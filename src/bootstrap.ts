@@ -34,6 +34,7 @@ import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
+import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
@@ -887,6 +888,10 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // RIVET_NO_SANDBOX) when writes are unbounded and rollback is the only — and
   // only after-the-fact, file-only — safety net.
   maybeWarnNoSandbox({ cwd })
+
+  // Re-activate out-of-workspace path grants the user chose to "remember" for
+  // this workspace, so previously-approved external paths work from turn one.
+  loadPersistedGrants(cwd)
 
   // 3. Provider + Auth
   const { provider, apiKey, auth } = resolveProviderAndAuth(config, opts.providerName)

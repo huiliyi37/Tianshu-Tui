@@ -48,7 +48,7 @@ Bad: using a too-short old_string that matches multiple locations`,
   async execute(params: ToolCallParams) {
     let filePath: string
     try {
-      filePath = validatePath(params.cwd, params.input.file_path as string)
+      filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
     } catch {
       return { content: 'Error: Path escapes project directory', isError: true }
     }

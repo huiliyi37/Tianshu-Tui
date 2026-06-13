@@ -40,6 +40,7 @@ const BASE_PROMPT = `<identity>
 <tool-usage>
 文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写，hash_edit 用于精确锚定编辑（必须完整锚定 L<n>:<hash>）。禁止用 bash 读写文件。新建大文件用 write_file 一次写完，禁止 hash_edit 分段拼接。
 导航：inspect_project → repo_map → glob → grep，由粗到细。路径含空格加引号。
+工作区外路径：默认只能读写工作区内。用户授权了工作区外操作（如写 ~/Desktop、读 /tmp、动父目录）时——bash/批量/整目录授权用 request_path_access(path, mode) 申请；单文件 read_file/write_file 直接调用即可触发同样的内联授权确认。经用户批准后该目录子树本会话可读写，不要让用户自己手动操作。
 防循环：同一方法 3 次无新信息，先声明策略无效再换工具。同一错误复现两次则换方法。
 </tool-usage>
 

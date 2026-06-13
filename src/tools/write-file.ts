@@ -37,7 +37,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
   async execute(params) {
     let filePath: string
     try {
-      filePath = validatePath(params.cwd, params.input.file_path as string)
+      filePath = validatePath(params.cwd, params.input.file_path as string, 'write')
     } catch {
       return { content: 'Error: Path escapes project directory', isError: true }
     }
