@@ -273,3 +273,37 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 
   return lines
 }
+
+// ── Tasks ──────────────────────────────────────────────────────
+
+export interface TasksData {
+  workers: Array<{ profile: string; objective: string; elapsedMs: number; glyph: string }>
+}
+
+export function renderTasks(data: TasksData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar('⚙ Running Agents', width, theme))
+
+  const maxEntries = height - 5
+  const visible = data.workers.slice(0, maxEntries)
+
+  for (const w of visible) {
+    const elapsed = w.elapsedMs > 1000 ? `${(w.elapsedMs / 1000).toFixed(0)}s` : `${w.elapsedMs}ms`
+    const line = ` ${w.glyph} ${w.profile.padEnd(14)} ${w.objective.slice(0, width - 30)} ${color(`(${elapsed})`, theme.muted)}`
+    lines.push(padLine(line, width, theme))
+  }
+
+  if (visible.length === 0) {
+    lines.push(padLine(color(' (no running workers)', theme.dim), width, theme))
+  }
+
+  for (let i = visible.length; i < maxEntries; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  lines.push(formatFooter(`${data.workers.length} workers running  ·  q quit`, width, theme))
+  lines.push(formatBottomBorder(width, theme))
+
+  return lines
+}

@@ -39,8 +39,8 @@ import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../f
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import { appendHistory, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -154,6 +154,7 @@ export class TuiApp {
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
     historySearchData?: () => HistorySearchData
+    tasksData?: () => TasksData
   }
   /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
   private paletteExec?: (index: number) => void
@@ -393,7 +394,6 @@ export class TuiApp {
     this.input.onAnyKey((key) => {
       // ── Approval mode short-circuit (顶部，先于一切普通输入) ──
       // 审批态只解析审批动作，绝不落入 slash / inputLine —— 杜绝 Enter 双触发
-      // （旧实现：onAnyKey 落入 inputLine 触发 submit + mode-bound approval:return 再 approve）。
       if (this.input.getMode() === 'approval' && this.approvalPending) {
         const c = key.char.toLowerCase()
         if (key.name === 'ctrl_c') {
@@ -402,9 +402,15 @@ export class TuiApp {
         } else {
           if (key.name === 'return' || c === 'y') this.resolveApproval({ approved: true })
           else if (key.name === 'escape' || c === 'n') this.resolveApproval(false)
+          else if (c === 'e') {
+            // Enter edit mode — populate input line with formatted JSON
+            this.approvalEditMode = true
+            this.approvalEditError = ''
+            this.inputLine.setValue(JSON.stringify(this.approvalPending.input, null, 2))
+            this.input.setMode('input')
+            this.renderLive()
+          }
           // 其余按键在审批态一律吞掉，不污染输入框。
-          // 注意：不提供 [e] edit —— 编辑工具入参的完整流程尚未实装，
-          // 旧实现 e===approve 是误导性假动作（UI 明示可编辑，实际等同 y）。
           return
         }
       }
@@ -425,6 +431,40 @@ export class TuiApp {
           // 其余按键在意图态一律吞掉，不污染输入框
           return
         }
+      }
+
+      // ── Approval edit mode short-circuit ──
+      // 编辑工具入参模式：Enter 解析 JSON → approve with editedInput，
+      // Esc 回到审批 y/n 提示。其余键落入 InputLine 正常编辑。
+      if (this.approvalEditMode && this.approvalPending) {
+        if (key.name === 'ctrl_c') {
+          this.resolveApproval(false)
+          this.approvalEditMode = false
+          this.approvalEditError = ''
+          // 继续走下方全局 ctrl_c（abort / exit）
+        } else if (key.name === 'escape') {
+          // Back to approval mode
+          this.approvalEditMode = false
+          this.approvalEditError = ''
+          this.inputLine.setValue('')
+          this.input.setMode('approval')
+          this.renderLive()
+          return
+        } else if (key.name === 'return') {
+          // Try to parse edited JSON
+          try {
+            const edited = JSON.parse(this.inputLine.value)
+            this.approvalEditMode = false
+            this.approvalEditError = ''
+            this.inputLine.setValue('')
+            this.resolveApproval({ approved: true, editedInput: edited })
+          } catch (err) {
+            this.approvalEditError = `Invalid JSON: ${(err as Error).message}`
+            this.renderLive()
+          }
+          return
+        }
+        // All other keys (chars, arrows, backspace, etc.) fall through to InputLine
       }
 
       // ── Overlay 交互导航（pager 翻页 / palette 选择执行）──
@@ -675,7 +715,8 @@ export class TuiApp {
       case 'cockpit':
       case 'rewind':
       case 'history-search':
-      case 'chronicle': {
+      case 'chronicle':
+      case 'tasks': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
         this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
         return this.overlay.activate(id)
@@ -694,6 +735,27 @@ export class TuiApp {
   /** 返回 scrollback 完整文本（供 pager overlay 读取） */
   getScrollbackContent(): string {
     return this.commit.getContent()
+  }
+
+  /**
+   * Get running delegation workers for /tasks overlay.
+   * MVP: reads from pendingTools filtered for delegation tools.
+   */
+  getRunningWorkers(): Array<{ profile: string; objective: string; elapsedMs: number; glyph: string }> {
+    return [...this.pendingTools.entries()]
+      .filter(([, meta]) => isDelegationTool(meta.name))
+      .map(([, meta]) => {
+        const badge = domainBadge(meta.name)
+        const objective = typeof meta.input === 'object' && meta.input !== null && 'objective' in meta.input
+          ? String((meta.input as Record<string, unknown>).objective ?? '').slice(0, 80)
+          : ''
+        return {
+          profile: meta.name,
+          objective,
+          elapsedMs: Date.now() - meta.startMs,
+          glyph: badge?.glyph ?? '⚙',
+        }
+      })
   }
 
   /**
@@ -1011,6 +1073,7 @@ export class TuiApp {
   // ── Approval state ──────────────────────────────────────────
 
   /** Pending approval request — when set, InputHandler switches to approval mode */
+  /** Pending approval request — when set, InputHandler switches to approval mode */
   private approvalPending: {
     id: string
     name: string
@@ -1018,6 +1081,12 @@ export class TuiApp {
     resolve: (result: ApprovalResult | boolean) => void
   } | null = null
 
+  /** Whether approval is in edit mode (user pressed 'e' to edit tool input) */
+  private approvalEditMode = false
+  /** Error message from JSON parse failure during edit mode */
+  private approvalEditError = ''
+
+  /** Pending intent preview — when set, InputHandler switches to intent mode */
   /** Pending intent preview — when set, InputHandler switches to intent mode */
   private intentPending: {
     intent: IntentPreview
@@ -1318,7 +1387,7 @@ export class TuiApp {
     // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
     // 立即 settle，并复位输入模式。否则审批/意图态残留——后续按键被当确认解析、
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
-    if (this.approvalPending) this.resolveApproval(false)
+    if (this.approvalPending) { this.approvalEditMode = false; this.approvalEditError = ''; this.resolveApproval(false) }
     if (this.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
     if (this.toolGroupBuffer) this.flushToolGroup()
@@ -1431,10 +1500,26 @@ export class TuiApp {
     if (this.approvalPending) {
       const p = this.approvalPending
       const inputSummary = JSON.stringify(p.input).slice(0, 80)
-      lines.push({ text: ` ╭─ Approval Required ──────────────────────────────` })
-      lines.push({ text: ` │ Tool: ${p.name}` })
-      lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
-      lines.push({ text: ` ╰─ [y] approve  [n] deny ─────────────────────────` })
+    // 3. Approval prompt (when pending)
+    if (this.approvalPending) {
+      const p = this.approvalPending
+      if (this.approvalEditMode) {
+        // Edit mode: show edit header, InputLine contains the JSON
+        lines.push({ text: ` ╭─ Edit Tool Input ───────────────────────────────` })
+        lines.push({ text: ` │ Tool: ${p.name}` })
+        if (this.approvalEditError) {
+          lines.push({ text: ` │ ${color(`⚠ ${this.approvalEditError}`, this.theme.warning)}` })
+        }
+        lines.push({ text: ` │ Edit the JSON below, then Enter to confirm:` })
+        lines.push({ text: ` ╰─ Enter confirm  Esc back  Ctrl+C deny ─────────` })
+      } else {
+        const inputSummary = JSON.stringify(p.input).slice(0, 80)
+        lines.push({ text: ` ╭─ Approval Required ──────────────────────────────` })
+        lines.push({ text: ` │ Tool: ${p.name}` })
+        lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
+        lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ───────────────` })
+      }
+    }
     }
 
     // 3a. Intent preview prompt (when pending) — 意图闸确认框
@@ -1673,6 +1758,7 @@ export class TuiApp {
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
     historySearchData?: () => HistorySearchData
+    tasksData?: () => TasksData
   }, paletteExec?: (index: number) => void): void {
     this.overlayData = overlayData
     this.paletteExec = paletteExec
