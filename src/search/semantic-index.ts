@@ -161,14 +161,15 @@ export class SemanticIndex {
   /** Incrementally update the index: detect changed/new/deleted files and re-index.
    *  Falls back to full rebuild when more than 20% of files have changed. */
   incrementalUpdate(): { reindexed: number; removed: number; fallbackRebuild: boolean } {
-    const maxIndexed = 500
+    const maxFiles = 500
+    let scanned = 0
     const currentFiles = new Set<string>()
     let toReindex: string[] = []
     let toRemove: string[] = []
 
     // Collect current source files
     const walk = (dir: string, depth = 0): void => {
-      if (depth > 8) return
+      if (depth > 8 || scanned >= maxFiles) return
       let entries: string[]
       try {
         entries = readdirSync(dir)
@@ -186,6 +187,7 @@ export class SemanticIndex {
           if (!SOURCE_EXT.has(ext)) continue
           const rel = relative(this.cwd, abs)
           currentFiles.add(rel)
+          scanned++
         }
       }
     }

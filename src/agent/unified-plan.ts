@@ -225,6 +225,15 @@ export function deserializeUnifiedPlan(json: string): UnifiedPlan | null {
     if (plan.version !== 1) return null
     if (!Array.isArray(plan.tasks)) return null
     if (typeof plan.objective !== 'string') return null
+    // Per-node type validation — reject before downstream consumers crash on malformed entries
+    for (const node of plan.tasks) {
+      if (typeof node.id !== 'string' || !node.id.trim()) return null
+      if (typeof node.objective !== 'string') return null
+      if (typeof node.profile !== 'string') return null
+      if (typeof node.kind !== 'string') return null
+      if (!Array.isArray(node.files)) return null
+      if (!Array.isArray(node.dependsOn)) return null
+    }
     return plan
   } catch {
     return null

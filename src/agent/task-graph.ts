@@ -2,7 +2,7 @@
  * TaskGraph — structured DAG for plan-then-execute workflows.
  *
  * Nodes map to WorkOrder-shaped tasks; edges express dependencies.
- * Used by task-planner.ts and plan-executor.ts.
+ * Used by task-planner.ts and unified-plan.ts.
  */
 
 import type { WorkOrderKind, WorkerProfile } from './work-order.js'
