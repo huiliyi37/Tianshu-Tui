@@ -286,7 +286,7 @@ export class TuiApp {
     this.inputHistory = options.history ?? []
     this.inputLine = new InputLine({
       history: options.history,
-      placeholder: 'Type a message… (/ commands · @ files · \\⏎ newline)',
+      placeholder: '询问任何事，或 / 唤起命令',
       onTabComplete: () => this.handleTabComplete(),
       onSubmit: (text) => {
         const trimmed = text.trim()
