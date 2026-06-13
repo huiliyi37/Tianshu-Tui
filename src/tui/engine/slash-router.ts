@@ -157,6 +157,21 @@ export class SlashRouter {
       return true
     }
 
+    // ── /auto — 切换审批模式，同步更新 TuiApp 的 worker pills badge ──
+    if (command === '/auto') {
+      const next = !this.autoSafe
+      this.autoSafe = next
+      this.autoSafeRef.current = next
+      const mode = next ? 'auto-safe' : 'manual'
+      this.ctx.agent.setApprovalMode(mode)
+      this.app.setApprovalMode(mode)
+      this.app.commitStatic(next
+        ? 'Auto-approve: on (auto-safe — high-risk still requires approval)'
+        : 'Auto-approve: off (manual — all mutating tools require approval)')
+      this.app.setStreamingState(false)
+      return true
+    }
+
     // Delegate to shared slash-commands handler
     try {
       return await handleSlashCommand(handlerCtx)
