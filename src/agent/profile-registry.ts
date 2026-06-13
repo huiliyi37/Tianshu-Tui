@@ -80,6 +80,7 @@ Do NOT modify any files.`,
     allowedTools: [...READ_ONLY_TOOLS],
     expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.`,
     defaultTimeoutMs: 600_000, // 10min — review needs thorough analysis
+    tierLock: 'cheap',
     builtIn: true,
   },
   {
@@ -134,6 +135,7 @@ If failed or blocked, include: "counterexample": "the specific input/scenario th
     defaultMaxTokens: 16384,
     defaultTimeoutMs: 600_000, // 10min — adversarial verification requires deep probing
     defaultKind: 'verify',
+    tierLock: 'cheap',
     builtIn: true,
   },
   {

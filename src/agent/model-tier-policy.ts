@@ -49,11 +49,6 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
     return { tier: 'strong', hardFloor: 'strong', reason: 'repeated failure escalates worker tier to strong' }
   }
 
-  if ((authority === 'tianquan' || authority === '天权') &&
-    (input.profile === 'reviewer' || input.profile === 'adversarial_verifier')) {
-    return { tier: 'strong', hardFloor: 'strong', reason: 'tianquan reviewer/verifier has false-green hard floor' }
-  }
-
   if (input.kind === 'verify' || input.profile === 'verifier' || input.profile === 'adversarial_verifier') {
     return { tier: 'cheap', reason: 'verification work uses flash model for fast review throughput' }
   }
@@ -80,7 +75,7 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
 
   if (riskTier === 'high') return { tier: 'strong', hardFloor: 'strong', reason: 'high-risk work uses strong tier by default' }
   if (isExploration(input)) return { tier: 'cheap', reason: 'low-impact exploration defaults to cheap tier' }
-  return { tier: 'balanced', reason: 'default worker tier is balanced' }
+  return { tier: 'cheap', reason: 'default worker tier is cheap (flash model)' }
 }
 
 export function inferModelTierFromCard(card: Pick<ModelCapabilityCard, 'model' | 'contextWindow' | 'toolUseReliability' | 'jsonStability' | 'editSuccessRate' | 'testRepairRate'>): ModelTier {
