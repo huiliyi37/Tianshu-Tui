@@ -1399,6 +1399,18 @@ export class TuiApp {
       lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
     }
 
+    // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
+    const delegationTools = [...this.pendingTools.entries()]
+      .filter(([, meta]) => isDelegationTool(meta.name))
+    if (delegationTools.length > 0) {
+      const pills = delegationTools.map(([, meta]) => {
+        const elapsed = Date.now() - meta.startMs
+        const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+        return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${meta.name} ${color(elapsedStr, this.theme.muted)}`
+      })
+      lines.push({ text: ` ${pills.join('  ')}` })
+    }
+
     // 2c. 进行中工具：● 标题行 + 末 3 行输出（⎿ 缩进）
     if (this.pendingTools.size > 0) {
       for (const [id, meta] of this.pendingTools) {
