@@ -1221,10 +1221,14 @@ export class TuiApp {
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
     // 可折叠 tool（read/grep/glob/repo_map 等探索型）：按 toolUseId 绑定结果到折叠组
-    if (isCollapsibleTool(name) && this.toolGroupBuffer.isActive()) {
+    if (isCollapsibleTool(name)) {
+      // G4 修复：buffer 已被 flush（如 write 打断），迟到 result 自动开新组
+      // 避免 orphan 单卡直接 commit
+      if (!this.toolGroupBuffer.isActive()) {
+        this.toolGroupBuffer.pushUse(id, name, meta?.input ?? {})
+      }
       this.toolGroupBuffer.attachResult(id, finalContent, isError)
-      // G3 修复：collapsible terminal result 后必须从 pendingTools 中删除，
-      // 否则 live 区会永久显示已完成工具的卡片。
+      // G3 修复：collapsible terminal result 后必须从 pendingTools 中删除
       this.pendingTools.delete(id)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
       return
