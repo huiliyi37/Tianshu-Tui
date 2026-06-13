@@ -414,6 +414,7 @@ export function createAgentRuntime(deps: {
   refs: RuntimeRefs
   domainKnowledgeStore: DomainKnowledgeStore
   modelId?: string
+  session: SessionContext
 }): { agent: AgentLoop } {
   const {
     provider, apiKey, auth, config, sessionId, cwd,
@@ -635,7 +636,7 @@ export function createAgentRuntime(deps: {
       modelRoutingShadowModelCards: modelCards,
       domainKnowledgeStore,
     },
-    new SessionContext(),
+    deps.session,
     cwd,
   )
   agentForSignals = agent
@@ -837,6 +838,7 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
       refs: ctx.refs,
       domainKnowledgeStore: ctx.domainKnowledgeStore,
       modelId: found.id,
+      session: ctx.session,
     })
 
     ctx.agent = agent
@@ -1004,6 +1006,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     provider, apiKey, auth, config, sessionId, cwd,
     toolRegistry, persist, claimStore, fileHistory, refs,
     domainKnowledgeStore, modelId: opts.modelId,
+    session,
   })
   refs.promptEngine = agent.config.promptEngine
 
