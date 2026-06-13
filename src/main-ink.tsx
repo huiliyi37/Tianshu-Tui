@@ -23,6 +23,7 @@ import { createAgentConfig, createMainAgentConfigInput } from './agent/create-ag
 import { SessionContext } from './agent/context.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { evictOldSessions } from './agent/session-persist.js'
+import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
 import { FileHistory } from './agent/file-history.js'
 import { persistFileHistory } from './agent/file-history-persist.js'
 import { PromptEngine } from './prompt/engine.js'
@@ -115,18 +116,44 @@ function loadConfig(cwd?: string, args = process.argv.slice(2)): Config {
 }
 
 let _cachedSessionId: string | null = null
+let _sessionWasResumed = false
 function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
   const dir = join(homedir(), '.rivet')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  const id = randomUUID()
   const idFile = join(dir, 'session-id.txt')
+  let lastSessionId: string | null = null
+  try {
+    if (existsSync(idFile)) lastSessionId = readFileSync(idFile, 'utf-8').trim() || null
+  } catch { /* ignore */ }
+
+  const decision = decideStartupSession({
+    lastSessionId,
+    now: Date.now(),
+    freshnessMs: RESUME_FRESHNESS_MS,
+    forceNew: process.env.RIVET_NEW_SESSION === '1',
+    disableAutoResume: process.env.RIVET_NO_AUTO_RESUME === '1',
+    load: (id) => {
+      try {
+        const persist = new SessionPersist(id)
+        const meta = persist.loadMetadata()
+        return { hasContent: persist.loadOai().length > 0, status: meta?.status, updatedAt: meta?.updatedAt }
+      } catch {
+        return null
+      }
+    },
+  })
+
+  const id = decision.sessionId ?? randomUUID()
+  _sessionWasResumed = decision.resumed
   writeFileSync(idFile, id)
   _cachedSessionId = id
   return id
 }
+/** True when this run auto-resumed a prior interrupted session. */
+export function wasSessionResumed(): boolean { return _sessionWasResumed }
 
 // Module-level shutdown callback — set by Root component, called by signal handlers
 let shutdownCallback: (() => void) | null = null

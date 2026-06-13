@@ -27,6 +27,7 @@ import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
 import { SessionPersist, evictOldSessions } from './agent/session-persist.js'
+import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
@@ -67,6 +68,8 @@ import { persistFileHistory } from './agent/file-history-persist.js'
 import { cleanupOrphanedTmpFiles } from './fs-atomic.js'
 import { cleanupOldArtifactSessions } from './artifact/store.js'
 import { createLspManager } from './lsp/manager.js'
+import { createMultiLspManager } from './lsp/multi-manager.js'
+import { availableServers } from './lsp/server-registry.js'
 import { createGotoDefinitionTool, createFindReferencesTool } from './lsp/tools.js'
 import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
 import { persistTeamWaveTelemetry, type TeamWaveTelemetry } from './agent/team-wave-telemetry.js'
@@ -200,15 +203,58 @@ export function captureGitBaseline(cwd: string): BaselineSnapshot {
 // ── Session ID ─────────────────────────────────────────────────
 
 let _cachedSessionId: string | null = null
+let _sessionWasResumed = false
 
+/** True when the active session id was auto-resumed from a prior (interrupted) run. */
+export function wasSessionResumed(): boolean {
+  return _sessionWasResumed
+}
+
+/**
+ * Resolve the session id for this run. Instead of always minting a fresh UUID
+ * (which silently abandoned an interrupted task), we auto-resume the last
+ * incomplete session when it still has replayable content and is recent. The
+ * caller's existing startup path (`persist.loadOai()` + `replaceMessages()`)
+ * then rehydrates the conversation automatically — no manual `/resume`.
+ *
+ * Escape hatches: RIVET_NEW_SESSION=1 forces a fresh session;
+ * RIVET_NO_AUTO_RESUME=1 disables the behavior entirely.
+ */
 export function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
   const dir = join(homedir(), '.rivet')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  const id = randomUUID()
   const idFile = join(dir, 'session-id.txt')
+  let lastSessionId: string | null = null
+  try {
+    if (existsSync(idFile)) lastSessionId = readFileSync(idFile, 'utf-8').trim() || null
+  } catch { /* ignore */ }
+
+  const decision = decideStartupSession({
+    lastSessionId,
+    now: Date.now(),
+    freshnessMs: RESUME_FRESHNESS_MS,
+    forceNew: process.env.RIVET_NEW_SESSION === '1',
+    disableAutoResume: process.env.RIVET_NO_AUTO_RESUME === '1',
+    load: (id) => {
+      try {
+        const persist = new SessionPersist(id)
+        const meta = persist.loadMetadata()
+        return {
+          hasContent: persist.loadOai().length > 0,
+          status: meta?.status,
+          updatedAt: meta?.updatedAt,
+        }
+      } catch {
+        return null
+      }
+    },
+  })
+
+  const id = decision.sessionId ?? randomUUID()
+  _sessionWasResumed = decision.resumed
   writeFileSync(idFile, id)
   _cachedSessionId = id
   return id
@@ -640,26 +686,20 @@ export async function initializeLsp(
   cwd: string,
   toolRegistry: ReturnType<typeof createDefaultToolRegistry>,
 ): Promise<ReturnType<typeof createLspManager>> {
-  const lspManager = createLspManager(
-    () => spawn('npx', ['-y', 'typescript-language-server', '--stdio'], {
-      cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }),
-    cwd,
-  )
+  // Polyglot: the multi-language manager routes each file to its matching
+  // server (typescript-language-server / pyright / gopls / rust-analyzer /
+  // clangd / jdtls), lazily spawning installed ones on first use.
+  const lspManager = createMultiLspManager(cwd)
 
   try {
     await lspManager.initialize()
     if (lspManager.isReady()) {
       toolRegistry.register(createGotoDefinitionTool(lspManager))
       toolRegistry.register(createFindReferencesTool(lspManager))
-      console.error(
-        `[LSP] typescript-language-server ready — ` +
-        `definition: ${lspManager.supportsDefinition()}, ` +
-        `references: ${lspManager.supportsReferences()}`,
-      )
+      const servers = availableServers().map(s => s.id).join(', ')
+      console.error(`[LSP] polyglot LSP ready — available servers: ${servers}`)
     } else {
-      console.error('[LSP] typescript-language-server failed to initialize — tools not registered')
+      console.error('[LSP] no language servers installed — code-intelligence tools not registered')
     }
   } catch (err) {
     console.error('[LSP] Initialization error:', (err as Error).message)
@@ -679,23 +719,13 @@ export async function createSessionInfrastructure(): Promise<{
   const { SessionRegistry } = await import('./agent/session-registry.js')
   const registry = await SessionRegistry.create(stateDir)
 
+  // Reap dead sessions' registry rows/claims so they don't block fresh claims.
+  // The actual context recovery happens in getOrCreateSessionId(), which
+  // auto-resumes the last interrupted session id (its jsonl is rehydrated by
+  // the startup path) — so here we only need to clean up the registry.
   const crashedSessions = registry.detectCrashedSessions()
   if (crashedSessions.length > 0) {
-    console.log(`\n🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理`)
-    for (const cs of crashedSessions) {
-      console.log(`   会话 ID: ${cs.id}`)
-    }
-    const lastCrashed = crashedSessions[0]
-    if (lastCrashed) {
-      try {
-        const persist = new SessionPersist(lastCrashed.id)
-        const messages = persist.loadOai()
-        console.log(`   ✅ 恢复完成：${messages.length} 条消息\n`)
-      } catch (err) {
-        console.error(`   ❌ 恢复失败: ${(err as Error).message}`)
-        console.log('   启动新会话...')
-      }
-    }
+    console.error(`🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理其锁定（上下文将自动续接）`)
   }
 
   const sessionId = getOrCreateSessionId()
@@ -874,10 +904,14 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const session = new SessionContext()
 
-  // Load prior messages
+  // Load prior messages. When the session id was auto-resumed from an
+  // interrupted run, this rehydrates the in-flight task automatically.
   const existingMessages = persist.loadOai()
   if (existingMessages.length > 0) {
     session.replaceMessages(existingMessages)
+    if (wasSessionResumed()) {
+      console.error(`🔄 自动续接上次会话 (${sessionId.slice(0, 8)}): 恢复 ${existingMessages.length} 条消息。新建会话用 RIVET_NEW_SESSION=1。`)
+    }
   }
 
   // Evict old sessions
