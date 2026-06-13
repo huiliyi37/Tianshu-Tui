@@ -134,6 +134,53 @@ describe('checkpoint module', () => {
         cleanupRepo(repo)
       }
     })
+
+    it('records irreversible bash effects (curl POST) and surfaces them as unrevertable', async () => {
+      const repo = makeTempGitRepo()
+      const sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      try {
+        await createCheckpoint(repo, 'auto', sid)
+        // A command that mutates remote state but touches NO files on disk.
+        const recorded = await recordBashSideEffects(repo, sid, undefined, 'curl -X POST https://api.example.com/charge')
+        assert.deepEqual(recorded, [], 'no files changed on disk')
+
+        // Preview must still appear and carry the unrevertable caveat.
+        const preview = await getRollbackPreview(repo, sid)
+        assert.ok(preview, 'preview surfaces even with zero revertable files')
+        assert.match(preview!.text, /CANNOT be reverted/i)
+        assert.match(preview!.text, /network mutation/i)
+
+        const result = await rollbackToCheckpoint(repo, preview!.confirmationToken, sid)
+        assert.ok(result.unrevertable && result.unrevertable.length > 0, 'rollback result carries unrevertable caveats')
+        assert.match(result.unrevertable![0]!, /network mutation/i)
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
+
+    it('combines file restore with unrevertable caveat when a command does both', async () => {
+      const repo = makeTempGitRepo()
+      const sid = `sess-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      try {
+        await createCheckpoint(repo, 'auto', sid)
+        writeFileSync(join(repo, 'log.txt'), 'wrote a log then published')
+        // Command both wrote a file and published a package.
+        const recorded = await recordBashSideEffects(repo, sid, undefined, 'npm publish > log.txt')
+        assert.ok(recorded.includes('log.txt'), 'file change captured')
+
+        const preview = await getRollbackPreview(repo, sid)
+        assert.ok(preview)
+        assert.match(preview!.text, /- log\.txt/)
+        assert.match(preview!.text, /publish/i)
+
+        const result = await rollbackToCheckpoint(repo, preview!.confirmationToken, sid)
+        assert.equal(result.success, true, 'file portion reverted')
+        assert.ok((result.unrevertable ?? []).some(e => /publish/i.test(e)), 'publish caveat surfaced')
+        assert.equal(existsSync(join(repo, 'log.txt')), false, 'bash-created file removed')
+      } finally {
+        cleanupRepo(repo)
+      }
+    })
   })
 
   describe('createCheckpoint', () => {

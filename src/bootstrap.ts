@@ -33,6 +33,7 @@ import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
+import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
@@ -880,6 +881,12 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 2. Config
   const config = loadRivetConfig(cwd, opts.args)
+
+  // Announce the command sandbox's protection level up-front. Stays silent when
+  // a real kernel boundary is active; warns loudly (esp. on native Windows or
+  // RIVET_NO_SANDBOX) when writes are unbounded and rollback is the only — and
+  // only after-the-fact, file-only — safety net.
+  maybeWarnNoSandbox({ cwd })
 
   // 3. Provider + Auth
   const { provider, apiKey, auth } = resolveProviderAndAuth(config, opts.providerName)

@@ -28,7 +28,7 @@ agent 应当全速、放权、无人值守地跑出 200 分生产力。安全**�
 - 新建 `src/tools/sandbox-profile.ts`：统一 `SandboxBackend` 抽象（mac/linux/windows/none），按 workspace root 动态生成 profile。
   - macOS Seatbelt：`(allow default)` + `(deny file-write*)` 后放回 `cwd`/TMPDIR/包缓存写权，网络放行。
   - Linux：Landlock 优先（内置），bwrap 兜底 `--bind cwd` rw + `--ro-bind / /`，**保留网络**（去掉 `--unshare-net`，build 需联网）。
-  - Windows：先探测 WSL → 复用 Linux 路径；原生走 AppContainer（FS ACL 边界）+ Job Object（进程树围栏），建不起来 **fail-closed**（拒绝工作区外写）。
+  - Windows：先探测 WSL → 复用 Linux 路径；原生当前 **fall 到 `none`**（AppContainer + Job Object 为后续 native helper），并在启动时显式告警 + 由 B2 回滚兜底（详见「已知边界」）。
 - `src/tools/bash.ts`：移除 `RIVET_BASH_SANDBOX` 闸门改为**默认开启**，新增 `RIVET_NO_SANDBOX=1` 逃生阀，收口到 `sandboxWrap`。
 - 审批级联调整：沙箱内命令默认自主模式不再逐条弹审批（含 git 提交）。
 - 测试：`sandbox-profile.test.ts`（后端探测/分派 + profile 纯函数生成，含 mac/linux/wsl/native-windows/none），`bash-sandbox.test.ts`（默认开启 + 逃生阀）。
@@ -39,8 +39,9 @@ agent 应当全速、放权、无人值守地跑出 200 分生产力。安全**�
   - checkpoint 触发从 `write/edit` 扩到 `bash` 及一切 mutating 工具。
   - `recordBashSideEffects` 用 `git status --porcelain` 捕获 bash 新建/删除/改动文件。
   - `getRollbackPreview` / `rollbackToCheckpoint` 接 `OwnershipGuard`：被其他存活会话 exclusive 持有的路径**跳过不还原**，以 blocked 语义上报；`makeOwnershipGuard` 工厂接 `ClaimLookup`（SessionRegistry）。
-- `src/agent/tool-pipeline.ts`：`MUTATING_TOOLS` / `isMutatingTool` 扩展 checkpoint 触发；bash 执行后调用 `recordBashSideEffects`；`buildOwnershipGuard` 接归属校验。
-- 测试：`checkpoint.test.ts`（bash 副作用捕获+还原；并行会话隔离——A 回滚不碰 B 的 exclusive 文件）。
+- `src/agent/tool-pipeline.ts`：`MUTATING_TOOLS` / `isMutatingTool` 扩展 checkpoint 触发；bash 执行后调用 `recordBashSideEffects`（透传命令文本）；`buildOwnershipGuard` 接归属校验。
+- **回滚粒度边界（不可逆副作用诚实上报）**：`git checkout` 只能还原**文件**。bash 的副作用不止于文件写——API 调用、数据库写、包发布、`git push`、容器/云资源变更、服务控制都在 git 触及范围之外。故新增 `src/agent/side-effect-classifier.ts`：`classifyIrreversibleEffects(command)` 按动词（非仅工具名，避免误伤只读查询）识别六类不可逆副作用。`recordBashSideEffects` 将命中类别落进 checkpoint 的 `unrevertableEffects`（即便该命令零文件改动，如 `curl -X POST`），`getRollbackPreview` 以「⚠️ CANNOT be reverted」区块展示，`rollbackToCheckpoint` 返回新增 `unrevertable` 字段——让回滚**明确区分「已还原文件」与「无法还原的外部副作用」**，而非假装一键全撤。
+- 测试：`checkpoint.test.ts`（bash 副作用捕获+还原；并行会话隔离——A 回滚不碰 B 的 exclusive 文件；curl POST 零文件改动仍上报 unrevertable；publish+文件改动组合既还原文件又上报 publish caveat），`side-effect-classifier.test.ts`（六类命中 + 只读 GET/SELECT 不误伤 + 复合命令多标签）。
 
 ### B3. 崩溃 / 冷启动自动续会话
 - 新建 `src/agent/session-recovery.ts`：`decideStartupSession` 依据内容/状态/新鲜度（`RESUME_FRESHNESS_MS`）/环境变量决定续接还是新建。
@@ -87,6 +88,7 @@ agent 应当全速、放权、无人值守地跑出 200 分生产力。安全**�
 
 ## 已知边界与后续
 
-- 原生 Windows AppContainer 的内核级 FS 作用域不如 seatbelt/landlock 简洁可靠；建不起来时 fail-closed，由 B2 全量回滚做跨平台兜底安全网。CI 无法覆盖原生平台，已用后端选择 + profile 生成纯函数测试覆盖。
+- **原生 Windows 当前无内核级写沙箱**：AppContainer + Job Object 为后续 native helper，当前 `selectSandboxBackend` 在 `win32` 直接 fall 到 `none`。这意味着「无写保护 + 回滚仅事后兜底」——恶意/误写命令在系统目录的暴露窗口明显大于 mac/linux（后两者有 seatbelt/landlock 内核边界先挡住）。为此 `getSandboxStartupNotice` + `maybeWarnNoSandbox` 在启动时**显式告警**（Windows 加重措辞，并对 `RIVET_NO_SANDBOX=1` 单独提醒），由 `bootstrap.ts` 在 config 加载后一次性发出；强烈建议 Windows 用户走 WSL（自动复用 Linux 边界）。CI 无法覆盖原生平台，已用后端选择 + notice 纯函数测试覆盖（`sandbox-profile.test.ts`）。
+- **回滚是文件级、事后的**：见 B2「回滚粒度边界」——非文件副作用（API/DB/网络/进程/发布）无法撤销，仅能上报 `unrevertable` 让人知情。这是机制的固有边界，不是 bug。
 - C1 远端 embedding 默认走当前配置 provider，无 key 时自动降级 BM25；本地模型（transformers.js/fastembed）留作后续 opt-in provider。
 - 大仓库向量检索目前暴力 cosine，HNSW 留作后续优化。

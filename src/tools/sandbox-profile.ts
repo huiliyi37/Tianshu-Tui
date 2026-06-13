@@ -235,6 +235,83 @@ export function _resetSandboxBackendCache(): void {
   _cachedActiveBackend = null
 }
 
+export interface SandboxNotice {
+  level: 'warn' | 'info'
+  message: string
+}
+
+/**
+ * Compute the startup notice about the command sandbox's protection level.
+ * Pure (given injected detectors) so it is unit-testable on any OS.
+ *
+ * Returns:
+ *   - a 'warn' when there is NO kernel write boundary (explicit RIVET_NO_SANDBOX,
+ *     or no backend available) — with deliberately sterner wording on native
+ *     Windows, where "no write protection + rollback as after-the-fact net"
+ *     means a malicious/buggy command can write system dirs before any rollback,
+ *     a strictly larger exposure window than mac/linux;
+ *   - null when a real boundary (seatbelt/bwrap/firejail) is in effect (no noise).
+ */
+export function getSandboxStartupNotice(ctx: SandboxContext): SandboxNotice | null {
+  const env = ctx.env ?? process.env
+  const platform = ctx.platform ?? process.platform
+
+  if (env.RIVET_NO_SANDBOX === '1') {
+    const base = 'RIVET_NO_SANDBOX=1 — 命令沙箱已关闭，无工作区写边界；回滚是唯一安全网（且只能撤销文件改动，撤不了已发生的 API/DB/网络副作用）。'
+    return {
+      level: 'warn',
+      message: platform === 'win32'
+        ? base + ' 你在原生 Windows 上：命令可写系统目录，风险显著高于 mac/linux。'
+        : base,
+    }
+  }
+
+  const backend = selectSandboxBackend(ctx)
+  if (backend !== 'none') return null
+
+  if (platform === 'win32') {
+    return {
+      level: 'warn',
+      message:
+        '⚠️ 原生 Windows 无内核级写沙箱：命令可写工作区外/系统目录，B2 回滚仅是事后兜底（无法撤销已发生的系统写入或外部副作用）——暴露窗口明显大于 mac/linux。' +
+        ' 强烈建议在 WSL 中运行（自动复用 Linux Landlock/bwrap 边界），或显式接受此风险。',
+    }
+  }
+
+  const readProcVersion = ctx.readProcVersion ?? defaultReadProcVersion
+  const isWsl = platform === 'linux' && detectWsl(readProcVersion, env)
+  return {
+    level: 'warn',
+    message: isWsl
+      ? 'WSL 检测到但未安装 bubblewrap：当前无写边界。`sudo apt install bubblewrap` 可获得真沙箱。'
+      : '无可用沙箱后端：当前无写边界。Linux 装 bubblewrap，Windows 走 WSL。',
+  }
+}
+
+let _emittedNoSandboxWarning = false
+
+/**
+ * Emit the no-sandbox warning at most once per process. Wired into startup so
+ * the exposure is announced up-front rather than buried in tool output. The
+ * logger defaults to console.error (stderr), matching the rest of bootstrap.
+ */
+export function maybeWarnNoSandbox(
+  ctx: SandboxContext,
+  log: (msg: string) => void = (m) => console.error(m),
+): SandboxNotice | null {
+  if (_emittedNoSandboxWarning) return null
+  const notice = getSandboxStartupNotice(ctx)
+  if (!notice) return null
+  _emittedNoSandboxWarning = true
+  log(`[sandbox] ${notice.message}`)
+  return notice
+}
+
+/** Test-only: reset the one-time warning latch. */
+export function _resetSandboxWarningLatch(): void {
+  _emittedNoSandboxWarning = false
+}
+
 /** Test-only: force the cached backend so isSandboxActive() is deterministic. */
 export function _setSandboxBackendForTest(kind: SandboxBackendKind): void {
   _cachedActiveBackend = kind

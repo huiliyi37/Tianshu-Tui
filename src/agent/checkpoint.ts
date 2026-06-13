@@ -4,6 +4,7 @@ import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { promisify } from 'util'
+import { classifyIrreversibleEffects } from './side-effect-classifier.js'
 
 const execFileP = promisify(execFile)
 
@@ -73,6 +74,14 @@ interface CheckpointData {
   preExistingDirtyFiles: string[]
   preExistingUntrackedFiles: string[]
   agentTouchedFiles: string[]
+  /**
+   * Human-readable caveats for irreversible side effects of bash commands that
+   * ran during this checkpoint window (API calls, DB writes, publishes, pushes,
+   * infra/service changes). File rollback (git checkout) CANNOT undo these — we
+   * record them so the rollback preview/result tells the truth instead of
+   * implying a clean undo. Deduplicated by label.
+   */
+  unrevertableEffects?: string[]
   confirmationToken?: string
 }
 
@@ -308,15 +317,24 @@ async function getChangedPaths(cwd: string): Promise<string[]> {
 }
 
 /**
- * Capture bash / shell side effects into the checkpoint's agent-touched set so
- * a rollback can undo them. Parallel-safe: never claims a path exclusively
- * owned by another live session, and never claims a pre-existing dirty file.
- * Returns the list of newly-recorded paths.
+ * Capture bash / shell side effects into the checkpoint so a rollback can both
+ * undo file changes AND honestly report what it cannot undo.
+ *
+ * - File effects: diffed against the turn baseline and attributed to THIS
+ *   session (parallel-safe — never claims a path another live session owns).
+ * - Non-file effects: when `command` is supplied it is classified for
+ *   irreversible side effects (API/DB/publish/push/infra/service); any matches
+ *   are recorded into `unrevertableEffects`. These persist even when the
+ *   command changed zero files (a `curl -X POST` touches nothing on disk yet
+ *   mutated remote state).
+ *
+ * Returns the list of newly-recorded file paths.
  */
 export async function recordBashSideEffects(
   cwd: string,
   sessionId?: string,
   guard?: OwnershipGuard,
+  command?: string,
 ): Promise<string[]> {
   const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data) return []
@@ -326,7 +344,7 @@ export async function recordBashSideEffects(
   try {
     changed = await getChangedPaths(cwd)
   } catch {
-    return []
+    changed = []
   }
 
   const owned = new Set(data.agentTouchedFiles)
@@ -341,11 +359,23 @@ export async function recordBashSideEffects(
     recorded.push(f)
   }
 
-  if (recorded.length === 0) return []
+  // Classify irreversible non-file effects from the command itself.
+  const effects = new Set(data.unrevertableEffects ?? [])
+  const effectsBefore = effects.size
+  if (command) {
+    for (const label of classifyIrreversibleEffects(command)) effects.add(label)
+  }
+  const effectsChanged = effects.size !== effectsBefore
+
+  // Persist if either dimension changed. (A POST that touched no files still
+  // needs its unrevertable caveat written.)
+  if (recorded.length === 0 && !effectsChanged) return []
+
   data.agentTouchedFiles = [...owned].sort()
+  if (effects.size > 0) data.unrevertableEffects = [...effects].sort()
   const outFile = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
   writeFileAtomicSync(outFile, JSON.stringify(data, null, 2))
-  if (sessionId) addToCheckpointIndex(cwd, sessionId, data.agentTouchedFiles)
+  if (sessionId && recorded.length > 0) addToCheckpointIndex(cwd, sessionId, data.agentTouchedFiles)
   return recorded
 }
 
@@ -367,14 +397,19 @@ export async function getRollbackPreview(cwd: string, sessionId?: string, guard?
   const rollbackFiles = candidate.filter(f => !guard?.isOwnedByOther(f))
   const blockedByOther = candidate.filter(f => guard?.isOwnedByOther(f))
 
-  if (rollbackFiles.length === 0) return null
+  const unrevertable = data.unrevertableEffects ?? []
+  // Nothing to restore AND no caveat to surface → truly nothing to do.
+  if (rollbackFiles.length === 0 && unrevertable.length === 0) return null
 
   const text = [
     `Checkpoint: ${data.hash.slice(0, 8)} (${new Date(data.timestamp).toLocaleString()})`,
     'Agent-owned files to restore/remove:',
-    ...rollbackFiles.map(f => `- ${f}`),
+    ...(rollbackFiles.length > 0 ? rollbackFiles.map(f => `- ${f}`) : ['- (none)']),
     ...(blockedByOther.length > 0
       ? ['', 'Skipped (owned by another live session):', ...blockedByOther.map(f => `- ${f}`)]
+      : []),
+    ...(unrevertable.length > 0
+      ? ['', '⚠️  CANNOT be reverted by file rollback (bash side effects):', ...unrevertable.map(e => `- ${e}`)]
       : []),
   ].join('\n')
 
@@ -387,13 +422,17 @@ export async function rollbackToCheckpoint(
   confirmationToken?: string,
   sessionId?: string,
   guard?: OwnershipGuard,
-): Promise<{ success: boolean; hash?: string; skipped?: string[] }> {
+): Promise<{ success: boolean; hash?: string; skipped?: string[]; unrevertable?: string[] }> {
   const data = sessionId
     ? (loadCheckpointDataForSession(sessionId) ?? loadCheckpointData(cwd))
     : loadCheckpointData(cwd)
   if (!data || !confirmationToken || confirmationToken !== data.confirmationToken) {
     return { success: false }
   }
+
+  // Caveats about bash effects git cannot undo — surfaced on every outcome so
+  // the caller never mistakes "files restored" for "world restored".
+  const unrevertable = data.unrevertableEffects?.length ? data.unrevertableEffects : undefined
 
   const protectedFiles = new Set([...data.preExistingDirtyFiles, ...data.preExistingUntrackedFiles])
   const candidate = data.agentTouchedFiles.filter(f => !protectedFiles.has(f))
@@ -406,7 +445,11 @@ export async function rollbackToCheckpoint(
     if (guard?.isOwnedByOther(f)) { skipped.push(f); return false }
     return true
   })
-  if (files.length === 0) return { success: false, skipped: skipped.length ? skipped : undefined }
+  if (files.length === 0) {
+    // No revertable files. Still surface any irreversible-effect caveat so the
+    // caller doesn't mistake "nothing restored" for "nothing happened".
+    return { success: false, skipped: skipped.length ? skipped : undefined, unrevertable }
+  }
 
   try {
     for (const file of files) {
@@ -420,9 +463,9 @@ export async function rollbackToCheckpoint(
         if (existsSync(fullPath)) rmSync(fullPath, { recursive: true, force: true })
       }
     }
-    return { success: true, hash: data.hash.slice(0, 7), skipped: skipped.length ? skipped : undefined }
+    return { success: true, hash: data.hash.slice(0, 7), skipped: skipped.length ? skipped : undefined, unrevertable }
   } catch {
-    return { success: false, skipped: skipped.length ? skipped : undefined }
+    return { success: false, skipped: skipped.length ? skipped : undefined, unrevertable }
   }
 }
 

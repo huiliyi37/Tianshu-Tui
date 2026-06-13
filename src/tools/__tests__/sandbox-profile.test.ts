@@ -10,6 +10,9 @@ import {
   selectSandboxBackend,
   wrapSandboxCommand,
   shSingleQuote,
+  getSandboxStartupNotice,
+  maybeWarnNoSandbox,
+  _resetSandboxWarningLatch,
 } from '../sandbox-profile.js'
 
 describe('sandbox-profile: shSingleQuote', () => {
@@ -134,5 +137,62 @@ describe('sandbox-profile: wrapSandboxCommand', () => {
     })
     assert.equal(d.sandboxed, false)
     assert.match(d.note ?? '', /WSL|bubblewrap/i)
+  })
+})
+
+describe('sandbox-profile: getSandboxStartupNotice', () => {
+  const env = { HOME: '/home/u' } as NodeJS.ProcessEnv
+
+  it('returns null when a real boundary is active (no noise)', () => {
+    assert.equal(getSandboxStartupNotice({ cwd: '/w', platform: 'darwin', which: () => true, env }), null)
+    assert.equal(getSandboxStartupNotice({ cwd: '/w', platform: 'linux', which: (b) => b === 'bwrap', env }), null)
+  })
+
+  it('warns sternly on native Windows with no backend', () => {
+    const n = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => false, env })
+    assert.ok(n)
+    assert.equal(n!.level, 'warn')
+    assert.match(n!.message, /Windows/)
+    assert.match(n!.message, /回滚|rollback|WSL/i)
+  })
+
+  it('warns on RIVET_NO_SANDBOX with extra Windows emphasis', () => {
+    const generic = getSandboxStartupNotice({ cwd: '/w', platform: 'linux', which: () => true, env: { ...env, RIVET_NO_SANDBOX: '1' } })
+    assert.ok(generic)
+    assert.match(generic!.message, /RIVET_NO_SANDBOX/)
+
+    const win = getSandboxStartupNotice({ cwd: '/w', platform: 'win32', which: () => true, env: { ...env, RIVET_NO_SANDBOX: '1' } })
+    assert.match(win!.message, /Windows/)
+  })
+
+  it('warns when WSL detected but bwrap missing', () => {
+    const n = getSandboxStartupNotice({
+      cwd: '/w', platform: 'linux', which: () => false,
+      env: { ...env, WSL_DISTRO_NAME: 'Ubuntu' }, readProcVersion: () => 'microsoft',
+    })
+    assert.ok(n)
+    assert.match(n!.message, /WSL|bubblewrap/i)
+  })
+})
+
+describe('sandbox-profile: maybeWarnNoSandbox (one-shot)', () => {
+  it('emits at most once per process and stays silent when sandboxed', () => {
+    _resetSandboxWarningLatch()
+    const logs: string[] = []
+    const log = (m: string) => logs.push(m)
+
+    // Sandboxed → no emission.
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'darwin', which: () => true }, log)
+    assert.equal(logs.length, 0)
+
+    // First no-sandbox call emits once...
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false }, log)
+    assert.equal(logs.length, 1)
+    assert.match(logs[0]!, /\[sandbox\]/)
+
+    // ...subsequent calls are latched.
+    maybeWarnNoSandbox({ cwd: '/w', platform: 'win32', which: () => false }, log)
+    assert.equal(logs.length, 1)
+    _resetSandboxWarningLatch()
   })
 })

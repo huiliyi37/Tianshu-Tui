@@ -732,7 +732,8 @@ export async function executeToolUse(
     if (!harnessResult.isError && tu.name === 'bash' && checkpointCreated) {
       try {
         const guard = buildOwnershipGuard(deps)
-        await recordBashSideEffects(deps.cwd, deps.config.sessionId, guard)
+        const bashCommand = typeof tu.input?.command === 'string' ? tu.input.command : undefined
+        await recordBashSideEffects(deps.cwd, deps.config.sessionId, guard, bashCommand)
       } catch { /* best-effort: capture failure must not fail the turn */ }
     }
 
