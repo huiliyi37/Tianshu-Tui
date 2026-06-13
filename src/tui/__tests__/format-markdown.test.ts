@@ -128,7 +128,7 @@ describe('formatMarkdown', () => {
 
   it('renders headers with glyphs', () => {
     const lines = formatMarkdown({ text: '# Title', columns: 80 }, theme)
-    assert.ok(stripAnsi(lines[0]!).includes('▍'))
+    assert.ok(stripAnsi(lines[0]!).includes('▌'))
     assert.ok(stripAnsi(lines[0]!).includes('Title'))
   })
 

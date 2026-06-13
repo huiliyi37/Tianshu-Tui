@@ -386,7 +386,7 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
     case 'header': {
       const level = block.level ?? 1
       const colors = [theme.primary, undefined, undefined, theme.secondary, theme.secondary, theme.secondary]
-      const glyphs = ['▍', '▍', '', '', '', '']
+      const glyphs = ['▌', '▌', '', '', '', '']
       const glyph = glyphs[level - 1] ?? ''
       const headerColor = colors[level - 1]
       const text = glyph ? `${glyph} ${block.content}` : block.content

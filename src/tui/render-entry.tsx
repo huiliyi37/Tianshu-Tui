@@ -20,7 +20,7 @@ const TurnSummary = memo(function TurnSummary({ content }: { content: string }) 
   // the right edge so it reads as a margin note on the turn that just closed.
   return (
     <Box paddingX={1} marginTop={1} justifyContent="flex-end">
-      <Text color={theme.dim}>✦ {content}</Text>
+      <Text color={theme.dim}>❧ {content}</Text>
     </Box>
   )
 })

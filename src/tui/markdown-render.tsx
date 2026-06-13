@@ -529,7 +529,7 @@ function renderBlock(block: Block, key: number, columns: number): ReactNode {
       // DIMMER than body (that inverts the hierarchy). H1 pops via accent color;
       // H2/H3 stay body-bright + bold; deep levels recede slightly but stay bold.
       const colors = [theme.primary, undefined, undefined, theme.secondary, theme.secondary, theme.secondary]
-      const glyphs = ['▍', '▍', '', '', '', '']
+      const glyphs = ['▌', '▌', '', '', '', '']
       const glyph = glyphs[level - 1] ?? ''
       const color = colors[level - 1]
       return (

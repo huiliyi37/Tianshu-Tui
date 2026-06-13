@@ -20,7 +20,7 @@ export function resolveStarDomainDisplay(domainName: string | undefined): { glyp
     }
   }
   const custom = starDomainRegistry.list().find(d => d.name === domainName || d.id === domainName)
-  if (custom) return { glyph: '✦', name: custom.name }
+  if (custom) return { glyph: '◇', name: custom.name }
   return { glyph: '☆', name: domainName }
 }
 
