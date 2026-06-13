@@ -1,10 +1,13 @@
 /**
- * T9 格式化函数 — 用户消息。
+ * T9 格式化函数 — 用户消息（极简水墨风格）。
  *
- * 纯函数，从 `user-message.tsx` 的渲染逻辑提取。
- * 输入数据 + 主题色 → ANSI 格式化字符串数组（每行一个元素）。
+ * 渲染结构：
+ * ───────────────── (dim 分隔线)
+ * ▌ 消息原文第一行    (用户标记，userColor — 唯一朱砂印)
+ *   消息后续行        (缩进对齐，中性正文)
  */
 
+import chalk from 'chalk'
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 
@@ -15,26 +18,23 @@ export interface FormatUserMessageInput {
   width: number
 }
 
-/**
- * 格式化用户消息为 ANSI 行数组。
- *
- * 渲染结构：
- * ───────────────── (dim 分隔线)
- * ▍ You           (粗体 gutter + 标签，userColor — 唯一朱砂落点)
- * 消息原文         (终端默认前景色 — 水墨原则：层级靠留白不靠满屏着色)
- */
 export function formatUserMessage(input: FormatUserMessageInput, theme: RivetTheme): string[] {
   const lines: string[] = []
 
   // 分隔线
   lines.push(color('─'.repeat(input.width), theme.dim))
 
-  // Gutter + 标签 —— 朱砂印只落在这一行
-  lines.push(`${color('▍', theme.userColor, { bold: true })} ${color('You', theme.userColor, { dim: true })}`)
+  const contentLines = input.content.split('\n')
+  const useAscii = chalk.level < 3
+  const marker = useAscii ? '❯' : '▌'
 
-  // 消息内容 —— 中性正文，不着 accent 色（避免整段朱砂红墙）
-  for (const line of input.content.split('\n')) {
-    lines.push(line)
+  if (contentLines.length > 0) {
+    // 首行带朱砂印标记
+    lines.push(`${color(marker, theme.userColor, { bold: true })} ${contentLines[0]}`)
+    // 后续行缩进 2 空格对齐
+    for (let i = 1; i < contentLines.length; i++) {
+      lines.push(`  ${contentLines[i]}`)
+    }
   }
 
   return lines

@@ -99,7 +99,8 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   // ── Header: ● Verb(arg) (elapsed) ───────────────────────────
   const bulletColor = isError ? theme.error : streaming ? theme.dim : theme.success
   const title = toolCardTitle(toolName, toolInput, rawPath)
-  let header = `${indent}${color('●', bulletColor)} ${color(title, theme.primary, { bold: true })}`
+  const tColor = theme.toolColor(toolName)
+  let header = `${indent}${color('●', bulletColor)} ${color(title, tColor, { bold: true })}`
   if (streaming) {
     header += ` ${color('…', theme.dim)}`
   } else if (elapsedMs !== undefined) {

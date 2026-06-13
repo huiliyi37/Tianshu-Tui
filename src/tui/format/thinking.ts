@@ -4,6 +4,7 @@
  * 纯函数，从 `thinking.tsx` 的渲染逻辑提取。
  */
 
+import chalk from 'chalk'
 import { ANSI, color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 
@@ -36,7 +37,9 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
   // ── Status line ─────────────────────────────────────────────
   const textLines = input.text.split('\n').filter(l => l.trim().length > 0)
   const lineInfo = textLines.length > 0 ? ` (${textLines.length} lines)` : ''
-  lines.push(color(`💭 ${statusLabel}${lineInfo}`, theme.dim))
+  const useAscii = chalk.level < 3
+  const glyph = useAscii ? '~' : '◐'
+  lines.push(color(`${glyph} ${statusLabel}${lineInfo}`, theme.dim))
 
   // ── Expanded content ────────────────────────────────────────
   if (input.expanded && textLines.length > 0) {

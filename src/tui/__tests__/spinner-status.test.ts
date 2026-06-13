@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import chalk from 'chalk'
 import {
   formatSpinnerStatus,
   formatTokenCount,
@@ -7,7 +8,7 @@ import {
   formatElapsedHuman,
   phaseIndicator,
 } from '../format/spinner-status.js'
-import { brailleSpinnerFrame } from '../braille-spinner.js'
+import { circleSpinnerFrame } from '../braille-spinner.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -24,7 +25,9 @@ describe('formatSpinnerStatus', () => {
     const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 12_000 }, theme)
     assert.ok(line)
     const plain = stripAnsi(line!)
-    assert.ok(plain.includes(brailleSpinnerFrame(3)), 'spinner frame matches tick')
+    const useAscii = chalk.level < 3
+    const expectedFrame = useAscii ? '-' : '◒'
+    assert.ok(plain.includes(expectedFrame), 'spinner frame matches tick')
     assert.ok(plain.includes('凝思…'))
     assert.ok(plain.includes('12s'))
     assert.ok(plain.includes('esc to interrupt'))
@@ -80,17 +83,28 @@ describe('formatTurnWorkSummary', () => {
       inputTokens: 12_300,
       outputTokens: 890,
     }, theme))
-    assert.ok(line.includes('✦ Worked for 1m 6s'))
+    const useAscii = chalk.level < 3
+    const expectedGlyph = useAscii ? 'Y' : '❧'
+    assert.ok(line.includes(`${expectedGlyph} Worked for 1m 6s`))
     assert.ok(line.includes('12.3k in / 890 out'))
   })
 })
 
 describe('phaseIndicator', () => {
   it('maps each phase to glyph + label', () => {
-    assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '凝思' })
-    assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: '书写' })
-    assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: '工具' })
-    assert.deepEqual(phaseIndicator('waiting'), { glyph: '◌', label: '候待' })
-    assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: 'idle' })
+    const useAscii = chalk.level < 3
+    if (useAscii) {
+      assert.deepEqual(phaseIndicator('thinking'), { glyph: '~', label: '水 · 凝思' })
+      assert.deepEqual(phaseIndicator('streaming'), { glyph: '*', label: '火 · 书写' })
+      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '>', label: '风 · 运作' })
+      assert.deepEqual(phaseIndicator('waiting'), { glyph: '^', label: '山 · 候待' })
+      assert.deepEqual(phaseIndicator('idle'), { glyph: '.', label: '空闲' })
+    } else {
+      assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '水 · 凝思' })
+      assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: '火 · 书写' })
+      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: '风 · 运作' })
+      assert.deepEqual(phaseIndicator('waiting'), { glyph: '▲', label: '山 · 候待' })
+      assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: '候待' })
+    }
   })
 })

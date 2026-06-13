@@ -1,11 +1,13 @@
 /**
- * T9 格式化函数 — assistant 消息。
+ * T9 格式化函数 — assistant 消息（极简水墨风格）。
  *
- * 纯函数，从 `assistant-message.tsx` 的渲染逻辑提取。
- * 输入数据 + 主题色 → ANSI 格式化字符串数组。
+ * 渲染结构：
+ * · 消息 Markdown 第一行    (助手标记，assistantColor — 紫微紫)
+ *   消息后续行             (缩进对齐，中性正文，自动换行减 2 列宽)
  */
 
-import { ANSI, color } from '../engine/ansi.js'
+import chalk from 'chalk'
+import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { formatMarkdown } from './markdown.js'
 
@@ -18,23 +20,12 @@ export interface FormatAssistantMessageInput {
 
 const MAX_STATIC_LINES = 200
 
-/**
- * 格式化 assistant 消息为 ANSI 行数组。
- *
- * 渲染结构：
- * ▍ Rivet         (粗体 gutter + 标签，assistantColor)
- * (…N lines omitted)  (如果超长，muted)
- * Markdown 内容    (完整 Markdown 渲染：语法高亮、标题、列表、代码块等)
- */
 export function formatAssistantMessage(input: FormatAssistantMessageInput, theme: RivetTheme): string[] {
   if (!input.content || input.content.trim().length === 0) return []
 
   const lines: string[] = []
   const contentLines = input.content.split('\n')
   const isLong = contentLines.length > MAX_STATIC_LINES
-
-  // Gutter + 标签
-  lines.push(`${color('▍', theme.assistantColor, { bold: true })} ${color('Rivet', theme.assistantColor, { dim: true })}`)
 
   // 省略提示
   if (isLong) {
@@ -46,8 +37,19 @@ export function formatAssistantMessage(input: FormatAssistantMessageInput, theme
   const displayContent = isLong
     ? contentLines.slice(-MAX_STATIC_LINES).join('\n')
     : input.content
-  const rendered = formatMarkdown({ text: displayContent, columns: input.width }, theme)
-  lines.push(...rendered)
+
+  // 宽度减去 2 列给缩进预留空间，避免终端自动折行
+  const rendered = formatMarkdown({ text: displayContent, columns: input.width - 2 }, theme)
+
+  if (rendered.length > 0) {
+    const useAscii = chalk.level < 3
+    const marker = useAscii ? '*' : '·'
+    // 首行前缀带助手标记，其余缩进 2 空格
+    lines.push(`${color(marker, theme.assistantColor, { bold: true })} ${rendered[0]}`)
+    for (let i = 1; i < rendered.length; i++) {
+      lines.push(`  ${rendered[i]}`)
+    }
+  }
 
   return lines
 }

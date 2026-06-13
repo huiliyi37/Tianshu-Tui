@@ -46,6 +46,51 @@ function shortenCwd(cwd: string, budget: number): string {
   return '…' + cwd.slice(-(budget - 1))
 }
 
+const TIAN_ROWS = [
+  '..#####..',
+  '#########',
+  '....#....',
+  '...###...',
+  '...#.#...',
+  '..#...#..',
+  '.#.....#.',
+  '#.......#',
+]
+
+const SHU_ROWS = [
+  '...#...######',
+  '########.....',
+  '...#...#.#.#.',
+  '..#.#..#..#..',
+  '.#...#.#.#.#.',
+  '.#...#.#.....',
+  '#.....#######',
+  '.............',
+]
+
+function bitmapToBlockChars(rows: string[]): string[] {
+  const w = rows[0]!.length
+  const out: string[] = []
+  for (let r = 0; r < rows.length; r += 2) {
+    let line = ''
+    for (let c = 0; c < w; c++) {
+      const top = rows[r]![c] === '#'
+      const bot = (rows[r + 1] || '')[c] === '#'
+      if (top && bot) {
+        line += '█'
+      } else if (top) {
+        line += '▀'
+      } else if (bot) {
+        line += '▄'
+      } else {
+        line += ' '
+      }
+    }
+    out.push(line)
+  }
+  return out
+}
+
 // 北斗七星 · 真·勺形布局（与 v2 设计稿同源坐标，%）：
 // 勺斗4星(天枢·天璇·天玑·天权) + 勺柄3星(玉衡·开阳·摇光)。
 // 天枢为勺口首星，落朱砂 ●；余者星尘灰 ·。无连线无框。
@@ -61,7 +106,7 @@ const DIPPER_STARS: ReadonlyArray<{ x: number; y: number; lead?: boolean }> = [
 const DIPPER_WIDTH = 26
 const DIPPER_ROWS = 4
 
-/** 渲染勺形北斗为 ANSI 行（仅当列宽足够时）。窄终端返回 []。 */
+/** 渲染勺形北斗为 ANSI 行（仅当列宽足够时）。 */
 function renderDipper(cols: number, theme: RivetTheme): string[] {
   if (cols < DIPPER_WIDTH + 2) return []
   const grid: string[][] = Array.from({ length: DIPPER_ROWS }, () =>
@@ -80,7 +125,7 @@ function renderDipper(cols: number, theme: RivetTheme): string[] {
       if (ch === ' ') { out += ' '; continue }
       const star = colored.find(s => s.row === r && s.col === c)!
       out += star.lead
-        ? color(ch, theme.pulseAlert, { bold: true }) // 天枢 — 朱砂落印
+        ? color(ch, theme.userColor, { bold: true }) // 天枢 — 朱砂印
         : color(ch, theme.dim)                          // 余星 — 星尘灰
     }
     return out.replace(/\s+$/, '')
@@ -90,25 +135,47 @@ function renderDipper(cols: number, theme: RivetTheme): string[] {
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
 
-  // 单行标题：天枢 (大字紫微紫) · Tiānshū (罗马音浅灰)
-  const titleZh = color('天枢', theme.primary, { bold: true })
-  const titleRo = color('Tiānshū', theme.muted)
-  const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
+  const out: string[] = []
+
+  if (cols >= 60) {
+    // 宽终端：展示 CJK 艺术字 logo + 右侧北斗星图
+    const tianBlock = bitmapToBlockChars(TIAN_ROWS)
+    const shuBlock = bitmapToBlockChars(SHU_ROWS)
+    const dipperLines = renderDipper(DIPPER_WIDTH + 2, theme)
+
+    for (let i = 0; i < 4; i++) {
+      const tianCol = color(tianBlock[i]!, theme.primary)
+      const shuCol = color(shuBlock[i]!, theme.primary)
+      const dipperLine = dipperLines[i] || ''
+      // 2 spaces between TIAN and SHU, 8 spaces spacing
+      const line = `${tianCol}  ${shuCol}        ${dipperLine}`
+      out.push(line)
+    }
+
+    // 子标题行：天枢 · Tiānshū
+    const titleZh = color('天枢', theme.primary, { bold: true })
+    const titleRo = color('Tiānshū', theme.muted)
+    const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
+    out.push(title)
+  } else {
+    // 窄终端：仅展示单行标题
+    const titleZh = color('天枢', theme.primary, { bold: true })
+    const titleRo = color('Tiānshū', theme.muted)
+    const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
+    out.push(title)
+  }
 
   const session = input.priorMsgCount > 0
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
-  const cwd = shortenCwd(input.cwd, 40)
+  const cwd = shortenCwd(input.cwd, Math.max(10, cols - session.length - input.modelName.length - 12))
   const meta = `${input.modelName}  ·  ${cwd}  ·  ${session}`
 
   const hint = '/help commands · @ files · \\⏎ newline · Ctrl+C exit'
 
-  const out: string[] = []
-  // 勺形北斗星图（窄终端自动省略）
-  out.push(...renderDipper(cols, theme))
-  // 标题行（title 已含 ANSI，不再二次截断以免破坏色码；窄终端依赖 dipper 省略 + meta/hint 截断兜底）
-  out.push(title)
   out.push(color(truncateToWidth(meta, cols), theme.muted))
   out.push(color(truncateToWidth(hint, cols), theme.dim))
-  return out
+
+  // 确保所有行在窄终端下严格不溢出列宽
+  return out.map(line => truncateToWidth(line, cols))
 }

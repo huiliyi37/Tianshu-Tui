@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import chalk from 'chalk'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatAssistantMessage } from '../format/assistant-message.js'
 import { getTheme } from '../theme.js'
@@ -9,11 +10,13 @@ const theme = getTheme()
 describe('formatUserMessage', () => {
   it('renders separator + gutter + content', () => {
     const lines = formatUserMessage({ content: 'hello', width: 40 }, theme)
-    assert.ok(lines.length >= 3, 'at least 3 lines (separator + gutter + content)')
+    assert.ok(lines.length >= 2, 'at least 2 lines (separator + content)')
     assert.ok(lines[0]!.includes('─'))
-    assert.ok(lines[1]!.includes('▍'))
-    assert.ok(lines[1]!.includes('You'))
-    assert.ok(lines[2]!.includes('hello'))
+    const plainLine1 = lines[1]!.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+    const useAscii = chalk.level < 3
+    const expectedMarker = useAscii ? '❯' : '▌'
+    assert.ok(plainLine1.includes(expectedMarker))
+    assert.ok(plainLine1.includes('hello'))
   })
 
   it('handles multi-line content', () => {
@@ -23,26 +26,24 @@ describe('formatUserMessage', () => {
   })
 
   it('body text is neutral, not the cinnabar accent (no wall of color)', () => {
-    // 水墨原则：accent 只落在 ▍ gutter + You 标签，正文用终端默认前景色。
-    // hex theme 才能产生 SGR；用带色 userColor 验证正文不被着成 userColor。
     const hexTheme = { ...theme, userColor: '#d4453a' }
     const lines = formatUserMessage({ content: 'hello', width: 40 }, hexTheme)
-    const gutter = lines[1]!
-    const body = lines[2]!
-    // gutter 仍带 cinnabar SGR
-    assert.ok(/\x1B\[38;2;212;69;58m/.test(gutter), 'gutter carries cinnabar')
-    // body 不得带 cinnabar 前景色
-    assert.ok(!/\x1B\[38;2;212;69;58m/.test(body), `body must not be cinnabar: ${JSON.stringify(body)}`)
+    const line1 = lines[1]!
+    const markerIndex = line1.indexOf(chalk.level < 3 ? '❯' : '▌')
+    const afterMarker = line1.slice(markerIndex + 1)
+    assert.ok(!/\x1B\[38;2;212;69;58m/.test(afterMarker), 'body must not be cinnabar')
   })
 })
 
 describe('formatAssistantMessage', () => {
   it('renders gutter + content', () => {
     const lines = formatAssistantMessage({ content: 'response', width: 40 }, theme)
-    assert.ok(lines.length >= 2)
-    assert.ok(lines[0]!.includes('▍'))
-    assert.ok(lines[0]!.includes('Rivet'))
-    assert.ok(lines[1]!.includes('response'))
+    assert.ok(lines.length >= 1)
+    const plainLine0 = lines[0]!.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+    const useAscii = chalk.level < 3
+    const expectedMarker = useAscii ? '*' : '·'
+    assert.ok(plainLine0.includes(expectedMarker))
+    assert.ok(plainLine0.includes('response'))
   })
 
   it('returns empty for falsy content', () => {

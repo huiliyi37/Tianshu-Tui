@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei'
 
 interface ColorSet {
   primary: string
@@ -207,6 +207,36 @@ const TIANSHU_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Ziwei theme — 紫微北斗·墨夜 (Ink-Night Purple Accent)
+// Design: 95% 墨灰 + 紫微紫 primary + 朱砂红 userColor.
+const ZIWEI_TRUECOLOR: ColorSet = {
+  primary: '#c9b8ff',     // 紫微 — 帝星紫，身份/链接/选中
+  secondary: '#8ab4ff',   // 天枢蓝白 — 北斗主序星色，正文强调
+  success: '#7ee7c7',     // 归航青 — 测试通过/完成 (木/林)
+  warning: '#ffd479',     // 星金 — 注意/委派 (土/山)
+  error: '#ff8a9b',       // 荧惑赤 — 错误/高风险 (火)
+  dim: '#5a5f7a',         // 星尘灰 — 分隔/次要
+  pulseQuiet: '#3a3d4a',  // 墨线 — quiet pulse
+  pulseActive: '#c9b8ff', // 紫微 — active pulse
+  pulseAlert: '#d4453a',  // 朱砂印 — alert pulse (user indicator color)
+  toolShell: '#8ab4ff',   // 天枢蓝白 — bash/grep/glob
+  toolEdit: '#c9b8ff',    // 紫微紫 — edit_file/write_file
+  toolTest: '#7ee7c7',    // 归航青 — run_tests
+  toolDelegate: '#ffd479' // 星金 — delegate
+}
+
+const ZIWEI_FALLBACK: ColorSet = {
+  primary: 'magenta',
+  secondary: 'blue',
+  success: 'cyan',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'magenta',
+  pulseAlert: 'red',
+}
+
 // Claude theme — Claude Code TUI palette port. Mirrors the RGB values from
 // claude-code-haha/src/utils/theme.ts darkTheme (Claude Code's own ANSI改造 TUI),
 // so we can switch between the two terminals without retraining the eye.
@@ -305,9 +335,16 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     truecolor: buildTheme(CLAUDE_TRUECOLOR, { userColor: '#d77757', assistantColor: '#d9d9d9', muted: '#999999' }),
     fallback: buildTheme(CLAUDE_FALLBACK, { userColor: 'redBright', assistantColor: 'white' }),
   },
+  ziwei: {
+    // userColor = 朱砂印 cinnabar (the user ▌ mark, the one warm point)
+    // assistantColor = 紫微紫 primary
+    // muted = 远星灰
+    truecolor: buildTheme(ZIWEI_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#c9b8ff', muted: '#9aa2b1' }),
+    fallback: buildTheme(ZIWEI_FALLBACK, { userColor: 'red', assistantColor: 'magenta', muted: 'white' }),
+  },
 }
 
-let activeTheme: ThemeName = 'tianshu'
+let activeTheme: ThemeName = 'ziwei'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name
