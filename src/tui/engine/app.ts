@@ -167,7 +167,7 @@ export class TuiApp {
   /** Streaming tool result accumulator: id → accumulated text */
   private toolAccumulator = new Map<string, string>()
   /** 进行中工具元数据：id → 名称/输入/开始时间（live 工具行 + 卡片标题用） */
-  private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number }>()
+  private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number; _approvalMode?: string }>()
   /** 最近一条被截断的工具结果（ctrl+o 展开用） */
   private lastTruncatedTool: { toolName: string; content: string; isError: boolean; rawPath?: string; toolInput?: Record<string, unknown> } | null = null
   /** 工具折叠组缓冲区：连续同族 read/grep/glob 调用在此累积，异族到达或 turn 结束时 flush */
@@ -216,6 +216,8 @@ export class TuiApp {
   readonly steerBuffer = new SteerBuffer()
   /** agent 是否正在执行（submit → final turn complete 之间） */
   private agentBusy = false
+  /** 当前会话审批模式（继承自 agent config），供 worker pills badge */
+  private _approvalMode: string = 'auto-safe'
   /**
    * Run 世代计数 —— 唯一权威的「当前 run」标识。
    * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）
@@ -1053,6 +1055,11 @@ export class TuiApp {
     this.metricsProvider = provider
   }
 
+  /** 设置当前审批模式（供 worker pills 显示 badge） */
+  setApprovalMode(mode: string): void {
+    this._approvalMode = mode
+  }
+
   /**
    * 读取当前真实指标快照（与 GlanceBar 同源）。无 provider 时返回 null。
    * 供 SlashRouter 让 /cost、maxTokens 等命令读到与 GlanceBar 一致的真实值，
@@ -1137,7 +1144,7 @@ export class TuiApp {
   private handleToolUse(id: string, name: string, input: Record<string, unknown>): void {
     this.setPhase('analyzing')
     this.markActivity()
-    this.pendingTools.set(id, { name, input, startMs: Date.now() })
+    this.pendingTools.set(id, { name, input, startMs: Date.now(), _approvalMode: this._approvalMode })
     // 子代理编排（delegate_* / team_orchestrate）切 GlanceBar domain 到天机。
     if (isDelegationTool(name)) {
       const badge = domainBadge(name)
@@ -1484,14 +1491,17 @@ export class TuiApp {
       lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
     }
 
-    // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
-    const delegationTools = [...this.pendingTools.entries()]
-      .filter(([, meta]) => isDelegationTool(meta.name))
-    if (delegationTools.length > 0) {
-      const pills = delegationTools.map(([, meta]) => {
-        const elapsed = Date.now() - meta.startMs
-        const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-        return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${meta.name} ${color(elapsedStr, this.theme.muted)}`
+      // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
+      const delegationTools = [...this.pendingTools.entries()]
+        .filter(([, meta]) => isDelegationTool(meta.name))
+      if (delegationTools.length > 0) {
+        const pills = delegationTools.map(([, meta]) => {
+          const elapsed = Date.now() - meta.startMs
+          const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+          const approvalBadge = (meta as any)._approvalMode === 'dangerously-skip-permissions'
+            ? color('[auto]', this.theme.success)
+            : color('[ask]', this.theme.warning)
+          return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${meta.name} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
       })
       lines.push({ text: ` ${pills.join('  ')}` })
     }

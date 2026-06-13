@@ -128,6 +128,7 @@ async function main() {
   // Register overlays with real data
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
+  tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
   tuiApp.registerOverlays({
     // Pager — scrollback 内容
     pagerContent: () => ({
@@ -208,6 +209,10 @@ async function main() {
       selectedIndex: 0,
       query: '',
     }),
+    // Tasks — /tasks 显示运行中子代理
+    tasksData: () => ({
+      workers: tuiApp.getRunningWorkers(),
+    }),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令
     const cmds = getPaletteCommands()
@@ -215,7 +220,7 @@ async function main() {
     if (!name) return
     if (name.startsWith('__surface:')) {
       const surfaceId = name.slice('__surface:'.length)
-      if (['pager', 'cockpit', 'starmap', 'chronicle'].includes(surfaceId)) {
+      if (['pager', 'cockpit', 'starmap', 'chronicle', 'tasks'].includes(surfaceId)) {
         tuiApp.activateOverlay(surfaceId)
       }
     } else if (name.startsWith('/')) {

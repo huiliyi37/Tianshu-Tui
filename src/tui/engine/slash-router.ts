@@ -152,6 +152,10 @@ export class SlashRouter {
       this.app.activateOverlay('rewind')
       return true
     }
+    if (command === '/tasks') {
+      this.app.activateOverlay('tasks')
+      return true
+    }
 
     // Delegate to shared slash-commands handler
     try {
