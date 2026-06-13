@@ -274,6 +274,11 @@ export class CompactionController {
   }
 
   async maybeCompact(input: MaybeCompactInput): Promise<MaybeCompactResult> {
+    // Ensure prefix overhead is always set before any early return.
+    // Without this, getEstimatedTokens() omits the system prompt + tool
+    // definition cost, making GlanceBar show ctx 0% and ◧ 0/1.0M.
+    this._ensurePrefixOverhead()
+
     if (this.deps.compactEnabled === false) {
       return { failures: input.failures, compacted: false }
     }

@@ -74,14 +74,18 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   if (input.reasoningEffort) {
     parts.push(color(input.reasoningEffort, theme.dim))
   }
-  if (input.cacheHitRate !== undefined && input.cacheHitRate > 0) {
-    parts.push(color(`⚡${(input.cacheHitRate * 100).toFixed(0)}%`, theme.dim))
+  if (input.cacheHitRate !== undefined) {
+    const cachePct = (input.cacheHitRate * 100).toFixed(0)
+    // 始终显示缓存命中率，0% 用 dim 而非隐藏，避免用户误判为"未接入"
+    parts.push(color(`⚡${cachePct}%`, input.cacheHitRate > 0 ? theme.success : theme.dim))
   }
   if (input.contextRatio !== undefined) {
     const pct = Math.round(input.contextRatio * 100)
+    // < 1% 也显示具体值，避免用户看到 ctx 0% 误以为数据未接入
+    const pctDisplay = pct === 0 && input.contextRatio > 0 ? '<1%' : `${pct}%`
     const ratioColor = pct >= 88 ? theme.error : pct >= 75 ? theme.warning : theme.dim
     const compactWarn = pct >= 78 ? ' ⚠compact' : ''
-    parts.push(color(`ctx ${pct}%${compactWarn}`, ratioColor))
+    parts.push(color(`ctx ${pctDisplay}${compactWarn}`, ratioColor))
   }
   if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
     parts.push(color(`◧ ${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, theme.dim))
