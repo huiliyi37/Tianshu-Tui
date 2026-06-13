@@ -758,11 +758,11 @@ export class TuiApp {
       .filter(([, meta]) => isDelegationTool(meta.name))
       .map(([, meta]) => {
         const badge = domainBadge(meta.name)
-        const objective = typeof meta.input === 'object' && meta.input !== null && 'objective' in meta.input
-          ? String((meta.input as Record<string, unknown>).objective ?? '').slice(0, 80)
-          : ''
+        const input = meta.input as Record<string, unknown>
+        const objective = typeof input.objective === 'string' ? input.objective.slice(0, 80) : ''
+        const profile = typeof input.profile === 'string' ? input.profile : meta.name
         return {
-          profile: meta.name,
+          profile,
           objective,
           elapsedMs: Date.now() - meta.startMs,
           glyph: badge?.glyph ?? '⚙',
@@ -1508,7 +1508,7 @@ export class TuiApp {
         const pills = delegationTools.map(([, meta]) => {
           const elapsed = Date.now() - meta.startMs
           const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-          const approvalBadge = (meta as any)._approvalMode === 'dangerously-skip-permissions'
+          const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
             ? color('[auto]', this.theme.success)
             : color('[ask]', this.theme.warning)
           return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${meta.name} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
@@ -1856,6 +1856,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.chronicleEntries?.() ?? { entries: [] }
         return renderChronicle(data, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Tasks — /tasks 显示运行中子代理
+    this.overlay.register('tasks', {
+      render: (_w, _h) => {
+        const data = overlayData?.tasksData?.() ?? { workers: [] }
+        return renderTasks(data, this.columns, this.rows, this.theme)
       },
     })
   }
