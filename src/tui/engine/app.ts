@@ -283,8 +283,10 @@ export class TuiApp {
           appendHistoryAsync(trimmed).catch(() => { /* 持久化失败静默 */ })
         }
 
-        // W4a: agent 执行中 → 入队（turn 边界 drain 注入），不直接 submit
+        // W4a: agent 执行中 → 入队（turn 边界 drain 注入）。
+        // 同时立即 commit 用户气泡到 scrollback，确保用户始终能看到自己说了什么。
         if (this.agentBusy && trimmed) {
+          this.commitUserPrompt(trimmed)
           this.steerBuffer.push(trimmed)
           this.renderLive()
           return
@@ -294,11 +296,15 @@ export class TuiApp {
         // busy 闩残留时排队的 guidance 会滞留到这里。若放任不管，它会在
         // 下一次工具回合作为 [User guidance] 注入 —— 旧指令混进新任务上下文。
         // 归并进本次 prompt（排队内容本就是用户意图，按时间序拼在新消息前）。
+        // 注意：steer 路径已为每条 queued 消息单独 commit 了用户气泡，
+        // 此处不再重复 commit，仅输出合并提示并归并文本。
         let submitText = text
+        let steerMerged = false
         if (trimmed && this.steerBuffer.hasPending()) {
           const pending = [...this.steerBuffer.getPending()]
           this.steerBuffer.clear()
           submitText = [...pending, trimmed].join('\n\n')
+          steerMerged = true
           this.commitAbove(() => {
             this.commit.write({
               text: color(`↳ ${pending.length} queued message${pending.length > 1 ? 's' : ''} merged into this prompt`, this.theme.muted),
@@ -308,9 +314,11 @@ export class TuiApp {
           })
         }
 
-        // Commit user message to scrollback
+        // Commit user message to scrollback（steer 已单独 commit 时跳过）
         if (trimmed) {
-          this.commitUserPrompt(submitText.trim())
+          if (!steerMerged) {
+            this.commitUserPrompt(submitText.trim())
+          }
           // 新 run 启动前丢弃上一 run 未 finalize 的流式残留：blockWriter 缓冲
           // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
           this.blockWriter.discard()
