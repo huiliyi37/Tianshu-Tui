@@ -367,3 +367,109 @@ export function classifyTaskDepth(
 
   return 'unit'
 }
+
+// ── Plan Methodology Router ─────────────────────────────────────────
+//
+// 天璇收敛（碎片→模式）：TaskDepthLayer 数模块边界，两个计划模板的
+// 区别本质上是 enforcement gate 数量。统一方法：让 TaskDepthLayer 的
+// 输出直接驱动模板选择，不新建第四个系统。
+
+export type PlanMethodology = 'lightweight' | 'full'
+
+/**
+ * Files belonging to enforcement subsystems. When a task mentions files from
+ * 2+ different subsystems here, it's a multi-gate coordination change →
+ * full plan methodology.
+ *
+ * Maintained as a flat list for now (MVP: security domain). Future domains
+ * (prompt + behavior, cache + prompt, API + error-classifier) can be added
+ * by extending this list or migrating to a directory-convention glob.
+ */
+const ENFORCEMENT_SUBSYSTEM_FILES: ReadonlySet<string> = new Set([
+  // File-tool gate
+  'src/tools/path-validate.ts',
+  'src/tools/path-grants.ts',
+  // Kernel sandbox gate
+  'src/tools/sandbox-profile.ts',
+  // Approval perimeter
+  'src/agent/permissions.ts',
+  'src/agent/approval-risk.ts',
+  // Sandbox wrapper (bash tool)
+  'src/tools/bash.ts',
+])
+
+const MULTI_GATE_VERB_PATTERN = /双门|多门|两个.*gate|both.*enforcement|sandbox.*file.*tool|file.*sandbox|enforcement.*sync|授权.*同步|安全.*接通/i
+const SAFETY_KEYWORD_PATTERN = /(security|permission|sandbox|安全|权限|沙箱|auth(?:orization)?|validate\s*safe|writable\s*root|policy)/i
+
+/**
+ * Routing decision: given what we know about the task, which plan
+ * template should 天权 use?
+ *
+ * This is a DERIVED signal — it doesn't replace TaskDepthLayer. It
+ * combines TaskDepthLayer with gate-count and safety-critical signals
+ * to decide between lightweight (5-stage) and full (9-stage) templates.
+ *
+ * Rules are evaluated in priority order. Returns 'lightweight' by default
+ * (fail-conservative: don't upgrade to full without sufficient signal).
+ *
+ * @param contract   Task contract with objective, mentionedFiles, constraints
+ * @param depthLayer Pre-computed TaskDepthLayer classification
+ * @param impact     Optional MeridianDb impact analysis result
+ * @param override   Explicit user override — if set, skips all rules
+ */
+export function classifyPlanMethodology(
+  contract: TaskContract,
+  depthLayer: TaskDepthLayer,
+  impact?: DepthImpactHint,
+  override?: PlanMethodology,
+): PlanMethodology {
+  // User override always wins — skip the entire rule chain
+  if (override !== undefined) return override
+
+  const obj = contract.objective
+  const files = contract.scope.mentionedFiles
+
+  // Rule 1 — SYSTEM depth → always 'full'
+  // System tasks span 3+ layers; even single-gate changes have wide
+  // consumer impact requiring full-boundary safety invariants.
+  if (depthLayer === 'system') return 'full'
+
+  // Count enforcement files mentioned in this task
+  const enforcementFiles = files.filter(f => ENFORCEMENT_SUBSYSTEM_FILES.has(f))
+  const enforcementFileCount = enforcementFiles.length
+
+  // Rule 2 — Multi-gate signal → 'full'
+  // 2a: Verb pattern signals multi-gate coordination
+  if (MULTI_GATE_VERB_PATTERN.test(obj)) return 'full'
+
+  // 2b: Files from 2+ enforcement subsystems
+  if (enforcementFileCount >= 2) return 'full'
+
+  // 2c: Constraint signals safety-critical coordination
+  const hasSafetyConstraint = contract.constraints.some(c => SAFETY_KEYWORD_PATTERN.test(c))
+  if (hasSafetyConstraint) return 'full'
+
+  // Rule 3 — WIRING depth + multi-file.
+  // If we reach here, enforcementFileCount < 2 (Rule 2b already checked).
+  // WIRING multi-file without multi-gate signal → lightweight.
+  // (Pure refactors spanning multiple non-enforcement files don't need the
+  // full 9-stage template.)
+
+  // Rule 4 — WIRING depth + single enforcement file + safety keyword → 'full'
+  // Even when only one enforcement file is touched, if the objective
+  // explicitly mentions safety concepts, the full template's security
+  // invariants and trigger-path checklist have defensive value.
+  if (depthLayer === 'wiring' && enforcementFileCount === 1 && SAFETY_KEYWORD_PATTERN.test(obj)) {
+    return 'full'
+  }
+
+  // Rule 5 — UNIT depth → 'lightweight'
+  // Single-file/single-function scope. Even enforcement-file fixes at
+  // unit scope (e.g. "fix canonicalize typo in path-grants.ts") don't
+  // need the full 9-stage template.
+  if (depthLayer === 'unit') return 'lightweight'
+
+  // Default — 'lightweight'
+  // Not enough signal to justify full template. User can override.
+  return 'lightweight'
+}

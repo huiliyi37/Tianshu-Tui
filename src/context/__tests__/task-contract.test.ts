@@ -7,6 +7,10 @@ import {
   renderContractProjection,
   renderTaskAnchor,
   isActionableTurn,
+  classifyTaskDepth,
+  classifyPlanMethodology,
+  type TaskDepthLayer,
+  type PlanMethodology,
 } from '../task-contract.js'
 
 // StarSpine Phase 1: TaskContract is the smallest mission anchor.
@@ -188,5 +192,203 @@ describe('advanceContractStatus', () => {
 
   it('isActionableTurn returns false for pure greetings', () => {
     assert.equal(isActionableTurn('谢谢'), false)
+  })
+})
+
+// ── PlanMethodology Router Tests ────────────────────────────────────
+
+function makeContract(
+  objective: string,
+  files: string[] = [],
+  constraints: string[] = [],
+): ReturnType<typeof extractTaskContract> {
+  return extractTaskContract(
+    [objective, ...files.map(f => `见 ${f}`), ...constraints].join('\n'),
+    1,
+  )
+}
+
+describe('classifyPlanMethodology', () => {
+  // ── Rule 1: SYSTEM depth → always 'full' ──
+  it('routes system-depth task to full even with zero enforcement files', () => {
+    const contract = makeContract('端到端重构整个请求管线')
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'system')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full', 'system depth must always route to full')
+  })
+
+  it('routes system-depth task to full regardless of file content', () => {
+    const contract = makeContract('全链路性能优化', ['src/tui/app.tsx', 'docs/readme.md'])
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'system')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full')
+  })
+
+  // ── Rule 2a: Multi-gate verb pattern → 'full' ──
+  it('routes multi-gate verb pattern to full', () => {
+    const contract = makeContract('接通 sandbox-profile 和 path-validate 的双门授权检查')
+    const depth = classifyTaskDepth(contract)
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full', '双门/接通 verb must route to full')
+  })
+
+  // ── Rule 2b: 2+ enforcement files → 'full' ──
+  it('routes 2 enforcement files to full (counterexample: file-count-only fails here)', () => {
+    const contract = makeContract(
+      '同步 path-validate 和 sandbox-profile 的授权逻辑',
+      ['src/tools/path-validate.ts', 'src/tools/sandbox-profile.ts', 'src/tools/bash.ts'],
+    )
+    const depth = classifyTaskDepth(contract)
+    // 3 files → wiring depth
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full',
+      '2+ enforcement files across subsystems must route to full — file-count-only impl would miss this')
+  })
+
+  // ── Rule 2c: Safety constraint → 'full' ──
+  it('routes safety-constrained task to full', () => {
+    const contract = makeContract(
+      '修复 bash 沙箱的超时处理',
+      ['src/tools/bash.ts'],
+      ['不要破坏 security sandbox'],
+    )
+    const depth = classifyTaskDepth(contract)
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full', 'safety constraint keyword must route to full')
+  })
+
+  // ── Rule 4: WIRING + single enforcement + safety keyword → 'full' ──
+  it('routes wiring + single enforcement file + safety keyword to full', () => {
+    // Use two files across different dirs to get wiring depth, one is enforcement
+    const contract = makeContract(
+      '增强 path-validate.ts 的安全校验逻辑并接入 TUI 面板',
+      ['src/tools/path-validate.ts', 'src/tui/app.tsx'],
+    )
+    // "安全" keyword in objective + wiring depth + 1 enforcement file triggers Rule 4
+    const depth = classifyTaskDepth(contract)
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full',
+      'wiring + single enforcement file + safety keyword → full')
+  })
+
+  // ── Rule 5: UNIT depth → 'lightweight' ──
+  it('routes unit-depth enforcement-fix to lightweight', () => {
+    const contract = makeContract(
+      'fix canonicalize typo in path-grants.ts',
+      ['src/tools/path-grants.ts'],
+    )
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'unit')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight',
+      'unit-depth fix even on enforcement file → lightweight')
+  })
+
+  it('routes unit-depth task without enforcement files to lightweight', () => {
+    const contract = makeContract('fix typo in ui/app.tsx', ['src/tui/app.tsx'])
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'unit')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight')
+  })
+
+  // ── Wiring + no enforcement → 'lightweight' ──
+  it('routes wiring multi-file pure refactor to lightweight', () => {
+    const contract = makeContract(
+      '重构 tool-group 为 collapsed-read-search，抽纯函数',
+      ['src/tools/tool-group.ts', 'src/tui/search-panel.tsx'],
+    )
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'wiring')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight',
+      'wiring + 0 enforcement files → lightweight (pure refactor)')
+  })
+
+  // ── Default: no signal → 'lightweight' ──
+  it('defaults to lightweight when no strong signal', () => {
+    const contract = makeContract('优化代码')
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'unit')
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight', 'no signal → default lightweight')
+  })
+
+  // ── Override mechanism ──
+  it('respects override=full even for unit-depth task', () => {
+    const contract = makeContract('fix typo in readme', ['docs/readme.md'])
+    const depth = classifyTaskDepth(contract)
+    assert.equal(depth, 'unit')
+    const methodology = classifyPlanMethodology(contract, depth, undefined, 'full')
+    assert.equal(methodology, 'full', 'override=full must skip all rules')
+  })
+
+  it('respects override=lightweight even with 2 enforcement files', () => {
+    const contract = makeContract(
+      '同步双门',
+      ['src/tools/path-validate.ts', 'src/tools/sandbox-profile.ts'],
+    )
+    const depth = classifyTaskDepth(contract)
+    const methodology = classifyPlanMethodology(contract, depth, undefined, 'lightweight')
+    assert.equal(methodology, 'lightweight', 'override=lightweight must skip all rules')
+  })
+
+  it('override being same as natural result is no-op', () => {
+    const contract = makeContract('fix typo', ['src/tui/app.tsx'])
+    const depth = classifyTaskDepth(contract)
+    const natural = classifyPlanMethodology(contract, depth)
+    const overridden = classifyPlanMethodology(contract, depth, undefined, natural)
+    assert.equal(overridden, natural, 'same-value override should return same result')
+  })
+
+  // ── Pure function: idempotent ──
+  it('is a pure function — same inputs, same output', () => {
+    const contract = makeContract(
+      '接通双门授权检查',
+      ['src/tools/path-validate.ts', 'src/tools/sandbox-profile.ts'],
+    )
+    const depth = classifyTaskDepth(contract)
+    const r1 = classifyPlanMethodology(contract, depth)
+    const r2 = classifyPlanMethodology(contract, depth)
+    const r3 = classifyPlanMethodology(contract, depth)
+    assert.equal(r1, r2)
+    assert.equal(r2, r3)
+    assert.equal(r1, 'full')
+  })
+
+  // ── Edge: wiring + single enforcement file WITHOUT safety keyword → lightweight ──
+  it('routes wiring + single enforcement file without safety keyword to lightweight', () => {
+    const contract = makeContract(
+      '重构 path-validate.ts 的日志输出格式',
+      ['src/tools/path-validate.ts'],
+    )
+    const depth = classifyTaskDepth(contract)
+    // "重构" + 1 file → wiring (detected as refactor kind)
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight',
+      'wiring + single enforcement file + no safety keyword → lightweight')
+  })
+
+  // ── Edge: wiring + non-enforcement multi-file → lightweight ──
+  it('routes wiring + multi non-enforcement files to lightweight', () => {
+    const contract = makeContract(
+      '重构 TUI 面板布局',
+      ['src/tui/app.tsx', 'src/tui/input.tsx', 'src/tui/search-panel.tsx'],
+    )
+    const depth = classifyTaskDepth(contract)
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'lightweight',
+      'multi-file non-enforcement refactor → lightweight')
+  })
+
+  // ── Edge: Chinese "双门" in objective triggers Rule 2a ──
+  it('routes Chinese 双门 keyword to full', () => {
+    const contract = makeContract('实现双门同步')
+    const depth = classifyTaskDepth(contract)
+    // "实现" without files → unit depth, but Rule 2a verb pattern triggers first
+    const methodology = classifyPlanMethodology(contract, depth)
+    assert.equal(methodology, 'full', '双门 keyword must trigger full via Rule 2a')
   })
 })
