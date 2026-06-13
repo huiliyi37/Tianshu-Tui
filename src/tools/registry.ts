@@ -1,5 +1,6 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ToolDefinition } from '../api/types.js'
+import { didYouMeanHint } from './did-you-mean.js'
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>()
@@ -20,6 +21,11 @@ export class ToolRegistry {
     return Array.from(this.tools.values())
   }
 
+  /** Names of every registered tool, sorted for stable did-you-mean hints. */
+  getAllNames(): string[] {
+    return Array.from(this.tools.keys()).sort()
+  }
+
   getDefinitions(): ToolDefinition[] {
     return this.getAll()
       .filter(t => t.isEnabled())
@@ -29,7 +35,15 @@ export class ToolRegistry {
 
   async execute(name: string, params: ToolCallParams): Promise<ToolResult> {
     const tool = this.tools.get(name)
-    if (!tool) throw new Error(`Unknown tool: ${name}`)
+    if (!tool) {
+      // Session 6176a17f history: LLM hallucinated `task` (Cursor/Claude Code
+      // convention) instead of `delegate_task`. The bare "Unknown tool: task"
+      // message was unhelpful — the next model turn had to guess the real
+      // name from memory. Surfacing a did-you-mean hint + the full tool
+      // catalog turns the failure into a learnable signal.
+      const hint = didYouMeanHint(name, this.getAllNames())
+      throw new Error(`Unknown tool: ${name}. ${hint}`)
+    }
     if (!tool.isEnabled()) throw new Error(`Tool ${name} is disabled`)
     return tool.execute(params)
   }
