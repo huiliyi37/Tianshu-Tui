@@ -50,7 +50,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
   glm: {
     key: 'glm',
     label: 'GLM',
-    defaultModelId: 'glm-5.1',
+    defaultModelId: 'glm-5.2',
     provider: {
       name: 'glm',
       apiKeyEnv: 'ZHIPU_API_KEY',
@@ -67,9 +67,9 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       maxTokens: 131072,
       models: [
         {
-          id: 'glm-5.1',
+          id: 'glm-5.2',
           alias: 'glm',
-          contextWindow: 200_000,
+          contextWindow: 1_000_000,
           maxTokens: 131072,
           reasoningEffort: 'high',
         },

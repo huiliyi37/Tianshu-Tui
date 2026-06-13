@@ -15,7 +15,7 @@ Provider 是「模型接入点」——你告诉天枢从哪里调用模型、�
 | `deepseek` | DeepSeek V4 Pro / Flash | OpenAI-compatible | API Key | 1M tokens | 原生前缀缓存，Cache Hit 可达 90%+ |
 | `opencode-go` | DeepSeek / MiMo / GLM / Kimi 等开源模型 | OpenAI-compatible | API Key | 1M tokens | OpenCode Go 订阅服务，首月 $5，每月 $10 |
 | `opencode-go-anthropic` | Qwen / MiniMax 等开源模型 | Anthropic Messages | API Key | 1M tokens | OpenCode Go 的 Anthropic 协议端点，支持 cache_control |
-| `glm` | 智谱 GLM-5.1 | OpenAI-compatible | API Key | 200K tokens | 支持 thinking |
+| `glm` | 智谱 GLM-5.2 | OpenAI-compatible | API Key | 1M tokens | 支持 thinking |
 | `mimo` | 小米 MiMo-v2.5-Pro | OpenAI-compatible | API Key | 1M tokens | 支持 thinking，prefix cache |
 | `minimax` | MiniMax M2.7 | OpenAI-compatible | API Key | 204.8K tokens | 需过滤 `top_k/metadata/cache_control` 参数 |
 | `codex` | GPT-5.5 (ChatGPT 订阅) | Codex Responses | OAuth PKCE | 1M tokens | 使用 ChatGPT 订阅（非 API 计费），自动 token 刷新 |
@@ -283,7 +283,7 @@ OpenCode Go 是 [OpenCode](https://opencode.ai) 提供的低成本订阅服务�
 
 | Provider Key | 协议 | 端点 | 适用模型 |
 |--------------|------|------|----------|
-| `opencode-go` | OpenAI Chat Completions | `/v1/chat/completions` | DeepSeek V4 Pro/Flash, MiMo-V2.5/V2.5-Pro, GLM-5/5.1, Kimi K2.5/K2.6 |
+| `opencode-go` | OpenAI Chat Completions | `/v1/chat/completions` | DeepSeek V4 Pro/Flash, MiMo-V2.5/V2.5-Pro, GLM-5.2, Kimi K2.5/K2.6 |
 | `opencode-go-anthropic` | Anthropic Messages | `/v1/messages` | Qwen3.5/3.6/3.7, MiniMax M2.5/M2.7 |
 
 > **注意**：`opencode-go-anthropic` 的 `name` 字段必须设为 `"anthropic"`，这样天枢的 factory 才会路由到 `AnthropicClient`，使用 `/v1/messages` 端点。
@@ -319,7 +319,7 @@ rivet config setup opencode-go --key sk-xxxx --default
           { "id": "deepseek-v4-pro", "alias": "go-ds4p", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "max" },
           { "id": "deepseek-v4-flash", "alias": "go-ds4f", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" },
           { "id": "mimo-v2.5-pro", "alias": "go-mimo", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "max" },
-          { "id": "glm-5.1", "alias": "go-glm", "contextWindow": 200000, "maxTokens": 64000, "reasoningEffort": "max" },
+          { "id": "glm-5.2", "alias": "go-glm", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" },
           { "id": "kimi-k2.6", "alias": "go-kimi", "contextWindow": 1000000, "maxTokens": 64000, "reasoningEffort": "high" }
         ],
         "unsupported": ["stream_options"]
@@ -367,8 +367,7 @@ rivet config setup opencode-go --key sk-xxxx --default
 | DeepSeek V4 Flash | OpenAI | `deepseek-v4-flash` |
 | MiMo-V2.5 | OpenAI | `mimo-v2.5` |
 | MiMo-V2.5-Pro | OpenAI | `mimo-v2.5-pro` |
-| GLM-5 | OpenAI | `glm-5` |
-| GLM-5.1 | OpenAI | `glm-5.1` |
+| GLM-5.2 | OpenAI | `glm-5.2` |
 | Kimi K2.5 | OpenAI | `kimi-k2.5` |
 | Kimi K2.6 | OpenAI | `kimi-k2.6` |
 | Qwen3.7 Max | Anthropic | `qwen3.7-max` |

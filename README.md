@@ -495,7 +495,7 @@ Rivet supports multiple model providers with different authentication methods:
 |----------|----------|------|--------|
 | DeepSeek | OpenAI-compatible | API key | deepseek-v4-pro, deepseek-v4-flash |
 | **Claude** | **OpenAI-compatible proxy** | **API key (`CLAUDE_API_KEY`)** | **opus-4-7, opus-4-6, sonnet-4-5** |
-| GLM | OpenAI-compatible | API key | glm-5.1 |
+| GLM | OpenAI-compatible | API key | glm-5.2 |
 | Codex (GPT-5.5) | Codex Responses | OAuth PKCE | gpt-5.5 |
 | MiniMax | OpenAI-compatible | API key | MiniMax-M2.7 |
 | MiMo | OpenAI-compatible | API key | mimo-v2.5-pro, mimo-v2.5 |

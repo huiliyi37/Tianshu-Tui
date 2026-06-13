@@ -9,7 +9,7 @@ if (!apiKey) {
 }
 
 const body = {
-  model: 'glm-5.1',
+  model: 'glm-5.2',
   messages: [
     { role: 'user', content: '搜索今天的重大科技新闻' },
   ],
