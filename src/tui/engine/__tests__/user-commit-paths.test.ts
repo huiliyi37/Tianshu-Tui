@@ -97,15 +97,17 @@ test('slash passthrough 路径：透传命令 → scrollback 包含用户原始�
   const { app, stdin } = makeApp()
   let passed: string | null = null
   app.onSubmit((t) => { passed = t })
-  app.setSlashHandler(async () => false) // 透传，如 /review
+  app.setSlashHandler(async () => false) // 透传，如 /team
 
-  app.setInput('/review src/app.ts')
+  // 用 /team 而非 /review — 单测只覆盖 TuiApp 层，main 层 resolveAppPromptInput
+  // 会为 /review 返回 null 并 rejectSubmit，行为不同于此单测预期。
+  app.setInput('/team plan.md')
   stdin.dataHandler!('\r')
   await tick()
 
-  assert.equal(passed, '/review src/app.ts', '应透传给 agent')
+  assert.equal(passed, '/team plan.md', '应透传给 agent')
   const sb = app.getScrollbackContent()
-  assert.ok(hasUserBubbleFor(sb, '/review src/app.ts'), 'slash 透传也应 commit 用户气泡')
+  assert.ok(hasUserBubbleFor(sb, '/team plan.md'), 'slash 透传也应 commit 用户气泡')
 })
 
 // ── 边界：steer 合并后不重复 commit ────────────────────────────

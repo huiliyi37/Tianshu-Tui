@@ -82,15 +82,17 @@ test('passthrough 后 scrollback 包含用户气泡', async () => {
   const { app, stdin } = makeApp()
   let passed: string | null = null
   app.onSubmit((t) => { passed = t })
-  app.setSlashHandler(async () => false) // 透传
+  app.setSlashHandler(async () => false) // 透传，如 /team
 
-  app.setInput('/review src/app.ts')
+  // 用 /team 而非 /review (后者在 main 层会被 resolveAppPromptInput 解析为 null
+  // 并触发 rejectSubmit)，单测只覆盖 TuiApp 层透传行为。
+  app.setInput('/team plan.md')
   stdin.dataHandler!('\r')
   await tick()
 
-  assert.equal(passed, '/review src/app.ts', '应透传给 agent')
+  assert.equal(passed, '/team plan.md', '应透传给 agent')
   const scrollback = app.getScrollbackContent()
   // ANSI 转义码穿插在 ▍/You 之间，无法做字面匹配，仅断言关键子串存在
   assert.ok(scrollback.includes('You'), 'scrollback 应包含 You 标签')
-  assert.ok(scrollback.includes('/review src/app.ts'), 'scrollback 应包含用户原始输入')
+  assert.ok(scrollback.includes('/team plan.md'), 'scrollback 应包含用户原始输入')
 })

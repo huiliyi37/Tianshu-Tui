@@ -692,6 +692,16 @@ export class TuiApp {
     return this.agentBusy
   }
 
+  /**
+   * 拒绝当前提交：撤销 submitSlashCommand 已设置的 agentBusy。
+   * main.ts 在 resolveAppPromptInput 返回 null 时调用，避免 agentBusy 卡死。
+   */
+  rejectSubmit(): void {
+    this.agentBusy = false
+    this.setPhase('idle')
+    this.renderLive()
+  }
+
   /** 设置退出回调（/exit、/quit 时触发，由外部执行 graceful shutdown） */
   onExit(callback: () => void): void {
     this.onExitCallback = callback

@@ -283,9 +283,13 @@ async function main() {
     if (!trimmed) return
 
     // 将 slash 命令解析为 agent prompt（对齐 Ink resolveAppPromptInput）。
-    // /review → "deliver_task(...)"；未知 slash → null → 静默跳过。
+    // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
     const prompt = resolveAppPromptInput(trimmed, process.cwd())
-    if (prompt === null) return
+    if (prompt === null) {
+      app!.rejectSubmit()
+      app!.commitStatic(`⚠️  Unknown command: ${trimmed.split(/\s/)[0]}\nType /help for available commands.`)
+      return
+    }
 
     // 单一权威：TuiApp.agentBusy 是唯一的 streaming 闩。app.onSubmit 只在 TuiApp
     // 判定空闲时触发（busy 时输入已被 TuiApp 入队 steerBuffer），故此处无需再自管
