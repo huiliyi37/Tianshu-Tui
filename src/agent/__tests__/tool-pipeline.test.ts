@@ -9,6 +9,7 @@ import { fingerprintToolCall } from '../trace-store.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
+import { isWriteGranted, _resetGrantsForTest } from '../../tools/path-grants.js'
 
 const mockEvidence = {
   trackFileRead: () => {},
@@ -42,7 +43,7 @@ describe('executeToolUse', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -420,7 +421,7 @@ describe('executeToolUse', () => {
   it('executes a tool and returns result', async () => {
     const deps = makeDeps()
     const result = await executeToolUse(
-      { id: 'tu-1', name: 'read_file', input: { file_path: '/tmp/test.ts' } },
+      { id: 'tu-1', name: 'read_file', input: { file_path: 'test.ts' } },
       deps, noopCallbacks as any, 1, false,
     )
     assert.equal((result.toolResult as any).tool_use_id, 'tu-1')
@@ -434,7 +435,7 @@ describe('executeToolUse', () => {
     let called = false
     const cb = { ...noopCallbacks, onToolResult: () => { called = true } }
     await executeToolUse(
-      { id: 'tu-2', name: 'read_file', input: { file_path: '/tmp/x.ts' } },
+      { id: 'tu-2', name: 'read_file', input: { file_path: 'x.ts' } },
       deps, cb as any, 1, false,
     )
     assert.ok(called)
@@ -446,7 +447,7 @@ describe('executeToolUse', () => {
       repairHintTracker: { recordSuccess: () => { successCalled = true }, recordFailure: () => {} } as any,
     })
     await executeToolUse(
-      { id: 'tu-3', name: 'read_file', input: { file_path: '/tmp/y.ts' } },
+      { id: 'tu-3', name: 'read_file', input: { file_path: 'y.ts' } },
       deps, noopCallbacks as any, 1, false,
     )
     assert.ok(successCalled)
@@ -467,7 +468,7 @@ describe('executeToolUse', () => {
     })
 
     const result = await executeToolUse(
-      { id: 'tu-5', name: 'read_file', input: { file_path: '/tmp/huge.txt' } },
+      { id: 'tu-5', name: 'read_file', input: { file_path: 'huge.txt' } },
       deps, noopCallbacks as any, 1, false,
     )
 
@@ -688,6 +689,100 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
+  it('out-of-workspace write_file forces an approval prompt even in auto-safe, and records a grant on approval', async () => {
+    _resetGrantsForTest()
+    const workspace = mkdtempSync(join(tmpdir(), 'rivet-ws-'))
+    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    const target = join(external, 'out.txt')
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      cwd: workspace,
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    try {
+      const result = await executeToolUse(
+        { id: 'tu-oow-write', name: 'write_file', input: { file_path: target, content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 1, 'out-of-workspace write must prompt despite auto-safe')
+      assert.equal(executed, true, 'op proceeds after approval')
+      assert.equal((result.toolResult as any).is_error, false)
+      assert.equal(isWriteGranted(target), true, 'subtree grant recorded on approval')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(external, { recursive: true, force: true })
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  it('denying the out-of-workspace prompt blocks the op and records no grant', async () => {
+    _resetGrantsForTest()
+    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    const target = join(external, 'out.txt')
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => false }
+    try {
+      const result = await executeToolUse(
+        { id: 'tu-oow-deny', name: 'write_file', input: { file_path: target, content: 'x' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(executed, false)
+      assert.equal((result.toolResult as any).is_error, true)
+      assert.match((result.toolResult as any).content, /requires user approval/)
+      assert.equal(isWriteGranted(target), false, 'no grant on denial')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(external, { recursive: true, force: true })
+    }
+  })
+
+  it('in-workspace read_file does not trigger the out-of-workspace gate', async () => {
+    _resetGrantsForTest()
+    let approvalCalls = 0
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => ({ content: 'ok', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    await executeToolUse(
+      { id: 'tu-inws-read', name: 'read_file', input: { file_path: 'src/file.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+    assert.equal(approvalCalls, 0, 'in-workspace read must not prompt')
+    _resetGrantsForTest()
+  })
+
   it('P1.3: strips trailing whitespace from tool result content', async () => {
     const deps = makeDeps()
     // Override tool registry to return content with trailing whitespace.
@@ -815,7 +910,7 @@ describe('artifactIntercept in tool pipeline', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -918,7 +1013,7 @@ describe('artifactIntercept in tool pipeline', () => {
       })
 
       const result = await executeToolUse(
-        { id: 'tu-read-bypass', name: 'read_file', input: { file_path: '/tmp/big.ts' } },
+        { id: 'tu-read-bypass', name: 'read_file', input: { file_path: 'big.ts' } },
         deps, noopCallbacks as any, 1, false,
       )
 
@@ -1184,7 +1279,7 @@ describe('phase-aware prediction recording', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -1275,7 +1370,7 @@ describe('phase-aware prediction recording', () => {
     })
 
     await executeToolUse(
-      { id: 'tu-read-fail', name: 'read_file', input: { file_path: '/nonexistent' } },
+      { id: 'tu-read-fail', name: 'read_file', input: { file_path: 'nonexistent' } },
       deps, noopCallbacks as any, 1, false,
     )
 
