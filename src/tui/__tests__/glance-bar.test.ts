@@ -103,4 +103,61 @@ describe('GlanceBar', () => {
     assert.equal(getDomainSeparatorStyle(undefined), 'thin')
     assert.equal(getDomainSeparatorStyle(''), 'thin')
   })
+
+  // ── undefined 值不崩溃：首次响应前 App 传 undefined → GlanceBar 不应抛异常 ──
+  it('accepts undefined cacheHitRate without crashing', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cost: 0,
+      model: 'deepseek-chat',
+      isStreaming: false,
+      estimatedTokens: 45_000,
+      maxTokens: 128_000,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.cacheHitRate, undefined)
+  })
+
+  it('accepts undefined estimatedTokens without crashing', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cacheHitRate: 0.5,
+      cost: 0,
+      model: 'deepseek-chat',
+      isStreaming: false,
+      maxTokens: 128_000,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.estimatedTokens, undefined)
+  })
+
+  it('accepts undefined maxTokens without crashing', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cacheHitRate: 0.5,
+      cost: 0,
+      model: 'deepseek-chat',
+      isStreaming: false,
+      estimatedTokens: 45_000,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.maxTokens, undefined)
+  })
+
+  it('accepts all data props as undefined (fresh session)', () => {
+    const el = render({
+      pulses: [],
+      phase: 'tianshu-planning',
+      cost: 0,
+      model: 'deepseek-chat',
+      isStreaming: false,
+    })
+    assert.ok(el != null)
+    assert.equal(el.props.cacheHitRate, undefined)
+    assert.equal(el.props.estimatedTokens, undefined)
+    assert.equal(el.props.maxTokens, undefined)
+  })
 })

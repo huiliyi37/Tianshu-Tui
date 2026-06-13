@@ -21,7 +21,8 @@ const EFFORT_GLYPH: Record<ReasoningEffort, string> = {
 interface GlanceBarProps {
   pulses: readonly GlancePulse[]
   phase: StarPhase
-  cacheHitRate: number
+  /** 缓存命中率 0-1；undefined 表示尚无数据（不渲染 ⚡） */
+  cacheHitRate?: number
   cost: number
   model: string
   isStreaming: boolean
@@ -30,10 +31,10 @@ interface GlanceBarProps {
   domain?: string
   /** Current git branch — identity marker */
   branch?: string
-  /** Estimated tokens currently in the session context */
-  estimatedTokens: number
-  /** Model context window size in tokens */
-  maxTokens: number
+  /** 估算已用 token；undefined 表示尚无数据（不渲染 ◧） */
+  estimatedTokens?: number
+  /** 模型上下文窗口大小；undefined 表示尚无数据（不渲染 ◧） */
+  maxTokens?: number
   /** Live elapsed time of the current/last turn (ms) — flows on the far right */
   elapsedMs?: number
   /** Current reasoning effort level */
@@ -92,17 +93,17 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const { columns } = useTerminalSize()
   const phaseGlyph = PHASE_GLYPHS[phase] ?? ''
   const phaseLabel = PHASE_SHORT_LABELS[phase] ?? ''
-  const cachePct = Math.round(cacheHitRate * 100)
-  const cacheColor = cacheHitRate >= 0.7 ? theme.success : cacheHitRate >= 0.5 ? theme.warning : theme.dim
+  const cachePct = cacheHitRate !== undefined ? Math.round(cacheHitRate * 100) : 0
+  const cacheColor = (cacheHitRate ?? 0) >= 0.7 ? theme.success : (cacheHitRate ?? 0) >= 0.5 ? theme.warning : theme.dim
   const alertPulse = pulses.find(p => p.level === 'alert')
   const hasActive = pulses.some(p => p.level === 'active')
 
   const narrow = columns < 60
   const branchLabel = branch && branch.length > 24 ? branch.slice(0, 23) + '…' : branch
 
-  const ratio = maxTokens > 0 ? estimatedTokens / maxTokens : 0
-  const estimatedK = Math.round(estimatedTokens / 1000)
-  const maxK = Math.round(maxTokens / 1000)
+  const ratio = (estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0) ? estimatedTokens / maxTokens : 0
+  const estimatedK = estimatedTokens !== undefined ? Math.round(estimatedTokens / 1000) : 0
+  const maxK = maxTokens !== undefined ? Math.round(maxTokens / 1000) : 0
   const pct = Math.round(ratio * 100)
 
   const tokenColor = ratio >= 0.88 ? theme.error
@@ -139,10 +140,10 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
         <Box flexDirection="row" gap={1}>
           <Text color={theme.muted}>{modelLabel}</Text>
           {reasoningEffort && <Text color={theme.dim}>{EFFORT_GLYPH[reasoningEffort]}{reasoningEffort}</Text>}
-          {!narrow && <Text color={cacheColor}>⚡{cachePct}%</Text>}
+          {!narrow && cacheHitRate !== undefined && <Text color={cacheColor}>⚡{cachePct}%</Text>}
           <Text color={theme.dim}>${cost.toFixed(2)}</Text>
-          {!narrow && <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>}
-          {narrow && <Text color={tokenColor}>{pct}%</Text>}
+          {!narrow && estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>}
+          {narrow && estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && <Text color={tokenColor}>{pct}%</Text>}
           {ratio >= 0.78 && <Text color={theme.error}> compact</Text>}
           {historyCount !== undefined && !narrow && (
             <Text color={theme.dim}>{historyCount}msgs</Text>
