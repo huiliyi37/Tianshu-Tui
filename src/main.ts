@@ -98,6 +98,12 @@ async function main() {
     const { SessionContext } = await import('./agent/context.js')
     const { createAgentConfig, createMainAgentConfigInput } = await import('./agent/create-agent-config.js')
     const { createDefaultToolRegistry } = await import('./tools/default-registry.js')
+    const { createDeliverTaskTool } = await import('./agent/deliver-task.js')
+    const { createTaskLedger } = await import('./agent/task-ledger.js')
+    const { createOwnershipLedger } = await import('./agent/ownership-ledger.js')
+    const { createVerificationAttribution } = await import('./agent/verification-attribution.js')
+    const { createDeliveryGateV2 } = await import('./agent/delivery-gate-v2.js')
+    const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
 
     const parsed = parseCliArgs(args)
     if (!parsed.prompt) {
@@ -120,6 +126,30 @@ async function main() {
       streamJson: parsed.streamJson,
       createAgent: () => {
         const toolRegistry = createDefaultToolRegistry([], { desktopTools: cfg.agent.desktopTools })
+
+        // B1 deliver_task: headless 模式下也需要交付门禁工具。
+        // 无 DelegationCoordinator，reviewDeps 不可用（deliver_task 内部降级处理）。
+        const b1TaskLedger = createTaskLedger({ taskId: sessionId })
+        // headless 无 pre-existing dirty 概念 — 用空基线
+        const b1Baseline = createWorktreeBaseline({
+          branch: '', head: '', preExistingDirty: [], preExistingUntracked: [], capturedAt: Date.now(),
+        })
+        const b1Ownership = createOwnershipLedger({
+          baseline: b1Baseline,
+          taskLedger: b1TaskLedger,
+        })
+        const b1Attribution = createVerificationAttribution({ ownership: b1Ownership })
+        const b1Gate = createDeliveryGateV2({
+          taskLedger: b1TaskLedger,
+          ownership: b1Ownership,
+          attribution: b1Attribution,
+        })
+        toolRegistry.register(createDeliverTaskTool(() => ({
+          taskLedger: b1TaskLedger,
+          ownership: b1Ownership,
+          gate: b1Gate,
+        })))
+
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },

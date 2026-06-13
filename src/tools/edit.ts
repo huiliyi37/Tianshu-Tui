@@ -89,7 +89,12 @@ Bad: using a too-short old_string that matches multiple locations`,
             await writeFileAtomicAsync(filePath, newContent)
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
+            const expectedCount = params.input.expected_count as number | undefined
             const warn = syntaxCheck(filePath, newContent)
+            if (expectedCount !== undefined && occurrences !== expectedCount) {
+              const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
+              return { content: base + (warn ? '\n\n' + warn : '') }
+            }
             return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}` }
           }
           const firstIdx = freshContent.indexOf(oldString)

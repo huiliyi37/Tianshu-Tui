@@ -219,6 +219,54 @@ describe('edit_file tool', () => {
     assert.ok(content.includes('// added comment'))
   })
 
+  it('on stale file: replace_all warns when expected_count mismatches', async () => {
+    const filePath = join(TEST_DIR, 'stale-count.ts')
+    writeFileSync(filePath, 'foo\nfoo\nfoo\nbar\n')
+
+    const { __setFileReadMtimeForTests } = await import('../read-file.js')
+    const oldMtime = statSync(filePath).mtimeMs
+    __setFileReadMtimeForTests(filePath, oldMtime)
+
+    writeFileSync(filePath, 'foo\nfoo\nbaz\nbar\n// added\n')
+    // Now only 2 'foo' occurrences instead of 3
+
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'foo',
+      new_string: 'qux',
+      replace_all: true,
+      expected_count: 3,
+    }))
+
+    assert.ok(!result.isError, `Expected success on stale auto-apply, got: ${result.content}`)
+    assert.match(result.content, /Warning.*expected 3.*replaced 2/i,
+      `Expected expected_count warning, got: ${result.content}`)
+  })
+
+  it('on stale file: replace_all no warning when expected_count matches', async () => {
+    const filePath = join(TEST_DIR, 'stale-count-ok.ts')
+    writeFileSync(filePath, 'foo\nfoo\nbar\n')
+
+    const { __setFileReadMtimeForTests } = await import('../read-file.js')
+    const oldMtime = statSync(filePath).mtimeMs
+    __setFileReadMtimeForTests(filePath, oldMtime)
+
+    writeFileSync(filePath, 'foo\nfoo\nbar\n// added\n')
+    // Still 2 'foo' occurrences
+
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: filePath,
+      old_string: 'foo',
+      new_string: 'qux',
+      replace_all: true,
+      expected_count: 2,
+    }))
+
+    assert.ok(!result.isError, `Expected success on stale auto-apply, got: ${result.content}`)
+    assert.ok(!result.content.includes('Warning'),
+      `Expected no warning, got: ${result.content}`)
+  })
+
   it('on stale file: shows current content near old_string when it no longer matches', async () => {
     const filePath = join(TEST_DIR, 'stale-nomatch.ts')
     writeFileSync(filePath, 'function foo() {\n  return 1\n}\n')
