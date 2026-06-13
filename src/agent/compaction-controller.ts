@@ -12,6 +12,7 @@ import type { PromptEngine } from '../prompt/engine.js'
 import type { PressureMonitor } from '../context/pressure-monitor.js'
 import type { SessionContext } from './context.js'
 import { extractTaskState } from './task-state.js'
+import { renderTaskAnchor, type TaskContract } from '../context/task-contract.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import { extractSessionMemories, type ExtractedMemory } from './session-memory-extract.js'
@@ -228,6 +229,12 @@ export interface CompactionControllerDeps {
   persistMemories?: (memories: Array<{ text: string; source: ExtractedMemory['source']; kind: ExtractedMemory['kind'] }>) => void | Promise<void>
   /** Current abort signal from the agent loop, so LLM compact can be cancelled. */
   getAbortSignal?: () => AbortSignal | undefined
+  /**
+   * C4: the live authoritative task contract. Re-injected into the appendix
+   * region after every compaction so the goal / constraints / forbidden items
+   * survive verbatim even when the LLM summary above drifts or drops them.
+   */
+  getActiveContract?: () => TaskContract | undefined
 }
 
 export interface MaybeCompactInput {
@@ -421,6 +428,13 @@ export class CompactionController {
           toolHistory: [],
         })
         compacted.push({ role: 'user', content: summaryText })
+
+        // C4: re-inject the authoritative task anchor after the summary so the
+        // objective / constraints / forbidden items survive verbatim.
+        const anchorAppendix = this.buildTaskAnchorAppendix()
+        if (anchorAppendix) {
+          compacted.push({ role: 'user', content: anchorAppendix })
+        }
       }
 
       this.deps.session.replaceMessages(compacted)
@@ -653,6 +667,26 @@ export class CompactionController {
   }
 
   /**
+   * C4: render the authoritative task anchor for appendix re-injection.
+   * Fuses the verbatim contract (objective / constraints / success) with live
+   * progress (completed / remaining) from the trajectory-derived task state.
+   * Returns null when there is no actionable contract.
+   */
+  private buildTaskAnchorAppendix(): string | null {
+    const contract = this.deps.getActiveContract?.()
+    if (!contract) return null
+    const taskState = extractTaskState(
+      this.deps.getTrajectoryEntries(),
+      this.deps.getStreamedText(),
+    )
+    const anchor = renderTaskAnchor(contract, {
+      completed: taskState.completed,
+      remaining: taskState.remaining,
+    })
+    return anchor.length > 0 ? anchor : null
+  }
+
+  /**
    * Replace message history with cache anchors + checkpoint summary.
    * Called by both trySessionSplit (86% threshold, richer handoff) and
    * enforceContextCeiling (95% threshold, emergency fallback).
@@ -670,6 +704,14 @@ export class CompactionController {
 
     if (estimateOaiTokens(candidate) > params.maxFallback) {
       candidate = [...anchorMessages, { role: 'user', content: params.fallbackText }]
+    }
+
+    // C4: append the authoritative task anchor at the tail (appendix region —
+    // never the frozen prefix, so prefix-cache stays intact). The anchor is the
+    // ground truth the model defers to if the summary above drifted.
+    const anchorAppendix = this.buildTaskAnchorAppendix()
+    if (anchorAppendix) {
+      candidate.push({ role: 'user', content: anchorAppendix })
     }
 
     const beforeTokens = estimateOaiTokens(messages)

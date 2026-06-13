@@ -5,6 +5,7 @@ import {
   contractStatusFromPhaseClass,
   extractTaskContract,
   renderContractProjection,
+  renderTaskAnchor,
   isActionableTurn,
 } from '../task-contract.js'
 
@@ -92,6 +93,29 @@ describe('advanceContractStatus', () => {
     const recovered = advanceContractStatus(blocked, 'executing', 3)
     assert.equal(recovered.status, 'executing')
     assert.equal(recovered.updatedAtTurn, 3)
+  })
+
+  it('renders an authoritative task anchor fusing contract + progress (C4)', () => {
+    const contract = advanceContractStatus(
+      extractTaskContract('refactor src/auth/middleware.ts. Don\'t break the API. Must be backwards compatible.', 1),
+      'executing',
+      3,
+    )
+    const anchor = renderTaskAnchor(contract, {
+      completed: ['wired the guard'],
+      remaining: ['add regression test'],
+    })
+    assert.match(anchor, /<task-anchor authoritative="true" status="executing">/)
+    assert.match(anchor, /AUTHORITATIVE/)
+    assert.match(anchor, /middleware\.ts/)
+    assert.match(anchor, /<constraint>/)
+    assert.match(anchor, /<completed>wired the guard<\/completed>/)
+    assert.match(anchor, /<remaining>add regression test<\/remaining>/)
+    assert.match(anchor, /<\/task-anchor>/)
+  })
+
+  it('returns empty anchor for a non-actionable contract (C4)', () => {
+    assert.equal(renderTaskAnchor(extractTaskContract('你好', 1)), '')
   })
 
   it('maps phase classes to contract lifecycle statuses', () => {

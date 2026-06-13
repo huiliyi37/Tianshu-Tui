@@ -7,6 +7,7 @@ import { PressureMonitor } from '../../context/pressure-monitor.js'
 import type { TrajectoryEntry } from '../trajectory.js'
 import type { OaiChatRequest } from '../../api/oai-types.js'
 import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
+import { extractTaskContract } from '../../context/task-contract.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -760,5 +761,95 @@ describe('CompactionController', () => {
     // With 25 tools × 50 tokens/tool = 1250 tool tokens
     // System prompt + 1250 + 400 volatile should be well above 500
     assert.ok(overhead > 500, `expected overhead > 500 with 25 tools, got ${overhead}`)
+  })
+
+  // ── C4: authoritative task anchor re-injection ──────────────────────────
+  describe('C4 task anchor re-injection', () => {
+    it('re-injects the authoritative task anchor after the ceiling checkpoint', async () => {
+      const session = new SessionContext()
+      const huge = 'x'.repeat(80_000 * 4)
+      session.replaceMessages([
+        { role: 'user', content: 'anchor user' },
+        { role: 'assistant', content: 'anchor assistant' },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+      ])
+      const contract = extractTaskContract(
+        '重构 src/auth/middleware.ts 的鉴权逻辑。不要改接口签名。必须向后兼容。',
+        1,
+      )
+      const controller = makeController(session, {
+        getActiveContract: () => contract,
+        getStreamedText: () => 'Completed: wired guard\nRemaining: add tests',
+      })
+
+      await controller.enforceContextCeiling()
+
+      const messages = session.getMessages()
+      // Frozen prefix untouched.
+      assert.equal(messages[0]?.content, 'anchor user')
+      assert.equal(messages[1]?.content, 'anchor assistant')
+      // Task anchor lands at the tail (appendix region), with the verbatim
+      // objective and the forbidden-item constraint preserved.
+      const tail = String(messages.at(-1)?.content)
+      assert.match(tail, /<task-anchor authoritative="true"/)
+      assert.match(tail, /middleware\.ts/)
+      assert.match(tail, /<constraint>/)
+      assert.ok(session.getEstimatedTokens() <= 128_000 * 0.95)
+    })
+
+    it('omits the anchor when there is no actionable contract', async () => {
+      const session = new SessionContext()
+      const huge = 'x'.repeat(80_000 * 4)
+      session.replaceMessages([
+        { role: 'user', content: 'anchor user' },
+        { role: 'assistant', content: 'anchor assistant' },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+        { role: 'user', content: huge },
+        { role: 'assistant', content: huge },
+      ])
+      // Non-actionable greeting → renderTaskAnchor returns '' → no appendix.
+      const controller = makeController(session, {
+        getActiveContract: () => extractTaskContract('你好', 1),
+      })
+
+      await controller.enforceContextCeiling()
+
+      const messages = session.getMessages()
+      assert.ok(!messages.some(m => String(m.content).includes('<task-anchor')))
+    })
+
+    it('re-injects the anchor after a tier-2 micro compaction', async () => {
+      const session = new SessionContext()
+      const historyMessage = 'x'.repeat(12_000 * 4)
+      session.replaceMessages(
+        Array.from({ length: 12 }, (_, i) => ({
+          role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: historyMessage,
+        })),
+      )
+      const contract = extractTaskContract('实现 src/foo.ts 的功能。不要破坏现有 API。', 1)
+      const controller = makeController(session, {
+        getActiveContract: () => contract,
+        getStreamedText: () => 'Remaining: finish foo',
+      })
+
+      const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+
+      if (result.compacted) {
+        const events = session.getCompactEvents()
+        const tier = events.at(-1)?.tier ?? 1
+        // Tier-2+ micro compaction injects both the compact summary AND the
+        // authoritative anchor. Tier-1 paths do not (no message-count drop), so
+        // only assert the anchor when a tier-2 summary fired.
+        if (tier >= 2) {
+          const hasAnchor = session.getMessages().some(m => String(m.content).includes('<task-anchor'))
+          assert.ok(hasAnchor, 'tier-2 compaction should re-inject the task anchor')
+        }
+      }
+    })
   })
 })

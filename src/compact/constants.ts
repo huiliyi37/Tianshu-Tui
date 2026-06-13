@@ -95,6 +95,14 @@ export function compactThresholds(input: number | CompactStrategyInput): Compact
   }
 }
 
+/**
+ * C4 task anchor: max items rendered per list (constraints / scope / completed /
+ * remaining) when the authoritative TaskContract is re-injected into the
+ * appendix region after compaction. Keeps the anchor compact so re-injecting it
+ * every compaction never meaningfully grows the post-compaction footprint.
+ */
+export const TASK_ANCHOR_MAX_ITEMS = 6
+
 /** Number of messages to preserve at the start as cache anchor.
  * Keeping the first 2 messages (initial user request + assistant response)
  * preserves the prefix structure after compaction, so DeepSeek's prefix

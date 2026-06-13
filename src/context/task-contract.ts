@@ -1,3 +1,5 @@
+import { TASK_ANCHOR_MAX_ITEMS } from '../compact/constants.js'
+
 export type ContractStatus =
   | 'exploring'
   | 'planning'
@@ -241,6 +243,57 @@ export function renderContractProjection(contract: TaskContract): string {
   }
   parts.push('</task-contract>')
   return parts.join('\n')
+}
+
+/** Progress fields fused into the post-compaction task anchor. Sourced from
+ *  the live task-state (todos / trajectory), which the contract itself does
+ *  not track. */
+export interface TaskAnchorProgress {
+  completed?: string[]
+  remaining?: string[]
+}
+
+/**
+ * Render the AUTHORITATIVE task anchor for re-injection into the appendix
+ * region after compaction (C4).
+ *
+ * The difference from `renderContractProjection`: this block is explicitly
+ * marked authoritative and fuses the verbatim contract (objective / constraints
+ * = forbidden items / success criteria) with live progress (completed /
+ * remaining). When an LLM-generated compaction summary above it drifts or drops
+ * a constraint, this block is the ground truth the model must defer to.
+ *
+ * It is appended at the TAIL of the message list (never the frozen prefix), so
+ * re-injecting it every compaction is prefix-cache safe.
+ */
+export function renderTaskAnchor(contract: TaskContract, progress: TaskAnchorProgress = {}): string {
+  if (!contract.isActionable) return ''
+
+  const lines: string[] = [
+    `<task-anchor authoritative="true" status="${contract.status}">`,
+    'AUTHORITATIVE task definition — survives compaction verbatim. If any summary above conflicts with this block, THIS block is ground truth.',
+    `  <objective>${escapeXml(contract.objective)}</objective>`,
+  ]
+  if (contract.scope.mentionedFiles.length > 0) {
+    lines.push(`  <scope>${contract.scope.mentionedFiles.slice(0, TASK_ANCHOR_MAX_ITEMS).map(escapeXml).join(', ')}</scope>`)
+  }
+  // constraints == forbidden / hard requirements: never silently drop these.
+  for (const constraint of contract.constraints.slice(0, TASK_ANCHOR_MAX_ITEMS)) {
+    lines.push(`  <constraint>${escapeXml(constraint)}</constraint>`)
+  }
+  for (const criterion of contract.successCriteria.slice(0, 2)) {
+    lines.push(`  <success>${escapeXml(criterion)}</success>`)
+  }
+  const completed = (progress.completed ?? []).filter(Boolean)
+  const remaining = (progress.remaining ?? []).filter(Boolean)
+  for (const item of completed.slice(-TASK_ANCHOR_MAX_ITEMS)) {
+    lines.push(`  <completed>${escapeXml(item)}</completed>`)
+  }
+  for (const item of remaining.slice(0, TASK_ANCHOR_MAX_ITEMS)) {
+    lines.push(`  <remaining>${escapeXml(item)}</remaining>`)
+  }
+  lines.push('</task-anchor>')
+  return lines.join('\n')
 }
 
 /**
