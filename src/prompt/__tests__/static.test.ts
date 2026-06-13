@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildSystemPrompt } from '../static.js'
+import { buildSystemPrompt, detectModelFamily } from '../static.js'
 
 describe('buildSystemPrompt', () => {
   it('wraps identity in <identity> tags', () => {
@@ -63,9 +63,8 @@ describe('buildSystemPrompt', () => {
 
   it('preserves core prompt semantics', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // Key phrases from the current prompt contract must survive
     assert.ok(prompt.includes('有理有据'))
-    assert.ok(prompt.includes('代码修改 / 架构决策 / bug 修复：严格先读'))
+    assert.ok(prompt.includes('改代码前先读'))
     assert.ok(prompt.includes('read_file'))
     assert.ok(prompt.includes('edit_file'))
     assert.ok(prompt.includes('write_file'))
@@ -73,46 +72,83 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('API key'))
   })
 
-  it('includes read-loop escape guardrails', () => {
+  it('includes beliefs as situational triggers', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('[diet:redundant]'))
-    assert.ok(prompt.includes('[diet:useless]'))
-    assert.ok(prompt.includes('禁止第 4 次对同一路径直接 read_file'))
-    assert.ok(prompt.includes('策略 X 无效，切换到 Y'))
+    assert.ok(prompt.includes('当你发现更优方案时'))
+    assert.ok(prompt.includes('当用户指令偏离用户意图时'))
+    assert.ok(prompt.includes('模糊确认'))
   })
 
-  it('upgrades complex spec workflow from checklist to dataflow verification', () => {
+  it('includes task completion reporting requirements', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-
-    assert.ok(prompt.includes('复杂 spec / 跨模块集成任务不得只按 checklist 打勾'))
-    assert.ok(prompt.includes('事实流图'))
-    assert.ok(prompt.includes('条件矩阵'))
-    assert.ok(prompt.includes('反证测试表'))
-    assert.ok(prompt.includes('没有能打红错误实现的测试，不得声称 spec 已验证'))
+    assert.ok(prompt.includes('遗留项'))
+    assert.ok(prompt.includes('设计偏离'))
+    assert.ok(prompt.includes('交付物'))
   })
 
   it('includes only a short manifest entry for sensitive knowledge domains', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-
     assert.ok(prompt.includes('.rivet/knowledge/manifest.md'))
     assert.ok(prompt.includes('prompt/identity/memory/recall/verification/ownership'))
   })
 
   it('includes delegation discipline guardrails', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-
     assert.ok(prompt.includes('委派不是默认执行方式'))
-    assert.ok(prompt.includes('当前计划的前置设计'))
-    assert.ok(prompt.includes('3 个以上独立探索前线'))
-    assert.ok(prompt.includes('用户明确说不要委派时'))
+    assert.ok(prompt.includes('3+ 独立探索前线'))
+    assert.ok(prompt.includes('用户说不要委派时'))
     assert.ok(prompt.includes('继续内联执行'))
+  })
+
+  it('applies model-specific calibration', () => {
+    const deepseek = buildSystemPrompt({ tools: [], modelFamily: 'deepseek' })
+    assert.ok(deepseek.includes('model-calibration'))
+    assert.ok(deepseek.includes('跨模块边界'))
+
+    const mimo = buildSystemPrompt({ tools: [], modelFamily: 'mimo' })
+    assert.ok(mimo.includes('model-calibration'))
+    assert.ok(mimo.includes('收敛'))
+
+    const glm = buildSystemPrompt({ tools: [], modelFamily: 'glm' })
+    assert.ok(glm.includes('model-calibration'))
+
+    const unknown = buildSystemPrompt({ tools: [], modelFamily: 'unknown' })
+    assert.ok(!unknown.includes('model-calibration'))
   })
 
   it('does not reintroduce retired long-form warning sections', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-
     assert.ok(!prompt.includes('Common Mistakes'))
     assert.ok(!prompt.includes('prefix cache 对静态提示词敏感'))
     assert.ok(!prompt.includes('891cc1b6'))
+  })
+})
+
+describe('detectModelFamily', () => {
+  it('detects deepseek models', () => {
+    assert.equal(detectModelFamily('deepseek-v4-0324'), 'deepseek')
+    assert.equal(detectModelFamily('DeepSeek-V4-Flash'), 'deepseek')
+  })
+
+  it('detects mimo models', () => {
+    assert.equal(detectModelFamily('MiMo-7B'), 'mimo')
+  })
+
+  it('detects glm models', () => {
+    assert.equal(detectModelFamily('glm-4-plus'), 'glm')
+  })
+
+  it('detects openai models', () => {
+    assert.equal(detectModelFamily('gpt-4o'), 'openai')
+    assert.equal(detectModelFamily('o3-mini'), 'openai')
+  })
+
+  it('detects anthropic models', () => {
+    assert.equal(detectModelFamily('claude-opus-4'), 'anthropic')
+    assert.equal(detectModelFamily('claude-sonnet-4'), 'anthropic')
+  })
+
+  it('returns unknown for unrecognized models', () => {
+    assert.equal(detectModelFamily('custom-model-v1'), 'unknown')
   })
 })

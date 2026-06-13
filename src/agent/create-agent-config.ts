@@ -1,6 +1,7 @@
 import { createProviderClient } from '../api/factory.js'
 import { resolveCapabilities } from '../api/provider.js'
 import { PromptEngine } from '../prompt/engine.js'
+import { detectModelFamily } from '../prompt/static.js'
 import { createVolatileSnapshot } from '../prompt/volatile-snapshot.js'
 import type { AgentConfig } from './loop-types.js'
 import type { CompactionConfig } from '../compact/constants.js'
@@ -101,7 +102,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   const promptEngine = new PromptEngine({
     model: model.id,
     maxTokens: model.maxTokens,
-    staticCtx: { tools: input.toolDefinitions },
+    staticCtx: { tools: input.toolDefinitions, modelFamily: detectModelFamily(model.id) },
     volatileCtx: createVolatileSnapshot({
       cwd,
       sessionMemoryBlock: input.sessionMemoryBlock,

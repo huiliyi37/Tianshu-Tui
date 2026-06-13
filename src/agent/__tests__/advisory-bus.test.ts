@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from '../advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, disciplineReanchorEntry, stalenessGateEntry, vigorLowEntry } from '../advisory-bus.js'
 
 describe('AdvisoryBus', () => {
   it('renders empty when no entries', () => {
@@ -96,8 +96,8 @@ describe('discipline re-anchor (F-fix, session 803d897d)', () => {
     bus.submit(disciplineReanchorEntry())
     bus.submit(disciplineReanchorEntry())
     const rendered = bus.render()
-    assert.match(rendered, /交付纪律重锚/)
     assert.match(rendered, /category="discipline"/)
+    assert.ok(rendered.includes('闭环') || rendered.includes('接线') || rendered.includes('自检'), 'discipline content must contain core keyword')
     const occurrences = rendered.split('discipline-reanchor').length - 1
     assert.equal(occurrences, 1, 'same-key entries must dedupe to one line')
   })
@@ -113,5 +113,45 @@ describe('discipline re-anchor (F-fix, session 803d897d)', () => {
     assert.match(rendered, /repair-1/)
     assert.match(rendered, /dedup-1/)
     assert.doesNotMatch(rendered, /discipline-reanchor/, 'discipline anchor yields to top-3 corrective signals')
+  })
+
+  it('discipline variants rotate content for anti-habituation', () => {
+    const contents = new Set<string>()
+    for (let i = 0; i < 30; i++) {
+      contents.add(disciplineReanchorEntry().content)
+    }
+    assert.ok(contents.size >= 2, `expected >=2 unique variants but got ${contents.size}`)
+  })
+})
+
+describe('anti-habituation: staleness gate & vigor-low', () => {
+  it('staleness gate has sane thresholds', () => {
+    assert.ok(STALENESS_GATE_TURN_THRESHOLD >= 10 && STALENESS_GATE_TURN_THRESHOLD <= 40)
+    assert.ok(STALENESS_GATE_QUIET_WINDOW >= 5 && STALENESS_GATE_QUIET_WINDOW <= 20)
+  })
+
+  it('staleness gate entry includes turn count and has TTL 2', () => {
+    const entry = stalenessGateEntry(15)
+    assert.equal(entry.key, 'staleness-gate')
+    assert.equal(entry.category, 'discipline')
+    assert.equal(entry.ttl, 2)
+    assert.ok(entry.content.includes('15'))
+  })
+
+  it('vigor-low entry has appropriate priority and TTL 1', () => {
+    const entry = vigorLowEntry()
+    assert.equal(entry.key, 'vigor-low-refresh')
+    assert.equal(entry.category, 'discipline')
+    assert.equal(entry.ttl, 1)
+    assert.ok(entry.priority > 0.5, 'vigor-low should have moderate-high priority')
+  })
+
+  it('staleness and vigor-low can coexist in advisory bus', () => {
+    const bus = new AdvisoryBus()
+    bus.submit(stalenessGateEntry(20))
+    bus.submit(vigorLowEntry())
+    const rendered = bus.render()
+    assert.ok(rendered.includes('staleness-gate'))
+    assert.ok(rendered.includes('vigor-low-refresh'))
   })
 })

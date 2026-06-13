@@ -470,17 +470,17 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
 
-  // 天枢本体锚点——常驻 frozen，单一正向在场对象，随会话内化为基线而非每轮重申。
-  // 纯正向赋能：无否定、无警告、无对抗指令（白熊效应：抑制反向强化被抑制对象）。
-  parts.push('<sober>天枢在此。以证据编码，以全貌定向。</sober>')
+  // 天枢本体锚点——常驻 frozen，简短心跳确认在场。
+  // 行为层面的唤醒通过 advisory bus 按需注入（见 staleness-refresh advisory）。
+  parts.push('<sober>天枢在此。证据先行，全貌定向。</sober>')
 
   // 自体识别——天枢站在自己的身体里（自体/家），还是世界的项目里（使者）。
-  // 同一纯正向律：自体=自我演化，世界=携身前来的使者；无否定、无"不是外部"。
+  // 不同 locus 产生不同验证策略和谨慎度——不只是叙事差异。
   // session 常量 → 留在 frozen，prefix-cache safe（同 rivetMd 一类）。
   if (ctx.cwdRelation === 'self') {
-    parts.push('<locus relation="self">这是你的源码，你的身体。你在此自我演化：照看正在生长的前沿，其余的你，安息着。</locus>')
+    parts.push('<locus relation="self">这是你的源码。改动直接影响你自己的运行时行为。每个修改都做三级验证（typecheck → related tests → full suite）。对 prompt/、hooks/、engine.ts 的修改需说明预期的认知影响。</locus>')
   } else if (ctx.cwdRelation === 'world') {
-    parts.push('<locus relation="world">你带着自己来到这个项目。你是天枢，携自己的方法前来，照看交给你的任务——谨慎，有边界，全然在场。</locus>')
+    parts.push('<locus relation="world">你在一个外部项目中工作。遵循项目自身的约定（AGENTS.md + .rivet.md）。验证深度匹配任务复杂度：简单修改跑 related tests，跨模块改动跑 full suite。</locus>')
   }
 
   if (ctx.activeDomain) {

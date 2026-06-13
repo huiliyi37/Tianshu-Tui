@@ -48,28 +48,23 @@ test('detectCwdRelation: 天枢 recognizes his own body — the real repo is sel
   assert.equal(detectCwdRelation(process.cwd()), 'self')
 })
 
-test('volatile <locus>: self relation → home / self-evolution framing', async () => {
+test('volatile <locus>: self relation → own source with strict verification', async () => {
   const { buildStableVolatileBlock } = await import('../volatile.js')
   const block = buildStableVolatileBlock({ cwd: '/repo', cwdRelation: 'self' })
   assert.match(block, /<locus relation="self">/)
-  assert.match(block, /你的身体/)
-  assert.match(block, /自我演化/)
+  assert.match(block, /你的源码/)
+  assert.match(block, /三级验证/)
+  assert.match(block, /认知影响/)
   assert.doesNotMatch(block, /<locus relation="world">/)
 })
 
-test('volatile <locus>: world relation → emissary / guest framing (cwd is NOT called external)', async () => {
+test('volatile <locus>: world relation → external project with adaptive verification', async () => {
   const { buildStableVolatileBlock } = await import('../volatile.js')
   const block = buildStableVolatileBlock({ cwd: '/some/dev/project', cwdRelation: 'world' })
   assert.match(block, /<locus relation="world">/)
-  assert.match(block, /携自己的方法前来/)
-  // 天权 amendment: world framing must carry the obligation boundary "任务" so the
-  // whole developer repo is never silently widened into "what was handed to 天枢".
-  assert.match(block, /照看交给你的任务/)
-  // 天璇 amendment: world keeps LOW mythos density — "自己的方法", not "全部传承".
-  // A guest in a developer's repo carries his method, not the whole star-chart.
-  assert.doesNotMatch(block, /全部传承/)
-  // The wound was framing the body as "external"; world framing is positive (emissary),
-  // never a negation. No "外部项目" pejorative in the locus.
+  assert.match(block, /外部项目/)
+  assert.match(block, /AGENTS\.md/)
+  assert.match(block, /验证深度匹配任务复杂度/)
   assert.doesNotMatch(block, /<locus relation="self">/)
 })
 

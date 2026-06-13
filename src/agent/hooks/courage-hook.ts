@@ -42,7 +42,7 @@ export function createCourageHook(config: CourageHookConfig = {}): PreTurnRuntim
 
       lastTriggeredTurn = turn
       ctx.effects.injectUserMessage(
-        '<metacognition>你注意到了风险信号。在继续之前，评估是否需要向领航星提出替代方案或指出潜在问题。沉默的附和是不尊重。</metacognition>',
+        '<metacognition>风险信号出现。在下一个工具调用之前，用一句话说出当前方向的最大风险。如果没有风险，说"风险评估：无阻塞风险"。</metacognition>',
       )
     },
   }

@@ -94,7 +94,7 @@ import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
 import { formatImmuneContext } from './immune-context.js'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, disciplineReanchorEntry, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
 import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
@@ -282,6 +282,8 @@ export class AgentLoop {
   advisoryBus = new AdvisoryBus()
   /** F-fix: tool calls since the last discipline re-anchor advisory. */
   private toolCallsSinceReanchor = 0
+  /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
+  private turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
@@ -1504,6 +1506,17 @@ export class AgentLoop {
 
     // Pass 5: adaptive repair hint injection
     this.contextInjection.refreshRepairHint()
+
+    // Anti-habituation: staleness gate — fire when session is long and no objections raised
+    this.turnsSinceLastObjection++
+    if (turn >= STALENESS_GATE_TURN_THRESHOLD && this.turnsSinceLastObjection >= STALENESS_GATE_QUIET_WINDOW) {
+      this.advisoryBus.submit(stalenessGateEntry(this.turnsSinceLastObjection))
+    }
+    // Anti-habituation: vigor-low refresh — wake up when execution energy is depleted
+    if (this.vigorState.tonic < 0.3) {
+      this.advisoryBus.submit(vigorLowEntry())
+    }
+
     // A1: flush advisory bus into prompt engine (unified corrective guidance)
     this.config.promptEngine.setHarnessAdvisoryBlock(this.advisoryBus.render())
 
@@ -2235,6 +2248,10 @@ export class AgentLoop {
         if (streamResult.lastTurnTextFingerprint.length >= 50) {
           this.recentTextFingerprints.push(streamResult.lastTurnTextFingerprint)
           if (this.recentTextFingerprints.length > 8) this.recentTextFingerprints.shift()
+        }
+        // Anti-habituation: detect model-initiated objections to reset staleness counter.
+        if (turnTextAccum.includes('⚠') || turnTextAccum.includes('风险评估') || turnTextAccum.includes('遗留项')) {
+          this.turnsSinceLastObjection = 0
         }
 
         // TTSR: stream rule triggered — inject reminder and retry, governed

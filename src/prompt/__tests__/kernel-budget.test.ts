@@ -60,13 +60,13 @@ describe('Kernel Budget — structural guards against trained-mode degradation',
       assert.ok(block.split('\n').length >= 2, '<identity> too short — needs at least name + one sentence')
     })
 
-    it('beliefs block exists and contains at least 3 belief statements', () => {
+    it('beliefs block exists and contains at least 3 situational triggers', () => {
       const block = extractTaggedBlock(prompt, '<beliefs>', '</beliefs>')
       assert.ok(block.length > 0, '<beliefs> block missing — kernel destroyed')
-      const beliefCount = (block.match(/你相信/g) ?? []).length
+      const triggerCount = (block.match(/当你|当用户/g) ?? []).length
       assert.ok(
-        beliefCount >= 3,
-        `<beliefs> contains only ${beliefCount} statements — agent identity needs richer value structure`,
+        triggerCount >= 3,
+        `<beliefs> contains only ${triggerCount} situational triggers — agent identity needs richer behavioral structure`,
       )
     })
 

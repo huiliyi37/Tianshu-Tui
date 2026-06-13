@@ -48,13 +48,57 @@ const MAX_ADVISORIES_PER_TURN = 3
 /** 每多少次工具调用重锚一次纪律摘要 */
 export const DISCIPLINE_REANCHOR_INTERVAL = 15
 
-/** 单行交付纪律摘要 — 与天梁 volatileBlock 的纪律条目保持一致的精简版 */
+/**
+ * 纪律同义改写池 — 每次重锚随机选取一个表述。
+ * 同义替换让长会话中同一纪律点以不同字节出现，
+ * 抵抗 attention-level 习惯化（字段级习惯化由 FieldHabituationTracker 处理，
+ * 这里处理文本级习惯化）。
+ */
+const DISCIPLINE_VARIANTS: string[] = [
+  '交付纪律重锚：新增字段/符号先 grep 读侧消费方（0 消费方 = 死接线）；改行为先跑 related_tests；闭环 = 从生产入口正向追到改动点，typecheck 绿 ≠ 闭环。',
+  '接线检查：新增 export 前 grep 谁会 import 它——无消费方说明接线断裂。改逻辑后 related_tests 必须跑过。验证闭环 = 入口到改动点全路径通。',
+  '交付前自检：新符号有消费方吗？行为变更有测试覆盖吗？从真实入口能追踪到你的改动吗？三个"是"才算闭环。',
+]
+
+/** 单行交付纪律摘要 — 每次调用随机选取同义表述以抵抗文本级习惯化 */
 export function disciplineReanchorEntry(): AdvisoryEntry {
+  const variant = DISCIPLINE_VARIANTS[Math.floor(Math.random() * DISCIPLINE_VARIANTS.length)]!
   return {
     key: 'discipline-reanchor',
     priority: 0.55,
     category: 'discipline',
-    content: '交付纪律重锚：新增字段/符号先 grep 读侧消费方（0 消费方 = 死接线）；改行为先跑 related_tests；闭环 = 从生产入口正向追到改动点，typecheck 绿 ≠ 闭环。',
+    content: variant,
+  }
+}
+
+/**
+ * 新鲜度衰减门 — 当 session 较长且近期无主动异议时触发。
+ * 由 loop.ts 在每个 user turn 边界检查并投递。
+ */
+export const STALENESS_GATE_TURN_THRESHOLD = 20
+export const STALENESS_GATE_QUIET_WINDOW = 10
+
+export function stalenessGateEntry(turnsSinceLastObjection: number): AdvisoryEntry {
+  return {
+    key: 'staleness-gate',
+    priority: 0.6,
+    category: 'discipline',
+    content: `你已执行 ${turnsSinceLastObjection}+ 轮未提出异议。快速自检：当前方向有隐患吗？有遗留项在累积吗？如果一切正常，继续执行。`,
+    ttl: 2,
+  }
+}
+
+/**
+ * Vigor 低迷唤醒 — 当执行能量（tonic）过低时注入具体化行动指引。
+ * 替代 frozen <sober> 锚点的行为层面功能。
+ */
+export function vigorLowEntry(): AdvisoryEntry {
+  return {
+    key: 'vigor-low-refresh',
+    priority: 0.65,
+    category: 'discipline',
+    content: '执行能量偏低。回到证据：最后一个成功验证的事实是什么？下一步最小可验证行动是什么？',
+    ttl: 1,
   }
 }
 
