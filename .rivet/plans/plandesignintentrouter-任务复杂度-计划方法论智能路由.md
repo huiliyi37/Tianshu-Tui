@@ -85,11 +85,13 @@ Rule 2 — Multi-gate signal → 'full'
     b. File pattern: mentionedFiles 同时包含不同 enforcement 子系统的文件
        - Enforcement subsystems 定义见下方 ENFORCEMENT_SUBSYSTEM_FILES 常量
     c. Constraint signal: contract.constraints 含 "security" | "permission" | "sandbox"
-    d. **Safety keyword in objective → 'full'（2026-06-14 补强）**
+    d. **Safety action keyword in objective → 'full'（2026-06-14 补强·修订）**
        即使 mentionedFiles 只含 0~1 个 enforcement 文件，如果 objective 包含
-       安全语义关键词，也必须走完整版模板——因为"存在第二个门"这个事实往往在
-       问题建模阶段才浮现（见下方"已知局限：鸡生蛋裂缝"）。
-       关键词：/授权|越界|放行|sandbox|permission|path.*(safe|grant|allow)|安全|沙箱|权限/i
+       **访问控制动作词**（不是话题词），也必须走完整版模板。
+       关键词（动作）：/授权|越界|放行|grant.*access|allow.*(access|path|write)|path.*(authoriz|grant)/i
+       排除（话题词，单独出现不触发）：安全/权限/sandbox — 这些会误触发纯 UI/文案任务
+       （"优化渲染安全性"不触发；"给越界路径放行"触发）
+       理由：话题词引发 cry-wolf，路由器被噪声淹没后退化为无人信任。
 
 Rule 3 — WIRING depth + multi-file → 'full' if ≥2 enforcement files, else 'lightweight'
   理由：wiring 任务可能只是连两个普通模块（lightweight），也可能是连
@@ -189,7 +191,7 @@ const ENFORCEMENT_SUBSYSTEM_FILES: ReadonlySet<string> = new Set([
 
 **代价不对称**：重构任务误判成 full 浪费几页文档；安全任务误判成 lightweight 留下可利用的裂缝。默认值 lightweight 对两类错误一视同仁，但后果不对称。
 
-**已实施的补强（Rule 2d）**：objective 含 `授权|越界|放行|sandbox|permission|path安全` 等安全语义词时，即使 0 个 enforcement 文件也升级到 full。这覆盖了"伪装成简单"的安全任务。
+**已实施的补强（Rule 2d）**：objective 含 `授权|越界|放行|grant access|allow access` 等访问控制动作词时，即使 0 个 enforcement 文件也升级到 full。排除裸的 `安全|权限|sandbox`（话题词）——这些会误触发纯 UI/文案任务，导致路由器被噪声淹没。
 
 **待评估的更彻底方案**（未实施，供后续决策）：
 - 引入第三档 `lightweight-with-boundary-scan`：不走完整九阶段，但强制保留不可删的边界扫描步骤

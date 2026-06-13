@@ -32,11 +32,13 @@
 
 ### 原则 A：双门模型
 
-> 当一个系统有两个独立执行路径共享同一安全缺口时，方案必须让两个门同步感知同一授权状态。单门方案不是简化——是不完整。
+> 当一个系统有两个独立执行路径共享同一 enforcement 目标时，方案必须让两个门同步感知同一授权状态。单门方案不是简化——是不完整。
 
 **适用场景**：任何涉及多个独立 enforcement point 的变更（安全、权限、沙箱、验证）。
 
-**检查方法**：grep 所有调用同一 guard 函数的地方，确认没有遗漏的路径。
+**检查方法**：grep 共享 enforcement 状态的导入方（不是 guard 函数的调用者——两个门可能不共享函数，只共享状态模块），或枚举"这个操作的所有拒绝点"（沿着操作往下数门，而非沿着函数往上数调用者）。
+
+**实证**：path-grants 场景中，`path-validate.ts` 和 `sandbox-profile.ts` 不共享 guard 函数（sandbox 不调用 validatePathSafe），但共享同一个状态模块 `path-grants.ts`。grep `validatePathSafe` 调用者返回 8 个文件工具但漏掉 sandbox 门；grep `path-grants` 导入方返回两个门。教训：**枚举执行点，不枚举调用者**。
 
 ### 原则 B：存储模式跟随既有先例
 

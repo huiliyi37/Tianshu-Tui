@@ -56,18 +56,23 @@
 ### 要求
 这是单模块重构**最容易跳但最关键**的阶段。不列消费者清单 = 合并后消费者构建失败。
 
-### 不可删的最小步骤（2026-06-14 补强）
+### 不可删的最小步骤（2026-06-14 补强·修订）
 
 > ⚠️ 以下步骤即使在轻量版中也**不可跳过**——它是原则 A（双门模型）的最小防御。
 
-**Grep 同一 guard 的所有调用路径**：如果改动涉及任何 guard/validate/check/sandbox/permission 函数，必须 grep 所有调用该 guard 的路径。这防止"看起来只碰了一个门，实际有第二个门被漏掉"的静默失效。
+**枚举所有能拒绝这个操作的并行执行点**：如果改动涉及任何门控/校验/沙箱/权限机制，不要只 grep 当前 guard 函数的调用者——那只能找到"谁用了这个门"，找不到"还有没有别的门"。正确做法是 **grep 共享 enforcement 状态的导入方**，或者更通用地：**沿着操作往下数门**（对一次写操作 = 文件工具路径校验 + 内核沙箱 writable-roots），而非沿着函数往上数调用者。
 
 ```bash
-# 示例：改 path-validate.ts 时必须执行
-grep -r "validatePathSafe\|validatePath\b" src/ --include="*.ts" -l
+# 正例：找所有读取同一 enforcement 状态的并行门
+rg -l "path-grants" src/    # → path-validate.ts + sandbox-profile.ts 两个都出现
+
+# 反例：只 grep guard 函数调用者——在 path-grants 场景会漏掉 sandbox 门
+# rg -l "validatePathSafe" src/  → 返回 6 个文件工具，不包含 sandbox-profile.ts ✗
 ```
 
-如果 grep 结果跨多个 enforcement 子系统（tools/ + agent/），应升级为完整版模板。
+**心智操作**："有哪些独立的执行点能拒绝这个操作？"不是"有哪些代码调用了这个函数？"
+
+如果 grep 共享状态的结果跨 2+ 个 enforcement 子系统目录（tools/ + agent/），应升级为完整版模板。
 
 ### 模板
 
