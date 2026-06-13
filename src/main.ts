@@ -201,6 +201,12 @@ async function main() {
         return { entries: [] }
       }
     },
+    // History search — Ctrl+R 反向搜索
+    historySearchData: () => ({
+      entries: loadHistory().slice(0, 50),
+      selectedIndex: 0,
+      query: '',
+    }),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令
     const cmds = getPaletteCommands()

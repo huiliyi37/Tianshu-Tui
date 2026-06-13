@@ -44,6 +44,8 @@ import type { PagerData, StarmapData, PaletteData, ChronicleData } from '../form
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
+import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
+import { searchHistory, loadHistory } from '../history.js'
 
 function formatElapsedShort(ms: number): string {
   if (ms < 60000) return `${Math.floor(ms / 1000)}s`
@@ -142,7 +144,7 @@ export class TuiApp {
 
   // Overlay 交互导航状态（pager 翻页 / palette 选中）。
   // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
+  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
   /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
   private overlayData?: {
     pagerContent?: () => PagerData
@@ -151,6 +153,7 @@ export class TuiApp {
     chronicleEntries?: () => ChronicleData
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
+    historySearchData?: () => HistorySearchData
   }
   /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
   private paletteExec?: (index: number) => void
@@ -460,7 +463,7 @@ export class TuiApp {
       }
       if (key.name === 'escape' && key.ctrl) {
         // Ctrl+Esc → 激活命令面板
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
         this.overlay.activate('command-palette')
         return
       }
@@ -491,6 +494,13 @@ export class TuiApp {
         if (this.state.isThinking) {
           this.state.thinkingExpanded = !this.state.thinkingExpanded
           this.renderLive()
+        }
+        return
+      }
+      if (key.name === 'ctrl_r') {
+        if (!this.isAgentActive()) {
+          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+          this.overlay.activate('history-search')
         }
         return
       }
@@ -664,9 +674,10 @@ export class TuiApp {
       case 'command-palette':
       case 'cockpit':
       case 'rewind':
+      case 'history-search':
       case 'chronicle': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0 }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
         return this.overlay.activate(id)
       }
       default:
@@ -762,6 +773,30 @@ export class TuiApp {
             // 将选中消息回填到输入框，用户可编辑后重新提交
             this.setInput(entry.content)
           }
+        } else {
+          this.deactivateOverlay()
+        }
+        return true
+      }
+      return false
+    }
+
+    if (id === 'history-search') {
+      const count = this.overlayData?.historySearchData?.().entries.length ?? 0
+      const cur = this.overlayNav.historySearchIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayNav.historySearchIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayNav.historySearchIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        if (count > 0) {
+          const entry = this.overlayData?.historySearchData?.().entries[cur]
+          this.deactivateOverlay()
+          if (entry) this.setInput(entry)
         } else {
           this.deactivateOverlay()
         }
@@ -1625,6 +1660,7 @@ export class TuiApp {
     chronicleEntries?: () => ChronicleData
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
+    historySearchData?: () => HistorySearchData
   }, paletteExec?: (index: number) => void): void {
     this.overlayData = overlayData
     this.paletteExec = paletteExec
@@ -1666,6 +1702,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
         return renderRewind({ ...data, selectedIndex: this.overlayNav.rewindIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // History search — selectedIndex 由 overlayNav 注入
+    this.overlay.register('history-search', {
+      render: (_w, _h) => {
+        const data = overlayData?.historySearchData?.() ?? { entries: [], selectedIndex: 0, query: '' }
+        return renderHistorySearch({ ...data, selectedIndex: this.overlayNav.historySearchIndex }, this.columns, this.rows, this.theme)
       },
     })
 
