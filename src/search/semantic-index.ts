@@ -25,6 +25,7 @@ export class SemanticIndex {
 
   constructor(cwd: string) {
     this.cwd = cwd
+    this.loadMeta()
   }
 
   private indexPath(): string {
@@ -33,6 +34,23 @@ export class SemanticIndex {
 
   private hashContent(content: string): string {
     return createHash('sha256').update(content).digest('hex').slice(0, 16)
+  }
+
+  /** Load persisted snapshot on cold start so ensureSemanticIndex skips rebuild. */
+  private loadMeta(): void {
+    const path = this.indexPath()
+    if (!existsSync(path)) return
+    try {
+      const raw = readFileSync(path, 'utf-8')
+      const snapshot = JSON.parse(raw) as SemanticIndexSnapshot
+      if (snapshot.version === INDEX_VERSION && snapshot.fileHashes) {
+        for (const [relPath, hash] of Object.entries(snapshot.fileHashes)) {
+          this.fileHashes.set(relPath, hash)
+        }
+      }
+    } catch {
+      // Corrupt snapshot — rebuild on first ensureSemanticIndex call
+    }
   }
 
   /** Full rebuild of the semantic index from source tree. */
@@ -271,6 +289,8 @@ export function getSemanticIndex(cwd: string): SemanticIndex {
 
 export function ensureSemanticIndex(cwd: string): SemanticIndex {
   const idx = getSemanticIndex(cwd)
+  // Cold start with persisted snapshot: fileHashes loaded but chunks empty → rebuild.
+  // Hot cache (same process): chunks already populated → skip.
   if (idx.chunkCount === 0) idx.rebuild()
   return idx
 }

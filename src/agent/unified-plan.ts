@@ -86,7 +86,11 @@ export function taskGraphToUnifiedPlan(
   }
 }
 
-/** Convert a UnifiedPlan back into a TaskGraph (for validation and wave grouping). */
+/** Convert a UnifiedPlan back into a TaskGraph (for validation and wave grouping).
+ *  Note: TaskGraph is a subset — groupId, routeHint, verification, touchSet,
+ *  metadata, source, version, and nonGoals are intentionally dropped as they
+ *  have no representation in TaskGraphNode. Use UnifiedPlan→TeamTask[] for a
+ *  full-fidelity round-trip that preserves all execution fields. */
 export function unifiedPlanToTaskGraph(plan: UnifiedPlan): TaskGraph {
   return {
     mission: plan.objective,

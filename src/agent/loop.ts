@@ -105,7 +105,7 @@ import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-
 import { ResourceSensor, type ResourceSensorOptions, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { advanceContractStatus, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type TaskContract, type TaskDepthLayer, type TurnMode } from '../context/task-contract.js'
 import { skillRegistry } from '../skills/skill-loader.js'
-import { renderMemoryBlock } from '../memory/observation-store.js'
+import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'

@@ -7,6 +7,10 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { appendMemoryEntry } from './unified-memory.js'
+import { migrateObservationsToUnified } from './unified-memory.js'
+
+/** Track which cwds have had migration attempted (lazy, on first append). */
+const _migrated = new Set<string>()
 
 export interface Observation {
   id: string
@@ -35,6 +39,12 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
   const dir = memoryDir(cwd)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
+  // Lazy auto-migrate old observations.jsonl → memory.jsonl on first write
+  if (!_migrated.has(cwd)) {
+    _migrated.add(cwd)
+    try { migrateObservationsToUnified(cwd) } catch { /* migration failure is non-critical */ }
+  }
+
   const record: Observation = {
     id: obs.id ?? `obs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
     text: obs.text.slice(0, 500),
@@ -55,7 +65,7 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
     confidence: record.confidence,
     source: record.source === 'user' ? 'manual' : record.source === 'agent' ? 'manual' : record.source,
     status: 'observed',
-    tags: record.tags,
+    tags: [...record.tags, `obs-source:${record.source}`],
     sessionId: record.sessionId,
   })
 
