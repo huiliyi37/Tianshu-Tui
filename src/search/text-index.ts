@@ -142,6 +142,11 @@ export class BM25Index {
   hasFile(file: string): boolean {
     return this.chunks.some(c => c.file === file)
   }
+
+  /** Export lightweight chunk refs for serialization (excludes terms Map). */
+  getChunkRefs(): Array<{ file: string; startLine: number; endLine: number; text: string }> {
+    return this.chunks.map(c => ({ file: c.file, startLine: c.startLine, endLine: c.endLine, text: c.text }))
+  }
 }
 
 /** Split file content into overlapping line-based chunks for indexing. */

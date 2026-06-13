@@ -16,6 +16,8 @@ export interface SemanticIndexSnapshot {
   fileHashes: Record<string, string>
   chunkCount: number
   builtAt: number
+  /** Lightweight chunk refs for cold-start restore (excludes terms — regenerated from text). */
+  chunks?: Array<{ file: string; startLine: number; endLine: number; text: string }>
 }
 
 export class SemanticIndex {
@@ -36,7 +38,8 @@ export class SemanticIndex {
     return createHash('sha256').update(content).digest('hex').slice(0, 16)
   }
 
-  /** Load persisted snapshot on cold start so ensureSemanticIndex skips rebuild. */
+  /** Load persisted snapshot on cold start. Restores fileHashes and chunks so
+   *  isStale() works immediately and searches succeed without a full rebuild. */
   private loadMeta(): void {
     const path = this.indexPath()
     if (!existsSync(path)) return
@@ -46,6 +49,12 @@ export class SemanticIndex {
       if (snapshot.version === INDEX_VERSION && snapshot.fileHashes) {
         for (const [relPath, hash] of Object.entries(snapshot.fileHashes)) {
           this.fileHashes.set(relPath, hash)
+        }
+        // Restore chunks so cold-start searches work without rebuild
+        if (snapshot.chunks) {
+          for (const c of snapshot.chunks) {
+            this.index.addChunk(c.file, c.startLine, c.endLine, c.text)
+          }
         }
       }
     } catch {
@@ -214,7 +223,7 @@ export class SemanticIndex {
     // Fallback: if too many files changed, do a full rebuild
     const totalChanged = toRemove.length + toReindex.length
     const totalIndexed = this.fileHashes.size
-    if (totalChanged > Math.max(10, totalIndexed * 0.2)) {
+    if (totalChanged >= Math.max(2, totalIndexed * 0.2)) {
       return this.rebuildWithResult(0, 0)
     }
 
@@ -272,6 +281,7 @@ export class SemanticIndex {
       fileHashes: Object.fromEntries(this.fileHashes),
       chunkCount: this.index.size,
       builtAt: Date.now(),
+      chunks: this.index.getChunkRefs(),
     }
     writeFileSync(this.indexPath(), JSON.stringify(snapshot, null, 2), 'utf-8')
   }
@@ -291,8 +301,9 @@ export function getSemanticIndex(cwd: string): SemanticIndex {
 
 export function ensureSemanticIndex(cwd: string): SemanticIndex {
   const idx = getSemanticIndex(cwd)
-  // Cold start with persisted snapshot: fileHashes loaded but chunks empty → rebuild.
-  // Hot cache (same process): chunks already populated → skip.
+  // Cold start with persisted snapshot: chunks loaded from disk → skip rebuild.
+  // Only rebuild when index is truly empty (never built) or stale (files changed).
   if (idx.chunkCount === 0) idx.rebuild()
+  else if (idx.isStale()) idx.incrementalUpdate()
   return idx
 }

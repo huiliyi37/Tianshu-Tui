@@ -84,12 +84,21 @@ export function appendMemoryEntry(
   const dir = memoryDir(cwd)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
-  // Count existing similar entries for repeatCount
+  // Count existing similar entries for repeatCount — streaming scan, no full parse.
   const normalized = partial.text.trim().toLowerCase().slice(0, 200)
-  const existing = readMemoryEntries(cwd)
-  const repeatCount = 1 + existing.filter(e =>
-    e.text.trim().toLowerCase().slice(0, 200) === normalized,
-  ).length
+  let repeatCount = 1
+  const path = memoryPath(cwd)
+  if (existsSync(path)) {
+    try {
+      for (const line of readFileSync(path, 'utf-8').split('\n')) {
+        if (!line.trim()) continue
+        // Fast substring match without full JSON parse
+        if (line.toLowerCase().includes(normalized.slice(0, 50))) {
+          repeatCount++
+        }
+      }
+    } catch { /* count failure → use 1 */ }
+  }
 
   const entry: MemoryEntry = {
     id: partial.id ?? generateId(),
