@@ -46,26 +46,28 @@ function shortenCwd(cwd: string, budget: number): string {
   return '…' + cwd.slice(-(budget - 1))
 }
 
+// "天" — 9×8 dot matrix: thin top stroke (▀) + bold "大" shape (█)
 const TIAN_ROWS = [
-  '..#####..',
-  '#########',
-  '....#....',
-  '...###...',
-  '...#.#...',
-  '..#...#..',
-  '.#.....#.',
-  '#.......#',
+  '  #####  ',
+  '  .....  ',
+  '    #    ',
+  '    #    ',
+  '   # #   ',
+  '   # #   ',
+  '  #   #  ',
+  '  #   #  ',
 ]
 
+// "枢" — 11×8 dot matrix: 木 radical (left █ + cross stroke) + 区 enclosure (right ▀▀ box)
 const SHU_ROWS = [
-  '...#...######',
-  '########.....',
-  '...#...#.#.#.',
-  '..#.#..#..#..',
-  '.#...#.#.#.#.',
-  '.#...#.#.....',
-  '#.....#######',
-  '.............',
+  ' #   #####  ',
+  ' #   .....  ',
+  ' #   #   #  ',
+  ' #   #   #  ',
+  '###  # # #  ',
+  '###  # # #  ',
+  ' #   #####  ',
+  ' #   .....  ',
 ]
 
 function bitmapToBlockChars(rows: string[]): string[] {
