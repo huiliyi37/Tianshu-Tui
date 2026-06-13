@@ -100,6 +100,14 @@ describe('GREP_TOOL', () => {
     assert.match(result.content, /outside project directory/i)
   })
 
+  it('returns error when pattern is missing or empty (no TypeError on artifact path)', async () => {
+    for (const input of [{ path: 'src' }, { pattern: '' }, { pattern: '   ' }, { pattern: null }]) {
+      const result = await GREP_TOOL.execute(makeParams(input))
+      assert.equal(result.isError, true, JSON.stringify(input))
+      assert.match(result.content, /pattern is required/i)
+    }
+  })
+
   it('enforces max_results globally', async () => {
     const manyDir = mkdtempSync(join(tmpdir(), 'grep-many-'))
     try {

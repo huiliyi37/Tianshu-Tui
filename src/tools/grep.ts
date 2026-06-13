@@ -21,6 +21,20 @@ import { registerGrepFileAccess } from './read-file.js'
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
 
+/** Safe label for debug logs — pattern may be missing if tool JSON is malformed. */
+function grepPatternLabel(pattern: unknown): string {
+  if (typeof pattern === 'string') return pattern.slice(0, 40)
+  if (pattern == null) return '(missing)'
+  return String(pattern).slice(0, 40)
+}
+
+function parseGrepPattern(input: Record<string, unknown>): string | null {
+  const raw = input.pattern
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 export const GREP_TOOL: Tool = {
   definition: {
     name: 'grep',
@@ -52,8 +66,8 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
   },
 
   async execute(params: ToolCallParams): Promise<ToolResult> {
-    const pattern = params.input.pattern
-    if (typeof pattern !== 'string' || pattern.length === 0) {
+    const pattern = parseGrepPattern(params.input)
+    if (pattern === null) {
       return { content: 'Error: pattern is required (non-empty string)', isError: true }
     }
     const searchPath = (params.input.path as string) ?? '.'
@@ -98,10 +112,10 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
 
       if (params.artifactStore) {
         if (hintedText.length < artifactThreshold) {
-          debugLog(`[artifact-skip] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          debugLog(`[artifact-skip] tool=grep pattern=${grepPatternLabel(pattern)} raw=${hintedText.length} threshold=${artifactThreshold}`)
           return { content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) }
         }
-        debugLog(`[artifact-wrap] tool=grep pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+        debugLog(`[artifact-wrap] tool=grep pattern=${grepPatternLabel(pattern)} raw=${hintedText.length} threshold=${artifactThreshold}`)
         const { summary, sections } = summarizeGrepResult(hintedText, pattern)
         const artifactId = await params.artifactStore.save({
           tool: 'grep',
@@ -240,6 +254,10 @@ async function tryRipgrep(
   artifactStore?: ArtifactStore,
   artifactThreshold: number = 0,
 ): Promise<ToolResult | null> {
+  if (typeof pattern !== 'string' || pattern.length === 0) {
+    return Promise.resolve({ content: 'Error: pattern is required (non-empty string)', isError: true })
+  }
+
   return new Promise((resolve) => {
     const args = [
       '--no-heading',
@@ -316,11 +334,11 @@ async function tryRipgrep(
 
         if (artifactStore) {
           if (hintedText.length < artifactThreshold) {
-            debugLog(`[artifact-skip] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+            debugLog(`[artifact-skip] tool=grep(rg) pattern=${grepPatternLabel(pattern)} raw=${hintedText.length} threshold=${artifactThreshold}`)
             resolve({ content: truncateContent(hintedText, modelCap.maxChars, modelCap.headChars, modelCap.tailChars) })
             return
           }
-          debugLog(`[artifact-wrap] tool=grep(rg) pattern=${pattern.slice(0, 40)} raw=${hintedText.length} threshold=${artifactThreshold}`)
+          debugLog(`[artifact-wrap] tool=grep(rg) pattern=${grepPatternLabel(pattern)} raw=${hintedText.length} threshold=${artifactThreshold}`)
           const { summary, sections } = summarizeGrepResult(hintedText, pattern)
           try {
             const artifactId = await artifactStore.save({
