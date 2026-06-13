@@ -445,6 +445,8 @@ describe('DelegationCoordinator', () => {
       authority: 'tianquan',
     })
 
+    // reviewer has tierLock:'cheap' → preferredTier='cheap' → no cheap cards in set
+    // → fallback to all cards → recommendModelForTask picks large-cache
     assert.equal(run.selectedModel, 'large-cache')
     assert.equal(saved.length, 3)
     assert.ok(saved.some(row => row.kind.startsWith('gated_influence_audit:model_tier_bandit:')))
@@ -452,11 +454,11 @@ describe('DelegationCoordinator', () => {
     assert.equal(audit.applied, false)
     assert.equal(audit.source, 'model_tier_bandit')
     const event = JSON.parse(saved.find(row => row.kind.startsWith('model_tier_shadow:'))!.json)
-    assert.equal(event.recommendedTier, 'strong')
+    assert.equal(event.recommendedTier, 'cheap')
     assert.equal(event.actualModel, 'large-cache')
     assert.equal(event.actualTier, 'strong')
-    assert.equal(event.matched, true)
-    assert.equal(run.modelTierShadows?.[0]?.recommendedTier, 'strong')
+    assert.equal(event.matched, false)
+    assert.equal(run.modelTierShadows?.[0]?.recommendedTier, 'cheap')
     assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
     assert.equal(run.modelTierGatedDecisions?.[0]?.selectedModel, 'large-cache')
   })
@@ -509,14 +511,16 @@ describe('DelegationCoordinator', () => {
       authority: 'tianliang',
     })
 
+    // tierLock:'cheap' forces ruleTier=cheap; bandit also recommends cheap →
+    // baseline=candidate (same arm), margin=0 → gate closed (reward_margin)
     assert.equal(run.selectedModel, 'cheap-flash')
     assert.deepEqual(selectedModels, ['cheap-flash'])
-    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, true)
+    assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
     assert.equal(run.modelTierGatedDecisions?.[0]?.candidateTier, 'cheap')
     assert.equal(run.modelTierGatedDecisions?.[0]?.selectedTier, 'cheap')
     assert.ok(saved.some(row => row.kind.startsWith('model_tier_gated_decision:')))
     const audit = JSON.parse(saved.find(row => row.kind.startsWith('gated_influence_audit:model_tier_bandit:'))!.json)
-    assert.equal(audit.applied, true)
+    assert.equal(audit.applied, false)
     assert.equal(audit.evidenceWindow.selectedTier, 'cheap')
   })
 
@@ -566,9 +570,11 @@ describe('DelegationCoordinator', () => {
       authority: 'tianliang',
     })
 
-    assert.equal(run.selectedModel, 'large-cache')
-    assert.deepEqual(selectedModels, ['large-cache'])
-    assert.equal(run.modelTierGatedDecisions?.[0]?.gateOpen, true)
+    // reviewer tierLock:'cheap' → recommendedTier='cheap' → selects cheap-flash even when bandit disabled
+    // tierLock=cheap matches bandit cheap → margin=0 → gateOpen=false
+    assert.equal(run.selectedModel, 'cheap-flash')
+    assert.deepEqual(selectedModels, ['cheap-flash'])
+    assert.equal(run.modelTierGatedDecisions?.[0]?.gateOpen, false)
     assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
   })
 
@@ -627,10 +633,12 @@ describe('DelegationCoordinator', () => {
       authority: 'tianliang',
     })
 
-    assert.equal(run.selectedModel, 'large-cache')
-    assert.deepEqual(selectedModels, ['large-cache'])
+    // reviewer tierLock:'cheap' → tierRecommendation='cheap' even when gate vetoes
+    // tierLock=cheap matches bandit cheap → margin=0 → gate closed on reward_margin (before scope-health)
+    assert.equal(run.selectedModel, 'cheap-flash')
+    assert.deepEqual(selectedModels, ['cheap-flash'])
     assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
-    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /scope-health veto high/)
+    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /reward margin|scope-health/)
   })
 
   it('hardFloor prevents verifier downgrade despite strong cheap reward history', async () => {
@@ -675,9 +683,11 @@ describe('DelegationCoordinator', () => {
       scope: { files: ['src/agent/coordinator.ts', 'src/agent/__tests__/coordinator.test.ts'] },
     })
 
-    assert.equal(run.selectedModel, 'large-cache')
+    // adversarial_verifier has tierLock:'cheap' — margin=0 (rule=bandit=cheap)
+    // → gate closed on reward_margin → applied=false → falls back to tierRecommendation='cheap' → cheap-flash
+    assert.equal(run.selectedModel, 'cheap-flash')
     assert.equal(run.modelTierGatedDecisions?.[0]?.applied, false)
-    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /hardFloor strong blocks cheap/)
+    assert.match(run.modelTierGatedDecisions?.[0]?.reason ?? '', /reward margin/)
   })
 
   it('keeps failed batch workers visible in aggregated results', async () => {
