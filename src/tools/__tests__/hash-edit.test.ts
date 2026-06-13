@@ -193,4 +193,99 @@ describe('hash_edit', () => {
     const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
     assert.equal(newContent, 'new one\nnew two\nline three\n')
   })
+
+  // ── stale recovery: anchors auto-recover when content shifted by prior edit ──
+  // 连续 hash_edit 时第一次编辑后行号全局移位，后续锚点过期。
+  // stale recovery 在锚点预期行号附近搜索匹配哈希的行，自动重算锚点。
+
+  it('stale anchors auto-recover when content shifted by prior edit', async () => {
+    const cwd = setup({
+      'test.ts': 'a\nb\nc\nd\ne\n',
+    })
+    const { createHash } = await import('crypto')
+    function h(line: string): string {
+      return createHash('sha256').update(line).digest('hex').slice(0, 8)
+    }
+    const lines = readFileSync(join(cwd, 'test.ts'), 'utf-8').split('\n')
+    // 模拟：行号因前序插入而偏移。原 L1=a L3=c → 现在 L3=a L5=c
+    // 写入新内容：在 a 前插入两行
+    const shifted = 'inserted1\ninserted2\na\nb\nc\nd\ne\n'
+    writeFileSync(join(cwd, 'test.ts'), shifted, 'utf-8')
+
+    // 用旧锚点 L1:<hash_a> L3:<hash_c> 应该自动搜索并恢复
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: [`L1:${h(lines[0]!)}`, `L3:${h(lines[2]!)}`],
+      new_string: 'REPLACED',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('auto-recovered'), `expected auto-recovered in: ${result.content}`)
+
+    const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
+    // a → REPLACED，b 和 c 被替换掉，d e 保留
+    assert.equal(newContent, 'inserted1\ninserted2\nREPLACED\nd\ne\n')
+  })
+
+  it('stale recovery fails when anchor content not in search window', async () => {
+    const cwd = setup({
+      'test.ts': 'line one\nline two\nline three\n',
+    })
+    // 故意给一个完全不在文件中的哈希
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L1:deadbeef', 'L2:cafebabe'],
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    // 搜索窗口内找不到 → 仍报 stale 错误（fail-safe）
+    assert.ok(result.content.includes('stale'), `expected stale error, got: ${result.content}`)
+    // 文件未被修改
+    const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
+    assert.equal(newContent, 'line one\nline two\nline three\n')
+  })
+
+  it('stale recovery on position-only anchors falls through to error', async () => {
+    // position-only 锚点没有哈希 → 无法做内容搜索恢复。
+    // 用 L99（超出文件长度）触发位置锚点的行号验证失败。
+    const cwd = setup({ 'test.ts': 'a\nb\nc\n' })
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: ['L99'],
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    // position-only 锚点 → 不进入 stale recovery（allFullHash=false），直接报错
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('stale') || result.content.includes('exceeds'),
+      `expected stale/exceeds error, got: ${result.content}`)
+  })
+
+  it('stale recovery rejects when only some anchors recoverable', async () => {
+    const cwd = setup({
+      'test.ts': 'alpha\nbeta\ngamma\ndelta\n',
+    })
+    const { createHash } = await import('crypto')
+    function h(line: string): string {
+      return createHash('sha256').update(line).digest('hex').slice(0, 8)
+    }
+    const originalLines = readFileSync(join(cwd, 'test.ts'), 'utf-8').split('\n')
+
+    // 修改文件：保留 alpha 但改了 beta 内容
+    writeFileSync(join(cwd, 'test.ts'), 'alpha\nCHANGED\ngamma\ndelta\n', 'utf-8')
+
+    // L1:alpha 能找到，L2:beta 哈希已变找不到
+    const p = params({
+      file_path: join(cwd, 'test.ts'),
+      anchors: [`L1:${h(originalLines[0]!)}`, `L2:${h(originalLines[1]!)}`],
+      new_string: 'x',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('stale'), `expected stale error, got: ${result.content}`)
+    // 文件未被修改（全部可恢复才应用编辑）
+    const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
+    assert.equal(newContent, 'alpha\nCHANGED\ngamma\ndelta\n')
+  })
 })

@@ -216,6 +216,70 @@ This avoids the read→truncate→re-read loop for large files.`,
     }
 
     if (mismatches.length > 0) {
+      // ── Stale recovery: attempt to find anchor content in current file ──
+      // When full-hash anchors go stale (e.g. after a prior edit shifted line
+      // numbers), search ±N lines around the expected position for matching
+      // content. If ALL mismatching anchors are recovered, apply the edit with
+      // updated anchors. If ANY cannot be found, fall through to the error.
+      const SEARCH_WINDOW = 50
+      const allFullHash = mismatches.every(m => m.anchor.hash !== null)
+      if (allFullHash) {
+        const recoveredAnchors: Anchor[] = anchors.map(a => ({ line: a.line, hash: a.hash }))
+        let allRecovered = true
+        let recoveredCount = 0
+
+        for (const m of mismatches) {
+          const targetHash = m.anchor.hash!
+          const searchStart = Math.max(1, m.anchor.line - SEARCH_WINDOW)
+          const searchEnd = Math.min(lines.length, m.anchor.line + SEARCH_WINDOW)
+          let found = false
+          for (let i = searchStart; i <= searchEnd; i++) {
+            if (hashLine(lines[i - 1]!) === targetHash) {
+              // Update this anchor to its new position
+              const idx = recoveredAnchors.findIndex(a => a.line === m.anchor.line && a.hash === m.anchor.hash)
+              if (idx >= 0) recoveredAnchors[idx] = { line: i, hash: targetHash }
+              found = true
+              recoveredCount++
+              break
+            }
+          }
+          if (!found) {
+            allRecovered = false
+            break
+          }
+        }
+
+        if (allRecovered && recoveredAnchors.every(a => a.line > 0)) {
+          // Re-validate ascending order after recovery
+          let orderOk = true
+          for (let i = 1; i < recoveredAnchors.length; i++) {
+            if (recoveredAnchors[i]!.line <= recoveredAnchors[i - 1]!.line) { orderOk = false; break }
+          }
+          if (orderOk) {
+            const firstLine = recoveredAnchors[0]!.line
+            const lastLine = recoveredAnchors[recoveredAnchors.length - 1]!.line
+            const newString = params.input.new_string as string
+
+            const before = lines.slice(0, firstLine - 1)
+            const after = lines.slice(lastLine)
+            const newLines = newString === '' ? [] : newString.split('\n')
+            const newContent = [...before, ...newLines, ...after].join('\n')
+
+            const relPath = relative(params.cwd, filePath)
+            trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
+
+            await writeFileAtomicAsync(filePath, newContent)
+            refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+            const warn = syntaxCheck(filePath, newContent)
+            const recoveredInfo = recoveredCount > 0
+              ? ` (auto-recovered ${recoveredCount} stale anchors)`
+              : ''
+            return { content: `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
+          }
+        }
+      }
+
+      // Recovery not possible — return the original stale diagnostic
       return {
         content: formatStaleDiagnostic(filePath, anchors, lines, mismatches),
         isError: true,
