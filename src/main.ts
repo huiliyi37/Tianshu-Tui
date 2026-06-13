@@ -129,6 +129,11 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  const initialDomain = ctx!.agent.getSessionDomain()?.name
+  if (initialDomain) {
+    tuiApp.setSessionStarDomain(initialDomain)
+  }
+  tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
   tuiApp.registerOverlays({
     // Pager — scrollback 内容
     pagerContent: () => ({

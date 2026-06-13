@@ -5,9 +5,24 @@
  * 单行 ANSI 格式化，包含 4 个 zone。
  */
 
+import { STAR_DOMAINS } from '../../agent/star-domain.js'
+import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { ANSI, color } from '../engine/ansi.js'
 import stringWidth from 'string-width'
 import type { RivetTheme } from '../theme.js'
+
+/** 星域名称 → GlanceBar 展示（glyph + 中文名），对齐 Ink glance-bar.tsx findDomain。 */
+export function resolveStarDomainDisplay(domainName: string | undefined): { glyph: string; name: string } | null {
+  if (!domainName) return null
+  for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
+    if (domain.name === domainName || id === domainName) {
+      return { glyph: domain.uiPersona.glyph, name: domain.name }
+    }
+  }
+  const custom = starDomainRegistry.list().find(d => d.name === domainName || d.id === domainName)
+  if (custom) return { glyph: '✦', name: custom.name }
+  return { glyph: '☆', name: domainName }
+}
 
 export interface GlanceBarInput {
   /** 终端宽度 */

@@ -111,6 +111,9 @@ export class SlashRouter {
       // T5: bandit promotion observability — without this, /status in T9
       // always shows the "(no bandit state available)" placeholder.
       banditState: this.ctx.refs.banditState ?? undefined,
+      onDomainChange: (domainName: string | undefined) => {
+        this.app.setSessionStarDomain(domainName)
+      },
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session

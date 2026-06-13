@@ -965,6 +965,9 @@ export class TuiApp {
     if (active && !this.ticker) {
       this.ticker = setInterval(() => {
         this.tick++
+        if (this.domainSyncProvider && this.tick % 8 === 0) {
+          this.syncSessionStarDomainFromAgent()
+        }
         this.renderLive()
       }, 120)
       this.ticker.unref?.()
@@ -1407,6 +1410,7 @@ export class TuiApp {
         this.commit.write({ text: summary, trailingNewline: true })
         this.state.committedCount++
       })
+      this.renderLive()
     } else {
       // Intermediate turn: archive thinking, keep writer alive
       if (this.state.thinkingText) {
