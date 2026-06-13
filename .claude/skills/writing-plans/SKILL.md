@@ -13,7 +13,7 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 
 **与 superpowers writing-plans 的差异：**
 - 天枢不依赖 `using-git-worktrees` / `finishing-a-development-branch`——改为 B1 归属门禁
-- 天枢支持 delegate_task 并行 scout 调研（见步骤 1.5）
+- 计划阶段由主代理直接调研：用 `read_file` / `grep` / `glob` 读代码，不用 `delegate_task` 派子代理
 - 计划保存路径统一为 `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`
 
 ## 流程
@@ -50,19 +50,14 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 - [ ] 已检查是否有现有实现已经解决问题
 - [ ] 已确认边缘情况有人处理
 
-#### 1.5 派调研 Scout（当自行调研不足时）
+#### 1.5 深入阅读（自行调研，不派子代理）
 
-如果对某个函数的修改理由只有"不需要了"而没有"因为 X 已经由 Y 处理"，派一个 scout 子代理调研：
+如果对某个函数的修改理由只有"不需要了"而没有"因为 X 已经由 Y 处理"，继续往下读：
+- 用 `read_file` 直接读函数本体和所有调用方（grep 列出引用位置）
+- 看 commit message（`git log --oneline -10 -- <file>`）
+- 看相关测试文件理解行为边界
 
-```
-使用 delegate_task:
-- kind: code_search
-- profile: code_scout
-- objective: 读 [函数名] 在 [文件路径] 的实现、调用者、注释和 commit message。
-  回答：1) 为什么存在 2) 删了谁受影响 3) 有没有只有它处理的边缘情况
-```
-
-可以并行派多个 scout，不阻塞规划。
+**不要调用 `task` / `Agent` / `TodoWrite` / `WebSearch` 等其他 agent 框架的子代理工具**——Rivet 里没有这些工具，调用会失败并浪费一轮流。Rivet 的子代理工具是 `delegate_task` / `delegate_batch`，**计划阶段不要派子代理**，子代理是执行阶段的能力。
 
 ### 步骤 2：设计方案
 
@@ -102,7 +97,7 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 ```markdown
 # [功能名称] 实现计划
 
-> **面向 AI 代理：** 使用 `executing-plans` 或 `subagent-driven-development` 逐任务实现。
+> **面向 AI 代理：** 使用 `executing-plans` 逐任务实现（计划阶段不推荐派子代理）。
 > 步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
 **目标：** [一句话描述要构建什么]
@@ -181,18 +176,14 @@ git commit -m "feat(scope): 描述（任务 N/M）"
 ```
 计划已完成并保存到 `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`。
 
-两种执行方式：
-1. 子代理驱动（推荐）— 使用 subagent-driven-development，每个任务调度新子代理
-2. 内联执行 — 使用 executing-plans，在当前会话中逐个执行任务
-
-选哪种方式？
+执行方式：使用 `executing-plans` 在当前会话中逐任务执行。
 ```
 
 ## 集成
 
 **计划执行技能：**
-- **subagent-driven-development**（推荐）— 每个任务派独立子代理，任务间审查，快速迭代
 - **executing-plans** — 在当前会话中逐任务执行，批量处理，设有检查点
+- 子代理（`subagent-driven-development` skill）是独立存在的能力，但**计划文档不要在交接段引用它**——避免模型把"派子代理"当成计划阶段的动作
 
 **交付验证：**
 - 天枢 B1 归属门禁 — 执行完成后自动验证文件所有权和测试完整性
@@ -200,7 +191,7 @@ git commit -m "feat(scope): 描述（任务 N/M）"
 
 ## 注意事项
 - 先深入调研再设计方案——不要先入为主
-- 调研 Scout 是可选的，但"删除"操作必须有调研背书
+- "删除"操作必须有调研背书（在步骤 1.2/1.5 自己读代码获得，不要派 scout）
 - 计划文件名用短语义名，不要机械使用整个需求描述
 - 中文或英文短名均可，保持在文件系统文件名长度限制内
 - 计划文档是给 AI 代理执行的——不是给人读的规格书
