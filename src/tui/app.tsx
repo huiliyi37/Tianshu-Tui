@@ -289,6 +289,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
   const [heartbeatStatus, setHeartbeatStatus] = useState<string | null>(null)
   const [cost, setCost] = useState(0)
   const [cacheHitRate, setCacheHitRate] = useState(0)
+  /** 首次 LLM 响应到达前不渲染 ⚡/◧ (区分"无数据"和"0%")。 */
+  const [hasReceivedFirstResponse, setHasReceivedFirstResponse] = useState(false)
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null)
   const [pendingIntent, setPendingIntent] = useState<PendingIntentPreview | null>(null)
   const [sessionPrompt, setSessionPrompt] = useState<'waiting' | 'done'>('done')
@@ -1163,6 +1165,7 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         // Turn-level cache hit rate for GlanceBar (last 3 turns)
         const recentHitRate = session.getRecentTurnHitRate(3) ?? session.getCacheHitRate()
         setCacheHitRate(recentHitRate)
+        setHasReceivedFirstResponse(true)
 
         // Detect cache degradation after compaction
         const latestHitRate = session.getLatestTurnHitRate()
@@ -1591,15 +1594,15 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         <GlanceBar
           pulses={glancePulses}
           phase={phaseFromSummary(summaryState)}
-          cacheHitRate={cacheHitRate}
+          cacheHitRate={hasReceivedFirstResponse ? cacheHitRate : undefined}
           cost={cost}
           model={model}
           isStreaming={isStreaming}
           historyCount={historyItems.length}
           domain={starDomain}
           branch={gitBranch}
-          estimatedTokens={session.getEstimatedTokens()}
-          maxTokens={maxTokens}
+          estimatedTokens={hasReceivedFirstResponse ? session.getEstimatedTokens() : undefined}
+          maxTokens={hasReceivedFirstResponse ? maxTokens : undefined}
           elapsedMs={summaryState.elapsedMs}
           reasoningEffort={summaryState.reasoningEffort}
         />
