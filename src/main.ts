@@ -9,6 +9,11 @@
  *   npx tsx src/main.ts --dangerously-skip-permissions
  */
 
+// Windows EPERM scandir noise filter — must register before any dependency
+// that might trigger fs operations against system-protected directories.
+import { installEpermFilter } from './platform/eperm-filter.js'
+installEpermFilter()
+
 import { bootstrapInteractiveSession, createShutdownHandler } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { TuiApp } from './tui/engine/app.js'
