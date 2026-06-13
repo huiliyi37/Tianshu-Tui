@@ -16,6 +16,8 @@ import { buildWorkerPrompt, buildWorkerRepairPrompt } from './worker-prompts.js'
 import { buildWorkerKnowledgeBlock } from './worker-knowledge.js'
 import { buildDomainKnowledgeBlock } from './domain-knowledge-block.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
+import type { WorkerMailbox } from './worker-mailbox.js'
+import { createWorkerMailboxSender } from './worker-mailbox.js'
 
 /** Max transient-retry attempts for network/API errors during worker execution.
  *  Independent of order.budget.maxRetries (which covers output parse failures). */
@@ -58,6 +60,10 @@ export interface WorkerSessionConfig {
    *  the worker doesn't redo completed work. Especially valuable for multi-turn
    *  Flash workers (test_scaffolder generating multiple files). */
   checkpoint?: WorkerCheckpoint
+  /** Structured mailbox for inter-agent communication. Worker tools can send
+   *  progress, findings, and escalations through this channel. The coordinator
+   *  drains the mailbox after the wave completes. */
+  mailbox?: WorkerMailbox
 }
 
 export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
@@ -214,6 +220,13 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     thetaCheckDisabled: true,
   }, session, config.cwd)
 
+  // Create mailbox sender for structured inter-agent communication.
+  // Workers report progress, findings, and escalations through this channel;
+  // the coordinator drains the mailbox after the wave completes.
+  const mbox = config.mailbox
+    ? createWorkerMailboxSender(config.mailbox, config.order.id)
+    : null
+
   // Abort latch — once the budget timer or the parent signal fires, the
   // session must STOP. Each agent.run() creates a fresh AbortController, so
   // without this latch the parse-repair loop below would happily re-run an
@@ -235,11 +248,13 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   try {
     const transcript = emptyTranscript()
     let latestText = await runOnceWithTransientRetry(agent, prompt, transcript, config.onActivity)
+    mbox?.progress(1, config.order.budget.maxRetries + 1, 'initial run')
 
     for (let attempt = 0; attempt <= config.order.budget.maxRetries; attempt++) {
       // Abort wins over repair: never re-run an aborted worker.
       if (wasAborted()) {
         const partialSummary = latestText.slice(0, 500)
+        mbox?.escalate(`Worker aborted: ${partialSummary.slice(0, 100)}`)
         // Extract checkpoint for potential resume
         const abortCheckpoint: WorkerCheckpoint = {
           turnIndex: attempt,
@@ -261,6 +276,15 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
       }
       try {
         const result = parseWorkerResult(latestText, config.order.id)
+        // Report structured findings back to coordinator
+        if (result.findings?.length) {
+          for (const f of result.findings.slice(0, 3)) {
+            mbox?.reportFinding(f.claim ?? 'finding', 'info', result.changedFiles)
+          }
+        }
+        if (mbox) {
+          mbox.progress(config.order.budget.maxRetries + 1, config.order.budget.maxRetries + 1, 'completed')
+        }
         return {
           result,
           transcript,
@@ -270,6 +294,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         transcript.errors.push(message)
+        mbox?.escalate(`Parse failed (attempt ${attempt + 1}): ${message.slice(0, 100)}`)
         if (attempt === config.order.budget.maxRetries) {
           const partialSummary = latestText.slice(0, 300)
           return {

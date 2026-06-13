@@ -836,6 +836,7 @@ export class DelegationCoordinator {
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
     workerConfig.reviewDepth = order.reviewDepth
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
+    workerConfig.mailbox = this.mailbox
 
     // A4: per-order AbortController merged with the parent signal — the stall
     // sweep can abort ONLY this worker without touching its batch siblings,
@@ -1352,10 +1353,27 @@ export class DelegationCoordinator {
       persistWorkerResult(r)
     }
 
+    // Drain mailbox: append structured findings and escalations to packet
+    const mailboxFindings = this.mailbox.byType('finding')
+    const mailboxEscalations = this.mailbox.byType('escalation')
+    const mailboxNotes: string[] = []
+    for (const f of mailboxFindings) {
+      mailboxNotes.push(`📬 ${f.from}: ${f.payload.summary}`)
+    }
+    for (const e of mailboxEscalations) {
+      mailboxNotes.push(`🚨 ${e.from}: ${e.payload.summary}`)
+    }
+    this.mailbox.clear()
+
+    const basePacket = await buildPrimaryWorkerPacket(aggregated)
+    const packet = mailboxNotes.length > 0
+      ? `${basePacket}\n\nMailbox:\n${mailboxNotes.join('\n')}`
+      : basePacket
+
     return {
       status: 'completed',
       results: aggregated,
-      packet: await buildPrimaryWorkerPacket(aggregated),
+      packet,
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
