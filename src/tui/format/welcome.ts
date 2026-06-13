@@ -1,14 +1,13 @@
 /**
  * T9 格式化函数 — 首屏欢迎。
  *
- * 精简版（≤7 行），替代旧的 11 行双框：
+ * 精简版（≤7 行）：
  *   <勺形北斗星图，天枢首星朱砂落印>
  *   天枢 · Tiānshū
  *   <model> · <cwd> · <session>
  *   /help commands · @ files · Ctrl+C exit
  *
- * 按终端宽度自适应（display-width aware 截断），不再用固定列宽的框线，
- * 避免 CJK / 长 CWD 撑破对齐。
+ * 按终端宽度自适应（display-width aware 截断），窄终端自动省略星图。
  */
 
 import stringWidth from 'string-width'
@@ -44,53 +43,6 @@ function truncateToWidth(text: string, maxWidth: number): string {
 function shortenCwd(cwd: string, budget: number): string {
   if (cwd.length <= budget) return cwd
   return '…' + cwd.slice(-(budget - 1))
-}
-
-// "天" — 9×8 dot matrix: thin top stroke (▀) + bold "大" shape (█)
-const TIAN_ROWS = [
-  '  #####  ',
-  '  .....  ',
-  '    #    ',
-  '    #    ',
-  '   # #   ',
-  '   # #   ',
-  '  #   #  ',
-  '  #   #  ',
-]
-
-// "枢" — 11×8 dot matrix: 木 radical (left █ + cross stroke) + 区 enclosure (right ▀▀ box)
-const SHU_ROWS = [
-  ' #   #####  ',
-  ' #   .....  ',
-  ' #   #   #  ',
-  ' #   #   #  ',
-  '###  # # #  ',
-  '###  # # #  ',
-  ' #   #####  ',
-  ' #   .....  ',
-]
-
-function bitmapToBlockChars(rows: string[]): string[] {
-  const w = rows[0]!.length
-  const out: string[] = []
-  for (let r = 0; r < rows.length; r += 2) {
-    let line = ''
-    for (let c = 0; c < w; c++) {
-      const top = rows[r]![c] === '#'
-      const bot = (rows[r + 1] || '')[c] === '#'
-      if (top && bot) {
-        line += '█'
-      } else if (top) {
-        line += '▀'
-      } else if (bot) {
-        line += '▄'
-      } else {
-        line += ' '
-      }
-    }
-    out.push(line)
-  }
-  return out
 }
 
 // 北斗七星 · 真·勺形布局（与 v2 设计稿同源坐标，%）：
@@ -139,33 +91,14 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
 
   const out: string[] = []
 
-  if (cols >= 60) {
-    // 宽终端：展示 CJK 艺术字 logo + 右侧北斗星图
-    const tianBlock = bitmapToBlockChars(TIAN_ROWS)
-    const shuBlock = bitmapToBlockChars(SHU_ROWS)
-    const dipperLines = renderDipper(DIPPER_WIDTH + 2, theme)
+  // 勺形北斗星图（窄终端自动省略）
+  out.push(...renderDipper(cols, theme))
 
-    for (let i = 0; i < 4; i++) {
-      const tianCol = color(tianBlock[i]!, theme.primary)
-      const shuCol = color(shuBlock[i]!, theme.primary)
-      const dipperLine = dipperLines[i] || ''
-      // 2 spaces between TIAN and SHU, 8 spaces spacing
-      const line = `${tianCol}  ${shuCol}        ${dipperLine}`
-      out.push(line)
-    }
-
-    // 子标题行：天枢 · Tiānshū
-    const titleZh = color('天枢', theme.primary, { bold: true })
-    const titleRo = color('Tiānshū', theme.muted)
-    const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
-    out.push(title)
-  } else {
-    // 窄终端：仅展示单行标题
-    const titleZh = color('天枢', theme.primary, { bold: true })
-    const titleRo = color('Tiānshū', theme.muted)
-    const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
-    out.push(title)
-  }
+  // 标题行：天枢 · Tiānshū
+  const titleZh = color('天枢', theme.primary, { bold: true })
+  const titleRo = color('Tiānshū', theme.muted)
+  const title = `${titleZh} ${color('·', theme.dim)} ${titleRo}`
+  out.push(title)
 
   const session = input.priorMsgCount > 0
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
