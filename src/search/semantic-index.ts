@@ -35,29 +35,6 @@ export class SemanticIndex {
     return createHash('sha256').update(content).digest('hex').slice(0, 16)
   }
 
-  /** Index a single file if changed. Returns true if re-indexed. */
-  indexFile(relPath: string): boolean {
-    const absPath = join(this.cwd, relPath)
-    if (!existsSync(absPath)) {
-      this.fileHashes.delete(relPath)
-      return false
-    }
-
-    let content: string
-    try {
-      content = readFileSync(absPath, 'utf-8')
-    } catch {
-      return false
-    }
-
-    const hash = this.hashContent(content)
-    if (this.fileHashes.get(relPath) === hash) return false
-
-    this.fileHashes.set(relPath, hash)
-    // Note: full rebuild per file is simpler for MVP; incremental chunk removal can follow
-    return true
-  }
-
   /** Full rebuild of the semantic index from source tree. */
   rebuild(maxFiles = 500): { indexed: number; skipped: number } {
     this.index.clear()
@@ -127,6 +104,29 @@ export class SemanticIndex {
 
   /** Check if the index is stale by comparing file hashes against the current filesystem. */
   isStale(): boolean {
+    // Quick count check: new files added since last index
+    let diskCount = 0
+    try {
+      const walk = (dir: string, depth = 0): void => {
+        if (depth > 8 || diskCount > this.fileHashes.size + 10) return
+        let entries: string[]
+        try { entries = readdirSync(dir) } catch { return }
+        for (const entry of entries) {
+          if (SKIP_DIRS.has(entry)) continue
+          const abs = join(dir, entry)
+          let st: ReturnType<typeof statSync>
+          try { st = statSync(abs) } catch { continue }
+          if (st.isDirectory()) { walk(abs, depth + 1) }
+          else if (st.isFile()) {
+            const ext = entry.slice(entry.lastIndexOf('.'))
+            if (SOURCE_EXT.has(ext)) diskCount++
+          }
+        }
+      }
+      walk(this.cwd)
+    } catch { /* count failure → fall through to hash check */ }
+    if (diskCount > this.fileHashes.size) return true
+
     for (const [relPath, storedHash] of this.fileHashes) {
       const absPath = join(this.cwd, relPath)
       if (!existsSync(absPath)) return true // file deleted

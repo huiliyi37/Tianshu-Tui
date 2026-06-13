@@ -1068,6 +1068,7 @@ export class DelegationCoordinator {
             this.liveness.tick(order.id)
             upstreamActivity?.(kind, detail)
           }
+          upgradedConfig.mailbox = this.mailbox
 
           // Re-register liveness for retry
           this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))

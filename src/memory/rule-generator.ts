@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { countSimilarObservations } from './observation-store.js'
+import { countSimilarMemoryEntries } from './unified-memory.js'
 
 const REPEAT_THRESHOLD = 3
 
@@ -17,7 +17,7 @@ function slugify(text: string): string {
 }
 
 export function maybeGenerateRule(cwd: string, observationText: string): string | null {
-  const count = countSimilarObservations(cwd, observationText)
+  const count = countSimilarMemoryEntries(cwd, observationText)
   if (count < REPEAT_THRESHOLD) return null
 
   const rulesDir = join(cwd, '.rivet', 'rules')

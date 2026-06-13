@@ -46,9 +46,8 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
     sessionId: obs.sessionId,
   }
 
-  appendFileSync(observationsPath(cwd), JSON.stringify(record) + '\n', 'utf-8')
-
-  // Dual-write to unified memory log for cross-system recall
+  // Dual-write to unified memory log first (primary store), then legacy log.
+  // If the legacy write fails, the unified entry is already persisted.
   appendMemoryEntry(cwd, {
     id: record.id,
     text: record.text,
@@ -59,6 +58,12 @@ export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts
     tags: record.tags,
     sessionId: record.sessionId,
   })
+
+  try {
+    appendFileSync(observationsPath(cwd), JSON.stringify(record) + '\n', 'utf-8')
+  } catch {
+    // Legacy log write failure is non-critical — unified log already persisted
+  }
 
   return record
 }

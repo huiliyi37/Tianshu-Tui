@@ -203,14 +203,15 @@ export function countSimilarMemoryEntries(cwd: string, text: string): number {
 
 // ── Migration ──────────────────────────────────────────────────────────────
 
-/** Migrate old observations.jsonl to unified memory.jsonl. Idempotent. */
+/** Migrate old observations.jsonl to unified memory.jsonl. Idempotent — skips
+ *  entries whose IDs already exist in the unified log. Safe to re-run after
+ *  partial migration (crash recovery). */
 export function migrateObservationsToUnified(cwd: string): number {
   const oldPath = join(memoryDir(cwd), 'observations.jsonl')
   if (!existsSync(oldPath)) return 0
 
-  const unifiedPath = memoryPath(cwd)
-  // Only migrate if unified log doesn't exist yet
-  if (existsSync(unifiedPath)) return 0
+  // Load existing unified entries to skip already-migrated observations
+  const existingIds = new Set(readMemoryEntries(cwd).map(e => e.id))
 
   let migrated = 0
   try {
@@ -218,9 +219,11 @@ export function migrateObservationsToUnified(cwd: string): number {
     for (const line of raw.split('\n').filter(Boolean)) {
       try {
         const obs = JSON.parse(line)
-        // Skip if already has repeatCount (already migrated)
+        const id = obs.id ?? ''
+        if (id && existingIds.has(id)) continue // already migrated, skip
+
         const entry: MemoryEntry = {
-          id: obs.id ?? generateId(),
+          id: id || generateId(),
           text: (obs.text ?? '').slice(0, 500),
           kind: obs.kind ?? 'fact',
           confidence: obs.confidence ?? 0.5,
@@ -231,7 +234,11 @@ export function migrateObservationsToUnified(cwd: string): number {
           repeatCount: 1,
           sessionId: obs.sessionId,
         }
-        appendMemoryEntry(cwd, entry)
+        // Direct append — bypass appendMemoryEntry's repeatCount read-back
+        const dir = memoryDir(cwd)
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        appendFileSync(memoryPath(cwd), JSON.stringify(entry) + '\n', 'utf-8')
+        existingIds.add(entry.id)
         migrated++
       } catch { /* skip malformed */ }
     }
