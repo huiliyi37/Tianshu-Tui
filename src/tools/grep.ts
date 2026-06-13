@@ -52,7 +52,10 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
   },
 
   async execute(params: ToolCallParams): Promise<ToolResult> {
-    const pattern = params.input.pattern as string
+    const pattern = params.input.pattern
+    if (typeof pattern !== 'string' || pattern.length === 0) {
+      return { content: 'Error: pattern is required (non-empty string)', isError: true }
+    }
     const searchPath = (params.input.path as string) ?? '.'
     const glob = params.input.glob as string | undefined
     const maxResults = (params.input.max_results as number) ?? MAX_RESULTS_DEFAULT
