@@ -96,16 +96,22 @@ describe('buildActiveDomain', () => {
   })
 })
 
-describe('tianliang main-session discipline (E-fix, session 803d897d)', () => {
-  it('carries the wave-split rule in volatileBlock so the MAIN session sees it', () => {
+describe('tianliang cognitive field + delivery discipline split', () => {
+  it('volatileBlock carries wave-split concept as cognitive bias', () => {
     const tianliang = STAR_DOMAINS.tianliang
-    assert.match(tianliang.volatileBlock, /分波规则/, 'wave-split rule must live in the main-session-visible volatileBlock, not only in the worker-only systemPromptSuffix')
-    assert.match(tianliang.volatileBlock, />= 4/, 'threshold is >=4 — a 5-task plan in one batch was the observed failure mode')
+    assert.match(tianliang.volatileBlock, /分波/, 'wave-split concept must be present in volatileBlock as cognitive bias')
+    assert.match(tianliang.volatileBlock, /验证/, 'verification rhythm must be present in volatileBlock')
   })
 
-  it('aligns the worker suffix threshold with the volatileBlock (>=4)', () => {
+  it('systemPromptSuffix carries full delivery discipline with >= 4 threshold', () => {
     const tianliang = STAR_DOMAINS.tianliang
-    assert.match(tianliang.systemPromptSuffix, />= 4/)
+    assert.match(tianliang.systemPromptSuffix, />= 4/, 'detailed threshold lives in systemPromptSuffix for workers')
+    assert.match(tianliang.systemPromptSuffix, /假闭环禁令/, 'full discipline rules live in systemPromptSuffix')
     assert.doesNotMatch(tianliang.systemPromptSuffix, /> 5/)
+  })
+
+  it('volatileBlock is concise (cognitive field, not procedural manual)', () => {
+    const lines = STAR_DOMAINS.tianliang.volatileBlock.split('\n').filter(l => l.trim().length > 0)
+    assert.ok(lines.length <= 6, `volatileBlock should be ≤6 non-empty lines, got ${lines.length}`)
   })
 })

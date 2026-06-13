@@ -97,7 +97,7 @@ describe('discipline re-anchor (F-fix, session 803d897d)', () => {
     bus.submit(disciplineReanchorEntry())
     const rendered = bus.render()
     assert.match(rendered, /category="discipline"/)
-    assert.ok(rendered.includes('闭环') || rendered.includes('接线') || rendered.includes('自检'), 'discipline content must contain core keyword')
+    assert.ok(rendered.includes('闭环') || rendered.includes('接线') || rendered.includes('自检') || rendered.includes('节奏') || rendered.includes('分波'), 'discipline content must contain core keyword')
     const occurrences = rendered.split('discipline-reanchor').length - 1
     assert.equal(occurrences, 1, 'same-key entries must dedupe to one line')
   })
