@@ -29,7 +29,7 @@ import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../form
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay } from '../format/glance-bar.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
@@ -191,6 +191,12 @@ export class TuiApp {
   private contextWindow?: number
   /** git 分支（启动时读取一次） */
   private gitBranch?: string
+  /** /domain 或 agent 自动匹配的会话星域（GlanceBar 常态显示） */
+  private sessionStarDomainName?: string
+  /** 子代理编排期间的临时 domain override（turn 结束清除） */
+  private delegationDomainOverride?: { glyph: string; name: string }
+  /** streaming 期间从 agent 同步星域（对齐 Ink 1Hz sync） */
+  private domainSyncProvider?: () => string | undefined
   /** 累计 usage（cost 估算） */
   private totalUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }
   /** 最近一轮的 cache 命中率（0-1） */
@@ -1075,6 +1081,49 @@ export class TuiApp {
   }
 
   /**
+   * 设置会话星域显示（/domain 切换 → GlanceBar）。
+   * undefined 表示 auto/off/未设定，GlanceBar 回退默认「天枢」。
+   */
+  setSessionStarDomain(domainName: string | undefined): void {
+    this.sessionStarDomainName = domainName
+    if (!this.delegationDomainOverride) {
+      this.applyGlanceDomainDisplay()
+    }
+    this.renderLive()
+  }
+
+  /** 注册 agent 星域同步（streaming ticker ~1Hz 读取 getSessionDomain） */
+  setDomainSyncProvider(provider: () => string | undefined): void {
+    this.domainSyncProvider = provider
+  }
+
+  private applyGlanceDomainDisplay(): void {
+    if (this.delegationDomainOverride) {
+      this.state.domainGlyph = this.delegationDomainOverride.glyph
+      this.state.domainName = this.delegationDomainOverride.name
+      return
+    }
+    const display = resolveStarDomainDisplay(this.sessionStarDomainName)
+    if (display) {
+      this.state.domainGlyph = display.glyph
+      this.state.domainName = display.name
+    } else {
+      this.state.domainGlyph = undefined
+      this.state.domainName = undefined
+    }
+  }
+
+  private syncSessionStarDomainFromAgent(): void {
+    if (!this.domainSyncProvider) return
+    const next = this.domainSyncProvider()
+    if (next === this.sessionStarDomainName) return
+    this.sessionStarDomainName = next
+    if (!this.delegationDomainOverride) {
+      this.applyGlanceDomainDisplay()
+    }
+  }
+
+  /**
    * 读取当前真实指标快照（与 GlanceBar 同源）。无 provider 时返回 null。
    * 供 SlashRouter 让 /cost、maxTokens 等命令读到与 GlanceBar 一致的真实值，
    * 不再写死 cost: 0 或取 models[0]（非当前模型）。
@@ -1163,6 +1212,7 @@ export class TuiApp {
     if (isDelegationTool(name)) {
       const badge = domainBadge(name)
       if (badge) {
+        this.delegationDomainOverride = { glyph: badge.glyph, name: badge.name }
         this.state.domainGlyph = badge.glyph
         this.state.domainName = badge.name
       }
@@ -1220,13 +1270,10 @@ export class TuiApp {
     // 可折叠 tool（read/grep/glob/repo_map 等探索型）：按 toolUseId 绑定结果到折叠组
     if (isCollapsibleTool(name)) {
       // G4 修复：buffer 已被 flush（如 write 打断），迟到 result 自动开新组
-      // 避免 orphan 单卡直接 commit
       if (!this.toolGroupBuffer.isActive()) {
         this.toolGroupBuffer.pushUse(id, name, meta?.input ?? {})
       }
       this.toolGroupBuffer.attachResult(id, finalContent, isError)
-      // G3 修复：collapsible terminal result 后必须从 pendingTools 中删除
-      this.pendingTools.delete(id)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
       return
     }
@@ -1345,9 +1392,9 @@ export class TuiApp {
       this.state.isThinking = false
       this.setPhase('idle')
       this.state.thinkStartMs = 0
-      // 复位 GlanceBar domain（子代理编排结束 → 回默认天枢）
-      this.state.domainGlyph = undefined
-      this.state.domainName = undefined
+      // 清除委派 override，恢复 /domain 设定的会话星域
+      this.delegationDomainOverride = undefined
+      this.applyGlanceDomainDisplay()
 
       // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
       const elapsed = Date.now() - this.state.turnStartMs
