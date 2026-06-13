@@ -310,15 +310,7 @@ export class TuiApp {
 
         // Commit user message to scrollback
         if (trimmed) {
-          this.commitAbove(() => {
-            const formatted = formatUserMessage({
-              content: submitText.trim(),
-              width: this.columns,
-            }, this.theme)
-            // 单次提交 + 块尾空行：与 assistant/tool/summary 统一间距契约
-            this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
-            this.state.committedCount++
-          })
+          this.commitUserPrompt(submitText.trim())
           // 新 run 启动前丢弃上一 run 未 finalize 的流式残留：blockWriter 缓冲
           // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
           this.blockWriter.discard()
@@ -911,6 +903,22 @@ export class TuiApp {
     this.live.clearForCommit()
     write()
     this.renderLive()
+  }
+
+  /**
+   * 统一用户消息提交入口。在 scrollback 中写入 ▍ You 气泡。
+   * 所有 submit 路径（idle / slash passthrough / steer）共用此入口，
+   * 确保用户始终能在终端历史中看到自己输入的内容。
+   */
+  private commitUserPrompt(content: string): void {
+    this.commitAbove(() => {
+      const formatted = formatUserMessage({
+        content: content.trim(),
+        width: this.columns,
+      }, this.theme)
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
   }
 
   // ── W3: phase + ticker ───────────────────────────────────────
@@ -1701,6 +1709,15 @@ export class TuiApp {
       handled = this.handleSlashCommand(input)
     }
     if (!handled) {
+      // 透传给 agent 前 commit 用户消息到 scrollback，确保 slash 命令
+      // 也能在终端历史中看到（之前只有 agent 回复无用户气泡）。
+      this.commitUserPrompt(input)
+      this.blockWriter.discard()
+      this.streamRenderer.reset()
+      this.assistantHeaderDone = false
+      this.agentBusy = true
+      this.state.turnStartMs = Date.now()
+      this.lastActivityMs = Date.now()
       this.onSubmitCallback?.(input)
     }
   }
