@@ -1,6 +1,10 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { validatePath, validatePathSafe } from '../path-validate.js'
+import { grantPath, _resetGrantsForTest } from '../path-grants.js'
 
 describe('validatePath', () => {
   it('allows files within cwd', () => {
@@ -62,5 +66,56 @@ describe('validatePathSafe', () => {
     const result = validatePathSafe('/home/user/project', '../etc/passwd')
     assert.equal(result.ok, false)
     if (!result.ok) assert.match(result.error, /outside project directory/)
+  })
+})
+
+describe('validatePathSafe with out-of-workspace grants', () => {
+  beforeEach(() => _resetGrantsForTest())
+
+  it('allows an out-of-workspace path once a read grant covers it', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    try {
+      // Without a grant: rejected.
+      const before = validatePathSafe(cwd, join(external, 'data.json'), 'read')
+      assert.equal(before.ok, false)
+
+      grantPath(external, 'read')
+      const after = validatePathSafe(cwd, join(external, 'data.json'), 'read')
+      assert.equal(after.ok, true)
+
+      // A read grant must NOT satisfy a write op.
+      const write = validatePathSafe(cwd, join(external, 'data.json'), 'write')
+      assert.equal(write.ok, false)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(external, { recursive: true, force: true })
+    }
+  })
+
+  it('allows an out-of-workspace write once a write grant covers it', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    try {
+      grantPath(external, 'write')
+      const w = validatePathSafe(cwd, join(external, 'out.zip'), 'write')
+      assert.equal(w.ok, true)
+      const r = validatePathSafe(cwd, join(external, 'out.zip'), 'read')
+      assert.equal(r.ok, true)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(external, { recursive: true, force: true })
+    }
+  })
+
+  it('upgraded error hints at request_path_access', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    try {
+      const r = validatePathSafe(cwd, '/etc/hosts', 'read')
+      assert.equal(r.ok, false)
+      if (!r.ok) assert.match(r.error, /request_path_access/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })

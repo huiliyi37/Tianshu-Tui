@@ -14,6 +14,10 @@ import {
   maybeWarnNoSandbox,
   _resetSandboxWarningLatch,
 } from '../sandbox-profile.js'
+import { grantPath, _resetGrantsForTest } from '../path-grants.js'
+import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 describe('sandbox-profile: shSingleQuote', () => {
   it('wraps in single quotes', () => {
@@ -39,6 +43,24 @@ describe('sandbox-profile: defaultWritableRoots', () => {
     const roots = defaultWritableRoots({ cwd: '/w', env: { HOME: '/home/u', RIVET_SANDBOX_WRITABLE: '/data:/scratch' } })
     assert.ok(roots.includes('/data'))
     assert.ok(roots.includes('/scratch'))
+  })
+  it('includes user-approved WRITE grants, excludes read-only grants', () => {
+    _resetGrantsForTest()
+    const wdir = mkdtempSync(join(tmpdir(), 'rivet-w-'))
+    const rdir = mkdtempSync(join(tmpdir(), 'rivet-r-'))
+    try {
+      grantPath(wdir, 'write')
+      grantPath(rdir, 'read')
+      const roots = defaultWritableRoots({ cwd: '/w', env: { HOME: '/home/u' } })
+      const canonicalW = realpathSync(wdir)
+      const canonicalR = realpathSync(rdir)
+      assert.ok(roots.includes(canonicalW), 'write-granted root present')
+      assert.ok(!roots.includes(canonicalR), 'read-only grant must NOT be writable')
+    } finally {
+      _resetGrantsForTest()
+      rmSync(wdir, { recursive: true, force: true })
+      rmSync(rdir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -25,6 +25,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { writeGrantedRoots } from './path-grants.js'
 
 export type SandboxBackendKind =
   | 'seatbelt'
@@ -101,6 +102,11 @@ export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv
       if (trimmed) roots.add(trimmed)
     }
   }
+
+  // User-approved out-of-workspace write grants (session or persisted). Recomputed
+  // per command-wrap, so a grant approved mid-session takes effect on the next
+  // bash call with no restart.
+  for (const granted of writeGrantedRoots()) roots.add(granted)
 
   return [...roots]
 }

@@ -1,5 +1,6 @@
 import { isAbsolute, relative, resolve, dirname, join, basename } from 'path'
 import { realpathSync, existsSync } from 'fs'
+import { isReadGranted, isWriteGranted } from './path-grants.js'
 
 export interface ValidatedPath {
   ok: true
@@ -13,7 +14,12 @@ export interface InvalidPath {
 
 export type PathValidationResult = ValidatedPath | InvalidPath
 
-export function validatePathSafe(cwd: string, inputPath: string): PathValidationResult {
+/**
+ * Validate that `inputPath` is inside the workspace, OR covered by an explicit,
+ * user-approved out-of-workspace grant for the requested access `mode`
+ * ('read' satisfied by read|write grant; 'write' requires a write grant).
+ */
+export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 'write' = 'read'): PathValidationResult {
   // Returned path stays original-cwd-based to preserve the existing contract
   // (callers compute relative labels / read via this path). Validation, however,
   // canonicalizes both sides: without resolving cwd, a cwd reached through a
@@ -51,7 +57,15 @@ export function validatePathSafe(cwd: string, inputPath: string): PathValidation
   }
 
   if (rel.startsWith('..') || isAbsolute(rel)) {
-    return { ok: false, error: `Path outside project directory: ${inputPath}` }
+    // Out of workspace — allow only if the user has granted access to this
+    // subtree at the requested mode (the grant store is widened solely through
+    // the approval flow; nothing here grants on its own).
+    const granted = mode === 'write' ? isWriteGranted(real) : isReadGranted(real)
+    if (granted) return { ok: true, path: resolved }
+    return {
+      ok: false,
+      error: `Path outside project directory: ${inputPath}. If the user authorized this, call request_path_access (or approve the prompt) to grant ${mode} access to this path.`,
+    }
   }
 
   return { ok: true, path: resolved }
@@ -84,8 +98,8 @@ function resolveNearestExisting(target: string, floor: string): string {
   }
 }
 
-export function validatePath(cwd: string, filePath: string): string {
-  const result = validatePathSafe(cwd, filePath)
+export function validatePath(cwd: string, filePath: string, mode: 'read' | 'write' = 'read'): string {
+  const result = validatePathSafe(cwd, filePath, mode)
   if (!result.ok) throw new Error(result.error)
   return result.path
 }
