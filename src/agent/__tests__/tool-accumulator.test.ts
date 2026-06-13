@@ -9,61 +9,79 @@ describe('ToolAccumulator', () => {
     acc = new ToolAccumulator()
   })
 
-  it('returns null when fewer than 4 consecutive same-type calls', () => {
-    acc.record({ toolName: 'grep', toolUseId: '1', content: 'a', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '2', content: 'b', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '3', content: 'c', turn: 1 })
-    assert.equal(acc.tryCollapse('grep'), null)
+  it('returns null when fewer than 4 consecutive same-type calls (non-reader)', () => {
+    acc.record({ toolName: 'bash', toolUseId: '1', content: 'a', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '2', content: 'b', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '3', content: 'c', turn: 1 })
+    assert.equal(acc.tryCollapse('bash'), null)
   })
 
-  it('collapses when 4+ consecutive same-type calls detected', () => {
+  it('collapses when 4+ consecutive non-reader calls detected', () => {
     for (let i = 0; i < 5; i++) {
-      acc.record({ toolName: 'grep', toolUseId: `g${i}`, content: `match${i}`, turn: 1 })
+      acc.record({ toolName: 'bash', toolUseId: `g${i}`, content: `match${i}`, turn: 1 })
     }
-    const result = acc.tryCollapse('grep')
+    const result = acc.tryCollapse('bash')
     assert.notEqual(result, null)
     assert.equal(result!.collapsedIds.length, 4)
     assert.ok(!result!.collapsedIds.includes('g4'))
     assert.ok(result!.summary.includes('storm-collapsed'))
-    assert.ok(result!.summary.includes('4 grep calls'))
+    assert.ok(result!.summary.includes('4 bash calls'))
+  })
+
+  it('reader tools (read_file/grep) use higher threshold (12)', () => {
+    // 11 read_file calls: below threshold (12), no collapse
+    for (let i = 0; i < 11; i++) {
+      acc.record({ toolName: 'read_file', toolUseId: `r${i}`, content: 'x'.repeat(500), turn: 1 })
+    }
+    assert.equal(acc.tryCollapse('read_file'), null)
+
+    // 12th call: hits threshold, collapses first 11
+    acc.record({ toolName: 'read_file', toolUseId: 'r11', content: 'x'.repeat(500), turn: 1 })
+    const result = acc.tryCollapse('read_file')
+    assert.notEqual(result, null)
+    assert.equal(result!.collapsedIds.length, 11)
+    assert.ok(result!.summary.includes('storm-collapsed'))
+    assert.ok(result!.summary.includes('read_file'))
   })
 
   it('does not collapse different tool types', () => {
-    acc.record({ toolName: 'grep', toolUseId: '1', content: 'a', turn: 1 })
-    acc.record({ toolName: 'read_file', toolUseId: '2', content: 'b', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '3', content: 'c', turn: 1 })
-    acc.record({ toolName: 'read_file', toolUseId: '4', content: 'd', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '1', content: 'a', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '2', content: 'b', turn: 1 })
+    acc.record({ toolName: 'read_file', toolUseId: '3', content: 'c', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '4', content: 'd', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '5', content: 'e', turn: 1 })
+    assert.equal(acc.tryCollapse('bash'), null)
     assert.equal(acc.tryCollapse('read_file'), null)
-    assert.equal(acc.tryCollapse('grep'), null)
   })
 
   it('breaks consecutive chain on tool type change', () => {
-    acc.record({ toolName: 'grep', toolUseId: '1', content: 'a', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '2', content: 'b', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '1', content: 'a', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '2', content: 'b', turn: 1 })
     acc.record({ toolName: 'read_file', toolUseId: '3', content: 'c', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '4', content: 'd', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '5', content: 'e', turn: 1 })
-    assert.equal(acc.tryCollapse('grep'), null)
+    acc.record({ toolName: 'bash', toolUseId: '4', content: 'd', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '5', content: 'e', turn: 1 })
+    assert.equal(acc.tryCollapse('bash'), null)
   })
 
   it('tracks consecutive count correctly', () => {
-    acc.record({ toolName: 'grep', toolUseId: '1', content: 'a', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: '2', content: 'b', turn: 1 })
-    assert.equal(acc.consecutiveCount('grep'), 2)
+    acc.record({ toolName: 'bash', toolUseId: '1', content: 'a', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '2', content: 'b', turn: 1 })
+    assert.equal(acc.consecutiveCount('bash'), 2)
     assert.equal(acc.consecutiveCount('read_file'), 0)
   })
 
   it('resets correctly', () => {
-    acc.record({ toolName: 'grep', toolUseId: '1', content: 'a', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: '1', content: 'a', turn: 1 })
     acc.reset()
-    assert.equal(acc.consecutiveCount('grep'), 0)
-    assert.equal(acc.tryCollapse('grep'), null)
+    assert.equal(acc.consecutiveCount('bash'), 0)
+    assert.equal(acc.tryCollapse('bash'), null)
   })
 
-  it('builds grep summary with file extraction', () => {
+  it('builds grep summary with file extraction after reader threshold', () => {
     const grepContent = (n: number) =>
       `src/a.ts:${n}:  const foo = bar\nsrc/b.ts:${n}:  const baz = qux`
-    for (let i = 0; i < 5; i++) {
+    // 13 grep calls to trigger reader threshold (12 collapsed)
+    for (let i = 0; i < 13; i++) {
       acc.record({ toolName: 'grep', toolUseId: `g${i}`, content: grepContent(i), turn: 1 })
     }
     const result = acc.tryCollapse('grep')!
@@ -72,13 +90,14 @@ describe('ToolAccumulator', () => {
     assert.ok(result.summary.includes('src/b.ts'))
   })
 
-  it('builds read_file summary with char count', () => {
-    for (let i = 0; i < 5; i++) {
-      acc.record({ toolName: 'read_file', toolUseId: `r${i}`, content: 'x'.repeat(1000), turn: 1 })
+  it('builds read_file summary with file path extraction from headers', () => {
+    for (let i = 0; i < 13; i++) {
+      acc.record({ toolName: 'read_file', toolUseId: `r${i}`, content: `── src/tools/hash-edit.ts ──\n${'x'.repeat(500)}`, turn: 1 })
     }
     const result = acc.tryCollapse('read_file')!
     assert.ok(result.summary.includes('read_file calls'))
-    assert.ok(result.summary.includes('chars collapsed'))
+    assert.ok(result.summary.includes('src/tools/hash-edit.ts'))
+    assert.ok(result.summary.includes('files: '))
   })
 
   it('builds bash summary with last lines', () => {

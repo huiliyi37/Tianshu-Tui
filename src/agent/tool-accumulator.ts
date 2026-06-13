@@ -21,6 +21,24 @@ export interface CollapseResult {
 }
 
 const CONSECUTIVE_THRESHOLD = 4
+
+/**
+ * Reader tools (read_file, glob, grep) provide the model with source code context.
+ * Collapsing their output — the very content the model needs to understand and edit
+ * the codebase — is counterproductive. The summaries ("929 lines, 158 lines" etc.)
+ * carry no actionable signal.
+ *
+ * These tools are already bounded: read_file has per-call line limits, grep caps
+ * at 100 results, glob at 500 files. The request-time context collapse (2+ turns
+ * old) still applies, so stale reads are eventually compacted.
+ *
+ * Consecutive threshold of 12 means the model can make up to 11 sequential
+ * read_file/glob/grep calls without triggering storm collapse — enough for
+ * any reasonable exploration pattern without flooding context.
+ */
+const READER_CONSECUTIVE_THRESHOLD = 12
+
+const READER_TOOLS = new Set(['read_file', 'glob', 'grep', 'read_section'])
 const MAX_AGGREGATE_LINES = 30
 
 export class ToolAccumulator {
@@ -53,8 +71,9 @@ export class ToolAccumulator {
    * Returns null if no collapse is needed.
    */
   tryCollapse(toolName: string): CollapseResult | null {
+    const threshold = READER_TOOLS.has(toolName) ? READER_CONSECUTIVE_THRESHOLD : CONSECUTIVE_THRESHOLD
     const consecutive = this.getConsecutiveTail(toolName)
-    if (consecutive.length < CONSECUTIVE_THRESHOLD) return null
+    if (consecutive.length < threshold) return null
 
     const stale = consecutive.slice(0, -1)
     const collapsedIds = stale.map(e => e.toolUseId)
@@ -116,11 +135,18 @@ export class ToolAccumulator {
   }
 
   private buildReadFileSummary(entries: AccumulatorEntry[], count: number, totalChars: number): string {
-    const files = entries.map(e => {
-      const lines = e.content.split('\n')
-      return `${lines.length} lines`
-    })
-    return `[storm-collapsed: ${count} read_file calls, ${totalChars} chars collapsed, sizes: ${files.join(', ')}]`
+    // Extract file paths from content headers like "── src/tools/hash-edit.ts ──"
+    const paths: string[] = []
+    for (const e of entries) {
+      const headerMatch = e.content.match(/──\s*(.+?)\s*──/)
+      if (headerMatch) {
+        paths.push(headerMatch[1]!)
+      }
+    }
+    const pathInfo = paths.length > 0
+      ? `files: ${paths.join(', ')}`
+      : `sizes: ${entries.map(e => e.content.split('\n').length + ' lines').join(', ')}`
+    return `[storm-collapsed: ${count} read_file calls, ${totalChars} chars collapsed, ${pathInfo}]`
   }
 
   private buildBashSummary(entries: AccumulatorEntry[], count: number, totalChars: number): string {

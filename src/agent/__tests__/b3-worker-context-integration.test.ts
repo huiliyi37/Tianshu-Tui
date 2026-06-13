@@ -150,18 +150,18 @@ describe('B3: worker context optimization integration (T4/T7/T10)', () => {
   it('verify T4 tool accumulator collapses 4+ consecutive same-type calls', () => {
     const acc = new ToolAccumulator()
 
-    // Feed 4 consecutive grep calls
-    acc.record({ toolName: 'grep', toolUseId: 'tu_1', content: 'result1', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: 'tu_2', content: 'result2', turn: 1 })
-    acc.record({ toolName: 'grep', toolUseId: 'tu_3', content: 'result3', turn: 1 })
+    // Feed 4 consecutive bash calls (non-reader tool, threshold 4)
+    acc.record({ toolName: 'bash', toolUseId: 'tu_1', content: 'result1', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: 'tu_2', content: 'result2', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: 'tu_3', content: 'result3', turn: 1 })
 
     // 3 calls of same type: not yet collapsed
-    let result = acc.tryCollapse('grep')
+    let result = acc.tryCollapse('bash')
     assert.equal(result, null)
 
-    acc.record({ toolName: 'grep', toolUseId: 'tu_4', content: 'result4', turn: 1 })
+    acc.record({ toolName: 'bash', toolUseId: 'tu_4', content: 'result4', turn: 1 })
     // 4th consecutive same-type call: should collapse
-    result = acc.tryCollapse('grep')
+    result = acc.tryCollapse('bash')
     assert.notEqual(result, null)
     assert.ok(result!.summary.includes('storm-collapsed'))
   })
