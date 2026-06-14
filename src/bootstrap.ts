@@ -908,9 +908,9 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   for (const rule of loadProjectRules(cwd)) {
     claimStore.propose(rule)
   }
-  const skillLoad = loadProjectSkills(cwd)
+  const skillLoad = loadProjectSkills(cwd, { importFromClaude: config.skills?.importFromClaude })
   if (skillLoad.loaded.length > 0) {
-    console.error(`[skills] Loaded ${skillLoad.loaded.length} skill(s) from .rivet/skills/`)
+    console.error(`[skills] Loaded ${skillLoad.loaded.length} skill(s)`)
   }
   for (const err of skillLoad.errors) {
     console.warn(`[skills] ${err}`)

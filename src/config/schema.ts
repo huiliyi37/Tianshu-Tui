@@ -160,6 +160,13 @@ export const workersSchema = z.object({
   routing: workerRoutingSchema,
 }).default({})
 
+export const skillsSchema = z.object({
+  /** Skill names to import from ~/.claude/skills/ and .claude/skills/. Only
+   *  listed skills are loaded — avoids importing all 70+ Claude skills when
+   *  the user only needs a few. Empty array (default) = don't scan .claude/. */
+  importFromClaude: z.array(z.string()).default([]),
+}).default({})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -171,6 +178,7 @@ export const configSchema = z.object({
   editor: editorSchema.default({}),
   mcp: mcpConfigSchema.default({}),
   workers: workersSchema,
+  skills: skillsSchema,
 })
 
 export type Config = {
@@ -181,6 +189,7 @@ export type Config = {
   editor: EditorConfig
   mcp: McpConfig
   workers: WorkersConfig
+  skills: SkillsConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
@@ -192,3 +201,4 @@ export type AgentConfig = z.infer<typeof agentSchema>
 export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>
 export type WorkersConfig = z.infer<typeof workersSchema>
+export type SkillsConfig = z.infer<typeof skillsSchema>
