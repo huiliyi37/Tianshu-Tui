@@ -6,6 +6,7 @@
  *   GET    /sessions                                   list
  *   GET    /sessions/:id                               one record
  *   POST   /sessions/:id/prompt                        start a run
+ *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
  *   POST   /sessions/:id/abort                         abort
  *   GET    /sessions/:id/events?since=N                replay tail (B3)
  *   GET    /sessions/:id/stream?since=N                live SSE (B3)
@@ -134,6 +135,22 @@ export function buildSessionRoutes(
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),
 
+    // T3 — mid-run steering. Queues user guidance into a RUNNING session's steer
+    // buffer; injected at the next tool boundary (no new turn). Idle → 409 so the
+    // desktop knows to use /prompt instead. Bearer-gated.
+    'POST /sessions/:id/steer': withAuth((body, params) => {
+      const data = (body ?? {}) as { text?: string }
+      if (!data.text || typeof data.text !== 'string' || !data.text.trim()) {
+        return { status: 400, body: { error: 'Missing or empty "text" field' } }
+      }
+      const result = manager.steer(params!.id!, data.text.trim())
+      if (result === 'not_found') return { status: 404, body: { error: 'Session not found' } }
+      if (result === 'idle') {
+        return { status: 409, body: { error: 'Session is not running; use /prompt to start a turn' } }
+      }
+      return { status: 200, body: { queued: true } }
+    }, apiToken),
+
     'POST /sessions/:id/abort': withAuth((_body, params) => {
       const ok = manager.abort(params!.id!)
       if (!ok) return { status: 404, body: { error: 'Session not found' } }
@@ -225,6 +242,28 @@ export function buildSessionRoutes(
         return { status: 409, body: { error: 'Rollback failed or nothing to restore', ...result } }
       }
       return { status: 200, body: result }
+    }, apiToken),
+
+    // ── Rewind: list user messages that can be rewound to ──
+    'GET /sessions/:id/rewind-points': withAuth((_body, params) => {
+      const points = manager.listRewindPoints(params!.id!)
+      if (!points) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { points } }
+    }, apiToken),
+
+    // ── Rewind: truncate conversation to a prior message index ──
+    'POST /sessions/:id/rewind': withAuth((body, params) => {
+      const data = (body ?? {}) as { messageIndex?: number; rollbackFiles?: boolean }
+      if (typeof data.messageIndex !== 'number' || data.messageIndex < 0) {
+        return { status: 400, body: { error: 'Missing or invalid "messageIndex"' } }
+      }
+      const ok = manager.rewind(params!.id!, data.messageIndex, { rollbackFiles: data.rollbackFiles === true })
+      if (!ok) {
+        const rec = manager.getSession(params!.id!)
+        if (!rec) return { status: 404, body: { error: 'Session not found' } }
+        return { status: 409, body: { error: 'Session is running, has no agent, or index out of range' } }
+      }
+      return { status: 200, body: { ok: true, ...manager.getSession(params!.id!) } }
     }, apiToken),
   }
 

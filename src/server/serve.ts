@@ -230,6 +230,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
         setApprovalMode: (mode) => agent.setApprovalMode(mode),
         listArtifacts: () => agent.artifactStore?.list() ?? [],
         readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
+        getMessages: () => agent.session.getMessages(),
+        replaceMessages: (msgs) => agent.session.replaceMessages(msgs),
       }
     },
     defaultCwd: process.cwd(),

@@ -3,11 +3,14 @@ import assert from 'node:assert/strict'
 import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 class FakeAgent implements ManagedAgent {
   callbacks?: AgentCallbacks
   aborted = false
   artifacts: Artifact[] = []
+  /** Rewind: in-memory message store for testing. */
+  messages: OaiMessage[] = []
   /** S — captures the mode this agent was built with + any live switches. */
   builtApprovalMode?: string
   liveApprovalMode?: string
@@ -28,6 +31,8 @@ class FakeAgent implements ManagedAgent {
   readArtifact(id: string): Promise<string | null> {
     return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null)
   }
+  getMessages(): OaiMessage[] { return this.messages }
+  replaceMessages(msgs: OaiMessage[]): void { this.messages = msgs }
 }
 
 function makeArtifact(id: string, over: Partial<Artifact> = {}): Artifact {

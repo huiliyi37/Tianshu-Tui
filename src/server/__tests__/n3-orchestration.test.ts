@@ -10,6 +10,7 @@ import { CronScheduler } from '../cron-scheduler.js'
 import { buildScheduleRoutes } from '../schedule-routes.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 const TOKEN = 'tok'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -24,6 +25,8 @@ class ScriptedAgent implements ManagedAgent {
   abort(): void {}
   listArtifacts(): Artifact[] { return [] }
   readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(_msgs: OaiMessage[]): void {}
 }
 
 test('SessionRuntimePool spawns a VISIBLE session and reports summary + changedFiles', async () => {
@@ -54,6 +57,8 @@ test('delegation tool events are surfaced as delegation tree nodes', () => {
     abort(): void {}
     listArtifacts(): Artifact[] { return [] }
     readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+    getMessages(): OaiMessage[] { return [] }
+    replaceMessages(_msgs: OaiMessage[]): void {}
   }
   const manager = new RuntimeSessionManager({
     createAgent: () => { const a = new DelegatingAgent(); agents.push(a); return a },

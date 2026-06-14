@@ -10,12 +10,15 @@ import {
 } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 class NoopAgent implements ManagedAgent {
   run(_p: string, _cb: AgentCallbacks): Promise<void> { return Promise.resolve() }
   abort(): void {}
   listArtifacts(): Artifact[] { return [] }
   readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(_msgs: OaiMessage[]): void {}
 }
 
 /** In-memory persistence so the rehydrate path can be tested without disk. */

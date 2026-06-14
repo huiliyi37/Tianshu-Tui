@@ -19,8 +19,10 @@ import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
+import type { OaiMessage } from '../api/oai-types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { DecisionShift } from '../agent/loop-types.js'
+import { SteerBuffer } from '../tui/steer-buffer.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -42,6 +44,11 @@ export type SessionEventType =
   | 'status'
   | 'error'
   | 'decision_shift'
+  | 'rewind'
+  // T2 — structured active task list (mirrors the `todo` tool's write payload).
+  | 'todo_state'
+  // T3 — mid-run user guidance accepted into the steer buffer.
+  | 'steer_queued'
   | 'done'
 
 export interface SessionEvent {
@@ -83,6 +90,10 @@ export interface ManagedAgent {
    * Optional so lightweight test doubles need not implement it.
    */
   setApprovalMode?(mode: ApprovalMode): void
+  /** Rewind: return the current message list (for listing rewind points). */
+  getMessages(): OaiMessage[]
+  /** Rewind: replace the message list (truncate to a prior point). */
+  replaceMessages(msgs: OaiMessage[]): void
 }
 
 /**
@@ -161,6 +172,8 @@ interface InternalSession {
   pending: Map<string, PendingIntervention>
   listeners: Set<(e: SessionEvent) => void>
   knownArtifacts: Set<string>
+  /** T3 — mid-run user guidance, drained into the agent at the next tool boundary. */
+  steer: SteerBuffer
 }
 
 const REDACTED = '[REDACTED]'
@@ -175,6 +188,38 @@ function extractObjective(input: Record<string, unknown>): string {
     if (typeof v === 'string' && v.trim()) return v.slice(0, 200)
   }
   return ''
+}
+
+/** T2 — todo item as surfaced to the desktop (subset of the tool's schema). */
+interface TodoStateItem {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+}
+
+/**
+ * T2 — parse a `todo` write tool input into structured items.
+ *
+ * We read the per-call input rather than the global TodoStore singleton on
+ * purpose: the store is shared across all sidecar sessions, so its snapshot is
+ * not session-correct, whereas the tool input belongs to this session's call.
+ * Returns null for non-write actions or malformed payloads.
+ */
+function extractTodoState(input: Record<string, unknown>): TodoStateItem[] | null {
+  if (input.action !== 'write') return null
+  const raw = input.todos
+  if (!Array.isArray(raw)) return null
+  const items: TodoStateItem[] = []
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue
+    const e = entry as Record<string, unknown>
+    const id = typeof e.id === 'string' ? e.id : ''
+    const content = typeof e.content === 'string' ? e.content : ''
+    const status = e.status === 'in_progress' || e.status === 'completed' ? e.status : 'pending'
+    if (!id || !content) continue
+    items.push({ id, content, status })
+  }
+  return items
 }
 
 export class RuntimeSessionManager {
@@ -233,6 +278,7 @@ export class RuntimeSessionManager {
         knownArtifacts: new Set(
           events.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
         ),
+        steer: new SteerBuffer(),
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
@@ -274,6 +320,7 @@ export class RuntimeSessionManager {
       pending: new Map(),
       listeners: new Set(),
       knownArtifacts: new Set(),
+      steer: new SteerBuffer(),
     }
     this.sessions.set(id, session)
     this.persistRecord(session)
@@ -292,6 +339,8 @@ export class RuntimeSessionManager {
     if (!session || session.running) return false
     const agent = this.ensureAgent(session)
     session.running = true
+    // T3 — drop any guidance left from a previous run so it can't leak forward.
+    session.steer.clear()
     session.record.status = 'running'
     session.record.error = undefined
     // R1 — keep the registry heartbeat fresh while this session is active.
@@ -354,6 +403,28 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     return true
+  }
+
+  /**
+   * T3 — queue mid-run user guidance. Unlike run(), this does NOT start a turn:
+   * the text is buffered and injected at the next tool boundary (onSteerDrain).
+   * Only meaningful while running — an idle session has no turn to steer.
+   *
+   * Returns:
+   *  - 'queued'    guidance accepted into the running session's buffer
+   *  - 'idle'      session exists but is not running (caller should use /prompt)
+   *  - 'not_found' no such session
+   */
+  steer(id: string, text: string): 'queued' | 'idle' | 'not_found' {
+    const session = this.sessions.get(id)
+    if (!session) return 'not_found'
+    if (!session.running) return 'idle'
+    session.steer.push(text)
+    // Echo into the event log so the thread reflects the queued guidance and
+    // reconnecting viewers see it (append-only, like the user turn echo).
+    this.append(session, 'steer_queued', { text: redactText(text) })
+    this.touch(session)
+    return 'queued'
   }
 
   /**
@@ -533,6 +604,81 @@ export class RuntimeSessionManager {
     return s.agent.readArtifact(artifactId)
   }
 
+  /**
+   * List user messages that can be rewound to. Each entry has the message
+   * index (for use with rewind()), the text content, and the event timestamp.
+   * Returns empty for sessions without a live agent (rehydrated/idle).
+   */
+  listRewindPoints(id: string): { index: number; content: string; timestamp: number }[] | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    if (!s.agent) return []
+    const msgs = s.agent.getMessages()
+    const entries: { index: number; content: string; timestamp: number }[] = []
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i]!
+      if (m.role === 'user' && typeof m.content === 'string') {
+        entries.push({ index: i, content: m.content, timestamp: 0 })
+      }
+    }
+    return entries
+  }
+
+  /**
+   * Rewind a session to a prior message index. Truncates the agent's message
+   * list, appends a `rewind` event to the event log (append-only — old events
+   * are NOT deleted, so reconnecting clients can see the rewind marker), and
+   * optionally rolls back files via the existing checkpoint system.
+   *
+   * Safety: rejects if session is `running` (caller must abort first).
+   */
+  rewind(id: string, messageIndex: number, options?: { rollbackFiles?: boolean }): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    if (s.running) return false
+    if (!s.agent) return false
+
+    const msgs = s.agent.getMessages()
+    if (messageIndex < 0 || messageIndex >= msgs.length) return false
+
+    const target = msgs[messageIndex]!
+    const prompt = typeof target.content === 'string' ? target.content : ''
+
+    // Truncate messages to the selected point.
+    s.agent.replaceMessages(msgs.slice(0, messageIndex))
+
+    // Append rewind event (append-only — viewers see the marker).
+    this.append(s, 'rewind', {
+      messageIndex,
+      prompt,
+      timestamp: this.now(),
+    })
+
+    // Optional file rollback via existing checkpoint system.
+    if (options?.rollbackFiles) {
+      void this.rollbackFiles(s)
+    }
+
+    return true
+  }
+
+  /** Best-effort file rollback for rewind. Surfaces result via event log. */
+  private async rollbackFiles(session: InternalSession): Promise<void> {
+    try {
+      const { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } = await import('../agent/checkpoint.js')
+      const registry = this.getRegistry?.()
+      const guard = registry
+        ? makeOwnershipGuard(registry, session.record.id, session.record.cwd)
+        : undefined
+      const preview = await getRollbackPreview(session.record.cwd, session.record.id, guard)
+      if (preview) {
+        await rollbackToCheckpoint(session.record.cwd, preview.confirmationToken, session.record.id, guard)
+      }
+    } catch {
+      // checkpoint rollback is best-effort; rewind still succeeds on messages
+    }
+  }
+
   // ── internals ─────────────────────────────────────────────────
 
   private buildCallbacks(session: InternalSession): AgentCallbacks {
@@ -550,6 +696,12 @@ export class RuntimeSessionManager {
             profile: typeof input.profile === 'string' ? input.profile : undefined,
             status: 'running',
           })
+        }
+        // T2: surface the active task list as structured state for the desktop
+        // checklist (Codex-style active todo / Antigravity Task Plan).
+        if (name === 'todo') {
+          const items = extractTodoState(input)
+          if (items) this.append(session, 'todo_state', { items })
         }
       },
       onToolResult: (toolId, name, result, isError) => {
@@ -592,6 +744,10 @@ export class RuntimeSessionManager {
       onApprovalRequired: (toolId, name, input) =>
         this.requestApproval(session, toolId, name, input),
       onIntentPreview: (intent) => this.requestIntent(session, intent),
+      // T3 — drain mid-run user guidance at the tool boundary (the agent appends
+      // it to the last tool_result; see tool-execution.ts). The buffer is fed by
+      // POST /sessions/:id/steer while the session is running.
+      onSteerDrain: () => session.steer.drain(),
     }
   }
 

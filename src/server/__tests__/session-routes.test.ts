@@ -5,6 +5,7 @@ import { buildSessionRoutes, classifyArtifact } from '../session-routes.js'
 import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -17,6 +18,8 @@ class FakeAgent implements ManagedAgent {
   abort() { this.resolveRun?.() }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(_msgs: OaiMessage[]): void {}
 }
 
 function setup() {

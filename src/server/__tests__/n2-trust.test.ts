@@ -6,6 +6,7 @@ import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { Artifact } from '../../artifact/types.js'
+import type { OaiMessage } from '../../api/oai-types.js'
 
 const TOKEN = 'tok'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -24,6 +25,8 @@ class FakeAgent implements ManagedAgent {
   abort() { this.resolveRun?.() }
   listArtifacts() { return this.artifacts }
   readArtifact() { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(_msgs: OaiMessage[]): void {}
 }
 
 function setup() {
