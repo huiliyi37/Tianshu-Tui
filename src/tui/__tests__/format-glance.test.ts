@@ -41,11 +41,28 @@ describe('formatGlanceBar', () => {
     assert.ok(!stripAnsi(high).includes('75%'), 'cache >= 50% should be hidden')
   })
 
-  it('shows tokens only when ratio >= 75%', () => {
-    const normal = formatGlanceBar({ width: 80, estimatedTokens: 50_000, maxTokens: 200_000 }, theme)
-    assert.ok(!stripAnsi(normal).includes('◧'), 'token ratio < 75% should be hidden')
-    const high = formatGlanceBar({ width: 80, estimatedTokens: 160_000, maxTokens: 200_000 }, theme)
+  it('tokens 常驻：即便 < 75% 也显示（G7 token/cost 常显）', () => {
+    const normal = formatGlanceBar({ width: 120, estimatedTokens: 50_000, maxTokens: 200_000 }, theme)
+    assert.ok(stripAnsi(normal).includes('◧'), 'token ratio < 75% 仍常驻显示')
+    assert.ok(stripAnsi(normal).includes('50k/200k'))
+    const high = formatGlanceBar({ width: 120, estimatedTokens: 160_000, maxTokens: 200_000 }, theme)
     assert.ok(stripAnsi(high).includes('◧'), 'token ratio >= 75% should show')
+  })
+
+  it('token 阈值色：<75% dim、≥75% warning、≥90% error', () => {
+    // 强制 hex theme（test 环境默认回退命名色无 truecolor SGR）
+    const hexTheme = { ...theme, dim: '#5b6270', warning: '#d6a35c', error: '#e08891' }
+    const mid = formatGlanceBar({ width: 120, estimatedTokens: 50_000, maxTokens: 200_000 }, hexTheme)
+    const warn = formatGlanceBar({ width: 120, estimatedTokens: 160_000, maxTokens: 200_000 }, hexTheme)
+    const err = formatGlanceBar({ width: 120, estimatedTokens: 190_000, maxTokens: 200_000 }, hexTheme)
+    assert.ok(mid.includes('38;2;91;98;112'), '25% → dim(#5b6270)')
+    assert.ok(warn.includes('38;2;214;163;92'), '80% → warning(#d6a35c)')
+    assert.ok(err.includes('38;2;224;136;145'), '95% → error(#e08891)')
+  })
+
+  it('窄终端降级：tokens 隐藏', () => {
+    const narrow = formatGlanceBar({ width: 50, narrow: true, estimatedTokens: 50_000, maxTokens: 200_000 }, theme)
+    assert.ok(!stripAnsi(narrow).includes('◧'), '窄终端隐藏 tokens')
   })
 
   it('adapts for narrow terminals', () => {

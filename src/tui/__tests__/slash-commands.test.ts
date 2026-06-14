@@ -61,6 +61,32 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
   }
 }
 
+describe('/context 占用明细', () => {
+  it('无参数输出含 cache 命中率与 cost 头（占用明细）', async () => {
+    let captured = ''
+    const ctx = makeCtx({
+      parts: ['/context'],
+      cacheHitRate: 0.8,
+      cost: 1.5,
+      session: {
+        getContextLedger: () => ({
+          tokenBudget: { compactionState: 'healthy', estimatedTokens: 50_000, maxTokens: 200_000 },
+          apiInvariantStatus: { brokenRounds: 0 },
+          rounds: [{}, {}],
+          anchors: [],
+        }),
+        getCompactEvents: () => [],
+      } as any,
+      pushStatic: (entry: LogEntry) => { captured += `${entry.content}\n` },
+    })
+    const handled = await handleSlashCommand(ctx)
+    assert.equal(handled, true)
+    assert.ok(captured.includes('Cache hit: 80%'), `应显示缓存命中率: ${captured}`)
+    assert.ok(captured.includes('Cost: $1.50'), `应显示 cost: ${captured}`)
+    assert.ok(captured.includes('50,000/200,000'), `应显示 token 占用: ${captured}`)
+  })
+})
+
 describe('resolveAppPromptInput', () => {
   it('returns non-slash input unchanged', async () => {
     assert.equal(resolveAppPromptInput('hello world', '/cwd'), 'hello world')

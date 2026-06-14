@@ -92,8 +92,9 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
 
-  // Zone 3: Model + anomaly-only metrics — minimal: model + cost + elapsed
-  // Cache/tokens only surface when anomalous (cache < 50%, tokens ratio ≥ 75%)
+  // Zone 3: Model + metrics — model + tokens(常驻) + cost + elapsed。
+  // tokens/cost 常驻（对标 Claude Code /context 的常显占用），窄终端降级隐藏 tokens；
+  // cache 仍仅在异常(< 50%)时浮出，避免正常态噪声。
   const parts: string[] = []
   if (input.modelName) {
     parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
@@ -104,8 +105,9 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
-  if (!narrow && ratio >= 0.75 && input.estimatedTokens !== undefined && input.maxTokens) {
-    const tokenColor = ratio >= 0.9 ? theme.error : theme.warning
+  // tokens 常驻：阈值色保留 — <75% dim（安静）、≥75% warning、≥90% error。
+  if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
+    const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.dim
     parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
