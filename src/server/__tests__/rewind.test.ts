@@ -182,8 +182,11 @@ test('#9 [反证 #2] SessionContext.replaceMessages resets turnCount + turnCache
   ctx.addUserMessage('msg3')
   ctx.addAssistantBlocks([{ type: 'text', text: 'resp3' }])
   ctx.recordTurnCache(3, { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80, cache_creation_input_tokens: 20 })
+  ctx.trackFileRead('src/a.ts')
+  ctx.trackFileModified('src/b.ts')
 
   assert.equal(ctx.getTurnCount(), 3, '3 user messages → turnCount 3')
+  assert.ok(ctx.getFilesRead().includes('src/a.ts'), 'filesRead tracks read files')
 
   // Rewind to turn 1: keep only first user+assistant pair
   const msgs = ctx.getMessages().slice(0, 2)
@@ -191,4 +194,6 @@ test('#9 [反证 #2] SessionContext.replaceMessages resets turnCount + turnCache
 
   assert.equal(ctx.getTurnCount(), 1, 'after rewind turnCount should be 1')
   assert.equal(ctx.getCacheHistory().length, 0, 'turnCacheHistory should be cleared')
+  assert.equal(ctx.getFilesRead().length, 0, 'filesRead should be cleared')
+  assert.equal(ctx.getFilesModified().length, 0, 'filesModified should be cleared')
 })
