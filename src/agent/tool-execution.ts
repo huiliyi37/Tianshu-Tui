@@ -89,6 +89,8 @@ export interface ToolExecutionDeps {
   getToolNameHistory?: () => string[]
   /** Record a named fingerprint (tool name + fingerprint) */
   recordToolNamedFingerprint?: (fingerprint: string, toolName: string) => void
+  /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
+  onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
 }
 
 export interface ToolExecBatchInput {
@@ -189,6 +191,7 @@ export class ToolExecutionController {
           sessionId: this.deps.getSessionId(),
           recordToolHistory: (name, input_, isError, content) =>
             this.deps.recordToolHistory(name, input_, isError, content),
+          onLeaveMark: this.deps.onLeaveMark,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(
@@ -252,6 +255,7 @@ export class ToolExecutionController {
           sessionId: this.deps.getSessionId(),
           recordToolHistory: (name, input_, isError, content) =>
             this.deps.recordToolHistory(name, input_, isError, content),
+          onLeaveMark: this.deps.onLeaveMark,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(

@@ -157,6 +157,8 @@ export interface ToolPipelineDeps {
   sessionTurnCount: number
   sessionId: string | undefined
   abortSignal?: AbortSignal
+  /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
+  onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -454,6 +456,7 @@ export async function executeToolUse(
     onWorkerActivity: callbacks.onDelegationActivity
       ? (activity) => callbacks.onDelegationActivity!(activity)
       : undefined,
+    onLeaveMark: deps.onLeaveMark,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     artifactStore: deps.artifactStore,

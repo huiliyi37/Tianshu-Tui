@@ -19,6 +19,7 @@ import { GIT_TOOL } from './git.js'
 import { GLOB_TOOL } from './glob.js'
 import { GREP_TOOL } from './grep.js'
 import { INSPECT_PROJECT_TOOL } from './inspect-project.js'
+import { LEAVE_MARK_TOOL } from './leave-mark.js'
 import { PLAN_CLOSE_TOOL } from './plan-close.js'
 import { PLAN_SUBMIT_TOOL } from './plan-submit.js'
 import { READ_FILE_TOOL } from './read-file.js'
@@ -75,6 +76,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(FILE_INFO_TOOL)
   registry.register(REQUEST_PATH_ACCESS_TOOL)
   registry.register(SKILL_TOOL)
+  registry.register(LEAVE_MARK_TOOL)
   if (options.browserTool) {
     registry.register(BROWSER_TOOL)
   }

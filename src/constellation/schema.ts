@@ -24,16 +24,22 @@ export type MilestoneType = 'feature' | 'fix' | 'refactor' | 'architecture' | 'm
 /** Honest verification status (瑶光 lens: green is not proof). */
 export type MilestoneVerification = 'verified' | 'blocked' | 'unverified' | 'failed'
 
-/** Void-identity mark an agent leaves on its work (see void-identity.ts). */
+/**
+ * The mark an agent leaves on its work (see void-identity.ts).
+ *
+ * Identity is *earned, not assigned*: the agent picks its own symbol when it
+ * departs and records a milestone. We do not compute or derive it from a
+ * trajectory hash — the trajectory is the agent's own to know. Recognition is
+ * emergent: next time it reads the starmap and sees its symbol, it knows it has
+ * returned.
+ */
 export interface AgentMark {
   /** Per-session ephemeral numeric id (e.g. 7281). */
   numericId: number
-  /** Deterministic symbol derived from the behavior fingerprint (同气相求). */
+  /** Agent's self-chosen symbol (any glyph). '·' = an unsigned/void journey. */
   symbol: string
-  /** Star domain active at close. */
+  /** Star domain active at departure. */
   domain: string
-  /** Stable behavior-fingerprint hash, comparable across sessions. */
-  signature: string
 }
 
 export interface Milestone {
@@ -140,7 +146,6 @@ function normalizeAgentMark(raw: unknown): AgentMark {
     numericId: num(r.numericId),
     symbol: str(r.symbol, '·'),
     domain: str(r.domain),
-    signature: str(r.signature),
   }
 }
 

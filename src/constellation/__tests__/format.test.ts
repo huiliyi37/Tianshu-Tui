@@ -6,7 +6,7 @@ import { createConstellation, type Milestone } from '../schema.js'
 function m(id: string, over: Partial<Milestone> = {}): Milestone {
   return {
     id, timestamp: 1000, sessionId: 's',
-    agentMark: { numericId: 7281, symbol: '⚘', domain: 'yaoguang', signature: 'sig' },
+    agentMark: { numericId: 7281, symbol: '⚘', domain: 'yaoguang' },
     domain: 'yaoguang', summary: `summary ${id}`, filesChanged: ['a.ts', 'b.ts'],
     type: 'feature', verificationStatus: 'verified', cycleClose: 'cc', tags: [],
     ...over,

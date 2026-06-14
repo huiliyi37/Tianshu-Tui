@@ -140,6 +140,8 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/plan-close', description: 'Preview or apply implementation plan closure' },
     { name: '/review', description: 'Trigger L2 adversarial code review on current changes' },
     { name: '/review max', description: 'Trigger L3 Review Squadron (5 inspectors) on current changes' },
+    { name: '/constellation', description: '星图 — Project blueprint & milestone chronicle' },
+    { name: '/leave', description: '离开仪式 — Leave your mark in the starmap' },
     { name: '/exit', description: 'Save session and exit' },
   ]
 }

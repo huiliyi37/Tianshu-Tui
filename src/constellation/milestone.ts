@@ -53,7 +53,12 @@ export function mapVerification(level: DeliveryVerificationLevel | undefined): M
   }
 }
 
-function collectFilesChanged(entries: readonly ChronicleEntry[]): string[] {
+/** Stable id for a session's single departure mark — idempotent per session. */
+export function departureMilestoneId(sessionId: string): string {
+  return shortHash(`${sessionId}:departure`)
+}
+
+export function collectFilesChanged(entries: readonly ChronicleEntry[]): string[] {
   const seen = new Set<string>()
   for (const e of entries) {
     for (const f of e.files ?? []) {
@@ -69,7 +74,7 @@ function oneLine(s: string, max = 140): string {
 }
 
 /** Derive a one-line summary, preferring the most recent meaningful entry. */
-function deriveSummary(entries: readonly ChronicleEntry[], type: MilestoneType, changedCount: number): string {
+export function deriveSummary(entries: readonly ChronicleEntry[], type: MilestoneType, changedCount: number): string {
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i]!
     if (e.type === 'milestone' && e.summary.trim()) return oneLine(e.summary)
@@ -106,6 +111,41 @@ export function extractMilestone(input: ExtractMilestoneInput): Milestone | null
     type,
     verificationStatus: mapVerification(input.taskSummary?.verificationStatus),
     cycleClose: input.cycleClose,
+    tags: input.tags ?? [],
+  }
+}
+
+export interface DepartureMilestoneInput {
+  sessionId: string
+  agentMark: AgentMark
+  domain: string
+  /** One-line summary (agent-supplied on explicit leave, derived for anonymous). */
+  summary: string
+  filesChanged?: string[]
+  type?: MilestoneType
+  tags?: string[]
+  verificationStatus?: DeliveryVerificationLevel
+  cycleClose?: string
+  now?: number
+}
+
+/**
+ * Build the single departure mark for a session — always recorded (no noise
+ * gate), idempotent by sessionId so the explicit-leave path, the user `/leave`
+ * path and the anonymous safety net never produce duplicates.
+ */
+export function buildDepartureMilestone(input: DepartureMilestoneInput): Milestone {
+  return {
+    id: departureMilestoneId(input.sessionId),
+    timestamp: input.now ?? Date.now(),
+    sessionId: input.sessionId,
+    agentMark: input.agentMark,
+    domain: input.domain,
+    summary: input.summary.replace(/\s+/g, ' ').trim() || 'departed',
+    filesChanged: input.filesChanged ?? [],
+    type: input.type ?? 'milestone',
+    verificationStatus: mapVerification(input.verificationStatus),
+    cycleClose: input.cycleClose ?? '',
     tags: input.tags ?? [],
   }
 }

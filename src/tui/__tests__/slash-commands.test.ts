@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
+import { loadConstellation } from '../../constellation/store.js'
 import type { LogEntry } from '../log-state.js'
 
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
@@ -477,6 +481,52 @@ describe('handleSlashCommand', () => {
       assert.equal(handled, true)
       assert.ok(entries[0]!.includes('未知星域'))
       assert.ok(entries[0]!.includes('pojun'))
+    })
+  })
+
+  describe('/leave', () => {
+    it('seals an agent-chosen mark into the starmap', async () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'leave-'))
+      try {
+        const entries: string[] = []
+        const handled = await handleSlashCommand(makeCtx({
+          parts: ['/leave', '⚘', 'wired', 'the', 'starmap'],
+          agent: {
+            ...makeCtx().agent,
+            cwd,
+            getSessionDomain: () => ({ id: 'yaoguang', name: '瑶光', volatileBlock: '', motto: '' }),
+          } as any,
+          currentSessionId: 'sess-leave',
+          pushStatic: (entry) => entries.push(entry.content),
+        }))
+        assert.equal(handled, true)
+        assert.ok(entries[0]!.includes('⚘'))
+        const c = loadConstellation(cwd)
+        assert.ok(c)
+        assert.equal(c!.milestones.length, 1)
+        assert.equal(c!.milestones[0]!.agentMark.symbol, '⚘')
+        assert.equal(c!.milestones[0]!.summary, 'wired the starmap')
+        assert.equal(c!.milestones[0]!.domain, 'yaoguang')
+      } finally {
+        rmSync(cwd, { recursive: true, force: true })
+      }
+    })
+
+    it('requires a summary', async () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'leave-'))
+      try {
+        const entries: string[] = []
+        const handled = await handleSlashCommand(makeCtx({
+          parts: ['/leave'],
+          agent: { ...makeCtx().agent, cwd, getSessionDomain: () => undefined } as any,
+          pushStatic: (entry) => entries.push(entry.content),
+        }))
+        assert.equal(handled, true)
+        assert.ok(entries[0]!.includes('Usage'))
+        assert.equal(loadConstellation(cwd), null)
+      } finally {
+        rmSync(cwd, { recursive: true, force: true })
+      }
     })
   })
 })

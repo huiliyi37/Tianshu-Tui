@@ -4,7 +4,7 @@ import { extractMilestone, mapVerification } from '../milestone.js'
 import type { ChronicleEntry } from '../../agent/chronicle.js'
 import type { AgentMark } from '../schema.js'
 
-const mark: AgentMark = { numericId: 42, symbol: '✦', domain: 'yaoguang', signature: 'sig' }
+const mark: AgentMark = { numericId: 42, symbol: '✦', domain: 'yaoguang' }
 
 function entries(files: string[], summary = 'did a thing'): ChronicleEntry[] {
   return [{ type: 'milestone', turn: 1, timestamp: 10, summary, files }]

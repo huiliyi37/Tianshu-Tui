@@ -23,7 +23,7 @@ function milestone(id: string, ts = 1): Milestone {
     id,
     timestamp: ts,
     sessionId: 's',
-    agentMark: { numericId: 1, symbol: '✦', domain: '', signature: 'sig' },
+    agentMark: { numericId: 1, symbol: '✦', domain: '' },
     domain: '',
     summary: `m-${id}`,
     filesChanged: ['a.ts'],

@@ -142,6 +142,7 @@ return new ToolExecutionController({
       getSessionId: () => self.config.sessionId,
       addToolResults: results => { self.session.addToolResults(results) },
       recordToolHistory: (name, input, isError, content) => self.recordToolHistory(name, input, isError, content),
+      onLeaveMark: mark => self.captureLeaveMark(mark),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),
       requestThetaCheck: reason => { self.requestThetaCheck(reason) },
       getAutoReasoning: () => self.config.autoReasoning ?? false,

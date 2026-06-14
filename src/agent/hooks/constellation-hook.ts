@@ -1,20 +1,28 @@
 /**
- * Constellation post-session hook — auto-records one milestone per session.
+ * Constellation post-session hook — 主控 seals the session's departure mark.
  *
- * Mirrors the Songline hook's shape: pure post-session side effect, opt-in,
- * never mutates prompt state or runs during turns (cache-safe by construction).
- * Reuses the deterministic cycle_close hash, the TaskLedger summary (honest
- * verification), and — when available — the behavior fingerprint to stamp a
- * stable agent mark.
+ * Two paths, both producing the single idempotent departure milestone for the
+ * session:
+ *  1. The agent left a mark (leave_mark tool) → record it with the agent's
+ *     self-chosen symbol + summary. Identity is earned, not assigned.
+ *  2. Safety net — the agent did real work but left no mark → record an
+ *     unsigned journey (symbol '·') so the starmap keeps growing.
+ *
+ * Pure post-session side effect, opt-in, never mutates prompt state or runs
+ * during turns (cache-safe by construction).
  */
 import type { PostSessionRuntimeHook } from '../runtime-hooks.js'
 import type { TaskLedgerSummary } from '../task-ledger.js'
 import type { ChronicleEntry } from '../chronicle.js'
-import type { RetrospectFingerprint } from '../retrospect-fingerprint.js'
+import type { LeaveMarkInput } from '../../tools/types.js'
 import { createCycleClose } from '../songline.js'
 import { appendMilestone } from '../../constellation/store.js'
-import { extractMilestone } from '../../constellation/milestone.js'
-import { generateVoidIdentity, toAgentMark } from '../void-identity.js'
+import {
+  buildDepartureMilestone,
+  collectFilesChanged,
+  deriveSummary,
+} from '../../constellation/milestone.js'
+import { buildAgentMark, VOID_SYMBOL } from '../void-identity.js'
 import type { MilestoneType } from '../../constellation/schema.js'
 
 export interface ConstellationHookDeps {
@@ -22,12 +30,13 @@ export interface ConstellationHookDeps {
   enabled: boolean
   cwd: string
   sessionId: string
-  getTaskSummary: () => TaskLedgerSummary | null
+  /** Agent's self-chosen departure mark, if it left one (leave_mark tool). */
+  getPendingMark?: () => LeaveMarkInput | null
+  getTaskSummary?: () => TaskLedgerSummary | null
   getChronicleEntries?: () => readonly ChronicleEntry[]
   getDomainId?: () => string | null | undefined
-  getFingerprint?: () => RetrospectFingerprint | null
+  /** Minimum changed files for the anonymous safety net to fire. Default 1. */
   minFiles?: number
-  type?: MilestoneType
   now?: () => number
 }
 
@@ -38,32 +47,49 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
     async run() {
       if (!deps.enabled) return
       try {
-        const summary = deps.getTaskSummary()
-        if (!summary) return
-
         const now = deps.now?.() ?? Date.now()
         const domain = deps.getDomainId?.() ?? ''
         const entries = deps.getChronicleEntries?.() ?? []
-        const cycleClose = createCycleClose(summary)
-        const identity = generateVoidIdentity({
-          sessionId: deps.sessionId,
-          fingerprint: deps.getFingerprint?.() ?? null,
-          domain: domain || undefined,
-        })
+        const summary = deps.getTaskSummary?.() ?? null
+        const cycleClose = summary ? createCycleClose(summary) : ''
+        const pending = deps.getPendingMark?.() ?? null
 
-        const milestone = extractMilestone({
+        if (pending) {
+          // The agent left its own mark — seal it as the identity anchor.
+          const milestone = buildDepartureMilestone({
+            sessionId: deps.sessionId,
+            agentMark: buildAgentMark({ symbol: pending.symbol, domain }),
+            domain,
+            summary: pending.summary,
+            filesChanged: collectFilesChanged(entries),
+            type: pending.type as MilestoneType | undefined,
+            tags: pending.tags,
+            verificationStatus: summary?.verificationStatus,
+            cycleClose,
+            now,
+          })
+          appendMilestone(deps.cwd, milestone, now)
+          return
+        }
+
+        // Safety net: no mark left. Record an unsigned journey only if the
+        // session actually touched files (noise gate).
+        const filesChanged = collectFilesChanged(entries)
+        const wrote = summary?.writeFileCount ?? filesChanged.length
+        const minFiles = deps.minFiles ?? 1
+        if (wrote < minFiles) return
+
+        const milestone = buildDepartureMilestone({
           sessionId: deps.sessionId,
-          agentMark: toAgentMark(identity, domain),
+          agentMark: buildAgentMark({ symbol: VOID_SYMBOL, domain }),
           domain,
-          chronicleEntries: entries,
-          taskSummary: summary,
+          summary: deriveSummary(entries, 'milestone', filesChanged.length),
+          filesChanged,
+          type: 'milestone',
+          verificationStatus: summary?.verificationStatus,
           cycleClose,
-          type: deps.type,
-          minFiles: deps.minFiles,
           now,
         })
-        if (!milestone) return
-
         appendMilestone(deps.cwd, milestone, now)
       } catch {
         // Post-session side effect must never affect the session outcome.

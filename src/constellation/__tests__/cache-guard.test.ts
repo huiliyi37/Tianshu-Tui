@@ -32,6 +32,28 @@ test('constellation hook runs only in the postSession phase', () => {
   assert.equal(hook.phase, 'postSession')
 })
 
+test('agent-left mark is sealed with its self-chosen symbol', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
+  try {
+    const hook = createConstellationRuntimeHook({
+      enabled: true, cwd, sessionId: 'sess',
+      getPendingMark: () => ({ symbol: '⚘', summary: 'wired the starmap', type: 'feature' }),
+      getTaskSummary: () => summary({ writeFileCount: 3 }),
+      getChronicleEntries: () => [{ type: 'milestone', turn: 1, timestamp: 1, summary: 'noise', files: ['a.ts'] }],
+      now: () => 5000,
+    })
+    await hook.run({} as never)
+    const c = loadConstellation(cwd)
+    assert.ok(c)
+    assert.equal(c!.milestones.length, 1)
+    assert.equal(c!.milestones[0]!.agentMark.symbol, '⚘')
+    assert.equal(c!.milestones[0]!.summary, 'wired the starmap')
+    assert.equal(c!.milestones[0]!.type, 'feature')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
 test('disabled hook is inert (no file written)', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
   try {
@@ -45,7 +67,7 @@ test('disabled hook is inert (no file written)', async () => {
   }
 })
 
-test('enabled hook records a milestone purely as a file side effect', async () => {
+test('safety net records an unsigned journey when no mark was left', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
   try {
     const hook = createConstellationRuntimeHook({
@@ -59,19 +81,36 @@ test('enabled hook records a milestone purely as a file side effect', async () =
     assert.ok(c)
     assert.equal(c!.milestones.length, 1)
     assert.equal(c!.milestones[0]!.summary, 'shipped X')
+    assert.equal(c!.milestones[0]!.agentMark.symbol, '·')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
-test('enabled hook never throws even when the summary source explodes', async () => {
+test('safety net is inert when the session changed no files', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
+  try {
+    const hook = createConstellationRuntimeHook({
+      enabled: true, cwd, sessionId: 'sess',
+      getTaskSummary: () => summary({ writeFileCount: 0 }),
+      getChronicleEntries: () => [],
+      now: () => 5000,
+    })
+    await hook.run({} as never)
+    assert.equal(existsSync(constellationPath(cwd)), false)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('enabled hook never throws even when a source explodes', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
   try {
     const hook = createConstellationRuntimeHook({
       enabled: true, cwd, sessionId: 's',
       getTaskSummary: () => { throw new Error('boom') },
     })
-    await assert.doesNotReject(hook.run({} as never))
+    await assert.doesNotReject(async () => { await hook.run({} as never) })
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

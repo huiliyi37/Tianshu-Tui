@@ -37,9 +37,9 @@ import {
   appendMilestone,
 } from '../constellation/store.js'
 import { formatConstellationView, formatConstellationHistory } from '../constellation/format.js'
-import { extractMilestone } from '../constellation/milestone.js'
+import { extractMilestone, buildDepartureMilestone } from '../constellation/milestone.js'
 import { shortHash } from '../constellation/schema.js'
-import { generateVoidIdentity, toAgentMark } from '../agent/void-identity.js'
+import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -59,6 +59,7 @@ const HELP_TEXT = `Available commands:
 /memory [text|add|search|forget] — Session memory entries
 /mission — Show current task contract
 /constellation [view|init|update <summary>|history|shift <summary>] — Project blueprint & milestone chronicle
+/leave [symbol] <summary> — Leave your mark in the starmap as you depart
 /context [pin|claims|antibodies|conflicts|reload|export|import] — Context ledger
 /verify — Show verification status
 /evidence — Show last turn evidence summary
@@ -929,11 +930,11 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
           return true
         }
         const dirty = await collectDirtyFiles(cwd)
-        const identity = generateVoidIdentity({ sessionId: ctx.currentSessionId })
+        const domain = ctx.agent.getSessionDomain()?.id ?? ''
         const milestone = extractMilestone({
           sessionId: ctx.currentSessionId,
-          agentMark: toAgentMark(identity, ''),
-          domain: '',
+          agentMark: buildAgentMark({ symbol: VOID_SYMBOL, domain }),
+          domain,
           chronicleEntries: [{ type: 'milestone', turn: 0, timestamp: now, summary, files: dirty }],
           cycleClose: shortHash(`${ctx.currentSessionId}:${now}`),
           now,
@@ -965,6 +966,43 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
       // default: view
       pushStatic(createLogEntry({ type: 'system', content: formatConstellationView(c, { now }) }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/leave': {
+      // User-triggered departure ritual: seal a mark into the starmap now.
+      // First token may be a single-glyph symbol; the rest is the summary.
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const now = Date.now()
+      const rest = parts.slice(1)
+      let symbol = VOID_SYMBOL
+      let summaryParts = rest
+      if (rest.length > 0 && [...rest[0]!].length <= 2) {
+        symbol = rest[0]!
+        summaryParts = rest.slice(1)
+      }
+      const summary = summaryParts.join(' ').trim()
+      if (!summary) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /leave [symbol] <summary> — leave your mark in the starmap as you depart.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const domain = ctx.agent.getSessionDomain()?.id ?? ''
+      const dirty = await collectDirtyFiles(cwd)
+      const milestone = buildDepartureMilestone({
+        sessionId: ctx.currentSessionId,
+        agentMark: buildAgentMark({ symbol, domain }),
+        domain,
+        summary,
+        filesChanged: dirty,
+        now,
+      })
+      appendMilestone(cwd, milestone, now)
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `✶ Mark ${milestone.agentMark.symbol} sealed into the starmap.\n${milestone.summary}`,
+      }))
       setIsStreaming(false)
       return true
     }

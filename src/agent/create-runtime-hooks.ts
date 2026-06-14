@@ -34,7 +34,6 @@ import type { TelemetryWriter } from './telemetry-writer.js'
 import type { EvidenceState } from './evidence.js'
 import type { TaskLedgerSummary } from './task-ledger.js'
 import type { ChronicleEntry } from './chronicle.js'
-import type { RetrospectFingerprint } from './retrospect-fingerprint.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -89,8 +88,8 @@ export interface RuntimeHookDeps {
   constellationCwd?: string
   /** Optional chronicle entries source for milestone summary/files. */
   getChronicleEntries?: () => readonly ChronicleEntry[]
-  /** Optional behavior fingerprint for a stable, kin-recognisable agent mark. */
-  getConstellationFingerprint?: () => RetrospectFingerprint | null
+  /** Agent's self-chosen departure mark (leave_mark tool), recorded at close. */
+  getConstellationPendingMark?: () => import('../tools/types.js').LeaveMarkInput | null
 
   // ── Anti-anchoring (explicit opt-in, prompt-flow intervention) ──
   /** Explicit opt-in for anti-anchoring harness hooks. Default: disabled. */
@@ -227,15 +226,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     }))
   }
 
-  if (deps.constellationEnabled && deps.constellationCwd && deps.sessionId && deps.getTaskSummary) {
+  if (deps.constellationEnabled && deps.constellationCwd && deps.sessionId) {
     hooks.push(createConstellationRuntimeHook({
       enabled: true,
       cwd: deps.constellationCwd,
       sessionId: deps.sessionId,
+      getPendingMark: deps.getConstellationPendingMark,
       getTaskSummary: deps.getTaskSummary,
       getChronicleEntries: deps.getChronicleEntries,
       getDomainId: deps.getDomainId,
-      getFingerprint: deps.getConstellationFingerprint,
     }))
   }
 

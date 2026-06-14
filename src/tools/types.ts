@@ -19,11 +19,26 @@ export interface DelegationActivity {
   progressLine?: string
 }
 
+/**
+ * An agent's self-chosen departure mark, captured by the `leave_mark` tool and
+ * recorded by 主控 (the post-session hook) as one constellation milestone.
+ */
+export interface LeaveMarkInput {
+  /** Agent's self-chosen symbol (any glyph). */
+  symbol: string
+  /** One-line summary of the journey. */
+  summary: string
+  type?: 'feature' | 'fix' | 'refactor' | 'architecture' | 'milestone'
+  tags?: string[]
+}
+
 export interface ToolCallParams {
   input: Record<string, unknown>
   toolUseId: string
   cwd: string
   onOutput?: (chunk: string) => void
+  /** Capture an agent's departure mark for 主控 to record at session close. */
+  onLeaveMark?: (mark: LeaveMarkInput) => void
   /** T4: structured per-worker delegation updates (subagent panel). Optional —
    *  set by the tool pipeline; absent in non-server contexts (no-op). */
   onWorkerActivity?: (activity: DelegationActivity) => void

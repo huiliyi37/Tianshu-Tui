@@ -198,6 +198,9 @@ export class AgentLoop {
   private lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private sessionDomain: ActiveStarDomain | null | undefined
+  /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
+   *  constellation post-session hook. Null until the agent leaves a mark. */
+  private pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
   /** Session-local affordance adaptations — per-session, never mutates global registry */
   private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
@@ -390,8 +393,9 @@ export class AgentLoop {
         ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
         : undefined,
       // ── Project Constellation (post-session milestone capture, cache-safe) ──
-      constellationEnabled: this.config.taskLedger !== undefined && this.config.sessionId !== undefined,
+      constellationEnabled: this.config.sessionId !== undefined,
       constellationCwd: this.cwd,
+      getConstellationPendingMark: () => this.pendingLeaveMark,
       // ── HEARTH observe (pure diagnostic) ──
       hearthObserveEnabled: this.config.hearthObserveEnabled,
       getAnchorGraph: () => this.buildAnchorGraph(),
@@ -604,6 +608,16 @@ export class AgentLoop {
       return buildRuntimeSnapshot(this, extra);
   }
 
+
+  /** Capture an agent's departure mark — sealed into the starmap at session close. */
+  captureLeaveMark(mark: import('../tools/types.js').LeaveMarkInput): void {
+    this.pendingLeaveMark = mark
+  }
+
+  /** The pending departure mark, if the agent left one this session. */
+  getPendingLeaveMark(): import('../tools/types.js').LeaveMarkInput | null {
+    return this.pendingLeaveMark
+  }
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
       recordToolHistory(this, name, input, isError, result);

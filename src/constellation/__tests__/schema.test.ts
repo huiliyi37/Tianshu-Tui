@@ -38,7 +38,7 @@ test('normalizeConstellation drops malformed milestones but keeps valid ones', (
     name: 'P',
     createdAt: 1,
     milestones: [
-      { id: 'good', timestamp: 2, sessionId: 's', summary: 'x', type: 'feature', verificationStatus: 'verified', filesChanged: ['a.ts'], agentMark: { numericId: 1, symbol: '✦', domain: '', signature: 'sig' }, cycleClose: 'cc', tags: [] },
+      { id: 'good', timestamp: 2, sessionId: 's', summary: 'x', type: 'feature', verificationStatus: 'verified', filesChanged: ['a.ts'], agentMark: { numericId: 1, symbol: '✦', domain: '' }, cycleClose: 'cc', tags: [] },
       { timestamp: 3 }, // no id → dropped
       'garbage',
     ],
