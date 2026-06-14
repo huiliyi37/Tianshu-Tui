@@ -53,7 +53,11 @@ import { renderRewind, type RewindData } from '../format/rewind.js'
 import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
 import { searchHistory, loadHistory } from '../history.js'
 
-function formatElapsedShort(ms: number): string {
+// NOTE: exported for the mid-tui decomposition safety net. These are pure leaf
+// helpers slated to move into a TUI format/util module when TuiApp is split;
+// `app-core.test.ts` pins their behavior so the extraction stays observably
+// identical. (The full class still needs a TTY harness — deferred to that work.)
+export function formatElapsedShort(ms: number): string {
   if (ms < 60000) return `${Math.floor(ms / 1000)}s`
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
@@ -61,7 +65,7 @@ function formatElapsedShort(ms: number): string {
 }
 
 /** Truncate a string (possibly containing ANSI) to fit within maxWidth display columns. */
-function truncateToWidth(text: string, maxWidth: number): string {
+export function truncateToWidth(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return ''
   if (stringWidth(text) <= maxWidth) return text
   let out = ''
