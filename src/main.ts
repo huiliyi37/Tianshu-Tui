@@ -93,6 +93,13 @@ async function main() {
     return
   }
 
+  // rivet serve [--port N] — HTTP+SSE Runtime API (localhost sidecar for 桌面版)
+  if (args[0] === 'serve') {
+    const { serveCommand } = await import('./server/serve.js')
+    serveCommand(args.slice(1))
+    return
+  }
+
   // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
   const isHeadless = args.includes('-p') || args.includes('--print')
 

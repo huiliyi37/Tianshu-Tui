@@ -52,19 +52,25 @@ export function createRouter(routes: Record<string, RouteHandler>) {
     reqHeaders?: Record<string, string>,
     res?: ServerResponse,
   ): Promise<RouteResponse> => {
-    // Strip query string from path
-    const cleanPath = path.split('?')[0] ?? path
+    // Strip query string from path, but surface query params to handlers so
+    // routes like `GET /sessions/:id/events?since=N` can read them.
+    const qIdx = path.indexOf('?')
+    const cleanPath = qIdx >= 0 ? path.slice(0, qIdx) : path
+    const query: Record<string, string> = {}
+    if (qIdx >= 0) {
+      for (const [k, v] of new URLSearchParams(path.slice(qIdx + 1))) query[k] = v
+    }
 
     // Try exact match first
     const exactKey = method + ' ' + cleanPath
     const exactHandler = exact.get(exactKey)
-    if (exactHandler) return await exactHandler(body, undefined, reqHeaders, res)
+    if (exactHandler) return await exactHandler(body, query, reqHeaders, res)
 
     // Try parameterized routes
     for (const { pattern, paramNames, handler } of parameterized) {
       const match = cleanPath.match(pattern)
       if (match) {
-        const params: Record<string, string> = {}
+        const params: Record<string, string> = { ...query }
         for (let i = 0; i < paramNames.length; i++) {
           params[paramNames[i]!] = match[i + 1]!
         }
