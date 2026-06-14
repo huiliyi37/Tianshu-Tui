@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "天枢桌面默认能力集：主窗口可调用 core 命令。",
   "windows": ["main"],
-  "permissions": ["core:default", "notification:default"]
+  "permissions": ["core:default", "notification:default", "dialog:default"]
 }

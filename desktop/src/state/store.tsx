@@ -1,10 +1,18 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react'
-import { loadActiveSessionId, saveActiveSessionId } from '../lib/persist'
+import {
+  loadActiveProject,
+  loadActiveSessionId,
+  saveActiveProject,
+  saveActiveSessionId,
+} from '../lib/persist'
 
-export type Surface = 'workspace' | 'inbox' | 'schedule'
+// Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
+// automations (was schedule), attention (was inbox), settings.
+export type Surface = 'workspace' | 'automations' | 'attention' | 'settings'
 
 export interface UiState {
   activeSessionId: string | null
+  activeProject: string | null // project cwd
   surface: Surface
   newSessionOpen: boolean
   error: string | null
@@ -12,6 +20,7 @@ export interface UiState {
 
 type UiAction =
   | { type: 'setActive'; id: string | null }
+  | { type: 'setProject'; cwd: string | null }
   | { type: 'setSurface'; surface: Surface }
   | { type: 'openNew'; open: boolean }
   | { type: 'setError'; error: string | null }
@@ -20,6 +29,9 @@ function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case 'setActive':
       return { ...state, activeSessionId: action.id }
+    case 'setProject':
+      // Switching project drops the active thread; it belongs to another project.
+      return { ...state, activeProject: action.cwd, activeSessionId: null }
     case 'setSurface':
       return { ...state, surface: action.surface }
     case 'openNew':
@@ -37,6 +49,7 @@ const DispatchCtx = createContext<React.Dispatch<UiAction> | null>(null)
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, undefined, () => ({
     activeSessionId: loadActiveSessionId(),
+    activeProject: loadActiveProject(),
     surface: 'workspace' as Surface,
     newSessionOpen: false,
     error: null,
@@ -45,6 +58,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveActiveSessionId(state.activeSessionId)
   }, [state.activeSessionId])
+
+  useEffect(() => {
+    saveActiveProject(state.activeProject)
+  }, [state.activeProject])
 
   return (
     <StateCtx.Provider value={state}>

@@ -1,0 +1,121 @@
+/*
+ * Design tokens — Codex-style neutral design language (P0).
+ *
+ * Two themes via [data-theme="dark"|"light"] on <html> (lib/theme.ts).
+ * Semantic color names are stable across themes so component CSS never hardcodes
+ * a hex. The single `--accent` is the one knob a later CVM star-domain can
+ * override per-scope to tint the whole UI (see ROADMAP CVM seam).
+ */
+
+:root {
+  /* Typography */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --leading: 1.55;
+  --weight-normal: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Spacing scale (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 90ms;
+  --dur: 140ms;
+
+  /* Z-index */
+  --z-modal: 50;
+  --z-toast: 60;
+}
+
+/* ── Dark (default) ─────────────────────────────────────────────── */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0d0d10;
+  --panel: #151519;
+  --panel-2: #1c1c22;
+  --panel-3: #232329;
+  --border: #2a2a32;
+  --border-strong: #3a3a44;
+
+  --text: #e7e7ec;
+  --text-strong: #f6f6f9;
+  --muted: #989aa6;
+  --faint: #6c6e7a;
+
+  --accent: #7c8cff;
+  --accent-hover: #95a2ff;
+  --accent-fg: #0d0d10;
+  --accent-soft: rgba(124, 140, 255, 0.14);
+
+  --success: #43c463;
+  --success-soft: rgba(67, 196, 99, 0.14);
+  --warning: #e0a93a;
+  --warning-soft: rgba(224, 169, 58, 0.14);
+  --error: #f76b6b;
+  --error-soft: rgba(247, 107, 107, 0.13);
+  --info: #5aa9ff;
+  --info-soft: rgba(90, 169, 255, 0.13);
+
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* ── Light ──────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --panel: #f7f7f8;
+  --panel-2: #f0f0f2;
+  --panel-3: #e8e8ec;
+  --border: #e3e3e8;
+  --border-strong: #d2d2da;
+
+  --text: #1b1b21;
+  --text-strong: #0c0c10;
+  --muted: #6a6a76;
+  --faint: #9a9aa6;
+
+  --accent: #5462f0;
+  --accent-hover: #4150e0;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(84, 98, 240, 0.12);
+
+  --success: #1a7f37;
+  --success-soft: rgba(26, 127, 55, 0.12);
+  --warning: #9a6700;
+  --warning-soft: rgba(154, 103, 0, 0.12);
+  --error: #cf222e;
+  --error-soft: rgba(207, 34, 46, 0.10);
+  --info: #0969da;
+  --info-soft: rgba(9, 105, 218, 0.10);
+
+  --overlay: rgba(20, 20, 28, 0.40);
+  --shadow-sm: 0 1px 2px rgba(20, 20, 40, 0.08);
+  --shadow-md: 0 6px 20px rgba(20, 20, 40, 0.12);
+  --shadow-lg: 0 16px 48px rgba(20, 20, 40, 0.16);
+}

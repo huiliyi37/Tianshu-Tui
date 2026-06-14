@@ -13,8 +13,8 @@ export function InboxSurface() {
 
   return (
     <div className="single-pane">
-      <div className="panel-header"><span>收件箱</span></div>
-      {items.length === 0 && <div className="empty">没有需要关注的会话</div>}
+      <div className="panel-header"><span>需处理</span></div>
+      {items.length === 0 && <div className="empty">没有需要关注的线程</div>}
       {items.map((s) => (
         <div
           key={s.id}

@@ -3,9 +3,10 @@ import { useCreateSchedule, useDeleteSchedule, usePauseSchedule, useSchedule } f
 
 type TriggerType = 'interval' | 'cron' | 'oneshot'
 
-// N3 — CRUD over the CronScheduler. A due task fires through CronWiring →
-// TaskRegistry → SessionRuntimePool, appearing as a visible session in 工作台.
-export function ScheduleSurface() {
+// Automations (P3, was 定时任务). CRUD over the CronScheduler — a due task fires
+// through CronWiring → TaskRegistry → SessionRuntimePool, appearing as a visible
+// thread in 工作台.
+export function AutomationsSurface() {
   const schedule = useSchedule()
   const create = useCreateSchedule()
   const pause = usePauseSchedule()
@@ -30,7 +31,7 @@ export function ScheduleSurface() {
 
   return (
     <div className="single-pane">
-      <div className="panel-header"><span>定时任务</span></div>
+      <div className="panel-header"><span>自动化</span></div>
 
       <div className="schedule-form">
         <textarea
@@ -53,7 +54,7 @@ export function ScheduleSurface() {
         {create.isError && <div className="meta warn">{(create.error as Error).message}</div>}
       </div>
 
-      {(schedule.data ?? []).length === 0 && <div className="empty">还没有定时任务</div>}
+      {(schedule.data ?? []).length === 0 && <div className="empty">还没有自动化任务</div>}
       {(schedule.data ?? []).map((t) => (
         <div key={t.id} className="schedule-card">
           <div className="title">{t.prompt}</div>

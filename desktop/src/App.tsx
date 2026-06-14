@@ -1,58 +1,53 @@
-import { useHealth } from './state/queries'
+import { useHealth, useSessions, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
+import { Rail } from './components/Rail'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { InboxSurface } from './surfaces/InboxSurface'
-import { ScheduleSurface } from './surfaces/ScheduleSurface'
+import { AutomationsSurface } from './surfaces/AutomationsSurface'
+import { SettingsSurface } from './surfaces/SettingsSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
-import { useCreateSession } from './state/queries'
 
 export function App() {
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
+  const sessions = useSessions()
   const createSession = useCreateSession()
 
   const sidecarDown = health.isError
+  const attentionCount = (sessions.data ?? []).filter(
+    (s) => s.pendingApprovals > 0 || s.status === 'failed',
+  ).length
 
   return (
     <div className="shell">
-      <nav className="topnav">
-        <div className="brand">天枢 · Tianshu</div>
-        <div className="nav-tabs">
-          {(['workspace', 'inbox', 'schedule'] as const).map((s) => (
-            <button
-              key={s}
-              className={`nav-tab ${ui.surface === s ? 'active' : ''}`}
-              onClick={() => dispatch({ type: 'setSurface', surface: s })}
-            >
-              {s === 'workspace' ? '工作台' : s === 'inbox' ? '收件箱' : '定时任务'}
-            </button>
-          ))}
-        </div>
-        <div className="health">
-          {sidecarDown ? (
-            <span className="health-bad">● sidecar 离线，重连中…</span>
-          ) : (
-            <span className="health-ok">
-              ● {health.data?.runningCount ?? 0} 运行 / {health.data?.sessionCount ?? 0} 会话
-            </span>
-          )}
-        </div>
-      </nav>
+      <Rail
+        surface={ui.surface}
+        onSurface={(s) => dispatch({ type: 'setSurface', surface: s })}
+        attentionCount={attentionCount}
+      />
 
-      {ui.error && <div className="banner error">{ui.error}</div>}
+      <div className="main">
+        {sidecarDown && (
+          <div className="banner error">sidecar 离线，重连中…</div>
+        )}
+        {ui.error && <div className="banner error">{ui.error}</div>}
 
-      <div className="surface">
-        {ui.surface === 'workspace' && <WorkspaceSurface />}
-        {ui.surface === 'inbox' && <InboxSurface />}
-        {ui.surface === 'schedule' && <ScheduleSurface />}
+        <div className="surface">
+          {ui.surface === 'workspace' && <WorkspaceSurface />}
+          {ui.surface === 'automations' && <AutomationsSurface />}
+          {ui.surface === 'attention' && <InboxSurface />}
+          {ui.surface === 'settings' && <SettingsSurface />}
+        </div>
       </div>
 
       {ui.newSessionOpen && (
         <NewSessionDialog
+          defaultCwd={ui.activeProject}
           onCreate={async (input) => {
             try {
               const rec = await createSession.mutateAsync(input)
+              if (rec.cwd) dispatch({ type: 'setProject', cwd: rec.cwd })
               dispatch({ type: 'setActive', id: rec.id })
               dispatch({ type: 'setSurface', surface: 'workspace' })
               dispatch({ type: 'openNew', open: false })

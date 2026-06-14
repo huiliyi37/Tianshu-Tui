@@ -133,6 +133,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![runtime_info])
         .setup(|app| {
             // Spawn inside setup so the sidecar entry can be resolved against the

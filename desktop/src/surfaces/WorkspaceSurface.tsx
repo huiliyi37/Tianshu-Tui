@@ -4,12 +4,9 @@ import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, answerIntent } from '../runtime/client'
 import { notify } from '../lib/notify'
-import { SessionList } from '../components/SessionList'
-import { Conversation } from '../components/Conversation'
-import { ArtifactsPanel } from '../components/ArtifactsPanel'
-import { ApprovalModal } from '../components/ApprovalModal'
-import { IntentModal } from '../components/IntentModal'
-import { DelegationTree } from '../components/DelegationTree'
+import { ProjectSidebar } from './ProjectSidebar'
+import { ThreadView } from './ThreadView'
+import { ReviewPanel } from './ReviewPanel'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -64,44 +61,35 @@ export function WorkspaceSurface() {
 
   return (
     <div className="workspace">
-      <SessionList
-        sessions={sessions.data ?? []}
-        activeId={activeId}
-        onSelect={(id) => dispatch({ type: 'setActive', id })}
-        onNew={() => dispatch({ type: 'openNew', open: true })}
-      />
+      <ProjectSidebar />
 
       <div className="conversation">
         {active ? (
-          <>
-            <Conversation
-              session={active}
-              blocks={view.blocks}
-              phase={view.phase}
-              onSend={handleSend}
-              onAbort={() => abortSession.mutate(active.id)}
-            />
-            <DelegationTree nodes={view.delegation} />
-          </>
+          <ThreadView
+            session={active}
+            view={view}
+            onSend={handleSend}
+            onAbort={() => abortSession.mutate(active.id)}
+          />
         ) : (
-          <div className="empty">
-            打开就是「和 agent 对话」。左侧新建会话，或选择一个正在跑的 agent。
+          <div className="empty thread-empty">
+            <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
+            <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
+              + 新线程
+            </button>
           </div>
         )}
       </div>
 
-      <ArtifactsPanel
+      <ReviewPanel
         sessionId={activeId}
         artifacts={artifacts.data ?? []}
+        pendingApproval={view.pendingApproval}
+        pendingIntent={view.pendingIntent}
+        onApproval={handleApproval}
+        onIntent={handleIntent}
         onFeedbackSent={() => sessions.refetch()}
       />
-
-      {view.pendingApproval && (
-        <ApprovalModal request={view.pendingApproval} onDecision={handleApproval} />
-      )}
-      {view.pendingIntent && (
-        <IntentModal request={view.pendingIntent} onDecision={handleIntent} />
-      )}
     </div>
   )
 }

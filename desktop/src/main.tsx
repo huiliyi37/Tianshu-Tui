@@ -3,7 +3,11 @@ import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './App'
 import { AppStateProvider } from './state/store'
+import { initTheme } from './lib/theme'
+import './styles/tokens.css'
 import './styles.css'
+
+initTheme()
 
 const queryClient = new QueryClient({
   defaultOptions: {
