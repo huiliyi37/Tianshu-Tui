@@ -106,7 +106,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
     parts.push(color(`◧ ${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, theme.dim))
   }
   if (input.cost !== undefined && input.cost > 0) {
-    parts.push(color(`${input.cost.toFixed(2)}`, theme.dim))
+    parts.push(color(`$${input.cost.toFixed(2)}`, theme.dim))
   }
   const dotSep = color(' · ', theme.dim)
   const zone3 = parts.join(dotSep)
