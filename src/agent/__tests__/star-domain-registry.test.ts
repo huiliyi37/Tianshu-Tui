@@ -10,9 +10,9 @@ import { StarDomainRegistry, starDomainRegistry } from '../star-domain-registry.
 const _require = createRequire(import.meta.url)
 
 describe('StarDomainRegistry — built-in domains', () => {
-  test('has all 7 built-in domains', () => {
+  test('has all 8 built-in domains', () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.getDomainIds().length, 7)
+    assert.equal(reg.getDomainIds().length, 8)
     for (const id of Object.keys(STAR_DOMAINS) as Array<keyof typeof STAR_DOMAINS>) {
       assert.ok(reg.has(id), `missing built-in domain: ${id}`)
       assert.equal(reg.get(id)!.isCustom, false)
@@ -65,7 +65,7 @@ describe('StarDomainRegistry — built-in domains', () => {
 
   test('list() returns all domains', () => {
     const reg = new StarDomainRegistry()
-    assert.equal(reg.list().length, 7)
+    assert.equal(reg.list().length, 8)
   })
 })
 
@@ -305,8 +305,8 @@ describe('starDomainRegistry singleton', () => {
     assert.ok(starDomainRegistry instanceof StarDomainRegistry)
   })
 
-  test('has the 7 built-in domains', () => {
-    assert.equal(starDomainRegistry.getDomainIds().length, 7)
+  test('has the 8 built-in domains', () => {
+    assert.equal(starDomainRegistry.getDomainIds().length, 8)
   })
 })
 

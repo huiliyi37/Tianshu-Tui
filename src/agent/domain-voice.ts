@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
@@ -20,6 +20,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   pojun: '破军',
   tianfu: '天府',
   tianliang: '天梁',
+  fu: '辅',
 }
 
 /**
@@ -94,6 +95,23 @@ const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
     ['最后验证中', '逐项核对交付标准'],
     ['正在分析', '逐条分析中'],
     ['测一下', '验收一下'],
+  ],
+  fu: [
+    // 辅 — quiet, precise, structural. A distiller who amplifies others.
+    ['准备制定方案', '先诊断认知场，再定蒸馏方向'],
+    ['开始修改', '开始调校'],
+    ['正在修复', '定位偏差源，校正中'],
+    ['代码修改完成', '调校完毕，等待涌现验证'],
+    ['测试全部通过', '认知场验证通过'],
+    ['运行测试验证', '验证蒸馏效果'],
+    ['准备交付结果', '蒸馏完成，交付'],
+    ['收到任务，开始分析', '收到，先看认知场全貌'],
+    ['可能遇到困难', '当前方法论密度需要重新评估'],
+    ['接近完成', '最后的涌现验证'],
+    ['继续执行中', '持续蒸馏中'],
+    ['最后验证中', '验证域间边界'],
+    ['正在分析', '诊断认知场中'],
+    ['测一下', '验证一下'],
   ],
 }
 
