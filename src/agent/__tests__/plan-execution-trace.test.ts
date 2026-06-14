@@ -8,6 +8,8 @@ import {
   serializeTrace,
   maxStepsForDepth,
   inferExpectedTools,
+  buildPlanSteps,
+  withPlanSteps,
   type PlanStep,
   type StepResult,
 } from '../plan-execution-trace.js'
@@ -296,5 +298,78 @@ describe('inferExpectedTools', () => {
   it('preserves custom baseTools', () => {
     const tools = inferExpectedTools('简单修改', ['edit_file', 'grep'])
     assert.deepEqual(tools, ['edit_file', 'grep'])
+  })
+})
+
+// ─── buildPlanSteps (U6/C1) ───────────────────────────────────
+
+describe('buildPlanSteps', () => {
+  it('maps descriptions to PlanStep with sequential ids and pending status', () => {
+    const steps = buildPlanSteps(['读取配置', '修改逻辑'], 'wiring')
+    assert.equal(steps.length, 2)
+    assert.equal(steps[0]!.id, 'step-1')
+    assert.equal(steps[1]!.id, 'step-2')
+    assert.equal(steps[0]!.description, '读取配置')
+    assert.ok(steps.every(s => s.status === 'pending'))
+  })
+
+  it('populates expectedTools via inferExpectedTools (LSP keyword → lsp_*)', () => {
+    const [step] = buildPlanSteps(['追踪 processPayment 的调用方'], 'unit')
+    assert.ok(step!.expectedTools.includes('lsp_find_references'))
+    assert.ok(step!.expectedTools.includes('lsp_goto_definition'))
+  })
+
+  it('non-LSP description gets only base tools', () => {
+    const [step] = buildPlanSteps(['修改配置文件'], 'unit')
+    assert.deepEqual(step!.expectedTools, ['read_file'])
+  })
+
+  it('caps step count at maxStepsForDepth (unit=3)', () => {
+    const steps = buildPlanSteps(['s1', 's2', 's3', 's4', 's5'], 'unit')
+    assert.equal(steps.length, 3)
+  })
+
+  it('caps step count at maxStepsForDepth (system=8)', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `s${i}`)
+    const steps = buildPlanSteps(ten, 'system')
+    assert.equal(steps.length, maxStepsForDepth('system'))
+  })
+
+  it('filters blank/whitespace descriptions before numbering', () => {
+    const steps = buildPlanSteps(['  ', '真步骤', '\t'], 'wiring')
+    assert.equal(steps.length, 1)
+    assert.equal(steps[0]!.id, 'step-1')
+    assert.equal(steps[0]!.description, '真步骤')
+  })
+
+  it('empty input yields empty steps', () => {
+    assert.deepEqual(buildPlanSteps([], 'system'), [])
+  })
+})
+
+// ─── withPlanSteps (U6/C1) ────────────────────────────────────
+
+describe('withPlanSteps', () => {
+  it('fills steps when trace is empty (no steps, no history)', () => {
+    const trace = createTrace('c1', 'wiring')
+    const steps = buildPlanSteps(['a', 'b'], 'wiring')
+    const filled = withPlanSteps(trace, steps)
+    assert.equal(filled.steps.length, 2)
+    assert.notEqual(filled, trace, 'returns a new trace (immutable)')
+  })
+
+  it('does not overwrite once steps exist', () => {
+    const trace = createTrace('c1', 'unit', [makeStep('step-1')])
+    const result = withPlanSteps(trace, buildPlanSteps(['x', 'y'], 'unit'))
+    assert.equal(result.steps.length, 1)
+    assert.equal(result, trace, 'returns the same trace unchanged')
+  })
+
+  it('does not overwrite once history exists (idempotent guard)', () => {
+    const base = createTrace('c1', 'unit')
+    const progressed = appendResult(base, makeResult('turn-1', 1))
+    const result = withPlanSteps(progressed, buildPlanSteps(['x', 'y'], 'unit'))
+    assert.equal(result.steps.length, 0)
+    assert.equal(result.history.length, 1)
   })
 })

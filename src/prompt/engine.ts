@@ -72,6 +72,8 @@ export class PromptEngine {
   private affordanceHint?: string | null
   private policyGuidance?: string | null
   private planCacheAdvisory?: string | null
+  /** U6: serialized PlanExecutionTrace appendix (survives compaction). */
+  private planTraceAppendix?: string | null
   private intentRetrievalRoute?: string | null
   private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
   private planMethodology?: import('../context/task-contract.js').PlanMethodology
@@ -243,7 +245,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -603,6 +605,11 @@ export class PromptEngine {
     this.planCacheAdvisory = advisory ?? undefined
   }
 
+  /** U6: set serialized PlanExecutionTrace appendix (rendered in dynamic appendix, survives compaction). */
+  setPlanTraceAppendix(appendix: string | null): void {
+    this.planTraceAppendix = appendix ?? undefined
+  }
+
   setIntentRetrievalRoute(route: string | null): void {
     this.intentRetrievalRoute = route ?? undefined
     this.invalidateFreshCache()
@@ -754,6 +761,7 @@ export class PromptEngine {
       affordanceHint: this.affordanceHint,
       policyGuidance: this.policyGuidance,
       planCacheAdvisory: this.planCacheAdvisory,
+      planTraceAppendix: this.planTraceAppendix,
       intentRetrievalRoute: this.intentRetrievalRoute,
       taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer),
       planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason),

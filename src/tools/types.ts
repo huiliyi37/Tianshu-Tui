@@ -50,6 +50,10 @@ export interface ToolCallParams {
   onOutput?: (chunk: string) => void
   /** Capture an agent's departure mark for 主控 to record at session close. */
   onLeaveMark?: (mark: LeaveMarkInput) => void
+  /** U6/C1: capture the goal decomposition (ordered step descriptions) produced
+   *  by the plan_steps tool during planning. The loop maps these into the active
+   *  PlanExecutionTrace. Absent in non-task / worker contexts → tool is a no-op. */
+  onPlanSteps?: (descriptions: string[]) => void
   /** T4: structured per-worker delegation updates (subagent panel). Optional —
    *  set by the tool pipeline; absent in non-server contexts (no-op). */
   onWorkerActivity?: (activity: DelegationActivity) => void

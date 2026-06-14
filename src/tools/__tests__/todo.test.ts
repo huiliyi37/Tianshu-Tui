@@ -211,3 +211,58 @@ describe('TODO_TOOL scope gate', () => {
   })
 })
 
+// ─── U6/C1: onPlanSteps callback (todo → PlanExecutionTrace seed) ──
+
+describe('TODO_TOOL onPlanSteps (U6/C1)', () => {
+  beforeEach(() => setTodos([]))
+
+  it('write invokes onPlanSteps with the ordered content array', async () => {
+    const captured: string[][] = []
+    await TODO_TOOL.execute({
+      input: {
+        action: 'write',
+        todos: [
+          { id: '1', content: '读取 loop.ts 理解现状', status: 'pending' },
+          { id: '2', content: '修改 detectDeviation', status: 'pending' },
+        ],
+      },
+      toolUseId: 'tu_1',
+      cwd: '/repo',
+      onPlanSteps: d => captured.push(d),
+    })
+    assert.equal(captured.length, 1)
+    assert.deepEqual(captured[0], ['读取 loop.ts 理解现状', '修改 detectDeviation'])
+  })
+
+  it('read does not invoke onPlanSteps', async () => {
+    let calls = 0
+    await TODO_TOOL.execute({
+      input: { action: 'read' },
+      toolUseId: 'tu_1',
+      cwd: '/repo',
+      onPlanSteps: () => { calls++ },
+    })
+    assert.equal(calls, 0)
+  })
+
+  it('empty todo list does not invoke onPlanSteps', async () => {
+    let calls = 0
+    await TODO_TOOL.execute({
+      input: { action: 'write', todos: [] },
+      toolUseId: 'tu_1',
+      cwd: '/repo',
+      onPlanSteps: () => { calls++ },
+    })
+    assert.equal(calls, 0)
+  })
+
+  it('write without onPlanSteps does not throw (no-op)', async () => {
+    const result = await TODO_TOOL.execute({
+      input: { action: 'write', todos: [{ id: '1', content: 'x', status: 'pending' }] },
+      toolUseId: 'tu_1',
+      cwd: '/repo',
+    })
+    assert.equal(result.isError, undefined)
+  })
+})
+

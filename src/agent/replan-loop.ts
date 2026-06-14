@@ -32,17 +32,14 @@ export interface ReplanContext {
 
 // ─── correctPlan ───────────────────────────────────────────────
 
-let stepCounter = 0
-function nextStepId(): string {
-  stepCounter++
-  return `replan-${stepCounter}`
-}
-
 /**
- * 重置步数计数器（测试用）。
+ * U6/D1: trace-local replan step id. Derived from the count of existing
+ * `replan-*` steps in this trace — no module-level mutable counter, so
+ * concurrent sessions/traces never interleave or reset each other's ids.
  */
-export function resetStepCounter(): void {
-  stepCounter = 0
+function nextStepId(trace: PlanExecutionTrace): string {
+  const existing = trace.steps.filter(s => s.id.startsWith('replan-')).length
+  return `replan-${existing + 1}`
 }
 
 /**
@@ -65,7 +62,7 @@ export function correctPlan(
 
     case 'blocked': {
       const step: PlanStep = {
-        id: nextStepId(),
+        id: nextStepId(trace),
         description: `诊断阻塞原因 — ${deviation.reason}`,
         expectedTools: ['bash', 'read_file', 'grep'],
         verificationHint: '确认阻塞已解除或路径已切换',
@@ -80,7 +77,7 @@ export function correctPlan(
 
     case 'deviated': {
       const step: PlanStep = {
-        id: nextStepId(),
+        id: nextStepId(trace),
         description: `修正偏差 — ${deviation.reason}`,
         expectedTools: ['read_file'],
         verificationHint: '确认回到原计划路径',
@@ -107,7 +104,7 @@ export function correctPlan(
 
     case 'stray': {
       const step: PlanStep = {
-        id: nextStepId(),
+        id: nextStepId(trace),
         description: `验证随机探索发现 — ${deviation.reason}`,
         expectedTools: ['read_file', 'grep'],
         verificationHint: '确认探索发现是否相关于目标',
@@ -121,7 +118,7 @@ export function correctPlan(
 
     case 'stalled': {
       const step: PlanStep = {
-        id: nextStepId(),
+        id: nextStepId(trace),
         description: `打破停滞 — 选择最相关的未用工具推进`,
         expectedTools: ['todo', 'read_file', 'grep'],
         verificationHint: '确认 agent 恢复推进',

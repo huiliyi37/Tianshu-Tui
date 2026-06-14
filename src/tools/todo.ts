@@ -86,6 +86,14 @@ Always update the list when completing or starting a task.`,
 
       store.write(data.todos)
 
+      // U6/C1: the todo list IS the LLM's goal decomposition. Surface the
+      // ordered descriptions to the loop, which seeds the PlanExecutionTrace
+      // on the first write (idempotent — later status-update writes are a
+      // no-op on the trace via withPlanSteps). Zero new tool, zero budget.
+      if (params.onPlanSteps && data.todos.length > 0) {
+        params.onPlanSteps(data.todos.map(t => t.content))
+      }
+
       const summary = TodoStore.formatSummary(data.todos)
       let content = summary
 

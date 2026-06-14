@@ -123,6 +123,42 @@ export function maxStepsForDepth(depth: TaskDepthLayer): number {
 }
 
 /**
+ * U6/C1: 把 LLM 在 planning 阶段产出的步骤描述映射成结构化 PlanStep[]。
+ * 模型只需给出描述，expectedTools 由 inferExpectedTools 自动推断（含 LSP 关键词）。
+ * 步数按 depthLayer 截断（unit=3 / wiring=5 / system=8），空白描述被过滤。
+ */
+export function buildPlanSteps(
+  descriptions: string[],
+  depthLayer: TaskDepthLayer,
+): PlanStep[] {
+  const max = MAX_STEPS_BY_DEPTH[depthLayer]
+  return descriptions
+    .map(d => d.trim())
+    .filter(d => d.length > 0)
+    .slice(0, max)
+    .map((description, i) => ({
+      id: `step-${i + 1}`,
+      description,
+      expectedTools: inferExpectedTools(description),
+      status: 'pending' as StepStatus,
+    }))
+}
+
+/**
+ * U6/C1: 把分解出的步骤填入 trace。
+ * 幂等守卫：只在 trace 尚无步骤且无执行历史时填充——防止模型重复调用
+ * plan_steps 把已经在推进的轨迹清空。已开始执行后再分解视为 no-op
+ * （后续偏差走 correctPlan，不走这里）。
+ */
+export function withPlanSteps(
+  trace: PlanExecutionTrace,
+  steps: PlanStep[],
+): PlanExecutionTrace {
+  if (trace.steps.length > 0 || trace.history.length > 0) return trace
+  return { ...trace, steps }
+}
+
+/**
  * 追加一个步骤结果。不可变更新——返回新 trace。
  * 同时推进对应 step 的状态。
  */

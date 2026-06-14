@@ -1,10 +1,9 @@
-import { describe, it, beforeEach } from 'node:test'
+import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
   correctPlan,
   injectReplanContext,
-  resetStepCounter,
 } from '../replan-loop.js'
 import {
   createTrace,
@@ -21,8 +20,6 @@ function makeDeviation(type: DeviationResult['type'], overrides: Partial<Deviati
 }
 
 describe('correctPlan', () => {
-  beforeEach(() => resetStepCounter())
-
   it('returns unchanged trace for none deviation', () => {
     const trace = createTrace('c1', 'unit', [makeStep('step-1')])
     const { trace: updated, addedSteps } = correctPlan(trace, makeDeviation('none'))
@@ -70,6 +67,21 @@ describe('correctPlan', () => {
     correctPlan(trace, makeDeviation('blocked', { affectedStepId: 'step-1' }))
     assert.equal(trace.steps.length, 1)
     assert.equal(trace.steps[0]!.status, 'pending')
+  })
+
+  // U6/D1: replan ids are trace-local — concurrent traces must not interleave
+  // or reset each other (the old module-level stepCounter broke this).
+  it('produces trace-local, non-interleaving replan ids across concurrent traces', () => {
+    const a0 = createTrace('A', 'system', [makeStep('step-1')])
+    const b0 = createTrace('B', 'system', [makeStep('step-1')])
+    const a1 = correctPlan(a0, makeDeviation('stalled')).trace
+    const b1 = correctPlan(b0, makeDeviation('stalled')).trace
+    const a2 = correctPlan(a1, makeDeviation('stalled')).trace
+    const aReplanIds = a2.steps.filter(s => s.id.startsWith('replan-')).map(s => s.id)
+    const bReplanIds = b1.steps.filter(s => s.id.startsWith('replan-')).map(s => s.id)
+    // each trace numbers its own replans from 1 — independent of the other
+    assert.deepEqual(aReplanIds, ['replan-1', 'replan-2'])
+    assert.deepEqual(bReplanIds, ['replan-1'])
   })
 })
 

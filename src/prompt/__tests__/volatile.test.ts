@@ -647,4 +647,18 @@ describe('GWT salience and Top-K selection', () => {
       assert.ok(output.endsWith('</context-update>'))
     })
   })
+
+  describe('U6: planTraceAppendix rendering', () => {
+    it('renders planTraceAppendix into the dynamic appendix', () => {
+      const ctx: VolatileContext = { cwd: '/repo', planTraceAppendix: '<plan-execution-trace status="active">…</plan-execution-trace>' }
+      const out = buildDynamicAppendix(ctx)
+      assert.match(out, /plan-execution-trace/)
+    })
+
+    it('omits the trace when unset (no empty markers)', () => {
+      const ctx: VolatileContext = { cwd: '/repo' }
+      const out = buildDynamicAppendix(ctx)
+      assert.doesNotMatch(out, /plan-execution-trace/)
+    })
+  })
 })

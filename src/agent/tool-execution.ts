@@ -91,6 +91,8 @@ export interface ToolExecutionDeps {
   recordToolNamedFingerprint?: (fingerprint: string, toolName: string) => void
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
+  /** U6/C1: capture goal decomposition (plan_steps) for the loop's PlanExecutionTrace. */
+  onPlanSteps?: (descriptions: string[]) => void
 }
 
 export interface ToolExecBatchInput {
@@ -192,6 +194,7 @@ export class ToolExecutionController {
           recordToolHistory: (name, input_, isError, content) =>
             this.deps.recordToolHistory(name, input_, isError, content),
           onLeaveMark: this.deps.onLeaveMark,
+          onPlanSteps: this.deps.onPlanSteps,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(
@@ -257,6 +260,7 @@ export class ToolExecutionController {
           recordToolHistory: (name, input_, isError, content) =>
             this.deps.recordToolHistory(name, input_, isError, content),
           onLeaveMark: this.deps.onLeaveMark,
+          onPlanSteps: this.deps.onPlanSteps,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(

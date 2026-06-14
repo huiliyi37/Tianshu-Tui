@@ -23,7 +23,10 @@ import type { HookRegistry } from '../hooks/registry.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
-import type { PhaseClass } from './convergence-detector.js'
+import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
+import { createTrace, appendResult, serializeTrace, detectDeviation, buildPlanSteps, withPlanSteps } from './plan-execution-trace.js'
+import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
+import { correctPlan, injectReplanContext } from './replan-loop.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
@@ -201,6 +204,16 @@ export class AgentLoop {
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
    *  constellation post-session hook. Null until the agent leaves a mark. */
   private pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
+  /** U6: most recent convergence-detector result — consumed by the replan loop's
+   *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
+  private latestConvergenceResult: ConvergenceResult | null = null
+  /** U6: autonomous plan execution trace. Created per task (initializeRun), steps
+   *  seeded from the first todo write (capturePlanSteps), advanced per tool-turn,
+   *  and checked for deviation at each turn boundary. Null outside task context. */
+  private planTrace: PlanExecutionTrace | null = null
+  /** U6: last replan correction injected as a system-reminder — dedup guard so a
+   *  persistent deviation doesn't spam an identical nudge every turn. */
+  private lastReplanInjection = ''
   /** Session-local affordance adaptations — per-session, never mutates global registry */
   private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
@@ -617,6 +630,62 @@ export class AgentLoop {
   /** The pending departure mark, if the agent left one this session. */
   getPendingLeaveMark(): import('../tools/types.js').LeaveMarkInput | null {
     return this.pendingLeaveMark
+  }
+
+  /** U6/C1: seed the execution trace from the agent's first todo write.
+   *  withPlanSteps is idempotent — only the first non-empty write populates
+   *  the baseline; later status-update writes are a no-op on the trace. */
+  capturePlanSteps(descriptions: string[]): void {
+    if (!this.planTrace) return
+    this.planTrace = withPlanSteps(
+      this.planTrace,
+      buildPlanSteps(descriptions, this.planTrace.depthLayer),
+    )
+  }
+
+  /** U6: build a StepResult from the tool events recorded for a given turn.
+   *  Maps to the first active/pending step (sequential progress) or a turn-local
+   *  id when steps are exhausted. Returns null when the turn used no tools. */
+  private buildStepResultFromTurn(turn: number): StepResult | null {
+    if (!this.planTrace) return null
+    const toolEvents = this.traceStore.events.filter(e => e.kind === 'tool' && e.turn === turn)
+    if (toolEvents.length === 0) return null
+    const toolCalls = toolEvents.map(e => ({ tool: e.name, result_summary: (e.summary ?? '').slice(0, 80) }))
+    const failed = toolEvents.some(e => e.status === 'failed' || e.status === 'blocked')
+    const activeStep = this.planTrace.steps.find(s => s.status === 'active' || s.status === 'pending')
+    const stepId = activeStep?.id ?? `turn-${turn}`
+    return { stepId, turnNumber: turn, toolCalls, status: failed ? 'blocked' : 'done' }
+  }
+
+  /** U6: turn-boundary deviation check. Reads the latest convergence result +
+   *  no-tool counter + most recent step result, detects deviation, applies a
+   *  course correction, and refreshes the replan/trace prompt surfaces. No-op
+   *  until the trace has steps (i.e. the agent has produced a todo plan). */
+  private runReplanCheck(): void {
+    if (!this.planTrace || this.planTrace.steps.length === 0) return
+    const lastResult = this.planTrace.history[this.planTrace.history.length - 1]
+    const deviation = detectDeviation(
+      this.planTrace,
+      lastResult,
+      this.latestConvergenceResult?.level,
+      this.consecutiveNoToolTurns,
+    )
+    if (deviation.type !== 'none') {
+      const { trace, addedSteps } = correctPlan(this.planTrace, deviation)
+      this.planTrace = trace
+      const ctx = injectReplanContext(deviation, addedSteps)
+      // Mid-task course correction must reach the model THIS turn. The dynamic
+      // appendix is frozen within a user message (prefix-cache stability), so
+      // inject as a system-reminder — the same mechanism the convergence
+      // detector uses. Dedup guards against spamming a persistent deviation.
+      if (ctx.text && ctx.text !== this.lastReplanInjection) {
+        this.lastReplanInjection = ctx.text
+        this.session.addUserMessage(wrapSystemReminder(ctx.text))
+      }
+    }
+    // Trace appendix refreshes at the next user-message boundary (cache-safe);
+    // carries the plan baseline + progress into follow-up user turns.
+    this.config.promptEngine.setPlanTraceAppendix(serializeTrace(this.planTrace) || null)
   }
 
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
@@ -1448,11 +1517,24 @@ export class AgentLoop {
       this.config.promptEngine.setTaskDepthLayer(this._taskDepthLayer)
       this._planMethodology = classifyPlanMethodology(this.taskContract, this._taskDepthLayer)
       this.config.promptEngine.setPlanMethodology(this._planMethodology)
+      // U6: open a fresh execution trace for a new task (or a changed contract).
+      // Steps stay empty until the agent's first todo write seeds them.
+      if (this._taskDepthLayer && (!this.planTrace || this.planTrace.contractId !== this.taskContract.id)) {
+        this.planTrace = createTrace(this.taskContract.id, this._taskDepthLayer)
+        this.lastReplanInjection = ''
+        this.config.promptEngine.setPlanTraceAppendix(null)
+      }
     } else {
       this._taskDepthLayer = undefined
       this._planMethodology = undefined
       this.config.promptEngine.setTaskDepthLayer(undefined)
       this.config.promptEngine.setPlanMethodology(undefined)
+      // U6: no active task — drop any prior trace + clear its prompt surfaces.
+      if (this.planTrace) {
+        this.planTrace = null
+        this.lastReplanInjection = ''
+        this.config.promptEngine.setPlanTraceAppendix(null)
+      }
     }
 
     this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderDiscoveryBlock(userInput))
@@ -1697,6 +1779,7 @@ export class AgentLoop {
       noToolTurnCount: this.consecutiveNoToolTurns,
       textFingerprints: this.recentTextFingerprints,
     })
+    this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
     if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
@@ -2138,6 +2221,11 @@ export class AgentLoop {
           if (action === 'abort') return
         }
 
+        // Step 6e: U6 replan check — detect deviation from the plan trace and
+        // inject a course-correction. Runs after convergence (latestConvergenceResult
+        // is fresh) and before buildTurnRequest (so the appendix reflects this turn).
+        this.runReplanCheck()
+
         _tb = Date.now()
         // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
         const turnRequest = await rejectOnAbort(
@@ -2420,6 +2508,14 @@ export class AgentLoop {
           ;({ traceStore: this.traceStore, importGraph: this.importGraph,
              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
+
+          // U6: record this tool-turn into the execution trace (advances the
+          // active step / flags failures). detectDeviation runs at the next
+          // turn boundary (runReplanCheck) over the accumulated history.
+          if (this.planTrace && this.planTrace.steps.length > 0) {
+            const stepResult = this.buildStepResultFromTurn(turn)
+            if (stepResult) this.planTrace = appendResult(this.planTrace, stepResult)
+          }
 
           // L0 telemetry: tools duration
           this.telemetryWriter.write({

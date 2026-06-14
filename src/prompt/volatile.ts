@@ -24,9 +24,12 @@ export function renderTaskDepthAdvisory(layer: TaskDepthLayer | undefined): stri
 
 import type { PlanMethodology } from '../context/task-contract.js'
 
+// U6: the trailing 用 todo 列出有序步骤 hint seeds the PlanExecutionTrace — the
+// first `todo write` becomes the plan baseline that the replan loop tracks
+// against. Zero new tools; just nudges the model toward the existing todo tool.
 const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
-  lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。</plan-methodology>',
-  full: '<plan-methodology route="full">推荐使用完整版计划模板（9阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-template.md。必须包含: 安全不变量、触发路径清单、双门对齐数据流图。</plan-methodology>',
+  lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
+  full: '<plan-methodology route="full">推荐使用完整版计划模板（9阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-template.md。必须包含: 安全不变量、触发路径清单、双门对齐数据流图。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
 export function renderPlanMethodologyAdvisory(
@@ -80,6 +83,9 @@ export interface VolatileContext {
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Advisory-only: never auto-executes cached tool sequences. */
   planCacheAdvisory?: string | null
+  /** U6: serialized PlanExecutionTrace appendix (survives compaction).
+   *  Cache-safe: rendered ONLY into the dynamic appendix. */
+  planTraceAppendix?: string | null
   /** Intent retrieval route for the current user turn.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
@@ -206,6 +212,7 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     affordanceHint: undefined,
     policyGuidance: undefined,
     planCacheAdvisory: undefined,
+    planTraceAppendix: undefined,
     intentRetrievalRoute: undefined,
     // Harness advisory — per-turn dynamic, stripped from FROZEN
     harnessAdvisoryBlock: undefined,
@@ -385,6 +392,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.planCacheAdvisory)
   }
 
+  // U6: serialized PlanExecutionTrace — refreshed at compaction so the plan
+  // baseline + progress survive history pruning. Cache-safe (appendix only).
+  if (ctx.planTraceAppendix) {
+    parts.push(ctx.planTraceAppendix)
+  }
+
   // Repair hint: routed through A1 harness-advisory bus — legacy <repair-hint> block removed.
 
   // Harness advisory: unified corrective guidance (A1 bus, max 3 entries)
@@ -444,6 +457,9 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<affordance-hint>')) return 0.7
   if (blockContent.startsWith('<policy-guidance>')) return 0.7
   if (blockContent.startsWith('<plan-cache-advisory>')) return 0.7
+  // U6: plan trace is task-relevant baseline/progress. Explicit salience so
+  // Top-K never drops it under appendix budget pressure.
+  if (blockContent.startsWith('<plan-execution-trace')) return 0.7
   if (blockContent.startsWith('<intent-retrieval-route')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7

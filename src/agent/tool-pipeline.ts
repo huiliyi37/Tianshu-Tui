@@ -159,6 +159,8 @@ export interface ToolPipelineDeps {
   abortSignal?: AbortSignal
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
+  /** U6/C1: capture goal decomposition from plan_steps into the loop's PlanExecutionTrace. */
+  onPlanSteps?: (descriptions: string[]) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -460,6 +462,7 @@ export async function executeToolUse(
       ? (activity) => callbacks.onDelegationActivity!(activity)
       : undefined,
     onLeaveMark: deps.onLeaveMark,
+    onPlanSteps: deps.onPlanSteps,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),
