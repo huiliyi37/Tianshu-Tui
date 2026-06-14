@@ -43,6 +43,7 @@ import {
 import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
+import stringWidth from 'string-width'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData } from '../format/overlay.js'
@@ -57,6 +58,21 @@ function formatElapsedShort(ms: number): string {
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return `${mins}m${secs}s`
+}
+
+/** Truncate a string (possibly containing ANSI) to fit within maxWidth display columns. */
+function truncateToWidth(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return ''
+  if (stringWidth(text) <= maxWidth) return text
+  let out = ''
+  let w = 0
+  for (const ch of text) {
+    const cw = stringWidth(ch)
+    if (w + cw > maxWidth) break
+    out += ch
+    w += cw
+  }
+  return out
 }
 
 // ── State types ────────────────────────────────────────────────
@@ -1707,7 +1723,7 @@ export class TuiApp {
         : isStreaming ? this.theme.dim
         : resolveStarDomainAccent(this.state.domainName, this.theme)
 
-      const innerWidth = Math.max(20, this.columns - 4)
+      const innerWidth = Math.max(20, this.columns - 6)
       const topBorder = color(`╭${'─'.repeat(innerWidth + 2)}╮`, borderColor)
       const botBorder = color(`╰${'─'.repeat(innerWidth + 2)}╯`, borderColor)
       const leftBar = color('│ ', borderColor)
@@ -1719,10 +1735,17 @@ export class TuiApp {
 
       lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        lines.push({ text: `${leftBar}-- NORMAL -- ${inputLines[0] ?? ''}${rightBar}` })
-        for (const extra of inputLines.slice(1)) lines.push({ text: `${leftBar}${extra}${rightBar}` })
+        const firstLine = truncateToWidth(`-- NORMAL -- ${inputLines[0] ?? ''}`, innerWidth)
+        lines.push({ text: `${leftBar}${firstLine}${' '.repeat(Math.max(0, innerWidth - stringWidth(firstLine)))}${rightBar}` })
+        for (const extra of inputLines.slice(1)) {
+          const t = truncateToWidth(extra, innerWidth)
+          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+        }
       } else {
-        for (const inputDisplayLine of inputLines) lines.push({ text: `${leftBar}${inputDisplayLine}${rightBar}` })
+        for (const inputDisplayLine of inputLines) {
+          const t = truncateToWidth(inputDisplayLine, innerWidth)
+          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+        }
       }
       lines.push({ text: botBorder })
 
