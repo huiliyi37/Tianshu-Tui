@@ -179,6 +179,8 @@ export class TuiApp {
   }
   /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
   private paletteExec?: (index: number) => void
+  /** rewind Enter 执行回调：参数为选中条目的 content */
+  private rewindExec?: (content: string) => void
 
   // State
   private state: TuiState
@@ -265,6 +267,8 @@ export class TuiApp {
   private inputHistory: string[] = []
   /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
   private ctrlCPendingSince = 0
+  /** ESC double-press: last ESC timestamp (ms), 0 = inactive */
+  private lastEscAt = 0
   /** 原始 stdout（用于直接写 DEC 私有模式如 bracketed paste 开关） */
   private stdout: WriteStream
 
@@ -546,9 +550,22 @@ export class TuiApp {
         } else if (this.isAgentActive()) {
           this.handleAbort()
         } else {
-          // Idle: clear input line
-          this.inputLine.setValue('')
-          this.renderLive()
+          // Idle: double-ESC within 400ms on empty input → rewind overlay
+          const now = Date.now()
+          if (this.inputLine.value.trim()) {
+            // Has text: ESC clears input (like Claude Code)
+            this.inputLine.setValue('')
+            this.renderLive()
+          } else if (now - this.lastEscAt < 400) {
+            // Double-ESC → rewind
+            this.lastEscAt = 0
+            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+            this.overlay.activate('rewind')
+            this.renderLive()
+          } else {
+            // First ESC — record timestamp
+            this.lastEscAt = now
+          }
         }
         return
       }
@@ -870,8 +887,12 @@ export class TuiApp {
           const entry = this.overlayData?.rewindEntries?.().entries[cur]
           this.deactivateOverlay()
           if (entry) {
-            // 将选中消息回填到输入框，用户可编辑后重新提交
-            this.setInput(entry.content)
+            if (this.rewindExec) {
+              this.rewindExec(entry.content)
+            } else {
+              // Fallback: just populate input (old behavior)
+              this.setInput(entry.content)
+            }
           }
         } else {
           this.deactivateOverlay()
@@ -1909,9 +1930,10 @@ export class TuiApp {
     rewindEntries?: () => RewindData
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
-  }, paletteExec?: (index: number) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void): void {
     this.overlayData = overlayData
     this.paletteExec = paletteExec
+    this.rewindExec = rewindExec
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {

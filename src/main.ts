@@ -349,6 +349,22 @@ async function main() {
         tuiApp.setInput(name + ' ')
       }
     }
+  }, /* rewindExec: */ (content: string) => {
+    // Rewind Enter 回调：截断消息到选中点 + 回填输入框
+    const messages = ctx?.session.getMessages() ?? []
+    // Find the matching user message index
+    const matchIdx = messages
+      .map((m, i) => ({ m, i }))
+      .filter(({ m }) => m.role === 'user' && typeof m.content === 'string')
+      .filter(({ m }) => (m as { content: string }).content === content)
+      .pop()?.i
+    if (matchIdx !== undefined) {
+      ctx!.session.replaceMessages(messages.slice(0, matchIdx))
+      // Commit a rewind marker to scrollback
+      tuiApp.commitStatic('⏪ Rewound — message restored to input.')
+    }
+    // Always populate input (even if match not found — user can still edit)
+    tuiApp.setInput(content)
   })
 
   // ── SlashRouter ──────────────────────────────────────────────

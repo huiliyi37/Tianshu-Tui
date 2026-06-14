@@ -43,11 +43,11 @@ class RewindableAgent implements ManagedAgent {
 function makeMessages(): OaiMessage[] {
   return [
     { role: 'user', content: 'Hello' },
-    { role: 'assistant', content: [{ type: 'text', text: 'Hi there' }] },
+    { role: 'assistant', content: 'Hi there' },
     { role: 'user', content: 'Do task A' },
-    { role: 'assistant', content: [{ type: 'text', text: 'Doing A' }] },
+    { role: 'assistant', content: 'Doing A' },
     { role: 'user', content: 'Now do B' },
-    { role: 'assistant', content: [{ type: 'text', text: 'Doing B' }] },
+    { role: 'assistant', content: 'Doing B' },
   ]
 }
 
