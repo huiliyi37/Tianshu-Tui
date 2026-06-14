@@ -252,3 +252,29 @@ test('#9 [反证 #2] SessionContext.rewindToMessages resets turnCount + turnCach
   assert.equal(ctx.getFilesRead().length, 0, 'filesRead should be cleared')
   assert.equal(ctx.getFilesModified().length, 0, 'filesModified should be cleared')
 })
+
+test('#10 timestamp from event log', async () => {
+  // Messages injected out-of-band (no 'user' events) → timestamp falls back to 0.
+  const { manager, agents } = setup()
+  const id = await makeSession(manager, agents)
+  const points = manager.listRewindPoints(id)!
+
+  // makeSession creates via createSession({ prompt: 'init' }) which fires a
+  // real run → the event log contains a 'user' event for the first message.
+  // The remaining messages are injected out-of-band → their timestamps are 0.
+  assert.ok(points.length >= 3, 'should have at least 3 user messages')
+  assert.ok(points[0]!.timestamp > 0, 'first user msg (from real run) should have timestamp > 0')
+})
+
+test('#11 rewind with rollbackFiles does not crash', async () => {
+  const { manager, agents } = setup()
+  const id = await makeSession(manager, agents)
+
+  // rollbackFiles: true triggers dynamic import of checkpoint.ts.
+  // In unit tests there's no real git repo → the best-effort catch swallows.
+  // The important thing is: rewind still succeeds on the message path.
+  const ok = manager.rewind(id, 2, { rollbackFiles: true })
+  assert.ok(ok, 'rewind with rollbackFiles should return true')
+  // Messages should still be truncated even if file rollback failed silently.
+  assert.equal(agents[agents.length - 1]!.messages.length, 2, 'messages truncated')
+})

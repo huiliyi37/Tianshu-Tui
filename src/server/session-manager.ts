@@ -650,7 +650,8 @@ export class RuntimeSessionManager {
 
   /**
    * List user messages that can be rewound to. Each entry has the message
-   * index (for use with rewind()), the text content, and the event timestamp.
+   * index (for use with rewind()), the text content, and the event timestamp
+   * (derived from the session event log, since OaiMessage has no ts field).
    * Returns empty for sessions without a live agent (rehydrated/idle).
    */
   listRewindPoints(id: string): { index: number; content: string; timestamp: number }[] | undefined {
@@ -658,11 +659,19 @@ export class RuntimeSessionManager {
     if (!s) return undefined
     if (!s.agent) return []
     const msgs = s.agent.getMessages()
+    // Collect user-event timestamps from the event log so we can map each
+    // user message to its original submission time.
+    const userTimestamps: number[] = []
+    for (const e of s.events) {
+      if (e.type === 'user') { userTimestamps.push(e.ts) }
+    }
     const entries: { index: number; content: string; timestamp: number }[] = []
+    let userIdx = 0
     for (let i = 0; i < msgs.length; i++) {
       const m = msgs[i]!
       if (m.role === 'user' && typeof m.content === 'string') {
-        entries.push({ index: i, content: m.content, timestamp: 0 })
+        entries.push({ index: i, content: m.content, timestamp: userTimestamps[userIdx] ?? 0 })
+        userIdx++
       }
     }
     return entries
