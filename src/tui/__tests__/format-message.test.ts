@@ -8,15 +8,14 @@ import { getTheme } from '../theme.js'
 const theme = getTheme()
 
 describe('formatUserMessage', () => {
-  it('renders separator + gutter + content', () => {
+  it('renders gutter marker + content without separator', () => {
     const lines = formatUserMessage({ content: 'hello', width: 40 }, theme)
-    assert.ok(lines.length >= 2, 'at least 2 lines (separator + content)')
-    assert.ok(lines[0]!.includes('─'))
-    const plainLine1 = lines[1]!.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+    assert.ok(lines.length >= 1, 'at least 1 line')
+    const plainLine0 = lines[0]!.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
     const useAscii = chalk.level < 3
     const expectedMarker = useAscii ? '❯' : '▌'
-    assert.ok(plainLine1.includes(expectedMarker))
-    assert.ok(plainLine1.includes('hello'))
+    assert.ok(plainLine0.includes(expectedMarker))
+    assert.ok(plainLine0.includes('hello'))
   })
 
   it('handles multi-line content', () => {
@@ -28,9 +27,9 @@ describe('formatUserMessage', () => {
   it('body text is neutral, not the cinnabar accent (no wall of color)', () => {
     const hexTheme = { ...theme, userColor: '#d4453a' }
     const lines = formatUserMessage({ content: 'hello', width: 40 }, hexTheme)
-    const line1 = lines[1]!
-    const markerIndex = line1.indexOf(chalk.level < 3 ? '❯' : '▌')
-    const afterMarker = line1.slice(markerIndex + 1)
+    const line0 = lines[0]!
+    const markerIndex = line0.indexOf(chalk.level < 3 ? '❯' : '▌')
+    const afterMarker = line0.slice(markerIndex + 1)
     assert.ok(!/\x1B\[38;2;212;69;58m/.test(afterMarker), 'body must not be cinnabar')
   })
 })

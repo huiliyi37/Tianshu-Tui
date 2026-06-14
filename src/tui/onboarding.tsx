@@ -18,28 +18,7 @@ interface WelcomeScreenProps {
   cwd: string
 }
 
-// Futuristic core emblem — 7 lines tall
-const LOGO = [
-  '          ▲          ',
-  '        ╱ ⎔ ╲        ',
-  '      ╱   │   ╲      ',
-  '     ▲────┼────▲     ',
-  '      ╲   │   ╱      ',
-  '        ╲ ⎔ ╱        ',
-  '          ▼          ',
-]
-
-// Sleek block ASCII RIVET brand — 6 lines tall
-const BRAND = [
-  '██████╗  ██╗██╗   ██╗███████╗████████╗',
-  '██╔══██╗ ██║██║   ██║██╔════╝╚══██╔══╝',
-  '██████╔╝ ██║██║   ██║█████╗     ██║   ',
-  '██╔══██╗ ██║╚██╗ ██╔╝██╔══╝     ██║   ',
-  '██║  ██║ ██║  ╚████╔╝ ███████╗   ██║   ',
-  '╚═╝  ╚═╝ ╚═╝   ╚═══╝  ╚══════╝   ╚═╝   ',
-]
-
-const STAGGER_MS = 150
+const STAGGER_MS = 120
 
 export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
   const theme = getTheme()
@@ -48,62 +27,42 @@ export function WelcomeScreen({ model, cwd }: WelcomeScreenProps) {
   const [phase, setPhase] = useState(0)
 
   useEffect(() => {
-    const timers = [1, 2, 3].map(i => setTimeout(() => setPhase(i), STAGGER_MS * i))
+    const timers = [1, 2].map(i => setTimeout(() => setPhase(i), STAGGER_MS * i))
     return () => timers.forEach(clearTimeout)
   }, [])
 
-  // Vertical padding to center content in terminal
-  // Logo(7) + brand(6) + gap(1) + meta(1) + gap(2) + shortcuts(2) + gap(2) + hint(1) = ~22 lines
-  const contentHeight = 22
+  const contentHeight = 10
   const topPad = Math.max(1, Math.floor((rows - contentHeight) / 2) - 2)
 
   return (
     <Box flexDirection="column" paddingTop={topPad} alignItems="center">
-      {/* Phase 0: Logo + brand */}
-      <Box flexDirection="column" alignItems="center">
-        {LOGO.map((line, i) => (
-          <Text key={i} color={theme.primary}>{line}</Text>
-        ))}
-        <Box flexDirection="column" alignItems="center" marginTop={1}>
-          {BRAND.map((line, i) => (
-            <Text key={i} color={theme.secondary} bold>{line}</Text>
-          ))}
-        </Box>
+      <Text bold color={theme.primary}>Tianshu</Text>
+      <Box marginTop={1}>
+        <Text color={theme.muted}>{model}</Text>
+        <Text color={theme.dim}> · </Text>
+        <Text color={theme.dim}>{dir}/</Text>
       </Box>
 
-      {/* Phase 1: Model + directory */}
       {phase >= 1 && (
-        <Box marginTop={1} justifyContent="center">
-          <Text color={theme.secondary}>{model}</Text>
-          <Text color={theme.dim}> · </Text>
-          <Text color={theme.dim}>{dir}/</Text>
-        </Box>
-      )}
-
-      {/* Phase 2: Shortcuts */}
-      {phase >= 2 && (
         <Box flexDirection="column" marginTop={2} alignItems="center">
           <Text>
-            <Text color={theme.muted}>Ctrl+C </Text>
-            <Text color={theme.dim}>interrupt</Text>
-            <Text color={theme.dim}>    </Text>
-            <Text color={theme.muted}>Ctrl+K </Text>
+            <Text color={theme.dim}>Ctrl+C </Text>
+            <Text color={theme.dim}>interrupt    </Text>
+            <Text color={theme.dim}>Ctrl+K </Text>
             <Text color={theme.dim}>palette</Text>
           </Text>
           <Text>
-            <Text color={theme.muted}>/help  </Text>
-            <Text color={theme.dim}>commands</Text>
-            <Text color={theme.dim}>    </Text>
-            <Text color={theme.muted}>Alt+Ent</Text>
-            <Text color={theme.dim}> multi-line</Text>
+            <Text color={theme.dim}>/help  </Text>
+            <Text color={theme.dim}>commands    </Text>
+            <Text color={theme.dim}>Alt+Enter </Text>
+            <Text color={theme.dim}>multi-line</Text>
           </Text>
         </Box>
       )}
 
-      {/* Phase 3: Ready hint */}
-      {phase >= 3 && (
+      {phase >= 2 && (
         <Box marginTop={2}>
-          <Text color={theme.dim}>Type a message to begin ↵</Text>
+          <Text color={theme.dim}>Type a message to begin</Text>
         </Box>
       )}
     </Box>

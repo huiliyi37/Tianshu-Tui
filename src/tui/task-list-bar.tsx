@@ -30,13 +30,11 @@ export function TaskListBar({ items }: { items: readonly TaskListItem[] }) {
 
   if (narrow) {
     return (
-      <Box flexDirection="column" paddingX={1} borderStyle="single" borderColor="grey">
-        <Text dimColor>▸ Tasks</Text>
+      <Box flexDirection="column" paddingX={2}>
         {visible.map(item => (
           <Box key={item.id}>
             <Text color={STATUS_COLOR[item.status]}>{STATUS_GLYPH[item.status]}</Text>
-            <Text dimColor> {item.id} </Text>
-            <Text>{item.content.slice(0, 50)}{item.content.length > 50 ? '…' : ''}</Text>
+            <Text dimColor> {item.content.slice(0, 50)}{item.content.length > 50 ? '…' : ''}</Text>
           </Box>
         ))}
         {overflow ? <Text dimColor>{overflow} more…</Text> : null}
@@ -44,18 +42,16 @@ export function TaskListBar({ items }: { items: readonly TaskListItem[] }) {
     )
   }
 
-  // 宽终端：单行水平拼接
   const segments = visible.map(item =>
-    `${STATUS_GLYPH[item.status]} ${item.id} ${item.content.slice(0, 30)}${item.content.length > 30 ? '…' : ''}`
+    `${STATUS_GLYPH[item.status]} ${item.content.slice(0, 28)}${item.content.length > 28 ? '…' : ''}`
   )
-  const line = segments.join(' │ ')
+  const line = segments.join('  ')
 
   return (
-    <Box paddingX={1} borderStyle="single" borderColor="grey">
+    <Box paddingX={2}>
       <Text>
-        <Text dimColor>▸ </Text>
         <Text>{line}</Text>
-        {overflow ? <Text dimColor>{overflow} more</Text> : null}
+        {overflow ? <Text dimColor>  {overflow} more</Text> : null}
       </Text>
     </Box>
   )

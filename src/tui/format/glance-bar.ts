@@ -7,7 +7,7 @@
 
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
-import { ANSI, color } from '../engine/ansi.js'
+import { color } from '../engine/ansi.js'
 import stringWidth from 'string-width'
 import type { RivetTheme } from '../theme.js'
 
@@ -150,9 +150,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
 
   const gap = Math.max(4, input.width - 1 - leftLen - stripAnsiLen(right))
 
-  const sepLine = color('─'.repeat(Math.max(1, input.width - 1)), theme.dim)
-
-  return `${sepLine}\n${left}${' '.repeat(gap)}${right}`
+  return `${left}${' '.repeat(gap)}${right}`
 }
 
 function stripAnsiLen(s: string): number {

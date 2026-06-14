@@ -60,7 +60,6 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, starDomain
   // agent is thinking (steerMode) we drop the frame entirely — just the
   // breathing icon — so there's no long glaring box; the pulse is calm silver,
   // not warning-yellow.
-  const borderColor = isSlash ? theme.primary : theme.dim
   const domainAccent = getDomainAccentColor(starDomain, theme)
   const promptColor = isSlash ? theme.primary : domainAccent
 
@@ -87,9 +86,7 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, starDomain
       <Box
         flexDirection="row"
         paddingX={1}
-        borderStyle={steerMode ? undefined : 'round'}
-        borderColor={borderColor}
-        borderDimColor={!isSlash}
+        marginTop={1}
       >
         <Text bold color={promptColor}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
         <BaseTextInput

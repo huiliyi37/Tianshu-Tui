@@ -1493,9 +1493,9 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
         {activeOverlay === 'cockpit' && <CockpitView panel={cockpitPanel} agent={agent} session={session} model={model} cacheHitRate={cacheHitRate} cost={cost} mcpManager={mcpManagerRef.current} claimStoreRef={claimStoreRef} />}
         {activeOverlay === 'pager' && <Pager entries={historyItems} verbose={verbose} onExit={() => { surfacePop() }} />}
         {sessionPrompt === 'waiting' && (
-          <Box paddingX={2} borderStyle="single" borderColor="cyan">
-            <Text bold color="cyan">Previous session found.</Text>
-            <Text> Press <Text bold>r</Text> to restore, any other key to start fresh </Text>
+          <Box paddingX={2}>
+            <Text color={theme.primary}>Previous session found. </Text>
+            <Text color={theme.muted}>Press <Text bold color={theme.primary}>r</Text> to restore, any key to start fresh</Text>
           </Box>
         )}
         {/* liveTools elapsedMs relies on the 1s activity tick (activityIntervalRef) for re-render — see app.tsx:398 */}
@@ -1530,39 +1530,21 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           </Box>
         )}
         {pendingIntent && (
-          <Box
-            flexDirection="column"
-            borderStyle="round"
-            borderColor={theme.primary}
-            paddingX={1}
-            marginX={1}
-          >
-            <Text color={theme.dim}>◇ Intent</Text>
-            <Text bold color={theme.primary}>{formatIntentPreview(pendingIntent.intent)}</Text>
+          <Box flexDirection="column" paddingX={2} marginTop={1}>
+            <Text bold color={theme.primary}>◇ {formatIntentPreview(pendingIntent.intent)}</Text>
           </Box>
         )}
         {pendingApproval && (
-          <Box
-            flexDirection="column"
-            borderStyle="round"
-            borderColor={theme.warning}
-            paddingX={1}
-            marginX={1}
-          >
-            <Text color={theme.dim}>⚠ Tool Approval</Text>
+          <Box flexDirection="column" paddingX={2} marginTop={1}>
             <Text>
-              <Text color={theme.muted}>Approve </Text>
+              <Text color={theme.warning}>⚠ </Text>
               <Text bold color={theme.warning}>{pendingApproval.name}</Text>
-              <Text color={theme.muted}>?</Text>
+              <Text color={theme.muted}>  </Text>
+              <Text bold color={theme.primary}>[y]</Text>
+              <Text color={theme.muted}> approve  </Text>
+              <Text bold color={theme.dim}>[n]</Text>
+              <Text color={theme.muted}> deny</Text>
             </Text>
-            <Box marginTop={1}>
-              <Text>
-                <Text bold color={theme.primary}>[y]</Text>
-                <Text color={theme.muted}> approve  </Text>
-                <Text bold color={theme.dim}>[n]</Text>
-                <Text color={theme.muted}> deny</Text>
-              </Text>
-            </Box>
           </Box>
         )}
         {isSurfaceVisible('command-palette') && (
@@ -1620,9 +1602,8 @@ export function App({ agent, session, persist, model, maxTokens, availableModels
           }
         }} disabled={!!pendingApproval || !!pendingIntent} vimEnabled={false} steerMode={isStreaming} starDomain={starDomain} inputRef={inputBarRef} />
         {steerPending && isStreaming && (
-          <Box paddingX={2} borderStyle="round" borderColor="yellow">
-            <Text color="yellow">📨 Queued ({steerBuffer.current.getPending().length}): </Text>
-            <Text>{steerBuffer.current.getPending().slice(-1)[0]?.slice(0, 60)}{(steerBuffer.current.getPending().slice(-1)[0]?.length ?? 0) > 60 ? '...' : ''}</Text>
+          <Box paddingX={2}>
+            <Text color={theme.dim}>📨 Queued ({steerBuffer.current.getPending().length}): {steerBuffer.current.getPending().slice(-1)[0]?.slice(0, 60)}{(steerBuffer.current.getPending().slice(-1)[0]?.length ?? 0) > 60 ? '...' : ''}</Text>
           </Box>
         )}
       </Box>

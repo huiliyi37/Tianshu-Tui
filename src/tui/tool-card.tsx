@@ -48,14 +48,6 @@ function extToLang(rawPath: string | undefined): string | undefined {
   }
 }
 
-/** Build a framed folding marker: ┌─ 34 lines ─┐ */
-function foldMarker(lines: number, width: number, focused: boolean, theme: ReturnType<typeof getTheme>): string {
-  const label = ` ${lines} lines `
-  const inner = Math.max(0, width - label.length - 2) // 2 for ┌─/─┐
-  const left = '─'.repeat(Math.floor(inner / 2))
-  const right = '─'.repeat(Math.ceil(inner / 2))
-  return `┌${left}${label}${right}┐`
-}
 
 export const ToolCard = memo(function ToolCard({ name, result, isError, isStreaming, verbose, rawPath, focused, elapsedMs, depth = 0 }: ToolCardProps) {
   const theme = getTheme()
@@ -113,19 +105,12 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
 
   const borderColor = isError ? theme.error : theme.toolColor(name)
 
-  // Tree connectors for nested tool call chains
-  const treeLead = depth > 0 ? '  '.repeat(depth - 1) + ' ├─' : ''
-  const treePad = depth > 0 ? '  '.repeat(depth) : ''
-
-  // Collapse marker: boxed fold indicator
-  const foldColor = focused ? theme.primary : theme.dim
   const foldHint = focused && truncated > 0 ? ` Enter/Tab to ${localExpanded ? 'collapse' : 'expand'}` : ''
 
   return (
-    <Box flexDirection="column" paddingLeft={depth > 0 ? 0 : 2} paddingRight={1} marginBottom={1}>
+    <Box flexDirection="column" paddingLeft={depth > 0 ? depth * 2 : 2} paddingRight={1}>
       <Box flexDirection="row">
-        {depth > 0 && <Text color={theme.dim}>{treeLead}</Text>}
-        <Text bold color={borderColor}>
+        <Text color={borderColor}>
           {family.glyph} {family.verb}{isStreaming ? ' …' : ''}
           {isStreaming && formatToolElapsed(elapsedMs ?? 0) && (
             <Text color={theme.muted}> {formatToolElapsed(elapsedMs ?? 0)}</Text>
@@ -134,29 +119,20 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
           {foldHint ? <Text color={theme.primary}> {foldHint}</Text> : null}
         </Text>
       </Box>
-      <Box flexDirection="row">
-        {depth > 0 && <Text color={theme.dim}>{treePad}│</Text>}
-        <Box
-          borderStyle="single"
-          borderColor={isError ? theme.error : theme.dim}
-          borderLeft={true}
-          borderRight={false}
-          borderTop={false}
-          borderBottom={false}
-          paddingLeft={1}
-          flexDirection="column"
-          flexGrow={1}
-        >
-          <Markdown text={displayText} language={extToLang(rawPath)} />
-          {truncated > 0 && !expanded && (
-            <Text color={foldColor} bold={!!focused}>
-              {foldMarker(totalLines, 32, !!focused, theme)}
-            </Text>
-          )}
-          {truncated === 0 && rawPath && (
-            <Text color={theme.muted}>raw: {compactPath(rawPath)}</Text>
-          )}
-        </Box>
+      <Box
+        paddingLeft={2}
+        flexDirection="column"
+        flexGrow={1}
+      >
+        <Markdown text={displayText} language={extToLang(rawPath)} />
+        {truncated > 0 && !expanded && (
+          <Text color={theme.dim}>
+            ... {totalLines} more lines
+          </Text>
+        )}
+        {truncated === 0 && rawPath && (
+          <Text color={theme.muted}>{compactPath(rawPath)}</Text>
+        )}
       </Box>
     </Box>
   )

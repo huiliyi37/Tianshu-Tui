@@ -6,7 +6,7 @@ import type { ReasoningEffort } from '../agent/auto-reasoning.js'
 import { getTheme, type RivetTheme } from './theme.js'
 import { useTerminalSize, isResizeSettling } from './use-terminal-size.js'
 import type { GlancePulse } from './surface/types.js'
-import { horizontalRule, type SeparatorStyle } from './separator.js'
+import type { SeparatorStyle } from './separator.js'
 import { STAR_DOMAINS } from '../agent/star-domain.js'
 import { formatToolElapsed } from './tool-elapsed.js'
 
@@ -114,38 +114,31 @@ export const GlanceBar = React.memo(function GlanceBar({ pulses, phase, cacheHit
   const modelLabel = narrow ? model.slice(0, 12) : model.slice(0, 20)
   const elapsedLabel = elapsedMs !== undefined ? formatToolElapsed(elapsedMs) : ''
 
-  const rule = horizontalRule(columns, getDomainSeparatorStyle(domain), columns)
-
   return (
-    <Box flexDirection="column" marginTop={0}>
-      {/* Full-width separator line — dim, barely visible */}
-      <Text color={theme.dim}>{rule}</Text>
-      {/* Two-cluster layout: left (identity · phase) ………… right (metrics · elapsed) */}
-      <Box flexDirection="row" width="100%" gap={4}>
-        {/* Left cluster — who I am + what I'm doing */}
-        <Box flexDirection="row">
-          <Text color={domain ? domainColor : theme.muted}>{domainGlyph}</Text>{' '}<Text color={theme.muted}>{domain ?? '天枢'}</Text>
-          {branchLabel && !narrow && <Text color={theme.dim}> ⎇ {branchLabel}</Text>}
-          {phaseGlyph && <Text color={theme.primary}>  {phaseGlyph}</Text>}
-          <Text color={theme.muted}> {phaseLabel || '候待'}</Text>
-          {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
-        </Box>
+    <Box flexDirection="row" width="100%" marginTop={1}>
+      {/* Left cluster — identity + phase */}
+      <Box flexDirection="row">
+        <Text color={domain ? domainColor : theme.muted}>{domainGlyph} {domain ?? '天枢'}</Text>
+        {branchLabel && !narrow && <Text color={theme.dim}> · {branchLabel}</Text>}
+        {phaseGlyph && <Text color={theme.primary}> {phaseGlyph}</Text>}
+        {phaseLabel && <Text color={theme.muted}> {phaseLabel}</Text>}
+        {isStreaming && <Text color={theme.primary}> {MOON_PHASES[moonIdx]}</Text>}
+      </Box>
 
-        {/* Flexible spacer — pushes right cluster to the edge */}
-        <Box flexGrow={1} />
+      {/* Flexible spacer */}
+      <Box flexGrow={1} />
 
-        {/* Right cluster — progressive disclosure: only show what's actionable */}
-        <Box flexDirection="row" gap={1}>
-          <Text color={theme.muted}>{modelLabel}</Text>
-          {cacheHitRate !== undefined && cacheHitRate < 0.5 && <Text color={cacheColor}>⚡{cachePct}%</Text>}
-          <Text color={theme.dim}>${cost.toFixed(2)}</Text>
-          {estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && ratio >= 0.7 && (
-            <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>
-          )}
-          {elapsedLabel && isStreaming && (
-            <Text color={theme.primary}>⧗{elapsedLabel}</Text>
-          )}
-        </Box>
+      {/* Right cluster — minimal: model + cost + elapsed; anomaly-only: cache/token */}
+      <Box flexDirection="row" gap={1}>
+        <Text color={theme.dim}>{modelLabel}</Text>
+        {cacheHitRate !== undefined && cacheHitRate < 0.5 && <Text color={cacheColor}>⚡{cachePct}%</Text>}
+        {estimatedTokens !== undefined && maxTokens !== undefined && maxTokens > 0 && ratio >= 0.75 && (
+          <Text color={tokenColor}>◧{estimatedK}k/{maxK}k</Text>
+        )}
+        {cost > 0 && <Text color={theme.dim}>${cost.toFixed(2)}</Text>}
+        {elapsedLabel && isStreaming && (
+          <Text color={theme.dim}>{elapsedLabel}</Text>
+        )}
       </Box>
     </Box>
   )

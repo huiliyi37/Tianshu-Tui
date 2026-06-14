@@ -37,17 +37,14 @@ function truncate(text: string, max: number): string {
 }
 
 export function renderWorkerPanelLines(model: WorkerPanelModel, width = 80): string[] {
-  const safeWidth = Math.max(48, width)
-  const inner = safeWidth - 4
+  const inner = Math.max(44, width - 6)
   const activeCount = model.workers.filter(w => w.status === 'running').length
   const doneCount = model.workers.filter(w => w.status === 'done').length
-  const title = 'Workers'
   const stats = `${activeCount} active · ${doneCount}/${model.workers.length} done`
-  const topFill = Math.max(1, inner - title.length - stats.length - 2)
-  const lines = [`┌─ ${title}${'─'.repeat(topFill)} ${stats} ─┐`]
+  const lines = [`  Workers  ${stats}`]
 
   if (model.workers.length === 0) {
-    lines.push(`│ ${truncate('No workers active.', inner).padEnd(inner)} │`)
+    lines.push('    No workers active.')
   }
 
   for (const w of model.workers) {
@@ -71,21 +68,17 @@ export function renderWorkerPanelLines(model: WorkerPanelModel, width = 80): str
 
     const elapsed = w.elapsed ? ` ${formatElapsed(w.elapsed)}` : ''
     const line = `${glyph} ${name}${truncate(detail, inner - 20)}${elapsed}`
-    lines.push(`│ ${truncate(line, inner).padEnd(inner)} │`)
+    lines.push(`    ${truncate(line, inner)}`)
   }
 
-  // Circuit breaker summary
   const openCircuits = model.circuits.filter(c => c.state !== 'closed')
   if (openCircuits.length > 0) {
     for (const c of openCircuits) {
       const cooldown = c.cooldownRemainingS > 0 ? ` (${c.cooldownRemainingS}s)` : ''
-      lines.push(`│ ${truncate(`[circuit] ${c.profile}: ${c.state}${cooldown} (${c.failureCount} failures)`, inner).padEnd(inner)} │`)
+      lines.push(truncate(`    circuit ${c.profile}: ${c.state}${cooldown} (${c.failureCount} failures)`, inner))
     }
-  } else if (model.circuits.length > 0) {
-    lines.push(`│ ${truncate('[circuit: all closed]', inner).padEnd(inner)} │`)
   }
 
-  lines.push(`└${'─'.repeat(inner + 2)}┘`)
   return lines
 }
 
@@ -93,12 +86,12 @@ export function WorkerPanel({ model, width = 80 }: { model: WorkerPanelModel; wi
   const theme = getTheme()
   const lines = renderWorkerPanelLines(model, width)
   return (
-    <Box flexDirection="column" paddingX={1} marginBottom={1}>
+    <Box flexDirection="column" paddingX={1}>
       {lines.map((line, index) => {
         const color = line.includes('failed') || line.includes('circuit open') ? theme.error
-          : line.includes('circuit') && line.includes('half-open') ? theme.warning
-          : index === 0 || index === lines.length - 1 ? theme.secondary
-          : theme.primary
+          : line.includes('half-open') ? theme.warning
+          : index === 0 ? theme.muted
+          : theme.dim
         return <Text key={index} color={color}>{line}</Text>
       })}
     </Box>

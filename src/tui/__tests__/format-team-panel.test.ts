@@ -27,19 +27,19 @@ const model: TeamPanelModel = {
 describe('formatTeamPanel', () => {
   it('renders waves, star identities, and task status glyphs', () => {
     const plain = buildTeamPanelLines(model, 80).join('\n')
-    assert.ok(plain.includes('团队协作 · /team standard'), 'title')
+    assert.ok(plain.includes('团队 · /team standard'), 'title')
     assert.ok(plain.includes('wave 1/2'), 'wave label')
     assert.ok(plain.includes('wave-1'), 'wave id')
     assert.ok(plain.includes('✓ done'), 'done glyph')
     assert.ok(plain.includes('◐ running'), 'running glyph')
     assert.ok(plain.includes('◌ waiting'), 'waiting glyph')
-    assert.ok(plain.includes('depends ─ t1'), 'dependency line')
+    assert.ok(plain.includes('depends: t1'), 'dependency line')
     assert.ok(plain.includes('found 3 endpoints'), 'task summary')
   })
 
-  it('applies ANSI color (error on high-risk line, secondary border)', () => {
+  it('applies ANSI color (error on high-risk line, muted title)', () => {
     const lines = formatTeamPanel(model, theme, 80)
-    assert.ok(/\x1B\[/.test(lines[0]!), 'border line has color')
+    assert.ok(/\x1B\[/.test(lines[0]!), 'title line has color')
     const highLine = lines.find(l => l.includes('high ⚠'))
     assert.ok(highLine && /\x1B\[/.test(highLine), 'high-risk line has color')
   })
