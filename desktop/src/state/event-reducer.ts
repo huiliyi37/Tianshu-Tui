@@ -228,6 +228,25 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         isError: true,
       }]
       return next
+    case 'rewind': {
+      const prompt = String(ev.data.prompt ?? '')
+      next.blocks = [...next.blocks, {
+        key: `rewind-${ev.seq}`,
+        kind: 'turn',
+        text: `⏪ Rewound — message restored to input.`,
+      }]
+      // Truncate conversation blocks: remove everything after the rewind point.
+      if (prompt) {
+        const lastMatchIdx = [...next.blocks].reverse().findIndex(
+          b => b.kind === 'user' && b.text?.includes(prompt.slice(0, 40))
+        )
+        if (lastMatchIdx >= 0) {
+          const cutIdx = next.blocks.length - lastMatchIdx
+          next.blocks = next.blocks.slice(0, cutIdx)
+        }
+      }
+      return next
+    }
     case 'status':
       next.status = String(ev.data.status ?? next.status ?? '')
       return next

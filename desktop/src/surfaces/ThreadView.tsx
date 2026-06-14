@@ -6,6 +6,7 @@ import { ToolBlock } from '../components/ToolBlock'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
+import { RewindOverlay } from '../components/RewindOverlay'
 import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
 
 const STATUS_LABEL: Record<string, string> = {
@@ -29,6 +30,8 @@ export function ThreadView(props: {
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode } = props
   const [input, setInput] = useState('')
+  const [showRewind, setShowRewind] = useState(false)
+  const lastEscAt = useRef(0)
   const endRef = useRef<HTMLDivElement>(null)
   const busy = session.status === 'running'
   const autonomous = isAutonomous(session.approvalMode)
@@ -107,6 +110,19 @@ export function ThreadView(props: {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
               submit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              const now = Date.now()
+              if (input.trim()) {
+                // Has text: first ESC clears input
+                setInput('')
+              } else if (now - lastEscAt.current < 400) {
+                // Double-ESC → rewind
+                lastEscAt.current = 0
+                setShowRewind(true)
+              } else {
+                lastEscAt.current = now
+              }
             }
           }}
         />
@@ -119,6 +135,17 @@ export function ThreadView(props: {
           <button className="btn" onClick={submit} disabled={!input.trim()}>发送</button>
         )}
       </div>
+      {showRewind && (
+        <RewindOverlay
+          sessionId={session.id}
+          onClose={() => setShowRewind(false)}
+          onRewound={(prompt) => {
+            setInput(prompt)
+            // Force re-fetch events to update the conversation view
+            window.dispatchEvent(new Event('rewind-complete'))
+          }}
+        />
+      )}
     </div>
   )
 }

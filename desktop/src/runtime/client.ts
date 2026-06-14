@@ -150,6 +150,24 @@ export function answerIntent(
 
 // ── Rollback (R3) ───────────────────────────────────────────────────
 
+// ── Rewind (Wave 3) ─────────────────────────────────────────────────
+
+export interface RewindPoint {
+  index: number
+  content: string
+  timestamp: number
+}
+
+export function getRewindPoints(id: string): Promise<{ points: RewindPoint[] }> {
+  return apiGet<{ points: RewindPoint[] }>(`/sessions/${id}/rewind-points`)
+}
+
+export function rewindSession(id: string, messageIndex: number, rollbackFiles?: boolean): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/rewind`, { messageIndex, rollbackFiles })
+}
+
+// ── Rollback (R3) ───────────────────────────────────────────────────
+
 export interface RollbackPreview {
   available: boolean
   /** Human-readable preview incl. ⚠️ irreversible bash side-effect caveats. */

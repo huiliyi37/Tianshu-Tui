@@ -530,3 +530,17 @@ body {
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 .banner { padding: 8px 14px; font-size: 13px; }
 .banner.error { background: var(--error-soft); color: var(--error); }
+
+/* Rewind overlay */
+.rewind-panel { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 480px; max-width: 600px; max-height: 70vh; display: flex; flex-direction: column; gap: 8px; }
+.rewind-header { font-weight: 600; font-size: 14px; color: var(--text); }
+.rewind-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+.rewind-item { display: flex; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.rewind-item.selected { background: var(--accent-soft); }
+.rewind-item:hover { background: var(--hover); }
+.rewind-marker { color: var(--accent); width: 12px; flex-shrink: 0; }
+.rewind-text { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rewind-item.selected .rewind-text { color: var(--text); }
+.rewind-empty { color: var(--muted); padding: 16px 0; text-align: center; font-size: 13px; }
+.rewind-error { color: var(--error); padding: 8px 0; font-size: 13px; }
+.rewind-hint { color: var(--muted); font-size: 12px; padding-top: 4px; }
