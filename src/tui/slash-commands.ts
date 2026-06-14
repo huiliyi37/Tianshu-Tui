@@ -104,6 +104,26 @@ export interface SlashHandlerContext {
   onDomainChange?: (domainName: string | undefined) => void
   /** T5: bandit promotion state for /status observability. */
   banditState?: import('../server/routes.js').BanditStatusEntry[]
+  /** 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow。
+   *  未注入时 /review fallback 到 resolveAppPromptInput → deliver_task 旧路径。 */
+  runReview?: (change: import('../agent/review-discipline.js').ChangeSet, mode: import('../agent/review-router.js').ReviewMode, focus?: string) => Promise<import('../agent/review-router.js').ReviewOutcome>
+}
+
+/** 收集当前工作区未提交的改动文件（unstaged + staged + untracked）。 */
+async function collectDirtyFiles(cwd: string): Promise<string[]> {
+  const { spawnSync } = await import('node:child_process')
+  const run = (gitArgs: string[]): string[] => {
+    const r = spawnSync('git', ['-c', 'core.quotePath=false', ...gitArgs], { cwd, encoding: 'utf-8', timeout: 5000 })
+    return r.status === 0 ? r.stdout.split('\0').filter(Boolean) : []
+  }
+  try {
+    const unstaged = run(['diff', '--name-only', '-z'])
+    const staged = run(['diff', '--cached', '--name-only', '-z'])
+    const untracked = run(['ls-files', '--others', '--exclude-standard', '-z'])
+    return [...new Set([...unstaged, ...staged, ...untracked])].sort()
+  } catch {
+    return []
+  }
 }
 
 function formatClaimLine(claim: import('../context/claims.js').ContextClaim): string {
@@ -301,9 +321,58 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     }
 
     case '/review': {
-      // /review and /review max pass through to the agent as deliver_task instructions.
-      // resolveAppPromptInput maps them to explicit deliver_task(review_level=...) calls.
-      return false
+      // /review [max] [focus] — 独立审查入口（不经过 deliver_task）。
+      // 当 ctx.runReview 可用时直接调 routeReviewWorkflow；否则 fallback 到旧路径。
+      const isMax = parts[1]?.toLowerCase() === 'max'
+      const focus = parts.slice(isMax ? 2 : 1).join(' ').trim()
+
+      if (!ctx.runReview) {
+        // Fallback: 让 resolveAppPromptInput 映射为 deliver_task 指令
+        return false
+      }
+
+      // 动态导入避免循环依赖 + 避免顶层 import 增加初始 bundle
+      const { isCrossModule, isFixContext } = await import('../agent/review-discipline.js')
+      const { reviewWorkflowBudgetMs } = await import('../agent/review-router.js')
+      type ChangeSet = import('../agent/review-discipline.js').ChangeSet
+      type ReviewMode = import('../agent/review-router.js').ReviewMode
+
+      // 从 git diff 构造 ChangeSet
+      const dirtyFiles = await collectDirtyFiles(ctx.agent.cwd)
+      if (dirtyFiles.length === 0) {
+        pushStatic(createLogEntry({ type: 'system', content: '没有未提交的改动可以审查。' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      const change: ChangeSet = {
+        files: dirtyFiles,
+        crossModule: isCrossModule(dirtyFiles),
+        isFix: isFixContext(focus || ''),
+        ...(isMax ? { forceLevel: 'L3' as const } : {}),
+      }
+
+      const mode: ReviewMode = 'manual'
+      const budgetSec = Math.round(reviewWorkflowBudgetMs(mode, isMax ? 'L3' : undefined) / 1000)
+      const levelLabel = isMax ? 'L3 Squadron (5 inspectors)' : 'auto-classify'
+      pushStatic(createLogEntry({ type: 'system', content: `⏳ 审查启动中 (${levelLabel}, ≤${budgetSec}s)...\n` }))
+
+      try {
+        const outcome = await ctx.runReview(change, mode, focus || undefined)
+        const icon = outcome.verdict === 'verified' ? '🟢'
+                   : outcome.verdict === 'rejected' ? '🔴' : '🟡'
+        const lines = [`${icon} 审查结果 [${outcome.tier}]: ${outcome.verdict}`]
+        if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
+        if (outcome.evidence) lines.push(`   证据：${outcome.evidence}`)
+        if (outcome.verdict === 'rejected' || outcome.escalated) {
+          lines.push('   → 请在后续提交中处理审查发现。')
+        }
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      } catch (err) {
+        pushStatic(createLogEntry({ type: 'system', content: `审查失败：${(err as Error).message}` }))
+      }
+      setIsStreaming(false)
+      return true
     }
 
     case '/model': {

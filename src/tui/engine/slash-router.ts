@@ -114,6 +114,18 @@ export class SlashRouter {
       onDomainChange: (domainName: string | undefined) => {
         this.app.setSessionStarDomain(domainName)
       },
+      // 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow
+      runReview: this.ctx.refs.coordinator
+        ? (change, mode, focus) => {
+            const { createCoordinatorReviewDeps } = require('../../agent/review-coordinator-deps.js') as typeof import('../../agent/review-coordinator-deps.js')
+            const { routeReviewWorkflow } = require('../../agent/review-router.js') as typeof import('../../agent/review-router.js')
+            const reviewDeps = createCoordinatorReviewDeps(this.ctx.refs.coordinator!, {
+              parentTurnId: 'slash-review',
+              reviewDepth: 0,
+            })
+            return routeReviewWorkflow(change, reviewDeps, { mode })
+          }
+        : undefined,
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session
