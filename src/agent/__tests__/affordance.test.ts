@@ -233,3 +233,63 @@ describe('adaptAffordanceFromHistory', () => {
   })
 })
 
+// ─── U3: Planning Phase LSP Boost ─────────────────────────────
+
+describe('computeAffordanceScores (U3 planning boost)', () => {
+  const baseState: AffordanceState = {
+    sensorium: {
+      momentum: 0.5,
+      pressure: 0.3,
+      confidence: 0.5,
+      complexity: 0.4,
+      freshness: 0.6,
+      stability: 0.7,
+    },
+    vigor: null,
+    thetaPhase: 'encoding',
+    season: 'genesis',
+    workingSetSize: 2,
+    recentToolNames: ['lsp_find_references', 'lsp_goto_definition', 'grep'],
+  }
+
+  it('LSP tools get higher epistemic during planning vs non-planning', () => {
+    const normal = computeAffordanceScores({ ...baseState, contractStatus: 'executing' })
+    const planning = computeAffordanceScores({ ...baseState, contractStatus: 'planning' })
+
+    const lspNormal = normal['lsp_find_references']!.epistemic
+    const lspPlanning = planning['lsp_find_references']!.epistemic
+    assert.ok(
+      lspPlanning > lspNormal,
+      `LSP epistemic during planning (${lspPlanning}) should be > normal (${lspNormal})`,
+    )
+  })
+
+  it('LSP epistemic > grep epistemic during planning', () => {
+    const planning = computeAffordanceScores({ ...baseState, contractStatus: 'planning' })
+    const lspEp = planning['lsp_find_references']!.epistemic
+    const grepEp = planning['grep']!.epistemic
+    // LSP gets +0.15 boost; grep doesn't — LSP should be higher
+    assert.ok(lspEp > grepEp, `LSP (${lspEp}) should > grep (${grepEp}) during planning`)
+  })
+
+  it('grep epistemic unchanged regardless of planning status', () => {
+    const normal = computeAffordanceScores({ ...baseState, contractStatus: undefined })
+    const planning = computeAffordanceScores({ ...baseState, contractStatus: 'planning' })
+    assert.equal(
+      normal['grep']!.epistemic,
+      planning['grep']!.epistemic,
+      'grep should not get planning boost',
+    )
+  })
+
+  it('LSP boost is 0.15 delta', () => {
+    const normal = computeAffordanceScores({ ...baseState, contractStatus: 'off' })
+    const planning = computeAffordanceScores({ ...baseState, contractStatus: 'planning' })
+    const delta = planning['lsp_goto_definition']!.epistemic - normal['lsp_goto_definition']!.epistemic
+    assert.ok(
+      Math.abs(delta - 0.15) < 0.01,
+      `delta should be ~0.15, got ${delta}`,
+    )
+  })
+})
+

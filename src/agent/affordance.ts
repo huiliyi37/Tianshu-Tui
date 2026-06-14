@@ -81,6 +81,8 @@ export interface AffordanceState {
   workingSetSize: number
   /** 最近使用的工具名称列表 */
   recentToolNames: string[]
+  /** 当前 TaskContract 状态（planning 阶段时 LSP 工具升权） */
+  contractStatus?: string
 }
 
 // ─── Modulators ────────────────────────────────────────────────────
@@ -186,6 +188,11 @@ export function computeAffordanceScores(
   const epMod = epistemicModulator(state)
   const insMod = instrumentalModulator(state)
 
+  // U3: planning 阶段 LSP 工具 epistemic 升权
+  const isPlanning = state.contractStatus === 'planning'
+  const LSP_TOOLS = new Set(['lsp_find_references', 'lsp_goto_definition'])
+  const LSP_PLANNING_BOOST = 0.15
+
   // 收集所有需要评分的工具名
   const names = new Set([
     ...Object.keys(toolAffordanceRegistry),
@@ -196,8 +203,9 @@ export function computeAffordanceScores(
   for (const name of names) {
     // Session-local adaptation overrides global registry, if present
     const base = adaptations?.[name] ?? toolAffordanceRegistry[name] ?? DEFAULT_AFFORDANCE
+    const epBoost = (isPlanning && LSP_TOOLS.has(name)) ? LSP_PLANNING_BOOST : 0
     result[name] = {
-      epistemic: clamp(base.epistemic * epMod),
+      epistemic: clamp(base.epistemic * epMod + epBoost),
       instrumental: clamp(base.instrumental * insMod),
       contextual: contextualModulator(name, state),
     }

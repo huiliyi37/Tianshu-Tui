@@ -7,6 +7,7 @@ import {
   detectDeviation,
   serializeTrace,
   maxStepsForDepth,
+  inferExpectedTools,
   type PlanStep,
   type StepResult,
 } from '../plan-execution-trace.js'
@@ -259,5 +260,41 @@ describe('serializeTrace', () => {
     assert.ok(xml.includes('&lt;script&gt;'))
     assert.ok(xml.includes('&amp;'))
     assert.ok(xml.includes('&quot;'))
+  })
+})
+
+// ─── inferExpectedTools (U3) ──────────────────────────────────
+
+describe('inferExpectedTools', () => {
+  it('returns base tools when no LSP trigger keywords', () => {
+    const tools = inferExpectedTools('修改配置文件')
+    assert.deepEqual(tools, ['read_file'])
+  })
+
+  it('adds LSP tools when description contains "调用方"', () => {
+    const tools = inferExpectedTools('查找 processPayment 的调用方')
+    assert.ok(tools.includes('lsp_find_references'))
+    assert.ok(tools.includes('lsp_goto_definition'))
+  })
+
+  it('adds LSP tools when description contains "理解"', () => {
+    const tools = inferExpectedTools('理解现有数据流')
+    assert.ok(tools.includes('lsp_find_references'))
+  })
+
+  it('adds LSP tools when description contains "依赖"', () => {
+    const tools = inferExpectedTools('追踪模块依赖关系')
+    assert.ok(tools.includes('lsp_goto_definition'))
+  })
+
+  it('does not duplicate tools already in baseTools', () => {
+    const tools = inferExpectedTools('理解调用方', ['read_file', 'lsp_find_references'])
+    const refs = tools.filter(t => t === 'lsp_find_references')
+    assert.equal(refs.length, 1)
+  })
+
+  it('preserves custom baseTools', () => {
+    const tools = inferExpectedTools('简单修改', ['edit_file', 'grep'])
+    assert.deepEqual(tools, ['edit_file', 'grep'])
   })
 })

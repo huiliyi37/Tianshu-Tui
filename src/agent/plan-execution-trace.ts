@@ -75,7 +75,28 @@ const BLOCKED_FAILURE_THRESHOLD = 3
 /** stalled 检测：无工具回合数 */
 const STALLED_NO_TOOL_TURNS = 3
 
+/** U3: 触发 LSP 工具自动注入的关键词 */
+const LSP_TRIGGER_KEYWORDS = ['理解', '追踪', '调用方', '依赖', '消费', '引用', '影响', '调用链', '结构']
+const LSP_EXPAND_TOOLS = ['lsp_find_references', 'lsp_goto_definition']
+
 // ─── Pure Functions ────────────────────────────────────────────
+
+/**
+ * U3: 根据步骤描述推断 expectedTools。
+ * 描述包含"理解/追踪/调用方/依赖"等关键词时自动追加 LSP 工具。
+ */
+export function inferExpectedTools(description: string, baseTools: string[] = ['read_file']): string[] {
+  const tools = [...baseTools]
+  const lowerDesc = description.toLowerCase()
+  const hasLspTrigger = LSP_TRIGGER_KEYWORDS.some(kw => description.includes(kw) || lowerDesc.includes(kw))
+  if (hasLspTrigger) {
+    for (const t of LSP_EXPAND_TOOLS) {
+      if (!tools.includes(t)) tools.push(t)
+    }
+  }
+  return tools
+}
+
 
 /**
  * 创建一个新的执行轨迹。steps 由调用方填充（来自 planning 阶段的目标分解）。
