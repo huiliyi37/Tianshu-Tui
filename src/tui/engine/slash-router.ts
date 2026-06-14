@@ -15,6 +15,9 @@ import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } f
 import { switchAgentRuntime } from '../../bootstrap.js'
 import type { TuiApp } from './app.js'
 import type { BootstrapContext } from '../../bootstrap.js'
+import { createCoordinatorReviewDeps } from '../../agent/review-coordinator-deps.js'
+import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../../agent/review-router.js'
+import type { ChangeSet } from '../../agent/review-discipline.js'
 
 // ── React-free mutable ref adapter ─────────────────────────────
 
@@ -114,18 +117,18 @@ export class SlashRouter {
       onDomainChange: (domainName: string | undefined) => {
         this.app.setSessionStarDomain(domainName)
       },
-      // 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow
-      runReview: this.ctx.refs.coordinator
-        ? (change, mode, focus) => {
-            const { createCoordinatorReviewDeps } = require('../../agent/review-coordinator-deps.js') as typeof import('../../agent/review-coordinator-deps.js')
-            const { routeReviewWorkflow } = require('../../agent/review-router.js') as typeof import('../../agent/review-router.js')
-            const reviewDeps = createCoordinatorReviewDeps(this.ctx.refs.coordinator!, {
-              parentTurnId: 'slash-review',
-              reviewDepth: 0,
-            })
-            return routeReviewWorkflow(change, reviewDeps, { mode })
-          }
-        : undefined,
+        // 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow
+        runReview: this.ctx.refs.coordinator
+          ? (() => {
+              // 构造一次 reviewDeps，复用给每次 /review 调用
+              const reviewDeps = createCoordinatorReviewDeps(this.ctx.refs.coordinator!, {
+                parentTurnId: 'slash-review',
+                reviewDepth: 0,
+              })
+              return (change: ChangeSet, mode: ReviewMode, focus?: string) =>
+                routeReviewWorkflow(change, reviewDeps, { mode, focusHint: focus })
+            })()
+          : undefined,
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session

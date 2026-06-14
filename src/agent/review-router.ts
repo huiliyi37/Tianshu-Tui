@@ -57,6 +57,9 @@ export interface ReviewRouterOptions {
   mode?: ReviewMode
   /** Task dependency depth — upgrades review scale for wiring/system tasks. */
   depthLayer?: import('../context/task-contract.js').TaskDepthLayer
+  /** User-provided focus hint (from /review max <focus>). Injected into
+   *  inspector/verifier objectives so workers know what to prioritize. */
+  focusHint?: string
 }
 
 export interface ReviewOutcome {
@@ -148,6 +151,11 @@ export async function routeReviewWorkflow(
   options: ReviewRouterOptions = {},
 ): Promise<ReviewOutcome> {
   const signal = options.abortSignal
+
+  // Merge focusHint from options into change so inspector objectives pick it up.
+  if (options.focusHint && !change.focusHint) {
+    change = { ...change, focusHint: options.focusHint }
+  }
 
   if (options.mode === 'auto') {
     if (isTrivialChange(change.files)) return { tier: 'auto', verdict: 'nudge' }

@@ -126,6 +126,9 @@ export interface ChangeSet {
   isFix: boolean
   /** Explicitly override the auto-classified review scale. L2 = single verifier, L3 = squadron. */
   forceLevel?: ReviewScale
+  /** User-provided focus hint (from /review [max] <focus>). Passed to
+   *  inspector/verifier objectives so workers know what to prioritize. */
+  focusHint?: string
 }
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i

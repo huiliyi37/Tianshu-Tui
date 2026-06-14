@@ -204,6 +204,7 @@ function verifierObjective(change: ChangeSet): string {
     wiringEffectivenessBlock(),
     methodologyVerificationBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
+    ...(change.focusHint ? [`**Reviewer focus**: ${change.focusHint}`] : []),
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
     'For spec/integration changes, explicitly report fact-flow closure, condition-matrix coverage, and the counterexample that would fail a checklist-only implementation.',
@@ -286,6 +287,7 @@ function inspectorObjective(inspector: typeof INSPECTORS[number], change: Change
     ...stanceBlocks(inspector.stances),
     ...(inspector.method ? [inspector.method] : []),
     `Files: ${files(change).join(', ') || '(none)'}`,
+    ...(change.focusHint ? [`**Reviewer focus**: ${change.focusHint}`] : []),
     ...(inspector.stances.includes('dataflow')
       ? ['For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.']
       : []),
