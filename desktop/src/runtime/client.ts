@@ -1,0 +1,127 @@
+import { invoke } from '@tauri-apps/api/core'
+import type {
+  ApprovalDecision,
+  ArtifactSummary,
+  HealthInfo,
+  SessionEvent,
+  SessionRecord,
+} from './types'
+
+export interface RuntimeInfo {
+  port: number
+  token: string
+}
+
+let cached: RuntimeInfo | null = null
+
+/**
+ * The Rust shell spawns `rivet serve` as a sidecar, generates a random
+ * RIVET_SERVER_TOKEN, and exposes the live port + token via the `runtime_info`
+ * Tauri command. In a plain browser dev context (no Tauri), fall back to env so
+ * the UI can be developed against a manually-started `rivet serve`.
+ */
+export async function getRuntimeInfo(): Promise<RuntimeInfo> {
+  if (cached) return cached
+  try {
+    cached = await invoke<RuntimeInfo>('runtime_info')
+  } catch {
+    const port = Number(import.meta.env.VITE_RIVET_PORT ?? 3100)
+    const token = String(import.meta.env.VITE_RIVET_TOKEN ?? '')
+    cached = { port, token }
+  }
+  return cached
+}
+
+export function runtimeBaseUrl(info: RuntimeInfo): string {
+  return `http://127.0.0.1:${info.port}`
+}
+
+/**
+ * Low-level authed fetch against the sidecar. Shared by the REST helpers below
+ * and the SSE stream reader (runtime/sse.ts) so the Bearer token lives in one
+ * place. Throws on non-2xx.
+ */
+export async function rivetFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const info = await getRuntimeInfo()
+  const headers = new Headers(init.headers)
+  headers.set('Authorization', `Bearer ${info.token}`)
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
+  const res = await fetch(runtimeBaseUrl(info) + path, { ...init, headers })
+  return res
+}
+
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await rivetFetch(path)
+  if (!res.ok) throw new Error(`GET ${path} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  const res = await rivetFetch(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
+  if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+// ── Health (N1) ─────────────────────────────────────────────────────
+
+export function getHealth(): Promise<HealthInfo> {
+  return apiGet<HealthInfo>('/health')
+}
+
+// ── Session API ─────────────────────────────────────────────────────
+
+export function createSession(input: { cwd?: string; title?: string; prompt?: string }): Promise<SessionRecord> {
+  return apiPost<SessionRecord>('/sessions', input)
+}
+
+export async function listSessions(): Promise<SessionRecord[]> {
+  const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions')
+  return sessions
+}
+
+export function getSession(id: string): Promise<SessionRecord> {
+  return apiGet<SessionRecord>(`/sessions/${id}`)
+}
+
+export function sendPrompt(id: string, prompt: string): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt })
+}
+
+/** N2 — feedback on an artifact, re-injected as next-turn context. */
+export function sendArtifactFeedback(id: string, artifactId: string, comment: string): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment })
+}
+
+export function abortSession(id: string): Promise<{ aborted: boolean }> {
+  return apiPost<{ aborted: boolean }>(`/sessions/${id}/abort`)
+}
+
+export function fetchEvents(id: string, since: number): Promise<{ events: SessionEvent[]; lastSeq: number }> {
+  return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
+}
+
+export function answerApproval(id: string, requestId: string, decision: ApprovalDecision): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
+}
+
+/** N2 — resolve an intent-preview intervention. */
+export function answerIntent(
+  id: string,
+  requestId: string,
+  decision: 'continue' | 'veto' | 'alternative',
+): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
+}
+
+// ── Artifacts ───────────────────────────────────────────────────────
+
+export async function listArtifacts(id: string): Promise<ArtifactSummary[]> {
+  const { artifacts } = await apiGet<{ artifacts: ArtifactSummary[] }>(`/sessions/${id}/artifacts`)
+  return artifacts
+}
+
+export function getArtifact(id: string, artifactId: string): Promise<{ artifact: ArtifactSummary; raw: string }> {
+  return apiGet<{ artifact: ArtifactSummary; raw: string }>(
+    `/sessions/${id}/artifacts/${encodeURIComponent(artifactId)}`,
+  )
+}

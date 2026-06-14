@@ -62,6 +62,7 @@
     "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^7.0.2",
     "@types/node": "^22.0.0",
