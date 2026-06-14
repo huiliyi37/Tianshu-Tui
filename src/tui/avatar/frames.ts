@@ -1,3 +1,4 @@
+import stringWidth from 'string-width'
 import type { StarPhase } from '../../agent/star-event.js'
 import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown, HeroId } from './types.js'
 
@@ -11,30 +12,14 @@ import type { AvatarMode, AvatarFrame, FaceExpression, DomainId, SealCrown, Hero
 // ─── CJK 显示宽度计算 ───────────────────────────────────────────────
 
 /**
- * 计算字符串的终端显示宽度
+ * 计算字符串的终端显示宽度。
  *
- * CJK 字符（中日韩）占 2 列，其他字符占 1 列。
- * 基于 Unicode 码点范围判断。
+ * 统一委托给 `string-width`（Unicode East-Asian-Width + emoji 表），替代原先手写
+ * 的 CJK 码点区间——后者漏掉了星域配饰里的 emoji（如 🛡 U+1F6E1，实占 2 列却被
+ * 当成 1 列），导致印章帧 padding 错位。
  */
 export function getStringWidth(str: string): number {
-  let width = 0
-  for (const char of str) {
-    const code = char.codePointAt(0) ?? 0
-    // CJK Unified Ideographs + CJK Compatibility Ideographs + Katakana + Hiragana
-    if (
-      (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK Unified Ideographs
-      (code >= 0x3000 && code <= 0x303F) ||   // CJK Symbols and Punctuation
-      (code >= 0x3040 && code <= 0x309F) ||   // Hiragana
-      (code >= 0x30A0 && code <= 0x30FF) ||   // Katakana
-      (code >= 0xFF00 && code <= 0xFFEF) ||   // Fullwidth Forms
-      (code >= 0xF900 && code <= 0xFAFF)      // CJK Compatibility Ideographs
-    ) {
-      width += 2
-    } else {
-      width += 1
-    }
-  }
-  return width
+  return stringWidth(str)
 }
 
 // ─── 印章冠定义 ─────────────────────────────────────────────────────

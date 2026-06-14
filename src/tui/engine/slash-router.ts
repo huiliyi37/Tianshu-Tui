@@ -89,11 +89,11 @@ export class SlashRouter {
       currentSessionId: this.ctx.sessionId,
       cost,
       cacheHitRate: metrics?.cacheHitRate ?? this.cacheHitRate,
-      autoSafeRef: this.autoSafeRef as unknown as React.MutableRefObject<boolean>,
-      verboseRef: this.verboseRef as unknown as React.MutableRefObject<boolean>,
+      autoSafeRef: this.autoSafeRef,
+      verboseRef: this.verboseRef,
       setVerbose: (v: boolean) => { this.verbose = v; this.verboseRef.current = v },
       setAutoSafe: (v: boolean) => { this.autoSafe = v; this.autoSafeRef.current = v },
-      rollbackTokenRef: this.rollbackTokenRef as unknown as React.MutableRefObject<string | null>,
+      rollbackTokenRef: this.rollbackTokenRef,
       setCockpitPanel: (_v: unknown) => { /* noop in T9 */ },
       surfacePush: undefined,
       surfacePop: undefined,
@@ -107,10 +107,10 @@ export class SlashRouter {
       setSummaryState: (_v: unknown) => { /* noop in T9 */ },
       mcpManagerRef: {
         current: this.ctx.refs.mcpManager,
-      } as any,
+      },
       claimStoreRef: {
         current: this.ctx.claimStore,
-      } as any,
+      },
       // T5: bandit promotion observability — without this, /status in T9
       // always shows the "(no bandit state available)" placeholder.
       banditState: this.ctx.refs.banditState ?? undefined,

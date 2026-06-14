@@ -11,6 +11,7 @@
  * - Chronicle — 会话历史
  */
 
+import stringWidth from 'string-width'
 import { ANSI, color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 
@@ -26,7 +27,9 @@ function formatBottomBorder(width: number, theme: RivetTheme): string {
 
 function formatTitleBar(title: string, width: number, theme: RivetTheme): string {
   const padded = ` ${title} `
-  const remaining = width - 2 - padded.length
+  // stringWidth, not .length: CJK/emoji titles occupy 2 cells each, so .length
+  // under-counts and the border drifts right of the box edge.
+  const remaining = Math.max(0, width - 2 - stringWidth(padded))
   const left = Math.floor(remaining / 2)
   const right = remaining - left
   return color('│' + ' '.repeat(left) + padded + ' '.repeat(right) + '│', theme.dim)
@@ -34,13 +37,14 @@ function formatTitleBar(title: string, width: number, theme: RivetTheme): string
 
 function formatFooter(hint: string, width: number, theme: RivetTheme): string {
   const padded = ` ${hint} `
-  const remaining = width - 2 - padded.length
+  const remaining = width - 2 - stringWidth(padded)
   return color('│' + padded + ' '.repeat(Math.max(0, remaining)) + '│', theme.dim)
 }
 
 function padLine(text: string, width: number, theme: RivetTheme): string {
-  const visible = text.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
-  const padding = Math.max(0, width - 2 - visible.length)
+  // stringWidth handles ANSI stripping AND CJK/emoji cell width; the old
+  // `visible.length` under-padded any line with wide chars, misaligning the ┃ edge.
+  const padding = Math.max(0, width - 2 - stringWidth(text))
   return color('│', theme.dim) + text + ' '.repeat(padding) + color('│', theme.dim)
 }
 

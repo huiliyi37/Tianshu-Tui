@@ -82,6 +82,16 @@ const HELP_TEXT = `Available commands:
 /diagram [list|<type>] — Generate a mermaid diagram skeleton (architecture|dataflow|sequence|flowchart|comparison|state)
 Ctrl+C — Interrupt current turn (press twice to exit)`
 
+/**
+ * Framework-agnostic mutable ref. Structurally compatible with React's
+ * `MutableRefObject<T>` (`{ current: T }`) AND the T9 engine's plain
+ * `MutableRef` adapter, so the non-React SlashRouter no longer needs to fake a
+ * React type with `as unknown as React.MutableRefObject<...>` / `as any`.
+ */
+export interface MutableRefLike<T> {
+  current: T
+}
+
 export interface SlashHandlerContext {
   parts: string[]
   agent: AgentLoop
@@ -96,11 +106,11 @@ export interface SlashHandlerContext {
   currentSessionId: string
   cost: number
   cacheHitRate: number
-  autoSafeRef: React.MutableRefObject<boolean>
-  verboseRef: React.MutableRefObject<boolean>
+  autoSafeRef: MutableRefLike<boolean>
+  verboseRef: MutableRefLike<boolean>
   setVerbose: (v: boolean) => void
   setAutoSafe: (v: boolean) => void
-  rollbackTokenRef: React.MutableRefObject<string | null>
+  rollbackTokenRef: MutableRefLike<string | null>
   setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
   activeOverlay?: string | null
   surfacePush?: (id: string) => void
@@ -109,8 +119,8 @@ export interface SlashHandlerContext {
   setIsStreaming: (v: boolean) => void
   setCacheHitRate: (v: number) => void
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
-  mcpManagerRef: React.MutableRefObject<import('../mcp/manager.js').McpManager | null>
-  claimStoreRef: React.MutableRefObject<ContextClaimStore | null>
+  mcpManagerRef: MutableRefLike<import('../mcp/manager.js').McpManager | null>
+  claimStoreRef: MutableRefLike<ContextClaimStore | null>
   setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
   reasoningEffort?: string
   onDomainChange?: (domainName: string | undefined) => void
