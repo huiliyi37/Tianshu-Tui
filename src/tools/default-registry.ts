@@ -10,6 +10,7 @@ import { EXPORT_FILE_TOOL } from './export-file.js'
 import { OPEN_PATH_TOOL } from './open-path.js'
 import { REQUEST_PATH_ACCESS_TOOL } from './request-path-access.js'
 import { SKILL_TOOL } from './skill.js'
+import { BROWSER_TOOL } from './browser.js'
 import { BASH_TOOL } from './bash.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
@@ -36,6 +37,8 @@ export interface DefaultRegistryOptions {
    *  默认关闭：工具数必须守住 kernel budget（≤25），超过会触发认知过载退化
    *  （见 kernel-budget.test.ts / trained-mode-analysis.md 3.2.B）。 */
   desktopTools?: boolean
+  /** N4 桌面浏览器验证工具。默认关闭：新攻击面 + 占 kernel budget，仅桌面 sidecar 开启。 */
+  browserTool?: boolean
 }
 
 export function createDefaultToolRegistry(extraTools: Tool[] = [], options: DefaultRegistryOptions = {}): ToolRegistry {
@@ -72,6 +75,9 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(FILE_INFO_TOOL)
   registry.register(REQUEST_PATH_ACCESS_TOOL)
   registry.register(SKILL_TOOL)
+  if (options.browserTool) {
+    registry.register(BROWSER_TOOL)
+  }
   for (const tool of extraTools) registry.register(tool)
   return registry
 }
