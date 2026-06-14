@@ -23,6 +23,7 @@ import type { OaiMessage } from '../api/oai-types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { DecisionShift } from '../agent/loop-types.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
+import { resolve } from 'node:path'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -294,6 +295,24 @@ export class RuntimeSessionManager {
     let runningCount = 0
     for (const s of this.sessions.values()) if (s.running) runningCount++
     return { sessionCount: this.sessions.size, runningCount }
+  }
+
+  /**
+   * Count running sessions sharing a working directory (VSW §6 adaptive policy).
+   * `runningCount` alone is global and would misjudge sessions in different
+   * projects as concurrent (反证表). Paths are resolved before comparison so
+   * relative/absolute forms of the same cwd match. `excludeSessionId` drops the
+   * caller's own session, yielding "other concurrent sessions on this cwd".
+   */
+  sameCwdRunningCount(cwd: string, excludeSessionId?: string): number {
+    const target = resolve(cwd)
+    let count = 0
+    for (const s of this.sessions.values()) {
+      if (!s.running) continue
+      if (excludeSessionId && s.record.id === excludeSessionId) continue
+      if (resolve(s.record.cwd) === target) count++
+    }
+    return count
   }
 
   createSession(input: CreateSessionInput = {}): SessionRecord {

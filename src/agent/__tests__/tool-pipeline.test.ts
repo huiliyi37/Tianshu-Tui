@@ -126,6 +126,62 @@ describe('executeToolUse', () => {
     assert.ok(!content.includes('[策略信号：读取循环]'))
   })
 
+  it('VSW: injects verificationSnapshot into run_tests params when the manager returns a plan', async () => {
+    let seen: any
+    const deps = makeDeps({
+      ownershipLedger: { getOwnedFiles: () => ['a.ts'], getBaselineHead: () => 'head1' } as any,
+      verificationSnapshotManager: {
+        prepare: (owned: string[]) => ({ path: '/snap/dir', snapshotRef: 'head1+diffX', decision: { snapshot: true } as any, ownedFiles: owned }),
+        lastDecision: () => null,
+        currentSnapshotRef: () => 'head1+diffX',
+        destroy: () => {},
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async (_name: string, params: any) => { seen = params.verificationSnapshot; return { content: 'ok', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-rt', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.deepEqual(seen, { path: '/snap/dir', snapshotRef: 'head1+diffX' })
+  })
+
+  it('VSW: leaves verificationSnapshot unset when the manager returns null (in-place)', async () => {
+    let seen: any = 'sentinel'
+    const deps = makeDeps({
+      ownershipLedger: { getOwnedFiles: () => [], getBaselineHead: () => '' } as any,
+      verificationSnapshotManager: {
+        prepare: () => null,
+        lastDecision: () => null,
+        currentSnapshotRef: () => undefined,
+        destroy: () => {},
+      } as any,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async (_name: string, params: any) => { seen = params.verificationSnapshot; return { content: 'ok', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-rt2', name: 'run_tests', input: {} },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(seen, undefined)
+  })
+
   it('records applied plan_close as file_write in task ledger', async () => {
     const events: any[] = []
     const owned: string[] = []
@@ -136,6 +192,7 @@ describe('executeToolUse', () => {
       ownershipLedger: {
         registerOwned: (file: string) => { owned.push(file) },
         getOwnedFiles: () => owned,
+        getBaselineHead: () => '',
       } as any,
       config: {
         ...makeDeps().config,
@@ -169,6 +226,7 @@ describe('executeToolUse', () => {
       ownershipLedger: {
         registerOwned: (file: string) => { owned.push(file) },
         getOwnedFiles: () => owned,
+        getBaselineHead: () => '',
       } as any,
       config: {
         ...makeDeps().config,
@@ -204,6 +262,7 @@ describe('executeToolUse', () => {
       ownershipLedger: {
         registerOwned: () => {},
         getOwnedFiles: () => [],
+        getBaselineHead: () => '',
       } as any,
       config: {
         ...makeDeps().config,
@@ -236,6 +295,7 @@ describe('executeToolUse', () => {
       ownershipLedger: {
         registerOwned: () => {},
         getOwnedFiles: () => [],
+        getBaselineHead: () => '',
       } as any,
       config: {
         ...makeDeps().config,

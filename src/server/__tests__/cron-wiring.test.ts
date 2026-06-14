@@ -10,7 +10,9 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync, writeFileSync } from 'node:fs'
+import { rmSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   CronScheduler,
   createScheduledTask,
@@ -21,14 +23,17 @@ import { TaskRegistry } from '../task-registry.js'
 import { JsonTaskStore } from '../task-store.js'
 import { CronWiring } from '../cron-wiring.js'
 
-const TEST_SCHEDULE_PATH = '.test-tmp/wiring-test-sched.json'
-const TEST_LOCK_PATH = '.test-tmp/wiring-test-lock.lock'
-const TEST_TASKS_DIR = '.test-tmp/wiring-test-tasks'
+// Hermetic: unique temp dir per setup() instead of a shared fixed .test-tmp
+// path, so concurrent runs/sessions never collide.
+let TEST_SCHEDULE_PATH = ''
+let TEST_LOCK_PATH = ''
+let TEST_TASKS_DIR = ''
 
 function setup() {
-  rmSync(TEST_SCHEDULE_PATH, { force: true })
-  rmSync(TEST_LOCK_PATH, { force: true })
-  rmSync(TEST_TASKS_DIR, { recursive: true, force: true })
+  const tmpDir = mkdtempSync(join(tmpdir(), 'cron-wiring-'))
+  TEST_SCHEDULE_PATH = join(tmpDir, 'wiring-test-sched.json')
+  TEST_LOCK_PATH = join(tmpDir, 'wiring-test-lock.lock')
+  TEST_TASKS_DIR = join(tmpDir, 'wiring-test-tasks')
 
   const store = new JsonTaskStore(TEST_TASKS_DIR)
   const registry = new TaskRegistry({ taskStore: store })

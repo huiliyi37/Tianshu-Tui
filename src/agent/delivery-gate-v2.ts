@@ -124,10 +124,12 @@ export interface DeliveryReport {
 }
 
 export interface DeliveryGateV2 {
-  /** Assess delivery readiness, optionally with external verification metadata and current dirty files */
-  assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryGateResult
+  /** Assess delivery readiness, optionally with external verification metadata,
+   *  current dirty files, and the current VSW snapshotRef (drops stale snapshot
+   *  verifications when provided). */
+  assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryGateResult
   /** Full structured report suitable for cycle_close deposit */
-  getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryReport
+  getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryReport
 }
 
 /**
@@ -209,7 +211,7 @@ export function createDeliveryGateV2(opts: {
     return { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles }
   }
 
-  function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryGateResult {
+  function assess(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryGateResult {
     const { ownedFilesForGate: ownedFiles, coOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
 
     // Check ownership health for unclassified dirty files
@@ -236,9 +238,9 @@ export function createDeliveryGateV2(opts: {
       }
     }
 
-    // Use effective verifications (deduplicated by supersession)
+    // Use effective verifications (deduplicated by supersession + VSW staleness)
     const rawVerifications = taskLedger.getVerifications()
-    const { effective: ownedVerifications, supersededFailures } = getEffectiveVerifications(rawVerifications)
+    const { effective: ownedVerifications, supersededFailures } = getEffectiveVerifications(rawVerifications, currentSnapshotRef)
 
     // Combine owned + external verifications for full picture
     const allVerifications = [
@@ -336,6 +338,22 @@ export function createDeliveryGateV2(opts: {
           ...diagnostics,
         }
 
+      case 'integration_conflict':
+        // Phase B failed on current HEAD but the owned diff passed in isolation
+        // (Phase A). Concurrent-change conflict — advisory, not this session's
+        // fault. Deliverable with a rebase/coordinate caveat.
+        return {
+          state: 'YELLOW',
+          canDeliver: true,
+          isBlocked: false,
+          reason: `${ownedFiles.length} owned file(s) verified in isolation, but integration on current HEAD conflicts: ${aggregate.reason}`,
+          ownedFileCount: ownedFiles.length,
+          externalFileCount: externalFiles.length,
+          verificationCount: allVerifications.length,
+          supersededFailures,
+          ...diagnostics,
+        }
+
       case 'unverified':
         return {
           state: 'RED',
@@ -367,8 +385,8 @@ export function createDeliveryGateV2(opts: {
     }
   }
 
-  function getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[]): DeliveryReport {
-    const result = assess(externalVerifications, currentDirtyFiles)
+  function getReport(externalVerifications: VerificationMetadata[], currentDirtyFiles?: string[], currentSnapshotRef?: string): DeliveryReport {
+    const result = assess(externalVerifications, currentDirtyFiles, currentSnapshotRef)
     const { ownedFilesForGate, coOwnedFiles, historicalOwnedFiles, externalFiles } = getGateFiles(currentDirtyFiles)
     return {
       taskId: taskLedger.getTaskId(),

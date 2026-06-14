@@ -9,9 +9,9 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { hostname as osHostname } from 'node:os'
-import { dirname } from 'node:path'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { hostname as osHostname, tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { CronLock, isPidAlive, isProcStatZombie, type LockInfo, type LockState } from '../cron-lock.js'
 import { CronScheduler } from '../cron-scheduler.js'
@@ -19,11 +19,13 @@ import { CronWiring } from '../cron-wiring.js'
 import { TaskRegistry } from '../task-registry.js'
 import { JsonTaskStore } from '../task-store.js'
 
-const TEST_DIR = '.test-tmp/cron-lock-p0'
-const TEST_LOCK_PATH = `${TEST_DIR}/scheduled_tasks.lock`
-const TEST_RELEASE_PATH = `${TEST_DIR}/release-contenders`
-const TEST_SCHEDULE_PATH = `${TEST_DIR}/scheduled_tasks.json`
-const TEST_TASKS_DIR = `${TEST_DIR}/tasks`
+// Hermetic: a unique temp dir per test avoids cross-run/concurrent-session
+// collisions on a shared fixed path (.test-tmp/cron-lock-p0).
+let TEST_DIR = ''
+let TEST_LOCK_PATH = ''
+let TEST_RELEASE_PATH = ''
+let TEST_SCHEDULE_PATH = ''
+let TEST_TASKS_DIR = ''
 
 const CONTENDER_SCRIPT = `
 import { existsSync } from 'node:fs'
@@ -65,8 +67,11 @@ interface ContenderRun {
 
 describe('CronLock P0 regressions', () => {
   beforeEach(() => {
-    rmSync(TEST_DIR, { recursive: true, force: true })
-    mkdirSync(TEST_DIR, { recursive: true })
+    TEST_DIR = mkdtempSync(join(tmpdir(), 'cron-lock-p0-'))
+    TEST_LOCK_PATH = `${TEST_DIR}/scheduled_tasks.lock`
+    TEST_RELEASE_PATH = `${TEST_DIR}/release-contenders`
+    TEST_SCHEDULE_PATH = `${TEST_DIR}/scheduled_tasks.json`
+    TEST_TASKS_DIR = `${TEST_DIR}/tasks`
   })
 
   afterEach(() => {

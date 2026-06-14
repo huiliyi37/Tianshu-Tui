@@ -1,7 +1,7 @@
 import { spawn } from 'child_process'
 import { readFile, stat, glob } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
-import type { Tool, ToolCallParams, VerificationMetadata } from './types.js'
+import type { Tool, ToolCallParams, ToolResult, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
 import { gracefulKill, forceKill } from '../platform.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
@@ -441,10 +441,71 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
       }
     }
 
-    return new Promise((resolve) => {
+    const plan = params.verificationSnapshot
+    if (!plan) {
+      // Default in-place verification — unchanged single-phase path.
+      return runTestCommandIn(params.cwd, testCommand, params, filter, timeout)
+    }
+
+    // VSW two-phase: Phase A in the isolated snapshot (blocking gate), Phase B in
+    // the live tree against current HEAD (advisory integration check). Phase A's
+    // result is primary; Phase B rides along as an extra verification so the gate
+    // can flag integration_conflict without blocking delivery.
+    const phaseA = await runTestCommandIn(plan.path, testCommand, params, filter, timeout)
+    tagVerification(phaseA, 'isolated', plan.snapshotRef)
+
+    const phaseB = await runTestCommandIn(params.cwd, testCommand, params, filter, timeout)
+    tagVerification(phaseB, 'integration', plan.snapshotRef)
+
+    const phaseBNote = phaseB.isError
+      ? `\n\n[Phase B · integration on current HEAD] FAILED — owned changes passed in isolation; this is a concurrent-change conflict. Rebase/coordinate before merging. Delivery is NOT blocked by this.`
+      : `\n\n[Phase B · integration on current HEAD] passed.`
+    const result: ToolResult = {
+      ...phaseA,
+      content: `[Phase A · isolated snapshot] ${phaseA.content}${phaseBNote}`,
+      // Phase A governs isError (the blocking gate); Phase B is advisory only.
+      isError: phaseA.isError,
+    }
+    if (phaseB.verification) result.extraVerifications = [phaseB.verification]
+    return result
+  },
+
+  timeoutMs(params?: ToolCallParams): number {
+    const requested = params?.input.timeout
+    const testTimeout = typeof requested === 'number' && Number.isFinite(requested) && requested > 0
+      ? requested
+      : 120_000
+    // Keep the outer tool-pipeline timeout slightly above run_tests' own
+    // timer so timeout results can return structured VerificationMetadata
+    // instead of being converted into an untracked pipeline exception.
+    return testTimeout + 5_000
+  },
+
+  requiresApproval(): boolean {
+    return false
+  },
+
+  isConcurrencySafe: () => false,
+  isEnabled: () => true,
+}
+
+function tagVerification(result: ToolResult, phase: 'isolated' | 'integration', snapshotRef: string): void {
+  if (!result.verification) return
+  result.verification = { ...result.verification, verificationPhase: phase, snapshotRef }
+}
+
+function runTestCommandIn(
+  cwd: string,
+  testCommand: RunnableTestCommand,
+  params: ToolCallParams,
+  filter: string | undefined,
+  timeout: number,
+): Promise<ToolResult> {
+  const startTime = Date.now()
+  return new Promise<ToolResult>((resolve) => {
       const child = track(spawn(testCommand.command, testCommand.args, {
-        cwd: params.cwd,
-        env: buildExecutionEnv(params.cwd),
+        cwd,
+        env: buildExecutionEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
       }))
 
@@ -574,23 +635,4 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         })
       })
     })
-  },
-
-  timeoutMs(params?: ToolCallParams): number {
-    const requested = params?.input.timeout
-    const testTimeout = typeof requested === 'number' && Number.isFinite(requested) && requested > 0
-      ? requested
-      : 120_000
-    // Keep the outer tool-pipeline timeout slightly above run_tests' own
-    // timer so timeout results can return structured VerificationMetadata
-    // instead of being converted into an untracked pipeline exception.
-    return testTimeout + 5_000
-  },
-
-  requiresApproval(): boolean {
-    return false
-  },
-
-  isConcurrencySafe: () => false,
-  isEnabled: () => true,
 }

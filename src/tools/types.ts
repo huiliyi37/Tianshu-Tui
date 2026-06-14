@@ -32,6 +32,17 @@ export interface LeaveMarkInput {
   tags?: string[]
 }
 
+/**
+ * VSW: a resolved snapshot plan attached to a verification tool call. Built by
+ * the session-scoped verification-snapshot-manager from the §6 policy decision.
+ */
+export interface VerificationSnapshotPlan {
+  /** Snapshot worktree directory (Phase A cwd). */
+  path: string
+  /** Content-addressed identity (baselineHead + sha(ownedDiff)) for metadata. */
+  snapshotRef: string
+}
+
 export interface ToolCallParams {
   input: Record<string, unknown>
   toolUseId: string
@@ -50,8 +61,17 @@ export interface ToolCallParams {
   taskId?: string
   /** B1: Files owned by the current task (subset of sessionModifiedFiles, excluding externals) */
   ownedFiles?: string[]
-  /** B1: Worktree baseline hash for integrity verification */
+  /** B1: Worktree baseline hash for integrity verification (structural identity, NOT a commit) */
   baselineHash?: string
+  /** VSW: real baseline commit SHA captured at task start (BaselineSnapshot.head).
+   *  Distinct from baselineHash — this is the commit-ish a snapshot worktree
+   *  detaches onto so verification runs on (baseline.head + owned diff). */
+  baselineHead?: string
+  /** VSW: active snapshot plan for this verification. When present, run_tests
+   *  runs two phases — Phase A in `path` (isolated, blocking) tagged with
+   *  `snapshotRef`, then Phase B in the live `cwd` (integration, advisory).
+   *  Absent → in-place single-phase verification (default, unchanged). */
+  verificationSnapshot?: VerificationSnapshotPlan
   /** P0-2: Active context window — drives per-call read caps for read_file/grep. */
   contextWindow?: number
   /** P0-2: Provider profile — read caps relax for cache-preserving providers. */
@@ -84,6 +104,13 @@ export interface VerificationMetadata {
   targetFiles?: string[]
   resolvedCommand?: string
   recommendedCommand?: string
+  /** VSW: identity of the snapshot this verification ran against
+   *  (baselineHead + sha(ownedDiff)). Absent for in-place (non-snapshot) runs.
+   *  When the owned diff changes, the ref changes → old verifications go stale. */
+  snapshotRef?: string
+  /** VSW two-phase: 'isolated' = Phase A on baseline.head + owned diff (blocking
+   *  gate); 'integration' = Phase B on current HEAD + owned diff (advisory). */
+  verificationPhase?: 'isolated' | 'integration'
 }
 
 export interface ToolResult {
@@ -95,6 +122,10 @@ export interface ToolResult {
   rawPath?: string
   isError?: boolean
   verification?: VerificationMetadata
+  /** Additional verification events to record beyond the primary one. VSW uses
+   *  this to record the Phase B (integration) verification alongside the
+   *  primary Phase A (isolated) verification from a single run_tests call. */
+  extraVerifications?: VerificationMetadata[]
 }
 
 export interface Tool {

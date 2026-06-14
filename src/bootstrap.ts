@@ -44,6 +44,7 @@ import { createOwnershipLedger } from './agent/ownership-ledger.js'
 import { createVerificationAttribution } from './agent/verification-attribution.js'
 import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
+import { createVerificationSnapshotManager, reapOrphanSnapshots } from './agent/verification-snapshot-manager.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
@@ -93,6 +94,8 @@ export interface RuntimeRefs {
   sessionRegistry: import('./agent/session-registry.js').SessionRegistry | null
   taskLedger: import('./agent/task-ledger.js').TaskLedger | null
   ownershipLedger: import('./agent/ownership-ledger.js').OwnershipLedger | null
+  /** VSW: session-scoped snapshot manager (in-place by default per §6 policy). */
+  verificationSnapshotManager: import('./agent/verification-snapshot-manager.js').VerificationSnapshotManager | null
   /** Track 3: 权威交付门禁（v2）— badge 与收敛检测共用。 */
   deliveryGate: import('./agent/delivery-gate-v2.js').DeliveryGateV2 | null
   meridianIndexer: MeridianIndexer | null
@@ -368,6 +371,23 @@ export function createInteractiveToolRegistry(
     taskLedger: b1TaskLedger,
   })
   refs.ownershipLedger = b1Ownership
+  // VSW: best-effort reap of worktrees left by dead sessions, then a session-scoped
+  // manager. §6 policy keeps a single clean session in-place (head==='' → not a git
+  // repo → in-place; no other sessions on this cwd in the CLI path → in-place),
+  // so behavior is unchanged unless the baseline is dirty or RIVET_VSW=1 forces it.
+  try { reapOrphanSnapshots({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
+  const b1SnapshotManager = createVerificationSnapshotManager({
+    baseCwd: cwd,
+    sessionId: refs.sessionId ?? getOrCreateSessionId(),
+    baselineHead: b1Baseline.getHead() || undefined,
+    isGitRepo: b1Baseline.getHead().length > 0,
+    preExistingDirtyCount: b1Baseline.getExternalDirtyCount(),
+    preExistingUntrackedCount: b1Baseline.getExternalUntrackedCount(),
+    // CLI bootstrap is single-session; the server path supplies real concurrency.
+    sameCwdRunningSessions: () => 0,
+    forceSnapshot: process.env.RIVET_VSW === '1',
+  })
+  refs.verificationSnapshotManager = b1SnapshotManager
   const b1Attribution = createVerificationAttribution({ ownership: b1Ownership })
   const b1Gate = createDeliveryGateV2({
     taskLedger: b1TaskLedger,
@@ -379,6 +399,7 @@ export function createInteractiveToolRegistry(
     taskLedger: b1TaskLedger,
     ownership: b1Ownership,
     gate: b1Gate,
+    getCurrentSnapshotRef: () => b1SnapshotManager.currentSnapshotRef(),
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
     reviewDepth: params?.reviewDepth ?? 0,
@@ -626,6 +647,7 @@ export function createAgentRuntime(deps: {
       effortBanditEnabled: effortGate.enabled,
       taskLedger: refs.taskLedger ?? undefined,
       ownershipLedger: refs.ownershipLedger ?? undefined,
+      verificationSnapshotManager: refs.verificationSnapshotManager ?? undefined,
       // T4: late-bound LSP manager — initialized asynchronously after agent creation
       getLspManager: () => refs.lspManager,
       // Track 3 门禁合一：badge 与收敛检测读权威 v2 状态。
@@ -979,6 +1001,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     sessionRegistry,
     taskLedger: null,
     ownershipLedger: null,
+    verificationSnapshotManager: null,
     deliveryGate: null,
     meridianIndexer,
     mcpManager: null,

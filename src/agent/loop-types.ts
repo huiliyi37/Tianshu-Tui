@@ -113,6 +113,10 @@ export interface AgentConfig {
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   /** Optional OwnershipLedger for real-time file ownership — updated on every file_write. */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
+  /** VSW: session-scoped snapshot manager. When present, run_tests asks it for a
+   *  verification snapshot plan; §6 policy decides snapshot-vs-in-place, so the
+   *  default (single clean session) stays in-place and behavior is unchanged. */
+  verificationSnapshotManager?: import('./verification-snapshot-manager.js').VerificationSnapshotManager
   /** Optional Meridian code graph indexer for structural context. */
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
   /** Plan Mode state — when 'planning', write tools are blocked in tool-pipeline. */

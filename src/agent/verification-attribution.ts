@@ -32,6 +32,9 @@ export interface EffectiveVerifications {
   supersededFailures: number
   /** Total raw event count before deduplication */
   totalRawCount: number
+  /** Count of verifications dropped because their snapshotRef is stale
+   *  (owned diff changed since the verification ran). */
+  staleSnapshotDropped: number
 }
 
 /**
@@ -93,6 +96,9 @@ function eventToVerificationMetadata(event: TaskLedgerEvent): VerificationMetada
   const targetFiles = getMetaTargetFiles(event.meta)
   const resolvedCommand = asString(event.meta?.resolvedCommand)
   const recommendedCommand = asString(event.meta?.recommendedCommand)
+  const snapshotRef = asString(event.meta?.snapshotRef)
+  const phaseRaw = asString(event.meta?.verificationPhase)
+  const verificationPhase = phaseRaw === 'isolated' || phaseRaw === 'integration' ? phaseRaw : undefined
   const failureKind = asString(event.meta?.failureKind) === 'tool_invocation_failure' || isInvocationFailureMeta(status, event.meta)
     ? 'tool_invocation_failure' as const
     : asString(event.meta?.failureKind) === 'test_failure'
@@ -112,6 +118,8 @@ function eventToVerificationMetadata(event: TaskLedgerEvent): VerificationMetada
     ...(targetFiles.length > 0 ? { targetFiles } : {}),
     ...(resolvedCommand ? { resolvedCommand } : {}),
     ...(recommendedCommand ? { recommendedCommand } : {}),
+    ...(snapshotRef ? { snapshotRef } : {}),
+    ...(verificationPhase ? { verificationPhase } : {}),
   }
 }
 
@@ -152,8 +160,25 @@ function verificationKey(event: TaskLedgerEvent): string {
  */
 export function getEffectiveVerifications(
   events: ReadonlyArray<TaskLedgerEvent>,
+  currentSnapshotRef?: string,
 ): EffectiveVerifications {
-  const verificationEvents = events.filter(e => e.type === 'verification')
+  const allVerificationEvents = events.filter(e => e.type === 'verification')
+
+  // VSW supersession: a verification recorded under a snapshotRef that differs
+  // from the current owned diff is provably stale — the tree it ran on no longer
+  // matches reality. Drop it. Verifications without a snapshotRef (in-place /
+  // legacy runs) are never dropped, preserving existing behavior.
+  let staleSnapshotDropped = 0
+  const verificationEvents = currentSnapshotRef
+    ? allVerificationEvents.filter(e => {
+        const ref = asString(e.meta?.snapshotRef)
+        if (ref && ref !== currentSnapshotRef) {
+          staleSnapshotDropped++
+          return false
+        }
+        return true
+      })
+    : allVerificationEvents
 
   // Process in chronological order (events are already sorted by timestamp)
   const keyMap = new Map<string, { event: TaskLedgerEvent; index: number }>()
@@ -179,7 +204,7 @@ export function getEffectiveVerifications(
     effective.push(eventToVerificationMetadata(event))
   }
 
-  return { effective, supersededFailures, totalRawCount: verificationEvents.length }
+  return { effective, supersededFailures, totalRawCount: allVerificationEvents.length, staleSnapshotDropped }
 }
 
 export type AttributionClass =
@@ -189,6 +214,10 @@ export type AttributionClass =
   | 'tool_invocation_failure'
   | 'unattributed_failure'
   | 'unverified'
+  /** Phase B (integration) failure: owned diff is correct in isolation but
+   *  conflicts with concurrent changes on current HEAD. Not this session's
+   *  fault → advisory (rebase/coordinate), never blocking. */
+  | 'integration_conflict'
 
 export interface AttributionResult {
   attribution: AttributionClass
@@ -239,6 +268,18 @@ export function createVerificationAttribution(opts: {
 
     // Failed — determine attribution
     if (result.status === 'failed') {
+      // Phase B (integration) failure on current HEAD: the owned diff already
+      // passed in isolation (Phase A), so this is a concurrent-change conflict,
+      // not an owned defect. Advisory only — never blocks delivery.
+      if (result.verificationPhase === 'integration') {
+        return {
+          attribution: 'integration_conflict',
+          isBlocking: false,
+          reason: `Integration verification failed on current HEAD: ${result.command} — ${result.failed} test(s) failed. The owned diff passed in isolation; this is a concurrent-change conflict. Rebase/coordinate before merging; delivery is not blocked.`,
+          source: result,
+        }
+      }
+
       if (result.failureKind === 'tool_invocation_failure' || isInvocationFailure(result)) {
         return {
           attribution: 'tool_invocation_failure',
@@ -338,6 +379,19 @@ export function createVerificationAttribution(opts: {
         attribution: 'external_blocked',
         isBlocking: false,
         reason: `Verification blocked by external factors: ${first.source.command}`,
+        source: first.source,
+      }
+    }
+
+    // Phase B integration conflict: owned diff verified in isolation but clashes
+    // with concurrent HEAD. Advisory — surfaced but non-blocking.
+    const hasIntegrationConflict = attributions.some(a => a.attribution === 'integration_conflict')
+    if (hasIntegrationConflict) {
+      const first = attributions.find(a => a.attribution === 'integration_conflict')!
+      return {
+        attribution: 'integration_conflict',
+        isBlocking: false,
+        reason: `Integration conflict on current HEAD: ${first.source.command}. Owned changes passed in isolation; rebase/coordinate before merging. Delivery not blocked.`,
         source: first.source,
       }
     }

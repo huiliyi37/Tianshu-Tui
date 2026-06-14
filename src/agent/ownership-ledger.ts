@@ -54,6 +54,10 @@ export interface OwnershipLedger {
   /** Filter a file list to only owned files */
   scopeToOwned(files: string[]): string[]
   getOwnershipReport(): OwnershipReport
+  /** VSW: real baseline commit SHA (BaselineSnapshot.head) — the commit-ish a
+   *  snapshot worktree detaches onto. Distinct from baseline.getBaselineHash()
+   *  which is a structural-identity hash for integrity checks. */
+  getBaselineHead(): string
 }
 
 export function createOwnershipLedger(opts: {
@@ -164,6 +168,10 @@ export function createOwnershipLedger(opts: {
     return adopted.sort()
   }
 
+  function getBaselineHead(): string {
+    return baseline.getHead()
+  }
+
   function getOwnershipReport(): OwnershipReport {
     const owned = getOwnedFiles()
     const coOwned = getCoOwnedFiles()
@@ -192,5 +200,6 @@ export function createOwnershipLedger(opts: {
     getExternalFiles,
     scopeToOwned,
     getOwnershipReport,
+    getBaselineHead,
   }
 }

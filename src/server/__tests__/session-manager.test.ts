@@ -75,6 +75,36 @@ test('createSession with prompt starts running; without prompt stays idle', () =
   assert.notEqual(idle.id, live.id)
 })
 
+test('sameCwdRunningCount counts running sessions per cwd (VSW §6)', () => {
+  const { manager } = makeManager()
+  const a = manager.createSession({ prompt: 'a', cwd: '/repo/x' })
+  manager.createSession({ prompt: 'b', cwd: '/repo/x' })
+  manager.createSession({ prompt: 'c', cwd: '/repo/y' })
+  manager.createSession({ cwd: '/repo/x' }) // idle, not running
+
+  // 2 running in /repo/x, 1 in /repo/y
+  assert.equal(manager.sameCwdRunningCount('/repo/x'), 2)
+  assert.equal(manager.sameCwdRunningCount('/repo/y'), 1)
+  assert.equal(manager.sameCwdRunningCount('/repo/z'), 0)
+
+  // excluding self yields "other concurrent sessions" → 1
+  assert.equal(manager.sameCwdRunningCount('/repo/x', a.id), 1)
+
+  // path forms of the same cwd resolve equal
+  assert.equal(manager.sameCwdRunningCount('/repo/x/'), 2)
+})
+
+test('sameCwdRunningCount drops sessions once they finish', async () => {
+  const { manager, agents } = makeManager()
+  manager.createSession({ prompt: 'a', cwd: '/repo/q' })
+  manager.createSession({ prompt: 'b', cwd: '/repo/q' })
+  assert.equal(manager.sameCwdRunningCount('/repo/q'), 2)
+  agents[0]!.finish()
+  // The running flag clears in the run-completion handler (a microtask).
+  await new Promise((r) => setImmediate(r))
+  assert.equal(manager.sameCwdRunningCount('/repo/q'), 1)
+})
+
 test('two parallel sessions have distinct ids and abort is isolated', () => {
   const { manager, agents } = makeManager()
   const a = manager.createSession({ prompt: 'a' })

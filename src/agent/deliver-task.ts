@@ -63,6 +63,10 @@ export interface B1Context {
   getDepthLayer?: () => import('../context/task-contract.js').TaskDepthLayer | undefined
   /** Test hook for the wrote-but-never-read static check. */
   detectWroteButNeverRead?: typeof detectWroteButNeverRead
+  /** VSW: current active snapshotRef. When provided, the gate drops verifications
+   *  whose snapshotRef is stale (owned diff changed since they ran). Absent →
+   *  no supersession (unchanged default). */
+  getCurrentSnapshotRef?: () => string | undefined
 }
 
 function parseNulFileList(output: string): string[] {
@@ -187,7 +191,7 @@ When the task implements a complex spec or cross-module integration, include the
       ctx.ownership.autoOwnFromLedger()
       const currentDirtyFiles = ctx.getCurrentDirtyFiles?.(params.cwd) ?? collectCurrentDirtyFiles(params.cwd)
       if (currentDirtyFiles) ctx.ownership.autoOwnFromBaseline(currentDirtyFiles)
-      const report = ctx.gate.getReport([], currentDirtyFiles)
+      const report = ctx.gate.getReport([], currentDirtyFiles, ctx.getCurrentSnapshotRef?.())
 
       // C-fix (session 803d897d): cap file lists and filter external noise.
       // 67 untracked .test-tmp files used to drown the GREEN/YELLOW signal.
@@ -444,7 +448,7 @@ When the task implements a complex spec or cross-module integration, include the
         }
 
         const postAdoptionReport = adoptFiles && Array.isArray(adoptFiles) && adoptFiles.length > 0
-          ? ctx.gate.getReport([], currentDirtyFiles)
+          ? ctx.gate.getReport([], currentDirtyFiles, ctx.getCurrentSnapshotRef?.())
           : report
         if (postAdoptionReport.state === 'RED') {
           lines.push('', '❌ Cannot commit: delivery gate is RED after adoption.')

@@ -12,9 +12,10 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync, unlinkSync, existsSync, writeFileSync, readdirSync } from 'node:fs'
+import { rmSync, unlinkSync, existsSync, writeFileSync, readdirSync, mkdtempSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { hostname as osHostname } from 'node:os'
+import { hostname as osHostname, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   CronScheduler,
   computeNextTrigger,
@@ -24,8 +25,12 @@ import {
 } from '../cron-scheduler.js'
 import { CronLock, isPidAlive, type LockInfo } from '../cron-lock.js'
 
-const TEST_SCHEDULE_PATH = '.test-tmp/test-scheduled-tasks.json'
-const TEST_LOCK_PATH = '.test-tmp/test-scheduled-tasks.lock'
+// Hermetic: unique temp dir per test instead of a shared fixed .test-tmp path,
+// so concurrent runs never collide and corrupt-backup files don't leak into the
+// working tree.
+let tmpDir = ''
+let TEST_SCHEDULE_PATH = ''
+let TEST_LOCK_PATH = ''
 
 // ─── CronScheduler ────────────────────────────────────────────
 
@@ -34,7 +39,8 @@ describe('CronScheduler', () => {
   let firedTasks: Array<{ prompt: string; tools: string[] }>
 
   beforeEach(() => {
-    rmSync(TEST_SCHEDULE_PATH, { force: true })
+    tmpDir = mkdtempSync(join(tmpdir(), 'cron-sched-'))
+    TEST_SCHEDULE_PATH = join(tmpDir, 'test-scheduled-tasks.json')
     firedTasks = []
     scheduler = new CronScheduler({
       schedulePath: TEST_SCHEDULE_PATH,
@@ -47,7 +53,7 @@ describe('CronScheduler', () => {
 
   afterEach(() => {
     scheduler.stop()
-    rmSync(TEST_SCHEDULE_PATH, { force: true })
+    rmSync(tmpDir, { recursive: true, force: true })
   })
 
   it('adds and lists scheduled tasks', () => {
@@ -169,7 +175,7 @@ describe('CronScheduler', () => {
     scheduler2.start()
 
     assert.equal(scheduler2.list().length, 0)
-    assert.ok(readdirSync('.test-tmp').some(f => f.startsWith('test-scheduled-tasks.json.corrupt-')))
+    assert.ok(readdirSync(tmpDir).some(f => f.startsWith('test-scheduled-tasks.json.corrupt-')))
     scheduler2.stop()
   })
 
@@ -301,11 +307,14 @@ describe('computeNextTrigger', () => {
 
 describe('CronLock', () => {
   beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'cron-sched-lock-'))
+    TEST_LOCK_PATH = join(tmpDir, 'test-scheduled-tasks.lock')
     rmSync(TEST_LOCK_PATH, { force: true })
   })
 
   afterEach(() => {
     try { unlinkSync(TEST_LOCK_PATH) } catch { /* ignore */ }
+    rmSync(tmpDir, { recursive: true, force: true })
   })
 
   it('acquires lock when no lock file exists', () => {

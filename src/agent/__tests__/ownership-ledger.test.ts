@@ -26,6 +26,16 @@ describe('ownership-ledger — file ownership tracking', () => {
     assert.equal(ownership.isOwned('src/other.ts'), false)
   })
 
+  it('exposes baseline.head as getBaselineHead (VSW commit-ish, not the structural hash)', () => {
+    const baseline = createWorktreeBaseline(baselineSnap)
+    const ledger = createTaskLedger({ taskId: 't1' })
+    const ownership = createOwnershipLedger({ baseline, taskLedger: ledger })
+
+    assert.equal(ownership.getBaselineHead(), 'abc123')
+    // The VSW commit-ish must be the raw head, never the structural identity hash.
+    assert.notEqual(ownership.getBaselineHead(), baseline.getBaselineHash())
+  })
+
   it('pre-existing dirty files are NOT owned', () => {
     const baseline = createWorktreeBaseline(baselineSnap)
     const ledger = createTaskLedger({ taskId: 't1' })

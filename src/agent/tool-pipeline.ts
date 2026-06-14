@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
-import type { ToolCallParams } from '../tools/types.js'
+import type { ToolCallParams, VerificationMetadata } from '../tools/types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
@@ -180,6 +180,9 @@ export interface ToolPipelineDeps {
   taskLedger?: TaskLedger
   /** Optional OwnershipLedger for real-time file ownership registration */
   ownershipLedger?: import('./ownership-ledger.js').OwnershipLedger
+  /** VSW: session-scoped snapshot manager. Consulted before run_tests to decide
+   *  isolated (Phase A) + integration (Phase B) verification vs in-place. */
+  verificationSnapshotManager?: import('./verification-snapshot-manager.js').VerificationSnapshotManager
   /** Optional SessionRegistry for cross-session file claim coordination */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** P3 integration facade for speculative execution + mistake hints */
@@ -459,6 +462,7 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
+    baselineHead: deps.ownershipLedger?.getBaselineHead(),
     artifactStore: deps.artifactStore,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
@@ -750,6 +754,20 @@ export async function executeToolUse(
       predictedSuccess: true,
    })
     let rawToolResult: import('../tools/types.js').ToolResult | undefined
+
+    // VSW: for run_tests, ask the snapshot manager whether to isolate. §6 policy
+    // decides; in the common single-clean-session case it returns null → params
+    // stays unset → in-place single-phase verification (unchanged default). Any
+    // failure here degrades to in-place — VSW must never break verification.
+    if (tu.name === 'run_tests' && deps.verificationSnapshotManager) {
+      try {
+        const plan = deps.verificationSnapshotManager.prepare(deps.ownershipLedger?.getOwnedFiles() ?? [])
+        if (plan) params.verificationSnapshot = { path: plan.path, snapshotRef: plan.snapshotRef }
+      } catch {
+        // degrade to in-place
+      }
+    }
+
     const harnessResult = await deps.harness.executeTool({
       id: tu.id,
       name: tu.name,
@@ -977,19 +995,31 @@ export async function executeToolUse(
         const filter = typeof tu.input.filter === 'string' ? tu.input.filter : undefined
         const command = filter ? `run_tests ${filter}` : 'run_tests'
         const verification = rawToolResult?.verification
-        const meta: Record<string, unknown> = { scope: verification?.scope ?? (filter ? 'targeted' : 'full') }
-        if (verification) {
-          meta.exitCode = verification.exitCode
-          meta.passed = verification.passed
-          meta.failed = verification.failed
-          meta.skipped = verification.skipped
-          meta.durationMs = verification.durationMs
-          meta.resolvedCommand = verification.command
-          meta.recommendedCommand = verification.command
-          if (verification.failureKind) meta.failureKind = verification.failureKind
-          if (verification.targetFiles) meta.targetFiles = verification.targetFiles
-       }
-        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta })
+        const buildMeta = (v?: VerificationMetadata): Record<string, unknown> => {
+          const m: Record<string, unknown> = { scope: v?.scope ?? (filter ? 'targeted' : 'full') }
+          if (v) {
+            m.exitCode = v.exitCode
+            m.passed = v.passed
+            m.failed = v.failed
+            m.skipped = v.skipped
+            m.durationMs = v.durationMs
+            m.resolvedCommand = v.command
+            m.recommendedCommand = v.command
+            if (v.failureKind) m.failureKind = v.failureKind
+            if (v.targetFiles) m.targetFiles = v.targetFiles
+            // VSW: carry snapshot identity + phase so the gate can apply
+            // staleness supersession and integration_conflict attribution.
+            if (v.snapshotRef) m.snapshotRef = v.snapshotRef
+            if (v.verificationPhase) m.verificationPhase = v.verificationPhase
+          }
+          return m
+        }
+        deps.taskLedger.record({ type: 'verification', command, status: harnessResult.isError ? 'failed' : 'passed', meta: buildMeta(verification) })
+        // VSW two-phase: record the integration (Phase B) verification too so a
+        // Phase B failure surfaces as a non-blocking integration_conflict.
+        for (const extra of rawToolResult?.extraVerifications ?? []) {
+          deps.taskLedger.record({ type: 'verification', command, status: extra.status, meta: buildMeta(extra) })
+        }
      } else if (tu.name === 'deliver_task' && tu.input.commit === true && !harnessResult.isError) {
         // Successful scoped commit changed git state — invalidate the frozen
         // git-status snapshot so the next appendix rebuild shows the post-commit
