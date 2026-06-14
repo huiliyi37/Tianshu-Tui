@@ -80,21 +80,38 @@ if (reviewMatch) {
 }
 ```
 
-**改动 B — 进度可见**
+**改动 B — 进度可见（通过 onOutput streaming 回调）**
 
 文件：`src/agent/deliver-task.ts` L552-596 之间（commit 完成后、审查 await 之前）
 
-在 `route(change, ctx.reviewDeps, ...)` 之前追加一行进度标记：
+**关键发现**：`ToolCallParams` 有 `onOutput?: (chunk: string) => void` 字段（types.ts:9），`tool-pipeline.ts:449` 把它桥接到 `callbacks.onToolResult`——这意味着 deliver_task 的 execute 可以通过 `params.onOutput?.()` 在审查 await 之前推送一条**实时可见**的中间消息，不需要等 tool result 一次性返回。
 
 ```typescript
-lines.push('', `⏳ Post-commit review starting (${reviewMode} ${change.scale}, ≤${Math.round(reviewWorkflowBudgetMs(change) / 1000)}s)...`)
+// commit 完成后、审查 await 之前
+const budgetSec = Math.round(reviewWorkflowBudgetMs(reviewMode, change.scale) / 1000)
+params.onOutput?.(`\n⏳ Post-commit review starting (${reviewMode} ${change.scale}, ≤${budgetSec}s)...\n`)
 ```
 
-这行会立即作为 tool result 的一部分返回——但因为是 `lines.push` 在 await 之前，它只会在 tool 执行完毕后一次性输出。
+注意 `reviewWorkflowBudgetMs` 签名是 `(mode: ReviewMode, tier?: ReviewScale)`——接受 mode 和 tier，不接受 ChangeSet。正确调用方式见上方（传入 `reviewMode` 和 `change.scale`）。
 
-**限制**：deliver_task 的 tool result 是一次性返回的（不是 streaming），所以这行"进度标记"实际上还是和最终审查结果一起输出。真正的 streaming 进度需要 callback 机制——这是 Wave 3 的范畴。
+**验证**：`onOutput` 在 tool-pipeline.ts:449 被桥接为 `callbacks.onToolResult(tu.id, tu.name, chunk)`——chunk 会实时出现在 TUI 的工具输出区域，不等最终 result。
 
-**Wave 1 的实际价值**：regex 修复让参数能传进来；进度标记让最终输出中有时间预期说明。不是完美的，但比"完全黑盒"好。
+**改动 C — 静默丢弃防护**
+
+文件：`src/tui/slash-commands.ts` `resolveAppPromptInput` 最终 `return null` 之前
+
+审计文档观测 1 指出：不匹配的 `/review` 输入会被 `resolveAppPromptInput` 返回 null → TUI 解释为 blocked → 用户消息凭空消失。Wave 1 的 regex 修复了匹配，但仍然需要处理"以 /review 开头但不匹配"的边界：
+
+```typescript
+// 在最终 return null 之前
+if (input.toLowerCase().startsWith('/review')) {
+  // 能走到这里说明 regex 没匹配——可能是拼写错误或格式问题
+  return `User typed "${input}" which looks like a /review command but didn't match the expected format. ` +
+    `Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.`
+}
+```
+
+**Wave 1 的实际价值**：regex 修复让参数能传进来；onOutput 进度标记在审查开始时**实时可见**；静默丢弃防护消除消息凭空消失。
 
 ### Wave 2：解耦入口 — `/review` 独立路径（完整落地方案）
 
@@ -182,13 +199,13 @@ case '/review': {
   const change: ChangeSet = {
     files: dirtyFiles,
     crossModule: isCrossModule(dirtyFiles),  // 自动分级
-    isFix: false,
+    isFix: isFixContext(/* 最近 commit message 或用户输入 */),  // 不能硬编码 false
     ...(isMax ? { forceLevel: 'L3' } : {}),   // /review max 强制 L3
   }
 
+  const budgetSec = Math.round(reviewWorkflowBudgetMs('manual', isMax ? 'L3' : undefined) / 1000)
   pushStatic(createLogEntry({ type: 'system',
-    content: `⏳ Review starting (${isMax ? 'L3 Squadron' : 'auto-classify'},
-    ≤${Math.round(reviewWorkflowBudgetMs(change) / 1000)}s)...` }))
+    content: `⏳ Review starting (${isMax ? 'L3 Squadron' : 'auto-classify'}, ≤${budgetSec}s)...` }))
 
   try {
     const outcome = await ctx.runReview(change, 'manual', focus || undefined)
@@ -205,11 +222,19 @@ case '/review': {
 }
 ```
 
-#### 改动 4：resolveAppPromptInput 同步更新
+#### 改动 4：resolveAppPromptInput 清理策略（已确认优先级）
 
-当前 `resolveAppPromptInput` 把 `/review` 映射为 deliver_task 指令。Wave 2 后 `/review` 在 slash-commands 内直接处理（return true），不再走到 resolveAppPromptInput。但 regex 修复（Wave 1）仍然需要——因为 `resolveAppPromptInput` 在 slash-commands 之前执行，如果 regex 不匹配带参数的 `/review max <desc>`，会被 blocked 为 null。
+**调用优先级**（app.tsx:811-814 已确认）：
+```
+L811: if (await handleSlashCommand(slashCtx)) return  // 先
+L814: const promptInput = resolveAppPromptInput(...)   // 后（仅 handleSlashCommand 返回 false 时）
+```
 
-**Wave 2 后的 resolveAppPromptInput**：删除 review 分支（不再需要映射为 deliver_task），或保留作为 fallback（runReview 不可用时走旧路径）。
+Wave 2 后 `/review` 在 `handleSlashCommand` 中 return true → `resolveAppPromptInput` 不再被调用。
+
+**策略：保留 resolveAppPromptInput 的 review 分支作为 fallback。** 当 `ctx.runReview` 不可用时（未注入），`handleSlashCommand` 的 `/review` 分支 return false → 走到 `resolveAppPromptInput` → 映射为 deliver_task（旧行为）。两条路径自然互斥，不需要删除。
+
+但 Wave 1 的 regex 修复仍需要——因为 fallback 路径的 `resolveAppPromptInput` 也需要正确匹配 `/review max <desc>`。
 
 #### 分级机制（自动，无需手动判断）
 
@@ -257,9 +282,13 @@ classifyChangeScale 用结构性信号自动判断：
 | 偷懒实现 | 会红的测试 |
 |----------|----------|
 | 只修 regex 但不提取 focusText | `/review max 检查锚点漂移` 的描述被丢弃 → 用户附加文本无效 |
-| 进度标记放在 await 之后 | 标记和结果一起输出，用户等待期间看不到 → 仍是黑盒 |
+| 进度标记用 lines.push 而非 onOutput | 标记和结果一起输出，用户等待期间看不到 → 仍是黑盒 |
 | `/review` 独立路径不检查 reviewDeps 可用性 | reviewDeps undefined → routeReviewWorkflow 崩溃 |
-| regex 改为 `(\s|$)` 但忘处理 `/reviewmax`（无空格） | `/reviewmax` 误匹配 → 非 review 命令被拦截 |
+| regex 改为 `(\s\|$)` 但忘处理 `/reviewmax`（无空格） | `/reviewmax` 误匹配 → 非 review 命令被拦截 |
+| `/review 检查锚点漂移`（无 max，有描述）被 blocked | regex `(\s+(max))?` 贪婪匹配截断 group 4 → 用户描述丢失 |
+| isFix 硬编码 false | fix commit 后 `/review` 审查丢失 isFix 信号 → classifyChangeScale 行为偏差 |
+| reviewWorkflowBudgetMs 传 ChangeSet 而非 mode+tier | 返回 NaN/undefined → 预算显示错误 |
+| `/review` 不匹配时静默 return null | 用户消息凭空消失 → 无错误提示 |
 
 ---
 
