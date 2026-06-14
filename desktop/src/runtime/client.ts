@@ -16,6 +16,12 @@ export interface RuntimeInfo {
 
 let cached: RuntimeInfo | null = null
 
+// Node-safe env access: `import.meta.env` only exists under Vite; reading it in
+// a node:test context (where this module is unit-tested) would throw.
+function viteEnv(): Record<string, string | undefined> {
+  return ((import.meta as unknown as { env?: Record<string, string | undefined> }).env) ?? {}
+}
+
 /**
  * The Rust shell spawns `rivet serve` as a sidecar, generates a random
  * RIVET_SERVER_TOKEN, and exposes the live port + token via the `runtime_info`
@@ -27,10 +33,28 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
   try {
     cached = await invoke<RuntimeInfo>('runtime_info')
   } catch {
-    const port = Number(import.meta.env.VITE_RIVET_PORT ?? 3100)
-    const token = String(import.meta.env.VITE_RIVET_TOKEN ?? '')
+    const env = viteEnv()
+    const port = Number(env.VITE_RIVET_PORT ?? 3100)
+    const token = String(env.VITE_RIVET_TOKEN ?? '')
     cached = { port, token }
   }
+  return cached
+}
+
+/**
+ * Drop the memoized port/token. The sidecar can restart (crash recovery, a new
+ * `rivet serve` after a `tauri dev` reload) with a fresh random token+port; a
+ * permanently-cached value would then send a stale token to a dead port and
+ * every request would 401 / ECONNREFUSED forever ("reconnect deadlock"). We
+ * clear on the two signals of a stale handle — a 401 (token rotated) and a
+ * network throw (port gone) — so the next call re-invokes `runtime_info`.
+ */
+export function clearRuntimeCache(): void {
+  cached = null
+}
+
+/** Test-only: inspect the memoized runtime handle (null when cleared). */
+export function __peekRuntimeCache(): RuntimeInfo | null {
   return cached
 }
 
@@ -41,14 +65,25 @@ export function runtimeBaseUrl(info: RuntimeInfo): string {
 /**
  * Low-level authed fetch against the sidecar. Shared by the REST helpers below
  * and the SSE stream reader (runtime/sse.ts) so the Bearer token lives in one
- * place. Throws on non-2xx.
+ * place. Throws on non-2xx (callers in this file check `res.ok`).
  */
 export async function rivetFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const info = await getRuntimeInfo()
   const headers = new Headers(init.headers)
   headers.set('Authorization', `Bearer ${info.token}`)
   if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
-  const res = await fetch(runtimeBaseUrl(info) + path, { ...init, headers })
+  let res: Response
+  try {
+    res = await fetch(runtimeBaseUrl(info) + path, { ...init, headers })
+  } catch (err) {
+    // Port gone (sidecar down/restarted) — invalidate so the next call
+    // re-resolves a fresh handle instead of retrying the dead one.
+    clearRuntimeCache()
+    throw err
+  }
+  // Token rotated after a sidecar restart — drop the stale handle; the caller's
+  // next attempt re-invokes runtime_info and picks up the new token.
+  if (res.status === 401) clearRuntimeCache()
   return res
 }
 

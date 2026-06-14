@@ -544,3 +544,33 @@ body {
 .rewind-empty { color: var(--muted); padding: 16px 0; text-align: center; font-size: 13px; }
 .rewind-error { color: var(--error); padding: 8px 0; font-size: 13px; }
 .rewind-hint { color: var(--muted); font-size: 12px; padding-top: 4px; }
+
+/* React error boundary fallback */
+.error-boundary {
+  margin: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+.error-boundary-title { color: var(--error); font-weight: var(--weight-semibold); }
+.error-boundary-message {
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-sm, 13px);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.error-boundary-retry {
+  padding: 4px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.error-boundary-retry:hover { background: var(--accent-soft); color: var(--accent); }

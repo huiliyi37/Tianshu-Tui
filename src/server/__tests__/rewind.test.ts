@@ -133,6 +133,60 @@ test('#4 rewind appends a rewind event to the event log (append-only)', async ()
   assert.equal(rewindEvent!.data.prompt, 'Do task A')
 })
 
+test('#4b rewind emits an anchorSeq matching the rewound user event', async () => {
+  // Agent that mirrors each run into user+assistant messages, so the event
+  // log's `user` events line up 1:1 with user messages (the real prompt flow).
+  // Only then can the manager resolve a duplicate-proof UI anchor.
+  class TurnMirrorAgent implements ManagedAgent {
+    messages: OaiMessage[] = []
+    run(prompt: string, _cb: AgentCallbacks): Promise<void> {
+      this.messages.push({ role: 'user', content: prompt })
+      this.messages.push({ role: 'assistant', content: 'ok' })
+      return Promise.resolve()
+    }
+    finish(): void {}
+    abort(): void {}
+    listArtifacts(): Artifact[] { return [] }
+    readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+    getMessages(): OaiMessage[] { return this.messages }
+    replaceMessages(m: OaiMessage[]): void { this.messages = m }
+  }
+  const manager = new RuntimeSessionManager({
+    createAgent: () => new TurnMirrorAgent(),
+    defaultCwd: '/tmp',
+  })
+  const s = manager.createSession({ prompt: 'Hello' })
+  await new Promise(r => setTimeout(r, 10))
+  manager.run(s.id, 'Do task A')
+  await new Promise(r => setTimeout(r, 10))
+  manager.run(s.id, 'Now do B')
+  await new Promise(r => setTimeout(r, 10))
+
+  // messages: [u Hello, a ok, u Do task A, a ok, u Now do B, a ok]
+  const points = manager.listRewindPoints(s.id)!
+  assert.deepEqual(points.map(p => [p.index, p.content]), [[0, 'Hello'], [2, 'Do task A'], [4, 'Now do B']])
+
+  assert.ok(manager.rewind(s.id, 2), 'rewind to "Do task A" should succeed')
+  const events = manager.getEvents(s.id, 0)!.events
+  const rewindEvent = events.find(e => e.type === 'rewind')!
+  const userEvent = events.find(e => e.type === 'user' && e.data.text === 'Do task A')!
+  assert.equal(rewindEvent.data.messageIndex, 2)
+  assert.equal(rewindEvent.data.prompt, 'Do task A')
+  assert.equal(rewindEvent.data.anchorSeq, userEvent.seq, 'anchorSeq points at the rewound user event')
+})
+
+test('#4c rewind omits anchorSeq when the event log diverges from messages', async () => {
+  // The default harness injects messages out-of-band (no matching `user`
+  // events), so the ordinal/text guard must drop anchorSeq and let the client
+  // fall back to its text heuristic — never emit a wrong anchor.
+  const { manager, agents } = setup()
+  const id = await makeSession(manager, agents)
+
+  manager.rewind(id, 2)
+  const rewindEvent = manager.getEvents(id, 0)!.events.find(e => e.type === 'rewind')!
+  assert.equal(rewindEvent.data.anchorSeq, undefined, 'diverged log → no anchor emitted')
+})
+
 test('#5 rewind with invalid index returns false', async () => {
   const { manager, agents } = setup()
   const id = await makeSession(manager, agents)

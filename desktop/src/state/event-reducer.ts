@@ -230,21 +230,31 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'rewind': {
       const prompt = String(ev.data.prompt ?? '')
+      // Anchor the truncation to the exact user block.
+      //  1. anchorSeq (preferred): the seq of the rewound `user` event. User
+      //     blocks are keyed `u-${seq}`, so this is an exact, duplicate-proof
+      //     match — no more prompt-prefix collisions matching the wrong turn.
+      //  2. prompt full-text (fallback, older servers): most-recent exact match.
+      // The backend truncated messages with `slice(0, messageIndex)` (the
+      // rewound user message is REMOVED and restored to the input box), so we
+      // mirror that: drop the matched user block and everything after it.
+      const anchorSeq = typeof ev.data.anchorSeq === 'number' ? ev.data.anchorSeq : undefined
+      let cutIdx = -1
+      if (anchorSeq !== undefined) {
+        cutIdx = next.blocks.findIndex(b => b.kind === 'user' && b.key === `u-${anchorSeq}`)
+      }
+      if (cutIdx < 0 && prompt) {
+        const fromEnd = [...next.blocks].reverse().findIndex(b => b.kind === 'user' && b.text === prompt)
+        if (fromEnd >= 0) cutIdx = next.blocks.length - 1 - fromEnd
+      }
+      if (cutIdx >= 0) {
+        next.blocks = next.blocks.slice(0, cutIdx)
+      }
       next.blocks = [...next.blocks, {
         key: `rewind-${ev.seq}`,
         kind: 'turn',
         text: `⏪ Rewound — message restored to input.`,
       }]
-      // Truncate conversation blocks: remove everything after the rewind point.
-      if (prompt) {
-        const lastMatchIdx = [...next.blocks].reverse().findIndex(
-          b => b.kind === 'user' && b.text?.includes(prompt.slice(0, 40))
-        )
-        if (lastMatchIdx >= 0) {
-          const cutIdx = next.blocks.length - lastMatchIdx
-          next.blocks = next.blocks.slice(0, cutIdx)
-        }
-      }
       return next
     }
     case 'status':

@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
@@ -96,10 +97,37 @@ fn detect_node() -> String {
     "node".to_string()
 }
 
-fn wait_until_ready(port: u16, timeout: Duration) -> bool {
+/// Verify the port is actually OUR rivet sidecar (correct token), not merely
+/// "something is listening". A bare TCP connect can succeed against an unrelated
+/// process that grabbed the recycled port, or before the HTTP server is wired,
+/// leaving the UI talking to a black hole. We send an authed `GET /health` and
+/// accept only a 200 status line.
+fn http_health_ok(port: u16, token: &str) -> bool {
+    let mut stream = match TcpStream::connect(("127.0.0.1", port)) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+    let req = format!(
+        "GET /health HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
+    if stream.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    let n = match stream.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    let head = String::from_utf8_lossy(&buf[..n]);
+    head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+}
+
+fn wait_until_ready(port: u16, token: &str, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        if http_health_ok(port, token) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(150));
@@ -113,20 +141,48 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let node = detect_node();
     let entry = sidecar_entry(app);
 
-    let child = Command::new(node)
-        .arg(entry)
+    // Report spawn failures instead of swallowing them with `.ok()`: a missing
+    // node / bad entry path otherwise leaves the UI with a valid-looking handle
+    // pointing at nothing, surfacing only as opaque fetch failures later.
+    let child = match Command::new(&node)
+        .arg(&entry)
         .arg("serve")
         .arg("--port")
         .arg(port.to_string())
         .env("RIVET_SERVER_TOKEN", &token)
         .spawn()
-        .ok();
+    {
+        Ok(c) => Some(c),
+        Err(e) => {
+            eprintln!(
+                "[rivet] failed to spawn sidecar (node='{}', entry='{}'): {}",
+                node,
+                entry.display(),
+                e
+            );
+            None
+        }
+    };
 
-    if child.is_some() {
-        wait_until_ready(port, Duration::from_secs(15));
+    if child.is_some() && !wait_until_ready(port, &token, Duration::from_secs(15)) {
+        eprintln!(
+            "[rivet] sidecar spawned but did not pass /health on port {port} within timeout"
+        );
     }
 
     (RuntimeInfo { port, token }, child)
+}
+
+/// Kill the sidecar child if still tracked. Idempotent (take() empties the slot)
+/// so calling from both WindowEvent::Destroyed and RunEvent::Exit is safe.
+fn kill_sidecar(app_handle: &tauri::AppHandle) {
+    if let Some(state) = app_handle.try_state::<Sidecar>() {
+        if let Ok(mut guard) = state.child.lock() {
+            if let Some(mut c) = guard.take() {
+                let _ = c.kill();
+            }
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -147,15 +203,16 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                if let Some(state) = window.app_handle().try_state::<Sidecar>() {
-                    if let Ok(mut guard) = state.child.lock() {
-                        if let Some(mut c) = guard.take() {
-                            let _ = c.kill();
-                        }
-                    }
-                }
+                kill_sidecar(window.app_handle());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // RunEvent::Exit fires on app quit even when no window Destroyed event
+        // reaches us (e.g. Cmd+Q on macOS) — guarantees the sidecar is reaped.
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                kill_sidecar(app_handle);
+            }
+        });
 }

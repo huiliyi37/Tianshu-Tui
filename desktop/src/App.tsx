@@ -7,6 +7,7 @@ import { deriveProjects, loadKnownProjects } from './lib/projects'
 import { loadThemePref, setThemePref, type ThemePref } from './lib/theme'
 import type { Command } from './lib/commands'
 import { Rail } from './components/Rail'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { InboxSurface } from './surfaces/InboxSurface'
 import { AutomationsSurface } from './surfaces/AutomationsSurface'
@@ -105,10 +106,12 @@ export function App() {
         {ui.error && <div className="banner error">{ui.error}</div>}
 
         <div className="surface">
-          {ui.surface === 'workspace' && <WorkspaceSurface />}
-          {ui.surface === 'automations' && <AutomationsSurface />}
-          {ui.surface === 'attention' && <InboxSurface />}
-          {ui.surface === 'settings' && <SettingsSurface />}
+          <ErrorBoundary label="工作台">
+            {ui.surface === 'workspace' && <WorkspaceSurface />}
+            {ui.surface === 'automations' && <AutomationsSurface />}
+            {ui.surface === 'attention' && <InboxSurface />}
+            {ui.surface === 'settings' && <SettingsSurface />}
+          </ErrorBoundary>
         </div>
       </div>
 

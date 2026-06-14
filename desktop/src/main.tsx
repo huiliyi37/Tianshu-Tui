@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { AppStateProvider } from './state/store'
 import { initTheme } from './lib/theme'
 import './styles/tokens.css'
@@ -17,10 +18,12 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <AppStateProvider>
-        <App />
-      </AppStateProvider>
-    </QueryClientProvider>
+    <ErrorBoundary label="应用">
+      <QueryClientProvider client={queryClient}>
+        <AppStateProvider>
+          <App />
+        </AppStateProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 )

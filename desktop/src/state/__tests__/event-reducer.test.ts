@@ -217,6 +217,54 @@ test('T3: steer_queued produces a steer block', () => {
   assert.equal(s.blocks[0]!.text, 'focus on tests')
 })
 
+// ── Wave3: rewind anchoring ─────────────────────────────────────────
+
+test('rewind anchorSeq truncates at the exact user block (drops it + after)', () => {
+  seq = 0
+  const uA = ev('user', { text: 'task A' })
+  const a1 = ev('text_delta', { text: 'doing A' })
+  const uB = ev('user', { text: 'task B' })
+  const a2 = ev('text_delta', { text: 'doing B' })
+  const s = fold([
+    uA, a1, uB, a2,
+    ev('rewind', { prompt: 'task B', anchorSeq: uB.seq }),
+  ])
+  // u-B and everything after it is dropped; only A's turn survives + marker.
+  const kinds = s.blocks.map(b => b.kind)
+  assert.deepEqual(kinds, ['user', 'assistant', 'turn'])
+  assert.equal(s.blocks[0]!.text, 'task A')
+  assert.equal(s.blocks[2]!.text, '⏪ Rewound — message restored to input.')
+})
+
+test('rewind anchorSeq disambiguates duplicate prompts (substring heuristic could not)', () => {
+  seq = 0
+  const u1 = ev('user', { text: 'do it' })
+  const d1 = ev('text_delta', { text: 'r1' })
+  const u2 = ev('user', { text: 'do it' }) // identical prompt
+  const d2 = ev('text_delta', { text: 'r2' })
+  // Anchor explicitly to the FIRST occurrence — a text match would hit the last.
+  const s = fold([
+    u1, d1, u2, d2,
+    ev('rewind', { prompt: 'do it', anchorSeq: u1.seq }),
+  ])
+  assert.deepEqual(s.blocks.map(b => b.kind), ['turn'], 'both turns dropped, only the marker remains')
+})
+
+test('rewind falls back to exact full-text match when no anchorSeq (older server)', () => {
+  seq = 0
+  const u1 = ev('user', { text: 'first' })
+  const d1 = ev('text_delta', { text: 'r1' })
+  const u2 = ev('user', { text: 'second' })
+  const d2 = ev('text_delta', { text: 'r2' })
+  const s = fold([
+    u1, d1, u2, d2,
+    ev('rewind', { prompt: 'second' }), // no anchorSeq
+  ])
+  // cut at u2 ('second'); first turn survives + marker.
+  assert.deepEqual(s.blocks.map(b => b.kind), ['user', 'assistant', 'turn'])
+  assert.equal(s.blocks[0]!.text, 'first')
+})
+
 // ── T4: structured delegation merge ─────────────────────────────────
 
 test('T4: delegation merges fields; terminal update keeps prior objective', () => {

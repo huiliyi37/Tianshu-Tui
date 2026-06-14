@@ -663,6 +663,20 @@ export class RuntimeSessionManager {
     const target = msgs[messageIndex]!
     const prompt = typeof target.content === 'string' ? target.content : ''
 
+    // Resolve a duplicate-proof UI anchor: the seq of the `user` event that
+    // produced this rewound message. The rewound message is the N-th user-role
+    // string message; the N-th `user` event in the log carries the same text.
+    // Emit anchorSeq only when the ordinal lines up AND the text matches, so a
+    // trimmed/diverged log silently falls back to the client's text heuristic.
+    let userOrdinal = 0
+    for (let i = 0; i < messageIndex; i++) {
+      const m = msgs[i]!
+      if (m.role === 'user' && typeof m.content === 'string') userOrdinal++
+    }
+    const userEvents = s.events.filter(e => e.type === 'user')
+    const anchorEvent = userEvents[userOrdinal]
+    const anchorSeq = anchorEvent && anchorEvent.data.text === prompt ? anchorEvent.seq : undefined
+
     // Truncate messages to the selected point.
     s.agent.replaceMessages(msgs.slice(0, messageIndex))
 
@@ -675,6 +689,7 @@ export class RuntimeSessionManager {
     this.append(s, 'rewind', {
       messageIndex,
       prompt,
+      ...(anchorSeq !== undefined ? { anchorSeq } : {}),
       timestamp: this.now(),
     })
 
