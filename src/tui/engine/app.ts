@@ -812,7 +812,7 @@ export class TuiApp {
           profile: delegationProfileFromInput(meta.name, meta.input),
           objective: delegationObjectiveFromInput(meta.input),
           elapsedMs: Date.now() - meta.startMs,
-          glyph: badge?.glyph ?? '⚙',
+          glyph: badge?.glyph ?? '◆',
         }
       })
   }
@@ -1628,7 +1628,7 @@ export class TuiApp {
           ? color('[auto]', this.theme.success)
           : color('[ask]', this.theme.warning)
         const profile = delegationProfileFromInput(meta.name, meta.input)
-        return `${domainBadge(meta.name)?.glyph ?? '⚙'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
+        return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
       })
       lines.push({ text: ` ${pills.join('  ')}` })
     }

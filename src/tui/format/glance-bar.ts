@@ -82,8 +82,8 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
   const zone1 = `${color(domainGlyph, theme.muted)} ${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
 
-  // Zone 2: Phase — glyph uses primary (ziwei, the ONE accent); label muted.
-  // 五行符号（◐✦⚙▲❧）是状态栏唯一的彩色亮点。
+  // Zone 2: Phase — glyph uses primary (slate teal, the ONE accent); label muted.
+  // 菱形家族（◐◆◈◇）是状态栏唯一的彩色亮点，克制不花哨。
   let zone2Glyph = ''
   let zone2Label = ''
   if (input.phaseGlyph) {

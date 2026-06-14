@@ -1,9 +1,12 @@
 /**
- * T9 格式化函数 — spinner 状态行（五行动态符号系统）。
+ * T9 格式化函数 — spinner 状态行（运行态符号系统）。
  *
- * - phase 动词映射为五行：水·凝思 (thinking)、火·书写 (streaming)、风·运作 (analyzing)、山·候待 (waiting/idle)。
- * - 各状态定制化符号动画帧，而非千篇一律的 braille spinner。
- * - 回合完成/收束态使用林/木 (❧)。
+ * 字形设计（对标 Claude Code 的克制单色风格，不花哨）：用同一「菱形家族」
+ * ◇/◆/◈/◌ 表达「一个系统的不同状态」，而非 5 个风格不一的装饰符号
+ * （旧版 ◐✦⚙▲❧ 混了圆/星/齿轮/三角/花饰，视觉吵）。五行标签保留承载叙事。
+ * - 水·凝思 (thinking)、火·书写 (streaming)、风·运作 (analyzing)、山·候待 (waiting/idle)。
+ * - 各状态有定制动画帧，但收敛到菱形/盈缺一族。
+ * - 回合完成/收束态用实心菱 ◆（沉淀/落定），取代旧花饰 ❧。
  * - 提供 ASCII fallback 兼容。
  */
 
@@ -32,17 +35,18 @@ function getSpinnerFrame(phase: SpinnerPhase, tick: number, useAscii: boolean): 
     }
   } else {
     switch (phase) {
-      case 'thinking': return circleSpinnerFrame(tick) // ['◐', '◓', '◑', '◒']
+      case 'thinking': return circleSpinnerFrame(tick) // ['◐', '◓', '◑', '◒'] — 盈缺，凝思
       case 'streaming': return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][((tick % 10) + 10) % 10]!
-      case 'analyzing': return ['⛭', '⛮'][((tick % 2) + 2) % 2]!
-      case 'waiting': return '▲'
+      case 'analyzing': return ['◇', '◈', '◆', '◈'][((tick % 4) + 4) % 4]! // 菱形脉动，取代齿轮
+      case 'waiting': return '◌'
       default: return '·'
     }
   }
 }
 
-/** GlanceBar 用的 phase glyph + 标签 — 五行运行态（对齐设计稿）
- *  ◐ 水·凝思  ✦ 火·书写  ⚙ 风·运作  ▲ 山·候待  ❧ 林·归航 */
+/** GlanceBar 用的 phase glyph + 标签 — 菱形家族运行态（克制、对标 Claude Code）
+ *  ◐ 水·凝思  ◆ 火·书写  ◈ 风·运作  ◇ 山·候待  · 空闲
+ *  五行标签保留承载叙事；字形收敛到盈缺/菱形一族，不再混星/齿轮/三角/花饰。 */
 export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: string } {
   const useAscii = chalk.level < 3
   if (useAscii) {
@@ -56,9 +60,9 @@ export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: str
   } else {
     switch (phase) {
       case 'thinking': return { glyph: '◐', label: '水 · 凝思' }
-      case 'streaming': return { glyph: '✦', label: '火 · 书写' }
-      case 'analyzing': return { glyph: '⚙', label: '风 · 运作' }
-      case 'waiting': return { glyph: '▲', label: '山 · 候待' }
+      case 'streaming': return { glyph: '◆', label: '火 · 书写' }
+      case 'analyzing': return { glyph: '◈', label: '风 · 运作' }
+      case 'waiting': return { glyph: '◇', label: '山 · 候待' }
       case 'idle': return { glyph: '·', label: '候待' }
     }
   }
@@ -98,7 +102,7 @@ export function formatTurnWorkSummary(input: {
   outputTokens: number
 }, theme: RivetTheme): string {
   const useAscii = chalk.level < 3
-  const glyph = useAscii ? 'Y' : '❧'
+  const glyph = useAscii ? 'Y' : '◆'
   const elapsed = formatElapsedHuman(input.elapsedMs)
   const tokens = `${formatTokenCount(input.inputTokens)} in / ${formatTokenCount(input.outputTokens)} out`
   return `${color(glyph, theme.primary)} ${color(`Worked for ${elapsed}`, theme.primary)} ${color(`· ${tokens}`, theme.muted)}`

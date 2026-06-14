@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate'
 
 interface ColorSet {
   primary: string
@@ -266,6 +266,37 @@ const CLAUDE_FALLBACK: ColorSet = {
   pulseAlert: 'redBright',
 }
 
+// Slate theme — 默认风格 (Professional / Calm). Design brief: 去强调紫，做专业、
+// 年轻化、不花哨、视觉不疲劳。手法：单一冷静 teal accent + 钢蓝结构色 + 全部去饱和
+// 语义色 + 柔和中性灰白正文（非纯白，降眩光）。暗色终端长时间观看不疲劳。
+const SLATE_TRUECOLOR: ColorSet = {
+  primary: '#56b6c2',   // 冷静 teal-cyan — 唯一 accent：链接/选中/相位字形/流式指示
+  secondary: '#7aa2cf', // 钢蓝 — 正文结构强调 / edit·write 头
+  success: '#7fb88a',   // 鼠尾草绿 — 测试通过/完成 (去饱和)
+  warning: '#d6a35c',   // 暗琥珀 — 注意/委派
+  error: '#e08891',     // 柔玫瑰 — 错误/高风险 (低光晕，非纯红)
+  dim: '#5b6270',       // 板岩灰 — 分隔/快捷键 (安静可见)
+  pulseQuiet: '#39414f', // 深板岩 — quiet pulse
+  pulseActive: '#56b6c2', // teal — active pulse (= primary)
+  pulseAlert: '#e08891',  // 柔玫瑰 — alert pulse (= error)
+  toolShell: '#7aa2cf',   // 钢蓝 — bash/grep/glob
+  toolEdit: '#6fb3ab',    // 雾青 — edit_file/write_file (区别于 shell 蓝与 success 绿)
+  toolTest: '#7fb88a',    // 鼠尾草绿 — run_tests
+  toolDelegate: '#d6a35c', // 暗琥珀 — delegate
+}
+
+const SLATE_FALLBACK: ColorSet = {
+  primary: 'cyan',
+  secondary: 'blue',
+  success: 'green',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'cyan',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -342,9 +373,16 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     truecolor: buildTheme(ZIWEI_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#c9b8ff', muted: '#9aa2b1' }),
     fallback: buildTheme(ZIWEI_FALLBACK, { userColor: 'red', assistantColor: 'magenta', muted: 'white' }),
   },
+  slate: {
+    // userColor = 干净中性亮白：用户 ▌ 标记不抢色（专业、不花哨）
+    // assistantColor = 柔中性灰：正文降眩光、不疲劳
+    // muted = 元信息灰
+    truecolor: buildTheme(SLATE_TRUECOLOR, { userColor: '#e2e6ec', assistantColor: '#c4c9d2', muted: '#8b93a3' }),
+    fallback: buildTheme(SLATE_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
+  },
 }
 
-let activeTheme: ThemeName = 'ziwei'
+let activeTheme: ThemeName = 'slate'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

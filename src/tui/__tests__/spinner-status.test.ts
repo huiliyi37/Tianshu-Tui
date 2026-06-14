@@ -77,14 +77,14 @@ describe('formatElapsedHuman / formatTokenCount', () => {
 })
 
 describe('formatTurnWorkSummary', () => {
-  it('renders ✦ Worked for … · in/out tokens', () => {
+  it('renders ◆ Worked for … · in/out tokens', () => {
     const line = stripAnsi(formatTurnWorkSummary({
       elapsedMs: 66_000,
       inputTokens: 12_300,
       outputTokens: 890,
     }, theme))
     const useAscii = chalk.level < 3
-    const expectedGlyph = useAscii ? 'Y' : '❧'
+    const expectedGlyph = useAscii ? 'Y' : '◆'
     assert.ok(line.includes(`${expectedGlyph} Worked for 1m 6s`))
     assert.ok(line.includes('12.3k in / 890 out'))
   })
@@ -101,9 +101,9 @@ describe('phaseIndicator', () => {
       assert.deepEqual(phaseIndicator('idle'), { glyph: '.', label: '空闲' })
     } else {
       assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '水 · 凝思' })
-      assert.deepEqual(phaseIndicator('streaming'), { glyph: '✦', label: '火 · 书写' })
-      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '⚙', label: '风 · 运作' })
-      assert.deepEqual(phaseIndicator('waiting'), { glyph: '▲', label: '山 · 候待' })
+      assert.deepEqual(phaseIndicator('streaming'), { glyph: '◆', label: '火 · 书写' })
+      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '◈', label: '风 · 运作' })
+      assert.deepEqual(phaseIndicator('waiting'), { glyph: '◇', label: '山 · 候待' })
       assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: '候待' })
     }
   })

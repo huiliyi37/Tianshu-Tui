@@ -2,20 +2,30 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('ziwei') })
+afterEach(() => { setTheme('slate') })
 
 describe('getTheme', () => {
-  it('defaults to ziwei theme', () => {
-    assert.equal(getActiveThemeName(), 'ziwei')
+  it('defaults to slate theme (专业/不疲劳，去强调紫)', () => {
+    assert.equal(getActiveThemeName(), 'slate')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#c9b8ff') // 紫微 — 帝星紫
-    assert.equal(theme.error, '#ff8a9b')   // 荧惑赤
+    assert.equal(theme.primary, '#56b6c2') // 冷静 teal — 唯一 accent
+    assert.equal(theme.error, '#e08891')   // 柔玫瑰
+    assert.notEqual(theme.primary, '#c9b8ff') // 不再是紫微紫
   })
 
-  it('ziwei uses cinnabar seal for user mark + alert pulse', () => {
+  it('slate uses clean neutral user mark + soft body text', () => {
     const theme = getTheme(3)
-    assert.equal(theme.userColor, '#d4453a')   // 朱砂印 — user ▌ mark
-    assert.equal(theme.pulseAlert, '#d4453a')  // alert pulse
+    assert.equal(theme.userColor, '#e2e6ec')      // 中性亮白 ▌ mark
+    assert.equal(theme.assistantColor, '#c4c9d2') // 柔中性正文
+    assert.equal(theme.pulseActive, '#56b6c2')    // teal active pulse
+  })
+
+  it('ziwei still available via explicit switch (cinnabar seal)', () => {
+    setTheme('ziwei')
+    const theme = getTheme(3)
+    assert.equal(theme.primary, '#c9b8ff')       // 紫微 — 帝星紫
+    assert.equal(theme.userColor, '#d4453a')      // 朱砂印 — user ▌ mark
+    assert.equal(theme.pulseAlert, '#d4453a')     // alert pulse
     assert.equal(theme.assistantColor, '#c9b8ff') // assistantColor
   })
 
@@ -27,13 +37,14 @@ describe('getTheme', () => {
     assert.equal(theme.assistantColor, '#c5c8d2') // brightened neutral body
   })
 
-  it('returns 256-color fallback when colorLevel < 3', () => {
+  it('returns 256-color fallback when colorLevel < 3 (slate → cyan accent)', () => {
     const theme = getTheme(1)
-    assert.equal(theme.primary, 'magenta')
+    assert.equal(theme.primary, 'cyan')
     assert.equal(theme.error, 'red')
   })
 
   it('maps tool names to colors (ziwei: multi-color per HTML design)', () => {
+    setTheme('ziwei')
     const theme = getTheme(3)
     assert.equal(theme.toolColor('bash'), '#8ab4ff')        // 天枢蓝白 (shell grey in tianshu)
     assert.equal(theme.toolColor('grep'), '#8ab4ff')        // same as bash
