@@ -444,7 +444,7 @@ async function main() {
   // 欢迎与底部 chrome 之间留一空行
   stdout.write('\n')
 
-  process.stderr.write('[T9] Ready. Type a message and press Enter.\n')
+  process.stderr.write('\n')
 
   // 首屏渲染底部 chrome（GlanceBar + 输入框），不必等第一次按键
   app.start()

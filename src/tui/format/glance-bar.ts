@@ -81,35 +81,26 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
 
-  // Zone 3: Model + Cache + Tokens — all muted/dim, dot-separated for breathing room
+  // Zone 3: Model + anomaly-only metrics — minimal: model + cost + elapsed
+  // Cache/tokens only surface when anomalous (cache < 50%, tokens ratio ≥ 75%)
   const parts: string[] = []
   if (input.modelName) {
-    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
+    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
   }
-  if (input.reasoningEffort) {
-    parts.push(color(input.reasoningEffort, theme.dim))
-  }
-  if (input.cacheHitRate !== undefined) {
+  if (input.cacheHitRate !== undefined && input.cacheHitRate < 0.5) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)
-    // 始终显示缓存命中率，0% 用 dim 而非隐藏，避免用户误判为"未接入"
-    parts.push(color(`⚡${cachePct}%`, input.cacheHitRate > 0 ? theme.success : theme.dim))
+    parts.push(color(`⚡${cachePct}%`, theme.warning))
   }
-  if (input.contextRatio !== undefined) {
-    const pct = Math.round(input.contextRatio * 100)
-    // < 1% 也显示具体值，避免用户看到 ctx 0% 误以为数据未接入
-    const pctDisplay = pct === 0 && input.contextRatio > 0 ? '<1%' : `${pct}%`
-    const ratioColor = pct >= 88 ? theme.error : pct >= 75 ? theme.warning : theme.dim
-    const compactWarn = pct >= 78 ? ' ⚠compact' : ''
-    parts.push(color(`ctx ${pctDisplay}${compactWarn}`, ratioColor))
-  }
-  if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
-    parts.push(color(`◧ ${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, theme.dim))
+  const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
+    ? input.estimatedTokens / input.maxTokens : 0
+  if (!narrow && ratio >= 0.75 && input.estimatedTokens !== undefined && input.maxTokens) {
+    const tokenColor = ratio >= 0.9 ? theme.error : theme.warning
+    parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
     parts.push(color(`$${input.cost.toFixed(2)}`, theme.dim))
   }
-  const dotSep = color(' · ', theme.dim)
-  const zone3 = parts.join(dotSep)
+  const zone3 = parts.join('  ')
 
   // Zone 4: Elapsed
   let zone4 = ''

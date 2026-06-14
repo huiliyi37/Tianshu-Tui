@@ -34,20 +34,18 @@ describe('formatGlanceBar', () => {
     assert.ok(stripAnsi(result).includes('2m5s'))
   })
 
-  it('includes cache hit rate', () => {
-    const result = formatGlanceBar({ width: 80, cacheHitRate: 0.75 }, theme)
-    assert.ok(stripAnsi(result).includes('75%'))
+  it('shows cache only when anomalous (< 50%)', () => {
+    const low = formatGlanceBar({ width: 80, cacheHitRate: 0.3 }, theme)
+    assert.ok(stripAnsi(low).includes('30%'), 'cache < 50% should show')
+    const high = formatGlanceBar({ width: 80, cacheHitRate: 0.75 }, theme)
+    assert.ok(!stripAnsi(high).includes('75%'), 'cache >= 50% should be hidden')
   })
 
-  it('includes context ratio with color thresholds', () => {
-    const normal = formatGlanceBar({ width: 80, contextRatio: 0.5 }, theme)
-    // Context ratio uses ANSI color — check for escape sequences in the ratio area
-    assert.ok(normal.includes('50%'))
-
-    const high = formatGlanceBar({ width: 80, contextRatio: 0.9 }, theme)
-    // High (>88%): should have color applied
-    assert.ok(high.includes('90%'))
-    assert.ok(/\x1B\[/.test(high), 'has ANSI color for high ratio')
+  it('shows tokens only when ratio >= 75%', () => {
+    const normal = formatGlanceBar({ width: 80, estimatedTokens: 50_000, maxTokens: 200_000 }, theme)
+    assert.ok(!stripAnsi(normal).includes('◧'), 'token ratio < 75% should be hidden')
+    const high = formatGlanceBar({ width: 80, estimatedTokens: 160_000, maxTokens: 200_000 }, theme)
+    assert.ok(stripAnsi(high).includes('◧'), 'token ratio >= 75% should show')
   })
 
   it('adapts for narrow terminals', () => {
@@ -59,32 +57,30 @@ describe('formatGlanceBar', () => {
   })
 
   it('renders ◧ Xk/Yk token counts when estimatedTokens + maxTokens given', () => {
-    const result = formatGlanceBar({ width: 120, estimatedTokens: 12_300, maxTokens: 200_000 }, theme)
+    const result = formatGlanceBar({ width: 120, estimatedTokens: 160_000, maxTokens: 200_000 }, theme)
     const plain = stripAnsi(result)
-    assert.ok(plain.includes('◧'), 'has token glyph')
-    assert.ok(plain.includes('12k/200k'), `has Xk/Yk: ${plain}`)
+    assert.ok(plain.includes('◧'), 'has token glyph when ratio >= 75%')
+    assert.ok(plain.includes('160k/200k'), `has Xk/Yk: ${plain}`)
   })
 
   it('renders 1.0M for 1M-context windows instead of 1000k', () => {
-    // 领航星 2026-06-11 实测：1M 窗口原显示 ◧ Xk/1000k 顶到换行临界。
-    // 验证: maxTokens=1_000_000 必须显示 "1.0M"，不得出现 "1000k"。
-    const result = formatGlanceBar({ width: 140, estimatedTokens: 12_300, maxTokens: 1_000_000 }, theme)
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 800_000, maxTokens: 1_000_000 }, theme)
     const plain = stripAnsi(result)
     assert.ok(plain.includes('1.0M'), `1.0M present: ${plain}`)
     assert.ok(!plain.includes('1000k'), `no 1000k artifact: ${plain}`)
   })
 
   it('renders 2.5M for 2.5M tokens (one decimal under 10M)', () => {
-    const result = formatGlanceBar({ width: 140, estimatedTokens: 2_500_000, maxTokens: 4_000_000 }, theme)
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 3_200_000, maxTokens: 4_000_000 }, theme)
     const plain = stripAnsi(result)
-    assert.ok(plain.includes('2.5M'), `2.5M present: ${plain}`)
+    assert.ok(plain.includes('3.2M'), `3.2M present: ${plain}`)
     assert.ok(plain.includes('4.0M'), `4.0M present: ${plain}`)
   })
 
   it('rounds to integer M for ≥10M tokens (avoid visual width blowup)', () => {
-    const result = formatGlanceBar({ width: 140, estimatedTokens: 12_000_000, maxTokens: 32_000_000 }, theme)
+    const result = formatGlanceBar({ width: 140, estimatedTokens: 25_000_000, maxTokens: 32_000_000 }, theme)
     const plain = stripAnsi(result)
-    assert.ok(plain.includes('12M'), `12M present: ${plain}`)
+    assert.ok(plain.includes('25M'), `25M present: ${plain}`)
     assert.ok(plain.includes('32M'), `32M present: ${plain}`)
   })
 
