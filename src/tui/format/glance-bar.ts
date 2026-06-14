@@ -11,6 +11,17 @@ import { color } from '../engine/ansi.js'
 import stringWidth from 'string-width'
 import type { RivetTheme } from '../theme.js'
 
+/** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
+export function resolveStarDomainAccent(domainName: string | undefined, theme: RivetTheme): string {
+  if (!domainName) return theme.muted
+  for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
+    if (domain.name === domainName || id === domainName) {
+      return theme[domain.uiPersona.accent]
+    }
+  }
+  return theme.muted
+}
+
 /** 星域名称 → GlanceBar 展示（glyph + 中文名），对齐 Ink glance-bar.tsx findDomain。 */
 export function resolveStarDomainDisplay(domainName: string | undefined): { glyph: string; name: string } | null {
   if (!domainName) return null

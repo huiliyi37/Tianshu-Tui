@@ -86,7 +86,9 @@ export function InputBar({ onSubmit, disabled, vimEnabled, steerMode, starDomain
       <Box
         flexDirection="row"
         paddingX={1}
-        marginTop={1}
+        borderStyle={steerMode ? undefined : 'round'}
+        borderColor={domainAccent}
+        borderDimColor={!isSlash}
       >
         <Text bold color={promptColor}>{steerMode ? PULSE_FRAMES[pulseIdx] : '❯'} </Text>
         <BaseTextInput

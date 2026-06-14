@@ -29,7 +29,7 @@ import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../form
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent } from '../format/glance-bar.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
@@ -1690,8 +1690,6 @@ export class TuiApp {
       elapsedMs: Date.now() - this.state.turnStartMs,
       turnCount: this.state.turnNumber,
     }, this.theme)
-    // formatGlanceBar 返回「分隔线\n状态行」两行——必须拆开 push，
-    // LiveEngine 按数组元素计行，内嵌 \n 会破坏重绘的行数计算
     for (const glanceLine of glanceBar.split('\n')) {
       lines.push({ text: glanceLine })
     }
@@ -1700,20 +1698,36 @@ export class TuiApp {
     if (this.ctrlCPendingSince > 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
-      // 空输入显示 dim placeholder
+      const inputVal = this.inputLine.value
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n')
+      const isStreaming = this.state.phase !== 'idle'
+
+      // Domain-accent border color: slash=primary, streaming=dim, else domain accent
+      const borderColor = isSlash ? this.theme.primary
+        : isStreaming ? this.theme.dim
+        : resolveStarDomainAccent(this.state.domainName, this.theme)
+
+      const innerWidth = Math.max(20, this.columns - 4)
+      const topBorder = color(`╭${'─'.repeat(innerWidth + 2)}╮`, borderColor)
+      const botBorder = color(`╰${'─'.repeat(innerWidth + 2)}╯`, borderColor)
+      const leftBar = color('│ ', borderColor)
+      const rightBar = color(' │', borderColor)
+
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines()
         : [`〉 █${color(this.inputLine.placeholder, this.theme.dim)}`]
+
+      lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        lines.push({ text: `-- NORMAL -- ${inputLines[0] ?? ''}` })
-        for (const extra of inputLines.slice(1)) lines.push({ text: extra })
+        lines.push({ text: `${leftBar}-- NORMAL -- ${inputLines[0] ?? ''}${rightBar}` })
+        for (const extra of inputLines.slice(1)) lines.push({ text: `${leftBar}${extra}${rightBar}` })
       } else {
-        for (const inputDisplayLine of inputLines) lines.push({ text: inputDisplayLine })
+        for (const inputDisplayLine of inputLines) lines.push({ text: `${leftBar}${inputDisplayLine}${rightBar}` })
       }
+      lines.push({ text: botBorder })
 
       // 5b. slash 命令提示（输入以 / 开头且未含空格）
-      const inputVal = this.inputLine.value
-      if (inputVal.startsWith('/') && !inputVal.includes(' ')) {
+      if (isSlash && !inputVal.includes(' ')) {
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.slashCommands, selectedIdx: this.slashSelectedIdx }, this.theme)) {
           lines.push({ text: hintLine })
         }
