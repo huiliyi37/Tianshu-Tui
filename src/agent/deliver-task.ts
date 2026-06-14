@@ -570,19 +570,23 @@ When the task implements a complex spec or cross-module integration, include the
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (!route || !ctx.reviewDeps) {
             // Advisory: review deps unavailable is a caveat, not a blocker.
-            lines.push('', '⚠️ Post-commit review skipped: review dependencies are unavailable (ReviewRouter unwired).')
+            lines.push('', '⚠️ 提交后审查跳过：审查依赖不可用（ReviewRouter 未接入）。')
           } else {
             const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
             const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
             const reviewAbort = new AbortController()
             if (params.abortSignal) {
               if (params.abortSignal.aborted) {
-                lines.push('', '⚠️  Post-commit review skipped: tool was cancelled.')
+                lines.push('', '⚠️ 提交后审查跳过：工具已取消。')
               } else {
                 params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
               }
             }
             if (!params.abortSignal?.aborted) {
+              // 进度可见：通过 onOutput streaming 回调推送中间状态，
+              // 用户在审查运行期间看到进度而非黑盒等待。
+              const budgetSec = Math.round(REVIEW_TIMEOUT_MS / 1000)
+              params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)...\n`)
               let outcome: ReviewOutcome
               let reviewTimer: NodeJS.Timeout | undefined
               try {
@@ -621,21 +625,21 @@ When the task implements a complex spec or cross-module integration, include the
               if (outcome.verdict === 'rejected' || outcome.escalated) {
                 // Advisory: the commit has already landed. Surface the finding
                 // as a strong warning + follow-up recommendation, not a block.
-                lines.push('', `⚠️ ReviewRouter flagged issues (${outcome.tier}): ${outcome.evidence ?? 'adversarial review did not verify this delivery'}`)
-                if (typeof outcome.rounds === 'number') lines.push(`   Rounds: ${outcome.rounds}`)
-                lines.push('   → The commit has landed. Address the review finding in a follow-up commit.')
+                lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
+                if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
+                lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
               } else if (outcome.verdict === 'verified') {
                 if (outcome.infraFailures && outcome.infraFailures.length > 0) {
-                  lines.push('', `⚠️ ReviewRouter YELLOW (${outcome.tier}): review infrastructure caveat(s), delivery verified by available evidence.`)
-                  lines.push(`   ${outcome.evidence ?? 'verified with review infra caveats'}`)
+                  lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)
+                  lines.push(`   ${outcome.evidence ?? '已通过审查基础设施注意事项验证'}`)
                 } else {
-                  lines.push('', `✅ ReviewRouter verified (${outcome.tier}): ${outcome.evidence ?? 'verified'}`)
+                  lines.push('', `✅ 审查通过 (${outcome.tier})：${outcome.evidence ?? '已验证'}`)
                 }
               } else if (outcome.verdict === 'inconclusive') {
-                lines.push('', `⚠️ ReviewRouter INCONCLUSIVE (${outcome.tier}): ${outcome.evidence ?? 'post-commit review DID NOT run (infra failure)'}`)
-                lines.push('   → This change is UNREVIEWED. Run /review max for a full squadron review.')
+                lines.push('', `⚠️ 审查未决 (${outcome.tier})：${outcome.evidence ?? '提交后审查未运行（基础设施故障）'}`)
+                lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
               } else if (outcome.verdict === 'nudge') {
-                lines.push('', `⚠️ ReviewRouter nudge (${outcome.tier}): apply review disciplines in follow-up work.`)
+                lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
               }
             }
           }
@@ -644,12 +648,12 @@ When the task implements a complex spec or cross-module integration, include the
 
       // Append review principle checklist at end (non-blocking, informational)
       if (reviewChecklist.length > 0) {
-        lines.push('', 'Review principle checklist:')
+        lines.push('', '审查原则清单：')
         for (const item of reviewChecklist.slice(0, 2)) {
           lines.push(`  - ${item.question}`)
         }
         if (reviewChecklist.length > 2) {
-          lines.push(`  ... and ${reviewChecklist.length - 2} more principles`)
+          lines.push(`  ... 还有 ${reviewChecklist.length - 2} 条原则`)
         }
       }
 

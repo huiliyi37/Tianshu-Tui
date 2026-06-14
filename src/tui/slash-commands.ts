@@ -28,6 +28,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
+import { skillRegistry } from '../skills/skill-loader.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 
 const HELP_TEXT = `Available commands:
@@ -191,12 +192,19 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   if (workflow) return workflow.prompt
   const custom = resolveCustomCommand(cwd, input)
   if (custom) return custom
-  // /review and /review max: map to explicit deliver_task instruction for the agent
-  const reviewMatch = input.match(/^\/review(\s+max)?$/i)
+  // /review [max] [focus description] — map to deliver_task instruction for the agent
+  const reviewMatch = input.match(/^\/review(?:\s+(max))?(?:\s+(.*))?$/i)
   if (reviewMatch) {
-    const level = reviewMatch[1] ? 'L3' : 'L2'
+    const isMax = !!reviewMatch[1]
+    const focusText = reviewMatch[2]?.trim()
+    const level = isMax ? 'L3' : 'L2'
     const levelLabel = level === 'L3' ? 'L3 Review Squadron (5 inspectors)' : 'L2 adversarial verifier'
-    return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.`
+    const focusInstruction = focusText ? ` Focus specifically on: ${focusText}.` : ''
+    return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.${focusInstruction}`
+  }
+  // /review typos — don't silently drop user input
+  if (/^\/review/i.test(input)) {
+    return `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.`
   }
   // Unrecognized slash command — return null to signal "blocked"
   return null
@@ -924,91 +932,48 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/skill': {
       const sub = parts[1]?.toLowerCase()
-      const cwd = process.cwd()
 
-      // Scan .rivet/skills/, .claude/skills/*/SKILL.md in project + home
-      const skillDirs = [
-        { label: 'rivet', path: join(cwd, '.rivet', 'skills'), rivetMd: true },
-        { label: 'project', path: join(cwd, '.claude', 'skills'), rivetMd: false },
-        { label: 'global', path: join(homedir(), '.claude', 'skills'), rivetMd: false },
-      ]
-
-      const skills: Array<{ name: string; path: string; source: string; desc: string; size: number }> = []
-      for (const dir of skillDirs) {
-        if (!existsSync(dir.path)) continue
-        if (dir.rivetMd) {
-          for (const file of readdirSync(dir.path).filter(f => f.endsWith('.md'))) {
-            const skillFile = join(dir.path, file)
-            const content = readFileSync(skillFile, 'utf8')
-            const descMatch = content.match(/^---\n([\s\S]*?\n)---/)?.[1] ?? ''
-            const descLine = descMatch.split('\n').find(l => l.startsWith('description:'))
-            const desc = descLine
-              ? descLine.replace(/^description:\s*(?:\|\s*)?/, '').replace(/^\s+/, '').slice(0, 120)
-              : ''
-            skills.push({
-              name: file.replace(/\.md$/, ''),
-              path: skillFile,
-              source: dir.label,
-              desc: desc || '(no description)',
-              size: content.length,
-            })
-          }
-          continue
-        }
-        for (const entry of readdirSync(dir.path, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue
-          const skillFile = join(dir.path, entry.name, 'SKILL.md')
-          if (!existsSync(skillFile)) continue
-          const content = readFileSync(skillFile, 'utf8')
-          // Extract YAML front-matter description
-          const descMatch = content.match(/^---\n([\s\S]*?\n)---/)?.[1] ?? ''
-          const descLine = descMatch.split('\n').find(l => l.startsWith('description:') || l.startsWith('description:'))
-          const desc = descLine
-            ? descLine.replace(/^description:\s*(?:\|\s*)?/, '').replace(/^\s+/, '').slice(0, 120)
-            : ''
-          skills.push({
-            name: entry.name,
-            path: skillFile,
-            source: dir.label,
-            desc: desc || '(no description)',
-            size: content.length,
-          })
-        }
-      }
+      // Single source of truth: the shared skillRegistry (loaded at bootstrap
+      // from .rivet/skills + project/global .claude/skills). No re-scan, no
+      // truncation — same Tier-1/Tier-2 model the model itself uses.
+      const sourceTag = (source?: string): string =>
+        source === 'global-claude' ? '🌐' : '📁'
+      const allSkills = skillRegistry.list()
 
       if (!sub || sub === 'list' || sub === 'ls') {
-        if (skills.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No skills found.\nScanned:\n  .claude/skills/ (project)\n  ~/.claude/skills/ (global)' }))
+        if (allSkills.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: 'No skills found.\nScanned:\n  .rivet/skills/\n  .claude/skills/ (project)\n  ~/.claude/skills/ (global)' }))
         } else {
-          const lines = skills.map(s => {
-            const tag = s.source === 'global' ? '🌐' : '📁'
-            const size = s.size > 1024 ? `${(s.size / 1024).toFixed(1)}KB` : `${s.size}B`
-            return `  ${tag} ${s.name} (${size}) — ${s.desc}`
-          })
-          pushStatic(createLogEntry({ type: 'system', content: `Skills (${skills.length}):\n${lines.join('\n')}\n\nUse /skill <name> to load a skill into the conversation.` }))
+          const lines = [...allSkills]
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(s => {
+              const size = s.body.length > 1024 ? `${(s.body.length / 1024).toFixed(1)}KB` : `${s.body.length}B`
+              const desc = (s.description || '(no description)').replace(/\s+/g, ' ').slice(0, 120)
+              return `  ${sourceTag(s.source)} ${s.name} (${size}) — ${desc}`
+            })
+          pushStatic(createLogEntry({ type: 'system', content: `Skills (${allSkills.length}):\n${lines.join('\n')}\n\nUse /skill <name> to load a skill's full instructions into the conversation.` }))
         }
         setIsStreaming(false)
         return true
       }
 
-      // /skill <name> — inject skill into conversation
-      const skill = skills.find(s => s.name === sub || s.name === parts[1])
+      // /skill <name> — load the FULL body into the conversation (no truncation).
+      const skill = skillRegistry.get(parts[1]!) ?? allSkills.find(s => s.name.toLowerCase() === sub)
       if (!skill) {
         pushStatic(createLogEntry({ type: 'system', content: `Skill "${parts[1]}" not found.\nUse /skill list to see available skills.` }))
         setIsStreaming(false)
         return true
       }
 
-      const skillContent = readFileSync(skill.path, 'utf8')
-      // Inject as a user message with skill preamble — the agent will treat it as context
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${(skill.size / 1024).toFixed(1)}KB from ${skill.source})\nThe skill prompt is now active for this conversation.` }))
+      const sizeKb = (skill.body.length / 1024).toFixed(1)
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${sizeKb}KB from ${skill.source ?? 'rivet'})\nThe full skill instructions are now in the conversation.` }))
 
-      // Store the skill content so the next user message can reference it
-      // We inject it as a slash command resolution that returns the skill body
+      // Append-only one-shot: the complete body becomes a normal message in
+      // history (visible all session). We deliberately do NOT use a persistent
+      // anchor — that would re-render the whole body every turn and bloat the
+      // prefix. No slice(): the full body is preserved.
+      ctx.session.addUserMessage(`[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`)
       setIsStreaming(false)
-      // Push the skill as the next prompt input by returning false with the skill content
-      // Instead, add it to session as a system-pinned context via anchor
-      ctx.agent.addAnchor('user_preference', `[Active Skill: ${skill.name}]\n${skillContent.slice(0, 8000)}`)
       return true
     }
 

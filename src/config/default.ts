@@ -156,4 +156,7 @@ export const DEFAULT_CONFIG: Config = {
       risky_refactor: 'cheap-flash',
     },
   },
+  skills: {
+    importFromClaude: [],
+  },
 }
