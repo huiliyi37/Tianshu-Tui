@@ -96,32 +96,138 @@ lines.push('', `⏳ Post-commit review starting (${reviewMode} ${change.scale}, 
 
 **Wave 1 的实际价值**：regex 修复让参数能传进来；进度标记让最终输出中有时间预期说明。不是完美的，但比"完全黑盒"好。
 
-### Wave 2：解耦入口 — `/review` 独立路径（方向 2b 修订版）
+### Wave 2：解耦入口 — `/review` 独立路径（完整落地方案）
 
 **核心决策**：不新建工具，暴露已有的 routeReviewWorkflow。
 
-**改动**：`src/tui/slash-commands.ts` 的 `case '/review'` 分支
+#### reviewDeps 可达性追踪（已确认）
 
-当前 `/review` 在 slash-commands.ts 的 switch-case 中返回 `false`（让 agent 处理），实际由 `resolveAppPromptInput` 映射为 deliver_task 指令文本。
+```
+bootstrap.ts
+  → 创建 coordinator (DelegationCoordinator)
+  → coordinator 传给 createAgentRuntime → AgentLoop.config
+  → AgentLoop 构造 deliver-task.ts 时传入 reviewDeps:
+       ctx.routeReviewWorkflow = createCoordinatorReviewDeps(coordinator, {...})
+  → deliver-task.ts execute() 通过 params → ctx.reviewDeps 获取
 
-修订为：`/review`（不带参数时）直接在 slash-commands 内调用 routeReviewWorkflow，不经过 deliver_task：
+slash-commands.ts 的 SlashHandlerContext
+  → 有 agent (AgentLoop) ✓  （agent 持有 coordinator）
+  → 有 session ✓
+  → 没有 coordinator ✗
+  → 没有 reviewDeps ✗
+```
+
+**结论**：SlashHandlerContext 没有 reviewDeps，但有 agent。通过 agent 可以获取 coordinator 构造 reviewDeps。但更干净的路径是：在 main.tsx/main.ts 构造 SlashHandlerContext 时直接注入一个 `runReview` 回调。
+
+#### 改动 1：SlashHandlerContext 新增可选字段
+
+文件：`src/tui/slash-commands.ts`
 
 ```typescript
-case '/review': {
-  // Pass through to agent — resolveAppPromptInput handles the mapping.
-  // Future: direct routeReviewWorkflow call (bypass deliver_task).
-  return false
+export interface SlashHandlerContext {
+  // ...existing fields...
+  /** 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow */
+  runReview?: (change: ChangeSet, mode: ReviewMode, focus?: string) => Promise<ReviewOutcome>
 }
 ```
 
-**不做事项（贪狼缰绳：不啃活前沿）**：
+#### 改动 2：main.tsx / main.ts 注入 runReview
 
-Wave 2 目前只做设计冻结，不做代码实现。原因：
-- `routeReviewWorkflow` 需要 `ReviewRouterDeps`（worker spawn 桥接），这在 slash-commands 的 SlashHandlerContext 中可能没有注入
-- 需要先确认 `SlashHandlerContext` 是否有 reviewDeps 可用
-- 如果不可用，需要在 main.tsx/main.ts 注入——这是跨层改动
+在构造 SlashHandlerContext 时，用 coordinator 构造 reviewDeps 并注入：
 
-**Wave 2 做什么**：确认 reviewDeps 在 slash-command 上下文中的可用性。如果可用，Wave 2 可以直接做；如果不可用，推迟到 Wave 3 一起。
+```typescript
+import { createCoordinatorReviewDeps } from './agent/review-coordinator-deps.js'
+import { routeReviewWorkflow } from './agent/review-router.js'
+
+// coordinator 在 bootstrap 中已创建
+const reviewDeps = createCoordinatorReviewDeps(coordinator, {
+  parentTurnId: 'slash-review',
+  reviewDepth: 0,
+})
+
+// 注入到 SlashHandlerContext
+runReview: async (change, mode, focus) => {
+  const focused = focus
+    ? { ...change, /* focus 注入到 files 或作为 metadata */ }
+    : change
+  return routeReviewWorkflow(focused, reviewDeps, { mode })
+}
+```
+
+**注意**：main.ts (T9) 和 main-ink.tsx (Ink) 都需要注入。T9 入口在 `app.setSlashHandler` 之前构造；Ink 入口在 Root 组件的 slashCtx 中。
+
+#### 改动 3：slash-commands.ts 的 `/review` 分支
+
+```typescript
+case '/review': {
+  const isMax = parts[1]?.toLowerCase() === 'max'
+  const focus = parts.slice(isMax ? 2 : 1).join(' ').trim()
+
+  if (!ctx.runReview) {
+    pushStatic(createLogEntry({ type: 'system',
+      content: 'Review infrastructure not available.' }))
+    setIsStreaming(false)
+    return true
+  }
+
+  // 从 git diff 构造 ChangeSet
+  const dirtyFiles = ctx.agent.getCurrentDirtyFiles?.() ?? []
+  if (dirtyFiles.length === 0) {
+    pushStatic(createLogEntry({ type: 'system',
+      content: 'No uncommitted changes to review.' }))
+    setIsStreaming(false)
+    return true
+  }
+
+  const change: ChangeSet = {
+    files: dirtyFiles,
+    crossModule: isCrossModule(dirtyFiles),  // 自动分级
+    isFix: false,
+    ...(isMax ? { forceLevel: 'L3' } : {}),   // /review max 强制 L3
+  }
+
+  pushStatic(createLogEntry({ type: 'system',
+    content: `⏳ Review starting (${isMax ? 'L3 Squadron' : 'auto-classify'},
+    ≤${Math.round(reviewWorkflowBudgetMs(change) / 1000)}s)...` }))
+
+  try {
+    const outcome = await ctx.runReview(change, 'manual', focus || undefined)
+    const icon = outcome.verdict === 'verified' ? '🟢'
+               : outcome.verdict === 'rejected' ? '🔴' : '🟡'
+    pushStatic(createLogEntry({ type: 'system',
+      content: `${icon} Review [${outcome.tier}]: ${outcome.verdict}${outcome.evidence ? '\n' + outcome.evidence : ''}` }))
+  } catch (err) {
+    pushStatic(createLogEntry({ type: 'system',
+      content: `Review failed: ${(err as Error).message}` }))
+  }
+  setIsStreaming(false)
+  return true
+}
+```
+
+#### 改动 4：resolveAppPromptInput 同步更新
+
+当前 `resolveAppPromptInput` 把 `/review` 映射为 deliver_task 指令。Wave 2 后 `/review` 在 slash-commands 内直接处理（return true），不再走到 resolveAppPromptInput。但 regex 修复（Wave 1）仍然需要——因为 `resolveAppPromptInput` 在 slash-commands 之前执行，如果 regex 不匹配带参数的 `/review max <desc>`，会被 blocked 为 null。
+
+**Wave 2 后的 resolveAppPromptInput**：删除 review 分支（不再需要映射为 deliver_task），或保留作为 fallback（runReview 不可用时走旧路径）。
+
+#### 分级机制（自动，无需手动判断）
+
+| 用户输入 | forceLevel | routeReviewWorkflow 内部行为 |
+|---------|-----------|---------------------------|
+| `/review` | 无 | mode=manual → classifyChangeScale 自动分级 |
+| `/review max` | L3 | mode=manual → forceLevel 覆盖 → 强制 L3 Squadron |
+| `/review max 检查锚点漂移` | L3 + focus | 同上，focus 注入到 inspector objective |
+| deliver_task 内部 | 无 | mode=auto → wiring inspector（轻量，≤180s） |
+
+classifyChangeScale 用结构性信号自动判断：
+- **文件数 >=5** → L3
+- **跨模块**（不同顶层目录）→ L3
+- **安全边界**（path-validate/sandbox/permissions）→ L3
+- **依赖/配置文件**（package.json/tsconfig）→ L2
+- **其他** → L1（nudge，不 spawn worker）
+
+**用户不需要手动选级别**——`/review` 自动判断，`/review max` 是覆盖。
 
 ### Wave 3：进度 streaming + 输出隔离（方向 2a 完整版 + 方向 3）
 
