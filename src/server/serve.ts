@@ -238,6 +238,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
         readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
         getMessages: () => agent.session.getMessages(),
         replaceMessages: (msgs) => agent.session.replaceMessages(msgs),
+        rewindToMessages: (msgs) => agent.session.rewindToMessages(msgs),
       }
     },
     defaultCwd: process.cwd(),

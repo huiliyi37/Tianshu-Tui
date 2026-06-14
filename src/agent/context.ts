@@ -128,18 +128,25 @@ export class SessionContext {
   replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
-    // Recount user turns from the truncated message list.
-    this.state.turnCount = messages.filter(m => m.role === 'user').length
-    // Clear derived state that referenced the removed messages.
-    this.state.turnCacheHistory = []
-    this.state.compactedAtTurns = new Set()
-    // Clear file tracking — after rewind, the agent's view of which files
-    // it has read/modified no longer matches the truncated message history.
-    // Stale entries would make the agent believe it has context it doesn't.
-    this.state.filesRead = new Set()
-    this.state.filesModified = new Set()
     // Snapshot the array so subsequent mutations to state.oaiMessages don't
     // bleed into a listener's deferred work (e.g. async disk write).
+    this.onMutation?.({ type: 'replace', messages: messages.slice() })
+  }
+
+  /**
+   * Rewind-specific message replacement. Unlike {@link replaceMessages} (also
+   * used by compaction, which must NOT clear derived state), this resets all
+   * agent-internal tracking that referenced the removed messages after the
+   * rewind point.
+   */
+  rewindToMessages(messages: OaiMessage[]): void {
+    this.state.oaiMessages = messages
+    this.state.estimatedTokens = estimateOaiTokens(messages)
+    this.state.turnCount = messages.filter(m => m.role === 'user').length
+    this.state.turnCacheHistory = []
+    this.state.compactedAtTurns = new Set()
+    this.state.filesRead = new Set()
+    this.state.filesModified = new Set()
     this.onMutation?.({ type: 'replace', messages: messages.slice() })
   }
 

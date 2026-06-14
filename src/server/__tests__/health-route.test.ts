@@ -17,6 +17,7 @@ class NoopAgent implements ManagedAgent {
   readArtifact(): Promise<string | null> { return Promise.resolve(null) }
   getMessages(): OaiMessage[] { return [] }
   replaceMessages(_msgs: OaiMessage[]): void {}
+  rewindToMessages(_msgs: OaiMessage[]): void {}
 }
 
 function setup() {

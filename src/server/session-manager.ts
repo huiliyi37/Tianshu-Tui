@@ -96,6 +96,8 @@ export interface ManagedAgent {
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
   replaceMessages(msgs: OaiMessage[]): void
+  /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
+  rewindToMessages(msgs: OaiMessage[]): void
 }
 
 /**
@@ -700,8 +702,8 @@ export class RuntimeSessionManager {
     const anchorEvent = userEvents[userOrdinal]
     const anchorSeq = anchorEvent && anchorEvent.data.text === prompt ? anchorEvent.seq : undefined
 
-    // Truncate messages to the selected point.
-    s.agent.replaceMessages(msgs.slice(0, messageIndex))
+    // Truncate messages to the selected point (full derived-state reset).
+    s.agent.rewindToMessages(msgs.slice(0, messageIndex))
 
     // Update session status: rewind returns the session to idle so the user
     // can send a new prompt. Previous status (completed/failed) is stale.

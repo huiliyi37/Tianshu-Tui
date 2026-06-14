@@ -366,7 +366,7 @@ async function main() {
       .filter(({ m }) => (m as { content: string }).content === content)
       .pop()?.i
     if (matchIdx !== undefined) {
-      ctx!.session.replaceMessages(messages.slice(0, matchIdx))
+      ctx!.session.rewindToMessages(messages.slice(0, matchIdx))
       // Commit a rewind marker to scrollback
       tuiApp.commitStatic('⏪ Rewound — message restored to input.')
     }

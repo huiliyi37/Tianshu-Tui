@@ -33,6 +33,7 @@ class FakeAgent implements ManagedAgent {
   }
   getMessages(): OaiMessage[] { return this.messages }
   replaceMessages(msgs: OaiMessage[]): void { this.messages = msgs }
+  rewindToMessages(msgs: OaiMessage[]): void { this.messages = msgs }
 }
 
 function makeArtifact(id: string, over: Partial<Artifact> = {}): Artifact {

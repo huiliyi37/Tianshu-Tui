@@ -27,6 +27,7 @@ class ScriptedAgent implements ManagedAgent {
   readArtifact(): Promise<string | null> { return Promise.resolve(null) }
   getMessages(): OaiMessage[] { return [] }
   replaceMessages(_msgs: OaiMessage[]): void {}
+  rewindToMessages(_msgs: OaiMessage[]): void {}
 }
 
 test('SessionRuntimePool spawns a VISIBLE session and reports summary + changedFiles', async () => {
@@ -59,6 +60,7 @@ test('delegation tool events are surfaced as delegation tree nodes', () => {
     readArtifact(): Promise<string | null> { return Promise.resolve(null) }
     getMessages(): OaiMessage[] { return [] }
     replaceMessages(_msgs: OaiMessage[]): void {}
+    rewindToMessages(_msgs: OaiMessage[]): void {}
   }
   const manager = new RuntimeSessionManager({
     createAgent: () => { const a = new DelegatingAgent(); agents.push(a); return a },

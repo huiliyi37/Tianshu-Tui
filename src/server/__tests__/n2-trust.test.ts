@@ -27,6 +27,7 @@ class FakeAgent implements ManagedAgent {
   readArtifact() { return Promise.resolve(null) }
   getMessages(): OaiMessage[] { return [] }
   replaceMessages(_msgs: OaiMessage[]): void {}
+  rewindToMessages(_msgs: OaiMessage[]): void {}
 }
 
 function setup() {

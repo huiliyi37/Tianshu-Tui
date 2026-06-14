@@ -39,6 +39,7 @@ class RewindableAgent implements ManagedAgent {
   readArtifact(): Promise<string | null> { return Promise.resolve(null) }
   getMessages(): OaiMessage[] { return this.messages }
   replaceMessages(msgs: OaiMessage[]): void { this.messages = msgs }
+  rewindToMessages(msgs: OaiMessage[]): void { this.messages = msgs }
 }
 
 function makeMessages(): OaiMessage[] {
@@ -150,6 +151,7 @@ test('#4b rewind emits an anchorSeq matching the rewound user event', async () =
     readArtifact(): Promise<string | null> { return Promise.resolve(null) }
     getMessages(): OaiMessage[] { return this.messages }
     replaceMessages(m: OaiMessage[]): void { this.messages = m }
+    rewindToMessages(m: OaiMessage[]): void { this.messages = m }
   }
   const manager = new RuntimeSessionManager({
     createAgent: () => new TurnMirrorAgent(),
@@ -225,8 +227,7 @@ test('#8 POST /rewind returns 409 when session is running', async () => {
   assert.equal(res.status, 409)
 })
 
-test('#9 [反证 #2] SessionContext.replaceMessages resets turnCount + turnCacheHistory', () => {
-  // Directly test SessionContext — the mock agent can't verify derived state.
+test('#9 [反证 #2] SessionContext.rewindToMessages resets turnCount + turnCacheHistory + files', () => {
   const ctx = new SessionContext()
   // Simulate 3 turns
   ctx.addUserMessage('msg1')
@@ -244,7 +245,7 @@ test('#9 [反证 #2] SessionContext.replaceMessages resets turnCount + turnCache
 
   // Rewind to turn 1: keep only first user+assistant pair
   const msgs = ctx.getMessages().slice(0, 2)
-  ctx.replaceMessages(msgs)
+  ctx.rewindToMessages(msgs)
 
   assert.equal(ctx.getTurnCount(), 1, 'after rewind turnCount should be 1')
   assert.equal(ctx.getCacheHistory().length, 0, 'turnCacheHistory should be cleared')
