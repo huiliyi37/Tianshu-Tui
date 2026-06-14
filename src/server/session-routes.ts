@@ -18,6 +18,8 @@ import { isAuthorizedRequest } from './auth.js'
 import { SseStream } from './sse-stream.js'
 import type { RuntimeSessionManager } from './session-manager.js'
 import type { Artifact } from '../artifact/types.js'
+import type { SessionRegistry } from '../agent/session-registry.js'
+import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
@@ -64,7 +66,16 @@ function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
 export function buildSessionRoutes(
   manager: RuntimeSessionManager,
   apiToken?: string,
+  getRegistry?: () => SessionRegistry | undefined,
 ): Record<string, RouteHandler> {
+  // R3 — build an OwnershipGuard scoped to one session so rollback never
+  // restores files a *different* live session exclusively owns. Returns
+  // undefined when no registry is wired (single-session / CLI path).
+  const guardFor = (sessionId: string, cwd: string) => {
+    const registry = getRegistry?.()
+    return registry ? makeOwnershipGuard(registry, sessionId, cwd) : undefined
+  }
+
   const routes: Record<string, RouteHandler> = {
     'POST /sessions': withAuth((body) => {
       const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string }
@@ -153,6 +164,37 @@ export function buildSessionRoutes(
       if (!found) return { status: 404, body: { error: 'Artifact not found' } }
       const raw = await manager.readArtifact(id, artifactId)
       return { status: 200, body: { artifact: artifactSummary(found), raw: raw ?? '' } }
+    }, apiToken),
+
+    // R3 — rollback preview. Returns the agent-owned files that would be
+    // restored, files skipped because a peer session owns them, AND any
+    // irreversible bash side effects file rollback CANNOT undo. The returned
+    // confirmationToken must be echoed back to POST /rollback.
+    'GET /sessions/:id/rollback/preview': withAuth(async (_body, params) => {
+      const id = params!.id!
+      const rec = manager.getSession(id)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const preview = await getRollbackPreview(rec.cwd, id, guardFor(id, rec.cwd))
+      if (!preview) return { status: 200, body: { available: false } }
+      return { status: 200, body: { available: true, ...preview } }
+    }, apiToken),
+
+    // R3 — execute rollback. Requires the confirmationToken from preview. Only
+    // this session's own touched files are restored; contested files are skipped
+    // and surfaced, and irreversible effects are reported (never silently undone).
+    'POST /sessions/:id/rollback': withAuth(async (body, params) => {
+      const id = params!.id!
+      const rec = manager.getSession(id)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const data = (body ?? {}) as { confirmationToken?: string }
+      if (!data.confirmationToken) {
+        return { status: 400, body: { error: 'Missing "confirmationToken" (get one from rollback/preview)' } }
+      }
+      const result = await rollbackToCheckpoint(rec.cwd, data.confirmationToken, id, guardFor(id, rec.cwd))
+      if (!result.success) {
+        return { status: 409, body: { error: 'Rollback failed or nothing to restore', ...result } }
+      }
+      return { status: 200, body: result }
     }, apiToken),
   }
 

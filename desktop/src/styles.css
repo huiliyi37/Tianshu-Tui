@@ -103,6 +103,21 @@ body {
 }
 .rp-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 .review-pending .edit-input { width: 100%; min-height: 140px; margin-bottom: var(--space-2); }
+.review-pending .kind.warn { color: var(--warning); }
+.btn.danger { background: var(--error); color: #fff; }
+.btn.ghost.danger { background: transparent; color: var(--error); }
+
+/* Rollback (R3) */
+.rollback { padding: 0 var(--space-3); }
+.rollback-preview .rp-preview { max-height: 200px; }
+.rollback-result {
+  margin: var(--space-2) 0 0; padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel-2);
+  font-size: var(--text-sm);
+}
+.rollback-result.fail { border-color: var(--warning); }
+.rollback-result .meta { color: var(--muted); }
+.rollback-result .meta.warn { color: var(--warning); }
 
 /* ── Attention center (Q2) ─────────────────────────────────────── */
 .attention .panel-header { display: flex; align-items: center; justify-content: space-between; }
@@ -323,6 +338,26 @@ body {
 .msg.assistant .msg-body { color: var(--text); }
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
 .msg.error { color: var(--error); }
+
+/* Star-domain course-correction card (R5) — selective externalization of
+   "stuck → nudge → re-route". Deliberately quiet: distinct but not alarming. */
+.decision-shift {
+  border: 1px solid var(--border); border-left: 2px solid var(--accent);
+  background: var(--accent-soft); border-radius: var(--radius-md);
+  padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2);
+}
+.decision-shift.warn { border-left-color: var(--warning); }
+.decision-shift .ds-head { display: flex; align-items: center; gap: var(--space-2); }
+.decision-shift .ds-glyph { color: var(--accent); font-size: var(--text-md); }
+.decision-shift.warn .ds-glyph { color: var(--warning); }
+.decision-shift .ds-domain { color: var(--text-strong); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.decision-shift .ds-tag {
+  margin-left: auto; color: var(--muted); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.5px;
+}
+.decision-shift .ds-reason { color: var(--text); font-size: var(--text-sm); white-space: pre-wrap; word-break: break-word; }
+.decision-shift .ds-methods { margin: 0; padding-left: var(--space-4); color: var(--muted); font-size: var(--text-sm); }
+.decision-shift .ds-methods li { margin: 2px 0; }
 
 .tool-block { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
 .tool-block.err { border-color: var(--error); }

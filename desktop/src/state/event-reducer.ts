@@ -5,7 +5,7 @@ import type {
   SessionEvent,
 } from '../runtime/types'
 
-export type ConvoKind = 'user' | 'assistant' | 'tool' | 'result' | 'phase' | 'error'
+export type ConvoKind = 'user' | 'assistant' | 'tool' | 'result' | 'phase' | 'error' | 'decision_shift'
 
 export interface ConvoBlock {
   key: string
@@ -13,6 +13,14 @@ export interface ConvoBlock {
   role?: string
   text: string
   isError?: boolean
+  /** R5 — decision_shift card payload (star-domain course-correction). */
+  shift?: {
+    source: string
+    domain?: string
+    reason: string
+    methods: string[]
+    severity: 'info' | 'warn'
+  }
 }
 
 export interface EventViewState {
@@ -107,6 +115,24 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.private_textOpen = false
       next.phase = String(ev.data.phase ?? '')
       return next
+    case 'decision_shift': {
+      next.private_textOpen = false
+      const methods = Array.isArray(ev.data.methods) ? (ev.data.methods as unknown[]).map((m) => String(m)) : []
+      const severity = ev.data.severity === 'warn' ? 'warn' : 'info'
+      next.blocks = [...next.blocks, {
+        key: `ds-${ev.seq}`,
+        kind: 'decision_shift',
+        text: String(ev.data.reason ?? ''),
+        shift: {
+          source: String(ev.data.source ?? ''),
+          domain: ev.data.domain ? String(ev.data.domain) : undefined,
+          reason: String(ev.data.reason ?? ''),
+          methods,
+          severity,
+        },
+      }]
+      return next
+    }
     case 'error':
       next.private_textOpen = false
       next.blocks = [...next.blocks, {

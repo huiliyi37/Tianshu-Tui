@@ -127,6 +127,26 @@ export interface AgentConfig {
   autoDelegateEnabled?: boolean
 }
 
+/**
+ * A structured "course-correction" signal (R4). Emitted only at moments that are
+ * meaningful to a watching human: the agent was stuck / convergence stalled, the
+ * star-domain harness offered a different framing, and the agent is about to act
+ * on it. Internal bookkeeping (heartbeat / sensorium curves / cache diagnostics)
+ * deliberately does NOT emit these — selective visibility.
+ */
+export interface DecisionShift {
+  /** Which mechanism produced the nudge. */
+  source: 'kick' | 'convergence' | 'radio'
+  /** Star-domain persona / domain label (e.g. '天璇'), when applicable. */
+  domain?: string
+  /** Human-readable reason the agent was stuck / why a shift is warranted. */
+  reason: string
+  /** Alternative methods / frameworks offered to break the impasse. */
+  methods: string[]
+  /** Visual weight hint for the UI. Defaults to 'info'. */
+  severity?: 'info' | 'warn'
+}
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -138,6 +158,8 @@ export interface AgentCallbacks {
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
+  /** R4 — structured course-correction signal surfaced to the desktop conversation. */
+  onDecisionShift?: (shift: DecisionShift) => void
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null

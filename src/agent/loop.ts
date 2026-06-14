@@ -1688,6 +1688,15 @@ export class AgentLoop {
         reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
         suggestion: convergenceCheck.injectedMessage.slice(0, 200),
       })
+      // R4 — externalize the convergence nudge as a structured course-correction
+      // so the desktop renders a "改道" card; the injected guidance below is what
+      // the agent acts on next, making the cause→effect visible to the user.
+      callbacks.onDecisionShift?.({
+        source: 'convergence',
+        reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,
+        methods: [convergenceCheck.injectedMessage.slice(0, 200)],
+        severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
+      })
       this.session.addUserMessage(wrapSystemReminder(convergenceCheck.injectedMessage))
 
       // When convergence is detected AND doom loop is blocked, the agent is
@@ -1778,6 +1787,7 @@ export class AgentLoop {
       baselineFingerprint: this.baselineFingerprint,
     }, {
       emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
+      emitDecisionShift: (shift) => { callbacks.onDecisionShift?.(shift) },
     })
     this.sensorium = perceptionResult.sensorium
     debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)

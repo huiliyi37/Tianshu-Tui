@@ -122,6 +122,48 @@ export function answerIntent(
   return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
 }
 
+// ── Rollback (R3) ───────────────────────────────────────────────────
+
+export interface RollbackPreview {
+  available: boolean
+  /** Human-readable preview incl. ⚠️ irreversible bash side-effect caveats. */
+  text?: string
+  confirmationToken?: string
+}
+
+export interface RollbackResult {
+  success: boolean
+  hash?: string
+  /** Files skipped because a different live session owns them. */
+  skipped?: string[]
+  /** Bash side effects file rollback CANNOT undo (API calls, publishes, …). */
+  unrevertable?: string[]
+  error?: string
+}
+
+export function getRollbackPreview(id: string): Promise<RollbackPreview> {
+  return apiGet<RollbackPreview>(`/sessions/${id}/rollback/preview`)
+}
+
+/**
+ * Execute a rollback. Reads the body on both success (200) and conflict (409)
+ * so the caller can surface skipped/unrevertable detail either way.
+ */
+export async function rollbackSession(id: string, confirmationToken: string): Promise<RollbackResult> {
+  const res = await rivetFetch(`/sessions/${id}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmationToken }),
+  })
+  const json = (await res.json().catch(() => ({}))) as Partial<RollbackResult>
+  return {
+    success: json.success ?? false,
+    hash: json.hash,
+    skipped: json.skipped,
+    unrevertable: json.unrevertable,
+    error: json.error,
+  }
+}
+
 // ── Artifacts ───────────────────────────────────────────────────────
 
 export async function listArtifacts(id: string): Promise<ArtifactSummary[]> {

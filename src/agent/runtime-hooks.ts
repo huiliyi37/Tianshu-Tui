@@ -3,6 +3,7 @@ import type { CognitiveSeason } from './cognitive-season.js'
 import type { FailureClass } from './failure-classifier.js'
 import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
+import type { DecisionShift } from './loop-types.js'
 
 export type RuntimeHookPhase = 'preTurn' | 'afterPerception' | 'postTool' | 'postTurn' | 'postSession'
 
@@ -51,6 +52,8 @@ export interface RuntimeHookEffects {
   injectUserMessage(message: string): void
   requestThetaCheck(reason: string): void
   emitPhaseChange(phase: string, detail?: RuntimePhaseChangeDetail): void
+  /** R4 — surface a structured course-correction to the desktop conversation. */
+  emitDecisionShift(shift: DecisionShift): void
   markClaimStale(claimId: string): void
 }
 
@@ -139,6 +142,7 @@ export function createRuntimeHookContext(
       injectUserMessage: effects.injectUserMessage ?? noop,
       requestThetaCheck: effects.requestThetaCheck ?? noop,
       emitPhaseChange: effects.emitPhaseChange ?? noop,
+      emitDecisionShift: effects.emitDecisionShift ?? noop,
       markClaimStale: effects.markClaimStale ?? noop,
     },
   }

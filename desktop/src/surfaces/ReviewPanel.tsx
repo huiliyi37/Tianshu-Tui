@@ -1,5 +1,11 @@
 import { useCallback, useState } from 'react'
-import { getArtifact, sendArtifactFeedback } from '../runtime/client'
+import {
+  getArtifact,
+  sendArtifactFeedback,
+  getRollbackPreview,
+  rollbackSession,
+  type RollbackResult,
+} from '../runtime/client'
 import type { ApprovalRequest, ArtifactSummary, IntentRequest } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { editableKey, previewOf } from '../lib/approval-preview'
@@ -84,6 +90,13 @@ export function ReviewPanel(props: {
             </div>
           ))}
         </section>
+
+        {sessionId && (
+          <section className="review-section">
+            <h4>检查点 · 回滚</h4>
+            <RollbackSection sessionId={sessionId} />
+          </section>
+        )}
       </div>
 
       {open && (
@@ -157,6 +170,80 @@ function ApprovalReview(props: {
         <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
         <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
       </div>
+    </div>
+  )
+}
+
+// Rollback entry (R3) — preview the agent-owned files a checkpoint would
+// restore, INCLUDING irreversible bash side effects that file rollback cannot
+// undo, then confirm execution. Contested files (owned by another live session)
+// are skipped and surfaced, never blanket-reverted.
+function RollbackSection(props: { sessionId: string }) {
+  const { sessionId } = props
+  const [preview, setPreview] = useState<{ text: string; confirmationToken: string } | null>(null)
+  const [state, setState] = useState<'idle' | 'loading' | 'previewed' | 'running' | 'none'>('idle')
+  const [result, setResult] = useState<RollbackResult | null>(null)
+
+  const loadPreview = useCallback(async () => {
+    setState('loading')
+    setResult(null)
+    try {
+      const p = await getRollbackPreview(sessionId)
+      if (!p.available || !p.text || !p.confirmationToken) {
+        setPreview(null)
+        setState('none')
+        return
+      }
+      setPreview({ text: p.text, confirmationToken: p.confirmationToken })
+      setState('previewed')
+    } catch {
+      setState('none')
+    }
+  }, [sessionId])
+
+  const execute = useCallback(async () => {
+    if (!preview) return
+    setState('running')
+    try {
+      const r = await rollbackSession(sessionId, preview.confirmationToken)
+      setResult(r)
+    } finally {
+      setPreview(null)
+      setState('idle')
+    }
+  }, [sessionId, preview])
+
+  return (
+    <div className="rollback">
+      {state !== 'previewed' && (
+        <button className="btn ghost sm" disabled={state === 'loading' || state === 'running'} onClick={loadPreview}>
+          {state === 'loading' ? '加载预览…' : '回滚到此检查点'}
+        </button>
+      )}
+      {state === 'none' && <div className="empty sm">当前没有可回滚的检查点</div>}
+      {state === 'previewed' && preview && (
+        <div className="review-pending rollback-preview">
+          <div className="rp-head">
+            <span className="kind warn">确认回滚</span>
+          </div>
+          <pre className="rp-preview">{preview.text}</pre>
+          <div className="rp-actions">
+            <button className="btn ghost sm" onClick={() => setState('idle')}>取消</button>
+            <button className="btn sm danger" onClick={execute}>确认回滚</button>
+          </div>
+        </div>
+      )}
+      {result && (
+        <div className={`rollback-result ${result.success ? 'ok' : 'fail'}`}>
+          <div className="meta">{result.success ? `已回滚（${result.hash ?? ''}）` : (result.error ?? '回滚未执行')}</div>
+          {result.skipped && result.skipped.length > 0 && (
+            <div className="meta">跳过（被其它会话占用）：{result.skipped.join(', ')}</div>
+          )}
+          {result.unrevertable && result.unrevertable.length > 0 && (
+            <div className="meta warn">⚠️ 无法回滚的副作用：{result.unrevertable.join('; ')}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

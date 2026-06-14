@@ -111,6 +111,24 @@ function Block({ block }: { block: ConvoBlock }) {
   if (block.kind === 'error') {
     return <div className="msg error">{block.text}</div>
   }
+  if (block.kind === 'decision_shift' && block.shift) {
+    const s = block.shift
+    return (
+      <div className={`decision-shift ${s.severity}`}>
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>✦</span>
+          <span className="ds-domain">{s.domain ? `星域 · ${s.domain}` : '星域 · 改道'}</span>
+          <span className="ds-tag">提醒 → 改道</span>
+        </div>
+        <div className="ds-reason">{s.reason}</div>
+        {s.methods.length > 0 && (
+          <ul className="ds-methods">
+            {s.methods.map((m, i) => <li key={i}>{m}</li>)}
+          </ul>
+        )}
+      </div>
+    )
+  }
   return (
     <div className="msg assistant">
       <div className="msg-role">天枢</div>

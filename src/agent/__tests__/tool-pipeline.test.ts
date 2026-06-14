@@ -418,6 +418,61 @@ describe('executeToolUse', () => {
     onCheckpoint: () => {},
   }
 
+  it('R2: blocks write_file when another session holds an exclusive claim (fail-closed)', async () => {
+    let executed = false
+    const fakeRegistry = {
+      acquireClaim: (_sid: string, _path: string, _type: string) => false,
+      checkClaim: (filePath: string) => ({ sessionId: 'peer-1234abcd', claimType: 'exclusive', filePath }),
+    }
+    let resultMsg = ''
+    const callbacks = {
+      ...noopCallbacks,
+      onToolResult: (_id: string, _name: string, content: string, isError?: boolean) => {
+        if (isError) resultMsg = content
+      },
+    }
+    const deps = makeDeps({
+      sessionRegistry: fakeRegistry as any,
+      sessionId: 'mine',
+      harness: {
+        executeTool: async ({ execute }: any) => { executed = true; const r = await execute(); return { content: r.content, isError: false, retried: false } },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-w', name: 'write_file', input: { file_path: 'foo.ts', content: 'x' } },
+      deps, callbacks as any, 1, false,
+    )
+
+    assert.equal((result.toolResult as any).is_error, true, 'must be an error tool result')
+    assert.equal(executed, false, 'harness must NOT execute the write when claim is contested')
+    assert.match((result.toolResult as any).content as string, /另一个会话/)
+    assert.match(resultMsg, /阻断/)
+  })
+
+  it('R2: allows write_file when the claim is uncontended (acquireClaim true)', async () => {
+    let executed = false
+    const fakeRegistry = {
+      acquireClaim: (_sid: string, _path: string, _type: string) => true,
+      checkClaim: () => null,
+    }
+    const deps = makeDeps({
+      sessionRegistry: fakeRegistry as any,
+      sessionId: 'mine',
+      harness: {
+        executeTool: async ({ execute }: any) => { executed = true; const r = await execute(); return { content: r.content, isError: r.isError ?? false, retried: false } },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-w2', name: 'write_file', input: { file_path: 'foo.ts', content: 'x' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(executed, true, 'uncontended write must reach the harness (not blocked)')
+    assert.doesNotMatch((result.toolResult as any).content as string, /阻断/, 'must not be the R2 block message')
+  })
+
   it('executes a tool and returns result', async () => {
     const deps = makeDeps()
     const result = await executeToolUse(

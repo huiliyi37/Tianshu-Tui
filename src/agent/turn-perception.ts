@@ -69,7 +69,11 @@ export class TurnPerceptionController {
 
   async perceive(
     input: PerceptionInput,
-    effects: { emitPhaseChange(phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }): void },
+    effects: {
+      emitPhaseChange(phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }): void
+      /** R4 — surface a structured course-correction (kick-hook fires in preTurn). */
+      emitDecisionShift?(shift: import('./loop-types.js').DecisionShift): void
+    },
   ): Promise<PerceptionResult> {
     const sensoriumInput: SensoriumInput = {
       predictionAcc: input.predictionAccumulator,
@@ -97,6 +101,7 @@ export class TurnPerceptionController {
       setStrategy: strategy => { nextStrategy = strategy },
       injectUserMessage: message => { this.deps.addUserMessage(message) },
       emitPhaseChange: (phase, detail) => { effects.emitPhaseChange(phase, detail) },
+      emitDecisionShift: shift => { effects.emitDecisionShift?.(shift) },
     }))
 
     if (!nextSensorium || !nextStrategy) {

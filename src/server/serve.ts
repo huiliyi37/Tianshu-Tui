@@ -33,6 +33,11 @@ import { createAgentConfig, createMainAgentConfigInput } from '../agent/create-a
 import { createDefaultToolRegistry } from '../tools/default-registry.js'
 import { AgentLoop } from '../agent/loop.js'
 import { SessionContext } from '../agent/context.js'
+import { SessionRegistry } from '../agent/session-registry.js'
+import { createTaskLedger } from '../agent/task-ledger.js'
+import { createOwnershipLedger } from '../agent/ownership-ledger.js'
+import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
+import { captureGitBaseline } from '../bootstrap.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
 
 export interface ServeContext {
@@ -84,8 +89,19 @@ export interface BuiltAgent {
  * registry / PromptEngine (via createAgentConfig) and its own ArtifactStore
  * (created internally by AgentLoop, keyed by sessionId) — so concurrent
  * sessions never share prompt cache state or artifacts.
+ *
+ * R1: when a shared `registry` is supplied (desktop multi-session path), each
+ * session also gets its own TaskLedger + OwnershipLedger and the registry is
+ * threaded into AgentLoop config so file claims / OwnershipGuard / cross-session
+ * conflict blocking become live. Omitting `registry` (CLI / single-session)
+ * keeps the previous behavior byte-for-byte.
  */
-export function buildAgentLoop(ctx: ServeContext, cwd: string, sessionId: string = randomUUID()): BuiltAgent {
+export function buildAgentLoop(
+  ctx: ServeContext,
+  cwd: string,
+  sessionId: string = randomUUID(),
+  registry?: SessionRegistry,
+): BuiltAgent {
   const persist = new SessionPersist(sessionId)
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
@@ -114,6 +130,13 @@ export function buildAgentLoop(ctx: ServeContext, cwd: string, sessionId: string
     auth: ctx.auth,
   }))
   const session = new SessionContext()
+  // R1 — per-session ownership bookkeeping. Cheap to build (one git snapshot);
+  // only meaningful when a registry is wired, but harmless otherwise.
+  const taskLedger = createTaskLedger({ taskId: sessionId })
+  const ownershipLedger = createOwnershipLedger({
+    baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
+    taskLedger,
+  })
   const agent = new AgentLoop({
     ...agentCfg,
     toolRegistry,
@@ -122,6 +145,9 @@ export function buildAgentLoop(ctx: ServeContext, cwd: string, sessionId: string
     getSessionMemoryState: () => persist.getSessionMemoryState(),
     fileHistory,
     playbookStore,
+    sessionRegistry: registry,
+    taskLedger,
+    ownershipLedger,
   }, session, cwd)
   return { agent, sessionId }
 }
@@ -135,6 +161,12 @@ export interface RunServeOptions {
   sessionDir?: string
   /** Disable persistence (tests / ephemeral). */
   ephemeral?: boolean
+  /**
+   * R1 — shared cross-session registry (file claims / OwnershipGuard / conflict
+   * blocking). Tests inject a pre-built one; production creates it async at boot.
+   * When absent, concurrency features stay dormant and behavior is unchanged.
+   */
+  sessionRegistry?: SessionRegistry
 }
 
 export interface RunningServer {
@@ -158,6 +190,18 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   const ctx = opts.context ?? resolveServeContext()
   const startedAt = Date.now()
 
+  // R1 — one shared SessionRegistry for the whole sidecar. Created async (the
+  // SQLite backend dynamic-imports better-sqlite3); sessions are created
+  // seconds later by user interaction, by which time it's resolved. Tests pass a
+  // pre-built registry. Ephemeral mode (tests) skips it → behavior unchanged.
+  let sessionRegistry: SessionRegistry | undefined = opts.sessionRegistry
+  if (!sessionRegistry && !opts.ephemeral) {
+    const registryDir = process.env.RIVET_DESKTOP_DIR ?? join(homedir(), '.rivet', 'desktop')
+    void SessionRegistry.create(registryDir)
+      .then((r) => { sessionRegistry = r })
+      .catch(() => { /* registry stays disabled — concurrency features dormant */ })
+  }
+
   // N1: durable session storage so sessions survive sidecar restarts.
   const persistence = opts.ephemeral
     ? undefined
@@ -173,7 +217,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // align with the session.
   const sessions = new RuntimeSessionManager({
     createAgent: (cwd, sessionId) => {
-      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId)
+      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId, sessionRegistry)
       return {
         run: (prompt, callbacks) => agent.run(prompt, callbacks),
         abort: () => agent.abort(),
@@ -183,6 +227,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     },
     defaultCwd: process.cwd(),
     persistence,
+    // R1 — late-bound getter: registry resolves async after server start.
+    getSessionRegistry: () => sessionRegistry,
   })
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.
@@ -220,8 +266,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     },
   })
 
-  // Multi-session routes (M0.5 → M3): /sessions/*
-  Object.assign(routes, buildSessionRoutes(sessions, apiToken))
+  // Multi-session routes (M0.5 → M3): /sessions/*. R3 rollback routes consult
+  // the live registry to build an OwnershipGuard, so thread it in via getter.
+  Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry))
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
   const version = process.env.npm_package_version ?? '2.9.0'

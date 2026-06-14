@@ -33,6 +33,7 @@ export type SessionEventType =
   | 'artifact'
   | 'status'
   | 'error'
+  | 'decision_shift'
   | 'done'
 
 export interface SessionEvent {

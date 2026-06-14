@@ -209,3 +209,79 @@ test('completed run emits a terminal done event', async () => {
   assert.ok(events.some((e) => e.type === 'done'))
   assert.equal(manager.getSession(s.id)!.status, 'completed')
 })
+
+// ── R1: registry lifecycle (register / heartbeat / release) ──────────
+
+interface FakeRegistryCalls {
+  registered: Array<{ id: string; cwd: string; role: string }>
+  heartbeats: string[]
+  released: string[]
+}
+
+function makeManagerWithRegistry() {
+  const agents: FakeAgent[] = []
+  const calls: FakeRegistryCalls = { registered: [], heartbeats: [], released: [] }
+  const fakeRegistry = {
+    register: (id: string, cwd: string, role: string) => calls.registered.push({ id, cwd, role }),
+    heartbeat: (id: string) => calls.heartbeats.push(id),
+    releaseAllClaims: (id: string) => calls.released.push(id),
+  }
+  const manager = new RuntimeSessionManager({
+    createAgent: () => {
+      const a = new FakeAgent()
+      agents.push(a)
+      return a
+    },
+    defaultCwd: '/tmp/work',
+    getSessionRegistry: () => fakeRegistry as any,
+  })
+  return { manager, agents, calls }
+}
+
+test('R1: createSession registers the session and run heartbeats the registry', () => {
+  const { manager, calls } = makeManagerWithRegistry()
+  const s = manager.createSession({ cwd: '/tmp/proj', prompt: 'go' })
+  assert.deepEqual(calls.registered, [{ id: s.id, cwd: '/tmp/proj', role: 'standalone' }])
+  assert.ok(calls.heartbeats.includes(s.id), 'run() must heartbeat the registry')
+})
+
+test('R1: a finished run releases the session claims', async () => {
+  const { manager, agents, calls } = makeManagerWithRegistry()
+  const s = manager.createSession({ prompt: 'go' })
+  assert.equal(calls.released.length, 0, 'no release while running')
+  agents[0]!.finish()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(calls.released, [s.id], 'terminal state must release claims')
+})
+
+test('R1: two concurrent sessions register & release independently', async () => {
+  const { manager, agents, calls } = makeManagerWithRegistry()
+  const a = manager.createSession({ prompt: 'a' })
+  const b = manager.createSession({ prompt: 'b' })
+  assert.deepEqual(calls.registered.map((r) => r.id).sort(), [a.id, b.id].sort())
+  agents[0]!.finish()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.deepEqual(calls.released, [a.id], 'finishing A must not release B')
+  assert.equal(manager.getSession(b.id)!.status, 'running')
+})
+
+// ── R5: decision_shift event ─────────────────────────────────────────
+
+test('R5: onDecisionShift appends a decision_shift event with structured payload', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  agents[0]!.callbacks!.onDecisionShift!({
+    source: 'kick',
+    domain: '天璇',
+    reason: '检测到停滞',
+    methods: ['换用 grep', '重新框定问题'],
+    severity: 'warn',
+  })
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'decision_shift')
+  assert.ok(ev, 'a decision_shift event must be recorded')
+  assert.equal(ev!.data.source, 'kick')
+  assert.equal(ev!.data.domain, '天璇')
+  assert.equal(ev!.data.reason, '检测到停滞')
+  assert.deepEqual(ev!.data.methods, ['换用 grep', '重新框定问题'])
+  assert.equal(ev!.data.severity, 'warn')
+})

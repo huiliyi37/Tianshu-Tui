@@ -19,6 +19,8 @@ import type { AgentCallbacks } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
+import type { SessionRegistry } from '../agent/session-registry.js'
+import type { DecisionShift } from '../agent/loop-types.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -39,6 +41,7 @@ export type SessionEventType =
   | 'artifact'
   | 'status'
   | 'error'
+  | 'decision_shift'
   | 'done'
 
 export interface SessionEvent {
@@ -110,6 +113,12 @@ export interface RuntimeSessionManagerOptions {
   approvalTimeoutMs?: number
   /** Optional durable store. When set, sessions survive sidecar restarts. */
   persistence?: SessionPersistenceAdapter
+  /**
+   * R1 — late-bound accessor for the shared cross-session registry. A getter
+   * (not a value) because the registry's SQLite backend resolves async after the
+   * server starts. Returns undefined when concurrency features are disabled.
+   */
+  getSessionRegistry?: () => SessionRegistry | undefined
 }
 
 type InterventionKind = 'approval' | 'intent'
@@ -156,6 +165,7 @@ export class RuntimeSessionManager {
   private readonly maxEvents: number
   private readonly approvalTimeoutMs: number
   private readonly persistence?: SessionPersistenceAdapter
+  private readonly getRegistry?: () => SessionRegistry | undefined
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -165,6 +175,7 @@ export class RuntimeSessionManager {
     this.maxEvents = opts.maxEvents ?? 5000
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
     this.persistence = opts.persistence
+    this.getRegistry = opts.getSessionRegistry
     if (this.persistence) this.rehydrate()
   }
 
@@ -243,6 +254,9 @@ export class RuntimeSessionManager {
     }
     this.sessions.set(id, session)
     this.persistRecord(session)
+    // R1 — announce the session to the shared registry so its file claims are
+    // attributed and reaped on crash. Best-effort: registry may be disabled.
+    try { this.getRegistry?.()?.register(id, cwd, 'standalone') } catch { /* non-fatal */ }
     if (input.prompt && input.prompt.trim()) {
       this.run(id, input.prompt)
     }
@@ -257,6 +271,8 @@ export class RuntimeSessionManager {
     session.running = true
     session.record.status = 'running'
     session.record.error = undefined
+    // R1 — keep the registry heartbeat fresh while this session is active.
+    try { this.getRegistry?.()?.heartbeat(id) } catch { /* non-fatal */ }
     this.touch(session)
     // Echo the user's turn into the event log so the conversation persists it
     // (the agent loop only emits assistant/tool events). Must precede 'status'.
@@ -282,6 +298,9 @@ export class RuntimeSessionManager {
       .finally(() => {
         session.running = false
         this.rejectAllPending(session, 'aborted')
+        // R1 — turn finished: release this session's exclusive file claims so a
+        // peer session can edit those files next. Idempotent / best-effort.
+        try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
         this.touch(session)
         this.append(session, 'done', { status: session.record.status })
         this.persistRecord(session)
@@ -517,6 +536,17 @@ export class RuntimeSessionManager {
       onPhaseChange: (phase, detail) => {
         session.record.currentPhase = phase
         this.append(session, 'phase', { phase, ...(detail ?? {}) })
+      },
+      // R5 — structured course-correction → its own event so the desktop can
+      // render a "改道" card inline (selective externalization of star-domain).
+      onDecisionShift: (shift: DecisionShift) => {
+        this.append(session, 'decision_shift', {
+          source: shift.source,
+          domain: shift.domain,
+          reason: redactText(shift.reason),
+          methods: (shift.methods ?? []).map((m) => redactText(m)),
+          severity: shift.severity ?? 'info',
+        })
       },
       onApprovalRequired: (toolId, name, input) =>
         this.requestApproval(session, toolId, name, input),

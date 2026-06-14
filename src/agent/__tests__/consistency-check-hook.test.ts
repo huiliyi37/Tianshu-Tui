@@ -23,6 +23,7 @@ function makeCtx(overrides: { markClaimStale?: (id: string) => void } = {}): Run
       injectUserMessage: () => {},
       requestThetaCheck: () => {},
       emitPhaseChange: () => {},
+      emitDecisionShift: () => {},
       markClaimStale: overrides.markClaimStale ?? (() => {}),
     },
   }

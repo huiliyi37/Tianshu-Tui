@@ -44,7 +44,23 @@ export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntime
         ctx.effects.injectUserMessage(fullMessage)
       }
 
-      if (shouldEscalateFromKick(sensorium)) {
+      const escalate = shouldEscalateFromKick(sensorium)
+
+      // R4 — externalize the course-correction. The kick just injected a
+      // reframing into the agent's context; surface it as a structured signal so
+      // the desktop can render a "改道" card and the user sees stuck → nudge →
+      // (the agent's next action). Only emit when there's a concrete reframing.
+      if (kickActions.injectedMessage) {
+        ctx.effects.emitDecisionShift({
+          source: 'kick',
+          domain: '天璇',
+          reason: kickActions.injectedMessage,
+          methods: kickActions.alternativeFrameworks,
+          severity: escalate ? 'warn' : 'info',
+        })
+      }
+
+      if (escalate) {
         ctx.effects.emitPhaseChange('tianshu-encore', {
           reason: 'Dissipative kick: stagnation detected',
           suggestion: 'Escalate to stronger model or reframe the problem',

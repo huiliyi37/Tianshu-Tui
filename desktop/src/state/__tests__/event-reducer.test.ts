@@ -105,3 +105,35 @@ test('user event breaks an open text run (Q1)', () => {
   assert.equal(s.blocks[2]!.kind, 'assistant')
   assert.equal(s.blocks[2]!.text, 'reply')
 })
+
+test('decision_shift produces a card block with structured payload (R5)', () => {
+  seq = 0
+  const s = fold([ev('decision_shift', {
+    source: 'kick',
+    domain: '天璇',
+    reason: '检测到停滞',
+    methods: ['换用 grep', '重新框定问题'],
+    severity: 'warn',
+  })])
+  assert.equal(s.blocks.length, 1)
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'decision_shift')
+  assert.equal(b.shift?.domain, '天璇')
+  assert.equal(b.shift?.reason, '检测到停滞')
+  assert.deepEqual(b.shift?.methods, ['换用 grep', '重新框定问题'])
+  assert.equal(b.shift?.severity, 'warn')
+})
+
+test('decision_shift breaks an open text run (R5)', () => {
+  seq = 0
+  const s = fold([
+    ev('text_delta', { text: 'thinking' }),
+    ev('decision_shift', { source: 'convergence', reason: 'stuck', methods: ['x'] }),
+    ev('text_delta', { text: 'new approach' }),
+  ])
+  assert.equal(s.blocks.length, 3)
+  assert.equal(s.blocks[0]!.kind, 'assistant')
+  assert.equal(s.blocks[1]!.kind, 'decision_shift')
+  assert.equal(s.blocks[2]!.kind, 'assistant')
+  assert.equal(s.blocks[2]!.text, 'new approach')
+})

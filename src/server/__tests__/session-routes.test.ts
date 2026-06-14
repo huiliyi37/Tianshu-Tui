@@ -106,6 +106,45 @@ test('artifacts list + read with taxonomy', async () => {
   assert.equal((read.body as { raw: string }).raw, 'raw:edit_file:1')
 })
 
+// ── R3: rollback routes ──────────────────────────────────────────────
+
+test('R3: rollback preview 404 for missing session', async () => {
+  const { router } = setup()
+  const res = await router('GET', '/sessions/nope/rollback/preview', {}, AUTH)
+  assert.equal(res.status, 404)
+})
+
+test('R3: rollback preview returns available:false when no checkpoint exists', async () => {
+  const { manager, router } = setup()
+  // Fresh session in a throwaway cwd → no checkpoint on disk.
+  const s = manager.createSession({ cwd: '/tmp/rollback-none-' + Math.random().toString(36).slice(2) })
+  const res = await router('GET', `/sessions/${s.id}/rollback/preview`, {}, AUTH)
+  assert.equal(res.status, 200)
+  assert.equal((res.body as { available: boolean }).available, false)
+})
+
+test('R3: rollback execute requires a confirmationToken (400)', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({ cwd: '/tmp/rollback-none-' + Math.random().toString(36).slice(2) })
+  const res = await router('POST', `/sessions/${s.id}/rollback`, {}, AUTH)
+  assert.equal(res.status, 400)
+})
+
+test('R3: rollback execute 404 for missing session', async () => {
+  const { router } = setup()
+  const res = await router('POST', '/sessions/nope/rollback', { confirmationToken: 'x' }, AUTH)
+  assert.equal(res.status, 404)
+})
+
+test('R3: rollback routes are Bearer-gated (fail-closed)', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({ cwd: '/tmp/work' })
+  const preview = await router('GET', `/sessions/${s.id}/rollback/preview`, {}, {})
+  assert.equal(preview.status, 401)
+  const exec = await router('POST', `/sessions/${s.id}/rollback`, { confirmationToken: 'x' }, {})
+  assert.equal(exec.status, 401)
+})
+
 test('classifyArtifact taxonomy mapping', () => {
   const base = { id: 'x', sessionId: 's', createdAt: 0, summary: '', sections: [], rawPath: '', charCount: 0, lineCount: 0, sha256: '' }
   assert.equal(classifyArtifact({ ...base, tool: 'write_plan', target: 'plan.md' }), 'plan')
