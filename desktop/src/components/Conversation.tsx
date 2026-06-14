@@ -1,79 +1,25 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { SessionEvent, SessionRecord } from '../runtime/types'
+import { useEffect, useRef, useState } from 'react'
+import type { SessionRecord } from '../runtime/types'
+import type { ConvoBlock } from '../state/event-reducer'
 
-interface RenderBlock {
-  key: string
-  className: string
-  role?: string
-  text: string
-}
-
-// Fold the raw event stream into readable conversation blocks. Consecutive
-// text_delta events coalesce into one assistant message until a non-text event
-// breaks the run.
-function foldEvents(events: SessionEvent[]): RenderBlock[] {
-  const blocks: RenderBlock[] = []
-  let textBuf = ''
-  let textKey: string | null = null
-
-  const flushText = () => {
-    if (textBuf) {
-      blocks.push({ key: textKey!, className: 'event assistant', role: 'assistant', text: textBuf })
-      textBuf = ''
-      textKey = null
-    }
-  }
-
-  for (const ev of events) {
-    switch (ev.type) {
-      case 'text_delta':
-        textBuf += String(ev.data.text ?? '')
-        textKey ??= `t-${ev.seq}`
-        break
-      case 'tool_use':
-        flushText()
-        blocks.push({
-          key: `tu-${ev.seq}`,
-          className: 'event tool',
-          role: `tool · ${String(ev.data.name ?? '')}`,
-          text: JSON.stringify(ev.data.input ?? {}, null, 2),
-        })
-        break
-      case 'tool_result':
-        flushText()
-        blocks.push({
-          key: `tr-${ev.seq}`,
-          className: `event tool ${ev.data.isError ? 'err' : ''}`,
-          role: `result · ${String(ev.data.name ?? '')}`,
-          text: String(ev.data.result ?? ''),
-        })
-        break
-      case 'phase':
-        flushText()
-        blocks.push({ key: `p-${ev.seq}`, className: 'event phase', text: `▸ ${String(ev.data.phase ?? '')}` })
-        break
-      case 'error':
-        flushText()
-        blocks.push({ key: `e-${ev.seq}`, className: 'event error', text: `Error: ${String(ev.data.error ?? '')}` })
-        break
-      default:
-        break
-    }
-  }
-  flushText()
-  return blocks
+const KIND_CLASS: Record<ConvoBlock['kind'], string> = {
+  assistant: 'event assistant',
+  tool: 'event tool',
+  result: 'event tool',
+  phase: 'event phase',
+  error: 'event error',
 }
 
 export function Conversation(props: {
   session: SessionRecord
-  events: SessionEvent[]
+  blocks: ConvoBlock[]
+  phase?: string
   onSend: (prompt: string) => void
   onAbort: () => void
 }) {
-  const { session, events, onSend, onAbort } = props
+  const { session, blocks, phase, onSend, onAbort } = props
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
-  const blocks = useMemo(() => foldEvents(events), [events])
   const busy = session.status === 'running'
 
   useEffect(() => {
@@ -91,12 +37,12 @@ export function Conversation(props: {
     <>
       <div className="panel-header">
         <span>{session.title ?? session.id.slice(0, 8)}</span>
-        <span className="meta">{session.cwd}</span>
+        <span className="meta">{busy && phase ? `▸ ${phase}` : session.cwd}</span>
       </div>
       <div className="events">
         {blocks.length === 0 && <div className="empty">发一条消息开始</div>}
         {blocks.map((b) => (
-          <div key={b.key} className={b.className}>
+          <div key={b.key} className={`${KIND_CLASS[b.kind]}${b.isError ? ' err' : ''}`}>
             {b.role && <div className="role">{b.role}</div>}
             {b.text}
           </div>
