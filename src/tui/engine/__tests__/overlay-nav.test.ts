@@ -119,6 +119,96 @@ test('q 在 overlay 内关闭', async () => {
   assert.ok(out.chunks.join('').includes('\x1B[?1049l'), 'q 关闭 overlay（退出 alt-screen）')
 })
 
+// ── T1：搜索型 overlay 实时过滤 ──────────────────────────────
+// SEQ.backspace = DEL(0x7f)；字母直接当 data 送入。
+const typeKey = (stdin: MockIn, ch: string) => stdin.dataHandler!(ch)
+
+test('command-palette: 字符输入实时过滤 + selectedIndex 复位 + Enter 执行过滤后索引', () => {
+  const { app, stdin } = makeApp()
+  const all = [{ label: '/foo' }, { label: '/bar' }, { label: '/baz' }]
+  const filter = () => {
+    const q = app.getOverlayQuery()
+    return q ? all.filter(c => c.label.includes(q)) : all
+  }
+  let executed = ''
+  app.registerOverlays(
+    { paletteCommands: () => ({ commands: filter(), selectedIndex: 0 }) },
+    (idx) => { executed = filter()[idx]?.label ?? '' },
+  )
+  app.activateOverlay('command-palette')
+
+  typeKey(stdin, 'b')              // query 'b' → [/bar, /baz]，index 0
+  stdin.dataHandler!('\x1B[B')     // ↓ → index 1 (/baz)
+  typeKey(stdin, 'a')              // query 'ba' → [/bar, /baz] 仍 2 项 → index 复位 0
+  assert.equal(app.getOverlayQuery(), 'ba', '查询串累积为 ba')
+  stdin.dataHandler!('\r')         // Enter
+  assert.equal(executed, '/bar', 'index 复位 0 → Enter 执行过滤后第 0 项 /bar')
+})
+
+test('command-palette: 过滤后 Enter 映射到正确命令（display 与 exec 同源）', () => {
+  const { app, stdin } = makeApp()
+  const all = [{ label: '/alpha' }, { label: '/beta' }, { label: '/gamma' }]
+  const filter = () => {
+    const q = app.getOverlayQuery()
+    return q ? all.filter(c => c.label.includes(q)) : all
+  }
+  let executed = ''
+  app.registerOverlays(
+    { paletteCommands: () => ({ commands: filter(), selectedIndex: 0 }) },
+    (idx) => { executed = filter()[idx]?.label ?? '' },
+  )
+  app.activateOverlay('command-palette')
+  // 输入 'g' → 仅 [/gamma]；未过滤时 /gamma 在 index 2，过滤后应在 index 0。
+  typeKey(stdin, 'g')
+  stdin.dataHandler!('\r')
+  assert.equal(executed, '/gamma', '过滤后 index 0 = /gamma（不会错位到未过滤的 index 0）')
+})
+
+test('command-palette: q 是查询字符而非关闭（仅 Esc/全局关闭）', async () => {
+  const { app, out, stdin } = makeApp()
+  app.registerOverlays({ paletteCommands: () => ({ commands: [{ label: '/quit' }], selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  out.clear()
+  typeKey(stdin, 'q')
+  await new Promise(r => setTimeout(r, 10))
+  assert.equal(app.getOverlayQuery(), 'q', 'q 进入查询串')
+  assert.ok(!out.chunks.join('').includes('\x1B[?1049l'), 'q 未关闭 palette（未退出 alt-screen）')
+})
+
+test('command-palette: backspace 删除查询尾字符', () => {
+  const { app, stdin } = makeApp()
+  app.registerOverlays({ paletteCommands: () => ({ commands: [], selectedIndex: 0 }) })
+  app.activateOverlay('command-palette')
+  typeKey(stdin, 'b'); typeKey(stdin, 'a')
+  assert.equal(app.getOverlayQuery(), 'ba')
+  stdin.dataHandler!('\x7f')       // DEL → backspace
+  assert.equal(app.getOverlayQuery(), 'b', 'backspace 删一字符')
+})
+
+test('history-search: 字符过滤渲染列表 + 查询回显 + Enter 回填输入', () => {
+  const { app, out, stdin } = makeApp()
+  const all = ['git status', 'npm test', 'git log']
+  app.registerOverlays({
+    historySearchData: () => {
+      const q = app.getOverlayQuery().toLowerCase()
+      const entries = q ? all.filter(e => e.toLowerCase().includes(q)) : all
+      return { entries, selectedIndex: 0, query: app.getOverlayQuery() }
+    },
+  })
+  app.activateOverlay('history-search')
+  const visible = () => stripAnsi(out.chunks.join(''))
+
+  out.clear()
+  typeKey(stdin, 'g'); typeKey(stdin, 'i'); typeKey(stdin, 't')   // query 'git'
+  assert.equal(app.getOverlayQuery(), 'git')
+  assert.ok(visible().includes('git status') && visible().includes('git log'), '过滤后列表含 git 项')
+  assert.ok(!visible().includes('npm test'), '过滤掉 npm test')
+  assert.ok(visible().includes('git'), '查询串回显')
+
+  stdin.dataHandler!('\r')         // Enter → 回填第 0 项
+  assert.equal(app.getInputValue(), 'git status', 'Enter 回填过滤后第 0 项到输入框')
+})
+
 test('tasks overlay: register + activate 渲染 worker 列表', () => {
   const { app, out } = makeApp()
   app.registerOverlays({

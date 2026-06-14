@@ -19,7 +19,7 @@ import type { BootstrapContext } from './bootstrap.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
-import { getPaletteCommands } from './tui/command-palette.js'
+import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { getTodos } from './tools/todo.js'
@@ -244,6 +244,12 @@ async function main() {
     tuiApp.setSessionStarDomain(initialDomain)
   }
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
+  // 命令面板的过滤列表：display 与 paletteExec 必须共用同一份（含实时 query 过滤 + 排序），
+  // 否则选中索引会错位（Enter 执行到错误命令）。
+  const filteredPaletteCommands = (): PaletteCommand[] => {
+    const base = getPaletteCommands().filter(c => c.name.startsWith('/') || c.name.startsWith('__surface:'))
+    return filterCommands(base, tuiApp.getOverlayQuery())
+  }
   tuiApp.registerOverlays({
     // Pager — scrollback 内容
     pagerContent: () => ({
@@ -268,12 +274,13 @@ async function main() {
         milestones,
       }
     },
-    // Command palette
+    // Command palette — 实时 query 过滤（与 paletteExec 共用 filteredPaletteCommands）
     paletteCommands: () => {
-      const cmds: PaletteCommand[] = getPaletteCommands().filter(c => c.name.startsWith('/') || c.name.startsWith('__surface:'))
+      const cmds = filteredPaletteCommands()
       return {
         commands: cmds.map(c => ({ label: c.name, description: c.description, hotkey: c.hotkey })),
         selectedIndex: 0,
+        searchText: tuiApp.getOverlayQuery() || undefined,
       }
     },
     // Cockpit — 运行时仪表盘
@@ -323,19 +330,26 @@ async function main() {
         return { entries: [] }
       }
     },
-    // History search — Ctrl+R 反向搜索
-    historySearchData: () => ({
-      entries: loadHistory().slice(0, 50),
-      selectedIndex: 0,
-      query: '',
-    }),
+    // History search — Ctrl+R 反向搜索（实时 query 子串过滤）
+    historySearchData: () => {
+      const query = tuiApp.getOverlayQuery()
+      const lower = query.toLowerCase()
+      const all = loadHistory()
+      const filtered = lower ? all.filter(e => e.toLowerCase().includes(lower)) : all
+      return {
+        entries: filtered.slice(0, 50),
+        selectedIndex: 0,
+        query,
+      }
+    },
     // Tasks — /tasks 显示运行中子代理
     tasksData: () => ({
       workers: tuiApp.getRunningWorkers(),
     }),
   }, /* paletteExec: */ (index: number) => {
-    // Command palette Enter 回调：执行选中命令
-    const cmds = getPaletteCommands()
+    // Command palette Enter 回调：执行选中命令。
+    // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
+    const cmds = filteredPaletteCommands()
     const name = cmds[index]?.name
     if (!name) return
     if (name.startsWith('__surface:')) {

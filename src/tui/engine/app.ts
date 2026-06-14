@@ -169,7 +169,7 @@ export class TuiApp {
 
   // Overlay 交互导航状态（pager 翻页 / palette 选中）。
   // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
   /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
   private overlayData?: {
     pagerContent?: () => PagerData
@@ -542,7 +542,7 @@ export class TuiApp {
       }
       if (key.name === 'escape' && key.ctrl) {
         // Ctrl+Esc → 激活命令面板
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
         this.overlay.activate('command-palette')
         return
       }
@@ -563,7 +563,7 @@ export class TuiApp {
           } else if (now - this.lastEscAt < 400) {
             // Double-ESC → rewind
             this.lastEscAt = 0
-            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
             this.overlay.activate('rewind')
             this.renderLive()
           } else {
@@ -591,7 +591,7 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_r') {
         if (!this.isAgentActive()) {
-          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
           this.overlay.activate('history-search')
         }
         return
@@ -780,7 +780,7 @@ export class TuiApp {
       case 'chronicle':
       case 'tasks': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0 }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
         return this.overlay.activate(id)
       }
       default:
@@ -824,12 +824,13 @@ export class TuiApp {
    * - 其它 overlay（starmap/chronicle）：仅 q 关闭（无内部导航）
    * Esc/Ctrl+C 不在此消费，留给全局兜底统一关闭。
    */
-  private handleOverlayKey(key: { name: string; char: string }): boolean {
+  private handleOverlayKey(key: { name: string; char: string; ctrl?: boolean; meta?: boolean }): boolean {
     const id = this.overlay.activeId()
     const c = key.char.toLowerCase()
+    const isSearch = id === 'command-palette' || id === 'history-search'
 
-    // q 在所有 overlay 内统一关闭
-    if (c === 'q') {
+    // q 关闭非搜索型 overlay；搜索型（palette/history）里 q 是普通查询字符，仅 Esc 关闭。
+    if (c === 'q' && !isSearch) {
       this.deactivateOverlay()
       return true
     }
@@ -872,6 +873,8 @@ export class TuiApp {
         }
         return true
       }
+      if (key.name === 'backspace') { this.editOverlayQuery(null); return true }
+      if (this.isPrintableKey(key)) { this.editOverlayQuery(key.char); return true }
       return false
     }
 
@@ -927,10 +930,40 @@ export class TuiApp {
         }
         return true
       }
+      if (key.name === 'backspace') { this.editOverlayQuery(null); return true }
+      if (this.isPrintableKey(key)) { this.editOverlayQuery(key.char); return true }
       return false
     }
 
     return false
+  }
+
+  /** 当前搜索型 overlay 的实时查询串（command-palette / history-search）。
+   *  直接返回 overlayNav.query（不按 active overlay 门控）：activateOverlay 每次都把
+   *  query 复位为 ''，非搜索 overlay 因此读到空串；而 paletteExec 在 deactivateOverlay
+   *  之后、下次 activate 之前执行，此时 query 仍是用户输入值 → 过滤索引与 display 一致。 */
+  getOverlayQuery(): string {
+    return this.overlayNav.query
+  }
+
+  /** 判断按键是否为可打印字符（用于搜索型 overlay 的字符输入）。 */
+  private isPrintableKey(key: { name: string; char: string; ctrl?: boolean; meta?: boolean }): boolean {
+    if (key.ctrl || key.meta) return false
+    const ch = key.char
+    return !!ch && ch.length === 1 && ch.charCodeAt(0) >= 0x20 && ch !== '\x7f'
+  }
+
+  /** 编辑搜索型 overlay 的 query：传字符追加，传 null 退格删一字符。每次编辑复位选中索引。 */
+  private editOverlayQuery(ch: string | null): void {
+    if (ch === null) {
+      if (this.overlayNav.query.length === 0) return
+      this.overlayNav.query = this.overlayNav.query.slice(0, -1)
+    } else {
+      this.overlayNav.query += ch
+    }
+    this.overlayNav.paletteIndex = 0
+    this.overlayNav.historySearchIndex = 0
+    this.overlay.rerender()
   }
 
   /** pager 总页数（与 renderPager 同口径：pageSize = rows - 4）。 */
@@ -1974,7 +2007,7 @@ export class TuiApp {
     this.overlay.register('command-palette', {
       render: (_w, _h) => {
         const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
-        return renderCommandPalette({ ...data, selectedIndex: this.overlayNav.paletteIndex }, this.columns, this.rows, this.theme)
+        return renderCommandPalette({ ...data, selectedIndex: this.overlayNav.paletteIndex, searchText: this.overlayNav.query || data.searchText }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -1999,7 +2032,7 @@ export class TuiApp {
     this.overlay.register('history-search', {
       render: (_w, _h) => {
         const data = overlayData?.historySearchData?.() ?? { entries: [], selectedIndex: 0, query: '' }
-        return renderHistorySearch({ ...data, selectedIndex: this.overlayNav.historySearchIndex }, this.columns, this.rows, this.theme)
+        return renderHistorySearch({ ...data, selectedIndex: this.overlayNav.historySearchIndex, query: this.overlayNav.query || data.query }, this.columns, this.rows, this.theme)
       },
     })
 
