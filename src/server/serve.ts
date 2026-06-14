@@ -18,6 +18,7 @@ import { buildHealthRoute } from './health-route.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
+import { CronLock } from './cron-lock.js'
 import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
@@ -205,7 +206,12 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     const registryDir = process.env.RIVET_DESKTOP_DIR ?? join(homedir(), '.rivet', 'desktop')
     void SessionRegistry.create(registryDir)
       .then((r) => { sessionRegistry = r })
-      .catch(() => { /* registry stays disabled — concurrency features dormant */ })
+      .catch((err) => {
+        // Registry init failed (e.g. better-sqlite3 native build missing).
+        // Concurrency features stay dormant; surface the cause instead of
+        // silently swallowing it so the failure is diagnosable in logs.
+        console.error('[serve] SessionRegistry unavailable:', (err as Error)?.message ?? err)
+      })
   }
 
   // N1: durable session storage so sessions survive sidecar restarts.
@@ -281,7 +287,15 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
   const version = process.env.npm_package_version ?? '2.9.0'
-  Object.assign(routes, buildHealthRoute(sessions, startedAt, version, apiToken))
+  // registryOk lets the desktop tell "sidecar up but concurrency dormant" apart
+  // from a healthy sidecar. In ephemeral/test mode (no registry wired) it reads
+  // true so existing single-session behavior is unchanged.
+  Object.assign(
+    routes,
+    buildHealthRoute(sessions, startedAt, version, apiToken, () =>
+      opts.ephemeral ? true : sessionRegistry !== undefined,
+    ),
+  )
 
   // N3: async orchestration — cron scheduler → task registry → runtime pool that
   // spins up *visible* sessions. Disabled in ephemeral mode (tests) to avoid
@@ -293,7 +307,11 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     scheduler = new CronScheduler({ schedulePath: join(rivetDir, 'scheduled_tasks.json') })
     const registry = new TaskRegistry({ taskStore: new JsonTaskStore(join(rivetDir, 'tasks')) })
     const runtimePool = new SessionRuntimePool({ manager: sessions, defaultCwd: process.cwd() })
-    wiring = new CronWiring({ scheduler, registry, runtimePool })
+    // CronLock: with multiple sidecars pointed at the same desktop dir, exactly
+    // one wins the lock and runs the scheduler — the rest stay idle instead of
+    // double-firing every scheduled task.
+    const lock = new CronLock({ lockPath: join(rivetDir, 'scheduled_tasks.lock') })
+    wiring = new CronWiring({ scheduler, registry, runtimePool, lock })
     void wiring.start().catch(() => { /* non-fatal: scheduler stays idle */ })
     Object.assign(routes, buildScheduleRoutes(scheduler, apiToken))
   }

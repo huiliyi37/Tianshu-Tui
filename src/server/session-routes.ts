@@ -174,7 +174,16 @@ export function buildSessionRoutes(
       const sse = new SseStream(res)
       for (const ev of existing.events) sse.send(ev.type, ev)
       const unsubscribe = manager.subscribe(id, (ev) => sse.send(ev.type, ev))
-      res.on('close', () => unsubscribe?.())
+      // Keepalive: a 30s comment heartbeat stops idle proxies from reaping the
+      // connection and detects a half-dead socket (write throws → sse closes).
+      // unref so the timer never keeps the process (or a test) alive on its own.
+      const keepalive = setInterval(() => sse.ping(), 30_000)
+      if (typeof keepalive.unref === 'function') keepalive.unref()
+      res.on('close', () => {
+        clearInterval(keepalive)
+        unsubscribe?.()
+        sse.close()
+      })
       return { status: 200, handled: true }
     }, apiToken),
 

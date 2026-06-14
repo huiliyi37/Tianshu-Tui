@@ -11,6 +11,12 @@ export function buildHealthRoute(
   startedAt: number,
   version: string,
   apiToken?: string,
+  /**
+   * Whether the shared SessionRegistry has finished its async init. When
+   * omitted (tests / single-session paths) it reports `true`, so callers that
+   * don't run a registry see a healthy sidecar.
+   */
+  registryReady?: () => boolean,
 ): Record<string, RouteHandler> {
   return {
     'GET /health': (body, _params, headers) => {
@@ -26,6 +32,7 @@ export function buildHealthRoute(
           uptimeMs: Date.now() - startedAt,
           sessionCount,
           runningCount,
+          registryOk: registryReady ? registryReady() : true,
         },
       }
     },

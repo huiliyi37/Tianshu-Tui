@@ -19,11 +19,12 @@ import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
+import { ArtifactStore } from '../artifact/store.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { DecisionShift } from '../agent/loop-types.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -175,6 +176,13 @@ interface InternalSession {
   knownArtifacts: Set<string>
   /** T3 — mid-run user guidance, drained into the agent at the next tool boundary. */
   steer: SteerBuffer
+  /**
+   * Lazily built read-only view over the on-disk artifact log for sessions
+   * without a live agent (rehydrated/idle). Lets the desktop still read artifact
+   * bodies after a sidecar restart, since the agent's ArtifactStore persists
+   * both the index and raw files keyed by sessionId.
+   */
+  rehydratedArtifacts?: ArtifactStore
 }
 
 const REDACTED = '[REDACTED]'
@@ -610,17 +618,32 @@ export class RuntimeSessionManager {
   listArtifacts(id: string): Artifact[] | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
-    // Rehydrated/idle sessions have no live agent; artifact bodies aren't
-    // recoverable yet (the metadata still lives in the replayed event log).
-    if (!s.agent) return []
+    // Rehydrated/idle sessions have no live agent — read the artifact log
+    // straight off disk (index + raw files survive a sidecar restart).
+    if (!s.agent) return this.rehydratedArtifactStore(s).list()
     return s.agent.listArtifacts()
   }
 
   readArtifact(id: string, artifactId: string): Promise<string | null> | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
-    if (!s.agent) return Promise.resolve(null)
+    if (!s.agent) return this.rehydratedArtifactStore(s).readRaw(artifactId)
     return s.agent.readArtifact(artifactId)
+  }
+
+  /**
+   * Build (once) a read-only ArtifactStore over the session's persisted
+   * artifact directory. Mirrors the layout the live AgentLoop writes:
+   * `<cwd>/.rivet/artifacts/<sessionId>`. Construction is cheap and never
+   * throws on a missing directory (loadIndex no-ops), so an idle session with
+   * no artifacts simply yields an empty list.
+   */
+  private rehydratedArtifactStore(s: InternalSession): ArtifactStore {
+    if (!s.rehydratedArtifacts) {
+      const artifactDir = join(s.record.cwd, '.rivet', 'artifacts')
+      s.rehydratedArtifacts = new ArtifactStore(artifactDir, s.record.id)
+    }
+    return s.rehydratedArtifacts
   }
 
   /**

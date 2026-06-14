@@ -15,13 +15,48 @@ export class SseStream {
 
   send(event: string, data: unknown): void {
     if (this._closed) return
-    this.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    // A peer that has already gone away makes `res.write` throw (EPIPE/
+    // ERR_STREAM_DESTROYED). Treat that as a close rather than crashing the
+    // server: a dead viewer must never take down the process.
+    try {
+      this.res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    } catch {
+      this._closed = true
+    }
+  }
+
+  /**
+   * Heartbeat as an SSE comment line (`: ...`). EventSource clients silently
+   * ignore comments, but the byte keeps intermediaries (proxies, load
+   * balancers) from reaping an otherwise idle connection — and surfaces a dead
+   * socket so we can stop the keepalive timer.
+   */
+  ping(): void {
+    if (this._closed) return
+    try {
+      this.res.write(': ping\n\n')
+    } catch {
+      this._closed = true
+    }
+  }
+
+  /** True once the stream has been closed (locally or by a dead peer). */
+  isClosed(): boolean {
+    return this._closed
   }
 
   close(): void {
     if (this._closed) return
-    this.send('done', {})
     this._closed = true
-    this.res.end()
+    try {
+      this.res.write('event: done\ndata: {}\n\n')
+    } catch {
+      // socket already gone — nothing to flush
+    }
+    try {
+      this.res.end()
+    } catch {
+      // response already ended
+    }
   }
 }

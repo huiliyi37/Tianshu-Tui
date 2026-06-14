@@ -37,10 +37,25 @@ test('GET /health reports version, uptime and counts', async () => {
   manager.createSession({ prompt: 'go' })
   const res = await router('GET', '/health', {}, AUTH)
   assert.equal(res.status, 200)
-  const body = res.body as { ok: boolean; version: string; uptimeMs: number; sessionCount: number; runningCount: number }
+  const body = res.body as { ok: boolean; version: string; uptimeMs: number; sessionCount: number; runningCount: number; registryOk: boolean }
   assert.equal(body.ok, true)
   assert.equal(body.version, '9.9.9')
   assert.ok(body.uptimeMs >= 1000)
   assert.equal(body.sessionCount, 2)
   assert.equal(body.runningCount, 1)
+  // registryReady omitted → reports healthy (single-session / test default)
+  assert.equal(body.registryOk, true)
+})
+
+test('GET /health surfaces registry readiness when a probe is wired', async () => {
+  const manager = new RuntimeSessionManager({ createAgent: () => new NoopAgent() })
+  let ready = false
+  const router = createRouter(
+    buildHealthRoute(manager, Date.now(), '9.9.9', TOKEN, () => ready),
+  )
+  const pending = (await router('GET', '/health', {}, AUTH)).body as { registryOk: boolean }
+  assert.equal(pending.registryOk, false)
+  ready = true
+  const resolved = (await router('GET', '/health', {}, AUTH)).body as { registryOk: boolean }
+  assert.equal(resolved.registryOk, true)
 })

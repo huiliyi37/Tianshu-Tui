@@ -233,6 +233,38 @@ test('artifacts are surfaced per session and never cross-read', async () => {
   assert.equal(await manager.readArtifact(a.id, 'read_file:aaa'), 'raw:read_file:aaa')
 })
 
+test('idle/rehydrated session reads artifact bodies straight off disk', async () => {
+  // An agentless session (idle or restored after a sidecar restart) must still
+  // serve artifact list + raw bodies from the on-disk log the live agent wrote.
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { ArtifactStore } = await import('../../artifact/store.js')
+
+  const cwd = mkdtempSync(join(tmpdir(), 'rehydrate-art-'))
+  const manager = new RuntimeSessionManager({
+    createAgent: () => new FakeAgent(),
+    defaultCwd: cwd,
+  })
+  // No prompt → agent stays null, exercising the rehydrated path.
+  const s = manager.createSession({ cwd })
+
+  // Mirror the live AgentLoop layout: <cwd>/.rivet/artifacts/<sessionId>
+  const store = new ArtifactStore(join(cwd, '.rivet', 'artifacts'), s.id)
+  const artId = await store.save({
+    tool: 'read_file',
+    target: 'foo.ts',
+    summary: 'sum',
+    sections: [],
+    rawContent: 'line one\nline two',
+  })
+
+  const list = manager.listArtifacts(s.id)!
+  assert.deepEqual(list.map((a) => a.id), [artId])
+  assert.equal(await manager.readArtifact(s.id, artId), 'line one\nline two')
+  assert.equal(await manager.readArtifact(s.id, 'missing:zzz'), null)
+})
+
 test('run() is rejected while a session is already running', () => {
   const { manager } = makeManager()
   const s = manager.createSession({ prompt: 'go' })
