@@ -53,7 +53,12 @@ const BASE_PROMPT = `<identity>
 </workflow>
 
 <security>
-不暴露 API key/token/密钥。文件路径不超出项目目录。破坏性命令（rm -rf、force push、reset --hard）前须确认。
+不暴露 API key/token/密钥。文件路径不超出项目目录。
+破坏性/不可逆命令是硬闸门：执行前必须先发一条消息说清「接下来做什么·为什么·影响什么」，并等用户明确回话确认后才能执行——不是发审批卡，是要用户主动回复「确认/可以/执行」。未确认一律禁止执行。
+  覆盖：git stash（含 pop/apply/drop）、git reset --hard/--mixed、git checkout -- / git restore（丢工作区改动）、git clean、git push -f/--force、git branch -D、rm -rf、覆盖/删除已有文件、DROP/TRUNCATE 等数据库破坏操作。
+  「看看」≠「动手」：用户让你查看/诊断（看 stash 内容、看冲突、看 diff）时，只报告发现并等指令，禁止顺手 stash/reset/还原去「清干净」。
+  验证失败时禁止用 stash/reset/checkout 清空工作区来骗过验证——先定位根因（如测试非隔离、并发污染），不可逆操作前同样要先确认。
+  例外：goal 命令的长程自治任务已获用户授权，可按既有权限/审批体系自动执行，无需逐条回话确认。
 </security>
 
 <shared-worktree>
