@@ -105,19 +105,20 @@ ${escapeXml(parsed.content)}
   }
 }
 
-/** 缓存：cwd → 已加载的胶囊列表 */
-let cachedCapsules: SeedCapsule[] | null = null
-let cachedCwd: string | null = null
+/**
+ * 缓存：cwd → 已加载的胶囊列表。多槽 Map（而非单槽 cachedCwd），这样并发
+ * worktree / 多会话在不同 cwd 间交替时不会互相清空缓存（单槽会反复重读 docs/）。
+ */
+const capsuleCacheByCwd = new Map<string, SeedCapsule[]>()
 
 /**
  * 从 docs/ 目录中发现并加载所有 seed-capsule-*.md 胶囊文档。
  * 结果按 sealedAt 排序（最早的在前，保证稳定顺序）。
- * 缓存在内存中——胶囊文档是静态的，session 内不需要重新读取。
+ * 按 cwd 缓存在内存中——胶囊文档是静态的，session 内不需要重新读取。
  */
 export function loadAllCapsules(cwd: string): SeedCapsule[] {
-  if (cachedCapsules !== null && cachedCwd === cwd) {
-    return cachedCapsules
-  }
+  const cached = capsuleCacheByCwd.get(cwd)
+  if (cached) return cached
 
   const docsDir = join(cwd, 'docs')
   if (!existsSync(docsDir)) return []
@@ -139,8 +140,7 @@ export function loadAllCapsules(cwd: string): SeedCapsule[] {
   // 按 sealedAt 排序，保证稳定顺序
   capsules.sort((a, b) => a.sealedAt.localeCompare(b.sealedAt))
 
-  cachedCapsules = capsules
-  cachedCwd = cwd
+  capsuleCacheByCwd.set(cwd, capsules)
   return capsules
 }
 
@@ -256,6 +256,5 @@ export function renderCapsuleBlock(l1: SeedCapsuleL1): string {
 
 /** 清除缓存（主要用于测试） */
 export function clearCapsuleCache(): void {
-  cachedCapsules = null
-  cachedCwd = null
+  capsuleCacheByCwd.clear()
 }

@@ -17,6 +17,18 @@ const todoActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('write'), todos: z.array(todoItemSchema) }),
 ])
 
+// Process-wide default store backing the convenience `getTodos`/`setTodos`
+// helpers and the bare `TODO_TOOL` export. It is correct for the single-session
+// CLI/TUI (one process == one session; `main.ts` wires the TUI todo panel via
+// `setTodosProvider(() => getTodos())` and `turn-end.ts` reads `getTodos()`).
+//
+// KNOWN MULTI-SESSION LIMITATION: the desktop server (`src/server/serve.ts`)
+// builds a fresh ToolRegistry per session but registers the shared `TODO_TOOL`
+// singleton, so concurrent sessions in one process currently share this one
+// list. True isolation means injecting a per-session store via
+// `createTodoTool(new TodoStore())` AND routing the TUI/turn-end readers to that
+// same store — a multi-session-isolation change tracked separately, not a local
+// tweak (it touches every `createDefaultToolRegistry` caller).
 const defaultStore = new TodoStore()
 
 export function getTodos(): TodoItem[] {
@@ -27,6 +39,12 @@ export function setTodos(todos: TodoItem[]): void {
   defaultStore.write(todos)
 }
 
+/**
+ * `store` is per-AgentLoop (inject `new TodoStore()` for session isolation).
+ * Note: `isConcurrencySafe: () => true` concerns intra-turn parallelism (the
+ * tool has no filesystem side effects), NOT cross-session store sharing — that
+ * isolation comes from injecting a distinct store per loop.
+ */
 export function createTodoTool(store: TodoStore = defaultStore): Tool {
   return {
     definition: {

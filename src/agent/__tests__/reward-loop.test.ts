@@ -11,6 +11,7 @@ import {
   recordRoutingRewardClosure,
   recordTeamEpisodeRewardClosure,
   recordTeamWaveRewardClosure,
+  resetRewardClosureClock,
   rewardClosureKind,
 } from '../reward-loop.js'
 
@@ -143,5 +144,39 @@ describe('reward loop closure', () => {
     assert.doesNotThrow(() => recordRoutingRewardClosure(throwingStore, routingEvent, { timestamp: 600 }))
     assert.doesNotThrow(() => recordTeamWaveRewardClosure(throwingStore, teamEvent, { timestamp: 601 }))
     assert.doesNotThrow(() => recordTeamEpisodeRewardClosure(throwingStore, buildTeamEpisode([teamEvent]), { timestamp: 602 }))
+  })
+
+  it('monotonic clock is per-session: one session never bumps another', () => {
+    resetRewardClosureClock()
+    const originalNow = Date.now
+    Date.now = () => 5_000_000
+    try {
+      const sA = { ...routingEvent, sessionId: 'A' }
+      const sB = { ...routingEvent, sessionId: 'B' }
+      // Two closures in session A at the same ms → A advances to +1.
+      const a1 = buildRewardClosureRecordFromRoutingShadow(sA)
+      const a2 = buildRewardClosureRecordFromRoutingShadow(sA)
+      assert.equal(a1.timestamp, 5_000_000)
+      assert.equal(a2.timestamp, 5_000_001)
+      // Session B starts fresh at wall-clock, unaffected by A's +1 drift.
+      const b1 = buildRewardClosureRecordFromRoutingShadow(sB)
+      assert.equal(b1.timestamp, 5_000_000)
+    } finally {
+      Date.now = originalNow
+    }
+  })
+
+  it('resetRewardClosureClock clears per-session state', () => {
+    const originalNow = Date.now
+    Date.now = () => 6_000_000
+    try {
+      const s = { ...routingEvent, sessionId: 'reset-me' }
+      assert.equal(buildRewardClosureRecordFromRoutingShadow(s).timestamp, 6_000_000)
+      assert.equal(buildRewardClosureRecordFromRoutingShadow(s).timestamp, 6_000_001)
+      resetRewardClosureClock()
+      assert.equal(buildRewardClosureRecordFromRoutingShadow(s).timestamp, 6_000_000)
+    } finally {
+      Date.now = originalNow
+    }
   })
 })

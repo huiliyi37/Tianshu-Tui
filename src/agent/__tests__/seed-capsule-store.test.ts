@@ -134,6 +134,34 @@ describe('seed-capsule-store', () => {
     try { rmSync(tmpDir2, { recursive: true }) } catch { /* ignore */ }
   })
 
+  it('multi-slot cache: alternating cwds do not evict each other (no thrash)', () => {
+    const docsDir1 = join(tmpDir, 'docs')
+    mkdirSync(docsDir1)
+    writeFileSync(join(docsDir1, 'seed-capsule-tianxuan.md'), [
+      '<seed-capsule star="天璇" sealed="2026-05-21">',
+      '  cwd1.',
+      '</seed-capsule>',
+    ].join('\n'))
+
+    const tmpDir2 = mkdtempSync(join(os.tmpdir(), 'capsule-test3-'))
+    const docsDir2 = join(tmpDir2, 'docs')
+    mkdirSync(docsDir2)
+    writeFileSync(join(docsDir2, 'seed-capsule-tianfu.md'), [
+      '<seed-capsule star="天府" sealed="2026-06-02">',
+      '  cwd2.',
+      '</seed-capsule>',
+    ].join('\n'))
+
+    const a1 = loadAllCapsules(tmpDir)
+    loadAllCapsules(tmpDir2) // single-slot cache would have evicted cwd1 here
+    const a2 = loadAllCapsules(tmpDir)
+    // Map cache keeps cwd1's entry → same reference, no reload (no thrash).
+    assert.strictEqual(a1, a2)
+
+    cleanup()
+    try { rmSync(tmpDir2, { recursive: true }) } catch { /* ignore */ }
+  })
+
   it('clearCapsuleCache forces reload', () => {
     const docsDir = join(tmpDir, 'docs')
     mkdirSync(docsDir)
