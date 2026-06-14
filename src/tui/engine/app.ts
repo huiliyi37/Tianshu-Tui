@@ -966,6 +966,22 @@ export class TuiApp {
   }
 
   /**
+   * Submit text directly to the agent — resolves the ecosystem workflow path
+   * where SlashRouter already has a resolved prompt from resolveAppPromptInput.
+   * Commits the user prompt to scrollback and fires onSubmitCallback.
+   */
+  submitText(text: string): void {
+    this.commitUserPrompt(text)
+    this.blockWriter.discard()
+    this.streamRenderer.reset()
+    this.assistantHeaderDone = false
+    this.agentBusy = true
+    this.state.turnStartMs = Date.now()
+    this.lastActivityMs = Date.now()
+    this.onSubmitCallback?.(text)
+  }
+
+  /**
    * Mid-stream commit 协议：先擦除 live region（光标停在其起始行），
    * 写入 scrollback 内容，再重绘 live region。
    * 不走该协议的裸 commit 会留下 ghost 行 / 覆盖已提交文本。

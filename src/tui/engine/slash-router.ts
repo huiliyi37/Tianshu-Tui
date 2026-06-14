@@ -52,7 +52,12 @@ export class SlashRouter {
 
     // Check if this is a pass-through command (handled by agent, not local handler)
     const resolved = resolveAppPromptInput(trimmed, this.ctx.cwd)
-    if (resolved !== null) return false
+    if (resolved !== null) {
+      // Ecosystem workflow resolution: submit the resolved prompt directly
+      // instead of returning false with the raw input (which discards the prompt).
+      this.app.submitText(resolved)
+      return true
+    }
 
     const parts = trimmed.split(/\s+/)
     const command = parts[0]!.toLowerCase()
