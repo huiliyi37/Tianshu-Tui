@@ -172,27 +172,28 @@ export class SessionContext {
   }
 
   getCacheHitRate(): number {
-    const total = this.state.totalUsage.cache_read_input_tokens + this.state.totalUsage.cache_creation_input_tokens
-    return total === 0 ? 0 : this.state.totalUsage.cache_read_input_tokens / total
+    // Use total input_tokens as denominator — cache_read / (cacheRead + cacheCreation)
+    // degenerates to 100% when cacheCreation is 0 (provider doesn't report miss tokens).
+    const input = this.state.totalUsage.input_tokens
+    return input === 0 ? 0 : Math.min(1, this.state.totalUsage.cache_read_input_tokens / input)
   }
 
   getLatestTurnHitRate(): number | null {
     const latest = this.state.turnCacheHistory[this.state.turnCacheHistory.length - 1]
     if (!latest) return null
-    const total = latest.cacheRead + latest.cacheCreation
-    return total > 0 ? latest.cacheRead / total : null
+    return latest.inputTokens > 0 ? Math.min(1, latest.cacheRead / latest.inputTokens) : null
   }
 
   getRecentTurnHitRate(lastN: number): number | null {
     const slice = this.state.turnCacheHistory.slice(-lastN)
     if (slice.length === 0) return null
     let totalRead = 0
-    let totalCache = 0
+    let totalInput = 0
     for (const t of slice) {
       totalRead += t.cacheRead
-      totalCache += t.cacheRead + t.cacheCreation
+      totalInput += t.inputTokens
     }
-    return totalCache > 0 ? totalRead / totalCache : null
+    return totalInput > 0 ? Math.min(1, totalRead / totalInput) : null
   }
 
   getMessages(): OaiMessage[] {

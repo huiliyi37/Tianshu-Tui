@@ -128,7 +128,7 @@ it('getLatestTurnHitRate returns null with no turn cache snapshots', () => {
   assert.equal(ctx.getLatestTurnHitRate(), null)
 })
 
-it('getLatestTurnHitRate returns null when latest turn has no cache counters', () => {
+it('getLatestTurnHitRate returns 0 when latest turn has no cache hit (but has input)', () => {
   const ctx = new SessionContext()
   ctx.recordTurnCache(1, {
     input_tokens: 100,
@@ -137,7 +137,8 @@ it('getLatestTurnHitRate returns null when latest turn has no cache counters', (
     cache_creation_input_tokens: 0,
   })
 
-  assert.equal(ctx.getLatestTurnHitRate(), null)
+  // inputTokens > 0 → 0% hit rate, not "no data"
+  assert.equal(ctx.getLatestTurnHitRate(), 0)
 })
 
 it('getLatestTurnHitRate returns latest turn cache read ratio', () => {
@@ -155,6 +156,7 @@ it('getLatestTurnHitRate returns latest turn cache read ratio', () => {
     cache_creation_input_tokens: 25,
   })
 
+  // New formula: cacheRead / inputTokens = 75 / 100 = 0.75
   assert.equal(ctx.getLatestTurnHitRate(), 0.75)
 })
 
@@ -172,6 +174,7 @@ describe('getRecentTurnHitRate', () => {
       cache_read_input_tokens: 80,
       cache_creation_input_tokens: 20,
     })
+    // New formula: cacheRead / inputTokens = 80 / 100 = 0.8
     assert.equal(ctx.getRecentTurnHitRate(3), 0.8)
   })
 
@@ -195,11 +198,11 @@ describe('getRecentTurnHitRate', () => {
       cache_read_input_tokens: 60,
       cache_creation_input_tokens: 40,
     })
-    // Last 2 turns aggregated: (30+60) / ((30+70)+(60+40)) = 90/200 = 0.45
+    // Last 2 turns aggregated: (30+60) / (100+100) = 90/200 = 0.45
     assert.equal(ctx.getRecentTurnHitRate(2), 0.45)
   })
 
-  it('returns null when all turns have zero cache counters', () => {
+  it('returns 0 when all turns have zero cache hit but have input tokens', () => {
     const ctx = new SessionContext()
     ctx.recordTurnCache(1, {
       input_tokens: 100,
@@ -207,7 +210,8 @@ describe('getRecentTurnHitRate', () => {
       cache_read_input_tokens: 0,
       cache_creation_input_tokens: 0,
     })
-    assert.equal(ctx.getRecentTurnHitRate(3), null)
+    // inputTokens > 0 → 0% hit rate, not null
+    assert.equal(ctx.getRecentTurnHitRate(3), 0)
   })
 })
 
