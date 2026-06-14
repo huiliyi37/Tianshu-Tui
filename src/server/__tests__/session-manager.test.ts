@@ -8,6 +8,9 @@ class FakeAgent implements ManagedAgent {
   callbacks?: AgentCallbacks
   aborted = false
   artifacts: Artifact[] = []
+  /** S — captures the mode this agent was built with + any live switches. */
+  builtApprovalMode?: string
+  liveApprovalMode?: string
   private resolveRun?: () => void
 
   run(_prompt: string, cb: AgentCallbacks): Promise<void> {
@@ -20,6 +23,7 @@ class FakeAgent implements ManagedAgent {
     this.callbacks?.onAbort()
     this.resolveRun?.()
   }
+  setApprovalMode(mode: string): void { this.liveApprovalMode = mode }
   listArtifacts(): Artifact[] { return this.artifacts }
   readArtifact(id: string): Promise<string | null> {
     return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null)
@@ -284,4 +288,61 @@ test('R5: onDecisionShift appends a decision_shift event with structured payload
   assert.equal(ev!.data.reason, '检测到停滞')
   assert.deepEqual(ev!.data.methods, ['换用 grep', '重新框定问题'])
   assert.equal(ev!.data.severity, 'warn')
+})
+
+// ── S: per-session autonomy (approvalMode) ───────────────────────────
+
+function makeManagerCapturingMode() {
+  const built: Array<{ cwd?: string; sessionId?: string; approvalMode?: string }> = []
+  const agents: FakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: (cwd, sessionId, approvalMode) => {
+      const a = new FakeAgent()
+      a.builtApprovalMode = approvalMode
+      built.push({ cwd, sessionId, approvalMode })
+      agents.push(a)
+      return a
+    },
+    defaultCwd: '/tmp/work',
+  })
+  return { manager, agents, built }
+}
+
+test('S: createSession threads approvalMode into the agent factory + record', () => {
+  const { manager, built } = makeManagerCapturingMode()
+  const rec = manager.createSession({ prompt: 'go', approvalMode: 'dangerously-skip-permissions' })
+  assert.equal(rec.approvalMode, 'dangerously-skip-permissions', 'record carries the mode')
+  assert.equal(built.length, 1)
+  assert.equal(built[0]!.approvalMode, 'dangerously-skip-permissions', 'factory received the mode')
+})
+
+test('S: createSession without approvalMode leaves it undefined (global default wins)', () => {
+  const { manager, built } = makeManagerCapturingMode()
+  const rec = manager.createSession({ prompt: 'go' })
+  assert.equal(rec.approvalMode, undefined)
+  assert.equal(built[0]!.approvalMode, undefined)
+})
+
+test('S: setApprovalMode live-switches a built agent and updates the record', () => {
+  const { manager, agents } = makeManagerCapturingMode()
+  const s = manager.createSession({ prompt: 'go' }) // builds the agent
+  const ok = manager.setApprovalMode(s.id, 'dangerously-skip-permissions')
+  assert.equal(ok, true)
+  assert.equal(agents[0]!.liveApprovalMode, 'dangerously-skip-permissions', 'agent was live-mutated')
+  assert.equal(manager.getSession(s.id)!.approvalMode, 'dangerously-skip-permissions', 'record updated')
+})
+
+test('S: setApprovalMode before first run applies on agent build', () => {
+  const { manager, agents, built } = makeManagerCapturingMode()
+  const s = manager.createSession({}) // idle: no agent yet
+  assert.equal(built.length, 0, 'no agent built for an idle session')
+  manager.setApprovalMode(s.id, 'manual')
+  manager.run(s.id, 'go') // now builds
+  assert.equal(built[0]!.approvalMode, 'manual', 'stored override used at build time')
+  assert.equal(agents[0]!.builtApprovalMode, 'manual')
+})
+
+test('S: setApprovalMode returns false for a missing session', () => {
+  const { manager } = makeManagerCapturingMode()
+  assert.equal(manager.setApprovalMode('nope', 'manual'), false)
 })

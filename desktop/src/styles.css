@@ -319,6 +319,47 @@ body {
 }
 /* Reserved slot for a future CVM domain glyph (kept invisible for now). */
 .thread-glyph { width: 0; height: 0; }
+/* S — autonomous sessions light up the reserved glyph slot. */
+.thread-glyph.autonomous {
+  width: auto; height: auto; color: var(--accent);
+  font-size: var(--text-md); line-height: 1;
+}
+
+/* ── S: autonomy control + guardrail surfaces ──────────────────── */
+.autonomy { display: flex; flex-direction: column; gap: var(--space-2); }
+.autonomy-seg {
+  display: inline-flex; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 2px; gap: 2px;
+}
+.autonomy-opt {
+  background: transparent; color: var(--muted); border: none; cursor: pointer;
+  padding: 6px 12px; border-radius: var(--radius-sm); font-size: var(--text-base);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.autonomy-opt:hover:not(:disabled) { color: var(--text); }
+.autonomy-opt.active { background: var(--accent); color: var(--accent-fg); }
+.autonomy-opt:disabled { opacity: 0.5; cursor: default; }
+.autonomy-glyph { font-size: var(--text-sm); }
+.autonomy-hint { color: var(--muted); font-size: var(--text-sm); }
+.autonomy.compact .autonomy-seg { padding: 1px; }
+.autonomy.compact .autonomy-opt { padding: 3px 8px; font-size: var(--text-xs); }
+/* Autonomous option keeps its accent tint even when inactive, as a signal. */
+.autonomy-opt.level-autonomous.active { background: var(--warning); color: var(--accent-fg); }
+
+.autonomy-banner {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: var(--warning-soft); color: var(--text);
+  font-size: var(--text-sm); border-bottom: 1px solid var(--border);
+}
+.autonomy-banner .ab-glyph { color: var(--warning); }
+.autonomy-note {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  margin: 0 var(--space-3); padding: var(--space-3);
+  background: var(--accent-soft); border: 1px solid var(--border);
+  border-radius: var(--radius-md); color: var(--text); font-size: var(--text-sm);
+}
+.autonomy-note .ab-glyph { color: var(--accent); }
 .thread-id { flex: 1; min-width: 0; }
 .thread-title { font-weight: var(--weight-semibold); color: var(--text-strong); }
 .thread-sub { color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

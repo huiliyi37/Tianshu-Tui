@@ -15,7 +15,7 @@
  *  - Artifacts are surfaced from each session's own ArtifactStore, never shared
  *    across sessions (B4).
  */
-import type { AgentCallbacks } from '../agent/loop-types.js'
+import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
@@ -62,6 +62,12 @@ export interface SessionRecord {
   lastSeq: number
   error?: string
   pendingApprovals: number
+  /**
+   * S — per-session autonomy level. Overrides the global config approval mode
+   * so one session can run unattended (dangerously-skip-permissions) while
+   * another stays supervised. Absent → the agent uses the global config default.
+   */
+  approvalMode?: ApprovalMode
 }
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
@@ -70,19 +76,32 @@ export interface ManagedAgent {
   abort(): void
   listArtifacts(): Artifact[]
   readArtifact(id: string): Promise<string | null>
+  /**
+   * S — live-switch the autonomy level. Mutates the agent's approval mode in
+   * place (read per-tool by the pipeline), so a mid-session toggle takes effect
+   * on the next tool without rebuilding the agent / losing conversation state.
+   * Optional so lightweight test doubles need not implement it.
+   */
+  setApprovalMode?(mode: ApprovalMode): void
 }
 
 /**
  * Builds the agent for a session. Receives the manager's own session id so the
  * agent's stores (artifacts/session-persist) align with the session — enabling
- * future artifact recovery across restarts.
+ * future artifact recovery across restarts. The optional approvalMode overrides
+ * the global config autonomy level for this session (S).
  */
-export type AgentFactory = (cwd?: string, sessionId?: string) => ManagedAgent
+export type AgentFactory = (
+  cwd?: string,
+  sessionId?: string,
+  approvalMode?: ApprovalMode,
+) => ManagedAgent
 
 export interface CreateSessionInput {
   cwd?: string
   title?: string
   prompt?: string
+  approvalMode?: ApprovalMode
 }
 
 /** Persisted snapshot of a session: a record + its full event log. */
@@ -134,6 +153,8 @@ interface InternalSession {
   record: SessionRecord
   /** Lazily built on first run; null for rehydrated/idle sessions. */
   agent: ManagedAgent | null
+  /** S — per-session autonomy override threaded into the agent on build. */
+  approvalMode?: ApprovalMode
   events: SessionEvent[]
   seq: number
   running: boolean
@@ -243,8 +264,10 @@ export class RuntimeSessionManager {
         title: input.title,
         lastSeq: 0,
         pendingApprovals: 0,
+        approvalMode: input.approvalMode,
       },
       agent: null,
+      approvalMode: input.approvalMode,
       events: [],
       seq: 0,
       running: false,
@@ -310,9 +333,27 @@ export class RuntimeSessionManager {
 
   private ensureAgent(session: InternalSession): ManagedAgent {
     if (!session.agent) {
-      session.agent = this.createAgent(session.record.cwd, session.record.id)
+      session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
     }
     return session.agent
+  }
+
+  /**
+   * S — set the per-session autonomy level. Updates the stored override (so it
+   * applies when the agent is first built) AND live-mutates an already-built
+   * agent (so a mid-session toggle takes effect on the next tool, no rebuild).
+   * Returns false when the session is missing. Persists the new mode onto the
+   * record so reconnecting viewers see the current level.
+   */
+  setApprovalMode(id: string, mode: ApprovalMode): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.approvalMode = mode
+    session.record.approvalMode = mode
+    try { session.agent?.setApprovalMode?.(mode) } catch { /* non-fatal */ }
+    this.touch(session)
+    this.persistRecord(session)
+    return true
   }
 
   /**

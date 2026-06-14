@@ -1,20 +1,27 @@
 import { useState } from 'react'
 import { pickFolder } from '../lib/dialog'
+import type { ApprovalMode } from '../runtime/types'
+import { AutonomyControl } from './AutonomyControl'
+import { coerceLevel, levelToMode, type AutonomyLevel } from '../lib/autonomy'
+import { loadDefaultAutonomy } from '../lib/persist'
 
 /**
  * New thread in a project (P1). The folder typed/picked here becomes the session
  * cwd; the runtime's path-grants + self/world locus enforce the boundary at the
  * tool layer. cwd is prefilled with the active project so threads land in it.
+ * The autonomy selector (S) sets the session's approval mode up front so an
+ * unattended run can start without per-tool prompts.
  */
 export function NewSessionDialog(props: {
   defaultCwd?: string | null
-  onCreate: (input: { cwd?: string; title?: string; prompt?: string }) => void
+  onCreate: (input: { cwd?: string; title?: string; prompt?: string; approvalMode?: ApprovalMode }) => void
   onClose: () => void
 }) {
   const { defaultCwd, onCreate, onClose } = props
   const [title, setTitle] = useState('')
   const [cwd, setCwd] = useState(defaultCwd ?? '')
   const [prompt, setPrompt] = useState('')
+  const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
 
   const browse = async () => {
     const picked = await pickFolder()
@@ -42,6 +49,8 @@ export function NewSessionDialog(props: {
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="可选，留空则先创建空闲线程"
         />
+        <label className="meta">自治档位</label>
+        <AutonomyControl value={level} onChange={setLevel} />
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>取消</button>
           <button
@@ -50,6 +59,7 @@ export function NewSessionDialog(props: {
               title: title.trim() || undefined,
               cwd: cwd.trim() || undefined,
               prompt: prompt.trim() || undefined,
+              approvalMode: levelToMode(level),
             })}
           >
             创建

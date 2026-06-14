@@ -6,9 +6,10 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalRequest, ArtifactSummary, IntentRequest } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { editableKey, previewOf } from '../lib/approval-preview'
+import { isAutonomous } from '../lib/autonomy'
 
 type ReviewTab = 'review' | 'council' | 'cognition'
 
@@ -21,11 +22,13 @@ export function ReviewPanel(props: {
   artifacts: ArtifactSummary[]
   pendingApproval: ApprovalRequest | null
   pendingIntent: IntentRequest | null
+  approvalMode?: ApprovalMode
   onApproval: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
   onIntent: (decision: 'continue' | 'veto' | 'alternative') => void
   onFeedbackSent?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, onApproval, onIntent, onFeedbackSent } = props
+  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, onApproval, onIntent, onFeedbackSent } = props
+  const autonomous = isAutonomous(approvalMode)
   const [tab, setTab] = useState<ReviewTab>('review')
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [comment, setComment] = useState('')
@@ -76,6 +79,15 @@ export function ReviewPanel(props: {
             {pendingIntent && (
               <IntentReview request={pendingIntent} onDecision={onIntent} />
             )}
+          </section>
+        )}
+
+        {autonomous && !pendingApproval && !pendingIntent && (
+          <section className="review-section">
+            <div className="autonomy-note">
+              <span className="ab-glyph" aria-hidden>✦</span>
+              自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
+            </div>
           </section>
         )}
 

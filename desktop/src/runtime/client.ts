@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   ApprovalDecision,
+  ApprovalMode,
   ArtifactSummary,
   HealthInfo,
   ScheduledTask,
@@ -71,8 +72,18 @@ export function getHealth(): Promise<HealthInfo> {
 
 // ── Session API ─────────────────────────────────────────────────────
 
-export function createSession(input: { cwd?: string; title?: string; prompt?: string }): Promise<SessionRecord> {
+export function createSession(input: {
+  cwd?: string
+  title?: string
+  prompt?: string
+  approvalMode?: ApprovalMode
+}): Promise<SessionRecord> {
   return apiPost<SessionRecord>('/sessions', input)
+}
+
+/** S — switch a session's autonomy level (监督/默认/自治). Live on a running agent. */
+export function setApprovalMode(id: string, approvalMode: ApprovalMode): Promise<{ id: string; approvalMode: ApprovalMode }> {
+  return apiPost<{ id: string; approvalMode: ApprovalMode }>(`/sessions/${id}/approval-mode`, { approvalMode })
 }
 
 export async function listSessions(): Promise<SessionRecord[]> {

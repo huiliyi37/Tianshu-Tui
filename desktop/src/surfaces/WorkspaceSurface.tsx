@@ -2,7 +2,8 @@ import { useCallback } from 'react'
 import { useAbortSession, useArtifacts, useSendPrompt, useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
-import { answerApproval, answerIntent } from '../runtime/client'
+import { answerApproval, answerIntent, setApprovalMode } from '../runtime/client'
+import type { ApprovalMode } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
@@ -41,6 +42,11 @@ export function WorkspaceSurface() {
     void answerIntent(activeId, view.pendingIntent.requestId, decision)
   }, [activeId, view.pendingIntent])
 
+  const handleSetApprovalMode = useCallback((mode: ApprovalMode) => {
+    if (!activeId) return
+    void setApprovalMode(activeId, mode).then(() => sessions.refetch())
+  }, [activeId, sessions])
+
   return (
     <div className="workspace">
       <ProjectSidebar />
@@ -52,6 +58,7 @@ export function WorkspaceSurface() {
             view={view}
             onSend={handleSend}
             onAbort={() => abortSession.mutate(active.id)}
+            onSetApprovalMode={handleSetApprovalMode}
           />
         ) : (
           <div className="empty thread-empty">
@@ -68,6 +75,7 @@ export function WorkspaceSurface() {
         artifacts={artifacts.data ?? []}
         pendingApproval={view.pendingApproval}
         pendingIntent={view.pendingIntent}
+        approvalMode={active?.approvalMode}
         onApproval={handleApproval}
         onIntent={handleIntent}
         onFeedbackSent={() => sessions.refetch()}

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { SessionRecord } from '../runtime/types'
+import type { ApprovalMode, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolBlock } from '../components/ToolBlock'
 import { DelegationTree } from '../components/DelegationTree'
+import { AutonomyControl } from '../components/AutonomyControl'
+import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -21,11 +23,13 @@ export function ThreadView(props: {
   view: EventViewState
   onSend: (prompt: string) => void
   onAbort: () => void
+  onSetApprovalMode: (mode: ApprovalMode) => void
 }) {
-  const { session, view, onSend, onAbort } = props
+  const { session, view, onSend, onAbort, onSetApprovalMode } = props
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
   const busy = session.status === 'running'
+  const autonomous = isAutonomous(session.approvalMode)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -45,17 +49,33 @@ export function ThreadView(props: {
   return (
     <div className="thread">
       <header className="thread-header">
-        <span className="thread-glyph" aria-hidden />
+        <span className={`thread-glyph ${autonomous ? 'autonomous' : ''}`} aria-hidden>
+          {autonomous ? '✦' : ''}
+        </span>
         <div className="thread-id">
           <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
           <div className="thread-sub" title={session.cwd}>{basename(session.cwd) || session.cwd}</div>
         </div>
+        <AutonomyControl
+          compact
+          value={modeToLevel(session.approvalMode)}
+          onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
+        />
         <div className="thread-status">
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
         </div>
       </header>
+      {autonomous && (
+        <div className="autonomy-banner">
+          <span className="ab-glyph" aria-hidden>✦</span>
+          自治模式 · 项目内操作自动执行
+          {isWindows()
+            ? '；⚠️ Windows 无写沙箱保护，仅靠回滚兜底'
+            : '；项目外写入仍被沙箱拦截，可随时回滚'}
+        </div>
+      )}
 
       <div className="messages">
         {view.blocks.length === 0 && <div className="empty sm">发一条消息开始</div>}

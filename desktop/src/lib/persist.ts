@@ -5,6 +5,7 @@
 const KEY_ACTIVE = 'tianshu.activeSessionId'
 const KEY_PROJECT = 'tianshu.activeProject'
 const KEY_SEEN = 'tianshu.attentionSeen'
+const KEY_AUTONOMY = 'tianshu.defaultAutonomy'
 
 export function loadActiveSessionId(): string | null {
   try {
@@ -57,6 +58,24 @@ export function saveAttentionSeen(sigs: string[]): void {
   try {
     // Cap to avoid unbounded growth as signatures churn.
     localStorage.setItem(KEY_SEEN, JSON.stringify(sigs.slice(-500)))
+  } catch {
+    // non-fatal
+  }
+}
+
+// S — default autonomy level for new sessions (one of AutonomyLevel). Stored as
+// a raw string; callers validate/coerce. Absent → 'default'.
+export function loadDefaultAutonomy(): string | null {
+  try {
+    return localStorage.getItem(KEY_AUTONOMY)
+  } catch {
+    return null
+  }
+}
+
+export function saveDefaultAutonomy(level: string): void {
+  try {
+    localStorage.setItem(KEY_AUTONOMY, level)
   } catch {
     // non-fatal
   }

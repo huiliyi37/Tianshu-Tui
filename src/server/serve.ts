@@ -32,6 +32,7 @@ import { loadProjectRules } from '../context/rules-loader.js'
 import { createAgentConfig, createMainAgentConfigInput } from '../agent/create-agent-config.js'
 import { createDefaultToolRegistry } from '../tools/default-registry.js'
 import { AgentLoop } from '../agent/loop.js'
+import type { ApprovalMode } from '../agent/loop-types.js'
 import { SessionContext } from '../agent/context.js'
 import { SessionRegistry } from '../agent/session-registry.js'
 import { createTaskLedger } from '../agent/task-ledger.js'
@@ -101,6 +102,7 @@ export function buildAgentLoop(
   cwd: string,
   sessionId: string = randomUUID(),
   registry?: SessionRegistry,
+  approvalMode?: ApprovalMode,
 ): BuiltAgent {
   const persist = new SessionPersist(sessionId)
   const claimStore = persist.createClaimStore()
@@ -129,6 +131,10 @@ export function buildAgentLoop(
     sessionMemoryBlock: persist.buildMemoryBlock(),
     auth: ctx.auth,
   }))
+  // S — per-session autonomy override. When the desktop creates a session with
+  // an explicit level it wins over the global config approval mode; otherwise
+  // the global default (createMainAgentConfigInput) stands.
+  if (approvalMode) agentCfg.approvalMode = approvalMode
   const session = new SessionContext()
   // R1 — per-session ownership bookkeeping. Cheap to build (one git snapshot);
   // only meaningful when a registry is wired, but harmless otherwise.
@@ -216,11 +222,12 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // manager's session id is threaded into buildAgentLoop so the agent's stores
   // align with the session.
   const sessions = new RuntimeSessionManager({
-    createAgent: (cwd, sessionId) => {
-      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId, sessionRegistry)
+    createAgent: (cwd, sessionId, approvalMode) => {
+      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId, sessionRegistry, approvalMode)
       return {
         run: (prompt, callbacks) => agent.run(prompt, callbacks),
         abort: () => agent.abort(),
+        setApprovalMode: (mode) => agent.setApprovalMode(mode),
         listArtifacts: () => agent.artifactStore?.list() ?? [],
         readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
       }

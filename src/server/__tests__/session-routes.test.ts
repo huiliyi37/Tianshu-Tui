@@ -145,6 +145,46 @@ test('R3: rollback routes are Bearer-gated (fail-closed)', async () => {
   assert.equal(exec.status, 401)
 })
 
+// ── S: per-session autonomy routes ──────────────────────────────────
+
+test('S: POST /sessions accepts a valid approvalMode and reflects it on the record', async () => {
+  const { router } = setup()
+  const res = await router('POST', '/sessions', { approvalMode: 'dangerously-skip-permissions' }, AUTH)
+  assert.equal(res.status, 201)
+  assert.equal((res.body as { approvalMode?: string }).approvalMode, 'dangerously-skip-permissions')
+})
+
+test('S: POST /sessions rejects an invalid approvalMode (400)', async () => {
+  const { router } = setup()
+  const res = await router('POST', '/sessions', { approvalMode: 'yolo' }, AUTH)
+  assert.equal(res.status, 400)
+})
+
+test('S: POST /sessions/:id/approval-mode switches the level', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const res = await router('POST', `/sessions/${s.id}/approval-mode`, { approvalMode: 'manual' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.equal((res.body as { approvalMode: string }).approvalMode, 'manual')
+  assert.equal(manager.getSession(s.id)!.approvalMode, 'manual')
+})
+
+test('S: approval-mode route validates the body (400) and 404s a missing session', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const bad = await router('POST', `/sessions/${s.id}/approval-mode`, { approvalMode: 'nope' }, AUTH)
+  assert.equal(bad.status, 400)
+  const missing = await router('POST', '/sessions/nope/approval-mode', { approvalMode: 'manual' }, AUTH)
+  assert.equal(missing.status, 404)
+})
+
+test('S: approval-mode route is Bearer-gated (fail-closed)', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const res = await router('POST', `/sessions/${s.id}/approval-mode`, { approvalMode: 'manual' }, {})
+  assert.equal(res.status, 401)
+})
+
 test('classifyArtifact taxonomy mapping', () => {
   const base = { id: 'x', sessionId: 's', createdAt: 0, summary: '', sections: [], rawPath: '', charCount: 0, lineCount: 0, sha256: '' }
   assert.equal(classifyArtifact({ ...base, tool: 'write_plan', target: 'plan.md' }), 'plan')

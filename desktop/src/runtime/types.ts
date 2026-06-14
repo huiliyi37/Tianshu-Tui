@@ -3,6 +3,9 @@
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
+/** S — autonomy level. Mirrors the backend ApprovalMode (loop-types.ts). */
+export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
+
 export interface SessionRecord {
   id: string
   status: SessionStatus
@@ -14,6 +17,8 @@ export interface SessionRecord {
   lastSeq: number
   error?: string
   pendingApprovals: number
+  /** S — per-session autonomy override; absent → global config default. */
+  approvalMode?: ApprovalMode
 }
 
 export type SessionEventType =

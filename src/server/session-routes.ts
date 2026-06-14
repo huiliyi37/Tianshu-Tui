@@ -19,9 +19,17 @@ import { SseStream } from './sse-stream.js'
 import type { RuntimeSessionManager } from './session-manager.js'
 import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
+import type { ApprovalMode } from '../agent/loop-types.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
+
+/** S — accepted autonomy levels for per-session approval-mode overrides. */
+const APPROVAL_MODES: ReadonlySet<ApprovalMode> = new Set<ApprovalMode>([
+  'auto-accept', 'auto-safe', 'manual', 'dangerously-skip-permissions',
+])
+const isApprovalMode = (v: unknown): v is ApprovalMode =>
+  typeof v === 'string' && APPROVAL_MODES.has(v as ApprovalMode)
 
 export function classifyArtifact(a: Artifact): ArtifactKind {
   const tool = a.tool.toLowerCase()
@@ -78,9 +86,31 @@ export function buildSessionRoutes(
 
   const routes: Record<string, RouteHandler> = {
     'POST /sessions': withAuth((body) => {
-      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string }
-      const rec = manager.createSession({ cwd: data.cwd, title: data.title, prompt: data.prompt })
+      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; approvalMode?: unknown }
+      if (data.approvalMode !== undefined && !isApprovalMode(data.approvalMode)) {
+        return { status: 400, body: { error: 'Invalid "approvalMode"' } }
+      }
+      const rec = manager.createSession({
+        cwd: data.cwd,
+        title: data.title,
+        prompt: data.prompt,
+        approvalMode: data.approvalMode as ApprovalMode | undefined,
+      })
       return { status: 201, body: rec }
+    }, apiToken),
+
+    // S — switch a session's autonomy level (监督 / 默认 / 自治). Live-mutates a
+    // running agent's approval mode and persists onto the record. Bearer-gated.
+    'POST /sessions/:id/approval-mode': withAuth((body, params) => {
+      const id = params!.id!
+      const data = (body ?? {}) as { approvalMode?: unknown }
+      if (!isApprovalMode(data.approvalMode)) {
+        return { status: 400, body: { error: 'Invalid or missing "approvalMode"' } }
+      }
+      if (!manager.setApprovalMode(id, data.approvalMode)) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id, approvalMode: data.approvalMode } }
     }, apiToken),
 
     'GET /sessions': withAuth(() => ({

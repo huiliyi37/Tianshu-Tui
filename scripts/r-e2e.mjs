@@ -60,15 +60,15 @@ async function api(path, init = {}) {
   return { status: res.status, json }
 }
 
-const createSession = (cwd, prompt) =>
-  api('/sessions', { method: 'POST', body: JSON.stringify({ cwd, prompt }) })
+const createSession = (cwd, prompt, approvalMode) =>
+  api('/sessions', { method: 'POST', body: JSON.stringify({ cwd, prompt, approvalMode }) })
 
 const getEvents = (sid, since = 0) => api(`/sessions/${sid}/events?since=${since}`)
 
 /**
  * 轮询会话事件直到出现 done，同时自动应答审批/意图。返回全部事件。
  */
-async function waitDone(sid, timeoutMs = 180000) {
+async function waitDone(sid, timeoutMs = 240000) {
   const start = Date.now()
   let since = 0
   const all = []
@@ -99,11 +99,12 @@ function openRegistry() {
 
 function gitClean() {
   const { spawnSync } = require('node:child_process')
-  for (const f of [SCRATCH_A, SCRATCH_B]) {
+  const scratch = [SCRATCH_A, SCRATCH_B, 'r-e2e-autonomy.txt']
+  for (const f of scratch) {
     try { rmSync(join(REPO, f), { force: true }) } catch { /* ignore */ }
   }
   // 还原任何被 agent 改动的已跟踪文件（保守：只 checkout scratch 名，若被跟踪）
-  spawnSync('git', ['checkout', '--', SCRATCH_A, SCRATCH_B], { cwd: REPO })
+  spawnSync('git', ['checkout', '--', ...scratch], { cwd: REPO })
 }
 
 async function main() {
@@ -199,6 +200,31 @@ async function main() {
       /阻断|另一个会话/.test(String(e.data.result || '')))
     check(blocked, 'R2: 写入被 fail-closed 阻断（tool_result isError 含"阻断/另一个会话"）')
     check(!existsSync(join(REPO, SCRATCH_B)), `R2: ${SCRATCH_B} 未被写入磁盘`)
+
+    // ── S：自治档 —— 项目内写文件全程无审批事件 ──
+    hdr('S: 自治档无审批闭环')
+    {
+      const SCRATCH_S = 'r-e2e-autonomy.txt'
+      try { rmSync(join(REPO, SCRATCH_S), { force: true }) } catch { /* ignore */ }
+      const rS = await createSession(REPO,
+        `请用 write_file 工具创建文件 ${SCRATCH_S}，内容写一行：AUTONOMY-OK。只做这一件事。`,
+        'dangerously-skip-permissions')
+      check(rS.status === 201 && rS.json.approvalMode === 'dangerously-skip-permissions',
+        `S: 自治会话创建并回显档位 (HTTP ${rS.status})`)
+      const sidS = rS.json.id
+      const evS = await waitDone(sidS)
+      const askedApproval = evS.some((e) => e.type === 'approval_required')
+      check(!askedApproval, 'S: 项目内写入全程未触发 approval_required')
+      check(existsSync(join(REPO, SCRATCH_S)), `S: agent 已自动写出 ${SCRATCH_S}`)
+      try { rmSync(join(REPO, SCRATCH_S), { force: true }) } catch { /* ignore */ }
+      // 还原（自治档同样写 checkpoint，回滚可用）
+      const pv = await api(`/sessions/${sidS}/rollback/preview`)
+      if (pv.json.available && pv.json.confirmationToken) {
+        await api(`/sessions/${sidS}/rollback`, {
+          method: 'POST', body: JSON.stringify({ confirmationToken: pv.json.confirmationToken }),
+        })
+      }
+    }
 
     // ── R4/R5：扫描 decision_shift（信息性）──
     hdr('R4/R5: 扫描 decision_shift 事件（简单任务通常不触发）')

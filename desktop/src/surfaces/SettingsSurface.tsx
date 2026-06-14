@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { AutonomyControl } from '../components/AutonomyControl'
+import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
+import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/persist'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -11,10 +14,16 @@ const THEME_LABEL: Record<ThemePref, string> = {
 export function SettingsSurface() {
   const health = useHealth()
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
+  const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
 
   const pick = (t: ThemePref) => {
     setTheme(t)
     setThemePref(t)
+  }
+
+  const pickAutonomy = (lvl: AutonomyLevel) => {
+    setAutonomy(lvl)
+    saveDefaultAutonomy(lvl)
   }
 
   return (
@@ -34,6 +43,12 @@ export function SettingsSurface() {
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>新线程默认自治档位</h4>
+        <AutonomyControl value={autonomy} onChange={pickAutonomy} />
+        <div className="meta">自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。</div>
       </section>
 
       <section className="settings-group">
