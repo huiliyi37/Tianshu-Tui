@@ -105,6 +105,8 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
 
   const borderColor = isError ? theme.error : theme.toolColor(name)
 
+  // Collapse marker
+  const foldColor = focused ? theme.primary : theme.dim
   const foldHint = focused && truncated > 0 ? ` Enter/Tab to ${localExpanded ? 'collapse' : 'expand'}` : ''
 
   return (
@@ -126,7 +128,7 @@ export const ToolCard = memo(function ToolCard({ name, result, isError, isStream
       >
         <Markdown text={displayText} language={extToLang(rawPath)} />
         {truncated > 0 && !expanded && (
-          <Text color={theme.dim}>
+          <Text color={foldColor} bold={!!focused}>
             ... {totalLines} more lines
           </Text>
         )}

@@ -1,5 +1,8 @@
 /**
  * T9 格式化函数 — 子代理 TeamPanel（团队协作面板）。
+ *
+ * 从 `team-panel.tsx` 的 `renderTeamPanelLines` 移植为框架无关的 ANSI 行渲染，
+ * 仅依赖 `team-panel-model.js`（框架无关）与 ansi/theme，避免 T9 路径引入 React/Ink。
  */
 
 import { color } from '../engine/ansi.js'
@@ -27,6 +30,8 @@ function truncate(text: string, max: number): string {
 }
 
 /**
+ * 生成 TeamPanel 的纯文本行（无颜色，便于宽度计算/测试）。
+ *
  * v3 极简布局：无边框无分隔线，靠缩进表达 wave→task→depends/summary 层级。
  */
 export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[] {
@@ -69,6 +74,11 @@ export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[]
   return lines
 }
 
+/**
+ * 渲染 TeamPanel 为带色 ANSI 行：
+ *  标题行 → muted · high ⚠ → error · medium → warning ·
+ *  running 任务行 → primary · footer → muted · 其余 → 默认前景。
+ */
 export function formatTeamPanel(model: TeamPanelModel, theme: RivetTheme, width = 80): string[] {
   const lines = buildTeamPanelLines(model, width)
   const lastIdx = lines.length - 1
