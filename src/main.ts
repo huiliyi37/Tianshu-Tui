@@ -29,6 +29,8 @@ import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
 import { resolveAppPromptInput } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
+import { loadConstellation } from './constellation/store.js'
+import { formatMilestoneLine } from './constellation/format.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
@@ -252,6 +254,10 @@ async function main() {
     // Starmap
     starmapEntries: () => {
       const domains = starDomainRegistry.list()
+      const constellation = ctx ? loadConstellation(ctx.cwd) : null
+      const milestones = constellation
+        ? constellation.milestones.slice(-5).reverse().map(m => formatMilestoneLine(m))
+        : []
       return {
         entries: domains.map(d => ({
           name: d.name,
@@ -259,6 +265,7 @@ async function main() {
           description: d.motto ?? '',
           active: false,
         })),
+        milestones,
       }
     },
     // Command palette

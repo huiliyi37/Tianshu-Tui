@@ -389,6 +389,9 @@ export class AgentLoop {
       setCycleClose: this.config.sessionRegistry
         ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
         : undefined,
+      // ── Project Constellation (post-session milestone capture, cache-safe) ──
+      constellationEnabled: this.config.taskLedger !== undefined && this.config.sessionId !== undefined,
+      constellationCwd: this.cwd,
       // ── HEARTH observe (pure diagnostic) ──
       hearthObserveEnabled: this.config.hearthObserveEnabled,
       getAnchorGraph: () => this.buildAnchorGraph(),

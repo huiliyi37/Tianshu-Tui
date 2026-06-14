@@ -30,6 +30,16 @@ import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList }
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
+import {
+  loadConstellation,
+  initConstellation,
+  surveySkeleton,
+  appendMilestone,
+} from '../constellation/store.js'
+import { formatConstellationView, formatConstellationHistory } from '../constellation/format.js'
+import { extractMilestone } from '../constellation/milestone.js'
+import { shortHash } from '../constellation/schema.js'
+import { generateVoidIdentity, toAgentMark } from '../agent/void-identity.js'
 
 const HELP_TEXT = `Available commands:
 /help — Show this help
@@ -48,6 +58,7 @@ const HELP_TEXT = `Available commands:
 /resume <number> — Restore a saved session
 /memory [text|add|search|forget] — Session memory entries
 /mission — Show current task contract
+/constellation [view|init|update <summary>|history|shift <summary>] — Project blueprint & milestone chronicle
 /context [pin|claims|antibodies|conflicts|reload|export|import] — Context ledger
 /verify — Show verification status
 /evidence — Show last turn evidence summary
@@ -878,6 +889,82 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const snapshot = ctx.agent.getCognitiveSnapshot?.()
       const strip = formatMissionStrip(snapshot)
       pushStatic(createLogEntry({ type: 'system', content: strip ? `Mission\n\n${strip}` : 'Mission\n\nNo actionable task contract is active.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/constellation': {
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const sub = (parts[1] ?? 'view').toLowerCase()
+      const now = Date.now()
+
+      if (sub === 'init') {
+        const skeleton = surveySkeleton(cwd)
+        const c = initConstellation(cwd, { skeleton, sessionId: ctx.currentSessionId }, now)
+        pushStatic(createLogEntry({
+          type: 'system',
+          content: `Constellation initialized for ${c.name}\n\n${formatConstellationView(c, { now })}`,
+        }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'shift') {
+        const summary = parts.slice(2).join(' ').trim() || 'skeleton re-surveyed'
+        const skeleton = surveySkeleton(cwd)
+        const c = initConstellation(cwd, { skeleton, sessionId: ctx.currentSessionId, shiftSummary: summary }, now)
+        pushStatic(createLogEntry({
+          type: 'system',
+          content: `Architecture shift recorded (${c.architectureShifts.length} total): ${summary}`,
+        }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'update') {
+        const summary = parts.slice(2).join(' ').trim()
+        if (!summary) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /constellation update <summary> — records a milestone for current changes.' }))
+          setIsStreaming(false)
+          return true
+        }
+        const dirty = await collectDirtyFiles(cwd)
+        const identity = generateVoidIdentity({ sessionId: ctx.currentSessionId })
+        const milestone = extractMilestone({
+          sessionId: ctx.currentSessionId,
+          agentMark: toAgentMark(identity, ''),
+          domain: '',
+          chronicleEntries: [{ type: 'milestone', turn: 0, timestamp: now, summary, files: dirty }],
+          cycleClose: shortHash(`${ctx.currentSessionId}:${now}`),
+          now,
+          force: true,
+        })
+        if (!milestone) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Nothing to record.' }))
+          setIsStreaming(false)
+          return true
+        }
+        appendMilestone(cwd, milestone, now)
+        pushStatic(createLogEntry({ type: 'system', content: `Milestone recorded: ${milestone.summary} (${milestone.filesChanged.length} files)` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      const c = loadConstellation(cwd)
+      if (!c) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No constellation yet. Use /constellation init to survey this project.' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'history') {
+        pushStatic(createLogEntry({ type: 'system', content: formatConstellationHistory(c, { now }) }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // default: view
+      pushStatic(createLogEntry({ type: 'system', content: formatConstellationView(c, { now }) }))
       setIsStreaming(false)
       return true
     }

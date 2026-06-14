@@ -106,10 +106,20 @@ export interface StarmapEntry {
 export interface StarmapData {
   entries: StarmapEntry[]
   title?: string
+  /**
+   * Optional project-constellation milestone layer (pre-formatted, ANSI-free
+   * one-liners). Rendered as a footer block below the star-domain list. This is
+   * render-only data — never injected into the model context / prefix cache.
+   */
+  milestones?: string[]
+  /** Optional cross-session "kindred agent" recognition line. */
+  recognitionLine?: string
 }
 
 /**
  * 渲染 Starmap overlay（星域/星君总览）。
+ *
+ * 双层：上层星域总览，下层（可选）项目星座里程碑时间线 + 跨会话辨认行。
  */
 export function renderStarmap(data: StarmapData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
@@ -122,8 +132,16 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
   const nameWidth = Math.min(20, Math.floor(width * 0.25))
   const descWidth = width - 2 - glyphWidth - nameWidth - 8 // 8 for padding/spacing
 
-  // List entries
-  const maxEntries = height - 6 // top border + title + header + footer + bottom border = 5; +1 safety
+  // ── Milestone layer budget ──────────────────────────────────────
+  const milestones = data.milestones ?? []
+  const recognition = data.recognitionLine
+  // header(1) + up to 5 milestone lines + recognition(0/1)
+  const milestoneRows = milestones.length > 0
+    ? 1 + Math.min(5, milestones.length) + (recognition ? 1 : 0)
+    : (recognition ? 1 : 0)
+
+  // List entries (shrunk to make room for the milestone layer)
+  const maxEntries = Math.max(1, height - 6 - milestoneRows)
   const visible = data.entries.slice(0, maxEntries)
 
   for (const entry of visible) {
@@ -143,6 +161,17 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
   // Pad remaining
   for (let i = visible.length; i < maxEntries; i++) {
     lines.push(padLine('', width, theme))
+  }
+
+  // ── Milestone layer rows ────────────────────────────────────────
+  if (milestones.length > 0) {
+    lines.push(padLine(color('✶ Milestones', theme.secondary, { bold: true }), width, theme))
+    for (const m of milestones.slice(0, 5)) {
+      lines.push(padLine(color(`  ${m}`.slice(0, width - 2), theme.dim), width, theme))
+    }
+  }
+  if (recognition) {
+    lines.push(padLine(color(recognition.slice(0, width - 2), theme.primary), width, theme))
   }
 
   lines.push(formatFooter('← → select  Enter activate  q quit', width, theme))

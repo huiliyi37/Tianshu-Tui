@@ -15,6 +15,7 @@ import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
 import { createMeridianHook, type MeridianHookDeps } from './hooks/meridian-hook.js'
 import { createPhysarumFileAccessHook, type PhysarumFileAccessHookDeps } from './hooks/physarum-file-access-hook.js'
 import { createSonglineRuntimeHook } from './hooks/songline-hook.js'
+import { createConstellationRuntimeHook } from './hooks/constellation-hook.js'
 import { createHearthObserveHook } from './hooks/hearth-observe-hook.js'
 import { createDedupGuardHook, type DedupGuardHookDeps } from './hooks/dedup-guard-hook.js'
 import { createBlindExplorationHook } from './hooks/blind-exploration-hook.js'
@@ -32,6 +33,8 @@ import type { DoomLoopLevel } from './trace-store.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
 import type { EvidenceState } from './evidence.js'
 import type { TaskLedgerSummary } from './task-ledger.js'
+import type { ChronicleEntry } from './chronicle.js'
+import type { RetrospectFingerprint } from './retrospect-fingerprint.js'
 import type { TrajectoryEntry } from './trajectory.js'
 import type { DomainVoiceId } from './domain-voice.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -78,6 +81,16 @@ export interface RuntimeHookDeps {
   getTaskSummary?: () => TaskLedgerSummary | null
   /** Optional cycle relay bridge for Songline substrate. */
   setCycleClose?: (sessionId: string, closeHash: string) => void
+
+  // ── Project Constellation (post-session milestone capture) ──
+  /** Explicit opt-in for auto milestone capture. Default: false. */
+  constellationEnabled?: boolean
+  /** Project root for `.rivet/constellation.json`. */
+  constellationCwd?: string
+  /** Optional chronicle entries source for milestone summary/files. */
+  getChronicleEntries?: () => readonly ChronicleEntry[]
+  /** Optional behavior fingerprint for a stable, kin-recognisable agent mark. */
+  getConstellationFingerprint?: () => RetrospectFingerprint | null
 
   // ── Anti-anchoring (explicit opt-in, prompt-flow intervention) ──
   /** Explicit opt-in for anti-anchoring harness hooks. Default: disabled. */
@@ -211,6 +224,18 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       deposit: deps.stigmergyDeposit,
       sessionId: deps.sessionId,
       setCycleClose: deps.setCycleClose,
+    }))
+  }
+
+  if (deps.constellationEnabled && deps.constellationCwd && deps.sessionId && deps.getTaskSummary) {
+    hooks.push(createConstellationRuntimeHook({
+      enabled: true,
+      cwd: deps.constellationCwd,
+      sessionId: deps.sessionId,
+      getTaskSummary: deps.getTaskSummary,
+      getChronicleEntries: deps.getChronicleEntries,
+      getDomainId: deps.getDomainId,
+      getFingerprint: deps.getConstellationFingerprint,
     }))
   }
 
