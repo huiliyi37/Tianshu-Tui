@@ -9,6 +9,7 @@ import { CREATE_PDF_TOOL } from './create-pdf.js'
 import { EXPORT_FILE_TOOL } from './export-file.js'
 import { OPEN_PATH_TOOL } from './open-path.js'
 import { REQUEST_PATH_ACCESS_TOOL } from './request-path-access.js'
+import { SKILL_TOOL } from './skill.js'
 import { BASH_TOOL } from './bash.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
@@ -70,6 +71,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(READ_SECTION_TOOL)
   registry.register(FILE_INFO_TOOL)
   registry.register(REQUEST_PATH_ACCESS_TOOL)
+  registry.register(SKILL_TOOL)
   for (const tool of extraTools) registry.register(tool)
   return registry
 }

@@ -1438,7 +1438,7 @@ export class AgentLoop {
       this.config.promptEngine.setPlanMethodology(undefined)
     }
 
-    this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderMatchedBlock(userInput))
+    this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderDiscoveryBlock(userInput))
     this.config.promptEngine.setCrossSessionMemoryBlock(renderMemoryBlock(this.cwd, userInput))
     this.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 
