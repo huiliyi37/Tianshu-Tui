@@ -2,11 +2,31 @@ import type { ToolDefinition } from '../api/types.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 
+/**
+ * T4 — structured per-worker delegation update for the desktop subagent panel
+ * (Codex `Down` panel / Antigravity Manager parity). Emitted alongside (not
+ * replacing) the existing text progress stream. `running` carries the latest
+ * activity line; a terminal status carries the worker's outcome.
+ */
+export interface DelegationActivity {
+  /** Stable per-worker id within a run (work order id), distinct from the tool id. */
+  workOrderId: string
+  /** The delegation tool call that spawned this worker (delegation tree parent). */
+  parentToolId: string
+  profile?: string
+  status: 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
+  /** Latest worker activity line (running) or terminal summary. */
+  progressLine?: string
+}
+
 export interface ToolCallParams {
   input: Record<string, unknown>
   toolUseId: string
   cwd: string
   onOutput?: (chunk: string) => void
+  /** T4: structured per-worker delegation updates (subagent panel). Optional —
+   *  set by the tool pipeline; absent in non-server contexts (no-op). */
+  onWorkerActivity?: (activity: DelegationActivity) => void
   /** Files this session/tool pipeline owns and may safely include in scoped write operations. */
   sessionModifiedFiles?: string[]
   /** Artifact store for persisting tool output — no global setter, always inject via params */

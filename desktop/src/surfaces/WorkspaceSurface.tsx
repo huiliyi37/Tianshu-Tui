@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useAbortSession, useArtifacts, useSendPrompt, useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
-import { answerApproval, answerIntent, setApprovalMode } from '../runtime/client'
+import { answerApproval, answerIntent, setApprovalMode, steerSession } from '../runtime/client'
 import type { ApprovalMode } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
@@ -27,6 +27,15 @@ export function WorkspaceSurface() {
   const handleSend = useCallback((prompt: string) => {
     if (!activeId) return
     sendPrompt.mutate({ id: activeId, prompt })
+  }, [activeId, sendPrompt])
+
+  // T3 — queue mid-run guidance. If the run already finished between render and
+  // submit (idle), fall back to starting a fresh turn so input is never lost.
+  const handleSteer = useCallback((text: string) => {
+    if (!activeId) return
+    void steerSession(activeId, text).then((r) => {
+      if (r === 'idle') sendPrompt.mutate({ id: activeId, prompt: text })
+    })
   }, [activeId, sendPrompt])
 
   const handleApproval = useCallback(
@@ -57,6 +66,7 @@ export function WorkspaceSurface() {
             session={active}
             view={view}
             onSend={handleSend}
+            onSteer={handleSteer}
             onAbort={() => abortSession.mutate(active.id)}
             onSetApprovalMode={handleSetApprovalMode}
           />

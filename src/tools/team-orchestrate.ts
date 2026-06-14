@@ -14,7 +14,8 @@ import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
-import { createActivityStreamer } from './worker-activity-stream.js'
+import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
+import type { WorkerActivityEvent } from '../agent/coordinator.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 /** Coordinator surface the team tool needs. `delegateBatch` drives planner
@@ -126,6 +127,21 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
         }
       }
 
+      // T9 P3 text stream + T4 structured per-worker updates (subagent panel).
+      const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
+      const onActivity = (textStreamer || params.onWorkerActivity)
+        ? (ev: WorkerActivityEvent) => {
+            textStreamer?.(ev)
+            params.onWorkerActivity?.({
+              workOrderId: ev.workOrderId,
+              parentToolId: params.toolUseId,
+              profile: ev.profile,
+              status: 'running',
+              progressLine: activityProgressLine(ev),
+            })
+          }
+        : undefined
+
       let summary: TeamRunSummary
       let telemetryEvent: TeamWaveTelemetry | undefined
       try {
@@ -141,7 +157,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             abortSignal: params.abortSignal,
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
             // T9 P3: live worker token/tool stream into the team tool card.
-            onActivity: params.onOutput ? createActivityStreamer(params.onOutput) : undefined,
+            onActivity,
           },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>
@@ -172,6 +188,18 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `team_orchestrate failed: ${msg}`, isError: true }
+      }
+
+      // T4: terminal per-worker status for the subagent panel.
+      if (params.onWorkerActivity && summary.run) {
+        for (const r of summary.run.results) {
+          params.onWorkerActivity({
+            workOrderId: r.workOrderId,
+            parentToolId: params.toolUseId,
+            status: r.status,
+            progressLine: r.summary.slice(0, 80),
+          })
+        }
       }
 
       let reviewNote = ''

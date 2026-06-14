@@ -7,6 +7,17 @@ export function shortOrderLabel(workOrderId: string): string {
 }
 
 /**
+ * T4 — one concise progress line for a worker activity event, for the structured
+ * subagent panel (no label prefix — the panel renders the worker identity).
+ */
+export function activityProgressLine(event: WorkerActivityEvent): string {
+  if (event.kind === 'tool_use') return `⚙ ${event.detail ? event.detail.slice(0, 60) : '工具调用'}`
+  if (event.kind === 'tool_result') return `✓ ${event.detail ? event.detail.slice(0, 50) : '工具完成'}`
+  if (event.kind === 'thinking') return '✶ 推理中…'
+  return '✎ 输出中…'
+}
+
+/**
  * T9 P3 实时上行: convert raw worker activity events into a bounded stream of
  * progress lines for the live tool card.
  *

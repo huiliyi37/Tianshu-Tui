@@ -4,6 +4,7 @@ import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolBlock } from '../components/ToolBlock'
 import { DelegationTree } from '../components/DelegationTree'
+import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
 
@@ -22,10 +23,11 @@ export function ThreadView(props: {
   session: SessionRecord
   view: EventViewState
   onSend: (prompt: string) => void
+  onSteer: (text: string) => void
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
 }) {
-  const { session, view, onSend, onAbort, onSetApprovalMode } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode } = props
   const [input, setInput] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
   const busy = session.status === 'running'
@@ -38,13 +40,15 @@ export function ThreadView(props: {
   const submit = () => {
     const text = input.trim()
     if (!text) return
-    // The user turn is echoed back as a 'user' event (server run()), so we don't
-    // render optimistically — the SSE round-trip is sub-ms on localhost.
-    onSend(text)
+    // T3 — while a turn is running, Enter queues steering guidance (injected at
+    // the next tool boundary) instead of erroring; idle starts a fresh turn.
+    // The user turn / steer is echoed back as an event, so no optimistic render.
+    if (busy) onSteer(text)
+    else onSend(text)
     setInput('')
   }
 
-  const showThinking = busy && !view.private_textOpen
+  const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
   return (
     <div className="thread">
@@ -89,12 +93,15 @@ export function ThreadView(props: {
         <div ref={endRef} />
       </div>
 
+      <TaskList items={view.todos} />
       <DelegationTree nodes={view.delegation} />
 
       <div className="composer">
         <textarea
           value={input}
-          placeholder="和天枢对话…  (Enter 发送, Shift+Enter 换行)"
+          placeholder={busy
+            ? '运行中 · Enter 插入引导（下一步生效）'
+            : '和天枢对话…  (Enter 发送, Shift+Enter 换行)'}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -104,7 +111,10 @@ export function ThreadView(props: {
           }}
         />
         {busy ? (
-          <button className="btn ghost" onClick={onAbort}>停止</button>
+          <div className="composer-actions">
+            <button className="btn ghost" onClick={submit} disabled={!input.trim()}>引导</button>
+            <button className="btn ghost danger" onClick={onAbort}>停止</button>
+          </div>
         ) : (
           <button className="btn" onClick={submit} disabled={!input.trim()}>发送</button>
         )}
@@ -124,6 +134,45 @@ function Block({ block }: { block: ConvoBlock }) {
   }
   if (block.kind === 'tool' || block.kind === 'result') {
     return <ToolBlock title={block.role ?? block.kind} body={block.text} isError={block.isError} />
+  }
+  if (block.kind === 'thinking') {
+    // T1 — reasoning stream, collapsed by default (Antigravity surfaces summaries,
+    // not raw token streams; the user can expand to audit).
+    return (
+      <details className="reasoning">
+        <summary className="reasoning-summary">
+          <span className="reasoning-glyph" aria-hidden>✶</span>
+          推理过程
+        </summary>
+        <div className="reasoning-body">{block.text}</div>
+      </details>
+    )
+  }
+  if (block.kind === 'turn') {
+    const t = block.turn
+    const tokens = t?.totalTokens ? ` · ~${formatTokens(t.totalTokens)} tokens` : ''
+    const label = t?.turnNumber != null ? `第 ${t.turnNumber} 轮` : '一轮结束'
+    return (
+      <div className="turn-divider" role="separator">
+        <span className="turn-label">{label}{tokens}</span>
+      </div>
+    )
+  }
+  if (block.kind === 'checkpoint') {
+    return (
+      <div className="checkpoint-chip" title="本轮写操作前的回滚锚点（可在右侧审查面板回滚）">
+        <span className="cp-glyph" aria-hidden>⎌</span>
+        回滚点 · {(block.hash ?? '').slice(0, 8)}
+      </div>
+    )
+  }
+  if (block.kind === 'steer') {
+    return (
+      <div className="msg steer">
+        <div className="msg-role">引导 · 已排队</div>
+        <div className="msg-body">{block.text}</div>
+      </div>
+    )
   }
   if (block.kind === 'phase') {
     return <div className="msg phase">{block.text}</div>
@@ -155,4 +204,9 @@ function Block({ block }: { block: ConvoBlock }) {
       <div className="msg-body">{block.text}</div>
     </div>
   )
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
 }

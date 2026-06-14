@@ -6,7 +6,8 @@ import type { ClaimProposal } from '../context/claims.js'
 import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { createActivityStreamer } from './worker-activity-stream.js'
+import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
+import type { WorkerActivityEvent } from '../agent/coordinator.js'
 
 export interface DelegateBatchCoordinator {
   delegateBatch(
@@ -150,7 +151,20 @@ export function createDelegateBatchTool(
       }
 
       // T9 P3: one shared streamer — events from all workers interleave with labels.
-      const streamActivity = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
+      // T4: also fan out structured per-worker updates for the subagent panel.
+      const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
+      const streamActivity = (textStreamer || params.onWorkerActivity)
+        ? (ev: WorkerActivityEvent) => {
+            textStreamer?.(ev)
+            params.onWorkerActivity?.({
+              workOrderId: ev.workOrderId,
+              parentToolId: params.toolUseId,
+              profile: ev.profile,
+              status: 'running',
+              progressLine: activityProgressLine(ev),
+            })
+          }
+        : undefined
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => ({
         parentTurnId: `${params.toolUseId}:${i}`,
         objective: t.objective,
@@ -211,6 +225,18 @@ export function createDelegateBatchTool(
         const sid = getSessionId?.()
         if (claimStore && sid) {
           extractClaimsFromRun(run, params.toolUseId, claimStore, sid)
+        }
+      }
+
+      // T4: terminal per-worker status for the subagent panel.
+      if (params.onWorkerActivity) {
+        for (const r of run.results) {
+          params.onWorkerActivity({
+            workOrderId: r.workOrderId,
+            parentToolId: params.toolUseId,
+            status: r.status,
+            progressLine: r.summary.slice(0, 80),
+          })
         }
       }
 

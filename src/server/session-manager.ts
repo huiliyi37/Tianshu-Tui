@@ -682,6 +682,8 @@ export class RuntimeSessionManager {
   // ── internals ─────────────────────────────────────────────────
 
   private buildCallbacks(session: InternalSession): AgentCallbacks {
+    // T4 — per-worker start times for elapsed reporting (one map per run).
+    const workerStartedAt = new Map<string, number>()
     return {
       onTextDelta: (text) => this.append(session, 'text_delta', { text }),
       onThinkingDelta: (thinking) => this.append(session, 'thinking_delta', { text: thinking }),
@@ -748,6 +750,25 @@ export class RuntimeSessionManager {
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
       onSteerDrain: () => session.steer.drain(),
+      // T4 — structured per-worker delegation status/progress → subagent panel.
+      // Keyed by workOrderId (distinct from the spawning tool id, which is the
+      // delegation-tree parent). Emitted alongside the existing text stream.
+      onDelegationActivity: (a) => {
+        let started = workerStartedAt.get(a.workOrderId)
+        if (started === undefined) {
+          started = this.now()
+          workerStartedAt.set(a.workOrderId, started)
+        }
+        this.append(session, 'delegation', {
+          workerId: a.workOrderId,
+          parentId: a.parentToolId,
+          profile: a.profile,
+          status: a.status,
+          phase: a.status === 'running' ? 'running' : a.status,
+          progressLine: a.progressLine ? redactText(a.progressLine) : undefined,
+          elapsedMs: this.now() - started,
+        })
+      },
     }
   }
 

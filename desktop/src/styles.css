@@ -233,14 +233,47 @@ body {
 .schedule-card .title { font-weight: 600; }
 .schedule-card .meta { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
 
-.delegation-tree { border-top: 1px solid var(--border); padding: 8px 14px; max-height: 180px; overflow-y: auto; }
+.delegation-tree { border-top: 1px solid var(--border); padding: 8px 14px; max-height: 220px; overflow-y: auto; }
 .deleg-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.deleg-node { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 2px 0; }
+.deleg-node { font-size: 13px; padding: 2px 0; }
+.deleg-row { display: flex; align-items: center; gap: 8px; }
 .deleg-node .obj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .deleg-node .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .deleg-node .dot.running { background: var(--accent); }
-.deleg-node .dot.completed { background: var(--success); }
-.deleg-node .dot.failed { background: var(--error); }
+.deleg-node .dot.ok { background: var(--success); }
+.deleg-node .dot.bad { background: var(--error); }
+.deleg-node .dot.pulse { animation: pulse 1.2s var(--ease) infinite; }
+/* T4 — per-worker status badge + elapsed + progress line. */
+.deleg-badge {
+  flex: none; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-pill);
+  background: var(--panel-2); color: var(--muted);
+}
+.deleg-badge.running { background: var(--accent-soft); color: var(--accent); }
+.deleg-badge.ok { color: var(--success); }
+.deleg-badge.bad { color: var(--error); }
+.deleg-elapsed { flex: none; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.deleg-progress {
+  margin-left: 16px; color: var(--muted); font-size: 12px; font-family: var(--font-mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* T2 — active task list (persistent operational checklist). */
+.task-list { border-top: 1px solid var(--border); padding: 8px 14px; max-height: 200px; overflow-y: auto; }
+.task-list-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.task-list-head .tl-title { font-size: 12px; color: var(--muted); }
+.task-list-head .tl-count {
+  margin-left: auto; font-size: 11px; color: var(--muted);
+  font-family: var(--font-mono); background: var(--panel-2);
+  padding: 1px 8px; border-radius: var(--radius-pill);
+}
+.tl-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tl-item { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text); }
+.tl-item .tl-glyph { flex: none; width: 1em; text-align: center; color: var(--muted); }
+.tl-item .tl-text { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.tl-item.in_progress .tl-glyph { color: var(--accent); }
+.tl-item.in_progress .tl-text { color: var(--text-strong); font-weight: var(--weight-medium); }
+.tl-item.completed .tl-glyph { color: var(--success); }
+.tl-item.completed .tl-text { color: var(--muted); text-decoration: line-through; }
 
 .modal.wide { width: 760px; }
 .modal input, .modal textarea {
@@ -426,11 +459,52 @@ body {
 .thinking-label { margin-left: var(--space-1); }
 @keyframes pulse { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 
+/* T1 — reasoning stream (collapsible). Quiet by default; expand to audit. */
+.reasoning {
+  border: 1px solid var(--border); border-left: 2px solid var(--muted);
+  border-radius: var(--radius-md); background: var(--panel);
+  padding: 0; overflow: hidden;
+}
+.reasoning-summary {
+  display: flex; align-items: center; gap: var(--space-2); cursor: pointer;
+  padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-sm);
+  list-style: none; user-select: none;
+}
+.reasoning-summary::-webkit-details-marker { display: none; }
+.reasoning[open] .reasoning-summary { border-bottom: 1px solid var(--border); }
+.reasoning-glyph { color: var(--muted); }
+.reasoning-body {
+  padding: var(--space-3); color: var(--muted); font-size: var(--text-sm); line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);
+}
+
+/* T1 — turn boundary divider. Thin centered hairline + label. */
+.turn-divider { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); }
+.turn-divider::before, .turn-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.turn-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+
+/* T1 — checkpoint anchor chip. */
+.checkpoint-chip {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: var(--space-2);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 2px 10px; color: var(--muted); font-size: var(--text-xs); font-family: var(--font-mono);
+}
+.checkpoint-chip .cp-glyph { color: var(--accent); }
+
 .composer { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; }
 .composer textarea {
   flex: 1; background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px;
   resize: none; font-family: inherit; font-size: 14px; min-height: 44px;
+}
+.composer-actions { display: flex; flex-direction: column; gap: 6px; }
+.btn.ghost.danger { color: var(--error); }
+
+/* T3 — queued mid-run guidance echo. Distinct from a normal user turn. */
+.msg.steer .msg-role { color: var(--accent); }
+.msg.steer .msg-body {
+  background: var(--accent-soft); border: 1px dashed var(--accent);
+  padding: var(--space-3); border-radius: var(--radius-md);
 }
 
 .modal-backdrop {

@@ -36,6 +36,7 @@ const BASE = `http://127.0.0.1:${PORT}`
 const TOKEN = `r-e2e-${Date.now()}`
 const SCRATCH_A = 'r-e2e-scratch.txt'      // R3：agent 新建 → 回滚移除
 const SCRATCH_B = 'r-e2e-blocked.txt'      // R2：被他会话独占，写入应被阻断
+const SCRATCH_T = 'r-e2e-steer.txt'        // T3：运行中 steer 会话的产物
 
 const stateDir = mkdtempSync(join(tmpdir(), 'r-e2e-'))
 const registryDbPath = join(stateDir, 'registry.db')
@@ -99,7 +100,7 @@ function openRegistry() {
 
 function gitClean() {
   const { spawnSync } = require('node:child_process')
-  const scratch = [SCRATCH_A, SCRATCH_B, 'r-e2e-autonomy.txt']
+  const scratch = [SCRATCH_A, SCRATCH_B, SCRATCH_T, 'r-e2e-autonomy.txt']
   for (const f of scratch) {
     try { rmSync(join(REPO, f), { force: true }) } catch { /* ignore */ }
   }
@@ -225,6 +226,73 @@ async function main() {
         })
       }
     }
+
+    // ── T3：运行中 Steer（运行入队 / idle 409）──
+    hdr('T3: 运行中 Steer（运行入队 / idle 409）')
+    try { rmSync(join(REPO, SCRATCH_T), { force: true }) } catch { /* ignore */ }
+    const rT = await createSession(REPO,
+      `请分两步：先用 glob 列出仓库根目录文件，再用 write_file 创建 ${SCRATCH_T} 写一行 STEER-OK。`,
+      'dangerously-skip-permissions')
+    const sidT = rT.json.id
+    // 抓住 running 窗口（出现任意事件且未 done）尝试入队 steering，同时自动应答意图
+    let queued = false
+    {
+      const start = Date.now()
+      while (Date.now() - start < 60000) {
+        const { json } = await getEvents(sidT, 0)
+        const evs = json.events || []
+        for (const ev of evs) {
+          if (ev.type === 'intent_required') {
+            await api(`/sessions/${sidT}/interventions/${ev.data.requestId}/answer`,
+              { method: 'POST', body: JSON.stringify({ decision: 'continue' }) })
+          }
+        }
+        if (evs.some((e) => e.type === 'done')) break
+        if (evs.length > 0) {
+          const sres = await api(`/sessions/${sidT}/steer`,
+            { method: 'POST', body: JSON.stringify({ text: '保持改动最小，只创建那一个文件' }) })
+          if (sres.status === 200 && sres.json.queued) { queued = true; break }
+        }
+        await sleep(400)
+      }
+    }
+    const evT = await waitDone(sidT)
+    if (queued) {
+      check(evT.some((e) => e.type === 'steer_queued'),
+        'T3: 运行中 POST /steer 入队并回显 steer_queued 事件')
+    } else {
+      log('    （运行太快，未抓到 running 窗口，跳过入队断言——信息性）')
+    }
+    // idle 后再 steer 应 409
+    const idleSteer = await api(`/sessions/${sidT}/steer`,
+      { method: 'POST', body: JSON.stringify({ text: 'x' }) })
+    check(idleSteer.status === 409, 'T3: idle 会话 POST /steer 返回 409（提示用 /prompt）')
+    // 还原 steer 会话产物
+    {
+      const pv = await api(`/sessions/${sidT}/rollback/preview`)
+      if (pv.json.available && pv.json.confirmationToken) {
+        await api(`/sessions/${sidT}/rollback`,
+          { method: 'POST', body: JSON.stringify({ confirmationToken: pv.json.confirmationToken }) })
+      }
+      try { rmSync(join(REPO, SCRATCH_T), { force: true }) } catch { /* ignore */ }
+    }
+
+    // ── T1/T2/T4：过程外显事件扫描（信息性，依赖模型行为）──
+    hdr('T1/T2/T4: 过程外显事件扫描（信息性）')
+    const tScan = [...await getEvents(sidA).then((r) => r.json.events || []), ...evB, ...evT]
+    const countType = (t) => tScan.filter((e) => e.type === t).length
+    log(`    thinking_delta: ${countType('thinking_delta')}  turn_complete: ${countType('turn_complete')}  checkpoint: ${countType('checkpoint')}`)
+    log(`    todo_state: ${countType('todo_state')}  delegation: ${countType('delegation')}`)
+    const perWorker = tScan.filter((e) => e.type === 'delegation'
+      && (e.data.progressLine != null || ['passed', 'failed', 'blocked', 'escalated'].includes(String(e.data.status))))
+    if (perWorker.length > 0) {
+      ok(`T4: 捕获到 ${perWorker.length} 条 per-worker 结构化 delegation`)
+      for (const d of perWorker.slice(0, 4)) log(`      - ${d.data.workerId} [${d.data.status}] ${d.data.progressLine ?? ''}`)
+    } else {
+      log('    （未触发子代理委派——简单任务通常不 delegate，属正常）')
+    }
+    if (countType('turn_complete') > 0) ok('T1: 出现 turn_complete 轮次事件')
+    if (countType('todo_state') > 0) ok('T2: 出现 todo_state 任务清单事件')
 
     // ── R4/R5：扫描 decision_shift（信息性）──
     hdr('R4/R5: 扫描 decision_shift 事件（简单任务通常不触发）')

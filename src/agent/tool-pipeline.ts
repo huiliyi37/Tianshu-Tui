@@ -449,6 +449,11 @@ export async function executeToolUse(
     onOutput: (chunk) => {
       callbacks.onToolResult(tu.id, tu.name, chunk)
    },
+    // T4: structured per-worker delegation updates → subagent panel. Optional;
+    // forwarded to the session layer alongside the text progress stream.
+    onWorkerActivity: callbacks.onDelegationActivity
+      ? (activity) => callbacks.onDelegationActivity!(activity)
+      : undefined,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     artifactStore: deps.artifactStore,

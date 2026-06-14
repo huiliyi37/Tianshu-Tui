@@ -39,6 +39,9 @@ export type SessionEventType =
   | 'status'
   | 'error'
   | 'decision_shift'
+  | 'rewind'
+  | 'todo_state'
+  | 'steer_queued'
   | 'done'
 
 export interface SessionEvent {
@@ -90,6 +93,17 @@ export interface DelegationNode {
   status: string
   phase?: string
   updatedAt: number
+  /** T4 — latest worker activity line (e.g. "edit_file src/x.ts"). */
+  progressLine?: string
+  /** T4 — elapsed wall-clock since the worker started, ms. */
+  elapsedMs?: number
+}
+
+/** T2 — structured active task list item (mirrors backend `todo` write). */
+export interface TodoStateItem {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
 }
 
 export interface ArtifactSummary {

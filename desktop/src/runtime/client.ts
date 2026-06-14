@@ -99,6 +99,21 @@ export function sendPrompt(id: string, prompt: string): Promise<SessionRecord> {
   return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt })
 }
 
+/**
+ * T3 — queue mid-run guidance into a running session. Does not start a turn.
+ * Returns 'queued' on success, 'idle' if the session isn't running (caller
+ * should fall back to sendPrompt). Does not throw on the 409 idle case.
+ */
+export async function steerSession(id: string, text: string): Promise<'queued' | 'idle'> {
+  const res = await rivetFetch(`/sessions/${id}/steer`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+  if (res.status === 409) return 'idle'
+  if (!res.ok) throw new Error(`POST /sessions/${id}/steer -> ${res.status}`)
+  return 'queued'
+}
+
 /** N2 — feedback on an artifact, re-injected as next-turn context. */
 export function sendArtifactFeedback(id: string, artifactId: string, comment: string): Promise<SessionRecord> {
   return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment })

@@ -137,3 +137,97 @@ test('decision_shift breaks an open text run (R5)', () => {
   assert.equal(s.blocks[2]!.kind, 'assistant')
   assert.equal(s.blocks[2]!.text, 'new approach')
 })
+
+// ── T1: process event rendering ─────────────────────────────────────
+
+test('T1: consecutive thinking_delta coalesce into one reasoning block', () => {
+  seq = 0
+  const s = fold([ev('thinking_delta', { text: 'rea' }), ev('thinking_delta', { text: 'son' })])
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.kind, 'thinking')
+  assert.equal(s.blocks[0]!.text, 'reason')
+})
+
+test('T1: thinking and text are separate runs that interrupt each other', () => {
+  seq = 0
+  const s = fold([
+    ev('thinking_delta', { text: 'plan' }),
+    ev('text_delta', { text: 'answer' }),
+    ev('thinking_delta', { text: 'more' }),
+  ])
+  assert.equal(s.blocks.length, 3)
+  assert.equal(s.blocks[0]!.kind, 'thinking')
+  assert.equal(s.blocks[1]!.kind, 'assistant')
+  assert.equal(s.blocks[2]!.kind, 'thinking')
+})
+
+test('T1: turn_complete adds a turn block with usage metadata', () => {
+  seq = 0
+  const s = fold([ev('turn_complete', { turnNumber: 2, isFinal: false, usage: { totalTokens: 1500 } })])
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.kind, 'turn')
+  assert.equal(s.blocks[0]!.turn?.turnNumber, 2)
+  assert.equal(s.blocks[0]!.turn?.totalTokens, 1500)
+  assert.equal(s.blocks[0]!.turn?.isFinal, false)
+})
+
+test('T1: checkpoint adds an anchor block; empty hash is ignored', () => {
+  seq = 0
+  const s = fold([ev('checkpoint', { hash: 'abc123' }), ev('checkpoint', { hash: '' })])
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.kind, 'checkpoint')
+  assert.equal(s.blocks[0]!.hash, 'abc123')
+})
+
+// ── T2: todo_state ──────────────────────────────────────────────────
+
+test('T2: todo_state replaces the active task list', () => {
+  seq = 0
+  const s = fold([
+    ev('todo_state', { items: [{ id: 'a', content: 'x', status: 'pending' }] }),
+    ev('todo_state', { items: [
+      { id: 'a', content: 'x', status: 'completed' },
+      { id: 'b', content: 'y', status: 'in_progress' },
+    ] }),
+  ])
+  assert.equal(s.todos.length, 2)
+  assert.equal(s.todos[0]!.status, 'completed')
+  assert.equal(s.todos[1]!.status, 'in_progress')
+})
+
+test('T2: todo_state drops malformed items', () => {
+  seq = 0
+  const s = fold([ev('todo_state', { items: [
+    { id: 'a', content: 'ok', status: 'pending' },
+    { id: '', content: 'no id', status: 'pending' },
+    { content: 'no id key', status: 'pending' },
+    'garbage',
+  ] })])
+  assert.equal(s.todos.length, 1)
+  assert.equal(s.todos[0]!.id, 'a')
+})
+
+// ── T3: steer_queued ────────────────────────────────────────────────
+
+test('T3: steer_queued produces a steer block', () => {
+  seq = 0
+  const s = fold([ev('steer_queued', { text: 'focus on tests' })])
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.kind, 'steer')
+  assert.equal(s.blocks[0]!.text, 'focus on tests')
+})
+
+// ── T4: structured delegation merge ─────────────────────────────────
+
+test('T4: delegation merges fields; terminal update keeps prior objective', () => {
+  seq = 0
+  const s = fold([
+    ev('delegation', { workerId: 'wo:T1', parentId: 'tool-1', objective: 'scan', profile: 'code_scout', status: 'running', progressLine: '⚙ grep', elapsedMs: 1200 }),
+    ev('delegation', { workerId: 'wo:T1', parentId: 'tool-1', status: 'passed', progressLine: 'done', elapsedMs: 3400 }),
+  ])
+  const node = s.delegation['wo:T1']!
+  assert.equal(node.status, 'passed')
+  assert.equal(node.objective, 'scan', 'objective preserved across terminal update')
+  assert.equal(node.progressLine, 'done')
+  assert.equal(node.elapsedMs, 3400)
+})

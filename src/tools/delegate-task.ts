@@ -5,7 +5,8 @@ import type { ClaimProposal } from '../context/claims.js'
 import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { createActivityStreamer } from './worker-activity-stream.js'
+import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
+import type { WorkerActivityEvent } from '../agent/coordinator.js'
 
 export interface DelegateTaskCoordinator {
   delegate(request: DelegationRequest, abortSignal?: AbortSignal): Promise<CoordinatorRun>
@@ -84,6 +85,21 @@ export function createDelegateTaskTool(
         }
       }
 
+      // T9 P3 text stream + T4 structured per-worker updates (subagent panel).
+      const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
+      const onActivity = (textStreamer || params.onWorkerActivity)
+        ? (ev: WorkerActivityEvent) => {
+            textStreamer?.(ev)
+            params.onWorkerActivity?.({
+              workOrderId: ev.workOrderId,
+              parentToolId: params.toolUseId,
+              profile: ev.profile,
+              status: 'running',
+              progressLine: activityProgressLine(ev),
+            })
+          }
+        : undefined
+
       const run = await coordinator.delegate({
         parentTurnId: params.toolUseId,
         objective: parsed.data.objective,
@@ -96,9 +112,20 @@ export function createDelegateTaskTool(
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,
         sessionTurn: params.sessionTurnCount,
-        // T9 P3: stream live worker progress into the tool card.
-        onActivity: params.onOutput ? createActivityStreamer(params.onOutput) : undefined,
+        onActivity,
       }, params.abortSignal)
+
+      // T4: terminal per-worker status for the subagent panel.
+      if (params.onWorkerActivity) {
+        for (const r of run.results) {
+          params.onWorkerActivity({
+            workOrderId: r.workOrderId,
+            parentToolId: params.toolUseId,
+            status: r.status,
+            progressLine: r.summary.slice(0, 80),
+          })
+        }
+      }
 
       // Extract worker findings into claim store
       if (run.status === 'completed') {

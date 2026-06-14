@@ -351,3 +351,101 @@ test('S: setApprovalMode returns false for a missing session', () => {
   const { manager } = makeManagerCapturingMode()
   assert.equal(manager.setApprovalMode('nope', 'manual'), false)
 })
+
+// ── T2: todo_state emission ─────────────────────────────────────────
+
+test('T2: todo write tool emits a structured todo_state event', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+  cb.onToolUse('t1', 'todo', {
+    action: 'write',
+    todos: [
+      { id: 'a', content: 'first', status: 'in_progress' },
+      { id: 'b', content: 'second', status: 'pending' },
+    ],
+  })
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'todo_state')
+  assert.equal(evs.length, 1)
+  const items = evs[0]!.data.items as Array<{ id: string; content: string; status: string }>
+  assert.deepEqual(items, [
+    { id: 'a', content: 'first', status: 'in_progress' },
+    { id: 'b', content: 'second', status: 'pending' },
+  ])
+})
+
+test('T2: todo read action does NOT emit todo_state; bad statuses fall back to pending', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+  cb.onToolUse('r1', 'todo', { action: 'read' })
+  cb.onToolUse('w1', 'todo', { action: 'write', todos: [{ id: 'x', content: 'c', status: 'bogus' }] })
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'todo_state')
+  assert.equal(evs.length, 1, 'only the write action emits')
+  const items = evs[0]!.data.items as Array<{ status: string }>
+  assert.equal(items[0]!.status, 'pending')
+})
+
+// ── T3: mid-run steering ────────────────────────────────────────────
+
+test('T3: steer on a running session queues, echoes, and drains once', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+
+  assert.equal(manager.steer(s.id, 'focus on tests'), 'queued')
+  const echoed = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'steer_queued')
+  assert.equal(echoed.length, 1)
+  assert.equal(echoed[0]!.data.text, 'focus on tests')
+
+  const drained = cb.onSteerDrain!()
+  assert.match(String(drained), /focus on tests/)
+  assert.equal(cb.onSteerDrain!(), null, 'second drain is empty')
+})
+
+test('T3: steer on an idle session returns idle; missing returns not_found', () => {
+  const { manager } = makeManager()
+  const idle = manager.createSession({})
+  assert.equal(manager.steer(idle.id, 'hi'), 'idle')
+  assert.equal(manager.steer('nope', 'hi'), 'not_found')
+})
+
+test('T3: a fresh run drops guidance left over from a previous run', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  manager.steer(s.id, 'stale')
+  agents[0]!.finish() // run resolves → session idle
+  await new Promise((r) => setTimeout(r, 0)) // let the run's finally flip running=false
+  assert.equal(manager.run(s.id, 'go again'), true) // reuses the same agent, fresh callbacks
+  // The new run cleared the buffer, so the first drain sees nothing stale.
+  assert.equal(agents[0]!.callbacks!.onSteerDrain!(), null)
+})
+
+// ── T4: structured per-worker delegation ────────────────────────────
+
+test('T4: onDelegationActivity emits per-worker delegation with progress + elapsed', () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const cb = agents[0]!.callbacks!
+  cb.onDelegationActivity!({
+    workOrderId: 'wo:T1',
+    parentToolId: 'tool-1',
+    profile: 'code_scout',
+    status: 'running',
+    progressLine: '⚙ grep',
+  })
+  cb.onDelegationActivity!({
+    workOrderId: 'wo:T1',
+    parentToolId: 'tool-1',
+    status: 'passed',
+    progressLine: 'found it',
+  })
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'delegation')
+  assert.equal(evs.length, 2)
+  assert.equal(evs[0]!.data.workerId, 'wo:T1')
+  assert.equal(evs[0]!.data.parentId, 'tool-1')
+  assert.equal(evs[0]!.data.status, 'running')
+  assert.equal(evs[0]!.data.progressLine, '⚙ grep')
+  assert.equal(typeof evs[0]!.data.elapsedMs, 'number')
+  assert.equal(evs[1]!.data.status, 'passed')
+})

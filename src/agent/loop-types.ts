@@ -19,6 +19,7 @@ import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
+import type { DelegationActivity } from '../tools/types.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
 
@@ -163,4 +164,6 @@ export interface AgentCallbacks {
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
+  /** T4 — structured per-worker delegation status/progress (subagent panel). */
+  onDelegationActivity?: (activity: DelegationActivity) => void
 }

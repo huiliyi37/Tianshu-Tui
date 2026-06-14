@@ -79,6 +79,38 @@ test('prompt on a busy session returns 409', async () => {
   assert.equal(again.status, 409)
 })
 
+test('T3: POST /steer queues guidance on a running session', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  const res = await router('POST', `/sessions/${id}/steer`, { text: 'prefer tests' }, AUTH)
+  assert.equal(res.status, 200)
+  assert.equal((res.body as { queued: boolean }).queued, true)
+})
+
+test('T3: POST /steer on an idle session returns 409', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', {}, AUTH) // idle, no prompt
+  const id = (created.body as { id: string }).id
+  const res = await router('POST', `/sessions/${id}/steer`, { text: 'hi' }, AUTH)
+  assert.equal(res.status, 409)
+})
+
+test('T3: POST /steer validates the text field and is Bearer-gated', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  const empty = await router('POST', `/sessions/${id}/steer`, { text: '  ' }, AUTH)
+  assert.equal(empty.status, 400)
+
+  const unauth = await router('POST', `/sessions/${id}/steer`, { text: 'x' }, {})
+  assert.equal(unauth.status, 401)
+
+  const missing = await router('POST', '/sessions/nope/steer', { text: 'x' }, AUTH)
+  assert.equal(missing.status, 404)
+})
+
 test('intervention answer route resolves a pending approval', async () => {
   const { router, agents } = setup()
   const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)

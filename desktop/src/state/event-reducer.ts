@@ -3,9 +3,23 @@ import type {
   DelegationNode,
   IntentRequest,
   SessionEvent,
+  TodoStateItem,
 } from '../runtime/types'
 
-export type ConvoKind = 'user' | 'assistant' | 'tool' | 'result' | 'phase' | 'error' | 'decision_shift'
+export type ConvoKind =
+  | 'user'
+  | 'assistant'
+  | 'tool'
+  | 'result'
+  | 'phase'
+  | 'error'
+  | 'decision_shift'
+  // T1 — process observability blocks.
+  | 'thinking'
+  | 'turn'
+  | 'checkpoint'
+  // T3 — mid-run user guidance echo.
+  | 'steer'
 
 export interface ConvoBlock {
   key: string
@@ -21,6 +35,14 @@ export interface ConvoBlock {
     methods: string[]
     severity: 'info' | 'warn'
   }
+  /** T1 — turn boundary metadata (turn_complete). */
+  turn?: {
+    turnNumber?: number
+    totalTokens?: number
+    isFinal?: boolean
+  }
+  /** T1 — checkpoint anchor (checkpoint). */
+  hash?: string
 }
 
 export interface EventViewState {
@@ -31,10 +53,14 @@ export interface EventViewState {
   /** Bumped on every artifact event so consumers can invalidate the artifact query. */
   artifactRev: number
   delegation: Record<string, DelegationNode>
+  /** T2 — active task list (latest `todo` write); empty until the agent plans. */
+  todos: TodoStateItem[]
   status?: string
   phase?: string
   /** Whether the last block is an open assistant run that text deltas append to. */
   private_textOpen: boolean
+  /** T1 — whether the last block is an open reasoning run that thinking deltas append to. */
+  private_thinkingOpen: boolean
 }
 
 export const initialEventState: EventViewState = {
@@ -44,7 +70,9 @@ export const initialEventState: EventViewState = {
   pendingIntent: null,
   artifactRev: 0,
   delegation: {},
+  todos: [],
   private_textOpen: false,
+  private_thinkingOpen: false,
 }
 
 export type EventAction =
@@ -73,6 +101,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
   switch (ev.type) {
     case 'user':
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       next.blocks = [...next.blocks, {
         key: `u-${ev.seq}`,
         kind: 'user',
@@ -81,6 +110,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
+      next.private_thinkingOpen = false
       if (next.private_textOpen && next.blocks.length > 0) {
         const blocks = next.blocks.slice()
         const last = blocks[blocks.length - 1]!
@@ -92,8 +122,25 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       }
       return next
     }
+    case 'thinking_delta': {
+      // T1 — accumulate reasoning into a single collapsible block per run, mirroring
+      // text_delta. Any other event kind closes the open thinking block.
+      const text = String(ev.data.text ?? '')
+      next.private_textOpen = false
+      if (next.private_thinkingOpen && next.blocks.length > 0) {
+        const blocks = next.blocks.slice()
+        const last = blocks[blocks.length - 1]!
+        blocks[blocks.length - 1] = { ...last, text: last.text + text }
+        next.blocks = blocks
+      } else {
+        next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
+        next.private_thinkingOpen = true
+      }
+      return next
+    }
     case 'tool_use':
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       next.blocks = [...next.blocks, {
         key: `tu-${ev.seq}`,
         kind: 'tool',
@@ -103,6 +150,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'tool_result':
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       next.blocks = [...next.blocks, {
         key: `tr-${ev.seq}`,
         kind: 'result',
@@ -113,10 +161,47 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'phase':
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       next.phase = String(ev.data.phase ?? '')
       return next
+    case 'turn_complete': {
+      // T1 — turn boundary marker. Carries usage so the UI can show a subtle
+      // "turn N · ~T tokens" divider between turns.
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      const usage = (ev.data.usage as Record<string, unknown> | undefined) ?? {}
+      const totalTokens = Number(
+        usage.totalTokens ?? usage.total_tokens ?? usage.total ?? 0,
+      ) || undefined
+      next.blocks = [...next.blocks, {
+        key: `turn-${ev.seq}`,
+        kind: 'turn',
+        text: '',
+        turn: {
+          turnNumber: ev.data.turnNumber != null ? Number(ev.data.turnNumber) : undefined,
+          totalTokens,
+          isFinal: !!ev.data.isFinal,
+        },
+      }]
+      return next
+    }
+    case 'checkpoint': {
+      // T1 — inline rollback anchor created before the first mutating tool of a turn.
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      const hash = String(ev.data.hash ?? '')
+      if (!hash) return next
+      next.blocks = [...next.blocks, {
+        key: `cp-${ev.seq}`,
+        kind: 'checkpoint',
+        text: '',
+        hash,
+      }]
+      return next
+    }
     case 'decision_shift': {
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       const methods = Array.isArray(ev.data.methods) ? (ev.data.methods as unknown[]).map((m) => String(m)) : []
       const severity = ev.data.severity === 'warn' ? 'warn' : 'info'
       next.blocks = [...next.blocks, {
@@ -135,6 +220,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     case 'error':
       next.private_textOpen = false
+      next.private_thinkingOpen = false
       next.blocks = [...next.blocks, {
         key: `e-${ev.seq}`,
         kind: 'error',
@@ -174,12 +260,17 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'delegation': {
       const workerId = String(ev.data.workerId ?? '')
       if (!workerId) return next
+      // T4 — merge with the prior node so terminal updates (which omit profile /
+      // objective) don't wipe fields set by earlier running updates.
+      const prev = next.delegation[workerId]
       const node: DelegationNode = {
         workerId,
-        parentId: ev.data.parentId ? String(ev.data.parentId) : undefined,
-        objective: String(ev.data.objective ?? ''),
-        status: String(ev.data.status ?? ''),
-        phase: ev.data.phase ? String(ev.data.phase) : undefined,
+        parentId: ev.data.parentId ? String(ev.data.parentId) : prev?.parentId,
+        objective: ev.data.objective != null ? String(ev.data.objective) : (prev?.objective ?? ''),
+        status: ev.data.status != null ? String(ev.data.status) : (prev?.status ?? ''),
+        phase: ev.data.phase != null ? String(ev.data.phase) : prev?.phase,
+        progressLine: ev.data.progressLine != null ? String(ev.data.progressLine) : prev?.progressLine,
+        elapsedMs: ev.data.elapsedMs != null ? Number(ev.data.elapsedMs) : prev?.elapsedMs,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }
@@ -188,6 +279,31 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'artifact':
       next.artifactRev = next.artifactRev + 1
       return next
+    case 'steer_queued':
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      next.blocks = [...next.blocks, {
+        key: `sg-${ev.seq}`,
+        kind: 'steer',
+        text: String(ev.data.text ?? ''),
+      }]
+      return next
+    case 'todo_state': {
+      // T2 — full-replace active task list (the tool is replace-only).
+      const raw = Array.isArray(ev.data.items) ? (ev.data.items as unknown[]) : []
+      const todos: TodoStateItem[] = []
+      for (const entry of raw) {
+        if (!entry || typeof entry !== 'object') continue
+        const e = entry as Record<string, unknown>
+        const id = typeof e.id === 'string' ? e.id : ''
+        const content = typeof e.content === 'string' ? e.content : ''
+        const status = e.status === 'in_progress' || e.status === 'completed' ? e.status : 'pending'
+        if (!id || !content) continue
+        todos.push({ id, content, status })
+      }
+      next.todos = todos
+      return next
+    }
     default:
       return next
   }
