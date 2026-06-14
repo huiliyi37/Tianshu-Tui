@@ -90,7 +90,7 @@ export function buildIntentRouterPrompt(input: {
   }
 
   return [
-    '你是天枢的轻量意图检索路由器。不要回答用户任务，不要调用工具，不要输出解释。',
+    '你是天枢星域的轻量意图检索路由器。不要回答用户任务，不要调用工具，不要输出解释。',
     '目标：先归类任务真实类型，再列出该类型应该先查的信息源。用户关键词是线索不是边界。',
     '只输出 JSON，不要 Markdown，不要代码块之外的文本。',
     '允许的 taskKinds: bug_fix, performance_diagnosis, new_feature, architecture_design, refactor, usage_question, code_explanation, review_audit, verification, security_safety。最多 2 个。',
