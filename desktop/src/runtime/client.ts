@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ArtifactSummary,
   HealthInfo,
+  ScheduledTask,
   SessionEvent,
   SessionRecord,
 } from './types'
@@ -100,8 +101,16 @@ export function fetchEvents(id: string, since: number): Promise<{ events: Sessio
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }
 
-export function answerApproval(id: string, requestId: string, decision: ApprovalDecision): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
+export function answerApproval(
+  id: string,
+  requestId: string,
+  decision: ApprovalDecision,
+  editedInput?: Record<string, unknown>,
+): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, {
+    decision,
+    ...(editedInput ? { editedInput } : {}),
+  })
 }
 
 /** N2 — resolve an intent-preview intervention. */
@@ -124,4 +133,28 @@ export function getArtifact(id: string, artifactId: string): Promise<{ artifact:
   return apiGet<{ artifact: ArtifactSummary; raw: string }>(
     `/sessions/${id}/artifacts/${encodeURIComponent(artifactId)}`,
   )
+}
+
+// ── Schedule (N3) ───────────────────────────────────────────────────
+
+export async function listSchedule(): Promise<ScheduledTask[]> {
+  const { tasks } = await apiGet<{ tasks: ScheduledTask[] }>('/schedule')
+  return tasks
+}
+
+export function createSchedule(input: {
+  prompt: string
+  trigger: { type: 'interval' | 'cron' | 'oneshot'; spec: string }
+  allowedTools?: string[]
+}): Promise<ScheduledTask> {
+  return apiPost<ScheduledTask>('/schedule', input)
+}
+
+export function pauseSchedule(id: string, enabled: boolean): Promise<{ id: string; enabled: boolean }> {
+  return apiPost<{ id: string; enabled: boolean }>(`/schedule/${id}/pause`, { enabled })
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  const res = await rivetFetch(`/schedule/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE /schedule/${id} -> ${res.status}`)
 }

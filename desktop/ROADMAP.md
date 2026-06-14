@@ -18,9 +18,27 @@
 | M3   | Artifacts 信任层 | B4 复用 `ArtifactStore` 升为 session API + taxonomy（plan/task-list/walkthrough/diff/screenshot/test-result）；前端 Artifacts 面板 + 查看 raw | `classifyArtifact` + 跨会话不串读测试绿；`readRaw()` 完整性沿用原 store |
 
 **验证边界（诚实声明）**：后端全部 `node:test` 覆盖并通过、`tsc --noEmit` 与发行 `tsup` 构建均绿；
-桌面前端 `tsc + vite build` 绿。**Rust 外壳（`src-tauri/`）因本机无 Rust/Tauri 工具链未实跑**——
-它是标准 Tauri 2.x 代码（spawn sidecar + `runtime_info` 命令 + 退出杀子进程），需在装好前置的机器
-上 `npm run tauri:dev` 验证。
+桌面前端 `tsc + vite build` 绿。Rust 外壳自 N 阶段起已在本机实跑（见下）。
+
+## N 阶段已交付（N0–N5）—— Antigravity 2.0 平价能力与细节建设
+
+在 M0–M3 基座上补齐 Antigravity 2.0 其余主线（暂不做星域/议事会个性化 I1），并把真实 Tauri
+启动 + 单平台打包纳入交付门。
+
+| 阶段 | 内容 | 交付物 | 验证 |
+|------|------|--------|------|
+| N0 | 前端架构重构 | TanStack Query 数据层 + UI store（Context+reducer）+ 类型化 `state/event-reducer.ts` + `runtime/sse.ts`（fetch ReadableStream 带 Authorization 消费 `/stream`，`?since=` 回灌）+ `surfaces/` 模块布局 | `event-reducer` 单测绿；前端 `tsc + vite build` 绿 |
+| N1 | 后端持久化与韧性 | `FileSessionPersistence`（`index.json` + append-only `events.jsonl`）；`RuntimeSessionManager` 懒实例化 agent + 启动 rehydrate（running→aborted 终态标记）；`GET /health`；前端崩溃重连 banner | 持久化/rehydrate/health 反证测试绿（损坏尾行不致命、seq 不回退、重启可回放） |
+| N2 | 信任层闭环 | `POST /sessions/:id/feedback` 把 artifact 评论回灌下一轮；审批 modal 渲染 diff 并支持 `editedInput`；`intent_required` → IntentModal（continue/veto/alternative）；`@tauri-apps/plugin-notification` 失焦时 OS 通知 | `n2-trust` 路由+manager 测试绿 |
+| N3 | 异步与编排 | `SessionRuntimePool`（`RuntimePool`→manager 桥，定时任务出现为可见会话）+ `manager.runAndWait`；`CronScheduler/TaskRegistry/CronWiring` 接进 `serve`；`/schedule` 路由 + ScheduleSurface；`onToolUse/Result` 合成 `delegation` 事件 + 委派树 + Inbox | `n3-orchestration` 测试绿（spawn 可见会话、summary/changedFiles、schedule CRUD、委派合成） |
+| N4 | 浏览器验证面 | `src/tools/browser.ts`：`BrowserDriver` 抽象 + Playwright 实现（动态加载）；**fail-closed 域白名单** + **强制 approval**；截图落 `browser_screenshot` → `screenshot` artifact，前端渲染为 `<img data:…>` | `browser` 工具层测试绿（空白名单全拒、越界拒、协议拒、driver 不预建、always-approval） |
+| N5 | 分发门 | `bundle.resources` 把 `dist/` 装为 `rivet-runtime` 资源；`lib.rs` 在 `setup` 内 spawn，`sidecar_entry` 优先解析打包资源、`detect_node()` 兼容 Finder 最小 PATH；CSP 加 `img-src 'self' data:` 供截图 | **本机实跑**：`tauri:build` 出 `天枢.app`（含 `Resources/rivet-runtime/main.js`）；`tauri:dev` 起窗 → 子进程 sidecar 经资源路径拉起、监听 127.0.0.1、401 fail-closed |
+
+**N5 分发决策（诚实声明）**：sidecar 采用 **ship `dist/` 资源 + 探测系统 node** 方案——`tsup` 把
+运行时打成自包含 ESM chunk（`better-sqlite3` 运行时可选），随 Tauri `bundle.resources` 进
+`Resources/rivet-runtime/`；node 走 `detect_node()`（Homebrew/usr 常见路径 + PATH 兜底）。**内置私有
+node 二进制与 DMG/安装器封装暂缓**——`bundle.targets` 当前限定 `["app"]`（`.app` 为可直接运行交付物；
+`bundle_dmg.sh` 需 Finder GUI 自动化，留待干净 release CI）。三平台矩阵仍留 I7。
 
 ## 后续迭代（本轮不做，按 Antigravity 2.0 其余能力 + 天枢个性化排序）
 
@@ -33,13 +51,13 @@ decisionStyle / toolWhitelist / 方法论 suffix / glyph+accent。新会话/子�
 - 验收：新会话能选/自动派星域；卡片显示星符与 accent；议事会对一份 plan artifact 产出 N 星分歧意见
   并汇总成可执行裁决。
 
-### I2 — Scheduled Tasks（`/schedule`）
+### I2 — Scheduled Tasks（`/schedule`）✅ 已在 N3 交付
 把已有 [`CronScheduler`](../src/server/cron-scheduler.ts) + [`TaskRegistry`](../src/server/task-registry.ts)
 + `CronWiring` 接进 daemon（含实现 `RuntimePool` 让定时任务复用 RuntimeSessionManager），GUI 管理
 cron / 一次性定时任务。
 - 验收：建一个每日 cron 任务，到点自动 spawn 一个会话跑通并在 dashboard 出现；可暂停/删除。
 
-### I3 — Dynamic subagents UI + slash 对齐
+### I3 — Dynamic subagents UI + slash 对齐（委派树部分 ✅ 已在 N3 交付）
 可视化委派树（谁派了谁、各自 phase/产出）；slash 对齐：`/goal`（已有 `--goal`，见
 [`src/goal-loop.ts`](../src/goal-loop.ts)）、`/grill-me`（≈ 现有 `/interview`）。
 - 验收：一个会话委派 2 个子代理，UI 实时画出树与状态；`/goal` 从前端可发起。
@@ -48,7 +66,7 @@ cron / 一次性定时任务。
 `.rivet/hooks.json` 的编辑 / 巡检 / 启停（[`src/hooks/user-hooks-runner.ts`](../src/hooks/user-hooks-runner.ts)）。
 - 验收：面板增删一条 hook，下一轮 tool 调用按配置触发并在事件流可见。
 
-### I5 — Browser 验证面（`/browser`）
+### I5 — Browser 验证面（`/browser`）✅ 已在 N4 交付
 Playwright headless 工具 + 截图/录屏 Artifact + **强制 approval 白名单**（新攻击面，必须在 M2/M3
 审批与 artifact 成熟后再引入）。
 - 验收：agent 请求打开 URL 必走审批；截图落为 `screenshot` 类 artifact 并在面板可看。

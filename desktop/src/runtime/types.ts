@@ -67,13 +67,13 @@ export interface HealthInfo {
 
 export interface ScheduledTask {
   id: string
-  name: string
-  schedule: string
   prompt: string
-  cwd?: string
-  enabled: boolean
-  lastRunAt?: number
-  nextRunAt?: number
+  allowedTools: string[]
+  trigger: { type: 'interval' | 'cron' | 'oneshot'; spec: string }
+  createdAt: string
+  lastTriggeredAt?: string
+  triggerCount: number
+  enabled?: boolean
 }
 
 export interface DelegationNode {

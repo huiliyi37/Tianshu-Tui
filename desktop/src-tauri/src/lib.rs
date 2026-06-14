@@ -48,18 +48,52 @@ fn random_token() -> String {
         .collect()
 }
 
-/// Resolve the rivet runtime entry point. Defaults to the repo's built
-/// `dist/main.js` (two levels up from `desktop/src-tauri`), overridable via env
-/// for packaged builds that ship the sidecar elsewhere.
-fn sidecar_entry() -> PathBuf {
+/// Resolve the rivet runtime entry point.
+///
+/// Resolution order (fail-soft, packaged → dev):
+///   1. `RIVET_SIDECAR_ENTRY` env override (CI / power users).
+///   2. Bundled resource `rivet-runtime/main.js` (production `.app`/installer).
+///      The whole tsup `dist/` is shipped via `bundle.resources` in
+///      tauri.conf.json and copied into the platform resource dir.
+///   3. Repo `dist/main.js` two levels up from `desktop/src-tauri` (dev mode).
+fn sidecar_entry(app: &tauri::App) -> PathBuf {
     if let Ok(p) = std::env::var("RIVET_SIDECAR_ENTRY") {
         return PathBuf::from(p);
+    }
+    if let Ok(res) = app.path().resource_dir() {
+        let bundled = res.join("rivet-runtime").join("main.js");
+        if bundled.exists() {
+            return bundled;
+        }
     }
     let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     // desktop/src-tauri -> desktop -> repo root
     dir.pop();
     dir.pop();
     dir.join("dist").join("main.js")
+}
+
+/// Locate a Node.js runtime to host the sidecar.
+///
+/// A bundled `.app` launched from Finder/Dock inherits a minimal PATH that
+/// usually lacks Homebrew/nvm dirs, so a bare `node` lookup fails. We probe the
+/// common install locations before falling back to PATH resolution. Embedding a
+/// private Node binary is deferred (see ROADMAP N5).
+fn detect_node() -> String {
+    if let Ok(cmd) = std::env::var("RIVET_SIDECAR_CMD") {
+        return cmd;
+    }
+    let candidates = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ];
+    for c in candidates {
+        if std::path::Path::new(c).exists() {
+            return c.to_string();
+        }
+    }
+    "node".to_string()
 }
 
 fn wait_until_ready(port: u16, timeout: Duration) -> bool {
@@ -73,11 +107,11 @@ fn wait_until_ready(port: u16, timeout: Duration) -> bool {
     false
 }
 
-fn spawn_sidecar() -> (RuntimeInfo, Option<Child>) {
+fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let port = pick_free_port();
     let token = random_token();
-    let node = std::env::var("RIVET_SIDECAR_CMD").unwrap_or_else(|_| "node".to_string());
-    let entry = sidecar_entry();
+    let node = detect_node();
+    let entry = sidecar_entry(app);
 
     let child = Command::new(node)
         .arg(entry)
@@ -97,14 +131,19 @@ fn spawn_sidecar() -> (RuntimeInfo, Option<Child>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let (info, child) = spawn_sidecar();
-
     tauri::Builder::default()
-        .manage(Sidecar {
-            info,
-            child: Mutex::new(child),
-        })
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![runtime_info])
+        .setup(|app| {
+            // Spawn inside setup so the sidecar entry can be resolved against the
+            // packaged resource dir (only available once the app handle exists).
+            let (info, child) = spawn_sidecar(app);
+            app.manage(Sidecar {
+                info,
+                child: Mutex::new(child),
+            });
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<Sidecar>() {
