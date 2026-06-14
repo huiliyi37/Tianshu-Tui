@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import { buildSessionRoutes } from '../session-routes.js'
 import { createRouter } from '../index.js'
+import { SessionContext } from '../../agent/context.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
@@ -168,4 +169,26 @@ test('#8 POST /rewind returns 409 when session is running', async () => {
 
   const res = await router('POST', `/sessions/${id}/rewind`, { messageIndex: 2 }, AUTH)
   assert.equal(res.status, 409)
+})
+
+test('#9 [反证 #2] SessionContext.replaceMessages resets turnCount + turnCacheHistory', () => {
+  // Directly test SessionContext — the mock agent can't verify derived state.
+  const ctx = new SessionContext()
+  // Simulate 3 turns
+  ctx.addUserMessage('msg1')
+  ctx.addAssistantBlocks([{ type: 'text', text: 'resp1' }])
+  ctx.addUserMessage('msg2')
+  ctx.addAssistantBlocks([{ type: 'text', text: 'resp2' }])
+  ctx.addUserMessage('msg3')
+  ctx.addAssistantBlocks([{ type: 'text', text: 'resp3' }])
+  ctx.recordTurnCache(3, { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 80, cache_creation_input_tokens: 20 })
+
+  assert.equal(ctx.getTurnCount(), 3, '3 user messages → turnCount 3')
+
+  // Rewind to turn 1: keep only first user+assistant pair
+  const msgs = ctx.getMessages().slice(0, 2)
+  ctx.replaceMessages(msgs)
+
+  assert.equal(ctx.getTurnCount(), 1, 'after rewind turnCount should be 1')
+  assert.equal(ctx.getCacheHistory().length, 0, 'turnCacheHistory should be cleared')
 })

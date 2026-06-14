@@ -128,6 +128,11 @@ export class SessionContext {
   replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
+    // Recount user turns from the truncated message list.
+    this.state.turnCount = messages.filter(m => m.role === 'user').length
+    // Clear derived state that referenced the removed messages.
+    this.state.turnCacheHistory = []
+    this.state.compactedAtTurns = new Set()
     // Snapshot the array so subsequent mutations to state.oaiMessages don't
     // bleed into a listener's deferred work (e.g. async disk write).
     this.onMutation?.({ type: 'replace', messages: messages.slice() })
