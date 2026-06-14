@@ -48,6 +48,18 @@ The shared gap: <what both lack — the thing this plan adds>
 - ❌ "我们需要一个 path grants 功能"
 - ✅ "两个独立门（validatePathSafe + defaultWritableRoots）都缺少用户授权后放行的能力。今天用户说'写 ~/Desktop'，两个门都硬拒绝，必须改两个才能让一个授权生效。"
 
+### 外部参照系（可选——有竞品/先驱时写）
+
+当方案有明确的外部参照物（竞品功能、先驱实现、行业惯例）时，标注它和本方案的照搬/偏离点。**范式照搬优先于个性化——先证明能跑通竞品的主线路径，再谈差异化。**
+
+```markdown
+## External Reference (optional)
+
+| Reference | What it does | Our approach | Deviation |
+|-----------|-------------|--------------|-----------|
+| <竞品/工具 X> | <它怎么解决这个问题> | 照搬 / 复用 / 受启发 | <偏离点和理由，或"无——忠实照搬"> |
+```
+
 ---
 
 ## 阶段二：边界标定 —— Scope Check
@@ -327,12 +339,14 @@ flowchart TD
 
 ### Wave breakdown
 
-| Wave | Tasks | Verifies | Commit message |
-|------|-------|----------|---------------|
-| 1 | path-grants.ts + tests | store, canonicalize, isolate | `feat(tools): session-scoped path grant store` |
-| 2 | path-validate.ts + sandbox-profile.ts + tests | both gates honor grants | `feat(tools): path-validate and sandbox honor grants` |
-| 3 | tool-pipeline.ts + request-path-access.ts + tests | approval flow integration | `feat(agent): inline gate + request_path_access tool` |
-| 4 | bootstrap.ts + prompt/static.ts | startup hydration + model guidance | `feat(bootstrap): load persisted grants at startup` |
+| Wave | Tasks | Verifies | Gate criteria (过门条件) | Commit message |
+|------|-------|----------|------------------------|---------------|
+| 1 | path-grants.ts + tests | store, canonicalize, isolate | grant 写入后重启进程仍可读取；跨 workspace 隔离测试红 | `feat(tools): session-scoped path grant store` |
+| 2 | path-validate.ts + sandbox-profile.ts + tests | both gates honor grants | read-only grant 无法通过 write 操作（反证测试红） | `feat(tools): path-validate and sandbox honor grants` |
+| 3 | tool-pipeline.ts + request-path-access.ts + tests | approval flow integration | 工作区外路径触发审批，批准后两个门都放行 | `feat(agent): inline gate + request_path_access tool` |
+| 4 | bootstrap.ts + prompt/static.ts | startup hydration + model guidance | 重启后持久化 grants 自动加载；模型指导可见 | `feat(bootstrap): load persisted grants at startup` |
+
+> **过门条件（Gate criteria）**：不是"测试绿"——那是底线。过门条件回答的是**"这个 Wave 做完后，产品层面的可验证状态是什么"**。一个 Wave 过门意味着这个 Wave 自身就是一个可交付的增量，即使后续 Wave 全部取消，产品在当前 Wave 的范围内是可用的。
 ```
 
 ---
@@ -352,3 +366,6 @@ flowchart TD
 - [ ] **执行次序**：按依赖排序，每个 task 独立可提交
 - [ ] **文件路径**：全为绝对路径或 `src/` 相对路径，无模糊引用
 - [ ] **可执行指令实证**：文档中每条 grep/regex/shell 命令已在真实代码库中跑过并确认输出覆盖预期目标。不跑不交付。
+- [ ] **可执行指令实证**：文档中每条 grep/regex/shell 命令已在真实代码库中跑过并确认输出覆盖预期目标。不跑不交付。
+- [ ] **验证边界标注**：当前环境无法验证的部分（缺工具链、缺外部服务、跨平台）已显式标注为"未实跑/需 X 环境验证"，没有把未验证的代码冒充为已验证。
+- [ ] **过门条件**：每个 Wave 有产品层面的过门条件（不只是"测试绿"），写明了这个 Wave 做完后产品的可验证状态。

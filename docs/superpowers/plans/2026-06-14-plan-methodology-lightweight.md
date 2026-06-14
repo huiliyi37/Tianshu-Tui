@@ -213,7 +213,12 @@ flowchart TD
 \`\`\`
 
 ### Wave breakdown
-
+| Wave | Tasks | Verifies | Gate criteria (过门) | Commit |
+|------|-------|----------|---------------------|--------|
+| 1 | 新建 `collapsed-read-search.ts`（纯函数 + 类型） | 独立 typecheck | 纯函数可独立 import 且 typecheck 绿 | `refactor(tui): extract collapsed-read-search pure functions` |
+| 2 | 修复 `app.ts` pendingTools 泄漏 | bug fix, test GREEN | 泄漏的 entry 在反证测试中红→绿 | `fix(tui): pendingTools leak in collapsible tool results` |
+| 3 | 切换 `app.ts` + 新建测试 | typecheck + tests | TUI 渲染折叠组正常，旧消费者无回归 | `refactor(tui): switch to collapsed-read-search pipeline` |
+| 4 | 旧文件 deprecation → 删除 | 确认无消费者 | grep 确认零导入旧模块 | `chore(tui): remove deprecated tool-group module` |
 | Wave | Tasks | Verifies | Commit |
 |------|-------|----------|--------|
 | 1 | 新建 `collapsed-read-search.ts`（纯函数 + 类型） | 独立 typecheck | `refactor(tui): extract collapsed-read-search pure functions` |
@@ -264,3 +269,5 @@ flowchart TD
 - [ ] **执行次序**：依赖排序，每 wave 独立可提交
 - [ ] **不改什么**：显式列出保持不变的合约/导出
 - [ ] **可执行指令实证**：文档中每条 grep/regex/shell 命令已在真实代码库中跑过并确认输出覆盖预期目标。不跑不交付。
+- [ ] **验证边界标注**：当前环境无法验证的部分已标注为"未实跑/需 X 环境验证"。
+- [ ] **过门条件**：每个 Wave 有产品层面的过门条件（不只是"测试绿"）。
