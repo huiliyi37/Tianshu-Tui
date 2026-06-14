@@ -647,6 +647,11 @@ export class RuntimeSessionManager {
     // Truncate messages to the selected point.
     s.agent.replaceMessages(msgs.slice(0, messageIndex))
 
+    // Update session status: rewind returns the session to idle so the user
+    // can send a new prompt. Previous status (completed/failed) is stale.
+    s.record.status = 'idle'
+    s.record.error = undefined
+
     // Append rewind event (append-only — viewers see the marker).
     this.append(s, 'rewind', {
       messageIndex,
