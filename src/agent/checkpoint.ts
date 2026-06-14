@@ -2,7 +2,7 @@ import { execFile } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, isAbsolute, relative } from 'path'
 import { promisify } from 'util'
 import { classifyIrreversibleEffects } from './side-effect-classifier.js'
 
@@ -282,8 +282,17 @@ export async function createCheckpoint(cwd: string, label?: string, sessionId?: 
 export function recordAgentTouchedFile(cwd: string, file: string, sessionId?: string): void {
   const data = sessionId ? loadCheckpointDataForSession(sessionId) : loadCheckpointData(cwd)
   if (!data) return
-  const normalized = file.replace(/^\.\//, '')
-  if (normalized.startsWith('/') || normalized.includes('..')) return
+  let normalized = file.replace(/^\.\//, '')
+  // Tools commonly pass an absolute file_path. Re-base it relative to the repo
+  // root so it matches the checkpoint's relative bookkeeping; reject anything
+  // that resolves outside cwd. (Mirrors the claim-path normalization the R2
+  // conflict guard already does.)
+  if (isAbsolute(normalized)) {
+    const rel = relative(cwd, normalized)
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return
+    normalized = rel
+  }
+  if (normalized.includes('..')) return
   data.agentTouchedFiles = [...new Set([...data.agentTouchedFiles, normalized])].sort()
   const outFile = sessionId ? checkpointFileForSession(sessionId) : checkpointFile(cwd)
   writeFileAtomicSync(outFile, JSON.stringify(data, null, 2))
