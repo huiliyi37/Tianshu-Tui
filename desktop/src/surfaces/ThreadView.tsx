@@ -13,15 +13,9 @@ const STATUS_LABEL: Record<string, string> = {
   aborted: '已中止',
 }
 
-interface UserTurn {
-  key: string
-  text: string
-  before: number // view.blocks length at send time → render order anchor
-}
-
-// Thread view (P2) — the single-session working surface. Status header (with a
+// Thread view (P2/Q1) — the single-session working surface. Status header (with a
 // reserved slot for a future CVM domain glyph) + Codex-style message stream
-// (collapsible tools, streaming indicator, optimistic user turns) + composer.
+// (collapsible tools, streaming indicator, server-persisted user turns) + composer.
 export function ThreadView(props: {
   session: SessionRecord
   view: EventViewState
@@ -30,54 +24,20 @@ export function ThreadView(props: {
 }) {
   const { session, view, onSend, onAbort } = props
   const [input, setInput] = useState('')
-  const [userTurns, setUserTurns] = useState<UserTurn[]>([])
   const endRef = useRef<HTMLDivElement>(null)
   const busy = session.status === 'running'
 
   useEffect(() => {
-    setUserTurns([])
-  }, [session.id])
-
-  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [view.blocks.length, userTurns.length])
+  }, [view.blocks.length])
 
   const submit = () => {
     const text = input.trim()
     if (!text) return
-    setUserTurns((t) => [...t, { key: `u-${Date.now()}`, text, before: view.blocks.length }])
+    // The user turn is echoed back as a 'user' event (server run()), so we don't
+    // render optimistically — the SSE round-trip is sub-ms on localhost.
     onSend(text)
     setInput('')
-  }
-
-  // Interleave optimistic user turns with reducer blocks by their anchor index.
-  const rendered: React.ReactNode[] = []
-  const flushUsers = (idx: number) => {
-    for (const u of userTurns) {
-      if (u.before === idx) {
-        rendered.push(
-          <div key={u.key} className="msg user">
-            <div className="msg-role">你</div>
-            <div className="msg-body">{u.text}</div>
-          </div>,
-        )
-      }
-    }
-  }
-  view.blocks.forEach((b, i) => {
-    flushUsers(i)
-    rendered.push(<Block key={b.key} block={b} />)
-  })
-  // Trailing user turns (sent against the current tail / before any response).
-  for (const u of userTurns) {
-    if (u.before >= view.blocks.length) {
-      rendered.push(
-        <div key={u.key} className="msg user">
-          <div className="msg-role">你</div>
-          <div className="msg-body">{u.text}</div>
-        </div>,
-      )
-    }
   }
 
   const showThinking = busy && !view.private_textOpen
@@ -98,8 +58,8 @@ export function ThreadView(props: {
       </header>
 
       <div className="messages">
-        {rendered.length === 0 && <div className="empty sm">发一条消息开始</div>}
-        {rendered}
+        {view.blocks.length === 0 && <div className="empty sm">发一条消息开始</div>}
+        {view.blocks.map((b) => <Block key={b.key} block={b} />)}
         {showThinking && (
           <div className="thinking">
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
@@ -134,6 +94,14 @@ export function ThreadView(props: {
 }
 
 function Block({ block }: { block: ConvoBlock }) {
+  if (block.kind === 'user') {
+    return (
+      <div className="msg user">
+        <div className="msg-role">你</div>
+        <div className="msg-body">{block.text}</div>
+      </div>
+    )
+  }
   if (block.kind === 'tool' || block.kind === 'result') {
     return <ToolBlock title={block.role ?? block.kind} body={block.text} isError={block.isError} />
   }

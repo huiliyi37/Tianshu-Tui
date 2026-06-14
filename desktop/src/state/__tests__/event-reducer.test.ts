@@ -82,3 +82,26 @@ test('status and phase tracked', () => {
   assert.equal(s.status, 'running')
   assert.equal(s.phase, 'planning')
 })
+
+test('user event produces a user block (Q1)', () => {
+  seq = 0
+  const s = fold([ev('user', { text: '帮我修一下 bug' })])
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.kind, 'user')
+  assert.equal(s.blocks[0]!.text, '帮我修一下 bug')
+})
+
+test('user event breaks an open text run (Q1)', () => {
+  seq = 0
+  const s = fold([
+    ev('text_delta', { text: 'partial' }),
+    ev('user', { text: 'next turn' }),
+    ev('text_delta', { text: 'reply' }),
+  ])
+  assert.equal(s.blocks.length, 3)
+  assert.equal(s.blocks[0]!.kind, 'assistant')
+  assert.equal(s.blocks[1]!.kind, 'user')
+  assert.equal(s.blocks[1]!.text, 'next turn')
+  assert.equal(s.blocks[2]!.kind, 'assistant')
+  assert.equal(s.blocks[2]!.text, 'reply')
+})

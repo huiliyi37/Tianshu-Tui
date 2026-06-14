@@ -86,6 +86,66 @@ body {
 .pending-card .kind { color: var(--warning); font-size: var(--text-xs); text-transform: uppercase; }
 .pending-card .summary { margin: var(--space-1) 0 var(--space-2); word-break: break-word; }
 
+/* Inline approval/intent (Q3) */
+.review-pending {
+  margin: 0 var(--space-2) var(--space-2); padding: var(--space-3);
+  border: 1px solid var(--warning); background: var(--warning-soft);
+  border-radius: var(--radius-md);
+}
+.review-pending .rp-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.review-pending .kind { color: var(--warning); font-size: var(--text-xs); text-transform: uppercase; }
+.review-pending .rp-tool { font-family: var(--font-mono); color: var(--text-strong); font-weight: var(--weight-medium); }
+.rp-summary { margin: 0 0 var(--space-2); word-break: break-word; }
+.rp-preview {
+  margin: 0 0 var(--space-2); padding: var(--space-2); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: auto; max-height: 240px;
+  font-family: var(--font-mono); font-size: var(--text-sm); white-space: pre-wrap; word-break: break-word;
+}
+.rp-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+.review-pending .edit-input { width: 100%; min-height: 140px; margin-bottom: var(--space-2); }
+
+/* ── Attention center (Q2) ─────────────────────────────────────── */
+.attention .panel-header { display: flex; align-items: center; justify-content: space-between; }
+.attn-group { padding: var(--space-2) 0; }
+.attn-group-name {
+  padding: var(--space-1) var(--space-4); font-size: var(--text-xs); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.attn-card {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-4); cursor: pointer;
+}
+.attn-card:hover { background: var(--panel-2); }
+.attn-card.unseen { background: var(--accent-soft); }
+.attn-body { min-width: 0; }
+.attn-card .title { font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attn-card .meta { color: var(--muted); font-size: var(--text-sm); }
+.status-dot.reason-approval { background: var(--warning); }
+.status-dot.reason-failed { background: var(--error); }
+.status-dot.reason-completed { background: var(--success); }
+
+/* ── Command palette (Q4) ──────────────────────────────────────── */
+.palette-backdrop { align-items: flex-start; }
+.palette {
+  margin-top: 12vh; width: 560px; max-width: 92vw; max-height: 60vh;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.palette-input {
+  border: none; border-bottom: 1px solid var(--border); background: transparent;
+  color: var(--text); padding: var(--space-4); font-size: var(--text-md); outline: none;
+}
+.palette-list { overflow-y: auto; padding: var(--space-2); }
+.palette-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
+}
+.palette-item.active { background: var(--accent-soft); }
+.palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-hint { color: var(--muted); font-size: var(--text-xs); margin-left: var(--space-3); flex: none; }
+
 /* ── Project → Thread sidebar ──────────────────────────────────── */
 .project-sidebar {
   background: var(--panel); border-right: 1px solid var(--border);

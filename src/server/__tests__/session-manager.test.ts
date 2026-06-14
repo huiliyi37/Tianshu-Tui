@@ -110,6 +110,31 @@ test('getEvents(since) replays only newer events with monotonic seq', () => {
   assert.ok(tail.events[0]!.seq > since)
 })
 
+test('createSession with prompt records a user event with the prompt text (Q1)', () => {
+  const { manager } = makeManager()
+  const s = manager.createSession({ prompt: '帮我重构这个模块' })
+  const events = manager.getEvents(s.id, 0)!.events
+  const userEvent = events.find((e) => e.type === 'user')
+  assert.ok(userEvent, 'a user event must be recorded')
+  assert.equal(userEvent!.data.text, '帮我重构这个模块')
+  // user must precede status:running so the conversation renders in order
+  const userIdx = events.findIndex((e) => e.type === 'user')
+  const statusIdx = events.findIndex((e) => e.type === 'status')
+  assert.ok(userIdx < statusIdx, 'user event must precede status')
+})
+
+test('subsequent run() records another user event (Q1)', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'first' })
+  agents[0]!.finish()
+  await new Promise((r) => setTimeout(r, 0))
+  assert.equal(manager.run(s.id, 'second'), true)
+  const texts = manager.getEvents(s.id, 0)!.events
+    .filter((e) => e.type === 'user')
+    .map((e) => e.data.text)
+  assert.deepEqual(texts, ['first', 'second'])
+})
+
 test('approval is a two-way intervention resolved out of band', async () => {
   const { manager, agents } = makeManager()
   const s = manager.createSession({ prompt: 'go' })

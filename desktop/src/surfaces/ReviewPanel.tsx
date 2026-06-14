@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { getArtifact, sendArtifactFeedback } from '../runtime/client'
 import type { ApprovalRequest, ArtifactSummary, IntentRequest } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
-import { ApprovalModal } from '../components/ApprovalModal'
-import { IntentModal } from '../components/IntentModal'
+import { editableKey, previewOf } from '../lib/approval-preview'
 
 type ReviewTab = 'review' | 'council' | 'cognition'
 
-// Review panel (P3) — Codex's third pane. Aggregates the trust-layer surfaces of
-// the active thread: pending approvals/intents (decision still flows through the
-// existing modals, opened on demand) + artifacts/diff/screenshots. The tab bar
-// reserves slots for future CVM council/sensorium views (not rendered yet).
+// Review panel (P3/Q3) — Codex's third pane. Aggregates the trust-layer surfaces
+// of the active thread: pending approvals/intents handled INLINE (no blocking
+// modal) + artifacts/diff/screenshots. The tab bar reserves slots for future CVM
+// council/sensorium views (not rendered yet).
 export function ReviewPanel(props: {
   sessionId: string | null
   artifacts: ArtifactSummary[]
@@ -25,12 +24,6 @@ export function ReviewPanel(props: {
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [comment, setComment] = useState('')
   const [sending, setSending] = useState(false)
-  const [modal, setModal] = useState<'approval' | 'intent' | null>(null)
-
-  // New intervention → auto-open its modal once (preserves blocking-approval feel)
-  // while still leaving a card in the panel to reopen if dismissed later.
-  useEffect(() => { if (pendingApproval) setModal('approval') }, [pendingApproval?.requestId])
-  useEffect(() => { if (pendingIntent) setModal('intent') }, [pendingIntent?.requestId])
 
   const view = useCallback(async (a: ArtifactSummary) => {
     if (!sessionId) return
@@ -72,18 +65,10 @@ export function ReviewPanel(props: {
           <section className="review-section">
             <h4>待处理</h4>
             {pendingApproval && (
-              <div className="pending-card" onClick={() => setModal('approval')}>
-                <div className="kind">需批准</div>
-                <div className="summary">{pendingApproval.toolName}</div>
-                <button className="btn sm">处理</button>
-              </div>
+              <ApprovalReview request={pendingApproval} onDecision={onApproval} />
             )}
             {pendingIntent && (
-              <div className="pending-card" onClick={() => setModal('intent')}>
-                <div className="kind">意图预览 · {(pendingIntent.confidence * 100).toFixed(0)}%</div>
-                <div className="summary">{pendingIntent.summary}</div>
-                <button className="btn sm">处理</button>
-              </div>
+              <IntentReview request={pendingIntent} onDecision={onIntent} />
             )}
           </section>
         )}
@@ -127,19 +112,84 @@ export function ReviewPanel(props: {
           </div>
         </div>
       )}
+    </div>
+  )
+}
 
-      {modal === 'approval' && pendingApproval && (
-        <ApprovalModal
-          request={pendingApproval}
-          onDecision={(d, edited) => { onApproval(d, edited); setModal(null) }}
-        />
+// Inline approval (Q3) — replaces the blocking ApprovalModal. Diff/JSON preview +
+// approve/reject, with optional edit-before-approve for edit tools.
+function ApprovalReview(props: {
+  request: ApprovalRequest
+  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
+}) {
+  const { request, onDecision } = props
+  const preview = previewOf(request)
+  const editKey = editableKey(request)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(
+    editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
+  )
+
+  const approve = () => {
+    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
+    else onDecision('approve')
+  }
+
+  return (
+    <div className="review-pending approval">
+      <div className="rp-head">
+        <span className="kind">需批准</span>
+        <span className="rp-tool">{request.toolName}</span>
+      </div>
+      {editing && editKey ? (
+        <textarea className="edit-input" value={draft} onChange={(e) => setDraft(e.target.value)} />
+      ) : preview.isDiff ? (
+        <DiffView raw={preview.text} />
+      ) : (
+        <pre className="rp-preview">{preview.text}</pre>
       )}
-      {modal === 'intent' && pendingIntent && (
-        <IntentModal
-          request={pendingIntent}
-          onDecision={(d) => { onIntent(d); setModal(null) }}
-        />
+      <div className="rp-actions">
+        {editKey && (
+          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
+            {editing ? '取消编辑' : '编辑'}
+          </button>
+        )}
+        <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+        <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
+      </div>
+    </div>
+  )
+}
+
+// Inline intent preview (Q3) — replaces IntentModal.
+function IntentReview(props: {
+  request: IntentRequest
+  onDecision: (decision: 'continue' | 'veto' | 'alternative') => void
+}) {
+  const { request, onDecision } = props
+  return (
+    <div className="review-pending intent">
+      <div className="rp-head">
+        <span className="kind">意图预览 · {(request.confidence * 100).toFixed(0)}%</span>
+      </div>
+      <p className="rp-summary">{request.summary}</p>
+      {request.alternatives.length > 0 && (
+        <>
+          <label className="meta">备选</label>
+          <ul>{request.alternatives.map((a, i) => <li key={i}>{a}</li>)}</ul>
+        </>
       )}
+      {request.warnings.length > 0 && (
+        <>
+          <label className="meta">警告</label>
+          <ul>{request.warnings.map((w, i) => <li key={i} className="warn">{w}</li>)}</ul>
+        </>
+      )}
+      <div className="rp-actions">
+        <button className="btn ghost sm" onClick={() => onDecision('veto')}>否决</button>
+        <button className="btn ghost sm" onClick={() => onDecision('alternative')}>换方案</button>
+        <button className="btn sm" onClick={() => onDecision('continue')}>继续</button>
+      </div>
     </div>
   )
 }

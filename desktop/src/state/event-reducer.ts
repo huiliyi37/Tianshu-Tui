@@ -5,7 +5,7 @@ import type {
   SessionEvent,
 } from '../runtime/types'
 
-export type ConvoKind = 'assistant' | 'tool' | 'result' | 'phase' | 'error'
+export type ConvoKind = 'user' | 'assistant' | 'tool' | 'result' | 'phase' | 'error'
 
 export interface ConvoBlock {
   key: string
@@ -63,6 +63,14 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
   const next: EventViewState = { ...state, lastSeq: ev.seq }
 
   switch (ev.type) {
+    case 'user':
+      next.private_textOpen = false
+      next.blocks = [...next.blocks, {
+        key: `u-${ev.seq}`,
+        kind: 'user',
+        text: String(ev.data.text ?? ''),
+      }]
+      return next
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_textOpen && next.blocks.length > 0) {

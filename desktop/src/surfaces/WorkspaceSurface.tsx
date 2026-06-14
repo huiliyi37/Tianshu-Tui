@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback } from 'react'
 import { useAbortSession, useArtifacts, useSendPrompt, useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, answerIntent } from '../runtime/client'
-import { notify } from '../lib/notify'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
@@ -21,25 +20,8 @@ export function WorkspaceSurface() {
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
 
-  // Async desktop notifications (N2): nudge on approval / completion when unfocused.
-  const lastApprovalRef = useRef<string | null>(null)
-  useEffect(() => {
-    const reqId = view.pendingApproval?.requestId ?? null
-    if (reqId && reqId !== lastApprovalRef.current) {
-      void notify('需要批准', `${view.pendingApproval!.toolName} 等待你的确认`)
-    }
-    lastApprovalRef.current = reqId
-  }, [view.pendingApproval])
-
-  const lastStatusRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    const status = active?.status
-    if (status && status !== lastStatusRef.current && (status === 'completed' || status === 'failed')) {
-      const label = active!.title ?? active!.id.slice(0, 8)
-      void notify('会话结束', `${label} ${status === 'completed' ? '已完成' : '失败'}`)
-    }
-    lastStatusRef.current = status
-  }, [active?.status, active])
+  // Desktop notifications now fire globally for ANY session (Q2) via
+  // useGlobalNotifications mounted in App — no per-active-session effects here.
 
   const handleSend = useCallback((prompt: string) => {
     if (!activeId) return

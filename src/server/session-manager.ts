@@ -23,6 +23,7 @@ import type { Artifact } from '../artifact/types.js'
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
 export type SessionEventType =
+  | 'user'
   | 'text_delta'
   | 'thinking_delta'
   | 'tool_use'
@@ -257,6 +258,9 @@ export class RuntimeSessionManager {
     session.record.status = 'running'
     session.record.error = undefined
     this.touch(session)
+    // Echo the user's turn into the event log so the conversation persists it
+    // (the agent loop only emits assistant/tool events). Must precede 'status'.
+    this.append(session, 'user', { text: prompt })
     this.append(session, 'status', { status: 'running' })
     this.persistRecord(session)
 

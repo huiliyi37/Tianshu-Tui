@@ -17,6 +17,7 @@ export interface SessionRecord {
 }
 
 export type SessionEventType =
+  | 'user'
   | 'text_delta'
   | 'thinking_delta'
   | 'tool_use'

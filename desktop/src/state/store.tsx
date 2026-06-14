@@ -2,8 +2,10 @@ import { createContext, useContext, useEffect, useReducer, type ReactNode } from
 import {
   loadActiveProject,
   loadActiveSessionId,
+  loadAttentionSeen,
   saveActiveProject,
   saveActiveSessionId,
+  saveAttentionSeen,
 } from '../lib/persist'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
@@ -16,6 +18,7 @@ export interface UiState {
   surface: Surface
   newSessionOpen: boolean
   error: string | null
+  attentionSeen: string[] // seen attention signatures (Q2)
 }
 
 type UiAction =
@@ -24,6 +27,7 @@ type UiAction =
   | { type: 'setSurface'; surface: Surface }
   | { type: 'openNew'; open: boolean }
   | { type: 'setError'; error: string | null }
+  | { type: 'markSeen'; sigs: string[] }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -38,6 +42,11 @@ function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, newSessionOpen: action.open }
     case 'setError':
       return { ...state, error: action.error }
+    case 'markSeen': {
+      if (action.sigs.length === 0) return state
+      const merged = new Set([...state.attentionSeen, ...action.sigs])
+      return { ...state, attentionSeen: [...merged] }
+    }
     default:
       return state
   }
@@ -53,6 +62,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     surface: 'workspace' as Surface,
     newSessionOpen: false,
     error: null,
+    attentionSeen: loadAttentionSeen(),
   }))
 
   useEffect(() => {
@@ -62,6 +72,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveActiveProject(state.activeProject)
   }, [state.activeProject])
+
+  useEffect(() => {
+    saveAttentionSeen(state.attentionSeen)
+  }, [state.attentionSeen])
 
   return (
     <StateCtx.Provider value={state}>
