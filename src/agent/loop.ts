@@ -1831,6 +1831,7 @@ export class AgentLoop {
       season: this.currentSeason,
       workingSetSize: this.evidence.getState().filesModified.size,
       recentToolNames: this.recentToolHistory.map(t => t.tool),
+      contractStatus: this.taskContract?.status,
     }
     this.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
 
