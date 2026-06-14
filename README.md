@@ -590,6 +590,41 @@ Inside a session, use `/model list` to show configured providers and models, the
 /model v4-pro
 ```
 
+### Skills Configuration
+
+Rivet supports reusable workflow templates called **skills**. Skills use a two-layer progressive disclosure model: only name + description is injected into context (discovery layer); full instructions are loaded on demand via the `skill` tool or `/skill` command.
+
+**Default**: Only `.rivet/skills/*.md` is scanned at startup.
+
+**Importing Claude Code skills**: If you have skills in `.claude/skills/` or `~/.claude/skills/` (Claude Code format), import specific ones by name in `~/.rivet/config.json`:
+
+```json
+{
+  "skills": {
+    "importFromClaude": ["pdf-extract", "git-flow", "code-review"]
+  }
+}
+```
+
+Only listed skill names (directory names under `.claude/skills/`) are loaded — not all of them. This prevents accidentally loading 70+ Claude skills when you only need a few.
+
+**Creating a skill**: Add a `.md` file to `.rivet/skills/`:
+
+```markdown
+---
+name: deploy-check
+description: Pre-deployment checklist
+triggers: [deploy, 部署, publish, release]
+---
+
+## Checklist
+1. Environment variables match production
+2. Database migrations are reversible
+3. Rollback plan confirmed
+```
+
+See `docs/skills-guide.md` for the complete guide.
+
 ## Slash Commands (in TUI)
 
 | Command | Description |
