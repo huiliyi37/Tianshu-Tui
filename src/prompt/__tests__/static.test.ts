@@ -100,20 +100,23 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('继续内联执行'))
   })
 
-  it('applies model-specific calibration', () => {
+  it('applies behavioral calibration without exposing model identity', () => {
     const deepseek = buildSystemPrompt({ tools: [], modelFamily: 'deepseek' })
-    assert.ok(deepseek.includes('model-calibration'))
+    assert.ok(deepseek.includes('<calibration>'))
+    assert.ok(!deepseek.includes('family='))
     assert.ok(deepseek.includes('跨模块边界'))
 
     const mimo = buildSystemPrompt({ tools: [], modelFamily: 'mimo' })
-    assert.ok(mimo.includes('model-calibration'))
+    assert.ok(mimo.includes('<calibration>'))
+    assert.ok(!mimo.includes('family='))
     assert.ok(mimo.includes('收敛'))
 
     const glm = buildSystemPrompt({ tools: [], modelFamily: 'glm' })
-    assert.ok(glm.includes('model-calibration'))
+    assert.ok(glm.includes('<calibration>'))
+    assert.ok(!glm.includes('family='))
 
     const unknown = buildSystemPrompt({ tools: [], modelFamily: 'unknown' })
-    assert.ok(!unknown.includes('model-calibration'))
+    assert.ok(!unknown.includes('<calibration>'))
   })
 
   it('does not reintroduce retired long-form warning sections', () => {
