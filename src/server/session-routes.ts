@@ -121,11 +121,21 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/interventions/:requestId/answer': withAuth((body, params) => {
-      const data = (body ?? {}) as { decision?: string }
+      const data = (body ?? {}) as { decision?: string; editedInput?: Record<string, unknown> }
       const decision = data.decision ?? 'approve'
-      const ok = manager.answerIntervention(params!.id!, params!.requestId!, decision)
+      const ok = manager.answerIntervention(params!.id!, params!.requestId!, decision, data.editedInput)
       if (!ok) return { status: 404, body: { error: 'Pending intervention not found' } }
       return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    'POST /sessions/:id/feedback': withAuth((body, params) => {
+      const data = (body ?? {}) as { artifactId?: string; comment?: string }
+      if (!data.artifactId || !data.comment || !data.comment.trim()) {
+        return { status: 400, body: { error: 'Missing "artifactId" or "comment"' } }
+      }
+      const ok = manager.feedback(params!.id!, data.artifactId, data.comment.trim())
+      if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
+      return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),
 
     'GET /sessions/:id/artifacts': withAuth((_body, params) => {

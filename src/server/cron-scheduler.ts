@@ -31,6 +31,8 @@ export interface ScheduledTask {
   createdAt: string
   lastTriggeredAt?: string
   triggerCount: number
+  /** When false, the task is retained but never fired (paused). Default true. */
+  enabled?: boolean
 }
 
 export type ScheduleTable = ScheduledTask[]
@@ -179,6 +181,18 @@ export class CronScheduler {
     return true
   }
 
+  /** Pause (enabled=false) or resume (true) a task without removing it. */
+  setEnabled(id: string, enabled: boolean): boolean {
+    let found = false
+    this.table = this.table.map(t => {
+      if (t.id !== id) return t
+      found = true
+      return { ...cloneTask(t), enabled }
+    })
+    if (found) this.persist()
+    return found
+  }
+
   list(): ScheduleTable {
     return this.table.map(cloneTask)
   }
@@ -239,6 +253,11 @@ export class CronScheduler {
       let changed = false
 
       for (const task of this.table) {
+        if (task.enabled === false) {
+          // paused — retain but never fire
+          nextTable.push(task)
+          continue
+        }
         if (task.recurringMaxAgeMs && task.createdAt) {
           const age = now - new Date(task.createdAt).getTime()
           if (age > task.recurringMaxAgeMs) {
@@ -373,6 +392,7 @@ function normalizeScheduledTask(value: unknown): ScheduledTask | null {
     ...(typeof task.recurringMaxAgeMs === 'number' && Number.isFinite(task.recurringMaxAgeMs) ? { recurringMaxAgeMs: task.recurringMaxAgeMs } : {}),
     ...(typeof task.agentId === 'string' ? { agentId: task.agentId } : {}),
     ...(typeof task.lastTriggeredAt === 'string' ? { lastTriggeredAt: task.lastTriggeredAt } : {}),
+    ...(typeof task.enabled === 'boolean' ? { enabled: task.enabled } : {}),
   }
   try {
     validateTriggerOrThrow(normalized.trigger)

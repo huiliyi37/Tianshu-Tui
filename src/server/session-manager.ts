@@ -34,6 +34,7 @@ export type SessionEventType =
   | 'approval_resolved'
   | 'intent_required'
   | 'intent_resolved'
+  | 'delegation'
   | 'artifact'
   | 'status'
   | 'error'
@@ -67,12 +68,34 @@ export interface ManagedAgent {
   readArtifact(id: string): Promise<string | null>
 }
 
-export type AgentFactory = (cwd?: string) => ManagedAgent
+/**
+ * Builds the agent for a session. Receives the manager's own session id so the
+ * agent's stores (artifacts/session-persist) align with the session — enabling
+ * future artifact recovery across restarts.
+ */
+export type AgentFactory = (cwd?: string, sessionId?: string) => ManagedAgent
 
 export interface CreateSessionInput {
   cwd?: string
   title?: string
   prompt?: string
+}
+
+/** Persisted snapshot of a session: a record + its full event log. */
+export interface PersistedSession {
+  record: SessionRecord
+  events: SessionEvent[]
+}
+
+/**
+ * Durable backing store for sessions (N1). Records are snapshotted; events are
+ * append-only. Implementations must tolerate a corrupt trailing event line
+ * (partial write) on load — never throw, just drop it.
+ */
+export interface SessionPersistenceAdapter {
+  saveRecord(record: SessionRecord): void
+  appendEvent(sessionId: string, event: SessionEvent): void
+  loadAll(): PersistedSession[]
 }
 
 export interface RuntimeSessionManagerOptions {
@@ -84,6 +107,8 @@ export interface RuntimeSessionManagerOptions {
   maxEvents?: number
   /** Auto-resolve a pending intervention after this many ms. 0 = never. Default 0. */
   approvalTimeoutMs?: number
+  /** Optional durable store. When set, sessions survive sidecar restarts. */
+  persistence?: SessionPersistenceAdapter
 }
 
 type InterventionKind = 'approval' | 'intent'
@@ -97,7 +122,8 @@ interface PendingIntervention {
 
 interface InternalSession {
   record: SessionRecord
-  agent: ManagedAgent
+  /** Lazily built on first run; null for rehydrated/idle sessions. */
+  agent: ManagedAgent | null
   events: SessionEvent[]
   seq: number
   running: boolean
@@ -109,6 +135,17 @@ interface InternalSession {
 const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY = /(?:api[_-]?key|token|secret|password|authorization)/i
 
+/** Tools that spawn worker agents — surfaced as delegation-tree nodes (N3). */
+const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate'])
+
+function extractObjective(input: Record<string, unknown>): string {
+  for (const key of ['objective', 'prompt', 'description', 'goal']) {
+    const v = input[key]
+    if (typeof v === 'string' && v.trim()) return v.slice(0, 200)
+  }
+  return ''
+}
+
 export class RuntimeSessionManager {
   private readonly sessions = new Map<string, InternalSession>()
   private readonly createAgent: AgentFactory
@@ -117,6 +154,7 @@ export class RuntimeSessionManager {
   private readonly idGenerator: () => string
   private readonly maxEvents: number
   private readonly approvalTimeoutMs: number
+  private readonly persistence?: SessionPersistenceAdapter
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -125,6 +163,58 @@ export class RuntimeSessionManager {
     this.idGenerator = opts.idGenerator ?? (() => randomId())
     this.maxEvents = opts.maxEvents ?? 5000
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
+    this.persistence = opts.persistence
+    if (this.persistence) this.rehydrate()
+  }
+
+  /**
+   * Restore sessions from the persistence store on boot. Honest semantics: the
+   * old agent run is gone, so any session that was 'running' is restored as
+   * 'aborted' (interrupted by restart) and is view-only until a fresh run is
+   * started in the same cwd. events.jsonl is the source of truth for seq.
+   */
+  private rehydrate(): void {
+    let restored: PersistedSession[]
+    try {
+      restored = this.persistence!.loadAll()
+    } catch {
+      return
+    }
+    for (const ps of restored) {
+      const events = ps.events.slice().sort((a, b) => a.seq - b.seq)
+      const maxSeq = events.length ? events[events.length - 1]!.seq : ps.record.lastSeq
+      const wasRunning = ps.record.status === 'running'
+      const session: InternalSession = {
+        record: {
+          ...ps.record,
+          status: wasRunning ? 'aborted' : ps.record.status,
+          lastSeq: maxSeq,
+          pendingApprovals: 0,
+        },
+        agent: null,
+        events,
+        seq: maxSeq,
+        running: false,
+        pending: new Map(),
+        listeners: new Set(),
+        knownArtifacts: new Set(
+          events.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
+        ),
+      }
+      this.sessions.set(session.record.id, session)
+      if (wasRunning) {
+        // Record an honest marker so the viewer sees the interruption.
+        this.append(session, 'status', { status: 'aborted', reason: 'sidecar-restart' })
+        this.persistRecord(session)
+      }
+    }
+  }
+
+  /** Lightweight counts for GET /health. */
+  stats(): { sessionCount: number; runningCount: number } {
+    let runningCount = 0
+    for (const s of this.sessions.values()) if (s.running) runningCount++
+    return { sessionCount: this.sessions.size, runningCount }
   }
 
   createSession(input: CreateSessionInput = {}): SessionRecord {
@@ -142,7 +232,7 @@ export class RuntimeSessionManager {
         lastSeq: 0,
         pendingApprovals: 0,
       },
-      agent: this.createAgent(cwd),
+      agent: null,
       events: [],
       seq: 0,
       running: false,
@@ -151,6 +241,7 @@ export class RuntimeSessionManager {
       knownArtifacts: new Set(),
     }
     this.sessions.set(id, session)
+    this.persistRecord(session)
     if (input.prompt && input.prompt.trim()) {
       this.run(id, input.prompt)
     }
@@ -161,14 +252,16 @@ export class RuntimeSessionManager {
   run(id: string, prompt: string): boolean {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    const agent = this.ensureAgent(session)
     session.running = true
     session.record.status = 'running'
     session.record.error = undefined
     this.touch(session)
     this.append(session, 'status', { status: 'running' })
+    this.persistRecord(session)
 
     const callbacks = this.buildCallbacks(session)
-    void session.agent
+    void agent
       .run(prompt, callbacks)
       .then(() => {
         if (session.record.status === 'running') {
@@ -187,8 +280,93 @@ export class RuntimeSessionManager {
         this.rejectAllPending(session, 'aborted')
         this.touch(session)
         this.append(session, 'done', { status: session.record.status })
+        this.persistRecord(session)
       })
     return true
+  }
+
+  private ensureAgent(session: InternalSession): ManagedAgent {
+    if (!session.agent) {
+      session.agent = this.createAgent(session.record.cwd, session.record.id)
+    }
+    return session.agent
+  }
+
+  /**
+   * N2 — artifact feedback re-injection. Turns a human comment on an artifact
+   * into a structured next-turn prompt so the agent revises in-context. Only
+   * valid on an idle session (a finished turn); returns false while running.
+   */
+  feedback(id: string, artifactId: string, comment: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s || s.running) return false
+    const meta = [...s.events].reverse().find(
+      (e) => e.type === 'artifact' && e.data.id === artifactId,
+    )
+    const target = meta ? String(meta.data.target ?? '') : ''
+    const prompt =
+      `[ARTIFACT FEEDBACK]\n` +
+      `Artifact: ${artifactId}${target ? ` (${target})` : ''}\n` +
+      `Comment: ${comment}\n\n` +
+      `Please revise your work to address this feedback.`
+    return this.run(id, prompt)
+  }
+
+  /**
+   * Start a run and resolve when it reaches a terminal state (N3 — used by the
+   * runtime pool so scheduled tasks can report a summary). Returns immediately
+   * with a failed result if the session is missing or already busy.
+   */
+  runAndWait(
+    id: string,
+    prompt: string,
+  ): Promise<{ status: SessionStatus; summary: string; changedFiles: string[] }> {
+    return new Promise((resolve) => {
+      const s = this.sessions.get(id)
+      if (!s || s.running) {
+        resolve({ status: 'failed', summary: 'session missing or busy', changedFiles: [] })
+        return
+      }
+      const unsub = this.subscribe(id, (e) => {
+        if (e.type === 'done') {
+          unsub?.()
+          resolve({
+            status: s.record.status,
+            summary: this.buildRunSummary(s),
+            changedFiles: this.collectChangedFiles(s),
+          })
+        }
+      })
+      if (!this.run(id, prompt)) {
+        unsub?.()
+        resolve({ status: 'failed', summary: 'failed to start', changedFiles: [] })
+      }
+    })
+  }
+
+  private buildRunSummary(session: InternalSession): string {
+    // Last assistant text run is the closest thing to a result summary.
+    for (let i = session.events.length - 1; i >= 0; i--) {
+      const e = session.events[i]!
+      if (e.type === 'text_delta') {
+        const text = String(e.data.text ?? '').trim()
+        if (text) return text.slice(0, 500)
+      }
+    }
+    return `status=${session.record.status}`
+  }
+
+  private collectChangedFiles(session: InternalSession): string[] {
+    const files = new Set<string>()
+    for (const e of session.events) {
+      if (e.type !== 'tool_use') continue
+      const name = String(e.data.name ?? '')
+      if (name !== 'edit_file' && name !== 'write_file' && name !== 'apply_patch') continue
+      const input = e.data.input as Record<string, unknown> | undefined
+      const path = input && typeof input.path === 'string' ? input.path : null
+      if (path) files.add(path)
+    }
+    return [...files]
   }
 
   listSessions(): SessionRecord[] {
@@ -221,10 +399,11 @@ export class RuntimeSessionManager {
     if (s.record.status === 'running') {
       s.record.status = 'aborted'
     }
-    s.agent.abort()
+    s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
     this.touch(s)
     this.append(s, 'status', { status: 'aborted' })
+    this.persistRecord(s)
     return true
   }
 
@@ -232,8 +411,17 @@ export class RuntimeSessionManager {
     for (const id of this.sessions.keys()) this.abort(id)
   }
 
-  /** Resolve a pending approval/intent. Returns false if the request is gone. */
-  answerIntervention(id: string, requestId: string, decision: string): boolean {
+  /**
+   * Resolve a pending approval/intent. Returns false if the request is gone.
+   * For approvals, an optional `editedInput` lets the human tweak the tool input
+   * (e.g. per-hunk edit picks) before it runs — flows through ApprovalResult.
+   */
+  answerIntervention(
+    id: string,
+    requestId: string,
+    decision: string,
+    editedInput?: Record<string, unknown>,
+  ): boolean {
     const s = this.sessions.get(id)
     if (!s) return false
     const pend = s.pending.get(requestId)
@@ -243,9 +431,17 @@ export class RuntimeSessionManager {
 
     if (pend.kind === 'approval') {
       const approved = decision === 'approve' || decision === 'approved'
-      pend.resolve({ approved })
+      const result: ApprovalResult = { approved }
+      if (approved && editedInput && typeof editedInput === 'object') {
+        result.editedInput = editedInput
+      }
+      pend.resolve(result)
       this.recountApprovals(s)
-      this.append(s, 'approval_resolved', { requestId, decision: approved ? 'approve' : 'reject' })
+      this.append(s, 'approval_resolved', {
+        requestId,
+        decision: approved ? 'approve' : 'reject',
+        edited: !!result.editedInput,
+      })
     } else {
       const action: IntentPreviewAction =
         decision === 'veto' ? 'veto' : decision === 'alternative' ? 'alternative' : 'continue'
@@ -253,18 +449,23 @@ export class RuntimeSessionManager {
       this.append(s, 'intent_resolved', { requestId, decision: action })
     }
     this.touch(s)
+    this.persistRecord(s)
     return true
   }
 
   listArtifacts(id: string): Artifact[] | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
+    // Rehydrated/idle sessions have no live agent; artifact bodies aren't
+    // recoverable yet (the metadata still lives in the replayed event log).
+    if (!s.agent) return []
     return s.agent.listArtifacts()
   }
 
   readArtifact(id: string, artifactId: string): Promise<string | null> | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
+    if (!s.agent) return Promise.resolve(null)
     return s.agent.readArtifact(artifactId)
   }
 
@@ -274,8 +475,19 @@ export class RuntimeSessionManager {
     return {
       onTextDelta: (text) => this.append(session, 'text_delta', { text }),
       onThinkingDelta: (thinking) => this.append(session, 'thinking_delta', { text: thinking }),
-      onToolUse: (toolId, name, input) =>
-        this.append(session, 'tool_use', { id: toolId, name, input: redactValue(input) }),
+      onToolUse: (toolId, name, input) => {
+        this.append(session, 'tool_use', { id: toolId, name, input: redactValue(input) })
+        // N3: surface delegation as a tree node, derived from the tool stream
+        // (no core-loop rewrite — stays inside the server layer).
+        if (DELEGATION_TOOLS.has(name)) {
+          this.append(session, 'delegation', {
+            workerId: toolId,
+            objective: extractObjective(input),
+            profile: typeof input.profile === 'string' ? input.profile : undefined,
+            status: 'running',
+          })
+        }
+      },
       onToolResult: (toolId, name, result, isError) => {
         this.append(session, 'tool_result', {
           id: toolId,
@@ -283,6 +495,12 @@ export class RuntimeSessionManager {
           isError: !!isError,
           result: redactText(result).slice(0, 2000),
         })
+        if (DELEGATION_TOOLS.has(name)) {
+          this.append(session, 'delegation', {
+            workerId: toolId,
+            status: isError ? 'failed' : 'completed',
+          })
+        }
         this.scanArtifacts(session)
       },
       onTurnComplete: (usage, turnNumber, isFinal) =>
@@ -379,6 +597,7 @@ export class RuntimeSessionManager {
   }
 
   private scanArtifacts(session: InternalSession): void {
+    if (!session.agent) return
     let list: Artifact[]
     try {
       list = session.agent.listArtifacts()
@@ -407,12 +626,28 @@ export class RuntimeSessionManager {
     }
     session.record.lastSeq = session.seq
     session.record.updatedAt = event.ts
+    if (this.persistence) {
+      try {
+        this.persistence.appendEvent(session.record.id, event)
+      } catch {
+        // persistence failure must not break the live event log
+      }
+    }
     for (const listener of session.listeners) {
       try {
         listener(event)
       } catch {
         // a misbehaving viewer must not break the event log
       }
+    }
+  }
+
+  private persistRecord(session: InternalSession): void {
+    if (!this.persistence) return
+    try {
+      this.persistence.saveRecord({ ...session.record })
+    } catch {
+      // non-fatal — events.jsonl is the source of truth for replay
     }
   }
 

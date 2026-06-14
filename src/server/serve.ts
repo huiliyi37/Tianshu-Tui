@@ -7,10 +7,20 @@
  * existing AgentLoop / ArtifactStore — no runtime rewrite, only an API surface.
  */
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { startServer } from './index.js'
 import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
+import { FileSessionPersistence } from './session-persistence.js'
 import { buildSessionRoutes } from './session-routes.js'
+import { buildHealthRoute } from './health-route.js'
+import { buildScheduleRoutes } from './schedule-routes.js'
+import { CronScheduler } from './cron-scheduler.js'
+import { CronWiring } from './cron-wiring.js'
+import { TaskRegistry } from './task-registry.js'
+import { JsonTaskStore } from './task-store.js'
+import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
 import { resolveApiKey } from '../api/factory.js'
 import { createAuthProvider } from '../auth/registry.js'
@@ -75,15 +85,18 @@ export interface BuiltAgent {
  * (created internally by AgentLoop, keyed by sessionId) — so concurrent
  * sessions never share prompt cache state or artifacts.
  */
-export function buildAgentLoop(ctx: ServeContext, cwd: string): BuiltAgent {
-  const sessionId = randomUUID()
+export function buildAgentLoop(ctx: ServeContext, cwd: string, sessionId: string = randomUUID()): BuiltAgent {
   const persist = new SessionPersist(sessionId)
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const playbookStore = new PlaybookStore(cwd)
-  const toolRegistry = createDefaultToolRegistry([], { desktopTools: ctx.config.agent.desktopTools })
+  const toolRegistry = createDefaultToolRegistry([], {
+    desktopTools: ctx.config.agent.desktopTools,
+    // N4: browser verification — opt-in (new attack surface, needs Playwright).
+    browserTool: process.env.RIVET_BROWSER_ENABLED === '1',
+  })
   const agentCfg = createAgentConfig(createMainAgentConfigInput({
     apiKey: ctx.apiKey,
     model: {
@@ -118,12 +131,17 @@ export interface RunServeOptions {
   token?: string
   /** Override the serve context (tests inject a fake). */
   context?: ServeContext
+  /** Directory for durable desktop session storage. Defaults to ~/.rivet/desktop/sessions. */
+  sessionDir?: string
+  /** Disable persistence (tests / ephemeral). */
+  ephemeral?: boolean
 }
 
 export interface RunningServer {
   port: number
   close: () => void
   sessions: RuntimeSessionManager
+  scheduler?: CronScheduler
 }
 
 /**
@@ -138,12 +156,24 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   }
   const port = opts.port ?? 3100
   const ctx = opts.context ?? resolveServeContext()
+  const startedAt = Date.now()
+
+  // N1: durable session storage so sessions survive sidecar restarts.
+  const persistence = opts.ephemeral
+    ? undefined
+    : new FileSessionPersistence(
+        opts.sessionDir ??
+          process.env.RIVET_DESKTOP_SESSION_DIR ??
+          join(homedir(), '.rivet', 'desktop', 'sessions'),
+      )
 
   // Multi-session manager (M0.5): each session is an independent AgentLoop,
-  // adapted to the manager's ManagedAgent surface (run/abort + artifacts).
+  // adapted to the manager's ManagedAgent surface (run/abort + artifacts). The
+  // manager's session id is threaded into buildAgentLoop so the agent's stores
+  // align with the session.
   const sessions = new RuntimeSessionManager({
-    createAgent: (cwd) => {
-      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd())
+    createAgent: (cwd, sessionId) => {
+      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId)
       return {
         run: (prompt, callbacks) => agent.run(prompt, callbacks),
         abort: () => agent.abort(),
@@ -152,6 +182,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       }
     },
     defaultCwd: process.cwd(),
+    persistence,
   })
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.
@@ -192,13 +223,36 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // Multi-session routes (M0.5 → M3): /sessions/*
   Object.assign(routes, buildSessionRoutes(sessions, apiToken))
 
+  // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
+  const version = process.env.npm_package_version ?? '2.9.0'
+  Object.assign(routes, buildHealthRoute(sessions, startedAt, version, apiToken))
+
+  // N3: async orchestration — cron scheduler → task registry → runtime pool that
+  // spins up *visible* sessions. Disabled in ephemeral mode (tests) to avoid
+  // leaking timers.
+  let scheduler: CronScheduler | undefined
+  let wiring: CronWiring | undefined
+  if (!opts.ephemeral) {
+    const rivetDir = process.env.RIVET_DESKTOP_DIR ?? join(homedir(), '.rivet', 'desktop')
+    scheduler = new CronScheduler({ schedulePath: join(rivetDir, 'scheduled_tasks.json') })
+    const registry = new TaskRegistry({ taskStore: new JsonTaskStore(join(rivetDir, 'tasks')) })
+    const runtimePool = new SessionRuntimePool({ manager: sessions, defaultCwd: process.cwd() })
+    wiring = new CronWiring({ scheduler, registry, runtimePool })
+    void wiring.start().catch(() => { /* non-fatal: scheduler stays idle */ })
+    Object.assign(routes, buildScheduleRoutes(scheduler, apiToken))
+  }
+
   const server = startServer(port, routes, apiToken)
   return {
     port,
     sessions,
+    scheduler,
     close: () => {
       for (const agent of activeAgents) agent.abort()
       sessions.abortAll()
+      void wiring?.stop()
+      wiring?.dispose()
+      scheduler?.stop()
       server.close()
     },
   }
