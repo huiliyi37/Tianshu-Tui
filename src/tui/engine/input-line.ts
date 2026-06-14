@@ -88,6 +88,12 @@ export class InputLine {
   get vimEnabled(): boolean { return this._vimEnabled }
   get placeholder(): string { return this._placeholder }
 
+  /** 启用/停用 vim 键位。停用或启用时都复位到 insert 模式，避免残留 normal 态吞字符。 */
+  setVimEnabled(enabled: boolean): void {
+    this._vimEnabled = enabled
+    this._vimMode = 'insert'
+  }
+
   /**
    * 多行渲染：返回输入框的显示行数组。
    * - 空值时显示 placeholder（首行）

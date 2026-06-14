@@ -180,6 +180,16 @@ export class SlashRouter {
       return true
     }
 
+    // ── /vim — 切换 vim 键位（InputLine 状态，shared handler 无 app 句柄，故在此特判）──
+    if (command === '/vim') {
+      const next = this.app.toggleVim()
+      this.app.commitStatic(next
+        ? 'Vim keybindings: on (Esc → normal mode, i/a → insert)'
+        : 'Vim keybindings: off')
+      this.app.setStreamingState(false)
+      return true
+    }
+
     // ── /auto — 切换审批模式，同步更新 TuiApp 的 worker pills badge ──
     if (command === '/auto') {
       const next = !this.autoSafe

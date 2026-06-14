@@ -46,6 +46,23 @@ test('priorMsgCount>0 shows prior count', () => {
   assert.ok(lines.join('\n').includes('7 prior'), 'should show prior message count')
 })
 
+test('shortcut hints match real keybindings (no Ctrl+K / Alt+Enter drift)', () => {
+  const lines = formatWelcome({
+    modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120,
+  }, theme)
+  const joined = lines.join('\n')
+  // 真实键位（与 engine/app.ts + input-line.ts 一致）
+  assert.ok(joined.includes('Ctrl+Esc palette'), 'palette 是 Ctrl+Esc')
+  assert.ok(joined.includes('Ctrl+R history'), '历史搜索 Ctrl+R')
+  assert.ok(joined.includes('Ctrl+O expand'), '展开工具 Ctrl+O')
+  assert.ok(joined.includes('Ctrl+T thinking'), 'thinking Ctrl+T')
+  assert.ok(joined.includes('Esc Esc rewind'), '双击 Esc rewind')
+  assert.ok(joined.includes('Ctrl+J') || joined.includes('\\+Enter'), '多行 \\+Enter / Ctrl+J')
+  // 旧的漂移键位必须消失
+  assert.ok(!joined.includes('Ctrl+K'), '不再写错误的 Ctrl+K palette')
+  assert.ok(!joined.includes('Alt+Enter'), '不再写错误的 Alt+Enter multi-line')
+})
+
 test('no line exceeds terminal width (display width ≤ columns)', () => {
   for (const cols of [20, 40, 80]) {
     const lines = formatWelcome({

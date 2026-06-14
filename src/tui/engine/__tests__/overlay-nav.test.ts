@@ -209,6 +209,15 @@ test('history-search: 字符过滤渲染列表 + 查询回显 + Enter 回填输�
   assert.equal(app.getInputValue(), 'git status', 'Enter 回填过滤后第 0 项到输入框')
 })
 
+test('toggleVim 切换 vim 键位并返回新状态', () => {
+  const { app } = makeApp()
+  assert.equal(app.isVimEnabled(), false, '默认关闭 vim')
+  assert.equal(app.toggleVim(), true, 'toggle → on 返回 true')
+  assert.equal(app.isVimEnabled(), true)
+  assert.equal(app.toggleVim(), false, 'toggle → off 返回 false')
+  assert.equal(app.isVimEnabled(), false)
+})
+
 test('tasks overlay: register + activate 渲染 worker 列表', () => {
   const { app, out } = makeApp()
   app.registerOverlays({

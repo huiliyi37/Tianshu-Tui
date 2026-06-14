@@ -258,6 +258,20 @@ describe('InputLine', () => {
       input.handleKey('unknown', 'D', false, false)
       assert.equal(input.value, 'hello ')
     })
+
+    it('setVimEnabled toggles vim on/off and resets to insert mode', () => {
+      const input = new InputLine({ vimEnabled: false })
+      assert.equal(input.vimEnabled, false)
+      input.setVimEnabled(true)
+      assert.equal(input.vimEnabled, true)
+      assert.equal(input.vimMode, 'insert', '启用后从 insert 起步')
+      input.handleKey('escape', '', false, false)
+      assert.equal(input.vimMode, 'normal')
+      // 关闭时复位 insert，避免残留 normal 态吞普通字符
+      input.setVimEnabled(false)
+      assert.equal(input.vimEnabled, false)
+      assert.equal(input.vimMode, 'insert', '停用后复位 insert')
+    })
   })
 
   describe('word navigation', () => {

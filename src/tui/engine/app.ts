@@ -768,6 +768,19 @@ export class TuiApp {
     return this.inputLine.value
   }
 
+  /** 切换 vim 键位，返回切换后的状态（供 /vim 命令）。 */
+  toggleVim(): boolean {
+    const next = !this.inputLine.vimEnabled
+    this.inputLine.setVimEnabled(next)
+    this.renderLive()
+    return next
+  }
+
+  /** 当前是否启用 vim 键位。 */
+  isVimEnabled(): boolean {
+    return this.inputLine.vimEnabled
+  }
+
   /** 激活 overlay */
   activateOverlay(id: string): boolean {
     switch (id) {

@@ -3,9 +3,12 @@
  *
  * 渲染结构：
  *   Tianshu
- *   <model> · <dir>
- *   Ctrl+C interrupt    Ctrl+K palette
- *   /help commands      Alt+Enter multi-line
+ *   <model> · <dir> · <session>
+ *   Ctrl+C interrupt    Ctrl+Esc palette    Ctrl+R history
+ *   Ctrl+O expand       Ctrl+T thinking     Esc Esc rewind
+ *   /help commands      \+Enter / Ctrl+J multi-line
+ *
+ * 快捷键须与 engine/app.ts + input-line.ts 实际键位一致（曾漂移成 Ctrl+K/Alt+Enter）。
  */
 
 import stringWidth from 'string-width'
@@ -46,8 +49,9 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     : input.sessionId.slice(0, 8)
   out.push(color(`${input.modelName} · ${dir}/ · ${session}`, theme.dim))
   out.push('')
-  out.push(color('Ctrl+C interrupt    Ctrl+K palette', theme.dim))
-  out.push(color('/help  commands     Alt+Enter multi-line', theme.dim))
+  out.push(color('Ctrl+C interrupt    Ctrl+Esc palette    Ctrl+R history', theme.dim))
+  out.push(color('Ctrl+O expand       Ctrl+T thinking     Esc Esc rewind', theme.dim))
+  out.push(color('/help commands      \\+Enter / Ctrl+J multi-line', theme.dim))
 
   return out.map(line => truncateToWidth(line, cols))
 }
