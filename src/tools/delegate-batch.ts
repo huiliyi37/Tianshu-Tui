@@ -261,11 +261,16 @@ export function createDelegateBatchTool(
     isConcurrencySafe: () => true,
     isEnabled: () => true,
     // P0: outer tool timeout dominates max(profile budgets) of all batch tasks
-    // so any single slow profile (reviewer/planner 600s) is not killed by the
-    // 60-180s ladder before its internal budget timer can preserve partial output.
-    timeoutMs: (params) => delegationToolTimeoutMs(
-      params?.sessionTurnCount,
-      ((params?.input?.tasks as Array<{ profile?: string }> | undefined) ?? []).map(t => t.profile),
-    ),
+    // AND scales by the number of sequential waves the worker pool must run, so a
+    // full 5-task batch is not killed by a single-wave budget before its later
+    // wave can finish (and salvage partial output) — see delegationToolTimeoutMs.
+    timeoutMs: (params) => {
+      const tasks = (params?.input?.tasks as Array<{ profile?: string }> | undefined) ?? []
+      return delegationToolTimeoutMs(
+        params?.sessionTurnCount,
+        tasks.map(t => t.profile),
+        { taskCount: tasks.length },
+      )
+    },
   }
 }

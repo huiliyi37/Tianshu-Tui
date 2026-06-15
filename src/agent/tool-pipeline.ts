@@ -121,6 +121,7 @@ function withToolTimeout<T>(
   toolName: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  timeoutController?: AbortController,
 ): Promise<T> {
   // Guard against NaN/Infinity/negative timeout (e.g. parameter misplacement bugs)
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -129,7 +130,12 @@ function withToolTimeout<T>(
   if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
 
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Tool ${toolName} timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+    const timer = setTimeout(() => {
+      // Cascade abort to the underlying op (child proc / fetch) BEFORE rejecting,
+      // so the tool stops consuming resources instead of orphaning.
+      try { timeoutController?.abort() } catch { /* noop */ }
+      reject(new Error(`Tool ${toolName} timed out after ${timeoutMs / 1000}s`))
+    }, timeoutMs)
     const onAbort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')) }
     signal?.addEventListener('abort', onAbort, { once: true })
 
@@ -791,11 +797,19 @@ export async function executeToolUse(
         // (smaller) cap; serving cached content here would re-introduce the
         // truncation regression. fs.readFile + OS page cache is fast enough.
         const toolTimeout = toolDef?.timeoutMs?.(params) ?? DEFAULT_TOOL_TIMEOUT_MS
+        // P0/H1: compose a per-tool timeout AbortController with the loop signal,
+        // so a tool-level timeout cascades an abort into the underlying op
+        // (child proc / fetch) instead of merely rejecting the wrapper Promise.
+        const toolAbort = new AbortController()
+        const composedSignal = deps.abortSignal
+          ? AbortSignal.any([deps.abortSignal, toolAbort.signal])
+          : toolAbort.signal
         const r = await withToolTimeout(
-          deps.config.toolRegistry.execute(tu.name, params),
+          deps.config.toolRegistry.execute(tu.name, { ...params, abortSignal: composedSignal }),
           tu.name,
           toolTimeout,
           deps.abortSignal,
+          toolAbort,
         )
         rawToolResult = r
         return { content: r.content, isError: r.isError }

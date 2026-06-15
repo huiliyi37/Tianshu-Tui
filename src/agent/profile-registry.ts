@@ -513,14 +513,27 @@ export const profileRegistry = new ProfileRegistry()
  * delegate 调用，worker 的 blocked+partial-output 收尾路径永远走不到
  * （reviewer/planner 600s 预算曾因此在 180s 工具超时下完全死接线）。
  */
+/** Default worker pool concurrency (mirrors bootstrap `maxWorkers: 3`). */
+export const DEFAULT_DELEGATE_CONCURRENCY = 3
+
 export function delegationToolTimeoutMs(
   sessionTurnCount: number | undefined,
   profiles: ReadonlyArray<string | undefined>,
+  opts?: { taskCount?: number; maxWorkers?: number },
 ): number {
   let budget = progressiveTimeout(sessionTurnCount)
   for (const name of profiles) {
     const profileBudget = name ? profileRegistry.get(name)?.defaultTimeoutMs : undefined
     if (profileBudget && profileBudget > budget) budget = profileBudget
   }
-  return budget + WORKER_EXIT_GRACE_MS
+  // P0: a bounded worker pool runs a batch in sequential waves. A 5-task batch
+  // on a 3-worker pool needs ceil(5/3)=2 waves, so the outer tool timeout must
+  // cover ALL waves of the slowest single-task budget — otherwise it pre-empts a
+  // later wave with a hard reject and orphans those workers (no blocked/partial
+  // result salvage). Scaling by waves (not total task count) avoids over-inflating
+  // the ceiling while still never firing before the pool can drain.
+  const taskCount = Math.max(1, Math.floor(opts?.taskCount ?? profiles.length ?? 1))
+  const maxWorkers = Math.max(1, Math.floor(opts?.maxWorkers ?? DEFAULT_DELEGATE_CONCURRENCY))
+  const waves = Math.max(1, Math.ceil(taskCount / maxWorkers))
+  return budget * waves + WORKER_EXIT_GRACE_MS
 }

@@ -182,6 +182,43 @@ describe('executeToolUse', () => {
     assert.equal(seen, undefined)
   })
 
+  it('A1: tool timeout cascades an abort into the underlying op before rejecting', async () => {
+    let captured: AbortSignal | undefined
+    let abortedInTool = false
+    const loopController = new AbortController()
+    const deps = makeDeps({
+      abortSignal: loopController.signal,
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          // Underlying op that only settles when its abortSignal fires — proves
+          // that a tool-level timeout must cascade an abort (not merely reject the wrapper).
+          execute: (_name: string, params: any) => {
+            captured = params.abortSignal
+            return new Promise((resolve) => {
+              params.abortSignal?.addEventListener('abort', () => {
+                abortedInTool = true
+                resolve({ content: 'aborted', isError: true })
+              }, { once: true })
+            })
+          },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false, timeoutMs: () => 20 }),
+          needsApproval: () => false,
+        } as any,
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-timeout', name: 'grep', input: { pattern: 'x' } },
+      deps, noopCallbacks as any, 1, false,
+    ).catch(() => {})
+
+    assert.ok(captured, 'tool received a composed abortSignal via params')
+    assert.equal(captured!.aborted, true, 'composed signal aborted when the tool timed out')
+    assert.equal(abortedInTool, true, 'underlying op observed the abort')
+    assert.equal(loopController.signal.aborted, false, 'loop signal itself is not aborted by a single tool timeout')
+  })
+
   it('records applied plan_close as file_write in task ledger', async () => {
     const events: any[] = []
     const owned: string[] = []

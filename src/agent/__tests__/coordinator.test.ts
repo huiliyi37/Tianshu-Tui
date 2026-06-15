@@ -408,6 +408,68 @@ describe('DelegationCoordinator', () => {
     assert.ok(run.results.every(r => r.status === 'passed'))
   })
 
+  it('A3: a dependent of a failed worker is reported as blocked, never silently dropped', async () => {
+    const ran: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      // A hard dispatch fault (factory throw) propagates out of delegateOrder and
+      // is caught as a worker failure → queue.markFailed. The upstream id then
+      // never enters completedIds, so its dependent can never be dequeued.
+      runtimeFactory: (order, card, workerRegistry) => {
+        if (order.id === 'team:T1') throw new Error('factory boom')
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => {
+        ran.push(config.order.id)
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    const run = await coordinator.delegateBatch([
+      {
+        parentTurnId: 'turn_meta:team:T1',
+        objective: 'Scout the routing seams in the main module before review.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/main.tsx'] },
+      },
+      {
+        parentTurnId: 'turn_meta:team:T2',
+        objective: 'Review the coordinator risk patterns that the scout surfaces.',
+        kind: 'review',
+        profile: 'reviewer',
+        scope: { files: ['src/agent/coordinator.ts'] },
+        dependencies: ['team:T1'],
+      },
+    ])
+
+    // Every order must be accounted for — the dependent is NOT lost.
+    assert.equal(run.results.length, 2)
+    const t1 = run.results.find(r => r.workOrderId === 'team:T1')!
+    const t2 = run.results.find(r => r.workOrderId === 'team:T2')!
+    assert.equal(t1.status, 'blocked', 'failed upstream worker is blocked')
+    assert.equal(t2.status, 'blocked', 'dependent is reported blocked, not dropped')
+    assert.match(t2.summary, /dependency failed: team:T1/)
+    // The dependent must never have actually run on the broken foundation.
+    assert.ok(!ran.includes('team:T2'), 'dependent worker was not executed')
+  })
+
   it('returns selected model metadata for each runnable batch work order', async () => {
     const coordinator = new DelegationCoordinator({
       baseToolRegistry: makeRegistry(),

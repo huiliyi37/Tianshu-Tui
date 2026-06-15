@@ -163,6 +163,28 @@ describe('WorkOrderQueue', () => {
     assert.equal(q.hasFileConflict(b), false)
   })
 
+  it('A3: markFailed records the failure without satisfying dependents', () => {
+    const q = new WorkOrderQueue()
+    const parent = order('parent')
+    const child = order('child', undefined, ['parent'])
+
+    q.enqueue(parent)
+    q.enqueue(child)
+
+    const dequeued = q.dequeue()!
+    assert.equal(dequeued.id, 'parent')
+    q.markInFlight(dequeued)
+    q.markFailed(dequeued)
+
+    // The failed parent is tracked as failed, NOT completed.
+    assert.equal(q.hasFailed('parent'), true)
+    assert.equal(q.isCompleted('parent'), false)
+    // The child must NOT become schedulable on a failed dependency.
+    assert.equal(q.dequeue(), undefined)
+    // ...and it remains visible in pending() for the post-drain blocked sweep.
+    assert.deepEqual(q.pending().map(o => o.id), ['child'])
+  })
+
   it('dequeue skips orders with file conflicts', () => {
     const q = new WorkOrderQueue()
     const a = createReadOnlyWorkOrder({

@@ -4,7 +4,8 @@ import { writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { ProfileRegistry } from '../profile-registry.js'
+import { ProfileRegistry, delegationToolTimeoutMs, DEFAULT_DELEGATE_CONCURRENCY } from '../profile-registry.js'
+import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from '../timeout-ladder.js'
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `rivet-test-agents-${randomUUID()}`)
@@ -218,5 +219,38 @@ describe('ProfileRegistry', () => {
     } finally {
       rmSync(tmp, { recursive: true })
     }
+  })
+})
+
+describe('delegationToolTimeoutMs (A2: wave-scaled batch timeout)', () => {
+  const mature = progressiveTimeout(undefined) // 180s
+
+  it('single wave (taskCount <= maxWorkers) equals legacy budget + grace', () => {
+    const single = delegationToolTimeoutMs(undefined, [undefined, undefined], { taskCount: 2 })
+    assert.equal(single, mature + WORKER_EXIT_GRACE_MS)
+  })
+
+  it('backward-compatible: no opts defaults taskCount to profiles.length', () => {
+    // 3 profiles, default concurrency 3 → 1 wave → unchanged from the old behavior.
+    const legacy = delegationToolTimeoutMs(undefined, [undefined, undefined, undefined])
+    assert.equal(legacy, mature + WORKER_EXIT_GRACE_MS)
+  })
+
+  it('scales by ceil(taskCount / maxWorkers) waves', () => {
+    // 5 tasks on the default 3-worker pool → ceil(5/3)=2 waves.
+    const twoWaves = delegationToolTimeoutMs(undefined, [], { taskCount: 5 })
+    assert.equal(twoWaves, mature * 2 + WORKER_EXIT_GRACE_MS)
+    assert.equal(DEFAULT_DELEGATE_CONCURRENCY, 3)
+  })
+
+  it('honors explicit maxWorkers when provided', () => {
+    // 10 tasks / 3 workers → ceil = 4 waves.
+    const fourWaves = delegationToolTimeoutMs(undefined, [], { taskCount: 10, maxWorkers: 3 })
+    assert.equal(fourWaves, mature * 4 + WORKER_EXIT_GRACE_MS)
+  })
+
+  it('never returns less than one wave for empty/zero input', () => {
+    const floor = delegationToolTimeoutMs(undefined, [], { taskCount: 0 })
+    assert.equal(floor, mature + WORKER_EXIT_GRACE_MS)
   })
 })

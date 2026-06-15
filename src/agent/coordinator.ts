@@ -223,6 +223,29 @@ function workerFailureResult(order: WorkOrder, error: unknown, nextActions?: str
   }
 }
 
+/**
+ * A3: a task whose dependency failed (or never completed) must be reported as
+ * `blocked`, not silently dropped. Without this, `delegateBatch` returns
+ * "completed" while dependents of a failed worker vanish from `run.results` —
+ * the primary never learns the sub-tree was abandoned.
+ */
+function blockedDependencyResult(order: WorkOrder, unmetDeps: string[], failedDeps: string[]): WorkerResult {
+  const detail = failedDeps.length > 0
+    ? `dependency failed: ${failedDeps.join(', ')}`
+    : `dependency never completed: ${unmetDeps.join(', ')}`
+  return {
+    workOrderId: order.id,
+    status: 'blocked',
+    summary: `Task blocked — ${detail}`,
+    findings: [],
+    artifacts: [{ kind: 'risk', title: 'Dependency unmet', content: detail }],
+    changedFiles: [],
+    risks: [`blocked by unmet dependency: ${detail}`],
+    nextActions: ['Re-dispatch this task after its dependency succeeds, or drop the dependency'],
+    evidenceStatus: 'blocked',
+  }
+}
+
 /** Persist worker result to ~/.rivet/subagents/<orderId>.json for future resume/inspection. */
 function persistWorkerResult(result: WorkerResult, fingerprint?: string): void {
   try {
@@ -1368,6 +1391,16 @@ export class DelegationCoordinator {
       inflight.push(processNext())
     }
     await Promise.all(inflight)
+
+    // A3: drain any orders that could never be scheduled because a dependency
+    // failed (or itself ended up blocked). processNext stops dequeuing these, so
+    // without an explicit sweep they would be silently lost from the result set.
+    for (const order of queue.pending()) {
+      const unmet = order.dependencies.filter(d => !queue.isCompleted(d))
+      const failedDeps = unmet.filter(d => queue.hasFailed(d))
+      allResults.push(blockedDependencyResult(order, unmet, failedDeps))
+      queue.markFailed(order)
+    }
 
     const profileMap = new Map(orders.map(o => [o.id, o.profile] as const))
     const aggregated = [...aggregateResults(allResults, policy, profileMap), ...depthCapped]

@@ -13,8 +13,15 @@ import { createTurnBudget } from '../turn-budget.js'
  * and the entire abort path becomes dead code, causing worker hangs ("No
  * response 3m") and orphaned detached children.
  *
- * The tool receives the signal as params.abortSignal (tool-pipeline.ts:399), so
- * a mock registry capturing params.abortSignal proves the whole chain.
+ * The tool receives the signal as params.abortSignal, so a mock registry
+ * capturing params.abortSignal proves the whole chain.
+ *
+ * A1 (2026-06-15): the pipeline now composes the batch signal with a per-tool
+ * timeout controller via AbortSignal.any, so the tool receives a *composite*
+ * signal rather than the batch signal by identity. The contract this guard
+ * protects is unchanged — aborting the batch signal MUST still abort the signal
+ * the tool sees (and it must never be undefined) — so we assert propagation, not
+ * object identity.
  */
 describe('ToolExecutionController abort-signal threading', () => {
   function makeController(captured: { signal?: AbortSignal | undefined }, concurrencySafe: boolean) {
@@ -96,7 +103,10 @@ describe('ToolExecutionController abort-signal threading', () => {
     const controller = makeController(captured, true)
     const ac = new AbortController()
     await controller.executeBatch(makeInput(ac.signal))
-    assert.equal(captured.signal, ac.signal, 'safe-tool path must forward the batch abortSignal, not undefined')
+    assert.ok(captured.signal, 'safe-tool path must forward a signal, not undefined')
+    assert.equal(captured.signal!.aborted, false, 'forwarded signal starts un-aborted')
+    ac.abort()
+    assert.equal(captured.signal!.aborted, true, 'aborting the batch signal must abort the tool-facing signal')
   })
 
   it('threads input.abortSignal into the sequential (non-safe) tool path', async () => {
@@ -104,7 +114,10 @@ describe('ToolExecutionController abort-signal threading', () => {
     const controller = makeController(captured, false)
     const ac = new AbortController()
     await controller.executeBatch(makeInput(ac.signal))
-    assert.equal(captured.signal, ac.signal, 'non-safe-tool path must forward the batch abortSignal, not undefined')
+    assert.ok(captured.signal, 'non-safe-tool path must forward a signal, not undefined')
+    assert.equal(captured.signal!.aborted, false, 'forwarded signal starts un-aborted')
+    ac.abort()
+    assert.equal(captured.signal!.aborted, true, 'aborting the batch signal must abort the tool-facing signal')
   })
 })
 

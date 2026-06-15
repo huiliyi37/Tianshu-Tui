@@ -18,6 +18,7 @@ export class WorkOrderQueue {
   private inFlightKeys = new Set<string>()
   private inFlightOrders = new Map<string, WorkOrder>()
   private completedIds = new Set<string>()
+  private failedIds = new Set<string>()
   private maxConcurrency: number
   /** Separate concurrency cap for explore (read-only) workers. Default: same as maxConcurrency. */
   private maxExploreConcurrency: number
@@ -110,7 +111,22 @@ export class WorkOrderQueue {
   markFailed(order: WorkOrder): void {
     this.inFlightKeys.delete(order.dedupeKey)
     this.inFlightOrders.delete(order.id)
+    // Record the failure so dependents can be distinguished as "dependency failed"
+    // (vs. "dependency never scheduled") during the post-drain blocked sweep.
+    // A failed id is NOT added to completedIds: dependents must NOT run on a
+    // broken foundation — they are settled as `blocked`, never silently dropped.
+    this.failedIds.add(order.id)
     this.emit({ type: 'failed', orderId: order.id })
+  }
+
+  /** True once an order has completed successfully (its dependents may run). */
+  isCompleted(id: string): boolean {
+    return this.completedIds.has(id)
+  }
+
+  /** True once an order has failed (its dependents must be blocked, not run). */
+  hasFailed(id: string): boolean {
+    return this.failedIds.has(id)
   }
 
   size(): number {
