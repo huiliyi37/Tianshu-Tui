@@ -154,8 +154,20 @@ describe('detectRigidity', () => {
     assert.equal(detectRigidity([0.5, 0.5, 0.5]), false)
   })
 
-  it('returns true when recent vigor is pathologically constant', () => {
-    assert.equal(detectRigidity(Array(10).fill(0.5)), true)
+  it('flat-low: returns true when vigor plateaus at low/mid level', () => {
+    assert.equal(detectRigidity(Array(10).fill(0.4)), true)
+  })
+
+  it('flat-high: returns false when vigor plateaus at high level (sustained success)', () => {
+    assert.equal(detectRigidity(Array(10).fill(0.95)), false)
+  })
+
+  it('flat-at-boundary: returns true when mean is exactly at threshold', () => {
+    assert.equal(detectRigidity(Array(10).fill(0.74)), true)
+  })
+
+  it('flat-above-boundary: returns false when mean exceeds high band', () => {
+    assert.equal(detectRigidity(Array(10).fill(0.76)), false)
   })
 
   it('returns false when recent vigor varies normally', () => {

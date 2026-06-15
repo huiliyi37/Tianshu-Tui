@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   adaptThetaInterval,
@@ -6,6 +6,7 @@ import {
   buildHealthTelemetry,
   buildStarPhaseContext,
   buildTelemetrySnapshot,
+  _resetElmCooldown,
 } from '../perception.js'
 import { createVigorState } from '../vigor.js'
 import type { Sensorium, StrategyProfile } from '../sensorium.js'
@@ -89,14 +90,53 @@ describe('buildStarPhaseContext', () => {
 })
 
 describe('buildHealthTelemetry', () => {
-  it('reports rigidity and elmDue', () => {
+  beforeEach(() => _resetElmCooldown())
+
+  it('flat-low triggers rigidity, elmDue stays false (below elm threshold)', () => {
     const health = buildHealthTelemetry(createVigorState({
-      vigor: 0.86,
-      history: [0.81, 0.82, 0.83, 0.84, 0.86, 0.86, 0.86, 0.86, 0.86, 0.86],
-    }))
+      vigor: 0.4,
+      history: Array(10).fill(0.4),
+    }), 1)
 
     assert.equal(health.rigidity, true)
+    assert.equal(health.elmDue, false)
+  })
+
+  it('flat-high does NOT trigger rigidity (sustained success is healthy)', () => {
+    const health = buildHealthTelemetry(createVigorState({
+      vigor: 0.9,
+      history: Array(10).fill(0.9),
+    }), 1)
+
+    assert.equal(health.rigidity, false)
     assert.equal(health.elmDue, true)
+  })
+
+  it('elmDue cools down after first trigger', () => {
+    const highState = createVigorState({
+      vigor: 0.86,
+      history: [0.81, 0.83, 0.84, 0.82, 0.86],
+    })
+
+    const first = buildHealthTelemetry(highState, 1)
+    assert.equal(first.elmDue, true)
+
+    const second = buildHealthTelemetry(highState, 2)
+    assert.equal(second.elmDue, false)
+
+    const third = buildHealthTelemetry(highState, 3)
+    assert.equal(third.elmDue, false)
+  })
+
+  it('elmDue re-triggers after cooldown expires', () => {
+    const highState = createVigorState({
+      vigor: 0.86,
+      history: [0.81, 0.83, 0.84, 0.82, 0.86],
+    })
+
+    buildHealthTelemetry(highState, 10)
+    const afterCooldown = buildHealthTelemetry(highState, 15)
+    assert.equal(afterCooldown.elmDue, true)
   })
 })
 

@@ -30,6 +30,8 @@ export interface VigorUpdateInput {
 
 const DEFAULT_HISTORY_LIMIT = 10
 const TONIC_ALPHA = 0.15
+/** Vigor mean above this band is "sustained success" — not rigidity. */
+const RIGIDITY_HIGH_BAND = 0.75
 
 /**
  * Failure class → phasic weight mapping.
@@ -155,11 +157,16 @@ export function updateVigor(prev: VigorState, input: VigorUpdateInput): VigorSta
 
 /**
  * HRV analogue: pathologically constant vigor means the runtime may be rigid.
+ *
+ * Flat-high plateaus (sustained success, mean > HIGH_BAND) are excluded —
+ * only flat-low/mid plateaus (true stagnation) trigger rigidity.
  */
 export function detectRigidity(history: number[], windowSize = DEFAULT_HISTORY_LIMIT, threshold = 0.05): boolean {
   if (history.length < windowSize) return false
   const recent = history.slice(-windowSize)
-  return computeStd(recent) < threshold
+  if (computeStd(recent) >= threshold) return false
+  const mean = recent.reduce((s, v) => s + v, 0) / recent.length
+  return mean < RIGIDITY_HIGH_BAND
 }
 
 /**

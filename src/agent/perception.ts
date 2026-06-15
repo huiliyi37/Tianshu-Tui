@@ -93,11 +93,26 @@ export function buildStarPhaseContext(input: StarPhaseContextInput): StarPhaseCo
   }
 }
 
-export function buildHealthTelemetry(vigor: VigorState): HealthTelemetrySnapshot {
+const ELM_COOLDOWN_TURNS = 5
+let lastElmReleaseTurn = -Infinity
+
+export function buildHealthTelemetry(vigor: VigorState, currentTurn?: number): HealthTelemetrySnapshot {
+  const rawElmDue = shouldTriggerElmRelease(vigor)
+  let elmDue = rawElmDue
+  if (currentTurn != null) {
+    const cooledDown = currentTurn - lastElmReleaseTurn >= ELM_COOLDOWN_TURNS
+    elmDue = rawElmDue && cooledDown
+    if (elmDue) lastElmReleaseTurn = currentTurn
+  }
   return {
     rigidity: detectRigidity(vigor.history),
-    elmDue: shouldTriggerElmRelease(vigor),
+    elmDue,
   }
+}
+
+/** Reset cooldown state — for testing only. */
+export function _resetElmCooldown(): void {
+  lastElmReleaseTurn = -Infinity
 }
 
 export function buildTelemetrySnapshot(input: TelemetryInput): PerceptionTelemetrySnapshot {
@@ -118,7 +133,7 @@ export function buildTelemetrySnapshot(input: TelemetryInput): PerceptionTelemet
       vigor: input.vigor.vigor,
       variability: input.vigor.variability,
     },
-    health: buildHealthTelemetry(input.vigor),
+    health: buildHealthTelemetry(input.vigor, input.turn),
     theta: input.theta,
     gitChangeRate: input.gitChangeRate,
     prefixDrift: input.prefixDrift,
