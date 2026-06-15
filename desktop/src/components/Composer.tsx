@@ -176,8 +176,19 @@ export function Composer(props: {
   }
 
   const onPaste = (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.files)
-    if (files.length > 0 && files.some(f => ACCEPTED_IMAGE_TYPES.has(f.type))) {
+    // Extract image files from BOTH .files and .items — WebKit/Tauri may
+    // populate only items for clipboard image paste (e.g. macOS screenshots).
+    const files: File[] = []
+    for (const f of Array.from(e.clipboardData.files)) {
+      if (ACCEPTED_IMAGE_TYPES.has(f.type)) files.push(f)
+    }
+    for (const item of Array.from(e.clipboardData.items)) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f && ACCEPTED_IMAGE_TYPES.has(f.type)) files.push(f)
+      }
+    }
+    if (files.length > 0) {
       e.preventDefault()
       void addFiles(files)
     }
@@ -197,6 +208,7 @@ export function Composer(props: {
       onDrop={onDrop}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
+      onPaste={onPaste}
     >
       {suggest && (
         <ul className="composer-suggest" role="listbox">
@@ -248,7 +260,6 @@ export function Composer(props: {
             : '和天枢对话…  (Enter 发送, Shift+Enter 换行, 粘贴/拖入图片)'}
           onChange={handleChange}
           onKeyDown={onKeyDown}
-          onPaste={onPaste}
           onClick={(e) => onAfterCaret(value, e.currentTarget.selectionStart ?? value.length)}
         />
         <input
