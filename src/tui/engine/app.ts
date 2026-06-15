@@ -1076,6 +1076,8 @@ export class TuiApp {
         if (this.metricsGlanceController.domainSyncProvider && this.streamRenderController.tick % 8 === 0) {
           this.syncSessionStarDomainFromAgent()
         }
+        // Keep todo panel in sync during long agent runs (not just on tool result / turn boundary).
+        this.refreshTodos()
         this.renderLive()
       }, 120)
       this.streamRenderController.ticker.unref?.()
@@ -1915,9 +1917,15 @@ export class TuiApp {
       const leftBar = color('│ ', borderColor)
       const rightBar = color(' │', borderColor)
 
-      const inputLines = this.inputLine.value
+      const MAX_INPUT_DISPLAY_LINES = 8
+      const allInputLines = this.inputLine.value
         ? this.inputLine.displayLines()
         : [`〉 █${color(this.inputLine.placeholder, this.theme.dim)}`]
+      // Cap visible input lines: show only the tail to prevent the input box
+      // from consuming excessive reservedTail budget and pushing content off-screen.
+      const inputLines = allInputLines.length > MAX_INPUT_DISPLAY_LINES
+        ? [color(`… ${allInputLines.length - MAX_INPUT_DISPLAY_LINES} lines above`, this.theme.dim), ...allInputLines.slice(-MAX_INPUT_DISPLAY_LINES)]
+        : allInputLines
 
       lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
