@@ -25,6 +25,7 @@ import { OverlayController } from './overlay-controller.js'
 import { ApprovalIntentController } from './approval-intent-controller.js'
 import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { StreamRenderController } from './stream-render-controller.js'
+import { InputController } from './input-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -238,19 +239,9 @@ export class TuiApp {
    */
   private _runGen = 0
 
-  // ── W4b: 输入辅助 ────────────────────────────────────────────
-  /** slash 命令列表（外部注入，提示 + Tab 补全用） */
-  private slashCommands: SlashHintEntry[] = []
-  /** slash hint 当前选中项索引（输入以 / 开头时，Tab 补全目标） */
-  private slashSelectedIdx = 0
-  /** @ 文件补全状态（Tab 循环） */
-  private fileCompletion: { baseText: string; baseCursor: number; candidates: string[]; idx: number } | null = null
-  /** 输入历史（最新在前，submit 时更新 + 持久化） */
-  private inputHistory: string[] = []
-  /** Ctrl+C double-press window start timestamp (ms), 0 = inactive */
-  private ctrlCPendingSince = 0
-  /** ESC double-press: last ESC timestamp (ms), 0 = inactive */
-  private lastEscAt = 0
+  // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
+  /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
+  private inputController = new InputController()
   /** 原始 stdout（用于直接写 DEC 私有模式如 bracketed paste 开关） */
   private stdout: WriteStream
 
@@ -285,7 +276,7 @@ export class TuiApp {
     })
     this.input = new InputHandler({ stdin: options.stdin, mode: 'input' })
     this.resize = new ResizeHandler({ stdout: options.stdout })
-    this.inputHistory = options.history ?? []
+    this.inputController.inputHistory = options.history ?? []
     this.inputLine = new InputLine({
       history: options.history,
       placeholder: '询问任何事，或 / 唤起命令',
@@ -295,8 +286,8 @@ export class TuiApp {
 
         // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
         if (trimmed) {
-          this.inputHistory = nextHistoryAfterSubmit(this.inputHistory, trimmed)
-          this.inputLine.setHistory(this.inputHistory)
+          this.inputController.inputHistory = nextHistoryAfterSubmit(this.inputController.inputHistory, trimmed)
+          this.inputLine.setHistory(this.inputController.inputHistory)
           appendHistoryAsync(trimmed).catch(() => { /* 持久化失败静默 */ })
         }
 
@@ -403,7 +394,7 @@ export class TuiApp {
     // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
     this.input.onPaste((text) => {
       this.inputLine.insertText(text)
-      this.fileCompletion = null
+      this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
     })
 
@@ -497,9 +488,9 @@ export class TuiApp {
         if (this.isAgentActive()) {
           // Agent active (含首 token 前/纯工具窗口): abort current agent run
           this.handleAbort()
-        } else if (this.ctrlCPendingSince > 0) {
+        } else if (this.inputController.ctrlCPendingSince > 0) {
           // Second Ctrl+C within window → exit
-          this.ctrlCPendingSince = 0
+          this.inputController.ctrlCPendingSince = 0
           this.dispose()
           if (this.onExitCallback) {
             this.onExitCallback()
@@ -512,9 +503,9 @@ export class TuiApp {
           this.renderLive()
         } else {
           // Idle with empty input: first Ctrl+C → show hint, start 2s window
-          this.ctrlCPendingSince = Date.now()
+          this.inputController.ctrlCPendingSince = Date.now()
           this.renderLive()
-          setTimeout(() => { this.ctrlCPendingSince = 0 }, 2000)
+          setTimeout(() => { this.inputController.ctrlCPendingSince = 0 }, 2000)
         }
         return
       }
@@ -538,15 +529,15 @@ export class TuiApp {
             // Has text: ESC clears input (like Claude Code)
             this.inputLine.setValue('')
             this.renderLive()
-          } else if (now - this.lastEscAt < 400) {
+          } else if (now - this.inputController.lastEscAt < 400) {
             // Double-ESC → rewind
-            this.lastEscAt = 0
+            this.inputController.lastEscAt = 0
             this.overlayController.resetNav()
             this.overlay.activate('rewind')
             this.renderLive()
           } else {
             // First ESC — record timestamp
-            this.lastEscAt = now
+            this.inputController.lastEscAt = now
           }
         }
         return
@@ -579,14 +570,14 @@ export class TuiApp {
       if (inputVal.startsWith('/')) {
         // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
         if (!inputVal.includes(' ')) {
-          const filtered = filterSlashCommands(this.slashCommands, inputVal.slice(1))
+          const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
           if (key.name === 'up' && filtered.length > 0) {
-            this.slashSelectedIdx = (this.slashSelectedIdx - 1 + filtered.length) % filtered.length
+            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
             this.renderLive()
             return
           }
           if (key.name === 'down' && filtered.length > 0) {
-            this.slashSelectedIdx = (this.slashSelectedIdx + 1) % filtered.length
+            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
             this.renderLive()
             return
           }
@@ -595,12 +586,12 @@ export class TuiApp {
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           this.inputLine.setValue('')
-          this.slashSelectedIdx = 0
+          this.inputController.slashSelectedIdx = 0
           void this.submitSlashCommand(inputVal)
           return
         }
       } else {
-        this.slashSelectedIdx = 0
+        this.inputController.slashSelectedIdx = 0
       }
       // ── W4a: Up 箭头取回最近 queued 消息到输入框编辑 ─────────
       if (key.name === 'up' && !this.inputLine.value && this.steerBuffer.hasPending()) {
@@ -615,9 +606,9 @@ export class TuiApp {
       const event = this.inputLine.handleKey(key.name, key.char, key.ctrl, key.meta)
       if (event?.type === 'change') {
         // 输入变化使 @ 补全循环失效
-        this.fileCompletion = null
+        this.inputController.fileCompletion = null
         // 普通文本输入重置 slash 选中项（避免选了第 3 项又打字导致选中越界）
-        this.slashSelectedIdx = 0
+        this.inputController.slashSelectedIdx = 0
         // 批渲染：快速输入/分 chunk 到达时合并为单次 LiveEngine.render，
         // 避免逐 chunk 全量重写造成的闪烁/残影。
         this.writeBatcher.schedule()
@@ -1103,7 +1094,7 @@ export class TuiApp {
 
   /** 注入 slash 命令列表（main-ansi 启动时调用） */
   setSlashCommands(commands: SlashHintEntry[]): void {
-    this.slashCommands = commands
+    this.inputController.slashCommands = commands
   }
 
   /**
@@ -1117,18 +1108,18 @@ export class TuiApp {
 
     // slash 命令补全
     if (value.startsWith('/') && !value.includes(' ')) {
-      const target = slashCompletionTarget(value, this.slashCommands, this.slashSelectedIdx)
+      const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
-        this.slashSelectedIdx = 0
+        this.inputController.slashSelectedIdx = 0
         return true
       }
       return false
     }
 
     // @ 文件补全（Tab 循环候选）
-    if (this.fileCompletion) {
-      const fc = this.fileCompletion
+    if (this.inputController.fileCompletion) {
+      const fc = this.inputController.fileCompletion
       fc.idx = (fc.idx + 1) % fc.candidates.length
       const applied = applyCompletion(fc.baseText, fc.baseCursor, fc.candidates[fc.idx]!)
       this.inputLine.setValue(applied.text, applied.cursor)
@@ -1140,11 +1131,11 @@ export class TuiApp {
     const candidates = getCompletions(token, process.cwd(), 8)
     if (candidates.length === 0) return false
 
-    this.fileCompletion = { baseText: value, baseCursor: cursor, candidates, idx: 0 }
+    this.inputController.fileCompletion = { baseText: value, baseCursor: cursor, candidates, idx: 0 }
     const applied = applyCompletion(value, cursor, candidates[0]!)
     this.inputLine.setValue(applied.text, applied.cursor)
     if (candidates.length === 1) {
-      this.fileCompletion = null // 唯一候选，无需循环
+      this.inputController.fileCompletion = null // 唯一候选，无需循环
     }
     return true
   }
@@ -1906,7 +1897,7 @@ export class TuiApp {
     }
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
-    if (this.ctrlCPendingSince > 0) {
+    if (this.inputController.ctrlCPendingSince > 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
@@ -1946,14 +1937,14 @@ export class TuiApp {
 
       // 5b. slash 命令提示（输入以 / 开头且未含空格）
       if (isSlash && !inputVal.includes(' ')) {
-        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.slashCommands, selectedIdx: this.slashSelectedIdx }, this.theme)) {
+        for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
           lines.push({ text: hintLine })
         }
       }
 
       // 5c. @ 文件补全候选列表（Tab 循环时显示）
-      if (this.fileCompletion && this.fileCompletion.candidates.length > 1) {
-        const fc = this.fileCompletion
+      if (this.inputController.fileCompletion && this.inputController.fileCompletion.candidates.length > 1) {
+        const fc = this.inputController.fileCompletion
         for (let i = 0; i < Math.min(fc.candidates.length, 6); i++) {
           const selected = i === fc.idx
           const marker = selected ? color('❯ ', this.theme.primary) : '  '
