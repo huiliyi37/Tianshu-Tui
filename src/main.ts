@@ -351,10 +351,8 @@ async function main() {
         query,
       }
     },
-    // Tasks — /tasks 显示运行中子代理
-    tasksData: () => ({
-      workers: tuiApp.getRunningWorkers(),
-    }),
+    // Tasks — /tasks 显示运行中子代理（per-worker，来自舰队读模型）
+    tasksData: () => tuiApp.getRunningWorkers(),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。

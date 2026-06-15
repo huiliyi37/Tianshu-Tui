@@ -86,6 +86,18 @@ describe('TeamPanel model', () => {
     assert.equal(model.reviewVerdict, 'verified')
   })
 
+  it('activeTaskIds overlays running state on a no-run skeleton (Wave 4)', () => {
+    const skeleton = { ...summary(), run: undefined }
+    // Without activity, a task outside the current wave is waiting.
+    const baseline = buildTeamPanelModel(skeleton, 0)
+    assert.equal(baseline.tasks.find(t => t.id === 'T3')?.status, 'waiting')
+    // With live activity for T3 (e.g. a later wave streamed early), it shows running.
+    const live = buildTeamPanelModel(skeleton, 0, undefined, new Set(['T3']))
+    assert.equal(live.tasks.find(t => t.id === 'T3')?.status, 'running')
+    // Current-wave tasks remain running regardless.
+    assert.equal(live.tasks.find(t => t.id === 'T1')?.status, 'running')
+  })
+
   it('round-trips through the uiContent prefix', () => {
     const model = buildTeamPanelModel(summary(), 0)
     const encoded = encodeTeamPanelModel(model)

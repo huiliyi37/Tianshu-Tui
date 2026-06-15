@@ -314,8 +314,50 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 
 // ── Tasks ──────────────────────────────────────────────────────
 
+export type TasksWorkerStatus = 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
+
+export interface TasksWorkerRow {
+  /** 短标签，例如 "wo_team:T1" → "T1"。 */
+  shortLabel: string
+  profile: string
+  status: TasksWorkerStatus
+  /** 最新活动行或终态摘要。 */
+  activity?: string
+  elapsedMs: number
+}
+
+export interface TasksGroup {
+  /** 派生这组 worker 的委派工具调用 id（不直接展示，仅用于分组/序号）。 */
+  parentToolId: string
+  total: number
+  done: number
+  failed: number
+  running: number
+  /** 该组当前在跑的 worker 行。 */
+  workers: TasksWorkerRow[]
+}
+
 export interface TasksData {
-  workers: Array<{ profile: string; objective: string; elapsedMs: number; glyph: string }>
+  groups: TasksGroup[]
+}
+
+const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
+  running: '◐',
+  passed: '✓',
+  failed: '✗',
+  blocked: '⊘',
+  escalated: '↑',
+}
+
+function tasksElapsed(ms: number): string {
+  return ms > 1000 ? `${(ms / 1000).toFixed(0)}s` : `${ms}ms`
+}
+
+/** done/total 进度条（复用 worker 面板风格）。 */
+function tasksProgressBar(done: number, total: number, width = 8): string {
+  if (total <= 0) return '░'.repeat(width)
+  const filled = Math.min(width, Math.round((done / total) * width))
+  return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
 export function renderTasks(data: TasksData, width: number, height: number, theme: RivetTheme): string[] {
@@ -323,24 +365,49 @@ export function renderTasks(data: TasksData, width: number, height: number, them
   lines.push(formatBorder(width, theme))
   lines.push(formatTitleBar('⚙ Running Agents', width, theme))
 
-  const maxEntries = height - 5
-  const visible = data.workers.slice(0, maxEntries)
+  const maxEntries = Math.max(1, height - 5)
+  const totalActive = data.groups.reduce((n, g) => n + g.workers.length, 0)
 
-  for (const w of visible) {
-    const elapsed = w.elapsedMs > 1000 ? `${(w.elapsedMs / 1000).toFixed(0)}s` : `${w.elapsedMs}ms`
-    const line = ` ${w.glyph} ${w.profile.padEnd(14)} ${w.objective.slice(0, width - 30)} ${color(`(${elapsed})`, theme.muted)}`
+  // 逐组渲染：组头（进度条 + done/total）后跟该组在跑 worker 行。多组时以
+  // 序号区分（parentToolId 是不透明的 tool id，不直接展示）。
+  const body: string[] = []
+  const multiGroup = data.groups.length > 1
+  data.groups.forEach((g, gi) => {
+    const bar = color(tasksProgressBar(g.done, g.total), theme.muted)
+    const counts = color(`${g.done}/${g.total} done`, theme.muted)
+    const failedNote = g.failed > 0 ? color(`  ${g.failed} failed`, theme.warning) : ''
+    const groupTitle = multiGroup ? `group ${gi + 1}` : 'fleet'
+    body.push(` ${color('◆', theme.primary)} ${groupTitle}  ${bar} ${counts}${failedNote}`)
+    for (const w of g.workers) {
+      const glyph = TASK_STATUS_GLYPH[w.status] ?? '·'
+      const glyphColored = w.status === 'running'
+        ? color(glyph, theme.primary)
+        : w.status === 'passed'
+          ? color(glyph, theme.success)
+          : color(glyph, theme.warning)
+      const label = `${w.shortLabel}·${w.profile}`.slice(0, 22).padEnd(22)
+      const activity = w.activity ? ` ${w.activity}` : ''
+      const elapsed = color(`(${tasksElapsed(w.elapsedMs)})`, theme.muted)
+      const detailMax = Math.max(0, width - 32 - stringWidth(elapsed))
+      const detail = activity.slice(0, detailMax)
+      body.push(`   ${glyphColored} ${label}${detail} ${elapsed}`)
+    }
+  })
+
+  if (totalActive === 0) {
+    body.push(color(' (no running workers)', theme.dim))
+  }
+
+  const visible = body.slice(0, maxEntries)
+  for (const line of visible) {
     lines.push(padLine(line, width, theme))
   }
-
-  if (visible.length === 0) {
-    lines.push(padLine(color(' (no running workers)', theme.dim), width, theme))
-  }
-
   for (let i = visible.length; i < maxEntries; i++) {
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter(`${data.workers.length} workers running  ·  q quit`, width, theme))
+  const summary = totalActive === 1 ? '1 worker running' : `${totalActive} workers running`
+  lines.push(formatFooter(`${summary}  ·  q quit`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines

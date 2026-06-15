@@ -47,6 +47,11 @@ export interface TeamRunInput {
   /** T9 P3: real-time worker activity upstream — injected into every
    *  dispatched DelegationRequest so the TeamPanel can show live progress. */
   onActivity?: DelegationRequest['onActivity']
+  /** Fleet viz: invoked once the wave plan is computed but BEFORE workers are
+   *  dispatched, so the UI can render the wave/task DAG (all waiting) up front
+   *  and overlay running state from live worker activity. The summary carries
+   *  waves+tasks but no `run`. */
+  onPlanReady?: (summary: TeamRunSummary, fromWave: number) => void
 }
 
 export interface TeamRunSummary {
@@ -284,6 +289,21 @@ async function dispatchWaveAt(
       blocked: remainingBlocked,
       packet: `team: wave ${targetWave.id} produced no dispatchable requests.`,
     }
+  }
+
+  // Fleet viz: surface the wave/task DAG before dispatch so the TUI can show
+  // the plan (all waiting) immediately; running state is overlaid from live
+  // worker activity. No `run` yet → all tasks render as waiting.
+  if (input.onPlanReady) {
+    input.onPlanReady({
+      mode: input.mode,
+      planned,
+      tasks,
+      waves,
+      dispatched: requests.length,
+      blocked: remainingBlocked,
+      packet: `[wave ${fromWave + 1}/${waves.length}] dispatching ${requests.length} workers…`,
+    }, fromWave)
   }
 
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)

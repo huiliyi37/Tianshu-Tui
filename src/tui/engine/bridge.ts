@@ -95,5 +95,11 @@ export function wrapCallbacksWithTuiApp(
       const originalDrained = original.onSteerDrain?.() ?? null
       return drained ?? originalDrained
     },
+    onDelegationActivity: (activity) => {
+      // 迟到的旧 run 委派活动 → 丢弃，避免污染新 run 的舰队读模型。
+      if (!live()) return
+      app.callbacks.onDelegationActivity?.(activity)
+      original.onDelegationActivity?.(activity)
+    },
   }
 }

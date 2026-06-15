@@ -33,7 +33,8 @@ import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent } fr
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
-import { decodeTeamPanelModel } from '../team-panel-model.js'
+import { formatWorkerFleet } from '../format/worker-fleet.js'
+import { decodeTeamPanelModel, taskIdFromActivity, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -46,7 +47,7 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -119,6 +120,8 @@ export interface TuiState {
 import type { Usage } from '../../api/types.js'
 import type { IntentPreview, IntentPreviewAction } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
+import type { DelegationActivity } from '../../tools/types.js'
+import { FleetRegistry } from '../fleet-registry.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -133,6 +136,8 @@ export interface AgentCallbacks {
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   onSteerDrain?: () => string | null
+  /** T4 — structured per-worker delegation status/progress feeding the fleet read model. */
+  onDelegationActivity?: (activity: DelegationActivity) => void
 }
 
 /**
@@ -205,6 +210,11 @@ export class TuiApp {
   private lastCollapsedGroup: CollapsedReadSearchGroup | null = null
   /** 工具折叠组缓冲区：连续 collapsible 调用在此累积，非 collapsible 到达或 turn 结束时 flush */
   private toolGroupBuffer = new CollapsedReadSearchBuffer()
+  /** 并行子代理舰队读模型（由 onDelegationActivity 事件流驱动） */
+  private fleet = new FleetRegistry()
+  /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
+   *  从流式块中拦截的初始编码面板解码而来；终态委派到 scrollback 后清空。 */
+  private liveTeamModel: TeamPanelModel | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** 渲染 ticker（streaming/thinking 时 120ms 驱动 spinner，idle 停止） */
@@ -687,6 +697,7 @@ export class TuiApp {
       },
       onIntentPreview: async (intent) => this.handleIntentPreview(intent),
       onSteerDrain: () => this.steerBuffer.drain(),
+      onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
 
     // 审批按键统一在 onAnyKey 顶部短路处理（见上），不再注册 mode-bound 处理器，
@@ -828,21 +839,32 @@ export class TuiApp {
   }
 
   /**
-   * Get running delegation workers for /tasks overlay.
-   * MVP: reads from pendingTools filtered for delegation tools.
+   * Get running delegation workers for the `/tasks` overlay.
+   * Reads per-worker state from the fleet read model (fed by onDelegationActivity),
+   * grouped by the spawning delegation tool. Falls back to an empty fleet when no
+   * delegation is in flight.
    */
-  getRunningWorkers(): Array<{ profile: string; objective: string; elapsedMs: number; glyph: string }> {
-    return [...this.pendingTools.entries()]
-      .filter(([, meta]) => isDelegationTool(meta.name))
-      .map(([, meta]) => {
-        const badge = domainBadge(meta.name)
-        return {
-          profile: delegationProfileFromInput(meta.name, meta.input),
-          objective: delegationObjectiveFromInput(meta.input),
-          elapsedMs: Date.now() - meta.startMs,
-          glyph: badge?.glyph ?? '◆',
-        }
+  getRunningWorkers(): TasksData {
+    const now = Date.now()
+    const active = this.fleet.getActiveWorkers(now)
+    const byParent = new Map<string, TasksWorkerRow[]>()
+    for (const w of active) {
+      const arr = byParent.get(w.parentToolId) ?? []
+      arr.push({
+        shortLabel: w.shortLabel,
+        profile: w.profile,
+        status: w.status,
+        activity: w.activity,
+        elapsedMs: w.elapsedMs,
       })
+      byParent.set(w.parentToolId, arr)
+    }
+    const groups: TasksGroup[] = []
+    for (const [parentToolId, workers] of byParent) {
+      const p = this.fleet.getGroupProgress(parentToolId)
+      groups.push({ parentToolId, total: p.total, done: p.done, failed: p.failed, running: p.running, workers })
+    }
+    return { groups }
   }
 
   /**
@@ -1386,11 +1408,56 @@ export class TuiApp {
     })
   }
 
+  /**
+   * T4 — 结构化 per-worker 委派活动 → 舰队读模型。
+   * 仅更新读模型并安排一次合并渲染（live 区的 worker 面板 / `/tasks` overlay
+   * 据此实时刷新）。终态清理在委派工具 result 到达时统一处理。
+   */
+  private handleDelegationActivity(activity: DelegationActivity): void {
+    this.fleet.apply(activity)
+    this.markActivity()
+    this.writeBatcher.schedule()
+  }
+
+  /**
+   * 将 team_orchestrate 的静态计划面板叠加运行态：依据 fleet 中在跑 worker 的
+   * workOrderId（"team:T1" / "wo_team:T1"）反查 task id，把对应 waiting 任务标 running。
+   * 终态任务（在 fleet 已无活跃记录）保持 waiting，待终态面板权威覆盖。
+   */
+  private teamModelWithLiveStatus(model: TeamPanelModel): TeamPanelModel {
+    const activeIds = new Set<string>()
+    for (const w of this.fleet.getActiveWorkers()) {
+      const tid = taskIdFromActivity(w.workerId)
+      if (tid) activeIds.add(tid)
+    }
+    if (activeIds.size === 0) return model
+    return {
+      ...model,
+      tasks: model.tasks.map(t =>
+        t.status === 'waiting' && activeIds.has(t.id) ? { ...t, status: 'running' } : t,
+      ),
+    }
+  }
+
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
     const displayContent = uiContent ?? result
 
     // Streaming chunk mode: isError === undefined means intermediate update
     if (isError === undefined) {
+      // team_orchestrate fleet viz: the orchestrator streams an initial encoded
+      // TeamPanel (all-waiting DAG) before dispatch. Intercept it into liveTeamModel
+      // and DO NOT accumulate — otherwise it would double-decode at terminal
+      // (indexOf would hit this stale panel before the real one) and leak the raw
+      // encoded string into the live tool tail.
+      if (name === 'team_orchestrate' && result.includes(TEAM_PANEL_UI_PREFIX)) {
+        const model = decodeTeamPanelModel(result)
+        if (model) {
+          this.liveTeamModel = model
+          this.markActivity()
+          this.writeBatcher.schedule()
+          return
+        }
+      }
       // Accumulate for live tool card display — show last lines in live region
       const toolAcc = this.toolAccumulator.get(id) ?? ''
       this.toolAccumulator.set(id, toolAcc + result)
@@ -1406,6 +1473,11 @@ export class TuiApp {
     this.toolAccumulator.delete(id)
     const meta = this.pendingTools.get(id)
     this.pendingTools.delete(id)
+    // 委派工具终态：清理该组在舰队读模型中的 worker 记录（终态摘要已通过
+    // onDelegationActivity 到达，面板转入 scrollback 后无需常驻 live 区）。
+    if (meta && isDelegationTool(meta.name)) {
+      this.fleet.clearGroup(id)
+    }
     const finalContent = toolAcc ? toolAcc + displayContent : displayContent
 
     // 可折叠 tool（read/grep/glob/repo_map 等探索型）：按 toolUseId 绑定结果到折叠组
@@ -1422,6 +1494,8 @@ export class TuiApp {
     // team_orchestrate：把编码串 rivet:team-panel:v1:{...} 解码为 TeamPanel 面板，
     // 而非把裸编码串当工具卡片输出（对齐 Ink decodeTeamPanelModel + TeamPanel）。
     if (name === 'team_orchestrate') {
+      // Live panel is being committed to scrollback — drop the in-flight overlay.
+      this.liveTeamModel = null
       const model = decodeTeamPanelModel(finalContent.trim())
       if (model) {
         const panel = formatTeamPanel(model, this.theme, this.columns)
@@ -1702,20 +1776,54 @@ export class TuiApp {
       lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
     }
 
-    // 2b2. Worker pills — 运行中子代理摘要（delegate_*/team_orchestrate）
-    const delegationTools = [...this.pendingTools.entries()]
-      .filter(([, meta]) => isDelegationTool(meta.name))
-    if (delegationTools.length > 0) {
-      const pills = delegationTools.map(([, meta]) => {
-        const elapsed = Date.now() - meta.startMs
-        const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-        const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
-          ? color('[auto]', this.theme.success)
-          : color('[ask]', this.theme.warning)
-        const profile = delegationProfileFromInput(meta.name, meta.input)
-        return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
-      })
-      lines.push({ text: ` ${pills.join('  ')}` })
+    // 2b2. 子代理可视化 —
+    //  - team_orchestrate 运行中：渲染 wave/task DAG（运行态由 fleet 叠加）。
+    //  - delegate_*：渲染 FleetRegistry 驱动的 per-worker 结构化总览。
+    //  - 刚启动、活动未上行的窗口期：回退工具级 pill，避免空白。
+    if (this.liveTeamModel) {
+      const model = this.teamModelWithLiveStatus(this.liveTeamModel)
+      for (const line of formatTeamPanel(model, this.theme, this.columns)) {
+        lines.push({ text: line })
+      }
+    } else {
+    const activeWorkers = this.fleet.getActiveWorkers()
+    if (activeWorkers.length > 0) {
+      const summary = activeWorkers.reduce(
+        (acc, w) => {
+          const p = this.fleet.getGroupProgress(w.parentToolId)
+          if (!acc.seen.has(w.parentToolId)) {
+            acc.seen.add(w.parentToolId)
+            acc.total += p.total
+            acc.done += p.done
+          }
+          acc.running += 1
+          return acc
+        },
+        { total: 0, done: 0, running: 0, seen: new Set<string>() },
+      )
+      const fleetLines = formatWorkerFleet(
+        activeWorkers,
+        this.theme,
+        this.columns,
+        { done: summary.done, total: summary.total, running: summary.running },
+      )
+      for (const line of fleetLines) lines.push({ text: line })
+    } else {
+      const delegationTools = [...this.pendingTools.entries()]
+        .filter(([, meta]) => isDelegationTool(meta.name))
+      if (delegationTools.length > 0) {
+        const pills = delegationTools.map(([, meta]) => {
+          const elapsed = Date.now() - meta.startMs
+          const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+          const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
+            ? color('[auto]', this.theme.success)
+            : color('[ask]', this.theme.warning)
+          const profile = delegationProfileFromInput(meta.name, meta.input)
+          return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
+        })
+        lines.push({ text: ` ${pills.join('  ')}` })
+      }
+    }
     }
 
     // 2c. Collapsible 探索工具聚合行（避免 read×5 + grep×3 刷屏 live 区）
@@ -2100,7 +2208,7 @@ export class TuiApp {
     // Tasks — /tasks 显示运行中子代理
     this.overlay.register('tasks', {
       render: (_w, _h) => {
-        const data = overlayData?.tasksData?.() ?? { workers: [] }
+        const data = overlayData?.tasksData?.() ?? { groups: [] }
         return renderTasks(data, this.columns, this.rows, this.theme)
       },
     })

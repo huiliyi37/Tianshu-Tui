@@ -158,6 +158,15 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
             // T9 P3: live worker token/tool stream into the team tool card.
             onActivity,
+            // Fleet viz: emit the wave/task DAG (all waiting) before dispatch so
+            // the TUI shows the plan up front; the engine overlays running state
+            // from live worker activity. Encoded as a dedicated stream chunk that
+            // the engine intercepts (not accumulated → no double-decode at term).
+            onPlanReady: params.onOutput
+              ? (skeleton, wave) => {
+                  params.onOutput!(`\n${encodeTeamPanelModel(buildTeamPanelModel(skeleton, wave))}\n`)
+                }
+              : undefined,
           },
           {
             delegateBatch: (requests, policy, abortSignal, onProgress) =>

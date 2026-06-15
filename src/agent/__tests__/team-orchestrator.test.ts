@@ -6,6 +6,7 @@ import {
   selectDispatchableTeamTasks,
   teamTasksToDelegationRequests,
 } from '../team-orchestrator.js'
+import type { TeamRunSummary } from '../team-orchestrator.js'
 import type { TeamTaskDraft } from '../team-plan.js'
 
 function task(id: string, files: string[], profile: TeamTaskDraft['profile'] = 'patcher'): TeamTaskDraft {
@@ -72,6 +73,33 @@ describe('team orchestrator skeleton', () => {
     assert.deepEqual(request!.scope.files, ['src/a.ts'])
     assert.ok(request!.objective.includes('你是天梁执行者'))
     assert.ok(request!.objective.includes('只执行本 task'))
+  })
+
+  it('onPlanReady 在 dispatch 之前触发，携带 waves/tasks 且无 run', async () => {
+    const order: string[] = []
+    let planReady: { summary: TeamRunSummary; wave: number } | null = null
+    await runTeamSkeleton({
+      mode: 'standard',
+      objective: 'execute plan',
+      parentTurnId: 'turn-1',
+      planMarkdown: `
+### Task 1: Parser
+修改 src/agent/team-plan.ts
+
+### Task 2: Orchestrator
+修改 src/agent/team-orchestrator.ts
+`,
+      onPlanReady: (s, w) => { order.push('plan'); planReady = { summary: s, wave: w } },
+    }, {
+      delegateBatch: async () => { order.push('dispatch'); return run('delegated') },
+    })
+    assert.deepEqual(order, ['plan', 'dispatch'], 'onPlanReady 必须先于 delegateBatch')
+    assert.ok(planReady, 'onPlanReady 应被调用')
+    const pr = planReady as unknown as { summary: TeamRunSummary; wave: number }
+    assert.equal(pr.wave, 0)
+    assert.ok(pr.summary.waves.length > 0, '计划骨架应含 waves')
+    assert.ok(pr.summary.tasks.length > 0, '计划骨架应含 tasks')
+    assert.equal(pr.summary.run, undefined, '骨架阶段尚无 run')
   })
 
   it('dispatches parsed standard plan tasks through delegateBatch', async () => {
