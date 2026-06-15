@@ -232,6 +232,62 @@ describe('createProviderClient', () => {
     })
     assert.ok(client instanceof AnthropicClient)
   })
+  it('injects thinkingStallTimeoutMs default for glm provider', () => {
+    const glmProvider: ProviderConfig = {
+      name: 'glm',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 64000,
+      models: [{ id: 'glm-4.6', contextWindow: 128000, maxTokens: 8192 }],
+      unsupported: [],
+    }
+    const capabilities = resolveCapabilities('glm')
+    const client = createProviderClient(glmProvider, capabilities, runtimeParams)
+    assert.ok(client instanceof OpenAIClient)
+    // config is private but accessible at runtime
+    const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
+    assert.equal(config.thinkingStallTimeoutMs, 120_000, 'glm should get default 120s thinking stall')
+  })
+
+  it('does NOT inject thinkingStallTimeoutMs for non-glm providers', () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    assert.ok(client instanceof OpenAIClient)
+    const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
+    assert.equal(config.thinkingStallTimeoutMs, undefined, 'deepseek should not get thinkingStallTimeoutMs')
+  })
+
+  it('provider config overrides default thinkingStallTimeoutMs for glm', () => {
+    const glmProvider: ProviderConfig = {
+      name: 'glm',
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'none',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 64000,
+      thinkingStallTimeoutMs: 90_000,
+      models: [{ id: 'glm-4.6', contextWindow: 128000, maxTokens: 8192 }],
+      unsupported: [],
+    }
+    const capabilities = resolveCapabilities('glm')
+    const client = createProviderClient(glmProvider, capabilities, runtimeParams)
+    const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
+    assert.equal(config.thinkingStallTimeoutMs, 90_000, 'explicit provider config should override default')
+  })
 })
 
 describe('resolveApiKey', () => {

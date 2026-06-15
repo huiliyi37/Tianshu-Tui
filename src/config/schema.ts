@@ -40,6 +40,13 @@ export const providerSchema = z.object({
   models: z.array(modelConfigSchema).min(1),
   thinking: z.enum(['enabled', 'disabled']).default('enabled'),
   maxTokens: z.number().int().positive().default(64000),
+  /**
+   * Thinking-stall timeout (ms): once reasoning tokens have arrived but no text/tool
+   * output yet, abort the stream if no further chunk within this window.
+   * 默认 undefined = 取 readMs（禁用）。仅对易卡死的 SLOW_THINKING provider（如 glm）
+   * 建议显式设置一个 < readMs 的值；factory.ts 对 glm 注入了 120s 内置默认。
+   */
+  thinkingStallTimeoutMs: z.number().int().positive().optional(),
   unsupported: z.array(z.string()).default([]),
 })
 
