@@ -87,8 +87,21 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
         resolve({ content: 'Error: git diff timed out', rawPath, isError: true })
       }, 30_000)
 
+      // 用户中止：协作式取消，kill git diff 子进程。
+      const signal = params.abortSignal
+      const onAbort = () => {
+        clearTimeout(timer)
+        gracefulKill(child)
+        resolve({ content: 'Diff aborted by user.', isError: false })
+      }
+      if (signal) {
+        if (signal.aborted) onAbort()
+        else signal.addEventListener('abort', onAbort, { once: true })
+      }
+
       child.on('close', async (code) => {
         clearTimeout(timer)
+        if (signal) signal.removeEventListener('abort', onAbort)
         if (stderr.trim()) {
           const rawPath = await persistRawOutput(params.toolUseId, stderr.trim())
           resolve({ content: `Error: ${stderr.trim()}`, rawPath, isError: true })
@@ -110,6 +123,7 @@ Good: diff(path="src/api/client.ts") — show diff for one file`,
 
       child.on('error', async (err) => {
         clearTimeout(timer)
+        if (signal) signal.removeEventListener('abort', onAbort)
         const rawPath = await persistRawOutput(params.toolUseId, err.message)
         resolve({ content: `Error: ${err.message}`, rawPath, isError: true })
       })

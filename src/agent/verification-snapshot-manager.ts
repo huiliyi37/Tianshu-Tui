@@ -19,6 +19,7 @@
 
 import { writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import {
   createVerificationSnapshot,
   snapshotPath,
@@ -205,4 +206,63 @@ function reapDir(baseCwd: string, dir: string, custom?: (baseCwd: string, dir: s
   } catch {
     // best-effort
   }
+}
+
+/**
+ * Reap orphaned Hands worktrees left by dead sessions. Scans /tmp for
+ * `rivet-wt-*` directories, reads each dir's owner marker, and reaps when
+ * the owner pid is not alive. Does not reap the current session's worktrees.
+ *
+ * Unlike VSW snapshots (`.rivet/vsw/*`), Hands worktrees live in `/tmp`
+ * and are not under the project root, so the existing `reapOrphanSnapshots`
+ * scanner does not find them.
+ */
+export function reapOrphanHandsWorktrees(opts: {
+  baseCwd: string
+  currentSessionId?: string
+  isAlive?: (pid: number) => boolean
+  removeWorktreeDir?: (baseCwd: string, dir: string) => void
+}): ReapOrphanSnapshotsResult {
+  const isAlive = opts.isAlive ?? isPidAlive
+  const reaped: string[] = []
+  const kept: string[] = []
+  const tmpRoot = tmpdir()
+  const prefix = 'rivet-wt-'
+
+  let entries: string[] = []
+  try {
+    entries = readdirSync(tmpRoot, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name.startsWith(prefix))
+      .map(e => e.name)
+  } catch {
+    return { reaped, kept }
+  }
+
+  for (const entryName of entries) {
+    const dir = join(tmpRoot, entryName)
+    const markerPath = join(dir, OWNER_FILE)
+    let pid: number | undefined
+    let sessionId: string | undefined
+    try {
+      const raw = JSON.parse(readFileSync(markerPath, 'utf-8')) as { pid?: unknown; sessionId?: unknown }
+      if (typeof raw.pid === 'number') pid = raw.pid
+      if (typeof raw.sessionId === 'string') sessionId = raw.sessionId
+    } catch {
+      // No readable marker — cannot prove dead → keep (fail safe).
+      kept.push(entryName)
+      continue
+    }
+    if (opts.currentSessionId && sessionId === opts.currentSessionId) {
+      kept.push(entryName)
+      continue
+    }
+    if (pid !== undefined && !isAlive(pid)) {
+      reapDir(opts.baseCwd, dir, opts.removeWorktreeDir)
+      reaped.push(entryName)
+    } else {
+      kept.push(entryName)
+    }
+  }
+
+  return { reaped, kept }
 }

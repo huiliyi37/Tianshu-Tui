@@ -43,7 +43,7 @@ import { createOwnershipLedger } from './agent/ownership-ledger.js'
 import { createVerificationAttribution } from './agent/verification-attribution.js'
 import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
-import { createVerificationSnapshotManager, reapOrphanSnapshots } from './agent/verification-snapshot-manager.js'
+import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
@@ -399,6 +399,7 @@ export function createInteractiveToolRegistry(
   // repo → in-place; no other sessions on this cwd in the CLI path → in-place),
   // so behavior is unchanged unless the baseline is dirty or RIVET_VSW=1 forces it.
   try { reapOrphanSnapshots({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
+  try { reapOrphanHandsWorktrees({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
   const b1SnapshotManager = createVerificationSnapshotManager({
     baseCwd: cwd,
     sessionId: refs.sessionId ?? getOrCreateSessionId(),

@@ -19,7 +19,7 @@ const FORCE_KILL_DELAY = 3_000
  * the entire git process tree is killed on timeout — prevents zombie
  * processes that would otherwise accumulate and eventually freeze the TUI.
  */
-async function runGit(args: string[], cwd: string): Promise<string> {
+async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       cwd,
@@ -46,11 +46,27 @@ async function runGit(args: string[], cwd: string): Promise<string> {
       else resolve(output)
     }
 
+    // 用户中止：协作式取消，沿袭 bash.ts 的 killProcessTree 两级终止模式。
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
+      killProcessTree(child, 'SIGTERM')
+      forceKillTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), FORCE_KILL_DELAY)
+      resolve('Aborted by user.')
+    }
+    if (abortSignal) {
+      if (abortSignal.aborted) { onAbort(); return }
+      abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+
     child.stdout!.on('data', (data: Buffer) => { stdout += data.toString() })
     child.stderr!.on('data', (data: Buffer) => { stderr += data.toString() })
 
     child.on('close', (code) => {
       if (settled) return
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       if (code !== 0) {
         const err = new Error((stderr || '').trim() || `git exited with status ${code}`)
         const gitErr = err as GitExitError
@@ -67,6 +83,7 @@ async function runGit(args: string[], cwd: string): Promise<string> {
 
     child.on('error', (err) => {
       if (settled) return
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       finish('', err)
     })
 
@@ -84,9 +101,9 @@ async function runGit(args: string[], cwd: string): Promise<string> {
 interface GitExitError extends Error { exitCode: number }
 
 /** runGit variant that returns exit code instead of throwing — for callers that need to distinguish exit codes. */
-async function runGitExitCode(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+async function runGitExitCode(args: string[], cwd: string, abortSignal?: AbortSignal): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
-    const stdout = await runGit(args, cwd)
+    const stdout = await runGit(args, cwd, abortSignal)
     return { code: 0, stdout, stderr: '' }
   } catch (err) {
     const exitCode = (err as GitExitError).exitCode
@@ -96,9 +113,9 @@ async function runGitExitCode(args: string[], cwd: string): Promise<{ code: numb
 }
 
 /** runGit that returns {ok, output} instead of throwing — for callers that need error detail. */
-async function runGitSafe(args: string[], cwd: string): Promise<{ ok: boolean; output: string }> {
+async function runGitSafe(args: string[], cwd: string, abortSignal?: AbortSignal): Promise<{ ok: boolean; output: string }> {
   try {
-    const output = await runGit(args, cwd)
+    const output = await runGit(args, cwd, abortSignal)
     return { ok: true, output }
   } catch (err) {
     const output = err instanceof Error ? err.message : String(err)
@@ -123,21 +140,21 @@ function getScopedCommitFiles(cwd: string, ownedFiles: string[] | undefined, ses
   return [...new Set(files)].sort((a, b) => a.localeCompare(b))
 }
 
-async function hasStagedChanges(cwd: string, pathspecs?: string[]): Promise<boolean> {
+async function hasStagedChanges(cwd: string, pathspecs?: string[], abortSignal?: AbortSignal): Promise<boolean> {
   const args = ['diff', '--cached', '--quiet']
   if (pathspecs?.length) args.push('--', ...pathspecs)
-  const { code } = await runGitExitCode(args, cwd)
+  const { code } = await runGitExitCode(args, cwd, abortSignal)
   if (code === 0) return false // no staged changes
   if (code === 1) return true  // has staged changes
   throw new Error(`git diff --cached failed with exit code ${code}`)
 }
 
 /** Best-effort: create a safety ref before stash so changes are recoverable (P2). */
-async function createSafetyRef(cwd: string): Promise<void> {
+async function createSafetyRef(cwd: string, abortSignal?: AbortSignal): Promise<void> {
   try {
-    const sha = (await runGit(['stash', 'create'], cwd)).trim()
+    const sha = (await runGit(['stash', 'create'], cwd, abortSignal)).trim()
     if (!sha) return
-    await runGit(['update-ref', 'refs/kiro-safety/last-stash', sha], cwd)
+    await runGit(['update-ref', 'refs/kiro-safety/last-stash', sha], cwd, abortSignal)
   } catch { /* best-effort, never block stash */ }
 }
 
@@ -185,9 +202,9 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
       switch (action) {
         case 'status': {
           const [branch, porcelain, untracked] = await Promise.all([
-            runGit(['branch', '--show-current'], cwd),
-            runGit(['status', '--porcelain'], cwd),
-            runGit(['ls-files', '--others', '--exclude-standard'], cwd),
+            runGit(['branch', '--show-current'], cwd, params.abortSignal),
+            runGit(['status', '--porcelain'], cwd, params.abortSignal),
+            runGit(['ls-files', '--others', '--exclude-standard'], cwd, params.abortSignal),
           ])
           const lines = [`Branch: ${branch.trim()}`]
           const porcelainTrimmed = porcelain.trim()
@@ -205,8 +222,8 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
 
         case 'diff_summary': {
           const [staged, unstaged] = await Promise.all([
-            runGit(['diff', '--cached', '--stat'], cwd),
-            runGit(['diff', '--stat'], cwd),
+            runGit(['diff', '--cached', '--stat'], cwd, params.abortSignal),
+            runGit(['diff', '--stat'], cwd, params.abortSignal),
           ])
           const lines: string[] = []
           const stagedTrimmed = staged.trim()
@@ -226,22 +243,22 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           const scopedFiles = getScopedCommitFiles(cwd, params.ownedFiles, params.sessionModifiedFiles)
           const commitArgs = ['commit', '-m', message]
           if (scopedFiles.length > 0) {
-            await runGit(['add', '--', ...scopedFiles], cwd)
+            await runGit(['add', '--', ...scopedFiles], cwd, params.abortSignal)
             commitArgs.push('--only', '--', ...scopedFiles)
-          } else if (!(await hasStagedChanges(cwd))) {
+          } else if (!(await hasStagedChanges(cwd, undefined, params.abortSignal))) {
             return {
               content: 'No session-owned files were provided to git commit and no staged changes exist. Use deliver_task with commit=true for ownership-scoped delivery, or stage explicit files if you intentionally manage git manually.',
               isError: true,
             }
           }
 
-          const commitResult = await runGitSafe(commitArgs, cwd)
+          const commitResult = await runGitSafe(commitArgs, cwd, params.abortSignal)
           if (!commitResult.ok) {
             return { content: `git commit failed: ${commitResult.output}`, isError: true }
           }
 
           // Post-commit truth readback: show actual landed changes + audit tag scope
-          const changed = (await runGit(['show', '--stat', '--format=%h%d', 'HEAD'], cwd)).trim()
+          const changed = (await runGit(['show', '--stat', '--format=%h%d', 'HEAD'], cwd, params.abortSignal)).trim()
           // --stat file rows contain '|'; this excludes the %h%d header line and the summary line
           const changedFiles = changed.split('\n')
             .filter(l => l.includes('|'))
@@ -254,12 +271,12 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
 
         case 'log': {
           const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 20, 100))
-          const log = (await runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd)).trim()
+          const log = (await runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd, params.abortSignal)).trim()
           return { content: log || 'No commits yet.' }
         }
 
         case 'stash': {
-          const stashStatus = (await runGit(['status', '--porcelain'], cwd)).trim()
+          const stashStatus = (await runGit(['status', '--porcelain'], cwd, params.abortSignal)).trim()
           if (!stashStatus) {
             return { content: 'No changes to stash.' }
           }
@@ -273,13 +290,13 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
                 isError: true,
               }
             }
-            await createSafetyRef(cwd)
-            await runGit(['stash', 'push', '--', ...scoped], cwd)
+            await createSafetyRef(cwd, params.abortSignal)
+            await runGit(['stash', 'push', '--', ...scoped], cwd, params.abortSignal)
             return { content: `Stashed ${scoped.length} owned file(s): ${scoped.join(', ')}` }
           }
 
-          await createSafetyRef(cwd)
-          await runGit(['stash'], cwd)
+          await createSafetyRef(cwd, params.abortSignal)
+          await runGit(['stash'], cwd, params.abortSignal)
           return { content: 'Saved working directory and index state.' }
         }
 
@@ -289,7 +306,7 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           if (safety.blocked) {
             return { content: safety.reasons.join('\n'), isError: true }
           }
-          await runGit(['stash', 'pop', stashRef], cwd)
+          await runGit(['stash', 'pop', stashRef], cwd, params.abortSignal)
           return { content: `Popped ${stashRef} (safety-checked: no overwriting conflicts).` }
         }
 

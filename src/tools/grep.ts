@@ -89,7 +89,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const artifactThreshold = getToolArtifactThreshold('grep', params.contextWindow)
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, contextLines, modelCap, params.artifactStore, artifactThreshold)
+    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, contextLines, modelCap, params.artifactStore, artifactThreshold, params.abortSignal)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -253,6 +253,7 @@ async function tryRipgrep(
   modelCap: ModelReadCap,
   artifactStore?: ArtifactStore,
   artifactThreshold: number = 0,
+  abortSignal?: AbortSignal,
 ): Promise<ToolResult | null> {
   if (typeof pattern !== 'string' || pattern.length === 0) {
     return Promise.resolve({ content: 'Error: pattern is required (non-empty string)', isError: true })
@@ -296,6 +297,18 @@ async function tryRipgrep(
       resolve(null)
     }, TIMEOUT_MS)
 
+    // 用户中止（Esc/Ctrl+C）：协作式取消，kill rg 子进程。
+    // 没有这一步，rg 在 abort 后继续跑到 30s 超时才停。
+    const onAbort = () => {
+      clearTimeout(timer)
+      gracefulKill(child)
+      resolve(null)
+    }
+    if (abortSignal) {
+      if (abortSignal.aborted) onAbort()
+      else abortSignal.addEventListener('abort', onAbort, { once: true })
+    }
+
     child.stdout!.on('data', (data: Buffer) => {
       stdout += data.toString()
       const lines = stdout.split('\n')
@@ -310,11 +323,13 @@ async function tryRipgrep(
 
     child.on('error', () => {
       clearTimeout(timer)
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       resolve(null)
     })
 
     child.on('close', (code) => {
       clearTimeout(timer)
+      if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
       if (code === 1) {
         resolve({ content: 'No matches found.' })
         return

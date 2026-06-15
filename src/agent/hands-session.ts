@@ -68,9 +68,9 @@ export interface HandsSessionRun {
  * 5. Clean up the worktree (always, even on failure)
  */
 export async function runHandsSession(config: HandsSessionConfig): Promise<HandsSessionRun> {
-  const wt = config.wtCoordinator.create(config.order.id)
-  config.order.workerCwd = wt.path
   try {
+    const wt = config.wtCoordinator.create(config.order.id)
+    config.order.workerCwd = wt.path
     const scopeResult = materializeScope(config.cwd, wt.path, worktreeScopeFiles(config.order))
     if (scopeResult.missing.length > 0) {
       return {

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -82,6 +82,14 @@ export function buildDetachedWorktreeArgs(path: string, commitish: string): stri
   return ['worktree', 'add', '--detach', path, commitish]
 }
 
+const OWNER_FILE = '.vsw-owner.json'
+
+function writeOwnerMarker(path: string, sessionId: string): void {
+  try {
+    writeFileSync(join(path, OWNER_FILE), JSON.stringify({ pid: process.pid, sessionId }), 'utf-8')
+  } catch { /* best-effort */ }
+}
+
 function git(cwd: string, args: string[]): { ok: boolean; stdout: string } {
   const result = spawnSync('git', args, {
     cwd,
@@ -95,8 +103,10 @@ export function createWorktree(cwd: string, sessionId: string, branch = `rivet-h
   const wtPath = mkdtempSync(join(tmpdir(), `rivet-wt-${sessionId.slice(0, 8)}-`))
   const result = git(cwd, buildWorktreeArgs(wtPath, branch))
   if (!result.ok) {
+    try { rmSync(wtPath, { recursive: true, force: true }) } catch {}
     throw new Error(`failed to create git worktree for ${sessionId}`)
   }
+  writeOwnerMarker(wtPath, sessionId)
   return { path: wtPath, branch }
 }
 
@@ -109,6 +119,7 @@ export function createWorktreeAt(cwd: string, wtPath: string, commitish: string)
   mkdirSync(dirname(wtPath), { recursive: true })
   const result = git(cwd, buildDetachedWorktreeArgs(wtPath, commitish))
   if (!result.ok) {
+    try { rmSync(wtPath, { recursive: true, force: true }) } catch {}
     throw new Error(`failed to create detached git worktree at ${wtPath} for ${commitish}`)
   }
   return { path: wtPath, branch: '(detached)' }
@@ -117,6 +128,8 @@ export function createWorktreeAt(cwd: string, wtPath: string, commitish: string)
 export function removeWorktree(cwd: string, wtPath: string, branch?: string): void {
   git(cwd, ['worktree', 'remove', '--force', wtPath])
   if (branch) git(cwd, ['branch', '-D', branch])
+  // Clean up owner marker so the reaper doesn't try to reap an already-removed worktree
+  try { rmSync(join(wtPath, OWNER_FILE), { force: true }) } catch {}
 }
 
 export function getCurrentGitRef(cwd: string): string | undefined {
