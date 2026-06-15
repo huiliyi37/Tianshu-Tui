@@ -1,6 +1,6 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'minimax' | 'codex'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex'
 
 export interface ProviderPreset {
   key: ProviderPresetKey
@@ -84,7 +84,42 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     provider: {
       name: 'mimo',
       apiKeyEnv: 'MIMO_API_KEY',
-      baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+      baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        toolJsonBug: false,
+        prefixCache: 'deepseek-native',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 128000,
+      models: [
+        {
+          id: 'mimo-v2.5-pro',
+          alias: 'mimo-pro',
+          contextWindow: 1_000_000,
+          maxTokens: 128000,
+        },
+        {
+          id: 'mimo-v2.5',
+          alias: 'mimo',
+          contextWindow: 1_000_000,
+          maxTokens: 128000,
+        },
+      ],
+      unsupported: ['stream_options'],
+    },
+  },
+  'mimo-api': {
+    key: 'mimo-api',
+    label: 'MiMo API (新)',
+    defaultModelId: 'mimo-v2.5-pro-ultraspeed',
+    provider: {
+      name: 'mimo-api',
+      apiKeyEnv: 'MIMO_API_KEY',
+      baseUrl: 'https://api.xiaomimimo.com/v1',
       protocol: 'openai',
       capabilities: {
         cacheControl: false,
@@ -99,18 +134,6 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         {
           id: 'mimo-v2.5-pro-ultraspeed',
           alias: 'mimo-ultra',
-          contextWindow: 1_000_000,
-          maxTokens: 128000,
-        },
-        {
-          id: 'mimo-v2.5-pro',
-          alias: 'mimo-pro',
-          contextWindow: 1_000_000,
-          maxTokens: 128000,
-        },
-        {
-          id: 'mimo-v2.5',
-          alias: 'mimo',
           contextWindow: 1_000_000,
           maxTokens: 128000,
         },

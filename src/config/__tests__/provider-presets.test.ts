@@ -5,7 +5,7 @@ import { PROVIDER_PRESETS, cloneProviderPreset, providerPresetKeys } from '../pr
 
 describe('provider presets', () => {
   it('contains required built-in provider modes', () => {
-    assert.deepEqual([...providerPresetKeys].sort(), ['codex', 'deepseek', 'glm', 'mimo', 'minimax'].sort())
+    assert.deepEqual([...providerPresetKeys].sort(), ['codex', 'deepseek', 'glm', 'mimo', 'mimo-api', 'minimax'].sort())
   })
 
   it('every preset parses as ProviderConfig', () => {
