@@ -58,6 +58,8 @@ export interface TelemetryInput {
   theta: ThetaTelemetrySnapshot
   gitChangeRate: number
   prefixDrift: boolean
+  /** elmDue 冷却的上次触发轮次（per-session 持有）。省略 = 从未触发。 */
+  lastElmReleaseTurn?: number
 }
 
 function clamp01(value: number): number {
@@ -93,26 +95,32 @@ export function buildStarPhaseContext(input: StarPhaseContextInput): StarPhaseCo
   }
 }
 
-const ELM_COOLDOWN_TURNS = 5
-let lastElmReleaseTurn = -Infinity
+export const ELM_COOLDOWN_TURNS = 5
 
-export function buildHealthTelemetry(vigor: VigorState, currentTurn?: number): HealthTelemetrySnapshot {
+/**
+ * 计算健康遥测。elmDue 冷却为**纯函数**：调用方传入上次触发的轮次
+ * （per-session 持有，见 TurnPerceptionController.lastElmReleaseTurn），
+ * 本函数不持有任何模块级状态——避免并行子代理共享同一进程时冷却态相互污染。
+ *
+ * 契约：当返回的 elmDue 为 true 时，调用方应把自己持有的 lastElmReleaseTurn
+ * 更新为本轮 currentTurn，以驱动下一轮的冷却判定。
+ *
+ * - currentTurn 省略 → 不施加冷却（裸 elm 判定，向后兼容）。
+ * - lastElmReleaseTurn 省略 → 视为从未触发（-Infinity），首次必触发。
+ */
+export function buildHealthTelemetry(
+  vigor: VigorState,
+  currentTurn?: number,
+  lastElmReleaseTurn = -Infinity,
+): HealthTelemetrySnapshot {
   const rawElmDue = shouldTriggerElmRelease(vigor)
-  let elmDue = rawElmDue
-  if (currentTurn != null) {
-    const cooledDown = currentTurn - lastElmReleaseTurn >= ELM_COOLDOWN_TURNS
-    elmDue = rawElmDue && cooledDown
-    if (elmDue) lastElmReleaseTurn = currentTurn
-  }
+  const elmDue = currentTurn == null
+    ? rawElmDue
+    : rawElmDue && (currentTurn - lastElmReleaseTurn >= ELM_COOLDOWN_TURNS)
   return {
     rigidity: detectRigidity(vigor.history),
     elmDue,
   }
-}
-
-/** Reset cooldown state — for testing only. */
-export function _resetElmCooldown(): void {
-  lastElmReleaseTurn = -Infinity
 }
 
 export function buildTelemetrySnapshot(input: TelemetryInput): PerceptionTelemetrySnapshot {
@@ -133,7 +141,7 @@ export function buildTelemetrySnapshot(input: TelemetryInput): PerceptionTelemet
       vigor: input.vigor.vigor,
       variability: input.vigor.variability,
     },
-    health: buildHealthTelemetry(input.vigor, input.turn),
+    health: buildHealthTelemetry(input.vigor, input.turn, input.lastElmReleaseTurn),
     theta: input.theta,
     gitChangeRate: input.gitChangeRate,
     prefixDrift: input.prefixDrift,

@@ -64,6 +64,8 @@ export class TurnPerceptionController {
   private sensoriumSnapshots: SensoriumEntry[] = []
   private hasEnteredHighComplexity = false
   private currentPhase = 'unknown'
+  /** elmDue 冷却的上次触发轮次（per-session，避免并行子代理共享模块级全局态）。 */
+  private lastElmReleaseTurn = -Infinity
 
   constructor(private deps: TurnPerceptionDeps) {}
 
@@ -175,6 +177,7 @@ export class TurnPerceptionController {
     this.sensoriumSnapshots = []
     this.hasEnteredHighComplexity = false
     this.currentPhase = 'unknown'
+    this.lastElmReleaseTurn = -Infinity
   }
 
   private recordTelemetry(input: {
@@ -205,7 +208,12 @@ export class TurnPerceptionController {
       },
       gitChangeRate: input.input.gitChangeRate,
       prefixDrift: driftEvent,
+      lastElmReleaseTurn: this.lastElmReleaseTurn,
     })
+    // 契约：elmDue 触发即记录本轮，驱动 per-session 冷却（见 buildHealthTelemetry）。
+    if (telemetrySnapshot.health.elmDue) {
+      this.lastElmReleaseTurn = input.input.turn
+    }
 
     this.deps.telemetryWriter.write(telemetrySnapshot)
     this.sensoriumSnapshots.push({
