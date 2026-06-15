@@ -382,104 +382,7 @@ export class AgentLoop {
     this.physarumForWarmup = physarum
     this.meridianDbForWarmup = meridianDb
 
-    this.runtimeHooks = this.config.runtimeHooks ?? new RuntimeHookPipeline(createDefaultRuntimeHooks({
-      stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
-      stigmergyQuery: () => this.stigmergyStore.query(),
-      getEvidenceState: () => this.evidence.getState(),
-      setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
-      recordStance: signal => this.stanceTally.record(signal),
-      publishEvent: this.config.sessionRegistry && this.config.sessionId
-        ? (input) => this.config.sessionRegistry!.publishEvent(this.config.sessionId!, input)
-        : undefined,
-      sessionId: this.config.sessionId,
-      getThetaState: () => this.thetaState,
-      setThetaState: state => { this.thetaState = state },
-      getPredictionAccumulator: () => this.predictionAccumulator,
-      playbookStore: this.config.playbookStore,
-      buildRetrospectInput: () => {
-        const es = this.evidence.getState()
-        return {
-          sensoriumEntries: this.sensoriumSnapshots, gitLog: [],
-          toolEvents: this.traceStore.events.filter(e => e.kind === 'tool').map(e => ({ turn: e.turn, name: e.name, status: e.status === 'passed' ? 'passed' : 'failed' })),
-          evidenceSummary: { filesModified: es.filesModified.size, verifiedCount: es.verifications.filter(v => v.status === 'passed').length },
-          pheromoneSignals: this.loadedPheromones.map(p => ({ signal: p.signal, path: p.path, strength: p.strength })),
-        }
-      },
-      getDoomLoopLevel: () => this.getDoomLoopLevel(),
-      telemetryWriter: this.telemetryWriter,
-      getPhysarumShadowStats: () => this.getPhysarumShadowStats(),
-      getDomainId: () => this.sessionDomain?.id ?? null,
-      getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
-      antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
-      getInitialUserMessage: () => this.initialUserMessage,
-      callAntiAnchoringSeedModel: prompt => this.callAntiAnchoringSeedModel(prompt),
-      songlineEnabled: this.config.songlineEnabled,
-      getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
-      setCycleClose: this.config.sessionRegistry
-        ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
-        : undefined,
-      // ── Project Constellation (post-session milestone capture, cache-safe) ──
-      constellationEnabled: this.config.sessionId !== undefined,
-      constellationCwd: this.cwd,
-      getConstellationPendingMark: () => this.pendingLeaveMark,
-      getConstellationNumericId: () => this._sessionNumericId,
-      // ── HEARTH observe (pure diagnostic) ──
-      hearthObserveEnabled: this.config.hearthObserveEnabled,
-      getAnchorGraph: () => this.buildAnchorGraph(),
-      getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
-      setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
-      // ── DEDUP guard (postTurn: repeated summary detection) ──
-      getStreamedText: () => this.streamedText,
-      getPrevStreamedText: () => this.prevStreamedText,
-      setPrevStreamedText: (text: string) => { this.prevStreamedText = text },
-      getPrevCycleOpen: this.config.sessionRegistry && this.config.sessionId
-        ? () => this.config.sessionRegistry!.getLastCycleClose()
-        : undefined,
-      getPrevSessionCycleClose: this.config.sessionRegistry
-        ? () => this.config.sessionRegistry!.getLastCycleClose()
-        : undefined,
-      ...(this.config.sessionId ? {
-        dream: {
-          cwd: this.cwd,
-          sessionId: this.config.sessionId,
-          getDecisions: () => this.decisions,
-          getTrajectory: () => this.trajectory.getEntries(),
-        },
-      } : {}),
-      meridianIndexer: this.config.meridianIndexer,
-      physarumFileAccess: {
-        getPhysarum: () => this.immuneHook.getPhysarum(),
-        onPredictions: batch => {
-          this.p3.enqueuePhysarumFilePredictions({
-            afterToolName: batch.afterToolName,
-            predictions: batch.predictions,
-          })
-          void batchPrewarm(
-            this.cwd,
-            batch.predictions.map(prediction => prediction.file),
-            this.prewarm,
-          ).catch(() => {})
-        },
-      },
-      // ── Auto-delegation (lazy getter, wired by main.tsx) ──
-      autoDelegate: (this.config.coordinatorRef && this.config.autoDelegateEnabled) ? {
-        coordinator: () => this.config.coordinatorRef?.() ?? null,
-        getTaskContract: () => this.getTaskContract(),
-        getSensorium: () => this.sensorium,
-      } : undefined,
-      memoryLearning: {
-        cwd: this.cwd,
-        sessionId: this.config.sessionId,
-        getUserMessage: () => this.initialUserMessage,
-        getStreamedText: () => this.streamedText,
-      },
-      userHooksBridge: {
-        cwd: this.cwd,
-        sessionId: this.config.sessionId,
-        getTurn: () => this.session.getTurnCount(),
-      },
-      advisoryBus: this.advisoryBus,
-    }))
+    this.runtimeHooks = this.config.runtimeHooks ?? this.createRuntimeHooksPipeline()
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,
       maxTurns: this.config.maxTurns,
@@ -637,6 +540,102 @@ export class AgentLoop {
 
   private createToolExecutionController(): ToolExecutionController {
       return createToolExecutionController(this);
+  }
+  private createRuntimeHooksPipeline(): RuntimeHookPipeline {
+      return new RuntimeHookPipeline(createDefaultRuntimeHooks({
+        stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
+        stigmergyQuery: () => this.stigmergyStore.query(),
+        getEvidenceState: () => this.evidence.getState(),
+        setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
+        recordStance: signal => this.stanceTally.record(signal),
+        publishEvent: this.config.sessionRegistry && this.config.sessionId
+          ? (input) => this.config.sessionRegistry!.publishEvent(this.config.sessionId!, input)
+          : undefined,
+        sessionId: this.config.sessionId,
+        getThetaState: () => this.thetaState,
+        setThetaState: state => { this.thetaState = state },
+        getPredictionAccumulator: () => this.predictionAccumulator,
+        playbookStore: this.config.playbookStore,
+        buildRetrospectInput: () => {
+          const es = this.evidence.getState()
+          return {
+            sensoriumEntries: this.sensoriumSnapshots, gitLog: [],
+            toolEvents: this.traceStore.events.filter(e => e.kind === 'tool').map(e => ({ turn: e.turn, name: e.name, status: e.status === 'passed' ? 'passed' : 'failed' })),
+            evidenceSummary: { filesModified: es.filesModified.size, verifiedCount: es.verifications.filter(v => v.status === 'passed').length },
+            pheromoneSignals: this.loadedPheromones.map(p => ({ signal: p.signal, path: p.path, strength: p.strength })),
+          }
+        },
+        getDoomLoopLevel: () => this.getDoomLoopLevel(),
+        telemetryWriter: this.telemetryWriter,
+        getPhysarumShadowStats: () => this.getPhysarumShadowStats(),
+        getDomainId: () => this.sessionDomain?.id ?? null,
+        getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
+        antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
+        getInitialUserMessage: () => this.initialUserMessage,
+        callAntiAnchoringSeedModel: prompt => this.callAntiAnchoringSeedModel(prompt),
+        songlineEnabled: this.config.songlineEnabled,
+        getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
+        setCycleClose: this.config.sessionRegistry
+          ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
+          : undefined,
+        constellationEnabled: this.config.sessionId !== undefined,
+        constellationCwd: this.cwd,
+        getConstellationPendingMark: () => this.pendingLeaveMark,
+        getConstellationNumericId: () => this._sessionNumericId,
+        hearthObserveEnabled: this.config.hearthObserveEnabled,
+        getAnchorGraph: () => this.buildAnchorGraph(),
+        getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
+        setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
+        getStreamedText: () => this.streamedText,
+        getPrevStreamedText: () => this.prevStreamedText,
+        setPrevStreamedText: (text: string) => { this.prevStreamedText = text },
+        getPrevCycleOpen: this.config.sessionRegistry && this.config.sessionId
+          ? () => this.config.sessionRegistry!.getLastCycleClose()
+          : undefined,
+        getPrevSessionCycleClose: this.config.sessionRegistry
+          ? () => this.config.sessionRegistry!.getLastCycleClose()
+          : undefined,
+        ...(this.config.sessionId ? {
+          dream: {
+            cwd: this.cwd,
+            sessionId: this.config.sessionId,
+            getDecisions: () => this.decisions,
+            getTrajectory: () => this.trajectory.getEntries(),
+          },
+        } : {}),
+        meridianIndexer: this.config.meridianIndexer,
+        physarumFileAccess: {
+          getPhysarum: () => this.immuneHook.getPhysarum(),
+          onPredictions: batch => {
+            this.p3.enqueuePhysarumFilePredictions({
+              afterToolName: batch.afterToolName,
+              predictions: batch.predictions,
+            })
+            void batchPrewarm(
+              this.cwd,
+              batch.predictions.map(prediction => prediction.file),
+              this.prewarm,
+            ).catch(() => {})
+          },
+        },
+        autoDelegate: (this.config.coordinatorRef && this.config.autoDelegateEnabled) ? {
+          coordinator: () => this.config.coordinatorRef?.() ?? null,
+          getTaskContract: () => this.getTaskContract(),
+          getSensorium: () => this.sensorium,
+        } : undefined,
+        memoryLearning: {
+          cwd: this.cwd,
+          sessionId: this.config.sessionId,
+          getUserMessage: () => this.initialUserMessage,
+          getStreamedText: () => this.streamedText,
+        },
+        userHooksBridge: {
+          cwd: this.cwd,
+          sessionId: this.config.sessionId,
+          getTurn: () => this.session.getTurnCount(),
+        },
+        advisoryBus: this.advisoryBus,
+      }))
   }
   buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
       return buildRuntimeSnapshot(this, extra);
@@ -1241,44 +1240,30 @@ export class AgentLoop {
   async runPostSession(callbacks: AgentCallbacks): Promise<void> {
     await this.runtimeHooks.runPostSession(createRuntimeHookContext(this.buildRuntimeSnapshot(),
       { emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) } }))
-    // Cleanup old cross-session events (2h TTL)
     if (this.config.sessionRegistry) {
       try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
     }
-
-    // Persist Physarum edge state to MeridianDb
     try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
-
-    // Persist immune memories for cross-session secondary response
     try {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveImmuneMemories(this.immuneHook.exportMemories())
     } catch { /* non-critical */ }
-
-    // Persist mistake notebook for cross-session learning
     try {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveMistakeEntries(this.p3.notebook.getAllEntries())
     } catch { /* non-critical */ }
-
-    // Persist P3 tool transition miner for cross-session speculation.
     try {
       const db = this.config.meridianIndexer?.getDb()
       if (db) db.saveToolPatternMinerSnapshot(this.p3.miner.exportSnapshot())
     } catch { /* non-critical */ }
-
-    // T2-02 P1: Persist bandit states to MeridianDb
     try {
       const db = this.config.meridianIndexer?.getDb()
       if (db) {
         db.saveBanditState('bandit:reasoning_effort', this.p3.serializeEffortBandit())
         db.saveBanditState('bandit:model_style', this.p3.serializeBandit())
-        // Track B1: Persist PlanCache
         db.saveBanditState('p3:plan_cache', this.p3.serializePlanCache())
       }
     } catch { /* non-critical */ }
-
-    // Persist structured handoff for the next session
     try {
       const handoffText = this.compaction.buildSessionHandoff()
       const sp = this.persist
@@ -1287,12 +1272,7 @@ export class AgentLoop {
         const domainId = this.sessionDomain?.id
         if (domainId) sp.updateMetadata({ domain: domainId })
       }
-      if (sp) {
-        sp.writeHandoff(handoffText)
-        const domainId = this.sessionDomain?.id
-        if (domainId) sp.updateMetadata({ domain: domainId })
-      }
-    } catch { /* non-critical */ }
+    } catch { /* ignore */ }
   }
 
   private async startFsWatcher(): Promise<void> {
