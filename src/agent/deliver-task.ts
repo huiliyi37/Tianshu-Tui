@@ -224,6 +224,13 @@ When the task implements a complex spec or cross-module integration, include the
         `Verifications: ${report.verificationCount}`,
       ]
 
+      // 层 1a: echo latest verification totals so agents copy real numbers
+      // into delivery reports instead of guessing from memory.
+      if (report.latestVerificationTotals) {
+        const v = report.latestVerificationTotals
+        lines.push(`  Latest: ${v.passed} pass ${v.failed} fail ${v.skipped} skip — ${v.command}`)
+      }
+
       const hasVerificationDiagnostics = report.currentBlockingFailure
         || report.staleFailureCandidates > 0
         || report.toolInvocationFailureCandidates.length > 0

@@ -93,6 +93,7 @@ export interface DeliveryGateResult {
   verificationCount: number
   /** Count of earlier failures superseded by later successes */
   supersededFailures: number
+  latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -114,6 +115,9 @@ export interface DeliveryReport {
   verificationCount: number
   /** Count of earlier failures superseded by later successes */
   supersededFailures: number
+  /** Latest verification pass/fail/skipped totals — for "声明即实测" echo in deliver_task output.
+   *  Agents copy these numbers into delivery reports instead of guessing from memory. */
+  latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -249,6 +253,12 @@ export function createDeliveryGateV2(opts: {
     ]
     const diagnostics = verificationDiagnostics(allVerifications, supersededFailures)
 
+    // 层 1a: latest verification totals for "声明即实测" echo
+    const _lv = allVerifications.length > 0 ? allVerifications[allVerifications.length - 1] : undefined
+    const latestVerificationTotals = _lv
+      ? { passed: _lv.passed, failed: _lv.failed, skipped: _lv.skipped, command: _lv.command }
+      : undefined
+
     // Nothing to deliver
     if (ownedFiles.length === 0) {
       const hasExternals = externalFiles.length > 0
@@ -264,6 +274,7 @@ export function createDeliveryGateV2(opts: {
         verificationCount: allVerifications.length,
         supersededFailures,
         ...diagnostics,
+      latestVerificationTotals,
       }
     }
 
@@ -282,6 +293,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
         }
 
       case 'external_blocked':
@@ -295,6 +307,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
         }
 
       case 'owned_failure':
@@ -309,6 +322,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
           currentBlockingFailure: aggregate.reason,
         }
 
@@ -323,6 +337,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
         }
 
       case 'unattributed_failure':
@@ -336,6 +351,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
         }
 
       case 'integration_conflict':
@@ -352,6 +368,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
         }
 
       case 'unverified':
@@ -366,6 +383,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
           currentBlockingFailure: `${ownedFiles.length} owned file(s) modified but unverified.`,
         }
 
@@ -380,6 +398,7 @@ export function createDeliveryGateV2(opts: {
           verificationCount: allVerifications.length,
           supersededFailures,
           ...diagnostics,
+      latestVerificationTotals,
           currentBlockingFailure: 'Unknown verification state.',
         }
     }
@@ -402,6 +421,7 @@ export function createDeliveryGateV2(opts: {
       externalFileCount: result.externalFileCount,
       verificationCount: result.verificationCount,
       supersededFailures: result.supersededFailures,
+      latestVerificationTotals: result.latestVerificationTotals,
       staleFailureCandidates: result.staleFailureCandidates,
       toolInvocationFailureCandidates: result.toolInvocationFailureCandidates,
       currentBlockingFailure: result.currentBlockingFailure,
