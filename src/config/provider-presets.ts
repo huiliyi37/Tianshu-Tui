@@ -97,6 +97,12 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       maxTokens: 128000,
       models: [
         {
+          id: 'mimo-v2.5-pro-ultraspeed',
+          alias: 'mimo-ultra',
+          contextWindow: 1_000_000,
+          maxTokens: 128000,
+        },
+        {
           id: 'mimo-v2.5-pro',
           alias: 'mimo-pro',
           contextWindow: 1_000_000,

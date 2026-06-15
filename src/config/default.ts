@@ -148,6 +148,7 @@ export const DEFAULT_CONFIG: Config = {
       capable: { provider: 'deepseek', model: 'deepseek-v4-pro' },
       mimo: { provider: 'mimo', model: 'mimo-v2.5' },
       'mimo-pro': { provider: 'mimo', model: 'mimo-v2.5-pro' },
+      'mimo-ultra': { provider: 'mimo', model: 'mimo-v2.5-pro-ultraspeed' },
     },
     routing: {
       repo_summarization: 'cheap-flash',
