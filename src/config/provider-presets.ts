@@ -118,7 +118,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
     defaultModelId: 'mimo-v2.5-pro-ultraspeed',
     provider: {
       name: 'mimo-api',
-      apiKeyEnv: 'MIMO_API_KEY',
+      apiKeyEnv: 'MIMO_PAY_API_KEY',
       baseUrl: 'https://api.xiaomimimo.com/v1',
       protocol: 'openai',
       capabilities: {
