@@ -12,25 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ReadStream, WriteStream } from 'node:tty'
 import { TuiApp } from '../app.js'
-
-class MockOut {
-  columns = 80
-  rows = 24
-  chunks: string[] = []
-  write = (s: string): boolean => { this.chunks.push(s); return true }
-  on(): this { return this }
-  removeListener(): this { return this }
-}
-class MockIn {
-  isTTY = true
-  dataHandler: ((d: string) => void) | null = null
-  setRawMode(): this { return this }
-  resume(): this { return this }
-  setEncoding(): this { return this }
-  on(ev: string, h: (d: string) => void): this { if (ev === 'data') this.dataHandler = h; return this }
-  removeAllListeners(): this { return this }
-  pause(): this { return this }
-}
+import { MockOut, MockIn } from './_harness.js'
 
 function makeApp() {
   const out = new MockOut()

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import type { ReadStream, WriteStream } from 'node:tty'
 import { WriteBatcher } from '../write-batcher.js'
 import { TuiApp } from '../app.js'
+import { MockOut, MockIn } from './_harness.js'
 
 test('WriteBatcher 同 tick 多次 schedule 只 flush 一次', async () => {
   let flushes = 0
@@ -25,25 +26,6 @@ test('WriteBatcher 同 tick 多次 schedule 只 flush 一次', async () => {
   await Promise.resolve()
   assert.equal(flushes, 2, '下一 tick 再 flush 一次')
 })
-
-class MockOut {
-  columns = 80
-  rows = 24
-  chunks: string[] = []
-  write = (s: string): boolean => { this.chunks.push(s); return true }
-  on(): this { return this }
-  removeListener(): this { return this }
-}
-class MockIn {
-  isTTY = true
-  dataHandler: ((d: string) => void) | null = null
-  setRawMode(): this { return this }
-  resume(): this { return this }
-  setEncoding(): this { return this }
-  on(ev: string, h: (d: string) => void): this { if (ev === 'data') this.dataHandler = h; return this }
-  removeAllListeners(): this { return this }
-  pause(): this { return this }
-}
 
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))
 
