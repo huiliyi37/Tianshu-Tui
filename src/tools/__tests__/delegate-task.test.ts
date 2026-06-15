@@ -55,6 +55,48 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.ok(result.uiContent!.includes('delegate_task completed'))
   })
 
+  it('passes authority through to the coordinator', async () => {
+    const calls: DelegationRequest[] = []
+    const coordinator: DelegateTaskCoordinator = {
+      delegate: async request => {
+        calls.push(request)
+        return makeRun()
+      },
+    }
+    const tool = createDelegateTaskTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_delegate',
+      cwd: '/repo',
+      input: {
+        objective: 'Review the architecture of the routing layer.',
+        authority: 'tianquan',
+      },
+    })
+
+    assert.equal(result.isError, false)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]!.authority, 'tianquan')
+  })
+
+  it('rejects an unknown authority value', async () => {
+    const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
+    const result = await tool.execute({
+      toolUseId: 'tu_delegate',
+      cwd: '/repo',
+      input: { objective: 'do a thing', authority: 'not_a_domain' },
+    })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('Invalid delegate_task input'))
+  })
+
+  it('exposes the authority enum from the star-domain registry', () => {
+    const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
+    const authoritySchema = tool.definition.input_schema!.properties.authority as { enum: string[] }
+    assert.ok(authoritySchema.enum.includes('tianquan'))
+    assert.ok(authoritySchema.enum.includes('tianji'))
+  })
+
   it('exposes profile schema from the profile registry', () => {
     const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
     const profileSchema = tool.definition.input_schema!.properties.profile as { enum: string[] }

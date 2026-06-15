@@ -1,5 +1,7 @@
 import { extractJsonCandidates, type WorkerResult } from './work-order.js'
 import type { TeamTask, RiskItem } from './team-plan.js'
+import { mergeRoleFor, type ExpertRole } from './expert-router.js'
+import { starDomainRegistry } from './star-domain-registry.js'
 
 // ── Perspective output schema ──────────────────────────────────────────────
 
@@ -29,7 +31,9 @@ export interface AlternativeProposal {
 }
 
 export interface TeamPerspectivePlan {
-  perspective: 'tianquan' | 'tianfu' | 'tianxuan'
+  /** Star-domain id of the planner (e.g. tianquan, tianfu, tianxuan, wenqu, or a
+   *  user-defined domain). Its merge role is derived via mergeRoleFor(). */
+  perspective: string
   summary: string
   tasks: TeamTask[]
   dependencyNotes: DependencyNote[]
@@ -84,23 +88,40 @@ export function normalizePerspective(
 
 // ── Merge algorithm ────────────────────────────────────────────────────────
 
+/** Resolve a perspective's display name (e.g. '天府') for human-readable merge notes. */
+function domainName(perspective: string): string {
+  return starDomainRegistry.get(perspective)?.name ?? perspective
+}
+
 /**
- * Three-perspective deterministic merge:
+ * Role-based deterministic merge (the generalized council adjudicator):
  *
- * 1. 天权 (tianquan) = base plan (task graph, dependencies, execution order)
- * 2. 天府 (tianfu) = risk gate (adds verification gates, risk upgrades, serialization constraints)
- * 3. 天璇 (tianxuan) = challenger (alternatives, blind spots, anti-proof)
+ *  - base       (天权…) provides the task-graph skeleton (deep-cloned).
+ *  - constraint (天府/天梁…) upgrades risk tiers (never downgrades) + adds
+ *    verification gates + contributes risks/dependency notes.
+ *  - challenger (天机/天璇/破军…) raises conflicts, defers extra tasks, and
+ *    classifies alternatives (accept/defer/reject) + blind spots.
+ *  - specialist (文曲/辅…) contributes advisory-only proposals (always deferred)
+ *    plus risks/dependency notes.
  *
- * Merging is NOT averaging — it's adjudication. 天权 provides the skeleton,
- * 天府 adds constraints, 天璇 provides alternatives that must earn acceptance.
+ * Merging is adjudication, not averaging. Exactly one base supplies the graph;
+ * everyone else earns acceptance. Backward compatible: with [base, constraint,
+ * challenger] it reproduces the historical tianquan/tianfu/tianxuan merge.
  */
-export function mergePerspectives(
-  tianquan: TeamPerspectivePlan,
-  tianfu: TeamPerspectivePlan,
-  tianxuan?: TeamPerspectivePlan,
-): MergedPlan {
-  // Step 1: Deep-clone 天权 tasks as base graph (avoid polluting caller's objects)
-  const tasks = tianquan.tasks.map(t => ({
+export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): MergedPlan {
+  const base = perspectives.find(p => mergeRoleFor(p.perspective) === 'base') ?? perspectives[0]
+  if (!base) {
+    return { tasks: [], dependencyNotes: [], risks: [], verification: [], accepted: [], rejected: [], deferred: [], conflicts: [] }
+  }
+  const others = perspectives.filter(p => p !== base)
+  const roleOf = (p: TeamPerspectivePlan): ExpertRole => mergeRoleFor(p.perspective)
+  const constraints = others.filter(p => roleOf(p) === 'constraint')
+  const challengers = others.filter(p => roleOf(p) === 'challenger')
+  // Extra bases (defensive — selectExpertSet yields one) fold in as advisory specialists.
+  const specialists = others.filter(p => roleOf(p) === 'specialist' || roleOf(p) === 'base')
+
+  // Step 1: Deep-clone base tasks as the graph (avoid polluting caller's objects)
+  const tasks = base.tasks.map(t => ({
     ...t,
     files: [...t.files],
     touchSet: [...t.touchSet],
@@ -114,168 +135,124 @@ export function mergePerspectives(
   const deferred: MergedPlan['deferred'] = []
   const conflicts: MergedPlan['conflicts'] = []
 
-  // Step 2: Apply 天府 risk upgrades
-  for (const risk of tianfu.risks) {
-    if (risk.taskId && taskIndex.has(risk.taskId)) {
-      const task = taskIndex.get(risk.taskId)!
-      // Only upgrade risk, never downgrade
-      if (riskSeverityRank(risk.severity) > riskSeverityRank(task.riskTier)) {
-        task.riskTier = risk.severity
-        accepted.push({
-          source: 'tianfu',
-          title: `Risk upgrade: ${risk.taskId} → ${risk.severity}`,
-          reason: risk.claim,
-        })
+  // Step 2+3: constraint risk upgrades + verification gates
+  const verification = base.verification.map(v => ({ taskId: v.taskId, command: v.command, expected: v.expected }))
+  for (const c of constraints) {
+    for (const risk of c.risks) {
+      if (risk.taskId && taskIndex.has(risk.taskId)) {
+        const task = taskIndex.get(risk.taskId)!
+        // Only upgrade risk, never downgrade
+        if (riskSeverityRank(risk.severity) > riskSeverityRank(task.riskTier)) {
+          task.riskTier = risk.severity
+          accepted.push({ source: c.perspective, title: `Risk upgrade: ${risk.taskId} → ${risk.severity}`, reason: risk.claim })
+        }
+      }
+    }
+    for (const v of c.verification) {
+      if (!verification.some(ev => ev.command === v.command)) {
+        verification.push({ taskId: v.taskId, command: v.command, expected: v.expected })
+        accepted.push({ source: c.perspective, title: `Verification: ${v.command}`, reason: `${domainName(c.perspective)} added verification gate` })
       }
     }
   }
 
-  // Step 3: Apply 天府 verification gates
-  const verification = [
-    ...tianquan.verification.map(v => ({
-      taskId: v.taskId,
-      command: v.command,
-      expected: v.expected,
-    })),
-    ...tianfu.verification
-      .filter(v => !tianquan.verification.some(tv => tv.command === v.command))
-      .map(v => {
-        accepted.push({
-          source: 'tianfu',
-          title: `Verification: ${v.command}`,
-          reason: `天府 added verification gate`,
-        })
-        return { taskId: v.taskId, command: v.command, expected: v.expected }
-      }),
-  ]
+  const baseTaskIds = new Set(base.tasks.map(t => t.id))
 
-  // Step 4: Process 天璇 alternatives and detect conflicts
-  if (tianxuan) {
-    // Check for conflicts between perspectives
-    const tianquanTaskIds = new Set(tianquan.tasks.map(t => t.id))
-    const tianxuanExtraTasks = tianxuan.tasks.filter(t => !tianquanTaskIds.has(t.id))
-
-    // Detect risk conflicts: 天府 and 天璇 disagree on severity.
-    // Only correlate a risk to an alternative when the risk names a concrete
-    // taskId — otherwise `''.includes` would match the first alternative and
-    // fabricate a spurious "conflict on unknown".
-    for (const tianfuRisk of tianfu.risks) {
-      const riskTaskId = tianfuRisk.taskId?.toLowerCase()
-      const tianxuanAlt = riskTaskId
-        ? tianxuan.alternatives.find(a => a.title.toLowerCase().includes(riskTaskId))
-        : undefined
-      if (tianxuanAlt && tianxuanAlt.recommendation === 'accept') {
-        // 天府 says risky, 天璇 says accept → conflict
-        conflicts.push({
-          description: `Risk vs alternative conflict on ${tianfuRisk.taskId ?? 'unknown'}`,
-          tianquan: 'no position',
-          tianfu: tianfuRisk.claim,
-          tianxuan: tianxuanAlt.tradeoff,
-        })
-      }
-    }
-
-    // Detect task ordering conflicts: 天璇 proposes a different dependency SET
-    // than 天权. Compare as sets (order-insensitive) so `[a,b]` vs `[b,a]` —
-    // the same dependencies in a different order — is not a false conflict.
-    for (const tianxuanTask of tianxuan.tasks) {
-      const tianquanTask = tianquan.tasks.find(t => t.id === tianxuanTask.id)
-      if (tianquanTask && !sameDependencySet(tianxuanTask.dependsOn, tianquanTask.dependsOn)) {
-        const hasDepConflict = tianxuanTask.dependsOn.length > 0 || tianquanTask.dependsOn.length > 0
-        if (hasDepConflict) {
+  // Step 4: challenger conflicts + alternatives + blind spots
+  for (const ch of challengers) {
+    // Risk-vs-alternative conflicts: a constraint flags risk, a challenger says accept.
+    // Only correlate when the risk names a concrete taskId (avoid ''.includes match-all).
+    for (const c of constraints) {
+      for (const cRisk of c.risks) {
+        const riskTaskId = cRisk.taskId?.toLowerCase()
+        const alt = riskTaskId ? ch.alternatives.find(a => a.title.toLowerCase().includes(riskTaskId)) : undefined
+        if (alt && alt.recommendation === 'accept') {
           conflicts.push({
-            description: `Dependency conflict on ${tianxuanTask.id}`,
-            tianquan: `depends: [${tianquanTask.dependsOn.join(', ')}]`,
-            tianfu: '(no position)',
-            tianxuan: `depends: [${tianxuanTask.dependsOn.join(', ')}]`,
+            description: `Risk vs alternative conflict on ${cRisk.taskId ?? 'unknown'}`,
+            tianquan: 'no position',
+            tianfu: cRisk.claim,
+            tianxuan: alt.tradeoff,
           })
         }
       }
     }
 
-    for (const extraTask of tianxuanExtraTasks) {
-      // Extra tasks from 天璇 are deferred unless explicitly smaller
-      deferred.push({
-        source: 'tianxuan',
-        title: `Extra task: ${extraTask.id}`,
-        reason: 'Not in 天权 base plan; deferred for manual review',
-      })
-    }
-
-    // Process alternatives
-    for (const alt of tianxuan.alternatives) {
-      switch (alt.recommendation) {
-        case 'accept':
-          // 天璇 recommends acceptance — accept if it reduces scope
-          accepted.push({
-            source: 'tianxuan',
-            title: alt.title,
-            reason: alt.tradeoff,
+    // Dependency ordering conflicts: challenger proposes a different dependency SET.
+    for (const chTask of ch.tasks) {
+      const baseTask = base.tasks.find(t => t.id === chTask.id)
+      if (baseTask && !sameDependencySet(chTask.dependsOn, baseTask.dependsOn)) {
+        if (chTask.dependsOn.length > 0 || baseTask.dependsOn.length > 0) {
+          conflicts.push({
+            description: `Dependency conflict on ${chTask.id}`,
+            tianquan: `depends: [${baseTask.dependsOn.join(', ')}]`,
+            tianfu: '(no position)',
+            tianxuan: `depends: [${chTask.dependsOn.join(', ')}]`,
           })
-          break
-        case 'defer':
-          deferred.push({
-            source: 'tianxuan',
-            title: alt.title,
-            reason: alt.tradeoff,
-          })
-          break
-        case 'reject':
-          rejected.push({
-            source: 'tianxuan',
-            title: alt.title,
-            reason: alt.tradeoff,
-          })
-          break
+        }
       }
     }
 
-    // Add 天璇 blind spots as risks
-    for (const blocker of tianxuan.blockers) {
-      accepted.push({
-        source: 'tianxuan',
-        title: `Blind spot: ${blocker.slice(0, 80)}`,
-        reason: '天璇 identified potential blocker',
-      })
+    // Extra tasks from challengers are deferred for manual review.
+    for (const extraTask of ch.tasks.filter(t => !baseTaskIds.has(t.id))) {
+      deferred.push({ source: ch.perspective, title: `Extra task: ${extraTask.id}`, reason: `Not in ${domainName(base.perspective)} base plan; deferred for manual review` })
+    }
+
+    // Classify challenger alternatives.
+    for (const alt of ch.alternatives) {
+      const entry = { source: ch.perspective, title: alt.title, reason: alt.tradeoff }
+      if (alt.recommendation === 'accept') accepted.push(entry)
+      else if (alt.recommendation === 'defer') deferred.push(entry)
+      else rejected.push(entry)
+    }
+
+    // Blind spots → accepted.
+    for (const blocker of ch.blockers) {
+      accepted.push({ source: ch.perspective, title: `Blind spot: ${blocker.slice(0, 80)}`, reason: `${domainName(ch.perspective)} identified potential blocker` })
     }
   }
 
-  // Build merged risks
-  const risks: RiskItem[] = [
-    ...tianquan.risks.map(r => ({
-      taskId: r.taskId,
-      severity: r.severity,
-      claim: r.claim,
-      mitigation: r.mitigation,
-    })),
-    ...tianfu.risks
-      .filter(r => !tianquan.risks.some(tr => tr.taskId === r.taskId && tr.claim === r.claim))
-      .map(r => ({
-        taskId: r.taskId,
-        severity: r.severity,
-        claim: `[天府] ${r.claim}`,
-        mitigation: r.mitigation,
-      })),
-  ]
-
-  // Merge dependency notes
-  const dependencyNotes = [
-    ...tianquan.dependencyNotes,
-    ...tianfu.dependencyNotes.filter(d =>
-      !tianquan.dependencyNotes.some(td => td.from === d.from && td.to === d.to)
-    ),
-  ]
-
-  return {
-    tasks,
-    dependencyNotes,
-    risks,
-    verification,
-    accepted,
-    rejected,
-    deferred,
-    conflicts,
+  // Step 5: specialist advisory — domain proposals always defer (advisory by default).
+  for (const sp of specialists) {
+    for (const alt of sp.alternatives) {
+      deferred.push({ source: sp.perspective, title: alt.title, reason: alt.tradeoff })
+    }
+    for (const blocker of sp.blockers) {
+      deferred.push({ source: sp.perspective, title: `Advisory: ${blocker.slice(0, 80)}`, reason: `${domainName(sp.perspective)} domain note` })
+    }
   }
+
+  // Build merged risks: base + (constraints ∪ specialists) deduped & name-prefixed.
+  // Challenger risks surface via conflicts/alternatives, not the risk ledger.
+  const risks: RiskItem[] = base.risks.map(r => ({ taskId: r.taskId, severity: r.severity, claim: r.claim, mitigation: r.mitigation }))
+  for (const p of [...constraints, ...specialists]) {
+    for (const r of p.risks) {
+      if (!risks.some(er => er.taskId === r.taskId && (er.claim === r.claim || er.claim === `[${domainName(p.perspective)}] ${r.claim}`))) {
+        risks.push({ taskId: r.taskId, severity: r.severity, claim: `[${domainName(p.perspective)}] ${r.claim}`, mitigation: r.mitigation })
+      }
+    }
+  }
+
+  // Merge dependency notes from base + all others, deduped on from/to.
+  const dependencyNotes = [...base.dependencyNotes]
+  for (const p of others) {
+    for (const d of p.dependencyNotes) {
+      if (!dependencyNotes.some(td => td.from === d.from && td.to === d.to)) dependencyNotes.push(d)
+    }
+  }
+
+  return { tasks, dependencyNotes, risks, verification, accepted, rejected, deferred, conflicts }
+}
+
+/**
+ * Backward-compatible three-perspective merge. Delegates to the role-based
+ * adjudicator with the historical 天权(base)/天府(constraint)/天璇(challenger) trio.
+ */
+export function mergePerspectives(
+  tianquan: TeamPerspectivePlan,
+  tianfu: TeamPerspectivePlan,
+  tianxuan?: TeamPerspectivePlan,
+): MergedPlan {
+  return mergePerspectivesByRole(tianxuan ? [tianquan, tianfu, tianxuan] : [tianquan, tianfu])
 }
 
 function riskSeverityRank(severity: 'low' | 'medium' | 'high'): number {
@@ -297,20 +274,34 @@ function sameDependencySet(a: string[], b: string[]): boolean {
 
 // ── Planner fanout helpers (max mode) ───────────────────────────────────────
 
-const PERSPECTIVE_BRIEFS: Record<TeamPerspectivePlan['perspective'], string> = {
-  tianquan: '你是天权 planner。职责：依赖分析、任务拆解、执行顺序，产出任务主图。',
-  tianfu: '你是天府 risk reviewer。职责：风险评估、验证门禁、回归测试、串行约束；遇歧义 fail-closed。',
-  tianxuan: '你是天璇 challenger。职责：定向反证、盲区发现、备选方案；质疑前提。',
+/** Role → council responsibility line. The role (not the specific domain)
+ *  defines what a planner must produce, so any domain can fill any seat. */
+const ROLE_BRIEFS: Record<ExpertRole, string> = {
+  base: '职责：依赖分析、任务拆解、执行顺序，产出任务主图。',
+  constraint: '职责：风险评估、验证门禁、回归测试、串行约束；遇歧义 fail-closed。',
+  challenger: '职责：定向反证、盲区发现、备选方案；质疑前提。',
+  specialist: '职责：从你的专业领域视角给出建议与约束（默认进入 advisory）。',
+}
+
+/** Compose a one-line stance from the domain capsule (name + first line of its
+ *  persona) so each planner reasons in-character; falls back to bare id. */
+function perspectiveBrief(perspective: string): string {
+  const role = mergeRoleFor(perspective)
+  const domain = starDomainRegistry.get(perspective)
+  const name = domain?.name ?? perspective
+  const personaLine = domain?.volatileBlock.split('\n').map(l => l.trim()).find(l => l.length > 0)
+  const head = `你是${name} planner。${ROLE_BRIEFS[role]}`
+  return personaLine ? `${head}\n认知场：${personaLine}` : head
 }
 
 /** Build the objective for one perspective planner. The stance rides in the
  *  objective text; the worker is read-only and embeds its plan as an artifact. */
 export function buildPlannerObjective(
-  perspective: TeamPerspectivePlan['perspective'],
+  perspective: string,
   mission: string,
 ): string {
   return [
-    PERSPECTIVE_BRIEFS[perspective],
+    perspectiveBrief(perspective),
     '',
     `Mission: ${mission}`,
     '',

@@ -4,6 +4,7 @@ import { aggregationPolicySchema, workOrderKindSchema, type AggregationPolicy } 
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
 import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
+import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
@@ -24,10 +25,17 @@ const profileStringSchema = z.string().refine(
   (val) => ({ message: `Unknown profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
 )
 
+/** Dynamic star-domain (authority) validation — see delegate-task.ts. */
+const authorityStringSchema = z.string().refine(
+  (val) => starDomainRegistry.getDomainIds().includes(val),
+  (val) => ({ message: `Unknown authority "${val}". Available: ${starDomainRegistry.getDomainIds().join(', ')}` }),
+)
+
 const taskSchema = z.object({
   objective: z.string().min(1),
   kind: workOrderKindSchema.optional(),
   profile: profileStringSchema.optional(),
+  authority: authorityStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
 })
@@ -110,6 +118,7 @@ export function createDelegateBatchTool(
                 objective: { type: 'string' },
                 kind: { type: 'string', enum: [...workOrderKindSchema.options] },
                 profile: { type: 'string', enum: profileRegistry.getProfileNames() },
+                authority: { type: 'string', enum: starDomainRegistry.getDomainIds(), description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng).' },
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
               },
@@ -170,6 +179,7 @@ export function createDelegateBatchTool(
         objective: t.objective,
         kind: t.kind ?? 'code_search',
         profile: (t.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
+        authority: t.authority,
         scope: { files: t.files, symbols: t.symbols },
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,

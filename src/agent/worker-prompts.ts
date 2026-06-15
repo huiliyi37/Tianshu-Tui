@@ -187,9 +187,12 @@ function buildWriteResultShape(): string {
 }
 
 export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): string {
-  // V3 Component A: if order has authority, derive suffix from domain registry
-  const effectiveSuffix = authoritySuffix
-    ?? (order.authority ? starDomainRegistry.get(order.authority)?.systemPromptSuffix : undefined)
+  // V3 Component A: if order has authority, derive persona + suffix from domain registry.
+  // volatileBlock = "你是谁" (frames identity, goes first); systemPromptSuffix = "你怎么做"
+  // (methodology, goes last for highest attention weight).
+  const domainDef = order.authority ? starDomainRegistry.get(order.authority) : undefined
+  const effectiveSuffix = authoritySuffix ?? domainDef?.systemPromptSuffix
+  const personaBlock = authoritySuffix ? undefined : domainDef?.volatileBlock
   const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
   const capability = hasWriteTools ? 'write-capable' : 'read-only'
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
@@ -200,6 +203,12 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
     `Kind: ${order.kind}`,
     `Profile: ${order.profile}`,
   ]
+
+  // V3 Component A (persona): inject the star-domain identity up front so the
+  // worker reasons in-character before reading its methodology / task.
+  if (personaBlock) {
+    parts.push('', '## 你是谁', '', personaBlock)
+  }
 
   // Inject profile-specific expertise (prefer registry, fallback to hardcoded PROFILE_PROMPTS)
   const profileDef = profileRegistry.get(order.profile)

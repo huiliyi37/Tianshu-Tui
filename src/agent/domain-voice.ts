@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
@@ -21,6 +21,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   tianfu: '天府',
   tianliang: '天梁',
   fu: '辅',
+  wenqu: '文曲',
 }
 
 /**
@@ -95,6 +96,23 @@ const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
     ['最后验证中', '逐项核对交付标准'],
     ['正在分析', '逐条分析中'],
     ['测一下', '验收一下'],
+  ],
+  wenqu: [
+    // 文曲 — aesthetic, context-rooted, expressive. A designer who makes intent legible.
+    ['准备制定方案', '先听懂既有语汇，再定设计变奏'],
+    ['开始修改', '落笔，贴合既有腔调'],
+    ['正在修复', '校准视觉层级'],
+    ['代码修改完成', '样式已成，待验渲染'],
+    ['测试全部通过', '渲染验收通过，质感对了'],
+    ['运行测试验证', '亲眼核验渲染效果'],
+    ['准备交付结果', '体验已打磨，交付'],
+    ['收到任务，开始分析', '收到，先摸既有视觉语汇'],
+    ['可能遇到困难', '当前语境信息不足，需要再问一处'],
+    ['接近完成', '细节润色中'],
+    ['继续执行中', '持续打磨中'],
+    ['最后验证中', '做最后一遍渲染核验'],
+    ['正在分析', '品读既有语汇中'],
+    ['测一下', '看一眼渲染'],
   ],
   fu: [
     // 辅 — quiet, precise, structural. A distiller who amplifies others.

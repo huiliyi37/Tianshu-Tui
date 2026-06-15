@@ -19,8 +19,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 9 built-in profiles', () => {
-    assert.equal(registry.list().length, 9)
+  it('has 16 built-in profiles (9 core + 6 flash-army + designer)', () => {
+    assert.equal(registry.list().length, 16)
   })
 
   it('maps code_scout as readonly', () => {
@@ -70,19 +70,21 @@ describe('ProfileRegistry', () => {
 
   it('listWriteProfiles returns hands roles (adversarial_verifier is not hands)', () => {
     const write = registry.listWriteProfiles()
-    // adversarial_verifier has role 'readonly_plus_test', not 'hands' — excluded from write list
-    assert.deepEqual(write.sort(), ['patcher', 'verifier'])
+    // adversarial_verifier has role 'readonly_plus_test', not 'hands' — excluded from write list.
+    // Flash-army hands profiles (lint_fixer/type_fixer/import_organizer/doc_syncer/test_scaffolder) included.
+    assert.deepEqual(write.sort(), ['doc_syncer', 'import_organizer', 'lint_fixer', 'patcher', 'test_scaffolder', 'type_fixer', 'verifier'])
   })
 
   it('listReadOnlyProfiles returns readonly roles', () => {
     const ro = registry.listReadOnlyProfiles()
-    // adversarial_verifier is readonly_plus_test, not 'readonly' — excluded from readonly list
-    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'doc_scout', 'reviewer', 'troubleshooter'])
+    // adversarial_verifier is readonly_plus_test, not 'readonly' — excluded from readonly list.
+    // designer + format_checker are readonly and included.
+    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'designer', 'doc_scout', 'format_checker', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 9 names', () => {
+  it('getProfileNames returns all 16 names', () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'doc_scout', 'patcher', 'planner', 'reviewer', 'troubleshooter', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', () => {

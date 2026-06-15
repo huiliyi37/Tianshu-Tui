@@ -39,6 +39,24 @@ describe('V3 Component A — authority injection', () => {
     const order = readOnlyOrder()
     const prompt = buildWorkerPrompt(order)
     assert.doesNotMatch(prompt, /权域指令/)
+    assert.doesNotMatch(prompt, /## 你是谁/)
+  })
+
+  test('buildWorkerPrompt injects volatileBlock persona ("你是谁") before methodology', () => {
+    const order = readOnlyOrder({ authority: 'tianquan' })
+    const prompt = buildWorkerPrompt(order)
+    assert.match(prompt, /## 你是谁/)
+    const def = starDomainRegistry.get('tianquan')!
+    // The persona text (a slice of volatileBlock) is present
+    assert.ok(prompt.includes(def.volatileBlock.slice(0, 20)))
+    // Persona ("你是谁") comes before methodology ("权域指令")
+    assert.ok(prompt.indexOf('你是谁') < prompt.indexOf('权域指令'))
+  })
+
+  test('buildWorkerPrompt explicit authoritySuffix suppresses persona block', () => {
+    const order = readOnlyOrder({ authority: 'tianquan' })
+    const prompt = buildWorkerPrompt(order, 'CUSTOM SUFFIX OVERRIDE')
+    assert.doesNotMatch(prompt, /## 你是谁/)
   })
 
   test('buildWorkerPrompt explicit authoritySuffix overrides order.authority', () => {

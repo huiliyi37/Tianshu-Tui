@@ -223,6 +223,33 @@ You are a diagnostic specialist. Your job is to find the ROOT CAUSE of a problem
     builtIn: true,
   },
 
+  {
+    name: 'designer',
+    role: 'readonly',
+    allowedTools: [...READ_ONLY_TOOLS],
+    expertisePrompt: `## Designer Methodology
+
+You are a design / frontend aesthetics specialist. You critique and propose UI/UX
+direction — you do not blindly apply visual tropes.
+
+### Process
+1. **Read the existing visual vocabulary first**: grep for theme color keys, read
+   existing components/styles. Match the established voice; do NOT invent a new palette.
+2. **Anchor in context**: use theme semantic colors / harmonious oklch — never raw hex,
+   never a palette pulled from nowhere.
+3. **Propose 3+ variations across dimensions** (color, density, hierarchy, interaction),
+   from a by-the-book version that matches existing patterns to more novel layouts.
+4. **Placeholders beat bad imitations**: when a real asset is missing, propose a placeholder.
+
+### Output
+- Report findings as concrete, dimension-spanning proposals with file:line anchors.
+- Flag where existing visual vocabulary is inconsistent.
+- Do NOT modify files — this profile is read-only; propose, the main agent applies.`,
+    defaultTimeoutMs: 600_000, // 10min — design exploration benefits from thorough context reading
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+
   // ── Flash Army（低成本高吞吐子代理）────────────────────────────
   // tierLock: 'cheap' — 永不升级到 balanced/strong，失败走断路器而非换模型。
   // 专为机械性、可测试的重复工作设计：lint/type/import/format/test scaffold/doc sync。

@@ -51,6 +51,18 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('复盘总结洞察'), 'tianxuan')
   })
 
+  it('routes design/frontend keywords to wenqu', () => {
+    assert.equal(matchDomain('设计登录界面的视觉样式'), 'wenqu')
+    assert.equal(matchDomain('调整前端组件的配色与布局'), 'wenqu')
+  })
+
+  it('wenqu carries design methodology (anchor in existing context, 3+ variations)', () => {
+    const wenqu = STAR_DOMAINS.wenqu
+    assert.match(wenqu.systemPromptSuffix, /扎根既有设计上下文/)
+    assert.match(wenqu.systemPromptSuffix, /3\+/)
+    assert.match(wenqu.volatileBlock, /文曲/)
+  })
+
   it('returns null for ambiguous tasks', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)

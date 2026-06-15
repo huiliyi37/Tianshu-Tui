@@ -8,7 +8,8 @@ import { createTeamSchedulerBandit, parallelismForTeamSchedulerArm, recommendTea
 import { applyTeamSchedulerInfluence, evaluateTeamSchedulerGate } from './team-scheduler-gate.js'
 import { buildTeamSchedulerShadowEvent, type TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
 import { buildGatedInfluenceAuditEvent, type GatedInfluenceAuditEvent } from './gated-influence-audit.js'
-import { buildPlannerObjective, mergePerspectives, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
+import { buildPlannerObjective, mergePerspectivesByRole, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
+import { selectExpertSet } from './expert-router.js'
 import { loadTeamPlanSkeleton, saveTeamPlanSkeleton, type TeamPlanCacheStore } from './team-plan-cache.js'
 
 export interface TeamOrchestratorDeps {
@@ -358,7 +359,10 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
     if (cached) {
       mergedTasks = cached.tasks
     } else {
-      const perspectives = ['tianquan', 'tianfu', 'tianxuan'] as const
+      // Dynamic council: route the mission to a complementary expert set
+      // (base + constraint + challenger + any matched specialist) instead of a
+      // hardcoded trio. Flash (tierLock:'cheap') reviewer planners, one round.
+      const perspectives = selectExpertSet(input.objective)
       const plannerRequests: DelegationRequest[] = perspectives.map(perspective => ({
         parentTurnId: `team:planner-${perspective}`,
         objective: buildPlannerObjective(perspective, input.objective),
@@ -370,11 +374,11 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       }))
       plannerRun = await deps.delegateBatch(plannerRequests, 'all_required', input.abortSignal)
 
-      const planFor = (perspective: TeamPerspectivePlan['perspective']): TeamPerspectivePlan => {
+      const planFor = (perspective: string): TeamPerspectivePlan => {
         const result = plannerRun!.results.find(r => r.workOrderId.includes(`planner-${perspective}`))
         return result ? parsePerspectiveResult(perspective, result) : normalizePerspective(perspective, {})
       }
-      const merged = mergePerspectives(planFor('tianquan'), planFor('tianfu'), planFor('tianxuan'))
+      const merged = mergePerspectivesByRole(perspectives.map(planFor))
       mergedTasks = merged.tasks
       if (mergedTasks.length > 0) {
         saveTeamPlanSkeleton(deps.planCacheStore, { objective: input.objective, mode: 'max', tasks: mergedTasks })

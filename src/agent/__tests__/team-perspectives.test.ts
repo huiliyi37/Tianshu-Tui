@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPlannerObjective, normalizePerspective, mergePerspectives, parsePerspectiveResult } from '../team-perspectives.js'
+import { buildPlannerObjective, normalizePerspective, mergePerspectives, mergePerspectivesByRole, parsePerspectiveResult } from '../team-perspectives.js'
 import type { TeamPerspectivePlan } from '../team-perspectives.js'
 import type { TeamTask } from '../team-plan.js'
 import type { WorkerResult } from '../work-order.js'
@@ -41,6 +41,13 @@ describe('planner fanout helpers', () => {
     assert.match(objective, /天权/)
     assert.match(objective, /perspective-plan/)
     assert.match(objective, /refactor the loop/)
+  })
+
+  it('buildPlannerObjective derives the brief from the domain capsule (wenqu)', () => {
+    const objective = buildPlannerObjective('wenqu', 'redesign the settings panel')
+    assert.match(objective, /文曲/)
+    assert.match(objective, /认知场/)
+    assert.match(objective, /redesign the settings panel/)
   })
 
   it('parsePerspectiveResult extracts embedded plan from artifact', () => {
@@ -338,5 +345,47 @@ describe('mergePerspectives', () => {
     const merged = mergePerspectives(tianquan, tianfu)
 
     assert.equal(merged.dependencyNotes.length, 2) // Deduped
+  })
+})
+
+describe('mergePerspectivesByRole', () => {
+  it('selects the base by role regardless of array order', () => {
+    const tianfu = normalizePerspective('tianfu', {})
+    const tianquan = basePerspective() // role: base
+    // base is last in the array — must still be chosen as skeleton
+    const merged = mergePerspectivesByRole([tianfu, tianquan])
+    assert.equal(merged.tasks.length, 2)
+    assert.equal(merged.tasks[0]!.id, 'T1')
+  })
+
+  it('defers specialist (wenqu) alternatives as advisory regardless of recommendation', () => {
+    const tianquan = basePerspective()
+    const tianfu = normalizePerspective('tianfu', {})
+    const wenqu = normalizePerspective('wenqu', {
+      alternatives: [{ title: 'Use a bento layout', tradeoff: 'denser', recommendation: 'accept' }],
+      blockers: ['No design tokens for spacing scale'],
+    })
+
+    const merged = mergePerspectivesByRole([tianquan, tianfu, wenqu])
+
+    // specialist accept is NOT promoted to accepted — it defers as advisory
+    assert.ok(merged.deferred.some(d => d.title === 'Use a bento layout' && d.source === 'wenqu'))
+    assert.ok(!merged.accepted.some(a => a.title === 'Use a bento layout'))
+    assert.ok(merged.deferred.some(d => d.title.includes('Advisory') && d.source === 'wenqu'))
+  })
+
+  it('reproduces the trio merge (backward compat via mergePerspectives wrapper)', () => {
+    const tianquan = basePerspective()
+    const tianfu = normalizePerspective('tianfu', {
+      verification: [{ taskId: 'T2', command: 'npm test', expected: 'pass' }],
+    })
+    const tianxuan = normalizePerspective('tianxuan', {
+      alternatives: [{ title: 'Alt', tradeoff: 't', recommendation: 'reject' }],
+    })
+
+    const viaWrapper = mergePerspectives(tianquan, tianfu, tianxuan)
+    const viaRole = mergePerspectivesByRole([tianquan, tianfu, tianxuan])
+
+    assert.deepEqual(viaWrapper, viaRole)
   })
 })

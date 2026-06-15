@@ -3,6 +3,7 @@ import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ClaimProposal } from '../context/claims.js'
 import { DEFAULT_DELEGATE_PROFILE, profileRegistry, delegationToolTimeoutMs } from '../agent/profile-registry.js'
+import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { validatePathSafe } from './path-validate.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
@@ -18,10 +19,19 @@ const profileStringSchema = z.string().refine(
   (val) => ({ message: `Unknown profile "${val}". Available: ${profileRegistry.getProfileNames().join(', ')}` }),
 )
 
+/** Dynamic star-domain (authority) validation — accepts built-in + user-loaded domains.
+ *  Injects the domain's persona (volatileBlock) + methodology (systemPromptSuffix)
+ *  into the worker, and intersects the worker's tools with the domain whitelist. */
+const authorityStringSchema = z.string().refine(
+  (val) => starDomainRegistry.getDomainIds().includes(val),
+  (val) => ({ message: `Unknown authority "${val}". Available: ${starDomainRegistry.getDomainIds().join(', ')}` }),
+)
+
 const delegateTaskInputSchema = z.object({
   objective: z.string().min(1),
   kind: z.enum(['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal']).optional(),
   profile: profileStringSchema.optional(),
+  authority: authorityStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
 })
@@ -50,6 +60,7 @@ export function createDelegateTaskTool(
           objective: { type: 'string', description: 'Specific objective for the worker.' },
           kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'], description: 'Worker task type. Default: code_search.' },
           profile: { type: 'string', enum: profileRegistry.getProfileNames(), description: 'Worker profile. Default: code_scout.' },
+          authority: { type: 'string', enum: starDomainRegistry.getDomainIds(), description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng). Injects that expert\'s perspective + methodology and restricts tools to its whitelist.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to focus on.' },
           symbols: { type: 'array', items: { type: 'string' }, description: 'Optional symbols to focus on.' },
         },
@@ -105,6 +116,7 @@ export function createDelegateTaskTool(
         objective: parsed.data.objective,
         kind: parsed.data.kind ?? 'code_search',
         profile: (parsed.data.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
+        authority: parsed.data.authority,
         scope: {
           files: parsed.data.files,
           symbols: parsed.data.symbols,
