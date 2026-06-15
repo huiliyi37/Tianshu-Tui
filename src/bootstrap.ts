@@ -1,13 +1,12 @@
 /**
- * bootstrap.ts — 共享初始化层，被 main.tsx (Ink) 和 main-ansi.ts (T9 ANSI) 共用。
+ * bootstrap.ts — 共享初始化层，由 T9 ANSI 唯一生产入口 src/main.ts 调用。
  *
- * 提取自 main.tsx 的 Root 组件，消除 React 依赖，提供纯异步函数。
- * 目标：零回归切换 main.tsx，同时让 main-ansi.ts 成为完整替代入口。
+ * 纯异步函数，零 React 依赖。历史上同时服务过已退役的 Ink 入口
+ * （main.tsx，已从仓库移除）与 main-ansi.ts；现仅 src/main.ts 使用。
  *
  * 架构：
  *   bootstrapInteractiveSession() → BootstrapContext
- *   ├── main.tsx 在 Root 组件内调用（React hooks 包装）
- *   └── main-ansi.ts 直接 await 调用
+ *   └── src/main.ts 直接 await 调用，连接 AgentLoop 到 TuiApp（engine/app.ts）
  */
 
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
