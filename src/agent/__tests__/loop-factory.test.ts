@@ -52,11 +52,12 @@ test('buildRuntimeSnapshot projects recentToolHistory to tool/status/target only
 })
 
 test('buildRuntimeSnapshot lets extra override mapped fields (hook augmentation)', () => {
-  const snap = buildRuntimeSnapshot(fakeLoop(), { strategy: 'converge', turn: 99 })
-  assert.equal(snap.strategy, 'converge')
+  const snap = buildRuntimeSnapshot(fakeLoop(), { turn: 99, gitChangeRate: 1 })
   assert.equal(snap.turn, 99)
+  assert.equal(snap.gitChangeRate, 1)
   // unrelated fields stay intact
   assert.equal(snap.cwd, '/work')
+  assert.equal(snap.season, 'summer')
 })
 
 test('buildRuntimeSnapshot reads turn count live from the session each call', () => {
