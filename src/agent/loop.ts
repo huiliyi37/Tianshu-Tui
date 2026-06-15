@@ -13,7 +13,7 @@ import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm, buildPrewarmValue, buildPrewarmValueAsync } from './prewarm-file.js'
 import { validatePathSafe } from '../tools/path-validate.js'
-import { type CompactionConfig, staleRoundThresholds } from '../compact/constants.js'
+import { type CompactionConfig } from '../compact/constants.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import { EvidenceTracker } from './evidence.js'
@@ -86,9 +86,7 @@ import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
-import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { CacheAdvisor } from '../cache/advisor.js'
-import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
 import { rejectOnAbort } from './turn-boundary-abort.js'
@@ -127,8 +125,9 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, buildRuntimeSnapshot } from "./loop-factory.js";
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
+import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import { buildEffortContext, type EffortShadowRecord } from './p3-reward.js'
 import { resolveEffortDelta } from './effort-delta.js'
 
@@ -172,7 +171,7 @@ export class AgentLoop {
   private _pendingAbort = false
   cwd: string
   evidence: EvidenceTracker
-  private compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
+  compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   recentToolHistory: ToolHistoryEntry[] = []
   prewarm = new PrewarmCache(60_000, 50)
   private _running = false
@@ -243,11 +242,12 @@ export class AgentLoop {
   private perception: TurnPerceptionController
   private intent: TurnIntentController
   contextInjection: ContextInjectionController
-  private compaction: CompactionController
+  compaction: CompactionController
   private turnStream: TurnStreamController | null = null
   private turnCompletion: TurnCompletionController
   private toolExecution: ToolExecutionController
   private planTraceCoordinator: PlanTraceCoordinator
+  private compactBoundaryCoordinator: CompactBoundaryCoordinator
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -290,11 +290,11 @@ export class AgentLoop {
   private fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
-  private lastCompactTurn: number | null = null
+  lastCompactTurn: number | null = null
   private _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
   private _taskDepthLayer: TaskDepthLayer | undefined = undefined
   private _planMethodology: PlanMethodology | undefined = undefined
-  private _prevPhaseHint: string | undefined = undefined
+  _prevPhaseHint: string | undefined = undefined
   /**
    * P2-5: mid-round history rewrites break the prefix cache between two API
    * calls inside one user round (cache-log #30: input +319, cacheRead
@@ -302,8 +302,8 @@ export class AgentLoop {
    * and processed at the next user-message boundary (turn 0), keeping the
    * session append-only within a round.
    */
-  private pendingStaleCompact = false
-  private pendingHeapCompact = false
+  pendingStaleCompact = false
+  pendingHeapCompact = false
   cacheAdvisor: CacheAdvisor
   p3: P3Integration
   immuneHook: ImmuneHook
@@ -548,6 +548,7 @@ export class AgentLoop {
     this.turnCompletion = this.createTurnCompletionController()
     this.toolExecution = this.createToolExecutionController()
     this.planTraceCoordinator = createPlanTraceCoordinator(this)
+    this.compactBoundaryCoordinator = createCompactBoundaryCoordinator(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -1479,10 +1480,8 @@ export class AgentLoop {
     this.contextInjection.recordUserInputClaims(userInput)
     this.contextInjection.refreshPlaybookLessons(userInput)
 
-    // Phase 2.3: Proactive session split at 86% context — MUST run BEFORE
-    // addUserMessage, otherwise the split replaces the just-added user message
-    // and the model never sees the new user input.
-    await this.compaction.trySessionSplit()
+    // Phase 2.3: Proactive session split — MUST run BEFORE addUserMessage.
+    await this.compactBoundaryCoordinator.preUserMessageSplit()
 
     // History invariant probe: a new run must start with the previous turn
     // answered. A trailing user message (or a thinking-only assistant with
@@ -1904,152 +1903,7 @@ export class AgentLoop {
     shouldAbort: boolean
     userMessageConsumed: boolean
   }> {
-    let userMessageConsumed = false
-
-    // Phase 2.3: Proactive session split at 86% context.
-    let _tb = Date.now()
-    if (await this.compaction.trySessionSplit()) {
-      userMessageConsumed = true
-    }
-    debugLog(`[turn-boundary] turn=${turn} trySessionSplit: ${Date.now() - _tb}ms`)
-    // A2: user may have aborted during trySessionSplit (which can trigger
-    // 60s LLM compact). Bail early instead of continuing into maybeCompact.
-    if (this.abortController!.signal.aborted) {
-      return { compacted: false, shouldAbort: true, userMessageConsumed }
-    }
-
-    _tb = Date.now()
-    const compactResult = await this.compaction.maybeCompact({
-      loopTurn: turn,
-      failures: this.compactFailures,
-    })
-    debugLog(`[turn-boundary] turn=${turn} maybeCompact: ${Date.now() - _tb}ms compacted=${compactResult.compacted}`)
-    if (compactResult.compacted) userMessageConsumed = true
-    // A2: bail after maybeCompact (can also trigger LLM compact on 1M windows)
-    if (this.abortController!.signal.aborted) {
-      return { compacted: false, shouldAbort: true, userMessageConsumed }
-    }
-    this.compactFailures = compactResult.failures
-    // Immune signal: surface compaction failures as danger signal for dual-signal gating
-    if (this.compactFailures.consecutiveFailures > 0) {
-      try {
-        this.immuneHook.injectSignal({
-          kind: 'compaction_fail',
-          severity: Math.min(1.0, this.compactFailures.consecutiveFailures * 0.3),
-          turn,
-          source: 'compaction-controller',
-        })
-      } catch { /* non-critical */ }
-    }
-    if (compactResult.compacted) {
-      this.lastCompactTurn = turn
-      // Hint V8 to release freed message objects sooner
-      if (typeof globalThis.gc === 'function') globalThis.gc()
-    }
-
-    // T9: Proactive Quality Compact — trigger partial compact on phase transition
-    // or when attention quality drops below threshold on 1M+ windows.
-    // P2-5: only at user boundaries (turn 0) — partial compact rewrites stored
-    // history, which mid-round breaks the prefix between two API calls.
-    // _prevPhaseHint is only updated at boundaries so a mid-round transition
-    // is still detected at the next boundary.
-    if (!compactResult.compacted && this.config.contextWindow >= 500_000 && turn === 0) {
-      const qTokens = this.session.getEstimatedTokens()
-      const qRatio = qTokens / this.config.contextWindow
-      const phaseHint = this.config.promptEngine.getPhaseHint?.()
-      const prevPhaseHint = this._prevPhaseHint
-      this._prevPhaseHint = phaseHint
-      const phaseTransition = prevPhaseHint !== undefined && phaseHint !== prevPhaseHint
-
-      if (qRatio > 0.3 && phaseTransition) {
-        debugLog(`[proactive-compact] phase transition ${prevPhaseHint}→${phaseHint} at ${(qRatio * 100).toFixed(0)}% — triggering partial compact`)
-        const partialOk = await this.compaction.tryPartialCompact(30)
-        if (partialOk) {
-          userMessageConsumed = true
-          this.lastCompactTurn = turn
-        }
-      }
-    }
-
-    // Stale round compaction: proactively shrink N-2+ tool_results
-    if (!compactResult.compacted) {
-      // Token gate: skip stale-round + diet when under 50% context capacity
-      const contextWindow = this.config.contextWindow ?? 1_000_000
-      const tokenBudget = estimateOaiTokens(this.session.getMessages() as any)
-      // P1+P2 trace: verify token gate skips diet/stale below 50% capacity
-      // eslint-disable-next-line no-console
-      const tokenRatio = tokenBudget / contextWindow
-      const skipGate = tokenRatio < 0.5
-      debugLog(`[token-gate] tokens=${tokenBudget} window=${contextWindow} ratio=${tokenRatio.toFixed(2)} skip=${skipGate}`)
-      if ((tokenRatio >= 0.5 || this.pendingStaleCompact) && contextWindow < 1_000_000) {
-        // P2-5: history rewrites only at user boundaries (turn 0). Mid-round
-        // mutation invalidates the prefix between two API calls of the same
-        // round — defer with a marker instead.
-        if (turn !== 0) {
-          if (tokenRatio >= 0.5) this.pendingStaleCompact = true
-        } else if (this.cacheAdvisor.shouldDelayCompact(tokenRatio >= 0.7 ? 3 : 2, { estimatedTokens: tokenBudget, contextWindow })) {
-          debugLog(`[token-gate] cacheAdvisor delayed stale-round compact (cache healthy, ratio=${tokenRatio.toFixed(2)})`)
-        } else {
-          this.pendingStaleCompact = false
-          // P3-B AgentDiet: remove redundant/expired/useless trajectory segments first
-          const dietBefore = this.session.getMessages()
-          const dietResult = this.p3.dietMessages(dietBefore as any)
-          if (dietResult.removedCount > 0) {
-            this.session.replaceMessages(dietResult.messages as any)
-          }
-
-          const before = this.session.getMessages()
-          // Take max of cacheAdvisor's adaptive value and the window-aware
-          // default. cacheAdvisor is bounded to 600–2400 (legacy small-window
-          // tuning); on a 1M window staleRoundThresholds gives 30K, which we
-          // want to win unless cacheAdvisor has actually escalated.
-          const advisorPreview = this.cacheAdvisor.getStalePreviewChars()
-          const after = compactStaleRoundsOai(before, contextWindow, Math.max(advisorPreview, staleRoundThresholds(contextWindow).previewChars))
-          if (after !== before) {
-            this.session.replaceMessages(after)
-            if (typeof globalThis.gc === 'function') globalThis.gc()
-          }
-        }
-      }
-    }
-
-    // Heap-driven forced compaction: when memory pressure is high,
-    // run phase 1 only (tool content truncation).
-    // On 1M+ windows, use a higher threshold (0.75) to delay prefix
-    // cache disruption. Phase 2 (round removal) won't fire since
-    // tokens << contextWindow — only tool_result truncation applies.
-    const heapRatio = snap
-      ? snap.memory.heapUsedBytes / snap.memory.memoryLimitBytes
-      : 0
-    const is1M = (this.config.contextWindow ?? 1_000_000) >= 1_000_000
-    const heapCompactThreshold = is1M ? 0.75 : 0.6
-    const heapPressure = heapRatio >= heapCompactThreshold
-    if (!compactResult.compacted && (heapPressure || this.pendingHeapCompact) && this.session.getMessages().length >= 10) {
-      // P2-5: on 1M windows, heap micro-compact rewrites history mid-round and
-      // breaks the prefix cache between API calls. Defer to the next user
-      // boundary (turn 0). On <1M windows heap pressure is a memory emergency
-      // — allow mid-round mutation (cache loss is the lesser harm).
-      if (is1M && turn !== 0) {
-        if (heapPressure) this.pendingHeapCompact = true
-        debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} deferred to next user boundary (1M window, mid-round)`)
-      } else if (is1M && !heapPressure && this.cacheAdvisor.shouldDelayCompact(2)) {
-        // Deferred marker but pressure subsided and cache is healthy — drop it.
-        this.pendingHeapCompact = false
-        debugLog('[memory-pressure] deferred heap compact dropped (pressure subsided, cache healthy)')
-      } else {
-        this.pendingHeapCompact = false
-        debugLog(`[memory-pressure] heap=${heapRatio.toFixed(2)} threshold=${heapCompactThreshold} msgCount=${this.session.getMessages().length}`)
-        const before = this.session.getMessages()
-        const contextWindow = this.config.contextWindow ?? 1_000_000
-        const { messages: trimmed } = microCompactOai(before, contextWindow, this.session.getEstimatedTokens())
-        if (trimmed.length < before.length || trimmed !== before) {
-          this.session.replaceMessages(trimmed)
-          if (typeof globalThis.gc === 'function') globalThis.gc()
-        }
-      }
-    }
-
-    return { compacted: compactResult.compacted, shouldAbort: false, userMessageConsumed }
+    return this.compactBoundaryCoordinator.runCompaction(turn, snap)
   }
 
   private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {

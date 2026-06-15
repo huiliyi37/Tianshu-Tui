@@ -11,6 +11,7 @@ import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { isSystemReminder, wrapSystemReminder } from '../prompt/system-reminder.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
+import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -198,5 +199,33 @@ export function createPlanTraceCoordinator(self: AgentLoop): PlanTraceCoordinato
     getTraceStore: () => self.traceStore,
     addSystemReminder: content => { self.session.addUserMessage(wrapSystemReminder(content)) },
     setPlanTraceAppendix: appendix => { self.config.promptEngine.setPlanTraceAppendix(appendix) },
+  })
+}
+
+export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBoundaryCoordinator {
+  return new CompactBoundaryCoordinator({
+    getCompactFailures: () => self.compactFailures,
+    setCompactFailures: f => { self.compactFailures = f },
+    getLastCompactTurn: () => self.lastCompactTurn,
+    setLastCompactTurn: t => { self.lastCompactTurn = t },
+    getPendingStaleCompact: () => self.pendingStaleCompact,
+    setPendingStaleCompact: v => { self.pendingStaleCompact = v },
+    getPendingHeapCompact: () => self.pendingHeapCompact,
+    setPendingHeapCompact: v => { self.pendingHeapCompact = v },
+    getPrevPhaseHint: () => self._prevPhaseHint,
+    setPrevPhaseHint: h => { self._prevPhaseHint = h },
+    getAbortSignal: () => self.abortController?.signal,
+    getContextWindow: () => self.config.contextWindow ?? 1_000_000,
+    getPhaseHint: () => self.config.promptEngine.getPhaseHint(),
+    getEstimatedTokens: () => self.session.getEstimatedTokens(),
+    getMessages: () => self.session.getMessages(),
+    replaceMessages: msgs => { self.session.replaceMessages(msgs) },
+    dietMessages: msgs => self.p3.dietMessages(msgs as any) as any,
+    trySessionSplit: () => self.compaction.trySessionSplit(),
+    maybeCompact: opts => self.compaction.maybeCompact(opts),
+    tryPartialCompact: target => self.compaction.tryPartialCompact(target),
+    shouldDelayCompact: (threshold, ctx) => self.cacheAdvisor.shouldDelayCompact(threshold, ctx?.estimatedTokens !== undefined && ctx?.contextWindow !== undefined ? { estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow } : undefined),
+    getStalePreviewChars: () => self.cacheAdvisor.getStalePreviewChars(),
+    injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
   })
 }
