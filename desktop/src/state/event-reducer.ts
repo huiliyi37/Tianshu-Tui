@@ -112,11 +112,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       const text = String(ev.data.text ?? '')
       next.private_thinkingOpen = false
       if (next.private_textOpen && next.blocks.length > 0) {
-        // Mutate the last block in place instead of copying the entire array.
-        // text_delta fires per-token (hundreds per turn); copying O(n) blocks
-        // each time causes visible render lag on long conversations.
         next.blocks[next.blocks.length - 1]!.text += text
-      } else {
+      } else if (text) {
         next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
         next.private_textOpen = true
       }
@@ -127,7 +124,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.private_textOpen = false
       if (next.private_thinkingOpen && next.blocks.length > 0) {
         next.blocks[next.blocks.length - 1]!.text += text
-      } else {
+      } else if (text) {
         next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
         next.private_thinkingOpen = true
       }
