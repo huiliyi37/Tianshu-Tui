@@ -20,6 +20,7 @@ import { ResizeHandler } from './resize-handler.js'
 import { InputLine } from './input-line.js'
 import { WriteBatcher } from './write-batcher.js'
 import { StreamRenderer } from './stream-renderer.js'
+import { ToolGroupController } from './tool-group-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -166,19 +167,7 @@ export type TuiMetricsProvider = () => TuiMetrics | null
  * 防止超大输出工具（如 cat 100MB 文件逐 chunk 上行）撑爆内存。终态结果
  * 提交到 scrollback 时用完整 result 字符串，不受此 cap 影响。
  */
-export const TOOL_ACCUMULATOR_MAX_BYTES = 64 * 1024
-
-/**
- * 截断工具累加器到字节上限，保留尾部并标注省略前缀。
- * 字节而非字符计数——内存压力来自字节数而非逻辑字符数。
- * 导出供测试直接验证（TuiApp 全量构造需 TTY harness，纯函数单测更精确）。
- */
-export function capToolAccumulator(text: string, maxBytes: number): string {
-  if (text.length <= maxBytes) return text // JS string length ≤ byte count for BMP, 绝大多数场景已足够
-  const tail = text.slice(-maxBytes)
-  const nl = tail.indexOf('\n')
-  return `… [truncated ${text.length - maxBytes} chars]\n${nl >= 0 ? tail.slice(nl + 1) : tail}`
-}
+export { TOOL_ACCUMULATOR_MAX_BYTES, capToolAccumulator } from './tool-accumulator.js'
 
 // ── TuiApp ─────────────────────────────────────────────────────
 
@@ -219,16 +208,8 @@ export class TuiApp {
   private get theme(): RivetTheme { return getTheme() }
   private columns: number
   private rows: number
-  /** Streaming tool result accumulator: id → accumulated text */
-  private toolAccumulator = new Map<string, string>()
-  /** 进行中工具元数据：id → 名称/输入/开始时间（live 工具行 + 卡片标题用） */
-  private pendingTools = new Map<string, { name: string; input: Record<string, unknown>; startMs: number; _approvalMode?: string }>()
-  /** 最近一条被截断的工具结果（ctrl+o 展开用） */
-  private lastTruncatedTool: { toolName: string; content: string; isError: boolean; rawPath?: string; toolInput?: Record<string, unknown> } | null = null
-  /** 最近一个被 flush 的折叠组（ctrl+o 展开用） */
-  private lastCollapsedGroup: CollapsedReadSearchGroup | null = null
-  /** 工具折叠组缓冲区：连续 collapsible 调用在此累积，非 collapsible 到达或 turn 结束时 flush */
-  private toolGroupBuffer = new CollapsedReadSearchBuffer()
+  /** W-B1: tool lifecycle state manager (buffer/accumulator/pending/truncated/collapsed) */
+  private toolGroupController = new ToolGroupController()
   /** 并行子代理舰队读模型（由 onDelegationActivity 事件流驱动） */
   private fleet = new FleetRegistry()
   /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
@@ -1389,7 +1370,7 @@ export class TuiApp {
   private handleToolUse(id: string, name: string, input: Record<string, unknown>): void {
     this.setPhase('analyzing')
     this.markActivity()
-    this.pendingTools.set(id, { name, input, startMs: Date.now(), _approvalMode: this._approvalMode })
+    this.toolGroupController.setPending(id, { name, input, startMs: Date.now(), _approvalMode: this._approvalMode })
     // 子代理编排（delegate_* / team_orchestrate）切 GlanceBar domain 到天机。
     if (isDelegationTool(name)) {
       const badge = domainBadge(name)
@@ -1402,9 +1383,9 @@ export class TuiApp {
 
     // 工具折叠组：collapsible → push entry；non-collapsible → 先 flush 再单独走 tool card
     if (isCollapsibleTool(name)) {
-      this.toolGroupBuffer.pushUse(id, name, input)
+      this.toolGroupController.pushUse(id, name, input)
     } else {
-      if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
+      if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     }
 
     // Commit thinking if any
@@ -1416,10 +1397,10 @@ export class TuiApp {
   }
   /** 将折叠组 buffer 刷新到 scrollback */
   private flushToolGroup(): void {
-    const group = this.toolGroupBuffer.flush()
+    const group = this.toolGroupController.flushGroup()
     if (!group || group.entries.length === 0) return
     // 记录最近 flush 的组供 ctrl+o 展开
-    this.lastCollapsedGroup = group
+    this.toolGroupController.flushGroup()
     const formatted = formatCollapsedGroup({ group, theme: this.theme })
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
@@ -1478,8 +1459,8 @@ export class TuiApp {
         }
       }
       // Accumulate for live tool card display — show last lines in live region
-      const toolAcc = this.toolAccumulator.get(id) ?? ''
-      this.toolAccumulator.set(id, capToolAccumulator(toolAcc + result, TOOL_ACCUMULATOR_MAX_BYTES))
+      const toolAcc = this.toolGroupController.getAccumulated(id) ?? ''
+      this.toolGroupController.accumulate(id, result)
       this.markActivity()
       // 经 WriteBatcher 合并：长输出工具（bash/test）逐 chunk 上行，旧实现每 chunk
       // 直接 renderLive() 全区域重绘。与正文/思考流同口径合并到 microtask。
@@ -1488,10 +1469,10 @@ export class TuiApp {
     }
 
     // Terminal result: commit to scrollback
-    const toolAcc = this.toolAccumulator.get(id)
-    this.toolAccumulator.delete(id)
-    const meta = this.pendingTools.get(id)
-    this.pendingTools.delete(id)
+    const toolAcc = this.toolGroupController.getAccumulated(id)
+    this.toolGroupController.deleteAccumulated(id)
+    const meta = this.toolGroupController.getPending(id)
+    this.toolGroupController.deletePending(id)
     // 委派工具终态：清理该组在舰队读模型中的 worker 记录（终态摘要已通过
     // onDelegationActivity 到达，面板转入 scrollback 后无需常驻 live 区）。
     if (meta && isDelegationTool(meta.name)) {
@@ -1502,10 +1483,10 @@ export class TuiApp {
     // 可折叠 tool（read/grep/glob/repo_map 等探索型）：按 toolUseId 绑定结果到折叠组
     if (isCollapsibleTool(name)) {
       // G4 修复：buffer 已被 flush（如 write 打断），迟到 result 自动开新组
-      if (!this.toolGroupBuffer.isActive()) {
-        this.toolGroupBuffer.pushUse(id, name, meta?.input ?? {})
+      if (!this.toolGroupController.isActiveGroup()) {
+        this.toolGroupController.pushUse(id, name, meta?.input ?? {})
       }
-      this.toolGroupBuffer.attachResult(id, finalContent, isError)
+      this.toolGroupController.attachResult(id, finalContent, isError)
       // 不单独 commit — 将在 flushToolGroup 时作为组渲染
       return
     }
@@ -1538,13 +1519,13 @@ export class TuiApp {
 
     // 记录截断结果供 ctrl+o 展开
     if (isToolCardTruncated(cardInput)) {
-      this.lastTruncatedTool = {
+      this.toolGroupController.setLastTruncatedTool({
         toolName: name,
         content: finalContent,
         isError,
         rawPath,
         toolInput: meta?.input,
-      }
+      })
     }
 
     this.commitAbove(() => {
@@ -1563,9 +1544,10 @@ export class TuiApp {
   /** ctrl+o：展开最近被截断的工具结果或折叠组 */
   private expandLastTruncatedTool(): void {
     // 优先展开折叠组
-    if (this.lastCollapsedGroup) {
-      const g = this.lastCollapsedGroup
-      this.lastCollapsedGroup = null
+    const collapsed = this.toolGroupController.getLastCollapsedGroup()
+    if (collapsed) {
+      const g = collapsed
+      this.toolGroupController.clearLastCollapsedGroup()
       const formatted = formatCollapsedGroup({ group: g, expanded: true, theme: this.theme })
       this.commitAbove(() => {
         this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
@@ -1574,9 +1556,9 @@ export class TuiApp {
       return
     }
     // 回退：展开单个截断工具卡片
-    const t = this.lastTruncatedTool
+    const t = this.toolGroupController.getLastTruncatedTool()
     if (!t) return
-    this.lastTruncatedTool = null
+    this.toolGroupController.clearLastTruncatedTool()
     const formatted = formatToolCard({
       toolName: t.toolName,
       content: t.content,
@@ -1605,7 +1587,7 @@ export class TuiApp {
     this.state.turnNumber = turnNumber
 
     // Flush 工具折叠组残余
-    if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -1717,8 +1699,7 @@ export class TuiApp {
    * 上一轮的孤儿条目（live 区显示已死的工具卡片、toolAccumulator 累加跨 run 污染）。
    */
   private resetRunLocalState(): void {
-    this.pendingTools.clear()
-    this.toolAccumulator.clear()
+    this.toolGroupController.clear()
     this.fleet.clear()
     this.liveTeamModel = null
   }
@@ -1741,7 +1722,7 @@ export class TuiApp {
     if (this.approvalPending) { this.approvalEditMode = false; this.approvalEditError = ''; this.resolveApproval(false) }
     if (this.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
-    if (this.toolGroupBuffer.isActive()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
@@ -1853,7 +1834,7 @@ export class TuiApp {
       )
       for (const line of fleetLines) lines.push({ text: line })
     } else {
-      const delegationTools = [...this.pendingTools.entries()]
+      const delegationTools = [...this.toolGroupController.getPendingEntries()]
         .filter(([, meta]) => isDelegationTool(meta.name))
       if (delegationTools.length > 0) {
         const pills = delegationTools.map(([, meta]) => {
@@ -1871,8 +1852,8 @@ export class TuiApp {
     }
 
     // 2c. Collapsible 探索工具聚合行（避免 read×5 + grep×3 刷屏 live 区）
-    if (this.toolGroupBuffer.isActive()) {
-      const activeGroup = this.toolGroupBuffer.getActive()
+    if (this.toolGroupController.isActiveGroup()) {
+      const activeGroup = this.toolGroupController.getActiveGroup()
       if (activeGroup && activeGroup.entries.length > 0) {
         const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, this.columns)
         for (const line of groupLines) {
@@ -1882,14 +1863,14 @@ export class TuiApp {
     }
 
     // 2d. 进行中非 collapsible 工具：● 标题行 + 末 3 行输出（⎿ 缩进）
-    if (this.pendingTools.size > 0) {
-      for (const [id, meta] of this.pendingTools) {
+    if (this.toolGroupController.getPendingSize() > 0) {
+      for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
         // 跳过已归入折叠组的 collapsible 工具（它们在 2c 聚合行中显示）
         if (isCollapsibleTool(meta.name)) continue
         const toolLines = formatToolCardLive({
           toolName: meta.name,
           toolInput: meta.input,
-          outputTail: this.toolAccumulator.get(id),
+          outputTail: this.toolGroupController.getAccumulated(id),
           elapsedMs: Date.now() - meta.startMs,
           columns: this.columns,
         }, this.theme)
