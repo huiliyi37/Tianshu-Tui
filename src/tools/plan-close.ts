@@ -99,6 +99,16 @@ export const PLAN_CLOSE_TOOL: Tool = {
       const action = closureAction(result)
       if (params.input.apply === true) {
         await writeFileAtomicAsync(filePath, result.content)
+
+        if (params.onPlanClosed) {
+          params.onPlanClosed({
+            planFile: relativePath,
+            tasks,
+            deliveryState: deliveryState ?? 'GREEN',
+            totalChangedCheckboxes: result.totalChangedCheckboxes,
+          })
+        }
+
         return {
           content: [
             `Plan closed: ${relativePath}`,

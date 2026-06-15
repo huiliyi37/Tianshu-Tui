@@ -161,6 +161,8 @@ export interface ToolPipelineDeps {
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition from plan_steps into the loop's PlanExecutionTrace. */
   onPlanSteps?: (descriptions: string[]) => void
+  /** Write a constellation milestone when plan_close succeeds with apply=true. */
+  onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -463,6 +465,7 @@ export async function executeToolUse(
       : undefined,
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
+    onPlanClosed: deps.onPlanClosed,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),

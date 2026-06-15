@@ -32,6 +32,13 @@ export interface LeaveMarkInput {
   tags?: string[]
 }
 
+export interface PlanClosedInput {
+  planFile: string
+  tasks: string
+  deliveryState: 'GREEN' | 'YELLOW' | 'RED'
+  totalChangedCheckboxes: number
+}
+
 /**
  * VSW: a resolved snapshot plan attached to a verification tool call. Built by
  * the session-scoped verification-snapshot-manager from the §6 policy decision.
@@ -50,6 +57,8 @@ export interface ToolCallParams {
   onOutput?: (chunk: string) => void
   /** Capture an agent's departure mark for 主控 to record at session close. */
   onLeaveMark?: (mark: LeaveMarkInput) => void
+  /** Write a constellation milestone when plan_close succeeds with apply=true. */
+  onPlanClosed?: (input: PlanClosedInput) => void
   /** U6/C1: capture the goal decomposition (ordered step descriptions) produced
    *  by the plan_steps tool during planning. The loop maps these into the active
    *  PlanExecutionTrace. Absent in non-task / worker contexts → tool is a no-op. */

@@ -1,12 +1,12 @@
 /**
- * Constellation post-session hook — 主控 seals the session's departure mark.
+ * Constellation post-session hook — seals agent departure marks and updates
+ * the project skeleton.
  *
- * Two paths, both producing the single idempotent departure milestone for the
- * session:
+ * Milestone paths (no automatic safety-net — milestones are only written by
+ * explicit actions: plan_close, leave_mark tool, or /leave command):
  *  1. The agent left a mark (leave_mark tool) → record it with the agent's
  *     self-chosen symbol + summary. Identity is earned, not assigned.
- *  2. Safety net — the agent did real work but left no mark → record an
- *     unsigned journey (symbol '·') so the starmap keeps growing.
+ *  2. Skeleton incremental update — re-surveys src/ modules after file changes.
  *
  * Pure post-session side effect, opt-in, never mutates prompt state or runs
  * during turns (cache-safe by construction).
@@ -20,9 +20,8 @@ import { appendMilestone, surveySkeleton, initConstellation, loadConstellation }
 import {
   buildDepartureMilestone,
   collectFilesChanged,
-  deriveSummary,
 } from '../../constellation/milestone.js'
-import { buildAgentMark, VOID_SYMBOL } from '../void-identity.js'
+import { buildAgentMark } from '../void-identity.js'
 import type { MilestoneType } from '../../constellation/schema.js'
 
 export interface ConstellationHookDeps {
@@ -37,8 +36,6 @@ export interface ConstellationHookDeps {
   getDomainId?: () => string | null | undefined
   /** Session's ephemeral numeric id — ensures departure mark matches arrival. */
   getNumericId?: () => number | null
-  /** Minimum changed files for the anonymous safety net to fire. Default 1. */
-  minFiles?: number
   now?: () => number
 }
 
@@ -71,31 +68,10 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
             now,
           })
           appendMilestone(deps.cwd, milestone, now)
-          // P3: re-survey skeleton after file changes (pending mark path)
-          surveyAndUpdateSkeleton(deps.cwd, deps.sessionId, domain, collectFilesChanged(entries), now)
-          return
         }
 
-        // Safety net: no mark left. Record an unsigned journey only if the
-        // session actually touched files (noise gate).
+        // P3: re-survey skeleton after file changes (always runs regardless of mark)
         const filesChanged = collectFilesChanged(entries)
-        const wrote = summary?.writeFileCount ?? filesChanged.length
-        const minFiles = deps.minFiles ?? 1
-        if (wrote < minFiles) return
-
-        const milestone = buildDepartureMilestone({
-          sessionId: deps.sessionId,
-          agentMark: buildAgentMark({ symbol: VOID_SYMBOL, domain, numericId: deps.getNumericId?.() ?? undefined }),
-          domain,
-          summary: deriveSummary(entries, 'milestone', filesChanged.length),
-          filesChanged,
-          type: 'milestone',
-          verificationStatus: summary?.verificationStatus,
-          cycleClose,
-          now,
-        })
-        appendMilestone(deps.cwd, milestone, now)
-        // P3: re-survey skeleton after file changes (safety net path)
         surveyAndUpdateSkeleton(deps.cwd, deps.sessionId, domain, filesChanged, now)
       } catch {
         // Post-session side effect must never affect the session outcome.

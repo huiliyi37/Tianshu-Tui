@@ -93,6 +93,8 @@ export interface ToolExecutionDeps {
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition (plan_steps) for the loop's PlanExecutionTrace. */
   onPlanSteps?: (descriptions: string[]) => void
+  /** Write a constellation milestone when plan_close succeeds with apply=true. */
+  onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
 }
 
 export interface ToolExecBatchInput {
@@ -195,6 +197,7 @@ export class ToolExecutionController {
             this.deps.recordToolHistory(name, input_, isError, content),
           onLeaveMark: this.deps.onLeaveMark,
           onPlanSteps: this.deps.onPlanSteps,
+          onPlanClosed: this.deps.onPlanClosed,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(
@@ -261,6 +264,7 @@ export class ToolExecutionController {
             this.deps.recordToolHistory(name, input_, isError, content),
           onLeaveMark: this.deps.onLeaveMark,
           onPlanSteps: this.deps.onPlanSteps,
+          onPlanClosed: this.deps.onPlanClosed,
           getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
           recordPrediction: (correct) => {
             this.deps.setPredictionAccumulator(

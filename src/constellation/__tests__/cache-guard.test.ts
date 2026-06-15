@@ -67,7 +67,7 @@ test('disabled hook is inert (no file written)', async () => {
   }
 })
 
-test('safety net records an unsigned journey when no mark was left', async () => {
+test('no milestone is written when no mark was left (safety-net removed)', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
   try {
     const hook = createConstellationRuntimeHook({
@@ -78,16 +78,13 @@ test('safety net records an unsigned journey when no mark was left', async () =>
     })
     await hook.run({} as never)
     const c = loadConstellation(cwd)
-    assert.ok(c)
-    assert.equal(c!.milestones.length, 1)
-    assert.equal(c!.milestones[0]!.summary, 'shipped X')
-    assert.equal(c!.milestones[0]!.agentMark.symbol, '·')
+    assert.equal(c?.milestones.length ?? 0, 0)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
 })
 
-test('safety net is inert when the session changed no files', async () => {
+test('no constellation file created when session changed no files and no mark left', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'cguard-'))
   try {
     const hook = createConstellationRuntimeHook({

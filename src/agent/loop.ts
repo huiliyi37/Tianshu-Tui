@@ -59,7 +59,9 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
-import { mintNumericId } from './void-identity.js'
+import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
+import { buildDepartureMilestone } from '../constellation/milestone.js'
+import { appendMilestone } from '../constellation/store.js'
 import { createAnchorGraph } from '../prompt/anchor-graph.js'
 import { createHash } from 'node:crypto'
 import { ArtifactStore } from '../artifact/store.js'
@@ -648,6 +650,27 @@ export class AgentLoop {
   /** The pending departure mark, if the agent left one this session. */
   getPendingLeaveMark(): import('../tools/types.js').LeaveMarkInput | null {
     return this.pendingLeaveMark
+  }
+
+  /** Write a constellation milestone when plan_close applies successfully. */
+  handlePlanClosed(input: import('../tools/types.js').PlanClosedInput): void {
+    try {
+      const domain = this.sessionDomain?.id ?? ''
+      const numericId = this._sessionNumericId ?? undefined
+      const mark = buildAgentMark({ symbol: VOID_SYMBOL, domain, numericId })
+      const summary = `plan closed: ${input.planFile} [${input.tasks}] ${input.deliveryState}`
+      const milestone = buildDepartureMilestone({
+        sessionId: this.config.sessionId ?? 'anon',
+        agentMark: mark,
+        domain,
+        summary,
+        type: 'milestone',
+        tags: ['plan-close'],
+      })
+      appendMilestone(this.cwd, milestone)
+    } catch {
+      // Milestone write is best-effort; must not disrupt the tool flow.
+    }
   }
 
   /** U6/C1: seed the execution trace from the agent's first todo write.
