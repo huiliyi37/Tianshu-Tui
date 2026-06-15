@@ -62,8 +62,8 @@ describe('PromptEngine OpenAI-native request building', () => {
     // Trailer mode: when firstUserIdx===lastUserIdx, cachedFreshBlock (which
     // includes frozenBase) is merged into the user message — no separate frozenBase msg.
     assert.equal(request.messages[1]?.role, 'user')
-    assert.match(request.messages[1]?.content ?? '', /<environment/)
-    assert.ok((request.messages[1]?.content ?? '').includes('hello'))
+    assert.match((request.messages[1]?.content as string) ?? '', /<environment/)
+    assert.ok(((request.messages[1]?.content as string) ?? '').includes('hello'))
   })
 
   it('reuses cached fresh volatile across tool-call turns for the same latest user message', () => {
@@ -309,7 +309,7 @@ describe('PromptEngine active claims projection', () => {
 
     const allUsers = req.messages.filter(m => m.role === 'user')
     // Trailer mode: cachedFreshBlock is merged into the LAST user message
-    const injectedBlock = allUsers[allUsers.length - 1]?.content ?? ''
+    const injectedBlock = (allUsers[allUsers.length - 1]?.content as string) ?? ''
 
     // consolidatedBlock with habituated domain should appear in merged message
     assert.ok(injectedBlock.includes('star-data'),

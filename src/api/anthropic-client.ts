@@ -14,7 +14,7 @@ export interface AnthropicClientConfig {
 }
 
 interface AnthropicContentBlock {
-  type: 'text' | 'thinking' | 'tool_use' | 'tool_result'
+  type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image'
   text?: string
   thinking?: string
   id?: string
@@ -22,6 +22,7 @@ interface AnthropicContentBlock {
   input?: Record<string, unknown>
   tool_use_id?: string
   content?: string
+  source?: { type: 'base64'; media_type: string; data: string }
   cache_control?: { type: 'ephemeral'; ttl?: '1h' }
 }
 
@@ -232,6 +233,20 @@ export class AnthropicClient implements StreamClient {
 
   private convertMessage(msg: OaiMessage): AnthropicMessage {
     if (msg.role === 'user') {
+      // Multimodal: pass through content parts; Anthropic supports native image_url.
+      if (Array.isArray(msg.content)) {
+        return {
+          role: 'user',
+          content: msg.content.map(p => {
+            if (p.type === 'text') return { type: 'text', text: p.text }
+            // Convert OpenAI image_url format to Anthropic's image block format.
+            const url = p.image_url.url
+            const m = url.match(/^data:(image\/[a-z+]+);base64,(.+)$/)
+            if (m) return { type: 'image', source: { type: 'base64', media_type: m[1]!, data: m[2]! } }
+            return { type: 'text', text: `[unsupported image: ${url.slice(0, 50)}]` }
+          }),
+        }
+      }
       return {
         role: 'user',
         content: [{ type: 'text', text: msg.content }],

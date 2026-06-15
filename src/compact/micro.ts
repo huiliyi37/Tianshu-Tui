@@ -59,8 +59,19 @@ export function estimateOaiMessageTokens(msg: OaiMessage): number {
     content = (msg.content ?? '')
       + (msg.tool_calls ? JSON.stringify(msg.tool_calls) : '')
       + (msg.reasoning_content ?? '')
+  } else if (msg.role === 'user' && Array.isArray(msg.content)) {
+    // Multimodal user message (vision): count text parts + fixed cost per image.
+    let textLen = 0
+    let imageCount = 0
+    for (const part of msg.content) {
+      if (part.type === 'text') textLen += part.text.length
+      else imageCount++
+    }
+    // OpenAI uses ~765 tokens per image (low detail); base64 payload itself
+    // is not counted as text tokens — the provider encodes it separately.
+    return Math.ceil(textLen / 4) + imageCount * 765
   } else {
-    content = msg.content
+    content = msg.content as string
   }
 
   let asciiChars = 0

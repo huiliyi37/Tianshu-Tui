@@ -130,8 +130,8 @@ export function getSession(id: string): Promise<SessionRecord> {
   return apiGet<SessionRecord>(`/sessions/${id}`)
 }
 
-export function sendPrompt(id: string, prompt: string): Promise<SessionRecord> {
-  return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt })
+export function sendPrompt(id: string, prompt: string, images?: string[]): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt, ...(images?.length ? { images } : {}) })
 }
 
 /**

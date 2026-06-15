@@ -128,11 +128,27 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/prompt': withAuth((body, params) => {
-      const data = (body ?? {}) as { prompt?: string }
+      const data = (body ?? {}) as { prompt?: string; images?: unknown }
       if (!data.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
       }
-      const ok = manager.run(params!.id!, data.prompt)
+      // Validate images: must be an array of data:image/...;base64,... URLs.
+      let images: string[] | undefined
+      if (data.images !== undefined) {
+        if (!Array.isArray(data.images) || data.images.length === 0) {
+          return { status: 400, body: { error: '"images" must be a non-empty array' } }
+        }
+        if (data.images.length > 4) {
+          return { status: 400, body: { error: 'Max 4 images allowed' } }
+        }
+        for (const img of data.images) {
+          if (typeof img !== 'string' || !img.startsWith('data:image/')) {
+            return { status: 400, body: { error: 'Each image must be a data:image/... URL' } }
+          }
+        }
+        images = data.images as string[]
+      }
+      const ok = manager.run(params!.id!, data.prompt, images)
       if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),

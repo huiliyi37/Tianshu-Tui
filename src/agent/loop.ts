@@ -1292,7 +1292,7 @@ export class AgentLoop {
     this.latestFsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   }
 
-  async run(userInput: string, callbacks: AgentCallbacks): Promise<void> {
+  async run(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
     // Re-entry guard: prevent concurrent agent.run() calls.
     // React strict mode or rapid re-submits could trigger handleSubmit
     // while a previous run is still in-flight, corrupting SessionContext.
@@ -1307,7 +1307,7 @@ export class AgentLoop {
     this._pendingAbort = false
     this.abortController = new AbortController()
     try {
-      await this._runInner(userInput, callbacks)
+      await this._runInner(userInput, callbacks, images)
     } finally {
       this._running = false
     }
@@ -1373,7 +1373,7 @@ export class AgentLoop {
    * Returns the heartbeat (for cleanup) and the wrapped callbacks (which
    * the caller must use for the rest of the run).
    */
-  async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
+  async initializeRun(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
     await this.warmupMemories()
     // The controller is created eagerly in run() before any await, so an abort
     // fired during warmup is honored (not discarded). Only create one here if a
@@ -1483,7 +1483,7 @@ export class AgentLoop {
       }
     }
 
-    this.session.addUserMessage(userInput)
+    this.session.addUserMessage(userInput, images)
     const turnMode = classifyTurnMode(userInput, this.taskContract)
     const actionable = turnMode !== 'chat'
     this.config.promptEngine.setActionableTurn(actionable)
@@ -1890,8 +1890,8 @@ export class AgentLoop {
     return this.compactBoundaryCoordinator.runCompaction(turn, snap)
   }
 
-  private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
-    await this.turnOrchestrator.execute(userInput, callbacks)
+  private async _runInner(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
+    await this.turnOrchestrator.execute(userInput, callbacks, images)
   }
 
 }

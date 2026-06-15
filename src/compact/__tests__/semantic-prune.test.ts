@@ -70,7 +70,7 @@ describe('semanticPruneLayer1', () => {
     assert.ok(result.prunedCount > 0)
     const oldGrep = result.messages[3]!
     assert.ok(oldGrep.role === 'tool')
-    assert.ok(oldGrep.content!.includes('outdated grep'))
+    assert.ok((oldGrep.content as string).includes('outdated grep'))
   })
 
   it('skips short tool results', () => {
@@ -115,7 +115,7 @@ describe('semanticPruneLayer1', () => {
     const result = semanticPruneLayer1(messages, 2)
     assert.equal(result.prunedCount, 0, 'different paths should NOT be deduped')
     const firstGrep = result.messages[3]!
-    assert.ok(!firstGrep.content!.includes('outdated grep'), `expected preserved, got: ${firstGrep.content!.slice(0, 80)}`)
+    assert.ok(!(firstGrep.content as string).includes('outdated grep'), `expected preserved, got: ${(firstGrep.content as string).slice(0, 80)}`)
   })
 
   it('dedups grep with same pattern AND same path', () => {
@@ -133,7 +133,7 @@ describe('semanticPruneLayer1', () => {
     const result = semanticPruneLayer1(messages, 2)
     assert.ok(result.prunedCount > 0, 'same pattern+path should be deduped')
     const oldGrep = result.messages[3]!
-    assert.ok(oldGrep.content!.includes('outdated grep'))
+    assert.ok((oldGrep.content as string).includes('outdated grep'))
   })
 
   it('does NOT dedup grep with same pattern but different glob', () => {

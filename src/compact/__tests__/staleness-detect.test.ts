@@ -126,7 +126,7 @@ describe('detectStaleness', () => {
     const result = detectStaleness(messages, 2)
     assert.equal(result.supersededCount, 0, 'non-overlapping ranges should NOT be superseded')
     const firstRead = result.messages[3]!
-    assert.ok(!firstRead.content!.includes('superseded'), `expected preserved, got: ${firstRead.content!.slice(0, 80)}`)
+    assert.ok(!(firstRead.content as string).includes('superseded'), `expected preserved, got: ${(firstRead.content as string).slice(0, 80)}`)
   })
 
   it('supersedes ranged read when later full read contains it', () => {
@@ -147,7 +147,7 @@ describe('detectStaleness', () => {
     const result = detectStaleness(messages, 2)
     assert.equal(result.supersededCount, 1, 'full read should contain ranged read')
     const firstRead = result.messages[3]!
-    assert.ok(firstRead.content!.includes('superseded'))
+    assert.ok((firstRead.content as string).includes('superseded'))
   })
 
   it('does NOT supersede full read when later ranged read is partial', () => {
@@ -186,7 +186,7 @@ describe('detectStaleness', () => {
     ]
     const result = detectStaleness(messages, 2)
     assert.equal(result.supersededCount, 1, 'larger range should contain smaller range')
-    assert.ok(result.messages[3]!.content!.includes('superseded'))
+    assert.ok((result.messages[3]!.content as string).includes('superseded'))
   })
 
   it('handles many file reads without excessive parse overhead', () => {

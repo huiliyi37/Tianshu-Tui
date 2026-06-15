@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseCliArgs, runHeadless } from '../headless.js'
+import type { AgentCallbacks } from '../agent/loop-types.js'
 
 describe('headless CLI parsing', () => {
   it('recognizes -p prompt input', () => {
@@ -37,7 +38,7 @@ describe('runHeadless', () => {
       json: false,
       streamJson: false,
       createAgent: () => ({
-        run: async (_prompt, callbacks) => {
+        run: async (_prompt: string, callbacks: AgentCallbacks) => {
           callbacks.onTextDelta('Hello')
           callbacks.onTextDelta(' world')
           callbacks.onTurnComplete({ input_tokens: 10, output_tokens: 3 }, 1)
@@ -56,7 +57,7 @@ describe('runHeadless', () => {
       json: true,
       streamJson: false,
       createAgent: () => ({
-        run: async (_prompt, callbacks) => {
+        run: async (_prompt: string, callbacks: AgentCallbacks) => {
           callbacks.onTextDelta('Done')
           callbacks.onTurnComplete({ input_tokens: 12, output_tokens: 4, cache_read_input_tokens: 8 }, 1)
         },
@@ -78,7 +79,7 @@ describe('runHeadless', () => {
       json: true,
       streamJson: false,
       createAgent: () => ({
-        run: async (_prompt, callbacks) => {
+        run: async (_prompt: string, callbacks: AgentCallbacks) => {
           callbacks.onError(new Error('boom'))
         },
       }),

@@ -36,7 +36,9 @@ export function replayMessagesToLogEntries(messages: OaiMessage[]): ReplayResult
         continue
       }
       turnCount++
-      entries.push(createLogEntry({ type: 'user_message', content: msg.content, turnNumber: turnCount }))
+      const userText = typeof msg.content === 'string' ? msg.content
+        : msg.content.filter(p => p.type === 'text').map(p => p.text).join('')
+      entries.push(createLogEntry({ type: 'user_message', content: userText, turnNumber: turnCount }))
       continue
     }
 

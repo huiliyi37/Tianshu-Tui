@@ -15,10 +15,21 @@ export interface OaiSystemMessage {
   content: string
 }
 
-/** User message. */
+/** Vision content parts for multimodal user messages (OpenAI image_url format). */
+export interface OaiTextPart {
+  type: 'text'
+  text: string
+}
+export interface OaiImagePart {
+  type: 'image_url'
+  image_url: { url: string } // data:image/...;base64,... or https URL
+}
+export type OaiContentPart = OaiTextPart | OaiImagePart
+
+/** User message — content is plain text or multimodal parts (vision). */
 export interface OaiUserMessage {
   role: 'user'
-  content: string
+  content: string | OaiContentPart[]
 }
 
 /** Assistant message, optionally including tool calls and provider reasoning. */
@@ -55,6 +66,17 @@ export function isAssistantWithTools(msg: OaiMessage): msg is OaiAssistantMessag
 
 export function isUserMessage(msg: OaiMessage): msg is OaiUserMessage {
   return msg.role === 'user'
+}
+
+/**
+ * Extract plain text from any OaiMessage content (handles multimodal user messages).
+ * Use this instead of `msg.content` when you need a string regardless of content type.
+ */
+export function oaiMessageText(msg: OaiMessage): string {
+  if (msg.role === 'user' && Array.isArray(msg.content)) {
+    return msg.content.filter(p => p.type === 'text').map(p => p.text).join('')
+  }
+  return msg.content as string
 }
 
 /** Tool definition in OpenAI function calling format. */

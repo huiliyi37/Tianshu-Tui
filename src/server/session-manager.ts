@@ -81,7 +81,7 @@ export interface SessionRecord {
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
 export interface ManagedAgent {
-  run(prompt: string, callbacks: AgentCallbacks): Promise<void>
+  run(prompt: string, callbacks: AgentCallbacks, images?: string[]): Promise<void>
   abort(): void
   listArtifacts(): Artifact[]
   readArtifact(id: string): Promise<string | null>
@@ -363,7 +363,7 @@ export class RuntimeSessionManager {
   }
 
   /** Start an agent run on an idle session. Returns false if missing or busy. */
-  run(id: string, prompt: string): boolean {
+  run(id: string, prompt: string, images?: string[]): boolean {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
     const agent = this.ensureAgent(session)
@@ -377,13 +377,13 @@ export class RuntimeSessionManager {
     this.touch(session)
     // Echo the user's turn into the event log so the conversation persists it
     // (the agent loop only emits assistant/tool events). Must precede 'status'.
-    this.append(session, 'user', { text: prompt })
+    this.append(session, 'user', { text: prompt, ...(images?.length ? { imageCount: images.length } : {}) })
     this.append(session, 'status', { status: 'running' })
     this.persistRecord(session)
 
     const callbacks = this.buildCallbacks(session)
     void agent
-      .run(prompt, callbacks)
+      .run(prompt, callbacks, images)
       .then(() => {
         if (session.record.status === 'running') {
           session.record.status = 'completed'

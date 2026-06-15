@@ -27,7 +27,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function ThreadView(props: {
   session: SessionRecord
   view: EventViewState
-  onSend: (prompt: string) => void
+  onSend: (prompt: string, images?: string[]) => void
   onSteer: (text: string) => void
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
@@ -123,9 +123,9 @@ export function ThreadView(props: {
         value={input}
         onChange={setInput}
         busy={busy}
-        onSubmit={(text) => {
+        onSubmit={(text, images) => {
           if (busy) onSteer(text)
-          else onSend(text)
+          else onSend(text, images)
           setInput('')
         }}
         onAbort={onAbort}
@@ -152,7 +152,12 @@ function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolea
     return (
       <div className="msg user">
         <div className="msg-role">你</div>
-        <div className="msg-body"><Markdown source={block.text} /></div>
+        <div className="msg-body">
+          <Markdown source={block.text} />
+          {block.imageCount && block.imageCount > 0 ? (
+            <div className="msg-images">📷 {block.imageCount} 张图片</div>
+          ) : null}
+        </div>
       </div>
     )
   }

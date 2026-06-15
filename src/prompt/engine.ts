@@ -211,7 +211,7 @@ export class PromptEngine {
         result.push(msg)
       } else if (msg.role === 'user' && this.volatileBlock) {
         if (i === lastUserIdx) {
-          const userContent = msg.content
+          const userContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
 
           // Force rebuild for true duplicate messages — they need their own frozen entry.
           // A true duplicate: same content, same message count, but different message array

@@ -21,7 +21,10 @@ function contentOf(message: OaiMessage): string {
   if (message.role === 'assistant') {
     return `${message.content ?? ''}\n${message.reasoning_content ?? ''}`.trim()
   }
-  return message.content
+  if (message.role === 'user' && Array.isArray(message.content)) {
+    return message.content.filter(p => p.type === 'text').map(p => p.text).join('')
+  }
+  return message.content as string
 }
 
 function normalizeForDedup(text: string): string {

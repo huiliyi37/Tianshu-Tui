@@ -31,7 +31,7 @@ function extractUserIntentChain(messages: OaiMessage[]): string[] {
     .filter(m => m.role === 'user')
     .slice(-MAX_MESSAGES)
     .map(m => {
-      const text = m.content.trim().replace(/\n+/g, ' ')
+      const text = (typeof m.content === 'string' ? m.content : '').trim().replace(/\n+/g, ' ')
       return text.length > MAX_PER_MESSAGE
         ? text.slice(0, MAX_PER_MESSAGE) + '...'
         : text

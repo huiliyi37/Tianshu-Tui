@@ -226,9 +226,19 @@ function hasOaiToolCalls(msg: OaiMessage): msg is OaiAssistantMessage & { tool_c
 }
 
 function estimateOaiMessageTokens(msg: OaiMessage): number {
-  const content = msg.role === 'assistant'
-    ? (msg.content ?? '') + (msg.reasoning_content ?? '') + (msg.tool_calls ? JSON.stringify(msg.tool_calls) : '')
-    : msg.content
+  let content: string
+  if (msg.role === 'assistant') {
+    content = (msg.content ?? '') + (msg.reasoning_content ?? '') + (msg.tool_calls ? JSON.stringify(msg.tool_calls) : '')
+  } else if (msg.role === 'user' && Array.isArray(msg.content)) {
+    let textLen = 0, imageCount = 0
+    for (const part of msg.content) {
+      if (part.type === 'text') textLen += part.text.length
+      else imageCount++
+    }
+    return Math.ceil(textLen / 4) + imageCount * 765
+  } else {
+    content = msg.content as string
+  }
   let ascii = 0, cjk = 0
   for (const ch of content) {
     const code = ch.codePointAt(0) ?? 0

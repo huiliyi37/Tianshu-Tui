@@ -60,7 +60,7 @@ export function useCreateSession() {
 export function useSendPrompt() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, prompt }: { id: string; prompt: string }) => sendPrompt(id, prompt),
+    mutationFn: ({ id, prompt, images }: { id: string; prompt: string; images?: string[] }) => sendPrompt(id, prompt, images),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

@@ -94,7 +94,7 @@ export interface CacheTurnEndParams {
 
 export interface TurnOrchestratorDeps {
   // === Lifecycle ===
-  initializeRun: (userInput: string, callbacks: AgentCallbacks) => Promise<{
+  initializeRun: (userInput: string, callbacks: AgentCallbacks, images?: string[]) => Promise<{
     heartbeat: TurnHeartbeat
     wrappedCallbacks: AgentCallbacks
     actionable: boolean
@@ -246,8 +246,8 @@ export class TurnOrchestrator {
    * Previously AgentLoop._runInner — extracted verbatim with control flow
    * preserved. All AgentLoop field accesses routed through deps.
    */
-  async execute(userInput: string, callbacks: AgentCallbacks): Promise<void> {
-    const { heartbeat, wrappedCallbacks, actionable, turnMode } = await this.deps.initializeRun(userInput, callbacks)
+  async execute(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
+    const { heartbeat, wrappedCallbacks, actionable, turnMode } = await this.deps.initializeRun(userInput, callbacks, images)
     callbacks = wrappedCallbacks
 
     let checkpointCreatedThisTurn = false

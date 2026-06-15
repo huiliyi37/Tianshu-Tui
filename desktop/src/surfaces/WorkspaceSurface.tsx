@@ -24,9 +24,9 @@ export function WorkspaceSurface() {
   // Desktop notifications now fire globally for ANY session (Q2) via
   // useGlobalNotifications mounted in App — no per-active-session effects here.
 
-  const handleSend = useCallback((prompt: string) => {
+  const handleSend = useCallback((prompt: string, images?: string[]) => {
     if (!activeId) return
-    sendPrompt.mutate({ id: activeId, prompt })
+    sendPrompt.mutate({ id: activeId, prompt, images })
   }, [activeId, sendPrompt])
 
   // T3 — queue mid-run guidance. If the run already finished between render and

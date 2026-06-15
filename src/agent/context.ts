@@ -1,5 +1,5 @@
 import type { ContentBlock, Usage } from '../api/types.js'
-import type { OaiMessage, OaiToolCall } from '../api/oai-types.js'
+import type { OaiMessage, OaiToolCall, OaiContentPart } from '../api/oai-types.js'
 import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
@@ -87,8 +87,18 @@ export class SessionContext {
     this.onMutation = fn
   }
 
-  addUserMessage(content: string): void {
-    const msg: OaiMessage = { role: 'user', content: sanitizeForJsonTransport(content) }
+  addUserMessage(content: string, images?: string[]): void {
+    let msg: OaiMessage
+    if (images && images.length > 0) {
+      // Multimodal: construct OpenAI vision content parts (text + image_url).
+      const parts: OaiContentPart[] = [
+        { type: 'text', text: sanitizeForJsonTransport(content) },
+        ...images.map(url => ({ type: 'image_url' as const, image_url: { url } })),
+      ]
+      msg = { role: 'user', content: parts }
+    } else {
+      msg = { role: 'user', content: sanitizeForJsonTransport(content) }
+    }
     this.state.oaiMessages.push(msg)
     this.state.estimatedTokens += estimateOaiMessageTokens(msg)
     this.state.turnCount++

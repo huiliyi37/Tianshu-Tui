@@ -89,8 +89,8 @@ function fakeWorkerClient(capture: { request?: OaiChatRequest }): StreamClient {
       capture.request = request
       const lastUser = [...request.messages].reverse().find(m => m.role === 'user')
       const text = JSON.stringify(passedResult('second-worker'))
-      assert.match(lastUser?.content ?? '', /天权的经验/, 'second worker prompt should include domain knowledge block')
-      assert.match(lastUser?.content ?? '', /boundary sentinel missing/, 'second worker prompt should include lesson from prior worker')
+      assert.match((lastUser?.content as string) ?? '', /天权的经验/, 'second worker prompt should include domain knowledge block')
+      assert.match((lastUser?.content as string) ?? '', /boundary sentinel missing/, 'second worker prompt should include lesson from prior worker')
       callbacks.onTextDelta(text)
       callbacks.onContentBlock({ type: 'text', text })
       callbacks.onStopReason('end_turn', { input_tokens: 10, output_tokens: 5 })
