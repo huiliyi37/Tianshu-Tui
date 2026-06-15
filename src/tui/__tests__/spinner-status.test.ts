@@ -21,25 +21,24 @@ describe('formatSpinnerStatus', () => {
     assert.equal(formatSpinnerStatus({ tick: 0, phase: 'idle', elapsedMs: 0 }, theme), null)
   })
 
-  it('thinking shows braille frame + verb + elapsed + esc hint', () => {
+  it('thinking shows braille frame + verb + elapsed', () => {
     const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 12_000 }, theme)
     assert.ok(line)
     const plain = stripAnsi(line!)
     const useAscii = chalk.level < 3
     const expectedFrame = useAscii ? '-' : '◒'
     assert.ok(plain.includes(expectedFrame), 'spinner frame matches tick')
-    assert.ok(plain.includes('凝思…'))
+    assert.ok(plain.includes('思考'))
     assert.ok(plain.includes('12s'))
-    assert.ok(plain.includes('esc to interrupt'))
   })
 
   it('verb rotates with phase', () => {
     const streaming = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'streaming', elapsedMs: 0 }, theme)!)
     const analyzing = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'analyzing', elapsedMs: 0 }, theme)!)
     const waiting = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'waiting', elapsedMs: 0 }, theme)!)
-    assert.ok(streaming.includes('书写…'))
-    assert.ok(analyzing.includes('运作…'))
-    assert.ok(waiting.includes('候待…'))
+    assert.ok(streaming.includes('书写'))
+    assert.ok(analyzing.includes('运作'))
+    assert.ok(waiting.includes('待命'))
   })
 
   it('spinner frame advances with tick', () => {
@@ -77,7 +76,7 @@ describe('formatElapsedHuman / formatTokenCount', () => {
 })
 
 describe('formatTurnWorkSummary', () => {
-  it('renders ◆ Worked for … · in/out tokens', () => {
+  it('renders ◆ elapsed · in→out tokens', () => {
     const line = stripAnsi(formatTurnWorkSummary({
       elapsedMs: 66_000,
       inputTokens: 12_300,
@@ -85,8 +84,8 @@ describe('formatTurnWorkSummary', () => {
     }, theme))
     const useAscii = chalk.level < 3
     const expectedGlyph = useAscii ? 'Y' : '◆'
-    assert.ok(line.includes(`${expectedGlyph} Worked for 1m 6s`))
-    assert.ok(line.includes('12.3k in / 890 out'))
+    assert.ok(line.includes(`${expectedGlyph} 1m 6s`))
+    assert.ok(line.includes('12.3k→890'))
   })
 })
 
@@ -94,17 +93,17 @@ describe('phaseIndicator', () => {
   it('maps each phase to glyph + label', () => {
     const useAscii = chalk.level < 3
     if (useAscii) {
-      assert.deepEqual(phaseIndicator('thinking'), { glyph: '~', label: '水 · 凝思' })
-      assert.deepEqual(phaseIndicator('streaming'), { glyph: '*', label: '火 · 书写' })
-      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '>', label: '风 · 运作' })
-      assert.deepEqual(phaseIndicator('waiting'), { glyph: '^', label: '山 · 候待' })
+      assert.deepEqual(phaseIndicator('thinking'), { glyph: '~', label: '思考' })
+      assert.deepEqual(phaseIndicator('streaming'), { glyph: '*', label: '书写' })
+      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '>', label: '运作' })
+      assert.deepEqual(phaseIndicator('waiting'), { glyph: '^', label: '待命' })
       assert.deepEqual(phaseIndicator('idle'), { glyph: '.', label: '空闲' })
     } else {
-      assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '水 · 凝思' })
-      assert.deepEqual(phaseIndicator('streaming'), { glyph: '◆', label: '火 · 书写' })
-      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '◈', label: '风 · 运作' })
-      assert.deepEqual(phaseIndicator('waiting'), { glyph: '◇', label: '山 · 候待' })
-      assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: '候待' })
+      assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '思考' })
+      assert.deepEqual(phaseIndicator('streaming'), { glyph: '◆', label: '书写' })
+      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '◈', label: '运作' })
+      assert.deepEqual(phaseIndicator('waiting'), { glyph: '◇', label: '待命' })
+      assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: '空闲' })
     }
   })
 })

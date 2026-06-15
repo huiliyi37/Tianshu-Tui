@@ -4,7 +4,7 @@
  * 字形设计（对标 Claude Code 的克制单色风格，不花哨）：用同一「菱形家族」
  * ◇/◆/◈/◌ 表达「一个系统的不同状态」，而非 5 个风格不一的装饰符号
  * （旧版 ◐✦⚙▲❧ 混了圆/星/齿轮/三角/花饰，视觉吵）。五行标签保留承载叙事。
- * - 水·凝思 (thinking)、火·书写 (streaming)、风·运作 (analyzing)、山·候待 (waiting/idle)。
+ * - 思考 (thinking)、书写 (streaming)、运作 (analyzing)、待命 (waiting/idle)。
  * - 各状态有定制动画帧，但收敛到菱形/盈缺一族。
  * - 回合完成/收束态用实心菱 ◆（沉淀/落定），取代旧花饰 ❧。
  * - 提供 ASCII fallback 兼容。
@@ -18,10 +18,10 @@ import { circleSpinnerFrame } from '../braille-spinner.js'
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
 const PHASE_LABELS: Record<Exclude<SpinnerPhase, 'idle'>, string> = {
-  thinking: '水 · 凝思',
-  streaming: '火 · 书写',
-  analyzing: '风 · 运作',
-  waiting: '山 · 候待',
+  thinking: '思考',
+  streaming: '书写',
+  analyzing: '运作',
+  waiting: '待命',
 }
 
 function getSpinnerFrame(phase: SpinnerPhase, tick: number, useAscii: boolean): string {
@@ -45,25 +45,25 @@ function getSpinnerFrame(phase: SpinnerPhase, tick: number, useAscii: boolean): 
 }
 
 /** GlanceBar 用的 phase glyph + 标签 — 菱形家族运行态（克制、对标 Claude Code）
- *  ◐ 水·凝思  ◆ 火·书写  ◈ 风·运作  ◇ 山·候待  · 空闲
+ *  ◐ 思考  ◆ 书写  ◈ 运作  ◇ 待命  · 空闲
  *  五行标签保留承载叙事；字形收敛到盈缺/菱形一族，不再混星/齿轮/三角/花饰。 */
 export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: string } {
   const useAscii = chalk.level < 3
   if (useAscii) {
     switch (phase) {
-      case 'thinking': return { glyph: '~', label: '水 · 凝思' }
-      case 'streaming': return { glyph: '*', label: '火 · 书写' }
-      case 'analyzing': return { glyph: '>', label: '风 · 运作' }
-      case 'waiting': return { glyph: '^', label: '山 · 候待' }
+      case 'thinking': return { glyph: '~', label: '思考' }
+      case 'streaming': return { glyph: '*', label: '书写' }
+      case 'analyzing': return { glyph: '>', label: '运作' }
+      case 'waiting': return { glyph: '^', label: '待命' }
       case 'idle': return { glyph: '.', label: '空闲' }
     }
   } else {
     switch (phase) {
-      case 'thinking': return { glyph: '◐', label: '水 · 凝思' }
-      case 'streaming': return { glyph: '◆', label: '火 · 书写' }
-      case 'analyzing': return { glyph: '◈', label: '风 · 运作' }
-      case 'waiting': return { glyph: '◇', label: '山 · 候待' }
-      case 'idle': return { glyph: '·', label: '候待' }
+      case 'thinking': return { glyph: '◐', label: '思考' }
+      case 'streaming': return { glyph: '◆', label: '书写' }
+      case 'analyzing': return { glyph: '◈', label: '运作' }
+      case 'waiting': return { glyph: '◇', label: '待命' }
+      case 'idle': return { glyph: '·', label: '空闲' }
     }
   }
 }
@@ -86,7 +86,7 @@ export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme
   const useAscii = chalk.level < 3
   const frame = getSpinnerFrame(input.phase, input.tick, useAscii)
   const phaseLabel = PHASE_LABELS[input.phase]
-  const text = `${frame} ${phaseLabel}… (${formatElapsedHuman(input.elapsedMs)} · esc to interrupt)`
+  const text = `${frame} ${phaseLabel} ${formatElapsedHuman(input.elapsedMs)}`
   return color(text, input.stalled ? theme.warning : theme.muted)
 }
 
@@ -104,6 +104,6 @@ export function formatTurnWorkSummary(input: {
   const useAscii = chalk.level < 3
   const glyph = useAscii ? 'Y' : '◆'
   const elapsed = formatElapsedHuman(input.elapsedMs)
-  const tokens = `${formatTokenCount(input.inputTokens)} in / ${formatTokenCount(input.outputTokens)} out`
-  return `${color(glyph, theme.primary)} ${color(`Worked for ${elapsed}`, theme.primary)} ${color(`· ${tokens}`, theme.muted)}`
+  const tokens = `${formatTokenCount(input.inputTokens)}→${formatTokenCount(input.outputTokens)}`
+  return `${color(glyph, theme.primary)} ${color(`${elapsed}`, theme.primary)} ${color(`· ${tokens}`, theme.muted)}`
 }

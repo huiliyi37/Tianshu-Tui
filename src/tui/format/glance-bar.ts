@@ -88,7 +88,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   let zone2Label = ''
   if (input.phaseGlyph) {
     zone2Glyph = color(input.phaseGlyph, theme.primary)
-    zone2Label = color(input.phaseLabel || '候待', theme.muted)
+    zone2Label = color(input.phaseLabel || '待命', theme.muted)
   }
   const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
 
