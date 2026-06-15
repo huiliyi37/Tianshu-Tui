@@ -161,6 +161,25 @@ export interface TuiMetrics {
 /** 指标提供者：返回 null 表示暂无（回退 TUI 内部估算）。 */
 export type TuiMetricsProvider = () => TuiMetrics | null
 
+/**
+ * 单个工具流式输出累加器的字节上限。超限时保留尾部（live 卡片只展示末尾），
+ * 防止超大输出工具（如 cat 100MB 文件逐 chunk 上行）撑爆内存。终态结果
+ * 提交到 scrollback 时用完整 result 字符串，不受此 cap 影响。
+ */
+export const TOOL_ACCUMULATOR_MAX_BYTES = 64 * 1024
+
+/**
+ * 截断工具累加器到字节上限，保留尾部并标注省略前缀。
+ * 字节而非字符计数——内存压力来自字节数而非逻辑字符数。
+ * 导出供测试直接验证（TuiApp 全量构造需 TTY harness，纯函数单测更精确）。
+ */
+export function capToolAccumulator(text: string, maxBytes: number): string {
+  if (text.length <= maxBytes) return text // JS string length ≤ byte count for BMP, 绝大多数场景已足够
+  const tail = text.slice(-maxBytes)
+  const nl = tail.indexOf('\n')
+  return `… [truncated ${text.length - maxBytes} chars]\n${nl >= 0 ? tail.slice(nl + 1) : tail}`
+}
+
 // ── TuiApp ─────────────────────────────────────────────────────
 
 export class TuiApp {
@@ -1460,7 +1479,7 @@ export class TuiApp {
       }
       // Accumulate for live tool card display — show last lines in live region
       const toolAcc = this.toolAccumulator.get(id) ?? ''
-      this.toolAccumulator.set(id, toolAcc + result)
+      this.toolAccumulator.set(id, capToolAccumulator(toolAcc + result, TOOL_ACCUMULATOR_MAX_BYTES))
       this.markActivity()
       // 经 WriteBatcher 合并：长输出工具（bash/test）逐 chunk 上行，旧实现每 chunk
       // 直接 renderLive() 全区域重绘。与正文/思考流同口径合并到 microtask。
@@ -1672,9 +1691,11 @@ export class TuiApp {
     this.agentBusy = false
     this.setPhase('idle')
     this.state.isStreaming = false
-    // 委派途中 provider 报错走 onError（非 onAbort）：与 abort 一样需回收舰队
-    // 读模型与运行态 TeamPanel，否则 records 残留到下一轮、live 区显示过期 worker。
-    this.resetDelegationViz()
+    this.state.isThinking = false
+    // 与 abort 同口径回收 run 本地状态：provider 在工具/委派回合中报错走 onError，
+    // 此时 pendingTools/toolAccumulator 可能持有半成品数据。只清 fleet 而漏清这两者，
+    // 下一轮会读到上轮孤儿条目（live 区显示已死工具卡片、累加器跨 run 污染）。
+    this.resetRunLocalState()
     this.commitAbove(() => {
       this.commit.write({
         text: `Error: ${error.message}`,
@@ -1684,12 +1705,20 @@ export class TuiApp {
   }
 
   /**
-   * 回收委派可视化的 run 本地状态（舰队读模型 + 运行态 TeamPanel）。
-   * 必须在 abort/error 两条收尾路径都调用：abort 会先 `_runGen++`，使委派工具的
-   * 终态 onToolResult（clearGroup 的唯一触发点）被 bridge 的世代守卫丢弃，
-   * 否则 fleet.records 会随每次中断单调泄露。
+   * 统一的 run 本地状态回收：abort 与 error 两条收尾路径共用。
+   *
+   * 清四项随 run 存亡的本地状态：pendingTools（进行中工具元数据）、
+   * toolAccumulator（流式工具输出累加）、fleet（舰队读模型）、liveTeamModel
+   * （运行态 TeamPanel）。
+   *
+   * 为什么 handleError 必须与 handleAbort 同口径：provider 在委派/工具回合中
+   * 报错走 onError（非 onAbort），此时 pendingTools/toolAccumulator 可能持有
+   * 进行中工具的半成品数据。若只回收 fleet 而漏清这两个 Map，下一轮 run 会读到
+   * 上一轮的孤儿条目（live 区显示已死的工具卡片、toolAccumulator 累加跨 run 污染）。
    */
-  private resetDelegationViz(): void {
+  private resetRunLocalState(): void {
+    this.pendingTools.clear()
+    this.toolAccumulator.clear()
     this.fleet.clear()
     this.liveTeamModel = null
   }
@@ -1718,11 +1747,9 @@ export class TuiApp {
     this.streamRenderer.reset()
     this.blockWriter.discard()
     this.assistantHeaderDone = false
-    this.pendingTools.clear()
-    this.toolAccumulator.clear()
-    // 舰队读模型 + 运行态 TeamPanel 与 pendingTools 同寿命：中断后委派工具不再到
-    // 终态（clearGroup 永不触发），必须在此显式回收，否则 records 单调泄露。
-    this.resetDelegationViz()
+    // 统一回收 run 本地状态（pendingTools/toolAccumulator/fleet/liveTeamModel），
+    // 与 handleError 同口径，防止中断后委派工具不到终态导致 records 单调泄露。
+    this.resetRunLocalState()
     this.agentBusy = false
     this.state.isStreaming = false
     this.state.isThinking = false

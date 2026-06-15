@@ -14,6 +14,10 @@
 
 import type { WriteStream } from 'node:tty'
 import { ANSI } from './ansi.js'
+import { createRingBuffer, type RingBuffer } from '../ring-buffer.js'
+
+/** Scrollback buffer 默认行数上限（长会话防内存无限增长）。 */
+const DEFAULT_SCROLLBACK_MAX_LINES = 1000
 
 export interface CommittedEntry {
   /** 原始文本内容（不含 ANSI 序列） */
@@ -28,22 +32,30 @@ export interface CommitEngineOptions {
   stdout: WriteStream
   /** 是否在每次 write 后立即 drain */
   flush?: boolean
+  /** Scrollback buffer 行数上限（超出后丢弃最旧条目）。默认 1000。 */
+  scrollbackMaxLines?: number
 }
 
 export class CommitEngine {
   private stdout: WriteStream
   private flush: boolean
-  /** Scrollback buffer: 累积所有已提交文本，供 pager overlay 读取。 */
-  private buffer: string[] = []
+  /**
+   * Scrollback buffer: 累积所有已提交文本，供 pager overlay 读取。
+   * 使用 RingBuffer 封顶——长会话下无界 string[] 会持续增长，
+   * 超过上限后最旧条目被自动丢弃（保留最近的，匹配 pager 实际可见范围）。
+   */
+  private buffer: RingBuffer<string>
 
   constructor(options: CommitEngineOptions) {
     this.stdout = options.stdout
     this.flush = options.flush ?? false
+    const cap = options.scrollbackMaxLines ?? DEFAULT_SCROLLBACK_MAX_LINES
+    this.buffer = createRingBuffer<string>(Math.max(1, cap))
   }
 
-  /** 返回 scrollback 完整文本（各条目以换行符连接）。 */
+  /** 返回 scrollback 完整文本（各条目以换行符连接，封顶后只含最近 N 条）。 */
   getContent(): string {
-    return this.buffer.join('\n')
+    return this.buffer.items().join('\n')
   }
 
   /**
