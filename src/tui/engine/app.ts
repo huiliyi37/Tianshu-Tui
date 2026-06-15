@@ -23,6 +23,7 @@ import { StreamRenderer } from './stream-renderer.js'
 import { ToolGroupController } from './tool-group-controller.js'
 import { OverlayController } from './overlay-controller.js'
 import { ApprovalIntentController } from './approval-intent-controller.js'
+import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -207,24 +208,8 @@ export class TuiApp {
   private tick = 0
   /** 最近收到 token/输出的时间戳（stall 检测） */
   private lastActivityMs = 0
-  /** 模型上下文窗口（tokens），用于 context% */
-  private contextWindow?: number
-  /** git 分支（启动时读取一次） */
-  private gitBranch?: string
-  /** /domain 或 agent 自动匹配的会话星域（GlanceBar 常态显示） */
-  private sessionStarDomainName?: string
-  /** 子代理编排期间的临时 domain override（turn 结束清除） */
-  private delegationDomainOverride?: { glyph: string; name: string }
-  /** streaming 期间从 agent 同步星域（对齐 Ink 1Hz sync） */
-  private domainSyncProvider?: () => string | undefined
-  /** 累计 usage（cost 估算） */
-  private totalUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }
-  /** 最近一轮的 cache 命中率（0-1） */
-  private lastCacheHitRate?: number
-  /** 最近一轮的上下文占比（0-1） */
-  private lastContextRatio?: number
-  /** 真实指标提供者（main-ansi 闭包读 ctx.session）；无则回退内部估算 */
-  private metricsProvider?: TuiMetricsProvider
+  /** W-B6: metrics + glance + domain state manager */
+  private metricsGlanceController = new MetricsGlanceController()
   /** todo 列表访问器（main-ansi 读 TodoStore 单例） */
   private todosProvider?: () => TodoItem[]
   /** Block stream writer: chunks streaming text into display-sized blocks */
@@ -293,8 +278,8 @@ export class TuiApp {
     this.stdout = options.stdout
     this.columns = options.cols
     this.rows = options.rows
-    this.contextWindow = options.contextWindow
-    this.gitBranch = options.gitBranch
+    this.metricsGlanceController.contextWindow = options.contextWindow
+    this.metricsGlanceController.gitBranch = options.gitBranch
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
@@ -1102,7 +1087,7 @@ export class TuiApp {
     if (active && !this.ticker) {
       this.ticker = setInterval(() => {
         this.tick++
-        if (this.domainSyncProvider && this.tick % 8 === 0) {
+        if (this.metricsGlanceController.domainSyncProvider && this.tick % 8 === 0) {
           this.syncSessionStarDomainFromAgent()
         }
         this.renderLive()
@@ -1198,7 +1183,7 @@ export class TuiApp {
   /** 设置模型信息（/model 切换后刷新 GlanceBar 显示） */
   setModelInfo(modelName: string, contextWindow?: number): void {
     this.state.modelName = modelName
-    if (contextWindow !== undefined) this.contextWindow = contextWindow
+    if (contextWindow !== undefined) this.metricsGlanceController.contextWindow = contextWindow
     this.renderLive()
   }
 
@@ -1212,7 +1197,7 @@ export class TuiApp {
    * 设置后 GlanceBar 优先用真实数据；未设置则回退内部估算（保持可独立运行/可测）。
    */
   setMetricsProvider(provider: TuiMetricsProvider): void {
-    this.metricsProvider = provider
+    this.metricsGlanceController.metricsProvider = provider
   }
 
   /** 设置当前审批模式（供 worker pills 显示 badge） */
@@ -1225,8 +1210,8 @@ export class TuiApp {
    * undefined 表示 auto/off/未设定，GlanceBar 回退默认「天枢」。
    */
   setSessionStarDomain(domainName: string | undefined): void {
-    this.sessionStarDomainName = domainName
-    if (!this.delegationDomainOverride) {
+    this.metricsGlanceController.sessionStarDomainName = domainName
+    if (!this.metricsGlanceController.delegationDomainOverride) {
       this.applyGlanceDomainDisplay()
     }
     this.renderLive()
@@ -1234,16 +1219,16 @@ export class TuiApp {
 
   /** 注册 agent 星域同步（streaming ticker ~1Hz 读取 getSessionDomain） */
   setDomainSyncProvider(provider: () => string | undefined): void {
-    this.domainSyncProvider = provider
+    this.metricsGlanceController.domainSyncProvider = provider
   }
 
   private applyGlanceDomainDisplay(): void {
-    if (this.delegationDomainOverride) {
-      this.state.domainGlyph = this.delegationDomainOverride.glyph
-      this.state.domainName = this.delegationDomainOverride.name
+    if (this.metricsGlanceController.delegationDomainOverride) {
+      this.state.domainGlyph = this.metricsGlanceController.delegationDomainOverride.glyph
+      this.state.domainName = this.metricsGlanceController.delegationDomainOverride.name
       return
     }
-    const display = resolveStarDomainDisplay(this.sessionStarDomainName)
+    const display = resolveStarDomainDisplay(this.metricsGlanceController.sessionStarDomainName)
     if (display) {
       this.state.domainGlyph = display.glyph
       this.state.domainName = display.name
@@ -1254,11 +1239,11 @@ export class TuiApp {
   }
 
   private syncSessionStarDomainFromAgent(): void {
-    if (!this.domainSyncProvider) return
-    const next = this.domainSyncProvider()
-    if (next === this.sessionStarDomainName) return
-    this.sessionStarDomainName = next
-    if (!this.delegationDomainOverride) {
+    if (!this.metricsGlanceController.domainSyncProvider) return
+    const next = this.metricsGlanceController.domainSyncProvider()
+    if (next === this.metricsGlanceController.sessionStarDomainName) return
+    this.metricsGlanceController.sessionStarDomainName = next
+    if (!this.metricsGlanceController.delegationDomainOverride) {
       this.applyGlanceDomainDisplay()
     }
   }
@@ -1269,7 +1254,7 @@ export class TuiApp {
    * 不再写死 cost: 0 或取 models[0]（非当前模型）。
    */
   getMetrics(): TuiMetrics | null {
-    return this.metricsProvider?.() ?? null
+    return this.metricsGlanceController.metricsProvider?.() ?? null
   }
 
   /**
@@ -1331,7 +1316,7 @@ export class TuiApp {
     if (isDelegationTool(name)) {
       const badge = domainBadge(name)
       if (badge) {
-        this.delegationDomainOverride = { glyph: badge.glyph, name: badge.name }
+        this.metricsGlanceController.delegationDomainOverride = { glyph: badge.glyph, name: badge.name }
         this.state.domainGlyph = badge.glyph
         this.state.domainName = badge.name
       }
@@ -1565,7 +1550,7 @@ export class TuiApp {
       this.setPhase('idle')
       this.state.thinkStartMs = 0
       // 清除委派 override，恢复 /domain 设定的会话星域
-      this.delegationDomainOverride = undefined
+      this.metricsGlanceController.delegationDomainOverride = undefined
       this.applyGlanceDomainDisplay()
 
       // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
@@ -1609,20 +1594,20 @@ export class TuiApp {
     const output = usage.output_tokens ?? 0
     const cacheRead = usage.cache_read_input_tokens ?? 0
     const cacheCreate = usage.cache_creation_input_tokens ?? 0
-    this.totalUsage = { input, output, cacheRead, cacheCreate }
+    this.metricsGlanceController.totalUsage = { input, output, cacheRead, cacheCreate }
 
     if (input > 0) {
-      this.lastCacheHitRate = Math.min(1, cacheRead / input)
+      this.metricsGlanceController.lastCacheHitRate = Math.min(1, cacheRead / input)
     }
-    if (this.contextWindow && this.contextWindow > 0 && input > 0) {
-      this.lastContextRatio = Math.min(1, (input + output) / this.contextWindow)
+    if (this.metricsGlanceController.contextWindow && this.metricsGlanceController.contextWindow > 0 && input > 0) {
+      this.metricsGlanceController.lastContextRatio = Math.min(1, (input + output) / this.metricsGlanceController.contextWindow)
     }
   }
 
   /** 估算累计费用（对齐 app.tsx 的近似定价：normal $1/M、cache $0.1/M、out $4/M） */
   private estimateSessionCost(): number {
-    const normalInput = Math.max(0, this.totalUsage.input - this.totalUsage.cacheRead)
-    return (normalInput * 1 + this.totalUsage.cacheRead * 0.1 + this.totalUsage.output * 4) / 1_000_000
+    const normalInput = Math.max(0, this.metricsGlanceController.totalUsage.input - this.metricsGlanceController.totalUsage.cacheRead)
+    return (normalInput * 1 + this.metricsGlanceController.totalUsage.cacheRead * 0.1 + this.metricsGlanceController.totalUsage.output * 4) / 1_000_000
   }
 
   private handleError(error: Error): void {
@@ -1888,7 +1873,7 @@ export class TuiApp {
     // 4. GlanceBar（phase glyph / context% / cache / cost / git branch）
     // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
     const phaseInd = phaseIndicator(this.state.phase)
-    const metrics = this.metricsProvider?.() ?? null
+    const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
     let glanceCacheHitRate: number | undefined
     let glanceContextRatio: number | undefined
     let glanceCost: number
@@ -1901,15 +1886,15 @@ export class TuiApp {
       glanceEstimatedTokens = metrics.estimatedTokens
       glanceMaxTokens = metrics.maxTokens
     } else {
-      glanceCacheHitRate = this.lastCacheHitRate
-      glanceContextRatio = this.lastContextRatio
+      glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
+      glanceContextRatio = this.metricsGlanceController.lastContextRatio
       glanceCost = this.estimateSessionCost()
     }
     const glanceBar = formatGlanceBar({
       width: this.columns,
       domainGlyph: this.state.domainGlyph,
       domainName: this.state.domainName,
-      branch: this.gitBranch,
+      branch: this.metricsGlanceController.gitBranch,
       phaseGlyph: phaseInd.glyph,
       phaseLabel: phaseInd.label,
       modelName: this.state.modelName,
