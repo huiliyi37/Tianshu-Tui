@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApprovalMode, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
@@ -36,12 +36,34 @@ export function ThreadView(props: {
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
+  const msgRef = useRef<HTMLDivElement>(null)
+  const [scrolledUp, setScrolledUp] = useState(false)
   const busy = session.status === 'running'
   const autonomous = isAutonomous(session.approvalMode)
 
+  const isNearBottom = useCallback(() => {
+    const el = msgRef.current
+    if (!el) return true
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }, [])
+
+  // Auto-scroll only when user is near the bottom.
   useEffect(() => {
+    if (!scrolledUp && endRef.current) {
+      endRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [view.blocks.length, scrolledUp])
+
+  // Track scroll position: when user scrolls into the "near bottom" zone,
+  // clear the scrolled-up flag so auto-scroll resumes.
+  const onScroll = useCallback(() => {
+    setScrolledUp(!isNearBottom())
+  }, [isNearBottom])
+
+  const scrollToBottom = useCallback(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [view.blocks.length])
+    setScrolledUp(false)
+  }, [])
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
@@ -93,8 +115,16 @@ export function ThreadView(props: {
         </div>
       )}
 
-      <div className="messages">
-        {view.blocks.length === 0 && <div className="empty sm">发一条消息开始</div>}
+      <div className="messages" ref={msgRef} onScroll={onScroll}>
+        {view.blocks.length === 0 && (
+          <div className="empty sm">
+            <svg className="empty-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+            </svg>
+            <span>发一条消息开始</span>
+          </div>
+        )}
         {view.blocks.map((b, i) => (
           <Block
             key={b.key}
@@ -111,6 +141,14 @@ export function ThreadView(props: {
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
             <span className="thinking-label">{view.phase ? `思考中 · ${view.phase}` : '思考中…'}</span>
           </div>
+        )}
+        {scrolledUp && (
+          <button className="scroll-bottom-btn" onClick={scrollToBottom} aria-label="回到底部">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
         )}
         <div ref={endRef} />
       </div>
@@ -150,15 +188,12 @@ export function ThreadView(props: {
 function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolean }) {
   if (block.kind === 'user') {
     return (
-      <div className="msg user">
-        <div className="msg-role">你</div>
-        <div className="msg-body">
-          <Markdown source={block.text} />
-          {block.imageCount && block.imageCount > 0 ? (
-            <div className="msg-images">📷 {block.imageCount} 张图片</div>
-          ) : null}
-        </div>
-      </div>
+      <MsgBlock role="你">
+        <Markdown source={block.text} />
+        {block.imageCount && block.imageCount > 0 ? (
+          <div className="msg-images">📷 {block.imageCount} 张图片</div>
+        ) : null}
+      </MsgBlock>
     )
   }
   if (block.kind === 'tool' || block.kind === 'result') {
@@ -187,17 +222,16 @@ function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolea
   }
   if (block.kind === 'steer') {
     return (
-      <div className="msg steer">
-        <div className="msg-role">引导 · 已排队</div>
-        <div className="msg-body"><Markdown source={block.text} /></div>
-      </div>
+      <MsgBlock role="引导 · 已排队">
+        <Markdown source={block.text} />
+      </MsgBlock>
     )
   }
   if (block.kind === 'phase') {
-    return <div className="msg phase">{block.text}</div>
+    return <MsgBlock className="phase">{block.text}</MsgBlock>
   }
   if (block.kind === 'error') {
-    return <div className="msg error">{block.text}</div>
+    return <MsgBlock isError>{block.text}</MsgBlock>
   }
   if (block.kind === 'decision_shift' && block.shift) {
     const s = block.shift
@@ -218,9 +252,50 @@ function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolea
     )
   }
   return (
-    <div className="msg assistant">
-      <div className="msg-role">天枢</div>
-      <div className="msg-body"><Markdown source={block.text} /></div>
+    <MsgBlock role="天枢">
+      <Markdown source={block.text} />
+    </MsgBlock>
+  )
+}
+
+/** MsgBlock — message wrapper with a copy button that appears on hover. */
+function MsgBlock(props: {
+  role?: string
+  isError?: boolean
+  className?: string
+  children: React.ReactNode
+}) {
+  const { role, isError, className, children } = props
+  const [copied, setCopied] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const copy = useCallback(() => {
+    const text = ref.current?.textContent ?? ''
+    if (!text) return
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [])
+
+  const kind = className
+    ? ` ${className}`
+    : isError ? ' error' : role === '引导 · 已排队' ? ' steer' : role === '你' ? ' user' : ' assistant'
+
+  return (
+    <div className={`msg${kind}`}>
+      {role && <div className="msg-role">{role}</div>}
+      <div className="msg-body" ref={ref}>
+        <button
+          className="msg-copy-btn"
+          onClick={copy}
+          aria-label={copied ? '已复制' : '复制'}
+          title={copied ? '已复制' : '复制'}
+        >
+          {copied ? '✓' : '⎘'}
+        </button>
+        {children}
+      </div>
     </div>
   )
 }

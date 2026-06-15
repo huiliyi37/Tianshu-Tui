@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { filterCommands, type Command } from '../lib/commands'
 
+const SHORTCUTS: { keys: string; desc: string }[] = [
+  { keys: '⌘/Ctrl + K', desc: '打开/关闭命令面板' },
+  { keys: '⌘/Ctrl + 1-4', desc: '切换面板（工作台·自动化·需处理·设置）' },
+  { keys: 'Enter', desc: '发送消息（运行中则为引导）' },
+  { keys: 'Shift + Enter', desc: '换行' },
+  { keys: 'Esc × 2', desc: '清空输入 → 打开 Rewind' },
+]
+
 // Cmd+K command palette (Q4). Keyboard-first: type to filter, ↑/↓ to move,
 // Enter to run, Esc to close.
 export function CommandPalette(props: { commands: Command[]; onClose: () => void }) {
@@ -58,6 +66,15 @@ export function CommandPalette(props: { commands: Command[]; onClose: () => void
             >
               <span className="palette-label">{c.label}</span>
               {c.hint && <span className="palette-hint">{c.hint}</span>}
+            </div>
+          ))}
+        </div>
+        <div className="palette-shortcuts">
+          <div className="palette-shortcuts-title">快捷键</div>
+          {SHORTCUTS.map((s) => (
+            <div key={s.keys} className="palette-shortcut-row">
+              <kbd className="palette-kbd">{s.keys}</kbd>
+              <span className="palette-shortcut-desc">{s.desc}</span>
             </div>
           ))}
         </div>

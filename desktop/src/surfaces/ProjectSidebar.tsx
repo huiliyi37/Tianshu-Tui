@@ -19,15 +19,27 @@ export function ProjectSidebar() {
   const dispatch = useUiDispatch()
   const sessions = useSessions()
   const [known, setKnown] = useState<string[]>(() => loadKnownProjects())
+  const [filter, setFilter] = useState('')
 
   const projects = useMemo(
     () => deriveProjects(sessions.data ?? [], known),
     [sessions.data, known],
   )
 
-  const threads = (sessions.data ?? []).filter(
-    (s) => !ui.activeProject || s.cwd === ui.activeProject,
-  )
+  const threads = useMemo(() => {
+    let list = (sessions.data ?? []).filter(
+      (s) => !ui.activeProject || s.cwd === ui.activeProject,
+    )
+    const q = filter.trim().toLowerCase()
+    if (q) {
+      list = list.filter((s) =>
+        (s.title ?? '').toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q) ||
+        (s.currentPhase ?? '').toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [sessions.data, ui.activeProject, filter])
 
   const openFolder = async () => {
     let cwd = await pickFolder()
@@ -62,17 +74,31 @@ export function ProjectSidebar() {
         </button>
       </div>
 
+      {threads.length > 0 || filter ? (
+        <input
+          className="thread-filter"
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="搜索线程…"
+          aria-label="搜索线程"
+        />
+      ) : null}
+
       <div className="thread-head">
-        <span>线程</span>
+        <span>线程{filter ? ` · ${threads.length}` : ''}</span>
         <button className="btn sm" onClick={() => dispatch({ type: 'openNew', open: true })}>
           + 新线程
         </button>
       </div>
 
-      {threads.length === 0 && (
+      {!filter && threads.length === 0 && (
         <div className="empty sm">
           {ui.activeProject ? '该项目还没有线程' : '打开一个文件夹，或新建线程'}
         </div>
+      )}
+      {filter && threads.length === 0 && (
+        <div className="empty sm">没有匹配「{filter}」的线程</div>
       )}
       {threads.map((s) => (
         <div

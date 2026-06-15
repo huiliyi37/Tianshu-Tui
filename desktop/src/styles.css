@@ -160,6 +160,25 @@ body {
 .palette-item.active { background: var(--accent-soft); }
 .palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-hint { color: var(--muted); font-size: var(--text-xs); margin-left: var(--space-3); flex: none; }
+.palette-shortcuts {
+  border-top: 1px solid var(--border); padding: var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.palette-shortcuts-title {
+  font-size: var(--text-xs); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1);
+}
+.palette-shortcut-row {
+  display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm);
+}
+.palette-kbd {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  color: var(--text); min-width: 80px; justify-content: center;
+}
+.palette-shortcut-desc { color: var(--muted); }
 
 /* ── Project → Thread sidebar ──────────────────────────────────── */
 .project-sidebar {
@@ -175,6 +194,15 @@ body {
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 6px 8px; font-size: var(--text-base); font-family: inherit;
 }
+.thread-filter {
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 6px 10px; font-size: var(--text-base); font-family: inherit;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  outline: none; transition: border-color var(--dur) var(--ease);
+}
+.thread-filter::placeholder { color: var(--faint); }
+.thread-filter:focus { border-color: var(--accent); }
 .icon-btn {
   flex: none; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
   background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
@@ -402,9 +430,29 @@ body {
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
 }
 
-.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
+.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); position: relative; }
+.scroll-bottom-btn {
+  position: sticky; bottom: var(--space-3); align-self: center;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--border); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow-md); z-index: 5;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.scroll-bottom-btn:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
 .msg { white-space: pre-wrap; word-break: break-word; }
 .msg-role { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1); }
+.msg-body { position: relative; }
+.msg-copy-btn {
+  position: absolute; top: 0; right: 0;
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted); border: none; cursor: pointer;
+  border-radius: var(--radius-sm); font-size: var(--text-sm);
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease);
+}
+.msg-body:hover .msg-copy-btn { opacity: 1; }
+.msg-copy-btn:hover { color: var(--text); background: var(--panel-3); }
 .msg.user .msg-body {
   background: var(--accent-soft); border: 1px solid var(--border);
   padding: var(--space-3); border-radius: var(--radius-md);
@@ -609,6 +657,9 @@ body {
 .artifact-card .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
 .empty { color: var(--muted); padding: 24px; text-align: center; }
+.empty.sm { padding: var(--space-4); font-size: var(--text-sm); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.empty-icon { color: var(--faint); flex: none; }
+.banner { padding: 8px 14px; font-size: 13px; }
 .banner { padding: 8px 14px; font-size: 13px; }
 .banner.error { background: var(--error-soft); color: var(--error); }
 
