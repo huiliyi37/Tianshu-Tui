@@ -12,6 +12,7 @@ import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { isSystemReminder, wrapSystemReminder } from '../prompt/system-reminder.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
+import { TurnOrchestrator } from './turn-orchestrator.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -227,5 +228,99 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     shouldDelayCompact: (threshold, ctx) => self.cacheAdvisor.shouldDelayCompact(threshold, ctx?.estimatedTokens !== undefined && ctx?.contextWindow !== undefined ? { estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow } : undefined),
     getStalePreviewChars: () => self.cacheAdvisor.getStalePreviewChars(),
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
+  })
+}
+
+export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
+  return new TurnOrchestrator({
+    // === Lifecycle ===
+    initializeRun: (userInput, callbacks) => self.initializeRun(userInput, callbacks),
+    stopFsWatcher: () => { self.stopFsWatcher() },
+
+    // === Config ===
+    getMaxTurns: () => self.config.maxTurns,
+    getTurnLevelThinking: () => self.config.turnLevelThinking,
+    getPlanModeState: () => self.planModeState,
+    getStreamRules: () => self.config.streamRules,
+    getAgentReconnect: () => self.config.agentReconnect,
+    getCwd: () => self.cwd,
+    setClientThinking: (mode) => { self.config.client.setThinking?.(mode) },
+    flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
+    syncPlanModeToConfig: () => { self.syncPlanModeToConfig() },
+
+    // === Session ===
+    removeLastMessage: () => { self.session.removeLastMessage() },
+    addUserMessage: (content) => { self.session.addUserMessage(content) },
+    addAssistantBlocks: (blocks) => { self.session.addAssistantBlocks(blocks) },
+    addUsage: (usage) => { self.session.addUsage(usage) },
+    getEstimatedTokens: () => self.session.getEstimatedTokens(),
+    getMessages: () => self.session.getMessages(),
+    getTotalUsage: () => self.session.getTotalUsage(),
+    getTurnCount: () => self.session.getTurnCount(),
+    getCacheHistory: () => self.session.getCacheHistory(),
+
+    // === Sub-processes (thin wrappers) ===
+    runCompaction: (turn, snap) => self.runCompaction(turn, snap),
+    runPerception: (turn, estTokens, actionable, callbacks) => self.runPerception(turn, estTokens, actionable, callbacks),
+    runConvergenceCheck: (turn, phaseClass, assistantResponded, userMessageConsumed, callbacks) =>
+      self.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
+    runReplanCheck: () => { self.runReplanCheck() },
+    buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
+      self.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
+    prewarmRecentReads: () => self.prewarmRecentReads(),
+    runPostSession: (callbacks) => self.runPostSession(callbacks),
+    recordProviderOutcome: (ok) => { self.recordProviderOutcome(ok) },
+
+    // === Sub-controllers ===
+    streamTurn: (params) => self.turnStream!.streamTurn(params),
+    executeBatch: (params) => self.toolExecution.executeBatch(params),
+    completeTurn: (params) => self.turnCompletion.complete(params),
+    appendTurnResult: (turn) => { self.planTraceCoordinator.appendTurnResult(turn) },
+    onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },
+
+    // === Telemetry ===
+    writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
+    resetEvidence: () => { self.evidence.reset() },
+
+    // === Abort signal ===
+    getAbortSignal: () => self.abortController?.signal,
+
+    // === Resource sensor ===
+    getLatestResourceSnapshot: () => self.latestResourceSnapshot,
+
+    // === FsWatcher ===
+    getFsWatcherState: () => self.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false },
+
+    // === Per-run state ===
+    getStreamedText: () => self.streamedText,
+    setStreamedText: (v) => { self.streamedText = v },
+    getLastPrewarmAt: () => self.lastPrewarmAt,
+    setLastPrewarmAt: (v) => { self.lastPrewarmAt = v },
+    getGitChangeRate: () => self.gitChangeRate,
+    setGitChangeRate: (v) => { self.gitChangeRate = v },
+    setTurnBudget: (v) => { self.turnBudget = v },
+    getLatestFsWatcherState: () => self.latestFsWatcherState,
+    setLatestFsWatcherState: (v) => { self.latestFsWatcherState = v },
+    getConsecutiveNoToolTurns: () => self.consecutiveNoToolTurns,
+    setConsecutiveNoToolTurns: (v) => { self.consecutiveNoToolTurns = v },
+    getThinkingOnlyRetries: () => self.thinkingOnlyRetries,
+    setThinkingOnlyRetries: (v) => { self.thinkingOnlyRetries = v },
+    getLastThinkingContent: () => self.lastThinkingContent,
+    setLastThinkingContent: (v) => { self.lastThinkingContent = v },
+    getLastTurnTextFingerprint: () => self.lastTurnTextFingerprint,
+    setLastTurnTextFingerprint: (v) => { self.lastTurnTextFingerprint = v },
+    getLastTurnThinkingFingerprint: () => self.lastTurnThinkingFingerprint,
+    setLastTurnThinkingFingerprint: (v) => { self.lastTurnThinkingFingerprint = v },
+    getRecentTextFingerprints: () => self.recentTextFingerprints,
+    setTurnsSinceLastObjection: (v) => { self.turnsSinceLastObjection = v },
+    getTraceStore: () => self.traceStore,
+    setTraceStore: (v) => { self.traceStore = v },
+    getImportGraph: () => self.importGraph,
+    setImportGraph: (v) => { self.importGraph = v },
+    getLastConflictCheckCount: () => self.lastConflictCheckCount,
+    setLastConflictCheckCount: (v) => { self.lastConflictCheckCount = v },
+    getLatestRisk: () => self.latestRisk,
+    setLatestRisk: (v) => { self.latestRisk = v },
+    setThetaRequestsThisTurn: (v) => { self.thetaRequestsThisTurn = v },
   })
 }

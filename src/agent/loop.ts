@@ -125,9 +125,11 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, buildRuntimeSnapshot } from "./loop-factory.js";
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
+import type { TurnOrchestrator } from "./turn-orchestrator.js";
+import { wrapCallbacksWithHeartbeat } from "./turn-orchestrator.js";
 import { buildEffortContext, type EffortShadowRecord } from './p3-reward.js'
 import { resolveEffortDelta } from './effort-delta.js'
 
@@ -179,17 +181,17 @@ export class AgentLoop {
   private meridianDbForWarmup?: import('../repo/meridian-db.js').MeridianDb
   private memoriesWarmed = false
   streamedText = ''
-  private thinkingOnlyRetries = 0
-  private lastThinkingContent = ''
+  thinkingOnlyRetries = 0
+  lastThinkingContent = ''
   consecutiveNoToolTurns = 0
-  private lastTurnTextFingerprint = ''
-  private lastTurnThinkingFingerprint = ''
+  lastTurnTextFingerprint = ''
+  lastTurnThinkingFingerprint = ''
   lastPrewarmAt = 0
   private lastCacheDiagnostic: string | null = null
-  private latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
+  latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   /** Latest per-turn free-energy signals — consumed by coordinator EFE worker routing. */
   private latestPolicySignals?: { efe: EFEComponents; sensorium: Sensorium }
-  private planModeState: PlanModeState = 'off'
+  planModeState: PlanModeState = 'off'
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
@@ -197,8 +199,8 @@ export class AgentLoop {
   traceStore: TraceStore
   harness: TurnHarness
   routingMetrics = new RoutingMetricsCollector()
-  private importGraph: ImportGraph | null = null
-  private lastConflictCheckCount = 0
+  importGraph: ImportGraph | null = null
+  lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
   private sessionDomain: ActiveStarDomain | null | undefined
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
@@ -243,11 +245,12 @@ export class AgentLoop {
   private intent: TurnIntentController
   contextInjection: ContextInjectionController
   compaction: CompactionController
-  private turnStream: TurnStreamController | null = null
-  private turnCompletion: TurnCompletionController
-  private toolExecution: ToolExecutionController
-  private planTraceCoordinator: PlanTraceCoordinator
+  turnStream: TurnStreamController | null = null
+  turnCompletion: TurnCompletionController
+  toolExecution: ToolExecutionController
+  planTraceCoordinator: PlanTraceCoordinator
   private compactBoundaryCoordinator: CompactBoundaryCoordinator
+  private turnOrchestrator: TurnOrchestrator
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -278,17 +281,17 @@ export class AgentLoop {
   private readonly stanceTally = createStanceTally()
   private lastSeenEventId = 0
   gitChangeRate = 0
-  private telemetryWriter: TelemetryWriter
+  telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
   private taskContract?: TaskContract
   private latestCognitiveSnapshot?: CognitivePhaseSnapshot
   private persist: SessionPersist | null = null
   private resourceSensor: ResourceSensor
-  private latestResourceSnapshot: ResourceSensorSnapshot | null = null
+  latestResourceSnapshot: ResourceSensorSnapshot | null = null
   latestReliabilityDecision: ReliabilityDecision | null = null
-  private fsWatcher: ReturnType<typeof createFsWatcher> | null = null
-  private latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
+  fsWatcher: ReturnType<typeof createFsWatcher> | null = null
+  latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
   lastCompactTurn: number | null = null
   private _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
@@ -313,11 +316,11 @@ export class AgentLoop {
   /** F-fix: tool calls since the last discipline re-anchor advisory. */
   private toolCallsSinceReanchor = 0
   /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
-  private turnsSinceLastObjection = 0
+  turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
   private initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
-  private recentTextFingerprints: string[] = []
+  recentTextFingerprints: string[] = []
   /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
   private _currentEffortShadow: EffortShadowRecord | null = null
 
@@ -452,6 +455,7 @@ export class AgentLoop {
     this.toolExecution = this.createToolExecutionController()
     this.planTraceCoordinator = createPlanTraceCoordinator(this)
     this.compactBoundaryCoordinator = createCompactBoundaryCoordinator(this)
+    this.turnOrchestrator = createTurnOrchestrator(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -689,7 +693,7 @@ export class AgentLoop {
    *  no-tool counter + most recent step result, detects deviation, applies a
    *  course correction, and refreshes the replan/trace prompt surfaces. No-op
    *  until the trace has steps (i.e. the agent has produced a todo plan). */
-  private runReplanCheck(): void {
+  runReplanCheck(): void {
     this.planTraceCoordinator.runReplanCheck()
   }
 
@@ -875,7 +879,7 @@ export class AgentLoop {
     }
   }
 
-  private async prewarmRecentReads(): Promise<void> {
+  async prewarmRecentReads(): Promise<void> {
     const paths = this.recentToolHistory
       .filter(entry => entry.tool === 'read_file' && entry.status === 'success')
       .map(entry => entry.target)
@@ -930,7 +934,7 @@ export class AgentLoop {
   }
 
   /** Sync plan-mode state into config so tool-pipeline reads it */
-  private syncPlanModeToConfig(): void {
+  syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState
     this.config.promptEngine.setPlanModeState(this.planModeState)
   }
@@ -1173,7 +1177,7 @@ export class AgentLoop {
    *  Success slowly warms the provider; failure rapidly cools it (4x asymmetry).
    *  Degradation ratio is consumed by sensorium stability; cold tiers are
    *  skipped by coordinator worker routing. */
-  private recordProviderOutcome(ok: boolean): void {
+  recordProviderOutcome(ok: boolean): void {
     const health = this.config.providerHealth
     const providerId = this.config.providerName
     if (!health || !providerId) return
@@ -1283,7 +1287,7 @@ export class AgentLoop {
     }
   }
 
-  private stopFsWatcher(): void {
+  stopFsWatcher(): void {
     this.fsWatcher?.stop()
     this.latestFsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   }
@@ -1369,7 +1373,7 @@ export class AgentLoop {
    * Returns the heartbeat (for cleanup) and the wrapped callbacks (which
    * the caller must use for the rest of the run).
    */
-  private async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
+  async initializeRun(userInput: string, callbacks: AgentCallbacks): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
     await this.warmupMemories()
     // The controller is created eagerly in run() before any await, so an abort
     // fired during warmup is honored (not discarded). Only create one here if a
@@ -1408,7 +1412,7 @@ export class AgentLoop {
         this.abortStalledTurn()
       },
     })
-    callbacks = this.wrapCallbacksWithHeartbeat(callbacks, heartbeat)
+    callbacks = wrapCallbacksWithHeartbeat(callbacks, heartbeat)
     heartbeat.start()
     this.turnStream = this.createTurnStreamController()
     this.turnCompletion = this.createTurnCompletionController(callbacks)
@@ -1557,7 +1561,7 @@ export class AgentLoop {
    * reliability decision, context ceiling enforcement, cross-session event
    * sync, and OAI request building. Returns the action and request.
    */
-  private async buildTurnRequest(
+  async buildTurnRequest(
     turn: number,
     currentStrategy: StrategyProfile,
     currentSensorium: Sensorium,
@@ -1673,7 +1677,7 @@ export class AgentLoop {
     // No-op: cognitive projection path removed.
   }
 
-  private async runConvergenceCheck(
+  async runConvergenceCheck(
     turn: number,
     phaseClass: string,
     assistantResponded: boolean,
@@ -1750,7 +1754,7 @@ export class AgentLoop {
     return { action: 'proceed' }
   }
 
-  private async runPerception(
+  async runPerception(
     turn: number,
     estTokens: number,
     actionable: boolean,
@@ -1875,7 +1879,7 @@ export class AgentLoop {
     return { sensorium: perceptionResult.sensorium, strategy: perceptionResult.strategy, phaseClass, pressureResult }
   }
 
-  private async runCompaction(
+  async runCompaction(
     turn: number,
     snap: ResourceSensorSnapshot | null,
   ): Promise<{
@@ -1887,523 +1891,9 @@ export class AgentLoop {
   }
 
   private async _runInner(userInput: string, callbacks: AgentCallbacks): Promise<void> {
-    const { heartbeat, wrappedCallbacks, actionable, turnMode } = await this.initializeRun(userInput, callbacks)
-    callbacks = wrappedCallbacks
-    callbacks = wrappedCallbacks
-
-    let checkpointCreatedThisTurn = false
-
-    // Track whether any assistant response was produced this turn.
-    // If the turn is aborted before any assistant output, we roll back
-    // the user message so it doesn't pollute context on retry.
-    let assistantResponded = false
-    // Track whether compaction consumed the user message (session split /
-    // LLM compact replace the message list). When true, skip removeLastMessage
-    // because the user message no longer exists at the top of the stack.
-    let userMessageConsumed = false
-
-    // TTSR retry governor: cap how many times each stream rule may abort+retry
-    // within a single run(). Without a cap, a model that keeps emitting a
-    // matched command loops until maxTurns, spamming injected reminders. After
-    // the cap, the rule is disabled for the rest of the run so the turn can
-    // proceed.
-    const ruleTriggerCounts = new Map<string, number>()
-    const disabledRulePatterns = new Set<string>()
-    const MAX_RULE_RETRIES = 2
-    let lastInjectedReminder = ''
-
-    // Whether a final (isFinal: true) turn completion was emitted. The turn
-    // loop can exhaust maxTurns without ever reaching the text-only break
-    // path — in that case the TUI never sees a final completion, its busy
-    // latch stays set, and the next user message gets routed to the steer
-    // buffer instead of starting a new run.
-    let finalTurnCompleted = false
-
-    try {
-      for (let turn = 0; turn < this.config.maxTurns; turn++) {
-        this.thetaRequestsThisTurn = 0
-        // Sync plan-mode state into config so tool-pipeline gate reads it
-        this.syncPlanModeToConfig()
-        if (this.abortController!.signal.aborted) {
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onAbort()
-          return
-        }
-
-        const estTokens = this.session.getEstimatedTokens()
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS narrows to null but later turns reassign
-        const snap = this.latestResourceSnapshot as ResourceSensorSnapshot | null
-        const rssRatio = snap
-          ? snap.memory.rssBytes / snap.memory.memoryLimitBytes
-          : 0
-        this.turnBudget = createTurnBudget(rssRatio)
-        
-
-        // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
-        {
-          const compactionResult = await rejectOnAbort(
-            this.runCompaction(turn, snap),
-            this.abortController!.signal,
-            'compaction',
-          )
-          if (compactionResult.shouldAbort) {
-            if (!assistantResponded && !compactionResult.userMessageConsumed) this.session.removeLastMessage()
-            callbacks.onAbort()
-            return
-          }
-          if (compactionResult.userMessageConsumed) userMessageConsumed = true
-        }
-
-        this.streamedText = ''
-        this.lastPrewarmAt = 0
-        let _tb = Date.now()
-        await rejectOnAbort(this.prewarmRecentReads(), this.abortController!.signal, 'prewarm')
-        debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
-
-        // ── Git freshness: file change rate (Zeitgeber signal) ──
-        getGitChangeRate(this.cwd).then(rate => {
-          this.gitChangeRate = smoothChangeRate(rate, this.gitChangeRate)
-        }).catch(() => {})
-
-        // ── FS freshness: realtime external Zeitgeber signal ──
-        this.latestFsWatcherState = this.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false }
-
-        // Step 6c: run perception (sensorium, season, phase class, contract)
-        const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await rejectOnAbort(
-          this.runPerception(turn, estTokens, actionable, callbacks),
-          this.abortController!.signal,
-          'perception',
-        )
-
-        // Step 6d: run convergence check
-        {
-          // Wrapped for parity with the other boundary steps: convergence can
-          // call trySessionSplit → llmCompact (a network call) whose internal
-          // abort cooperation is exactly the unreliable mechanism this commit
-          // backstops. Without the race, a watchdog abort can't free a wedge here.
-          const { action } = await rejectOnAbort(
-            this.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
-            this.abortController!.signal,
-            'convergence',
-          )
-          if (action === 'abort') return
-        }
-
-        // Step 6e: U6 replan check — detect deviation from the plan trace and
-        // inject a course-correction. Runs after convergence (latestConvergenceResult
-        // is fresh) and before buildTurnRequest (so the appendix reflects this turn).
-        this.runReplanCheck()
-
-        _tb = Date.now()
-        // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
-        const turnRequest = await rejectOnAbort(
-          this.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
-          this.abortController!.signal,
-          'build-request',
-        )
-        if (turnRequest.action === 'veto') continue
-        if (turnRequest.action === 'abort') return
-        const request = turnRequest.request!
-
-        // Turn-level thinking (GLM): disable thinking on tool execution turns
-        // to reduce reasoning_content accumulation. Plan Mode also disables
-        // provider-side thinking: plan_submit already requires a large polished
-        // document, and hidden reasoning streams can consume the whole timeout
-        // before the model emits the tool call. Normal analysis turns keep the
-        // previous behavior.
-        if (this.config.turnLevelThinking && this.config.client.setThinking) {
-          const messages = this.session.getMessages()
-          const lastMsg = messages[messages.length - 1]
-          const isToolExecTurn = lastMsg?.role === 'tool'
-          const isPlanModeTurn = this.planModeState === 'planning'
-          this.config.client.setThinking(isToolExecTurn || isPlanModeTurn ? 'disabled' : 'enabled')
-        }
-
-        let turnTextAccum = ''
-        let turnThinkingAccum = ''
-        let rateLimitOccurred = false
-        let rateLimitRetryMs = 0
-        const prevThinkingFingerprint = this.lastTurnThinkingFingerprint
-        let turnDedupState: 'tracking' | 'flushed' = 'tracking'
-        let pendingFlush = ''
-        const prevFingerprint = this.lastTurnTextFingerprint
-
-        // L0 streaming-executor telemetry: measure stream + tool execution latency.
-        const turnStartMs = Date.now()
-
-        const streamOnce = () => this.turnStream!.streamTurn({
-          request,
-          turn,
-          lastTurnTextFingerprint: this.lastTurnTextFingerprint,
-          streamRules: this.config.streamRules,
-          disabledRulePatterns,
-          callbacks: {
-            onTextDelta: (text) => {
-              turnTextAccum += text
-              if (turnDedupState === 'flushed') {
-                callbacks.onTextDelta(text)
-                return
-              }
-              if (!prevFingerprint) {
-                turnDedupState = 'flushed'
-                callbacks.onTextDelta(text)
-                return
-              }
-              pendingFlush += text
-              const fp = turnTextAccum.replace(/\s+/g, ' ').trim()
-              if (!prevFingerprint.startsWith(fp)) {
-                // Diverged or extended beyond the previous fingerprint — flush all pending
-                // and switch to pass-through. Do not suppress mid-stream: a full match so
-                // far may still be followed by new content in a later delta.
-                turnDedupState = 'flushed'
-                callbacks.onTextDelta(pendingFlush)
-                pendingFlush = ''
-              }
-              // else: still equal to or a prefix of prev fingerprint, keep buffering until stream end
-            },
-            onThinkingDelta: (thinking) => {
-              // Cross-turn thinking fingerprint dedup: if the model repeats
-              // thinking from the previous turn verbatim, suppress display.
-              // Only suppress exact full-match (not prefixes — early reasoning
-              // steps legitimately overlap across turns).
-              turnThinkingAccum += thinking
-              if (prevThinkingFingerprint && turnThinkingAccum === prevThinkingFingerprint) {
-                return // suppress — identical to previous turn's thinking
-              }
-              callbacks.onThinkingDelta(thinking)
-            },
-            onToolUse: callbacks.onToolUse,
-            onToolHint: (name) => {
-              callbacks.onPhaseChange?.('tool-hint', { tool: name, reason: `preparing ${name}…` })
-            },
-            onStreamStart: () => {
-              callbacks.onPhaseChange?.('working', { reason: 'waiting for first token' })
-            },
-            onError: callbacks.onError,
-            onRateLimit: (retryDelayMs) => {
-              rateLimitOccurred = true
-              rateLimitRetryMs = retryDelayMs ?? 0
-            },
-          },
-        })
-
-        let streamResult = await streamOnce()
-
-        // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
-        // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
-        // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
-        // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
-        const reconnectCfg = this.config.agentReconnect
-        if (reconnectCfg?.enabled && this.abortController) {
-          const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
-          const backoffMs = reconnectCfg.backoffMs ?? 500
-          let attempt = 0
-          while (
-            attempt < maxAttempts &&
-            streamResult.streamError !== null &&
-            (streamResult.streamError as Error).name !== 'AbortError' &&
-            !this.abortController.signal.aborted &&
-            classifyApiError(streamResult.streamError).shouldReconnect
-          ) {
-            attempt++
-            this.streamedText = ''
-            turnTextAccum = ''
-            turnThinkingAccum = ''
-            pendingFlush = ''
-            turnDedupState = 'tracking'
-            rateLimitOccurred = false
-            rateLimitRetryMs = 0
-            callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
-            try {
-              await abortableDelay(backoffMs, this.abortController.signal)
-            } catch {
-              break // aborted during backoff
-            }
-            streamResult = await streamOnce()
-          }
-        }
-
-        // Only decide full-turn suppression at the stream boundary. A mid-stream exact
-        // fingerprint match is not final; later deltas may add new content.
-        if (turnDedupState === 'tracking' && pendingFlush) {
-          const fp = turnTextAccum.replace(/\s+/g, ' ').trim()
-          if (fp !== prevFingerprint) {
-            callbacks.onTextDelta(pendingFlush)
-          }
-        }
-        const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
-        this.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
-        this.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
-        // Track text fingerprints for cross-turn repetition detection
-        if (streamResult.lastTurnTextFingerprint.length >= 50) {
-          this.recentTextFingerprints.push(streamResult.lastTurnTextFingerprint)
-          if (this.recentTextFingerprints.length > 8) this.recentTextFingerprints.shift()
-        }
-        // Anti-habituation: detect model-initiated objections to reset staleness counter.
-        if (turnTextAccum.includes('⚠') || turnTextAccum.includes('风险评估') || turnTextAccum.includes('遗留项')) {
-          this.turnsSinceLastObjection = 0
-        }
-
-        // TTSR: stream rule triggered — inject reminder and retry, governed
-        // by a per-run retry cap so a self-matching task can't loop forever.
-        if (streamResult.triggeredRule) {
-          const rule = streamResult.triggeredRule
-          const count = (ruleTriggerCounts.get(rule.pattern) ?? 0) + 1
-          ruleTriggerCounts.set(rule.pattern, count)
-
-          if (count > MAX_RULE_RETRIES) {
-            // Cap exceeded: disable this rule for the rest of the run and let
-            // the turn proceed normally (the bash tool's own exec-time guard
-            // remains as defense-in-depth). Re-enter the loop without injecting.
-            disabledRulePatterns.add(rule.pattern)
-            debugLog(`[ttsr] rule disabled after ${count - 1} retries: ${rule.pattern}`)
-            continue
-          }
-
-          // Wrap as a system reminder (not a bare user message) so it is not
-          // rendered as a user bubble, and dedup identical consecutive injects.
-          // Kept as a trailing user-role append: the expensive cache prefix
-          // (tools/system/first-user-message) sits at the head and is never
-          // touched, so prompt-cache reuse is preserved across the retry.
-          const reminder = `<system-reminder>\n${rule.inject}\n</system-reminder>`
-          if (reminder !== lastInjectedReminder) {
-            this.session.addUserMessage(reminder)
-            lastInjectedReminder = reminder
-          }
-          // Flush streamed text so the next stream doesn't append on top of
-          // existing TUI streamBuf content.
-          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
-          continue
-        }
-
-        // Rate-aware backpressure: if the API layer signaled a 429 retry,
-        // add an inter-turn delay to avoid hitting the rate limit again
-        // before the provider's rate window resets.
-        if (rateLimitOccurred) {
-          // Use server-provided retry delay when available, otherwise fall back to 2s
-          const delayMs = rateLimitRetryMs > 0 ? rateLimitRetryMs : 2000
-          // abort-race：429 回退期间 Esc 须立即解锁（abortableDelay 会清定时器并抛 AbortError）
-          await abortableDelay(delayMs, this.abortController!.signal)
-        }
-
-        // L0 telemetry: stream duration
-        const streamEndMs = Date.now()
-        if (toolUses.length > 0) {
-          this.telemetryWriter.write({
-            ts: streamEndMs,
-            turn,
-            phase: 'stream-complete',
-            streamDurationMs: streamEndMs - turnStartMs,
-            toolCount: toolUses.length,
-            toolNames: toolUses.map(tu => tu.name).join(','),
-          } as any)
-        }
-
-        // Feed CacheAdvisor with turn metrics after API call completes
-        // Cache read/creation metrics are captured here; artifact eviction/access
-        // metrics are added after tool execution (see below).
-        const cacheHistory = this.session.getCacheHistory()
-        const latestTurnCache = cacheHistory.length > 0 ? cacheHistory[cacheHistory.length - 1] : null
-
-        if (this.abortController!.signal.aborted) {
-          // P0: skip addAssistantBlocks — partial blocks from an aborted
-          // stream must not pollute the message list and break prefix cache.
-          if (this.streamedText.length > 0) this.session.addUsage({ output_tokens: Math.ceil(this.streamedText.length / 4) })
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          // runPostSession is best-effort cleanup — its failure must not cause
-          // the outer catch to double-delete an unrelated message.
-          try { await this.runPostSession(callbacks) } catch { /* best-effort */ }
-          callbacks.onAbort()
-          return
-        }
-
-        if (streamError) {
-          // Abort is a user action, not a provider fault — don't cool the provider.
-          if ((streamError as Error).name !== 'AbortError') this.recordProviderOutcome(false)
-          if (collectedBlocks.length > 0 && (streamError as Error).name !== 'AbortError') { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
-          if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-          callbacks.onError(streamError)
-          return
-        }
-
-        this.recordProviderOutcome(true)
-
-        // Contract repair: text shown to the user MUST be persisted. If the
-        // client streamed text only via onTextDelta and never emitted a text
-        // content block, synthesize one from the accumulated streamedText.
-        // Otherwise the reply is visible in the TUI but absent from history,
-        // and the model re-answers this turn's question on the next run.
-        if (this.streamedText && !collectedBlocks.some(b => b.type === 'text')) {
-          collectedBlocks.push({ type: 'text', text: this.streamedText })
-        }
-
-        if (collectedBlocks.length > 0) { this.session.addAssistantBlocks(collectedBlocks); assistantResponded = true }
-
-        // max_output_tokens on text-only turns: accept partial output instead of
-        // escalating. The model rarely continues coherently — it usually restarts
-        // from scratch, causing a confusing "cut off → restart" loop for users.
-        // Previously we tried up to 3 escalations; now we just end the turn.
-
-        if (toolUses.length > 0) {
-          // Reset no-tool counter — model is taking action
-          this.consecutiveNoToolTurns = 0
-          // ── Pre-execution diagnostic snapshot ──
-          // Write sensorium before tool execution so freeze analysis can
-          // identify which tools were about to run, even if executeBatch hangs.
-          const toolNames = toolUses.map(tu => tu.name).join(',')
-          this.telemetryWriter.write({
-            ts: Date.now(),
-            turn,
-            phase: 'tool-executing',
-            tools: toolNames,
-            toolCount: toolUses.length,
-          } as any)
-
-          // 工具批整体 abort-race：executeBatch 内部虽对单工具有 withToolTimeout，
-          // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
-          // 一旦卡住，仅靠 240s 心跳看门狗才能解锁 → run() 长时间不 settle、会话假死。
-          // 这里把整批与 abort 信号竞速，Esc 后立即抛 AbortError → 下方 catch 走 onAbort。
-          const r = await rejectOnAbort(
-            this.toolExecution.executeBatch({
-              toolUses, callbacks, turn, checkpointCreatedThisTurn,
-              abortSignal: this.abortController!.signal,
-              traceStore: this.traceStore, importGraph: this.importGraph,
-              lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk,
-            }),
-            this.abortController!.signal,
-            'tools',
-          )
-          ;({ traceStore: this.traceStore, importGraph: this.importGraph,
-             lastConflictCheckCount: this.lastConflictCheckCount, latestRisk: this.latestRisk } = r)
-          if (r.checkpointCreated) checkpointCreatedThisTurn = true
-
-          // U6: record this tool-turn into the execution trace.
-          this.planTraceCoordinator.appendTurnResult(turn)
-
-          // L0 telemetry: tools duration
-          this.telemetryWriter.write({
-            ts: Date.now(),
-            turn,
-            phase: "tools-complete",
-            toolsDurationMs: Date.now() - streamEndMs,
-            totalTurnMs: Date.now() - turnStartMs,
-            toolCount: toolUses.length,
-          } as any)
-
-          // Feed CacheAdvisor with cache metrics + artifact eviction/access data
-          if (latestTurnCache && latestTurnCache.turn === turn) {
-            this.cacheAdvisor.onTurnEnd({
-              turn,
-              cacheRead: latestTurnCache.cacheRead,
-              cacheCreation: latestTurnCache.cacheCreation,
-              prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
-              artifactIdsEvicted: r.artifactIdsEvicted,
-              artifactIdsAccessed: r.artifactIdsAccessed,
-            })
-          }
-          this.config.meridianIndexer?.flushTurn()
-          await rejectOnAbort(
-            this.turnCompletion.complete({ turn, isFinal: false, callbacks }),
-            this.abortController!.signal,
-            'post-turn',
-          )
-          continue
-        }
-
-        // Thinking-only turn detection: retry if model produced reasoning but no text/tools
-        // Feed CacheAdvisor for non-tool turns (no evictions/accesses)
-        if (latestTurnCache && latestTurnCache.turn === turn) {
-          this.cacheAdvisor.onTurnEnd({
-            turn,
-            cacheRead: latestTurnCache.cacheRead,
-            cacheCreation: latestTurnCache.cacheCreation,
-            prefixChanged: latestTurnCache.cacheRead === 0 && turn > 1,
-            artifactIdsEvicted: [],
-            artifactIdsAccessed: [],
-          })
-        }
-        const thinkingResult = evaluateThinkingRetry({
-          streamedText: this.streamedText, collectedBlockCount: collectedBlocks.length,
-          thinkingAccum, thinkingOnlyRetries: this.thinkingOnlyRetries,
-          lastThinkingContent: this.lastThinkingContent,
-        })
-        this.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
-        this.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
-        if (thinkingResult.shouldRetry) {
-          this.session.addUserMessage(wrapSystemReminder(thinkingResult.retryMessage))
-          // Archive any partial streamed text before retrying (same rationale as TTSR above)
-          callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
-          continue
-        }
-
-        // No tool calls this turn — increment the counter for convergence detection
-        this.consecutiveNoToolTurns++
-
-        this.config.meridianIndexer?.flushTurn()
-        await rejectOnAbort(
-          this.turnCompletion.complete({
-            turn,
-            isFinal: true,
-            emitBadge: true,
-            callbacks,
-          }),
-          this.abortController!.signal,
-          'final-complete',
-        )
-        finalTurnCompleted = true
-        this.evidence.reset()
-        break
-      }
-
-      // maxTurns exhausted mid-task (every turn used tools / retried): still
-      // emit a final completion so the TUI state machine resets (agentBusy /
-      // isStreaming) and the next user message starts a fresh run instead of
-      // silently landing in the steer buffer.
-      if (!finalTurnCompleted) {
-        debugLog(`[agent] maxTurns=${this.config.maxTurns} exhausted without a final turn — emitting final onTurnComplete`)
-        callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), true)
-      }
-    } catch (err) {
-      this.evidence.reset()
-      if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-      if ((err as Error).name === 'AbortError') {
-        await this.runPostSession(callbacks)
-        callbacks.onAbort()
-      } else {
-        callbacks.onError(err as Error)
-      }
-    } finally {
-      heartbeat.stop()
-      this.stopFsWatcher()
-    }
+    await this.turnOrchestrator.execute(userInput, callbacks)
   }
 
-  /**
-   * P7: wrap AgentCallbacks so every UI-visible event resets the heartbeat
-   * silence clock. Heartbeat fires only during true silent gaps (no text
-   * delta, no tool result, no phase change for `silentMs`).
-   */
-  private wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat): AgentCallbacks {
-    return {
-      ...cb,
-      onTextDelta: (text) => { hb.tick('streaming text'); cb.onTextDelta(text) },
-      onThinkingDelta: (thinking) => { hb.tick('thinking'); cb.onThinkingDelta(thinking) },
-      onToolUse: (id, name, input) => { hb.tick(`calling ${name}`); cb.onToolUse(id, name, input) },
-      onToolResult: (id, name, result, isError, rawPath, uiContent) => {
-        hb.tick(`${name} returned`)
-        cb.onToolResult(id, name, result, isError, rawPath, uiContent)
-      },
-      onTurnComplete: (usage, turnNumber, isFinal) => {
-        hb.tick(`turn ${turnNumber} complete`)
-        cb.onTurnComplete(usage, turnNumber, isFinal)
-      },
-      onPhaseChange: (phase, detail) => {
-        // Heartbeat-emitted phases must NOT recursively reset the clock.
-        if (phase !== 'heartbeat') hb.tick(`phase: ${phase}`)
-        cb.onPhaseChange?.(phase, detail)
-      },
-    }
-  }
 }
 
 /**
