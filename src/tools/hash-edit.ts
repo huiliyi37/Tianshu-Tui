@@ -187,14 +187,13 @@ This avoids the read→truncate→re-read loop for large files.`,
     if (posOnly) {
       const lastReadMtime = getFileReadMtime(filePath)
       if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
-        return {
-          content: [
-            `hash_edit position-only stale guard: ${filePath} was modified since your last read_file.`,
-            `Last read mtime: ${lastReadMtime}, current mtime: ${currentMtime}.`,
-            'Re-read the relevant portion and retry with updated anchors, or use full L<num>:<hash> anchors.',
-          ].join('\n'),
-          isError: true,
-        }
+        // Auto-refresh stale mtime instead of rejecting. Position-only anchors
+        // are verified by the line-existence check below — if line numbers
+        // shifted beyond file bounds, the verification loop catches it.
+        // This avoids the common self-interference case where a prior hash_edit
+        // in the same turn changes mtime, making the next position-only call
+        // stale even though its anchors point to a different part of the file.
+        refreshFileReadMtime(filePath, currentMtime)
       }
     }
 
