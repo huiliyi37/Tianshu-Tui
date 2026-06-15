@@ -9,7 +9,8 @@ import { recordToolNamedFingerprint } from './trace-store.js'
 import { join } from 'node:path'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
-import { isSystemReminder } from '../prompt/system-reminder.js'
+import { isSystemReminder, wrapSystemReminder } from '../prompt/system-reminder.js'
+import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -184,4 +185,18 @@ return {
       },
       ...extra,
     }
+}
+
+export function createPlanTraceCoordinator(self: AgentLoop): PlanTraceCoordinator {
+  return new PlanTraceCoordinator({
+    getPlanTrace: () => self.planTrace,
+    setPlanTrace: t => { self.planTrace = t },
+    getLastReplanInjection: () => self.lastReplanInjection,
+    setLastReplanInjection: s => { self.lastReplanInjection = s },
+    getLatestConvergenceResult: () => self.latestConvergenceResult,
+    getConsecutiveNoToolTurns: () => self.consecutiveNoToolTurns,
+    getTraceStore: () => self.traceStore,
+    addSystemReminder: content => { self.session.addUserMessage(wrapSystemReminder(content)) },
+    setPlanTraceAppendix: appendix => { self.config.promptEngine.setPlanTraceAppendix(appendix) },
+  })
 }
