@@ -165,6 +165,51 @@ describe('DelegationCoordinator', () => {
     assert.equal(configDepth, 1)
   })
 
+  it('clamps worker maxTurns to the work order budget (R3.1 budget enforcement)', async () => {
+    let capturedMaxTurns: number | undefined
+    let budgetMaxTurns: number | undefined
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        budgetMaxTurns = order.budget.maxTurns
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          // Deliberately huge generic default — the per-profile budget must win.
+          maxTurns: 99,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => {
+        capturedMaxTurns = config.maxTurns
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await coordinator.delegate({
+      parentTurnId: 'turn-budget',
+      objective: 'Verify worker turn budget is enforced against runtime default',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['src/agent/coordinator.ts', 'src/agent/worker-session.ts'] },
+    })
+
+    assert.equal(typeof budgetMaxTurns, 'number')
+    assert.ok(budgetMaxTurns! < 99, 'budget should be tighter than the runtime default')
+    assert.equal(capturedMaxTurns, budgetMaxTurns, 'worker must run within the work order budget, not the runtime default')
+  })
+
   it('routes patcher profile through injected hands runner seam', async () => {
     let handsCalled = false
     let workerCalled = false

@@ -183,4 +183,12 @@ export interface SessionMetadata {
   toolCallCount?: number
   /** Star-domain id for cross-session handoff routing (e.g. 'tianji', 'tanlang') */
   domain?: string
+  /** Working directory this session was started in. Gates cross-cwd resume (R1). */
+  cwd?: string
+  /**
+   * True when the previous run exited cleanly (vs crashed mid-flight). Set on
+   * shutdown, reset to false on every live start. A clean-exit session is NOT
+   * silently auto-resumed — only crash-interrupted sessions are (R1).
+   */
+  cleanExit?: boolean
 }

@@ -25,6 +25,7 @@ import {
   type WorkerResult,
   type WorkerBudget,
   type WorkOrderScope,
+  clampWorkerMaxTurns,
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
@@ -850,6 +851,10 @@ export class DelegationCoordinator {
     // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
     const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
+    // R3.1: the runtime factory returns a generic default maxTurns; clamp it to
+    // the work order's per-profile budget so caps like reviewer=6 actually bite.
+    // Covers both read (runWorker) and write (runHands → runWorker) paths.
+    workerConfig.maxTurns = clampWorkerMaxTurns(workerConfig.maxTurns, order.budget.maxTurns)
     workerConfig.reviewDepth = order.reviewDepth
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
@@ -1064,6 +1069,7 @@ export class DelegationCoordinator {
         if (strongCard) {
           // Re-create worker config with Pro model
           const upgradedConfig = this.config.runtimeFactory(order, strongCard, workerRegistry)
+          upgradedConfig.maxTurns = clampWorkerMaxTurns(upgradedConfig.maxTurns, order.budget.maxTurns)
           upgradedConfig.reviewDepth = order.reviewDepth
           upgradedConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
           upgradedConfig.abortSignal = mergedSignal

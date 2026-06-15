@@ -8,6 +8,7 @@ import { SessionContext } from './context.js'
 import { classifyFailure, isTransient } from './failure-classifier.js'
 import {
   buildBlockedWorkerResult,
+  clampWorkerMaxTurns,
   parseWorkerResult,
   type WorkOrder,
   type WorkerResult,
@@ -209,7 +210,9 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     client: config.client,
     promptEngine: config.promptEngine,
     toolRegistry: config.toolRegistry,
-    maxTurns: config.maxTurns,
+    // R3.1: honor the per-profile turn budget even for direct callers — the
+    // coordinator already clamps, this guards runWorkerSession used standalone.
+    maxTurns: clampWorkerMaxTurns(config.maxTurns, config.order.budget.maxTurns),
     contextWindow: config.contextWindow,
     compact: config.compact,
     sessionId: `worker-${config.order.id}`,

@@ -1,18 +1,26 @@
 /**
- * Cold-start / crash auto-resume decision.
+ * Startup session decision: fresh by default, explicit resume on demand.
  *
- * Historically `getOrCreateSessionId()` always minted a fresh UUID, so a crash
- * (or any restart) silently dropped the in-flight task — the user had to know
- * about and run `/resume`. For an unattended, autonomy-first agent that is a
- * dead end: a crashed long-running task must pick itself back up.
+ * Historically a restart within 24h silently auto-resumed the last session,
+ * replaying its full message history. Because the pointer was global (not
+ * per-cwd) and ignored whether the previous process exited cleanly, an
+ * unrelated task's hundreds of messages bled into what the user expected to be
+ * a fresh session — polluting context and eroding code-inspection discipline.
+ *
+ * New contract (mirrors Claude Code `--continue/--resume` and opencode):
+ *   - Default startup mints a FRESH session.
+ *   - `--continue`/`--resume`/`RIVET_RESUME=1` explicitly returns to the last
+ *     session for the current cwd (regardless of lifecycle/age).
+ *   - The ONLY implicit resume is crash recovery: an `active` session that never
+ *     got to mark a clean exit, in the same cwd and within the freshness window.
+ *     This preserves the long-running autonomous-task pickup that motivated the
+ *     original auto-resume.
  *
  * The decision is pure and injected (no fs/DB here) so it is unit-testable.
- * The caller wires in a loader that reports whether the last session has
- * resumable content + its lifecycle status + last-touched time. Returning the
- * previous session id makes the existing startup path (which already calls
- * `persist.loadOai()` + `session.replaceMessages()`) rehydrate the context
- * automatically — no separate restore plumbing, and the prefix-cache anchor is
- * untouched because we replay the very same persisted history.
+ * Resuming returns the previous session id so the existing startup path
+ * (`persist.loadOai()` + `session.replaceMessages()`) rehydrates the context
+ * automatically — the prefix-cache anchor is untouched because we replay the
+ * very same persisted history.
  */
 
 export interface LastSessionInfo {
@@ -22,18 +30,26 @@ export interface LastSessionInfo {
   status?: 'active' | 'completed' | 'archived'
   /** Last mutation time (ms epoch), if known. */
   updatedAt?: number
+  /** Working dir the session belongs to. Cross-cwd sessions are never resumed. */
+  cwd?: string
+  /** True when the previous run exited cleanly. Clean sessions are not auto-resumed. */
+  cleanExit?: boolean
 }
 
 export interface StartupDecisionInput {
-  /** The id recorded in ~/.rivet/session-id.txt, or null if none. */
+  /** The id recorded in the per-cwd last-session pointer, or null if none. */
   lastSessionId: string | null
   now: number
-  /** Don't resurrect sessions idle longer than this. */
+  /** Don't silently resurrect sessions idle longer than this. */
   freshnessMs: number
   /** User forced a brand-new session (RIVET_NEW_SESSION=1). */
   forceNew: boolean
-  /** User disabled auto-resume (RIVET_NO_AUTO_RESUME=1). */
+  /** User explicitly asked to return to the last session (--continue/--resume / RIVET_RESUME=1). */
+  resume: boolean
+  /** Disable silent crash-recovery resume (RIVET_NO_AUTO_RESUME=1). Explicit resume still honored. */
   disableAutoResume: boolean
+  /** Current working directory — used to reject cross-cwd resume. */
+  currentCwd?: string
   /** Loads resumability info for a given session id (null if unreadable). */
   load: (id: string) => LastSessionInfo | null
 }
@@ -46,25 +62,40 @@ export interface StartupDecision {
   reason: string
 }
 
-/** Default: don't auto-resume a session idle for more than 24h. */
+/** Default: don't silently auto-resume a session idle for more than 24h. */
 export const RESUME_FRESHNESS_MS = 24 * 60 * 60 * 1000
 
 export function decideStartupSession(input: StartupDecisionInput): StartupDecision {
   const fresh = { sessionId: null as string | null, resumed: false }
 
   if (input.forceNew) return { ...fresh, reason: 'forced-new (RIVET_NEW_SESSION=1)' }
-  if (input.disableAutoResume) return { ...fresh, reason: 'auto-resume disabled (RIVET_NO_AUTO_RESUME=1)' }
   if (!input.lastSessionId) return { ...fresh, reason: 'no previous session' }
 
   const info = input.load(input.lastSessionId)
   if (!info) return { ...fresh, reason: 'previous session unreadable' }
   if (!info.hasContent) return { ...fresh, reason: 'previous session has no replayable content' }
+
+  // Hard boundary: a session from another project must never bleed into this cwd.
+  if (input.currentCwd && info.cwd && info.cwd !== input.currentCwd) {
+    return { ...fresh, reason: 'previous session belongs to another cwd' }
+  }
+
+  // Explicit resume (--continue/--resume): honor regardless of lifecycle/clean-exit/age.
+  if (input.resume) {
+    return { sessionId: input.lastSessionId, resumed: true, reason: 'explicit resume (--continue)' }
+  }
+
+  // Default is a fresh session. The only implicit resume below is crash recovery.
+  if (input.disableAutoResume) return { ...fresh, reason: 'auto-resume disabled (RIVET_NO_AUTO_RESUME=1)' }
   if (info.status === 'completed' || info.status === 'archived') {
     return { ...fresh, reason: `previous session ${info.status}` }
   }
+  if (info.cleanExit) return { ...fresh, reason: 'previous session exited cleanly' }
   if (typeof info.updatedAt === 'number' && input.now - info.updatedAt > input.freshnessMs) {
     return { ...fresh, reason: 'previous session too old to auto-resume' }
   }
-
-  return { sessionId: input.lastSessionId, resumed: true, reason: 'auto-resumed interrupted session' }
+  if (info.status === 'active') {
+    return { sessionId: input.lastSessionId, resumed: true, reason: 'crash recovery (interrupted session)' }
+  }
+  return { ...fresh, reason: 'default new session' }
 }

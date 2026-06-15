@@ -554,7 +554,12 @@ export class AgentLoop {
       // P1: Initialize session metadata with model info
       this.persist.initMetadata({
         model: this.config.promptEngine.getModel(),
+        cwd: this.cwd,
       })
+      // R1: record cwd (cross-cwd resume gate) and reset cleanExit — the session
+      // is now live, so a subsequent crash should be recoverable and a later
+      // clean exit must re-mark it. Runs for both fresh and resumed sessions.
+      this.persist.updateMetadata({ cwd: this.cwd, cleanExit: false })
 
       // P0-1: Mirror every in-memory message change to disk so non-/exit
       // shutdowns (Ctrl+C, crash, network drop) don't lose the session.

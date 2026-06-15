@@ -12,7 +12,7 @@ if (proxyUrl) {
 import { readFileSync, existsSync, mkdirSync, writeFileSync, readSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import { render } from 'ink'
 import { createElement, useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { App } from './tui/app.js'
@@ -117,29 +117,44 @@ function loadConfig(cwd?: string, args = process.argv.slice(2)): Config {
 
 let _cachedSessionId: string | null = null
 let _sessionWasResumed = false
+function lastSessionPointerFile(cwd: string): string {
+  const dir = join(homedir(), '.rivet', 'last-session')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 12)
+  return join(dir, `${hash}.txt`)
+}
 function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
+  const cwd = process.cwd()
   const dir = join(homedir(), '.rivet')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  const idFile = join(dir, 'session-id.txt')
+  const pointerFile = lastSessionPointerFile(cwd)
   let lastSessionId: string | null = null
   try {
-    if (existsSync(idFile)) lastSessionId = readFileSync(idFile, 'utf-8').trim() || null
+    if (existsSync(pointerFile)) lastSessionId = readFileSync(pointerFile, 'utf-8').trim() || null
   } catch { /* ignore */ }
+  if (!lastSessionId) {
+    try {
+      const legacy = join(dir, 'session-id.txt')
+      if (existsSync(legacy)) lastSessionId = readFileSync(legacy, 'utf-8').trim() || null
+    } catch { /* ignore */ }
+  }
 
   const decision = decideStartupSession({
     lastSessionId,
     now: Date.now(),
     freshnessMs: RESUME_FRESHNESS_MS,
     forceNew: process.env.RIVET_NEW_SESSION === '1',
+    resume: process.env.RIVET_RESUME === '1',
     disableAutoResume: process.env.RIVET_NO_AUTO_RESUME === '1',
+    currentCwd: cwd,
     load: (id) => {
       try {
         const persist = new SessionPersist(id)
         const meta = persist.loadMetadata()
-        return { hasContent: persist.loadOai().length > 0, status: meta?.status, updatedAt: meta?.updatedAt }
+        return { hasContent: persist.loadOai().length > 0, status: meta?.status, updatedAt: meta?.updatedAt, cwd: meta?.cwd, cleanExit: meta?.cleanExit }
       } catch {
         return null
       }
@@ -148,7 +163,7 @@ function getOrCreateSessionId(): string {
 
   const id = decision.sessionId ?? randomUUID()
   _sessionWasResumed = decision.resumed
-  writeFileSync(idFile, id)
+  try { writeFileSync(pointerFile, id) } catch { /* ignore */ }
   _cachedSessionId = id
   return id
 }
@@ -831,6 +846,9 @@ function Root({ provider, apiKey, config, auth, initialModelId }: { provider: Pr
       // Persist session state FIRST — these synchronous writes are the most
       // valuable work on exit and the most likely to throw (disk full). Do them
       // before any cleanup so state is saved even if a later step fails.
+      // R1: mark a clean exit so the next startup mints a fresh session instead
+      // of silently resuming this one (only crashes auto-resume now).
+      try { persist.updateMetadata({ cleanExit: true }) } catch { /* best-effort */ }
       persist.compactOai(session.getMessages())
       if (_fileHistoryRef) {
         persistFileHistory(
@@ -895,6 +913,12 @@ function readPipedStdin(): string | undefined {
 async function main() {
   // CLI subcommand routing
   const args = process.argv.slice(2)
+
+  // R1: default startup is fresh; `--continue`/`--resume` returns to this cwd's
+  // last session. Signaled via env so getOrCreateSessionId picks it up.
+  if (args.includes('--continue') || args.includes('--resume')) {
+    process.env.RIVET_RESUME = '1'
+  }
 
   // --help / -h
   if (args[0] === '--help' || args[0] === '-h') {

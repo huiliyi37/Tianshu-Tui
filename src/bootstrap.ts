@@ -13,7 +13,7 @@
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
 import { homedir } from 'os'
 import { join } from 'path'
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { spawnSync, spawn } from 'child_process'
 
@@ -215,34 +215,56 @@ export function wasSessionResumed(): boolean {
   return _sessionWasResumed
 }
 
+/** Per-cwd last-session pointer file (so `--continue` returns *this* project's
+ *  session, never another project's). Hashed cwd mirrors the memory-store
+ *  convention (sha256(cwd).slice(0,12)). */
+function lastSessionPointerFile(cwd: string): string {
+  const dir = join(homedir(), '.rivet', 'last-session')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 12)
+  return join(dir, `${hash}.txt`)
+}
+
 /**
- * Resolve the session id for this run. Instead of always minting a fresh UUID
- * (which silently abandoned an interrupted task), we auto-resume the last
- * incomplete session when it still has replayable content and is recent. The
- * caller's existing startup path (`persist.loadOai()` + `replaceMessages()`)
- * then rehydrates the conversation automatically — no manual `/resume`.
+ * Resolve the session id for this run. Default is a FRESH session. We only
+ * return to the previous session when the user explicitly asks
+ * (`--continue`/`--resume`/`RIVET_RESUME=1`) or when the last run for this cwd
+ * crashed mid-flight (active + no clean-exit marker, recent). See
+ * `decideStartupSession` for the full contract. Resuming reuses the existing
+ * startup path (`persist.loadOai()` + `replaceMessages()`) to rehydrate.
  *
- * Escape hatches: RIVET_NEW_SESSION=1 forces a fresh session;
- * RIVET_NO_AUTO_RESUME=1 disables the behavior entirely.
+ * Escape hatches: RIVET_NEW_SESSION=1 forces fresh; RIVET_RESUME=1 forces
+ * resume; RIVET_NO_AUTO_RESUME=1 suppresses even crash recovery.
  */
 export function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
+  const cwd = process.cwd()
   const dir = join(homedir(), '.rivet')
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
-  const idFile = join(dir, 'session-id.txt')
+  const pointerFile = lastSessionPointerFile(cwd)
   let lastSessionId: string | null = null
   try {
-    if (existsSync(idFile)) lastSessionId = readFileSync(idFile, 'utf-8').trim() || null
+    if (existsSync(pointerFile)) lastSessionId = readFileSync(pointerFile, 'utf-8').trim() || null
   } catch { /* ignore */ }
+  // One-time compatibility fallback to the legacy global pointer. The cwd gate
+  // in decideStartupSession rejects it if it belongs to a different project.
+  if (!lastSessionId) {
+    try {
+      const legacy = join(dir, 'session-id.txt')
+      if (existsSync(legacy)) lastSessionId = readFileSync(legacy, 'utf-8').trim() || null
+    } catch { /* ignore */ }
+  }
 
   const decision = decideStartupSession({
     lastSessionId,
     now: Date.now(),
     freshnessMs: RESUME_FRESHNESS_MS,
     forceNew: process.env.RIVET_NEW_SESSION === '1',
+    resume: process.env.RIVET_RESUME === '1',
     disableAutoResume: process.env.RIVET_NO_AUTO_RESUME === '1',
+    currentCwd: cwd,
     load: (id) => {
       try {
         const persist = new SessionPersist(id)
@@ -251,6 +273,8 @@ export function getOrCreateSessionId(): string {
           hasContent: persist.loadOai().length > 0,
           status: meta?.status,
           updatedAt: meta?.updatedAt,
+          cwd: meta?.cwd,
+          cleanExit: meta?.cleanExit,
         }
       } catch {
         return null
@@ -260,7 +284,7 @@ export function getOrCreateSessionId(): string {
 
   const id = decision.sessionId ?? randomUUID()
   _sessionWasResumed = decision.resumed
-  writeFileSync(idFile, id)
+  try { writeFileSync(pointerFile, id) } catch { /* ignore */ }
   _cachedSessionId = id
   return id
 }
@@ -772,6 +796,9 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
     isShuttingDown = true
 
     try {
+      // Mark a clean exit so the next startup mints a fresh session instead of
+      // silently resuming this one (only crashes auto-resume now — R1).
+      try { ctx.persist.updateMetadata({ cleanExit: true }) } catch { /* best-effort */ }
       ctx.persist.compactOai(ctx.session.getMessages())
       if (ctx.fileHistory) {
         persistFileHistory(
@@ -946,7 +973,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   if (existingMessages.length > 0) {
     session.replaceMessages(existingMessages)
     if (wasSessionResumed()) {
-      console.error(`🔄 自动续接上次会话 (${sessionId.slice(0, 8)}): 恢复 ${existingMessages.length} 条消息。新建会话用 RIVET_NEW_SESSION=1。`)
+      console.error(`🔄 已恢复上一会话 (${sessionId.slice(0, 8)}): ${existingMessages.length} 条消息。默认启动为全新会话；继续上一会话用 --continue。`)
     }
   }
 

@@ -1,81 +1,121 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideStartupSession, RESUME_FRESHNESS_MS } from '../session-recovery.js'
+import { decideStartupSession, RESUME_FRESHNESS_MS, type StartupDecisionInput } from '../session-recovery.js'
 
-const baseLoad = () => ({ hasContent: true, status: 'active' as const, updatedAt: Date.now() })
+const CWD = '/proj/a'
 
-describe('session-recovery: decideStartupSession (B3 auto-resume)', () => {
-  it('resumes a recent interrupted session with content', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: false, load: baseLoad,
-    })
-    assert.equal(d.resumed, true)
-    assert.equal(d.sessionId, 'sess-1')
+function input(overrides: Partial<StartupDecisionInput> = {}): StartupDecisionInput {
+  return {
+    lastSessionId: 'sess-1',
+    now: Date.now(),
+    freshnessMs: RESUME_FRESHNESS_MS,
+    forceNew: false,
+    resume: false,
+    disableAutoResume: false,
+    currentCwd: CWD,
+    // Default: a crashed-mid-flight session in the same cwd (active, no cleanExit).
+    load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD, cleanExit: false }),
+    ...overrides,
+  }
+}
+
+describe('session-recovery: decideStartupSession (R1 fresh-by-default)', () => {
+  it('default startup after a clean exit mints a fresh session', () => {
+    const d = decideStartupSession(input({
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD, cleanExit: true }),
+    }))
+    assert.equal(d.resumed, false)
+    assert.equal(d.sessionId, null)
+  })
+
+  it('default startup with no clean-exit marker but completed status is fresh', () => {
+    for (const status of ['completed', 'archived'] as const) {
+      const d = decideStartupSession(input({
+        load: () => ({ hasContent: true, status, updatedAt: Date.now(), cwd: CWD }),
+      }))
+      assert.equal(d.resumed, false, `status=${status}`)
+    }
   })
 
   it('mints new when there is no previous session', () => {
-    const d = decideStartupSession({
-      lastSessionId: null, now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: false, load: baseLoad,
-    })
+    const d = decideStartupSession(input({ lastSessionId: null }))
     assert.equal(d.resumed, false)
     assert.equal(d.sessionId, null)
   })
 
   it('mints new when previous session has no replayable content', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: false,
-      load: () => ({ hasContent: false, status: 'active' }),
-    })
+    const d = decideStartupSession(input({
+      load: () => ({ hasContent: false, status: 'active', cwd: CWD }),
+    }))
+    assert.equal(d.resumed, false)
+  })
+
+  it('explicit --continue/--resume returns to the last session regardless of clean exit', () => {
+    const d = decideStartupSession(input({
+      resume: true,
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD, cleanExit: true }),
+    }))
+    assert.equal(d.resumed, true)
+    assert.equal(d.sessionId, 'sess-1')
+  })
+
+  it('explicit resume honors a completed session too', () => {
+    const d = decideStartupSession(input({
+      resume: true,
+      load: () => ({ hasContent: true, status: 'completed', updatedAt: Date.now(), cwd: CWD, cleanExit: true }),
+    }))
+    assert.equal(d.resumed, true)
+    assert.equal(d.sessionId, 'sess-1')
+  })
+
+  it('crash recovery: active session with no clean exit in same cwd is silently resumed', () => {
+    const d = decideStartupSession(input())
+    assert.equal(d.resumed, true)
+    assert.equal(d.sessionId, 'sess-1')
+    assert.match(d.reason, /crash recovery/)
+  })
+
+  it('never resumes a session belonging to another cwd (even with --continue)', () => {
+    const d = decideStartupSession(input({
+      resume: true,
+      currentCwd: '/proj/b',
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: '/proj/a', cleanExit: false }),
+    }))
+    assert.equal(d.resumed, false)
+    assert.match(d.reason, /another cwd/)
+  })
+
+  it('does not crash-resume sessions beyond the freshness window', () => {
+    const d = decideStartupSession(input({
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now() - RESUME_FRESHNESS_MS - 1, cwd: CWD, cleanExit: false }),
+    }))
+    assert.equal(d.resumed, false)
+  })
+
+  it('RIVET_NEW_SESSION (forceNew) always mints fresh, even with crash state', () => {
+    const d = decideStartupSession(input({ forceNew: true }))
     assert.equal(d.resumed, false)
     assert.equal(d.sessionId, null)
   })
 
-  it('does not resume completed/archived sessions', () => {
-    for (const status of ['completed', 'archived'] as const) {
-      const d = decideStartupSession({
-        lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-        forceNew: false, disableAutoResume: false,
-        load: () => ({ hasContent: true, status }),
-      })
-      assert.equal(d.resumed, false, `status=${status}`)
-    }
-  })
+  it('RIVET_NO_AUTO_RESUME suppresses crash recovery but explicit resume still works', () => {
+    const suppressed = decideStartupSession(input({ disableAutoResume: true }))
+    assert.equal(suppressed.resumed, false)
 
-  it('does not resume stale sessions beyond the freshness window', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: false,
-      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now() - RESUME_FRESHNESS_MS - 1 }),
-    })
-    assert.equal(d.resumed, false)
-  })
-
-  it('RIVET_NEW_SESSION forces a fresh session', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: true, disableAutoResume: false, load: baseLoad,
-    })
-    assert.equal(d.resumed, false)
-    assert.equal(d.sessionId, null)
-  })
-
-  it('RIVET_NO_AUTO_RESUME disables auto-resume', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: true, load: baseLoad,
-    })
-    assert.equal(d.resumed, false)
-    assert.equal(d.sessionId, null)
+    const explicit = decideStartupSession(input({ disableAutoResume: true, resume: true }))
+    assert.equal(explicit.resumed, true)
+    assert.equal(explicit.sessionId, 'sess-1')
   })
 
   it('mints new when the previous session is unreadable', () => {
-    const d = decideStartupSession({
-      lastSessionId: 'sess-1', now: Date.now(), freshnessMs: RESUME_FRESHNESS_MS,
-      forceNew: false, disableAutoResume: false, load: () => null,
-    })
+    const d = decideStartupSession(input({ load: () => null }))
     assert.equal(d.resumed, false)
+  })
+
+  it('crash recovery tolerates legacy sessions without a cwd field (no cross-cwd info)', () => {
+    const d = decideStartupSession(input({
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cleanExit: false }),
+    }))
+    assert.equal(d.resumed, true)
   })
 })

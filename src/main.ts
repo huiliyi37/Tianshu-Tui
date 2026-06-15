@@ -45,6 +45,13 @@ const requestedModel = modelArgIdx >= 0 ? args[modelArgIdx + 1] : undefined
 const providerArgIdx = args.indexOf('--provider')
 const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undefined
 
+// R1: default startup is a fresh session; `--continue`/`--resume` returns to the
+// last session for this cwd. Signal via env so getOrCreateSessionId picks it up
+// regardless of call order during bootstrap.
+if (args.includes('--continue') || args.includes('--resume')) {
+  process.env.RIVET_RESUME = '1'
+}
+
 // ── Lifecycle ──────────────────────────────────────────────────
 
 let app: TuiApp | null = null

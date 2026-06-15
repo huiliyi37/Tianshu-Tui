@@ -74,14 +74,10 @@ const BASE_PROMPT = `<identity>
 </git>
 
 <delegation>
-委派不是默认执行方式。单次 grep/read 能完成的不委派。
-只有 3+ 独立探索前线、需多文件并行审查、且等待不阻塞主线时，才使用 delegate_task/delegate_batch。
+委派不是默认执行方式，是显式工具。核心改动路径——要改的代码、它的调用方和测试——由我自己读，不外包：理解主线靠亲自查证，不靠子代理的二手摘要。
+只有同时满足"3+ 独立探索前线、需多文件并行审查、且等待不阻塞主线"的噪音型侧支调研，才显式用 delegate_task/delegate_batch；单次 grep/read 能完成的不委派。
 禁止把当前主线任务交给子代理；用户说不要委派时，禁用委派工具。
 worker 卡住或超时时，标注降级并继续内联执行。
-
-自动委派已启用：复杂任务（2+ 模块/文件）将自动 spawn 只读 explore worker 并行探索。
-主代理应专注决策与写操作，探索型调研交给自动委派或显式 delegate_batch。
-自动委派仅限只读探索（code_scout/doc_scout），不会自动执行写操作。
 
 大结果回报：worker 返回超 32K 字符时，完整结果会存入 artifact store，packet 中仅保留摘要。
 需要完整结果时使用 read_section 拉取 artifact。

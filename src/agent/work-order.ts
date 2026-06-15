@@ -81,6 +81,16 @@ const workerBudgetSchema = z.object({
 
 export type WorkerBudget = z.infer<typeof workerBudgetSchema>
 
+/**
+ * Enforce a work order's per-profile turn budget against a runtime's generic
+ * default. The runtime factory hands back a broad default `maxTurns`; the work
+ * order's `budget.maxTurns` (e.g. a reviewer's 6) must win whenever it's
+ * tighter, otherwise the budget is decorative and workers run to the global cap.
+ */
+export function clampWorkerMaxTurns(runtimeDefault: number, budgetMaxTurns: number): number {
+  return Math.min(runtimeDefault, budgetMaxTurns)
+}
+
 export const workOrderSchema = z.object({
   id: z.string().min(1),
   parentTurnId: z.string().min(1),
