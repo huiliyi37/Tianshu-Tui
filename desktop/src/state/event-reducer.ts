@@ -113,13 +113,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
-      // Do NOT close private_thinkingOpen — GLM alternates reasoning_content
-      // and content within the same stream, so interleaved deltas are normal.
-      // Closing the other channel on every delta fragments the output into
-      // many small blocks, making the reply appear duplicated/overlapping.
       if (next.private_textOpen && next.blocks.length > 0) {
+        // Append to the existing assistant block (fast path).
         next.blocks[next.blocks.length - 1]!.text += text
       } else if (text) {
+        // Starting a new assistant block — close any open thinking block so
+        // a subsequent thinking_delta creates a fresh block instead of
+        // appending to the old one. This preserves correct ordering while
+        // avoiding the cross-close fragmentation bug on the append path.
+        next.private_thinkingOpen = false
         next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
         next.private_textOpen = true
       }
@@ -127,10 +129,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     case 'thinking_delta': {
       const text = String(ev.data.text ?? '')
-      // Same: do NOT close private_textOpen.
       if (next.private_thinkingOpen && next.blocks.length > 0) {
         next.blocks[next.blocks.length - 1]!.text += text
       } else if (text) {
+        next.private_textOpen = false
         next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
         next.private_thinkingOpen = true
       }
@@ -163,10 +165,16 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.phase = String(ev.data.phase ?? '')
       return next
     case 'turn_complete': {
-      // T1 — turn boundary marker. Carries usage so the UI can show a subtle
-      // "turn N · ~T tokens" divider between turns.
       next.private_textOpen = false
       next.private_thinkingOpen = false
+      // Filter empty turns: skip the divider if no content block precedes it.
+      // Agent internal retries (TTSR, thinking-retry, veto) emit turn_complete
+      // without any text_delta/tool_use — rendering these as visible "第 N 轮"
+      // dividers creates visual noise with empty gaps.
+      const lastBlock = next.blocks[next.blocks.length - 1]
+      if (!lastBlock || lastBlock.kind === 'turn') {
+        return next
+      }
       const usage = (ev.data.usage as Record<string, unknown> | undefined) ?? {}
       const totalTokens = Number(
         usage.totalTokens ?? usage.total_tokens ?? usage.total ?? 0,
