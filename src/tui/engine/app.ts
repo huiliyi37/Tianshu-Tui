@@ -24,6 +24,7 @@ import { ToolGroupController } from './tool-group-controller.js'
 import { OverlayController } from './overlay-controller.js'
 import { ApprovalIntentController } from './approval-intent-controller.js'
 import { MetricsGlanceController } from './metrics-glance-controller.js'
+import { StreamRenderController } from './stream-render-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -202,12 +203,8 @@ export class TuiApp {
   private liveTeamModel: TeamPanelModel | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
-  /** 渲染 ticker（streaming/thinking 时 120ms 驱动 spinner，idle 停止） */
-  private ticker: ReturnType<typeof setInterval> | null = null
-  /** 单调递增的渲染 tick（spinner 帧） */
-  private tick = 0
-  /** 最近收到 token/输出的时间戳（stall 检测） */
-  private lastActivityMs = 0
+  /** W-B3: stream render state manager (ticker/tick/lastActivity/header) */
+  private streamRenderController = new StreamRenderController()
   /** W-B6: metrics + glance + domain state manager */
   private metricsGlanceController = new MetricsGlanceController()
   /** todo 列表访问器（main-ansi 读 TodoStore 单例） */
@@ -218,8 +215,6 @@ export class TuiApp {
   private writeBatcher: WriteBatcher
   /** Stream renderer: incremental markdown commit + live tail (W1) */
   private streamRenderer: StreamRenderer
-  /** 本段流式输出是否已 commit 过 `▍ Rivet` header */
-  private assistantHeaderDone = false
 
   // Agent callbacks (aligned to loop-types.ts AgentCallbacks)
   readonly callbacks: AgentCallbacks
@@ -345,12 +340,12 @@ export class TuiApp {
           // 与 streamRenderer pending 若不清，会把上一轮文字追加进新轮输出。
           this.blockWriter.discard()
           this.streamRenderer.reset()
-          this.assistantHeaderDone = false
+          this.streamRenderController.assistantHeaderDone = false
           this.agentBusy = true
         }
         // Reset turn timer for the new turn
         this.state.turnStartMs = Date.now()
-        this.lastActivityMs = Date.now()
+        this.streamRenderController.lastActivityMs = Date.now()
         this.onSubmitCallback?.(submitText)
       },
     })
@@ -362,7 +357,7 @@ export class TuiApp {
     this.streamRenderer = new StreamRenderer({
       commit: (ansi) => {
         this.commitAbove(() => {
-          if (!this.assistantHeaderDone) {
+          if (!this.streamRenderController.assistantHeaderDone) {
             this.commitAssistantHeader()
           }
           this.commit.write({ text: ansi, trailingNewline: true })
@@ -1013,9 +1008,9 @@ export class TuiApp {
 
   /** 销毁资源 */
   dispose(): void {
-    if (this.ticker) {
-      clearInterval(this.ticker)
-      this.ticker = null
+    if (this.streamRenderController.ticker) {
+      clearInterval(this.streamRenderController.ticker)
+      this.streamRenderController.ticker = null
     }
     // 关闭 bracketed paste，恢复终端默认
     this.stdout.write('\x1B[?2004l')
@@ -1039,10 +1034,10 @@ export class TuiApp {
     this.commitUserPrompt(text)
     this.blockWriter.discard()
     this.streamRenderer.reset()
-    this.assistantHeaderDone = false
+    this.streamRenderController.assistantHeaderDone = false
     this.agentBusy = true
     this.state.turnStartMs = Date.now()
-    this.lastActivityMs = Date.now()
+    this.streamRenderController.lastActivityMs = Date.now()
     this.onSubmitCallback?.(text)
   }
 
@@ -1084,24 +1079,24 @@ export class TuiApp {
   /** streaming/thinking/analyzing/waiting 时启动 120ms ticker，idle 停止 */
   private updateTicker(): void {
     const active = this.state.phase !== 'idle'
-    if (active && !this.ticker) {
-      this.ticker = setInterval(() => {
-        this.tick++
-        if (this.metricsGlanceController.domainSyncProvider && this.tick % 8 === 0) {
+    if (active && !this.streamRenderController.ticker) {
+      this.streamRenderController.ticker = setInterval(() => {
+        this.streamRenderController.tick++
+        if (this.metricsGlanceController.domainSyncProvider && this.streamRenderController.tick % 8 === 0) {
           this.syncSessionStarDomainFromAgent()
         }
         this.renderLive()
       }, 120)
-      this.ticker.unref?.()
-    } else if (!active && this.ticker) {
-      clearInterval(this.ticker)
-      this.ticker = null
+      this.streamRenderController.ticker.unref?.()
+    } else if (!active && this.streamRenderController.ticker) {
+      clearInterval(this.streamRenderController.ticker)
+      this.streamRenderController.ticker = null
     }
   }
 
   /** 记录 token/输出活动时间（spinner stall 检测） */
   private markActivity(): void {
-    this.lastActivityMs = Date.now()
+    this.streamRenderController.lastActivityMs = Date.now()
   }
 
   // ── W4b: 输入辅助 ────────────────────────────────────────────
@@ -1159,7 +1154,7 @@ export class TuiApp {
     this.commit.write({
       text: `${color('▍', this.theme.assistantColor, { bold: true })} ${color('Rivet', this.theme.assistantColor, { dim: true })}`,
     })
-    this.assistantHeaderDone = true
+    this.streamRenderController.assistantHeaderDone = true
   }
 
   /** 手动设置 streaming 状态 */
@@ -1533,7 +1528,7 @@ export class TuiApp {
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
     this.streamRenderer.finalize()
-    this.assistantHeaderDone = false
+    this.streamRenderController.assistantHeaderDone = false
 
     // ── W3: 累计 usage → cache hit / context% / cost ────────────
     this.accumulateUsage(usage)
@@ -1668,7 +1663,7 @@ export class TuiApp {
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
     this.blockWriter.discard()
-    this.assistantHeaderDone = false
+    this.streamRenderController.assistantHeaderDone = false
     // 统一回收 run 本地状态（pendingTools/toolAccumulator/fleet/liveTeamModel），
     // 与 handleError 同口径，防止中断后委派工具不到终态导致 records 单调泄露。
     this.resetRunLocalState()
@@ -1704,9 +1699,9 @@ export class TuiApp {
     const lines: LiveRegionLine[] = []
 
     // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
-    const stalled = this.lastActivityMs > 0 && Date.now() - this.lastActivityMs > 10_000
+    const stalled = this.streamRenderController.lastActivityMs > 0 && Date.now() - this.streamRenderController.lastActivityMs > 10_000
     const spinnerLine = formatSpinnerStatus({
-      tick: this.tick,
+      tick: this.streamRenderController.tick,
       phase: this.state.phase,
       elapsedMs: Date.now() - this.state.turnStartMs,
       stalled,
@@ -2052,10 +2047,10 @@ export class TuiApp {
       this.commitUserPrompt(input)
       this.blockWriter.discard()
       this.streamRenderer.reset()
-      this.assistantHeaderDone = false
+      this.streamRenderController.assistantHeaderDone = false
       this.agentBusy = true
       this.state.turnStartMs = Date.now()
-      this.lastActivityMs = Date.now()
+      this.streamRenderController.lastActivityMs = Date.now()
       this.onSubmitCallback?.(input)
     }
   }
