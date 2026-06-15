@@ -65,7 +65,7 @@ export default defineConfig({
   dts: false,
   clean: true,
   shims: true,
-  treeshake: true,
+  treeshake: false,
   external: ['esbuild', /^node:/],
   esbuildPlugins: [optionalNativeModulePlugin],
   banner: {
