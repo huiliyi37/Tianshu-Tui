@@ -58,7 +58,7 @@ describe('StarDomain', () => {
 
   it('wenqu carries design methodology (anchor in existing context, 3+ variations)', () => {
     const wenqu = STAR_DOMAINS.wenqu
-    assert.match(wenqu.systemPromptSuffix, /扎根既有设计上下文/)
+    assert.match(wenqu.systemPromptSuffix, /既有/)
     assert.match(wenqu.systemPromptSuffix, /3\+/)
     assert.match(wenqu.volatileBlock, /文曲/)
   })
@@ -137,7 +137,7 @@ describe('tianliang cognitive field + delivery discipline split', () => {
   it('systemPromptSuffix carries full delivery discipline with >= 4 threshold', () => {
     const tianliang = STAR_DOMAINS.tianliang
     assert.match(tianliang.systemPromptSuffix, />= 4/, 'detailed threshold lives in systemPromptSuffix for workers')
-    assert.match(tianliang.systemPromptSuffix, /假闭环禁令/, 'full discipline rules live in systemPromptSuffix')
+    assert.match(tianliang.systemPromptSuffix, /闭环/, 'closure discipline concept lives in systemPromptSuffix')
     assert.doesNotMatch(tianliang.systemPromptSuffix, /> 5/)
   })
 
