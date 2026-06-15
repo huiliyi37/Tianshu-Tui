@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ApprovalMode, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolBlock } from '../components/ToolBlock'
+import { Markdown } from '../components/Markdown'
+import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { RewindOverlay } from '../components/RewindOverlay'
+import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
+import { loadThemePref, setThemePref } from '../lib/theme'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -31,7 +35,6 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
-  const lastEscAt = useRef(0)
   const endRef = useRef<HTMLDivElement>(null)
   const busy = session.status === 'running'
   const autonomous = isAutonomous(session.approvalMode)
@@ -40,18 +43,24 @@ export function ThreadView(props: {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [view.blocks.length])
 
-  const submit = () => {
-    const text = input.trim()
-    if (!text) return
-    // T3 — while a turn is running, Enter queues steering guidance (injected at
-    // the next tool boundary) instead of erroring; idle starts a fresh turn.
-    // The user turn / steer is echoed back as an event, so no optimistic render.
-    if (busy) onSteer(text)
-    else onSend(text)
-    setInput('')
-  }
-
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
+
+  // D3 — composer slash commands: only desktop-actionable items (no agent slashes).
+  const commands = useMemo<ComposerCommand[]>(() => [
+    { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
+    { name: '/supervise', desc: '监督档 · 每步确认', run: () => onSetApprovalMode(levelToMode('supervised')) },
+    { name: '/default', desc: '默认档 · 低风险自动', run: () => onSetApprovalMode(levelToMode('default')) },
+    { name: '/autonomous', desc: '自治档 · 项目内全自动', run: () => onSetApprovalMode(levelToMode('autonomous')) },
+    {
+      name: '/theme',
+      desc: '切换主题 (system→light→dark)',
+      run: () => {
+        const order = ['system', 'light', 'dark'] as const
+        const cur = loadThemePref()
+        setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
+      },
+    },
+  ], [onSetApprovalMode])
 
   return (
     <div className="thread">
@@ -99,42 +108,20 @@ export function ThreadView(props: {
       <TaskList items={view.todos} />
       <DelegationTree nodes={view.delegation} />
 
-      <div className="composer">
-        <textarea
-          value={input}
-          placeholder={busy
-            ? '运行中 · Enter 插入引导（下一步生效）'
-            : '和天枢对话…  (Enter 发送, Shift+Enter 换行)'}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              submit()
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              const now = Date.now()
-              if (input.trim()) {
-                // Has text: first ESC clears input
-                setInput('')
-              } else if (now - lastEscAt.current < 400) {
-                // Double-ESC → rewind
-                lastEscAt.current = 0
-                setShowRewind(true)
-              } else {
-                lastEscAt.current = now
-              }
-            }
-          }}
-        />
-        {busy ? (
-          <div className="composer-actions">
-            <button className="btn ghost" onClick={submit} disabled={!input.trim()}>引导</button>
-            <button className="btn ghost danger" onClick={onAbort}>停止</button>
-          </div>
-        ) : (
-          <button className="btn" onClick={submit} disabled={!input.trim()}>发送</button>
-        )}
-      </div>
+      <Composer
+        sessionId={session.id}
+        value={input}
+        onChange={setInput}
+        busy={busy}
+        onSubmit={(text) => {
+          if (busy) onSteer(text)
+          else onSend(text)
+          setInput('')
+        }}
+        onAbort={onAbort}
+        onDoubleEscape={() => setShowRewind(true)}
+        commands={commands}
+      />
       {showRewind && (
         <RewindOverlay
           sessionId={session.id}
@@ -155,7 +142,7 @@ function Block({ block }: { block: ConvoBlock }) {
     return (
       <div className="msg user">
         <div className="msg-role">你</div>
-        <div className="msg-body">{block.text}</div>
+        <div className="msg-body"><Markdown source={block.text} /></div>
       </div>
     )
   }
@@ -197,7 +184,7 @@ function Block({ block }: { block: ConvoBlock }) {
     return (
       <div className="msg steer">
         <div className="msg-role">引导 · 已排队</div>
-        <div className="msg-body">{block.text}</div>
+        <div className="msg-body"><Markdown source={block.text} /></div>
       </div>
     )
   }
@@ -228,7 +215,7 @@ function Block({ block }: { block: ConvoBlock }) {
   return (
     <div className="msg assistant">
       <div className="msg-role">天枢</div>
-      <div className="msg-body">{block.text}</div>
+      <div className="msg-body"><Markdown source={block.text} /></div>
     </div>
   )
 }

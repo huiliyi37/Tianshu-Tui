@@ -162,6 +162,13 @@ export function fetchEvents(id: string, since: number): Promise<{ events: Sessio
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }
 
+/** D2 — @file mention picker: ranked project files under the session cwd. */
+export async function listFiles(id: string, query: string, limit = 50): Promise<string[]> {
+  const qs = `q=${encodeURIComponent(query)}&limit=${limit}`
+  const { files } = await apiGet<{ files: string[] }>(`/sessions/${id}/files?${qs}`)
+  return files
+}
+
 export function answerApproval(
   id: string,
   requestId: string,

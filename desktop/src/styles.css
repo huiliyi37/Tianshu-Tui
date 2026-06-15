@@ -413,6 +413,53 @@ body {
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
 .msg.error { color: var(--error); }
 
+/* ── Conversation Markdown (D1) ───────────────────────────────────── */
+/* .msg sets pre-wrap for plain blocks; Markdown subtree resets to normal flow
+   so block elements (lists/tables/headings) lay out correctly. Code keeps pre. */
+.md { white-space: normal; color: inherit; font-size: var(--text-base); line-height: var(--leading); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 var(--md-gap); }
+.md h1, .md h2, .md h3, .md h4, .md h5 { margin: var(--space-4) 0 var(--space-2); line-height: 1.3; color: var(--text-strong); font-weight: var(--weight-semibold); }
+.md h1 { font-size: var(--text-xl); }
+.md h2 { font-size: var(--text-lg); }
+.md h3 { font-size: var(--text-md); }
+.md h4, .md h5 { font-size: var(--text-base); }
+.md ul, .md ol { margin: 0 0 var(--md-gap); padding-left: var(--space-5); }
+.md li { margin: 2px 0; }
+.md li > ul, .md li > ol { margin: 2px 0; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md blockquote { margin: 0 0 var(--md-gap); padding: var(--space-1) var(--space-3); border-left: var(--md-quote-bar) solid var(--border-strong); color: var(--muted); }
+.md hr { border: none; border-top: 1px solid var(--border); margin: var(--space-4) 0; }
+.md strong { color: var(--text-strong); font-weight: var(--weight-semibold); }
+.md table { border-collapse: collapse; margin: 0 0 var(--md-gap); font-size: var(--text-sm); display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: var(--space-1) var(--space-3); text-align: left; }
+.md th { background: var(--panel-2); color: var(--text-strong); font-weight: var(--weight-medium); }
+.md :not(pre) > code {
+  font-family: var(--font-mono); font-size: 0.92em; background: var(--panel-3);
+  padding: 1px 5px; border-radius: var(--md-code-radius); border: 1px solid var(--border);
+}
+.md pre {
+  margin: 0 0 var(--md-gap); padding: var(--space-3); background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: var(--radius-md); overflow-x: auto; white-space: pre;
+}
+.md pre code { font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.5; background: none; border: none; padding: 0; }
+.md img { max-width: 100%; }
+.md input[type="checkbox"] { margin-right: var(--space-1); }
+
+/* highlight.js token colors mapped to design tokens (auto dark/light via vars). */
+.md .hljs-comment, .md .hljs-quote { color: var(--faint); font-style: italic; }
+.md .hljs-keyword, .md .hljs-selector-tag, .md .hljs-literal, .md .hljs-type { color: var(--accent); }
+.md .hljs-string, .md .hljs-meta .hljs-string { color: var(--success); }
+.md .hljs-number, .md .hljs-symbol, .md .hljs-bullet { color: var(--warning); }
+.md .hljs-title, .md .hljs-section, .md .hljs-name, .md .hljs-built_in { color: var(--info); }
+.md .hljs-attr, .md .hljs-attribute, .md .hljs-variable, .md .hljs-template-variable { color: var(--text-strong); }
+.md .hljs-regexp, .md .hljs-link, .md .hljs-addition { color: var(--success); }
+.md .hljs-deletion { color: var(--error); }
+.md .hljs-emphasis { font-style: italic; }
+.md .hljs-strong { font-weight: var(--weight-semibold); }
+
 /* Star-domain course-correction card (R5) — selective externalization of
    "stuck → nudge → re-route". Deliberately quiet: distinct but not alarming. */
 .decision-shift {
@@ -491,7 +538,7 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; }
+.composer { position: relative; border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; }
 .composer textarea {
   flex: 1; background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px;
@@ -499,6 +546,24 @@ body {
 }
 .composer-actions { display: flex; flex-direction: column; gap: 6px; }
 .btn.ghost.danger { color: var(--error); }
+
+/* @file mention / slash command autocomplete (D2/D3) — floats above composer. */
+.composer-suggest {
+  position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px);
+  margin: 0; padding: var(--space-1); list-style: none;
+  max-height: 260px; overflow-y: auto; z-index: var(--z-modal);
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+}
+.composer-suggest .suggest-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); cursor: pointer; color: var(--text);
+}
+.composer-suggest .suggest-item.active { background: var(--accent-soft); }
+.composer-suggest .suggest-glyph { color: var(--accent); font-family: var(--font-mono); }
+.composer-suggest .suggest-path { font-family: var(--font-mono); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-suggest .suggest-desc { margin-left: auto; color: var(--muted); font-size: var(--text-xs); }
 
 /* T3 — queued mid-run guidance echo. Distinct from a normal user turn. */
 .msg.steer .msg-role { color: var(--accent); }

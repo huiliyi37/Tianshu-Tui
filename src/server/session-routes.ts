@@ -9,6 +9,7 @@
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
  *   POST   /sessions/:id/abort                         abort
  *   GET    /sessions/:id/events?since=N                replay tail (B3)
+ *   GET    /sessions/:id/files?q=&limit=                @file mention picker (D2)
  *   GET    /sessions/:id/stream?since=N                live SSE (B3)
  *   POST   /sessions/:id/interventions/:rid/answer     resolve approval/intent (B2)
  *   GET    /sessions/:id/artifacts                     list (B4)
@@ -22,6 +23,7 @@ import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
+import { listProjectFiles, rankFiles } from './file-list.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
@@ -162,6 +164,18 @@ export function buildSessionRoutes(
       const result = manager.getEvents(params!.id!, since)
       if (!result) return { status: 404, body: { error: 'Session not found' } }
       return { status: 200, body: result }
+    }, apiToken),
+
+    // @file mention picker (D2) — enumerate project files under the session's
+    // cwd, ranked by an optional ?q substring/fuzzy query. Scoped to cwd, never
+    // follows symlinks, honors gitignore + silent-layer filters. Bearer-gated.
+    'GET /sessions/:id/files': withAuth(async (_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const q = typeof params?.q === 'string' ? params.q : ''
+      const limit = Math.min(Math.max(Number(params?.limit ?? 50) || 50, 1), 200)
+      const all = await listProjectFiles(rec.cwd)
+      return { status: 200, body: { files: rankFiles(all, q, limit) } }
     }, apiToken),
 
     'GET /sessions/:id/stream': withAuth((_body, params, _headers, res) => {

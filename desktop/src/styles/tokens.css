@@ -45,6 +45,11 @@
   /* Z-index */
   --z-modal: 50;
   --z-toast: 60;
+
+  /* Markdown / code typography (consumed by .md-* in styles.css) */
+  --md-gap: var(--space-3);
+  --md-code-radius: var(--radius-sm);
+  --md-quote-bar: 3px;
 }
 
 /* ── Dark (default) ─────────────────────────────────────────────── */
@@ -64,10 +69,11 @@
   --muted: #989aa6;
   --faint: #6c6e7a;
 
-  --accent: #7c8cff;
-  --accent-hover: #95a2ff;
-  --accent-fg: #0d0d10;
-  --accent-soft: rgba(124, 140, 255, 0.14);
+  /* Antigravity 2.0 / Codex cool azure — restrained, not periwinkle-purple. */
+  --accent: #5aa9ff;
+  --accent-hover: #7dbcff;
+  --accent-fg: #0a0f16;
+  --accent-soft: rgba(90, 169, 255, 0.14);
 
   --success: #43c463;
   --success-soft: rgba(67, 196, 99, 0.14);
@@ -100,10 +106,11 @@
   --muted: #6a6a76;
   --faint: #9a9aa6;
 
-  --accent: #5462f0;
-  --accent-hover: #4150e0;
+  /* Antigravity 2.0 / Codex cool azure — restrained, not indigo-purple. */
+  --accent: #1f6feb;
+  --accent-hover: #1a5fd0;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(84, 98, 240, 0.12);
+  --accent-soft: rgba(31, 111, 235, 0.10);
 
   --success: #1a7f37;
   --success-soft: rgba(26, 127, 55, 0.12);
