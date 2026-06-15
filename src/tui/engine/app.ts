@@ -22,6 +22,7 @@ import { WriteBatcher } from './write-batcher.js'
 import { StreamRenderer } from './stream-renderer.js'
 import { ToolGroupController } from './tool-group-controller.js'
 import { OverlayController } from './overlay-controller.js'
+import { ApprovalIntentController } from './approval-intent-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -191,6 +192,8 @@ export class TuiApp {
   private toolGroupController = new ToolGroupController()
   /** W-B2: overlay navigation + data providers + exec callbacks */
   private overlayController = new OverlayController()
+  /** W-B4: approval + intent pending state manager */
+  private approvalIntentController = new ApprovalIntentController()
   /** 并行子代理舰队读模型（由 onDelegationActivity 事件流驱动） */
   private fleet = new FleetRegistry()
   /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
@@ -428,7 +431,7 @@ export class TuiApp {
     this.input.onAnyKey((key) => {
       // ── Approval mode short-circuit (顶部，先于一切普通输入) ──
       // 审批态只解析审批动作，绝不落入 slash / inputLine —— 杜绝 Enter 双触发
-      if (this.input.getMode() === 'approval' && this.approvalPending) {
+      if (this.input.getMode() === 'approval' && this.approvalIntentController.approvalPending) {
         const c = key.char.toLowerCase()
         if (key.name === 'ctrl_c') {
           this.resolveApproval(false)
@@ -438,9 +441,9 @@ export class TuiApp {
           else if (key.name === 'escape' || c === 'n') this.resolveApproval(false)
           else if (c === 'e') {
             // Enter edit mode — populate input line with formatted JSON
-            this.approvalEditMode = true
-            this.approvalEditError = ''
-            this.inputLine.setValue(JSON.stringify(this.approvalPending.input, null, 2))
+            this.approvalIntentController.approvalEditMode = true
+            this.approvalIntentController.approvalEditError = ''
+            this.inputLine.setValue(JSON.stringify(this.approvalIntentController.approvalPending.input, null, 2))
             this.input.setMode('input')
             this.renderLive()
           }
@@ -452,9 +455,9 @@ export class TuiApp {
       // ── Intent preview mode short-circuit ──
       // 意图闸是「先确认再动手」的安全机制，旧实现 onIntentPreview 永远 'continue'
       // 等于旁路了这道闸。这里把按键解析成 IntentPreviewAction，绝不落入普通输入。
-      if (this.input.getMode() === 'intent' && this.intentPending) {
+      if (this.input.getMode() === 'intent' && this.approvalIntentController.intentPending) {
         const c = key.char.toLowerCase()
-        const hasAlt = (this.intentPending.intent.alternatives?.length ?? 0) > 0
+        const hasAlt = (this.approvalIntentController.intentPending.intent.alternatives?.length ?? 0) > 0
         if (key.name === 'ctrl_c') {
           this.resolveIntent('veto')
           // 继续走下方全局 ctrl_c（abort / exit）
@@ -470,16 +473,16 @@ export class TuiApp {
       // ── Approval edit mode short-circuit ──
       // 编辑工具入参模式：Enter 解析 JSON → approve with editedInput，
       // Esc 回到审批 y/n 提示。其余键落入 InputLine 正常编辑。
-      if (this.approvalEditMode && this.approvalPending) {
+      if (this.approvalIntentController.approvalEditMode && this.approvalIntentController.approvalPending) {
         if (key.name === 'ctrl_c') {
           this.resolveApproval(false)
-          this.approvalEditMode = false
-          this.approvalEditError = ''
+          this.approvalIntentController.approvalEditMode = false
+          this.approvalIntentController.approvalEditError = ''
           // 继续走下方全局 ctrl_c（abort / exit）
         } else if (key.name === 'escape') {
           // Back to approval mode
-          this.approvalEditMode = false
-          this.approvalEditError = ''
+          this.approvalIntentController.approvalEditMode = false
+          this.approvalIntentController.approvalEditError = ''
           this.inputLine.setValue('')
           this.input.setMode('approval')
           this.renderLive()
@@ -488,12 +491,12 @@ export class TuiApp {
           // Try to parse edited JSON
           try {
             const edited = JSON.parse(this.inputLine.value)
-            this.approvalEditMode = false
-            this.approvalEditError = ''
+            this.approvalIntentController.approvalEditMode = false
+            this.approvalIntentController.approvalEditError = ''
             this.inputLine.setValue('')
             this.resolveApproval({ approved: true, editedInput: edited })
           } catch (err) {
-            this.approvalEditError = `Invalid JSON: ${(err as Error).message}`
+            this.approvalIntentController.approvalEditError = `Invalid JSON: ${(err as Error).message}`
             this.renderLive()
           }
           return
@@ -688,9 +691,9 @@ export class TuiApp {
   // ── Approval resolution ─────────────────────────────────────
 
   private resolveApproval(result: ApprovalResult | boolean): void {
-    if (!this.approvalPending) return
-    this.approvalPending.resolve(result)
-    this.approvalPending = null
+    if (!this.approvalIntentController.approvalPending) return
+    this.approvalIntentController.approvalPending.resolve(result)
+    this.approvalIntentController.approvalPending = null
     this.input.setMode('input')
     this.renderLive()
   }
@@ -698,9 +701,9 @@ export class TuiApp {
   // ── Intent preview resolution ───────────────────────────────
 
   private resolveIntent(action: IntentPreviewAction): void {
-    if (!this.intentPending) return
-    this.intentPending.resolve(action)
-    this.intentPending = null
+    if (!this.approvalIntentController.intentPending) return
+    this.approvalIntentController.intentPending.resolve(action)
+    this.approvalIntentController.intentPending = null
     this.input.setMode('input')
     this.renderLive()
   }
@@ -1293,28 +1296,7 @@ export class TuiApp {
     }
   }
 
-  // ── Approval state ──────────────────────────────────────────
-
-  /** Pending approval request — when set, InputHandler switches to approval mode */
-  /** Pending approval request — when set, InputHandler switches to approval mode */
-  private approvalPending: {
-    id: string
-    name: string
-    input: Record<string, unknown>
-    resolve: (result: ApprovalResult | boolean) => void
-  } | null = null
-
-  /** Whether approval is in edit mode (user pressed 'e' to edit tool input) */
-  private approvalEditMode = false
-  /** Error message from JSON parse failure during edit mode */
-  private approvalEditError = ''
-
-  /** Pending intent preview — when set, InputHandler switches to intent mode */
-  /** Pending intent preview — when set, InputHandler switches to intent mode */
-  private intentPending: {
-    intent: IntentPreview
-    resolve: (action: IntentPreviewAction) => void
-  } | null = null
+  // ── Approval state (W-B4: fields moved to ApprovalIntentController) ───
 
   // ── Agent Event Handlers ─────────────────────────────────────
 
@@ -1693,8 +1675,8 @@ export class TuiApp {
     // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
     // 立即 settle，并复位输入模式。否则审批/意图态残留——后续按键被当确认解析、
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
-    if (this.approvalPending) { this.approvalEditMode = false; this.approvalEditError = ''; this.resolveApproval(false) }
-    if (this.intentPending) this.resolveIntent('veto')
+    if (this.approvalIntentController.approvalPending) { this.approvalIntentController.approvalEditMode = false; this.approvalIntentController.approvalEditError = ''; this.resolveApproval(false) }
+    if (this.approvalIntentController.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
@@ -1855,14 +1837,14 @@ export class TuiApp {
     }
 
     // 3. Approval prompt (when pending)
-    if (this.approvalPending) {
-      const p = this.approvalPending
-      if (this.approvalEditMode) {
+    if (this.approvalIntentController.approvalPending) {
+      const p = this.approvalIntentController.approvalPending
+      if (this.approvalIntentController.approvalEditMode) {
         // Edit mode: show edit header, InputLine contains the JSON
         lines.push({ text: ` ╭─ Edit Tool Input ───────────────────────────────` })
         lines.push({ text: ` │ Tool: ${p.name}` })
-        if (this.approvalEditError) {
-          lines.push({ text: ` │ ${color(`⚠ ${this.approvalEditError}`, this.theme.warning)}` })
+        if (this.approvalIntentController.approvalEditError) {
+          lines.push({ text: ` │ ${color(`⚠ ${this.approvalIntentController.approvalEditError}`, this.theme.warning)}` })
         }
         lines.push({ text: ` │ Edit the JSON below, then Enter to confirm:` })
         lines.push({ text: ` ╰─ Enter confirm  Esc back  Ctrl+C deny ─────────` })
@@ -1876,8 +1858,8 @@ export class TuiApp {
     }
 
     // 3a. Intent preview prompt (when pending) — 意图闸确认框
-    if (this.intentPending) {
-      const it = this.intentPending.intent
+    if (this.approvalIntentController.intentPending) {
+      const it = this.approvalIntentController.intentPending.intent
       const hasAlt = (it.alternatives?.length ?? 0) > 0
       lines.push({ text: ` ╭─ Intent Preview ─────────────────────────────────` })
       lines.push({ text: ` │ ${it.summary}` })
@@ -2046,7 +2028,7 @@ export class TuiApp {
       })
     }
     return new Promise((resolve) => {
-      this.approvalPending = { id, name, input, resolve }
+      this.approvalIntentController.approvalPending = { id, name, input, resolve }
       this.input.setMode('approval')
       this.setPhase('waiting')
       this.renderLive()
@@ -2055,7 +2037,7 @@ export class TuiApp {
 
   private handleIntentPreview(intent: IntentPreview): Promise<IntentPreviewAction> {
     return new Promise((resolve) => {
-      this.intentPending = { intent, resolve }
+      this.approvalIntentController.intentPending = { intent, resolve }
       this.input.setMode('intent')
       this.setPhase('waiting')
       this.renderLive()
