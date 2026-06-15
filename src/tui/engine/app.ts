@@ -21,6 +21,7 @@ import { InputLine } from './input-line.js'
 import { WriteBatcher } from './write-batcher.js'
 import { StreamRenderer } from './stream-renderer.js'
 import { ToolGroupController } from './tool-group-controller.js'
+import { OverlayController } from './overlay-controller.js'
 import { color } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
@@ -180,36 +181,16 @@ export class TuiApp {
   private resize: ResizeHandler
   private inputLine: InputLine
 
-  // Overlay 交互导航状态（pager 翻页 / palette 选中）。
-  // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
-  /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
-  private overlayData?: {
-    pagerContent?: () => PagerData
-    starmapEntries?: () => StarmapData
-    paletteCommands?: () => PaletteData
-    chronicleEntries?: () => ChronicleData
-    cockpitSnapshot?: () => CockpitSnapshot
-    rewindEntries?: () => RewindData
-    historySearchData?: () => HistorySearchData
-    tasksData?: () => TasksData
-  }
-  /** palette Enter 执行回调：参数为选中命令的 0-based 索引 */
-  private paletteExec?: (index: number) => void
-  /** rewind Enter 执行回调：参数为选中条目的 content */
-  private rewindExec?: (content: string) => void
-  /** chronicle Enter 执行回调：参数为选中会话 id（映射为 /resume 命令） */
-  private chronicleExec?: (id: string) => void
-  /** 当前 cockpit 聚焦面板（/cockpit <panel> 切换）。 */
-  private cockpitPanel: Panel = 'summary'
 
   // State
   private state: TuiState
   private get theme(): RivetTheme { return getTheme() }
   private columns: number
   private rows: number
-  /** W-B1: tool lifecycle state manager (buffer/accumulator/pending/truncated/collapsed) */
+  /** W-B1: tool lifecycle state manager */
   private toolGroupController = new ToolGroupController()
+  /** W-B2: overlay navigation + data providers + exec callbacks */
+  private overlayController = new OverlayController()
   /** 并行子代理舰队读模型（由 onDelegationActivity 事件流驱动） */
   private fleet = new FleetRegistry()
   /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
@@ -556,7 +537,7 @@ export class TuiApp {
       }
       if (key.name === 'escape' && key.ctrl) {
         // Ctrl+Esc → 激活命令面板
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
+        this.overlayController.resetNav()
         this.overlay.activate('command-palette')
         return
       }
@@ -577,7 +558,7 @@ export class TuiApp {
           } else if (now - this.lastEscAt < 400) {
             // Double-ESC → rewind
             this.lastEscAt = 0
-            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
+            this.overlayController.resetNav()
             this.overlay.activate('rewind')
             this.renderLive()
           } else {
@@ -605,7 +586,7 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_r') {
         if (!this.isAgentActive()) {
-          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
+          this.overlayController.resetNav()
           this.overlay.activate('history-search')
         }
         return
@@ -798,13 +779,13 @@ export class TuiApp {
 
   /** 设置 cockpit 聚焦面板（供 /cockpit <panel>）。激活时即时重渲染。 */
   setCockpitPanel(panel: Panel): void {
-    this.cockpitPanel = panel
+    this.overlayController.setCockpitPanel(panel)
     if (this.overlay.activeId() === 'cockpit') this.overlay.rerender()
   }
 
   /** 当前 cockpit 聚焦面板。 */
   getCockpitPanel(): Panel {
-    return this.cockpitPanel
+    return this.overlayController.getCockpitPanel()
   }
 
   /** 激活 overlay */
@@ -819,7 +800,7 @@ export class TuiApp {
       case 'chronicle':
       case 'tasks': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
+        this.overlayController.resetNav()
         return this.overlay.activate(id)
       }
       default:
@@ -887,7 +868,7 @@ export class TuiApp {
 
     if (id === 'pager') {
       const total = this.pagerTotalPages()
-      const cur = this.overlayNav.pagerPage
+      const cur = this.overlayController.nav().pagerPage
       let next = cur
       if (key.name === 'down' || key.name === 'pagedown' || c === 'j') next = cur + 1
       else if (key.name === 'up' || key.name === 'pageup' || c === 'k') next = cur - 1
@@ -896,28 +877,28 @@ export class TuiApp {
       else return false
       next = Math.max(0, Math.min(total - 1, next))
       if (next !== cur) {
-        this.overlayNav.pagerPage = next
+        this.overlayController.nav().pagerPage = next
         this.overlay.rerender()
       }
       return true
     }
 
     if (id === 'command-palette') {
-      const count = this.overlayData?.paletteCommands?.().commands.length ?? 0
-      const cur = this.overlayNav.paletteIndex
+      const count = this.overlayController.getData()?.paletteCommands?.().commands.length ?? 0
+      const cur = this.overlayController.nav().paletteIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayNav.paletteIndex = (cur + 1) % count; this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().paletteIndex = (cur + 1) % count; this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayNav.paletteIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().paletteIndex = (cur - 1 + count) % count; this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
-        if (count > 0 && this.paletteExec) {
+        if (count > 0 && this.overlayController.getPaletteExec()) {
           const idx = cur
           this.deactivateOverlay()
-          this.paletteExec(idx)
+          this.overlayController.getPaletteExec()?.(idx)
         } else {
           this.deactivateOverlay()
         }
@@ -929,23 +910,23 @@ export class TuiApp {
     }
 
     if (id === 'rewind') {
-      const count = this.overlayData?.rewindEntries?.().entries.length ?? 0
-      const cur = this.overlayNav.rewindIndex
+      const count = this.overlayController.getData()?.rewindEntries?.().entries.length ?? 0
+      const cur = this.overlayController.nav().rewindIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayNav.rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayNav.rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
         if (count > 0) {
-          const entry = this.overlayData?.rewindEntries?.().entries[cur]
+          const entry = this.overlayController.getData()?.rewindEntries?.().entries[cur]
           this.deactivateOverlay()
           if (entry) {
-            if (this.rewindExec) {
-              this.rewindExec(entry.content)
+            if (this.overlayController.getRewindExec()) {
+              this.overlayController.getRewindExec()?.(entry.content)
             } else {
               // Fallback: just populate input (old behavior)
               this.setInput(entry.content)
@@ -960,19 +941,19 @@ export class TuiApp {
     }
 
     if (id === 'history-search') {
-      const count = this.overlayData?.historySearchData?.().entries.length ?? 0
-      const cur = this.overlayNav.historySearchIndex
+      const count = this.overlayController.getData()?.historySearchData?.().entries.length ?? 0
+      const cur = this.overlayController.nav().historySearchIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayNav.historySearchIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().historySearchIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayNav.historySearchIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().historySearchIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
         if (count > 0) {
-          const entry = this.overlayData?.historySearchData?.().entries[cur]
+          const entry = this.overlayController.getData()?.historySearchData?.().entries[cur]
           this.deactivateOverlay()
           if (entry) this.setInput(entry)
         } else {
@@ -986,20 +967,20 @@ export class TuiApp {
     }
 
     if (id === 'chronicle') {
-      const count = this.overlayData?.chronicleEntries?.().entries.length ?? 0
-      const cur = this.overlayNav.chronicleIndex
+      const count = this.overlayController.getData()?.chronicleEntries?.().entries.length ?? 0
+      const cur = this.overlayController.nav().chronicleIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayNav.chronicleIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().chronicleIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayNav.chronicleIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        if (count > 0) { this.overlayController.nav().chronicleIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
-        const entry = count > 0 ? this.overlayData?.chronicleEntries?.().entries[cur] : undefined
+        const entry = count > 0 ? this.overlayController.getData()?.chronicleEntries?.().entries[cur] : undefined
         this.deactivateOverlay()
-        if (entry?.id && this.chronicleExec) this.chronicleExec(entry.id)
+        if (entry?.id && this.overlayController.getChronicleExec()) this.overlayController.getChronicleExec()?.(entry.id)
         return true
       }
       return false
@@ -1013,7 +994,7 @@ export class TuiApp {
    *  query 复位为 ''，非搜索 overlay 因此读到空串；而 paletteExec 在 deactivateOverlay
    *  之后、下次 activate 之前执行，此时 query 仍是用户输入值 → 过滤索引与 display 一致。 */
   getOverlayQuery(): string {
-    return this.overlayNav.query
+    return this.overlayController.getQuery()
   }
 
   /** 判断按键是否为可打印字符（用于搜索型 overlay 的字符输入）。 */
@@ -1025,20 +1006,13 @@ export class TuiApp {
 
   /** 编辑搜索型 overlay 的 query：传字符追加，传 null 退格删一字符。每次编辑复位选中索引。 */
   private editOverlayQuery(ch: string | null): void {
-    if (ch === null) {
-      if (this.overlayNav.query.length === 0) return
-      this.overlayNav.query = this.overlayNav.query.slice(0, -1)
-    } else {
-      this.overlayNav.query += ch
-    }
-    this.overlayNav.paletteIndex = 0
-    this.overlayNav.historySearchIndex = 0
+    this.overlayController.editQuery(ch)
     this.overlay.rerender()
   }
 
   /** pager 总页数（与 renderPager 同口径：pageSize = rows - 4）。 */
   private pagerTotalPages(): number {
-    const content = this.overlayData?.pagerContent?.().content ?? ''
+    const content = this.overlayController.getData()?.pagerContent?.().content ?? ''
     const lines = content.split('\n').length
     const pageSize = Math.max(1, this.rows - 4)
     return Math.max(1, Math.ceil(lines / pageSize))
@@ -2169,15 +2143,15 @@ export class TuiApp {
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
   }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void): void {
-    this.overlayData = overlayData
-    this.paletteExec = paletteExec
-    this.rewindExec = rewindExec
-    this.chronicleExec = chronicleExec
+    this.overlayController.setData(overlayData)
+    this.overlayController.setPaletteExec(paletteExec)
+    this.overlayController.setRewindExec(rewindExec)
+    this.overlayController.setChronicleExec(chronicleExec)
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
         const data = overlayData?.pagerContent?.() ?? { content: '(no content)', page: 0 }
-        return renderPager({ ...data, page: this.overlayNav.pagerPage }, this.columns, this.rows, this.theme)
+        return renderPager({ ...data, page: this.overlayController.nav().pagerPage }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -2193,7 +2167,7 @@ export class TuiApp {
     this.overlay.register('command-palette', {
       render: (_w, _h) => {
         const data = overlayData?.paletteCommands?.() ?? { commands: [], selectedIndex: 0 }
-        return renderCommandPalette({ ...data, selectedIndex: this.overlayNav.paletteIndex, searchText: this.overlayNav.query || data.searchText }, this.columns, this.rows, this.theme)
+        return renderCommandPalette({ ...data, selectedIndex: this.overlayController.nav().paletteIndex, searchText: this.overlayController.getQuery() || data.searchText }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -2202,7 +2176,7 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.cockpitSnapshot?.()
         if (!data) return ['Cockpit data not available.']
-        return renderCockpit(data, this.columns, this.rows, this.theme, this.cockpitPanel)
+        return renderCockpit(data, this.columns, this.rows, this.theme, this.overlayController.getCockpitPanel())
       },
     })
 
@@ -2210,7 +2184,7 @@ export class TuiApp {
     this.overlay.register('rewind', {
       render: (_w, _h) => {
         const data = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
-        return renderRewind({ ...data, selectedIndex: this.overlayNav.rewindIndex }, this.columns, this.rows, this.theme)
+        return renderRewind({ ...data, selectedIndex: this.overlayController.nav().rewindIndex }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -2218,7 +2192,7 @@ export class TuiApp {
     this.overlay.register('history-search', {
       render: (_w, _h) => {
         const data = overlayData?.historySearchData?.() ?? { entries: [], selectedIndex: 0, query: '' }
-        return renderHistorySearch({ ...data, selectedIndex: this.overlayNav.historySearchIndex, query: this.overlayNav.query || data.query }, this.columns, this.rows, this.theme)
+        return renderHistorySearch({ ...data, selectedIndex: this.overlayController.nav().historySearchIndex, query: this.overlayController.getQuery() || data.query }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -2226,7 +2200,7 @@ export class TuiApp {
     this.overlay.register('chronicle', {
       render: (_w, _h) => {
         const data = overlayData?.chronicleEntries?.() ?? { entries: [] }
-        return renderChronicle({ ...data, selectedIndex: this.overlayNav.chronicleIndex }, this.columns, this.rows, this.theme)
+        return renderChronicle({ ...data, selectedIndex: this.overlayController.nav().chronicleIndex }, this.columns, this.rows, this.theme)
       },
     })
 
