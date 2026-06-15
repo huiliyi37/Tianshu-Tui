@@ -539,7 +539,7 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { position: relative; border-top: 1px solid var(--border); padding: 12px; display: flex; gap: 8px; }
+.composer { position: relative; border-top: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); }
 .composer-row { display: flex; gap: 8px; align-items: flex-end; }
 .composer-row textarea { flex: 1; }

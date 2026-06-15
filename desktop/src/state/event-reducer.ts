@@ -43,6 +43,8 @@ export interface ConvoBlock {
   }
   /** T1 — checkpoint anchor (checkpoint). */
   hash?: string
+  /** Vision — number of images attached to a user message. */
+  imageCount?: number
 }
 
 export interface EventViewState {
@@ -106,11 +108,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         key: `u-${ev.seq}`,
         kind: 'user',
         text: String(ev.data.text ?? ''),
+        ...(typeof ev.data.imageCount === 'number' && ev.data.imageCount > 0 ? { imageCount: ev.data.imageCount } : {}),
       }]
       return next
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
-      next.private_thinkingOpen = false
+      // Do NOT close private_thinkingOpen — GLM alternates reasoning_content
+      // and content within the same stream, so interleaved deltas are normal.
+      // Closing the other channel on every delta fragments the output into
+      // many small blocks, making the reply appear duplicated/overlapping.
       if (next.private_textOpen && next.blocks.length > 0) {
         next.blocks[next.blocks.length - 1]!.text += text
       } else if (text) {
@@ -121,7 +127,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     case 'thinking_delta': {
       const text = String(ev.data.text ?? '')
-      next.private_textOpen = false
+      // Same: do NOT close private_textOpen.
       if (next.private_thinkingOpen && next.blocks.length > 0) {
         next.blocks[next.blocks.length - 1]!.text += text
       } else if (text) {
