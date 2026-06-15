@@ -1547,6 +1547,10 @@ export class TuiApp {
       this.commitAbove(() => {
         this.commit.write({ text: summary, trailingNewline: true })
         this.state.committedCount++
+        // P2: 离开暗示——final turn 提示 agent 可留印记（不进 system prompt，不影响缓存）
+        if (this.state.turnNumber >= 3) {
+          this.commit.write({ text: color('✶ leave_mark 可留下你的印记，或无签离去。', this.theme.muted), trailingNewline: true })
+        }
       })
       this.renderLive()
     } else {

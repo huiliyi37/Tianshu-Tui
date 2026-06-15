@@ -90,6 +90,8 @@ export interface RuntimeHookDeps {
   getChronicleEntries?: () => readonly ChronicleEntry[]
   /** Agent's self-chosen departure mark (leave_mark tool), recorded at close. */
   getConstellationPendingMark?: () => import('../tools/types.js').LeaveMarkInput | null
+  /** Session numeric id for departure mark consistency. */
+  getConstellationNumericId?: () => number | null
 
   // ── Anti-anchoring (explicit opt-in, prompt-flow intervention) ──
   /** Explicit opt-in for anti-anchoring harness hooks. Default: disabled. */
@@ -235,6 +237,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getTaskSummary: deps.getTaskSummary,
       getChronicleEntries: deps.getChronicleEntries,
       getDomainId: deps.getDomainId,
+      getNumericId: deps.getConstellationNumericId,
     }))
   }
 

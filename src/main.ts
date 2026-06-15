@@ -485,6 +485,7 @@ async function main() {
     sessionId: ctx.sessionId,
     priorMsgCount: existingMsgCount,
     columns: stdout.columns || 80,
+    numericId: ctx.agent.sessionNumericId,
   }, theme)
   for (const line of welcomeLines) {
     stdout.write(line + '\n')

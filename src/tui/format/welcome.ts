@@ -21,6 +21,8 @@ export interface FormatWelcomeInput {
   sessionId: string
   priorMsgCount: number
   columns: number
+  /** Ephemeral per-session numeric id (e.g. 7281). When present, shown in the title. */
+  numericId?: number
 }
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -42,6 +44,9 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const out: string[] = []
 
   out.push(color('Tianshu', theme.primary, { bold: true }))
+  if (input.numericId) {
+    out[0] = color(`Tianshu · #${input.numericId}`, theme.primary, { bold: true })
+  }
 
   const dir = input.cwd.replace(/^.*\//, '')
   const session = input.priorMsgCount > 0

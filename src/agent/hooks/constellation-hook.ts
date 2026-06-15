@@ -35,6 +35,8 @@ export interface ConstellationHookDeps {
   getTaskSummary?: () => TaskLedgerSummary | null
   getChronicleEntries?: () => readonly ChronicleEntry[]
   getDomainId?: () => string | null | undefined
+  /** Session's ephemeral numeric id — ensures departure mark matches arrival. */
+  getNumericId?: () => number | null
   /** Minimum changed files for the anonymous safety net to fire. Default 1. */
   minFiles?: number
   now?: () => number
@@ -58,7 +60,7 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
           // The agent left its own mark — seal it as the identity anchor.
           const milestone = buildDepartureMilestone({
             sessionId: deps.sessionId,
-            agentMark: buildAgentMark({ symbol: pending.symbol, domain }),
+            agentMark: buildAgentMark({ symbol: pending.symbol, domain, numericId: deps.getNumericId?.() ?? undefined }),
             domain,
             summary: pending.summary,
             filesChanged: collectFilesChanged(entries),
@@ -81,7 +83,7 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
 
         const milestone = buildDepartureMilestone({
           sessionId: deps.sessionId,
-          agentMark: buildAgentMark({ symbol: VOID_SYMBOL, domain }),
+          agentMark: buildAgentMark({ symbol: VOID_SYMBOL, domain, numericId: deps.getNumericId?.() ?? undefined }),
           domain,
           summary: deriveSummary(entries, 'milestone', filesChanged.length),
           filesChanged,

@@ -91,12 +91,30 @@ export function formatConstellationView(
     lines.push(`  latest: ${lastShift.summary} (${relativeTime(lastShift.timestamp, now)})`)
   }
 
-  if (opts.recognitionLine) {
+  // Recent travelers — emergent recognition hints (no similarity computation).
+  // If the caller didn't pass a recognitionLine, auto-generate from milestones.
+  const recognition = opts.recognitionLine ?? formatRecentTravelers(c, 5)
+  if (recognition) {
     lines.push('')
-    lines.push(opts.recognitionLine)
+    lines.push(recognition)
   }
 
   return lines.join('\n')
+}
+
+/** Format recent travelers — last N milestones as symbol+domain+summary.
+ *  Lets the agent emergently recognise familiar marks without computing similarity. */
+function formatRecentTravelers(c: ProjectConstellation, count: number): string {
+  if (c.milestones.length === 0) return ''
+  const recent = c.milestones.slice(-count).reverse()
+  const lines = recent.map(m => {
+    const mark = m.agentMark
+    const id = mark ? `#${mark.numericId}·${mark.symbol}` : ''
+    const domain = mark?.domain ? `${mark.domain}` : ''
+    const tag = [domain, id].filter(Boolean).join('·')
+    return `  ${tag ? tag + ' — ' : ''}${m.summary.slice(0, 80)}`
+  })
+  return `Recent travelers:\n${lines.join('\n')}`
 }
 
 /** Render a longer history listing of milestones, newest first. */

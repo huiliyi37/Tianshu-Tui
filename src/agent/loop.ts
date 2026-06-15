@@ -59,6 +59,7 @@ import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
 import { CompactionController } from './compaction-controller.js'
 import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
+import { mintNumericId } from './void-identity.js'
 import { createAnchorGraph } from '../prompt/anchor-graph.js'
 import { createHash } from 'node:crypto'
 import { ArtifactStore } from '../artifact/store.js'
@@ -204,6 +205,17 @@ export class AgentLoop {
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
    *  constellation post-session hook. Null until the agent leaves a mark. */
   private pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
+  /** Ephemeral per-session numeric id, minted on first run. Used in welcome
+   *  display and passed to buildAgentMark when the agent departs. */
+  private _sessionNumericId: number | null = null
+
+  /** The session's ephemeral numeric identity (e.g. 7281). Minted lazily. */
+  get sessionNumericId(): number {
+    if (this._sessionNumericId === null) {
+      this._sessionNumericId = mintNumericId()
+    }
+    return this._sessionNumericId
+  }
   /** U6: most recent convergence-detector result — consumed by the replan loop's
    *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
   private latestConvergenceResult: ConvergenceResult | null = null
@@ -409,6 +421,7 @@ export class AgentLoop {
       constellationEnabled: this.config.sessionId !== undefined,
       constellationCwd: this.cwd,
       getConstellationPendingMark: () => this.pendingLeaveMark,
+      getConstellationNumericId: () => this._sessionNumericId,
       // ── HEARTH observe (pure diagnostic) ──
       hearthObserveEnabled: this.config.hearthObserveEnabled,
       getAnchorGraph: () => this.buildAnchorGraph(),
