@@ -95,7 +95,17 @@ export function ThreadView(props: {
 
       <div className="messages">
         {view.blocks.length === 0 && <div className="empty sm">发一条消息开始</div>}
-        {view.blocks.map((b) => <Block key={b.key} block={b} />)}
+        {view.blocks.map((b, i) => (
+          <Block
+            key={b.key}
+            block={b}
+            isStreaming={
+              b.kind === 'thinking' &&
+              i === view.blocks.length - 1 &&
+              view.private_thinkingOpen
+            }
+          />
+        ))}
         {showThinking && (
           <div className="thinking">
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
@@ -137,7 +147,7 @@ export function ThreadView(props: {
   )
 }
 
-function Block({ block }: { block: ConvoBlock }) {
+function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolean }) {
   if (block.kind === 'user') {
     return (
       <div className="msg user">
@@ -150,17 +160,7 @@ function Block({ block }: { block: ConvoBlock }) {
     return <ToolBlock title={block.role ?? block.kind} body={block.text} isError={block.isError} />
   }
   if (block.kind === 'thinking') {
-    // T1 — reasoning stream, collapsed by default (Antigravity surfaces summaries,
-    // not raw token streams; the user can expand to audit).
-    return (
-      <details className="reasoning">
-        <summary className="reasoning-summary">
-          <span className="reasoning-glyph" aria-hidden>✶</span>
-          推理过程
-        </summary>
-        <div className="reasoning-body">{block.text}</div>
-      </details>
-    )
+    return <ThinkingBlock block={block} streaming={!!isStreaming} />
   }
   if (block.kind === 'turn') {
     const t = block.turn
@@ -216,6 +216,39 @@ function Block({ block }: { block: ConvoBlock }) {
     <div className="msg assistant">
       <div className="msg-role">天枢</div>
       <div className="msg-body"><Markdown source={block.text} /></div>
+    </div>
+  )
+}
+
+/**
+ * T1 — reasoning stream. Defaults to OPEN while streaming (user sees live
+ * token flow), collapsible for review after the run finishes.
+ *
+ * Replaces the old `<details>` approach which (a) defaulted to collapsed,
+ * hiding the live stream, and (b) used browser-managed `open` state that
+ * could desync under React's high-frequency re-renders during streaming.
+ */
+function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boolean }) {
+  const [open, setOpen] = useState(true)
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // While streaming, force-open and auto-scroll to the bottom.
+  useEffect(() => {
+    if (streaming) {
+      setOpen(true)
+      if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+  }, [streaming, block.text])
+
+  return (
+    <div className="reasoning">
+      <div className="reasoning-summary" onClick={() => setOpen((o) => !o)}>
+        <span className={`reasoning-glyph${streaming ? ' streaming' : ''}`} aria-hidden>{streaming ? '⟳' : '✶'}</span>
+        {streaming ? '推理中…' : '推理过程'}
+      </div>
+      {open && (
+        <div className="reasoning-body" ref={bodyRef}>{block.text}</div>
+      )}
     </div>
   )
 }

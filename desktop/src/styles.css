@@ -506,7 +506,7 @@ body {
 .thinking-label { margin-left: var(--space-1); }
 @keyframes pulse { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 
-/* T1 — reasoning stream (collapsible). Quiet by default; expand to audit. */
+/* T1 — reasoning stream. Open by default while streaming; collapsible. */
 .reasoning {
   border: 1px solid var(--border); border-left: 2px solid var(--muted);
   border-radius: var(--radius-md); background: var(--panel);
@@ -515,15 +515,16 @@ body {
 .reasoning-summary {
   display: flex; align-items: center; gap: var(--space-2); cursor: pointer;
   padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-sm);
-  list-style: none; user-select: none;
+  user-select: none;
 }
-.reasoning-summary::-webkit-details-marker { display: none; }
-.reasoning[open] .reasoning-summary { border-bottom: 1px solid var(--border); }
 .reasoning-glyph { color: var(--muted); }
+.reasoning-glyph.streaming { animation: spin 1.5s linear infinite; }
 .reasoning-body {
   padding: var(--space-3); color: var(--muted); font-size: var(--text-sm); line-height: 1.55;
   white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);
+  border-top: 1px solid var(--border); max-height: 400px; overflow-y: auto;
 }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* T1 — turn boundary divider. Thin centered hairline + label. */
 .turn-divider { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); }

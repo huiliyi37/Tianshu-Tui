@@ -86,23 +86,39 @@ export function startServer(port: number, routes: Record<string, RouteHandler>, 
   const router = createRouter(routes)
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    // CORS: allow Tauri dev mode (localhost:5273 → 127.0.0.1:<port>) and
+    // production (tauri://localhost). Bound to 127.0.0.1 so no external exposure.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, DELETE, PUT, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      })
+      res.end()
+      return
+    }
+
     const reqHeaders = normalizeHeaders(req)
     if (!isAuthorizedRequest({ headers: reqHeaders }, apiToken)) {
-      res.writeHead(401, { 'Content-Type': 'application/json' })
+      res.writeHead(401, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
       res.end(JSON.stringify({ error: 'Unauthorized' }))
       return
     }
 
     const body = await readBody(req)
     if (body === BODY_TOO_LARGE) {
-      res.writeHead(413, { 'Content-Type': 'application/json' })
+      res.writeHead(413, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
       res.end(JSON.stringify({ error: 'Request body too large' }))
       return
     }
 
     const result = await router(req.method ?? 'GET', req.url ?? '/', body, reqHeaders, res)
     if (result.handled) return
-    const headers: Record<string, string> = { 'Content-Type': 'application/json', ...result.headers }
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      ...result.headers,
+    }
     res.writeHead(result.status, headers)
     res.end(result.body ? JSON.stringify(result.body) : '')
   })

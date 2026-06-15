@@ -112,10 +112,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       const text = String(ev.data.text ?? '')
       next.private_thinkingOpen = false
       if (next.private_textOpen && next.blocks.length > 0) {
-        const blocks = next.blocks.slice()
-        const last = blocks[blocks.length - 1]!
-        blocks[blocks.length - 1] = { ...last, text: last.text + text }
-        next.blocks = blocks
+        // Mutate the last block in place instead of copying the entire array.
+        // text_delta fires per-token (hundreds per turn); copying O(n) blocks
+        // each time causes visible render lag on long conversations.
+        next.blocks[next.blocks.length - 1]!.text += text
       } else {
         next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
         next.private_textOpen = true
@@ -123,15 +123,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     }
     case 'thinking_delta': {
-      // T1 — accumulate reasoning into a single collapsible block per run, mirroring
-      // text_delta. Any other event kind closes the open thinking block.
       const text = String(ev.data.text ?? '')
       next.private_textOpen = false
       if (next.private_thinkingOpen && next.blocks.length > 0) {
-        const blocks = next.blocks.slice()
-        const last = blocks[blocks.length - 1]!
-        blocks[blocks.length - 1] = { ...last, text: last.text + text }
-        next.blocks = blocks
+        next.blocks[next.blocks.length - 1]!.text += text
       } else {
         next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
         next.private_thinkingOpen = true
