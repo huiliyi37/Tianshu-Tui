@@ -16,7 +16,7 @@ import type { TaskLedgerSummary } from '../task-ledger.js'
 import type { ChronicleEntry } from '../chronicle.js'
 import type { LeaveMarkInput } from '../../tools/types.js'
 import { createCycleClose } from '../songline.js'
-import { appendMilestone } from '../../constellation/store.js'
+import { appendMilestone, surveySkeleton, initConstellation, loadConstellation } from '../../constellation/store.js'
 import {
   buildDepartureMilestone,
   collectFilesChanged,
@@ -71,6 +71,8 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
             now,
           })
           appendMilestone(deps.cwd, milestone, now)
+          // P3: re-survey skeleton after file changes (pending mark path)
+          surveyAndUpdateSkeleton(deps.cwd, deps.sessionId, domain, collectFilesChanged(entries), now)
           return
         }
 
@@ -93,9 +95,27 @@ export function createConstellationRuntimeHook(deps: ConstellationHookDeps): Pos
           now,
         })
         appendMilestone(deps.cwd, milestone, now)
+        // P3: re-survey skeleton after file changes (safety net path)
+        surveyAndUpdateSkeleton(deps.cwd, deps.sessionId, domain, filesChanged, now)
       } catch {
         // Post-session side effect must never affect the session outcome.
       }
     },
+  }
+}
+
+/** P3: Re-survey the project skeleton and record architecture shifts if modules changed. */
+function surveyAndUpdateSkeleton(cwd: string, sessionId: string, domain: string, filesChanged: readonly string[], now: number): void {
+  if (filesChanged.length === 0) return
+  if (!loadConstellation(cwd)) return
+  try {
+    const fresh = surveySkeleton(cwd)
+    initConstellation(cwd, {
+      skeleton: fresh,
+      sessionId,
+      shiftSummary: `auto-detected after ${filesChanged.length} file(s) changed by ${domain}`,
+    }, now)
+  } catch {
+    // skeleton re-survey is best-effort
   }
 }
