@@ -246,3 +246,24 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
   assert.ok(visible.includes('1/2 done'), '应显示组进度')
   assert.ok(visible.includes('grep routing seams'), '应显示活动行')
 })
+
+test('fleet 回收：abort 后舰队读模型清空（防中断泄露回归）', () => {
+  const { app } = makeApp()
+  // 委派工具开始 + 两个 worker 上报 running 活动
+  app.callbacks.onToolUse('tool_a', 'delegate_batch', { tasks: [] })
+  app.callbacks.onDelegationActivity?.({ workOrderId: 'wo_team:T1', parentToolId: 'tool_a', profile: 'scout', status: 'running', progressLine: '⚙ grep' })
+  app.callbacks.onDelegationActivity?.({ workOrderId: 'wo_team:T2', parentToolId: 'tool_a', profile: 'patcher', status: 'running' })
+  assert.equal(app.getRunningWorkers().groups.length, 1, 'abort 前应有 1 个活跃委派组')
+  // 中断（先 _runGen++，旧 run 的终态 onToolResult 会被 bridge 丢弃）
+  app.callbacks.onAbort()
+  assert.equal(app.getRunningWorkers().groups.length, 0, 'abort 后舰队读模型必须清空，不得泄露')
+})
+
+test('fleet 回收：provider onError 同样清空舰队读模型', () => {
+  const { app } = makeApp()
+  app.callbacks.onToolUse('tool_b', 'delegate_task', {})
+  app.callbacks.onDelegationActivity?.({ workOrderId: 'wo:W1', parentToolId: 'tool_b', profile: 'scout', status: 'running' })
+  assert.equal(app.getRunningWorkers().groups.length, 1)
+  app.callbacks.onError(new Error('provider blew up'))
+  assert.equal(app.getRunningWorkers().groups.length, 0, 'onError 后舰队读模型必须清空')
+})

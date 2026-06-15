@@ -1672,12 +1672,26 @@ export class TuiApp {
     this.agentBusy = false
     this.setPhase('idle')
     this.state.isStreaming = false
+    // 委派途中 provider 报错走 onError（非 onAbort）：与 abort 一样需回收舰队
+    // 读模型与运行态 TeamPanel，否则 records 残留到下一轮、live 区显示过期 worker。
+    this.resetDelegationViz()
     this.commitAbove(() => {
       this.commit.write({
         text: `Error: ${error.message}`,
         trailingNewline: true,
       })
     })
+  }
+
+  /**
+   * 回收委派可视化的 run 本地状态（舰队读模型 + 运行态 TeamPanel）。
+   * 必须在 abort/error 两条收尾路径都调用：abort 会先 `_runGen++`，使委派工具的
+   * 终态 onToolResult（clearGroup 的唯一触发点）被 bridge 的世代守卫丢弃，
+   * 否则 fleet.records 会随每次中断单调泄露。
+   */
+  private resetDelegationViz(): void {
+    this.fleet.clear()
+    this.liveTeamModel = null
   }
 
   /**
@@ -1706,6 +1720,9 @@ export class TuiApp {
     this.assistantHeaderDone = false
     this.pendingTools.clear()
     this.toolAccumulator.clear()
+    // 舰队读模型 + 运行态 TeamPanel 与 pendingTools 同寿命：中断后委派工具不再到
+    // 终态（clearGroup 永不触发），必须在此显式回收，否则 records 单调泄露。
+    this.resetDelegationViz()
     this.agentBusy = false
     this.state.isStreaming = false
     this.state.isThinking = false
