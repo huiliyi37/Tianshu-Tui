@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef } from 'react'
 import { streamSession } from '../runtime/sse'
 import { fetchEvents } from '../runtime/client'
 import { eventReducer, initialEventState, type EventViewState } from './event-reducer'
+import type { SessionEvent } from '../runtime/types'
 
 /**
  * Subscribe to a session's live event stream and fold it into view state.
@@ -10,6 +11,12 @@ import { eventReducer, initialEventState, type EventViewState } from './event-re
  * - Auto-reconnects after a transient drop, resuming from the last folded seq
  *   (?since= backfill) so nothing is lost and a viewer drop never aborts the run.
  * - Falls back to one-shot polling if the streaming endpoint is unavailable.
+ *
+ * Performance: SSE events are buffered and flushed once per animation frame
+ * (rAF, ~16ms). Without batching, each text_delta token triggers a separate
+ * dispatch + React render — hundreds per second during streaming. With rAF
+ * batching, we coalesce all events arriving within one frame into a single
+ * dispatch via the reducer's 'events' action.
  */
 export function useSessionEvents(sessionId: string | null): EventViewState {
   const [state, dispatch] = useReducer(eventReducer, initialEventState)
@@ -23,9 +30,24 @@ export function useSessionEvents(sessionId: string | null): EventViewState {
     const ac = new AbortController()
     let stopped = false
 
+    // rAF batching buffer: accumulate events between frames, flush once.
+    let pending: SessionEvent[] = []
+    let rafId: number | null = null
+
+    const flush = () => {
+      rafId = null
+      if (pending.length === 0) return
+      const batch = pending
+      pending = []
+      dispatch({ type: 'events', events: batch })
+    }
+
     const onEvent = (e: { seq: number }) => {
       if (e.seq > seqRef.current) seqRef.current = e.seq
-      dispatch({ type: 'event', event: e as never })
+      pending.push(e as SessionEvent)
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush)
+      }
     }
 
     const loop = async () => {
@@ -54,6 +76,7 @@ export function useSessionEvents(sessionId: string | null): EventViewState {
     return () => {
       stopped = true
       ac.abort()
+      if (rafId !== null) cancelAnimationFrame(rafId)
     }
   }, [sessionId])
 
