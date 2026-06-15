@@ -22,6 +22,50 @@ const BASE: OpenAIClientConfig = {
 
 const flush = () => new Promise<void>(r => setImmediate(r))
 const REASONING_CHUNK = 'data: {"choices":[{"delta":{"reasoning_content":"thinking..."},"index":0}]}\n\n'
+const TEXT_CHUNK = 'data: {"choices":[{"delta":{"content":"done"},"index":0}]}\n\n'
+const DONE_CHUNK = 'data: [DONE]\n\n'
+
+/**
+ * 模拟「合法长思考」：持续吐 reasoning delta，每次间隔 < stall 窗口，总时长远超
+ * 单次合法思考上限。每个 data 事件都会 resetIdleTimer——只要相邻间隔 < stall 窗，
+ * 就不应触发 stall。最后吐 text + [DONE] 让流正常收束。
+ * 返回捕获到的错误（期望为 null）。
+ */
+async function runLegitLongThinking(
+  config: OpenAIClientConfig,
+  gapMs: number,
+  pumps: number,
+): Promise<Error | null> {
+  const client = new OpenAIClient(config)
+  const enc = new TextEncoder()
+  let ctl!: ReadableStreamDefaultController<Uint8Array>
+  const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c } })
+  const reader = new Response(stream).body!.getReader()
+
+  let err: Error | null = null
+  const p = (client as unknown as {
+    parseStreamFromReader: (r: ReadableStreamDefaultReader<Uint8Array>, cb: unknown) => Promise<void>
+  }).parseStreamFromReader(reader, { onTextDelta() {}, onThinkingDelta() {}, onStopReason() {} })
+    .catch((e: Error) => { err = e })
+
+  await flush()
+  for (let i = 0; i < pumps; i++) {
+    ctl.enqueue(enc.encode(REASONING_CHUNK))
+    await flush()
+    // 每个间隙都 < stall 窗：reasoning delta 持续到达，stall 不应触发
+    mock.timers.tick(gapMs)
+    await flush()
+  }
+  // 收束：吐 text + [DONE]，流正常结束
+  ctl.enqueue(enc.encode(TEXT_CHUNK))
+  await flush()
+  ctl.enqueue(enc.encode(DONE_CHUNK))
+  ctl.close()
+  await flush()
+  await flush()
+  await p
+  return err
+}
 
 async function runThinkingStall(config: OpenAIClientConfig, tickMs: number): Promise<Error | null> {
   const client = new OpenAIClient(config)
@@ -68,6 +112,22 @@ describe('thinking-stall configurable + message (2B)', () => {
       assert.ok(err, '到 read 超时应触发')
       assert.match((err as unknown as Error).message, /idle timeout \(120s\)/, '默认禁用 thinking-stall → 以 idle(120s) 文案触发，非 90s')
       assert.doesNotMatch((err as unknown as Error).message, /90s/, '不得再出现硬编码 90s')
+    } finally {
+      mock.timers.reset()
+    }
+  })
+
+  it('合法长思考不误杀：持续吐 reasoning（间隔<stall窗），总时长远超单次上限也不触发 stall', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] })
+    try {
+      // 模拟 glm：slow provider → read 300s、stall 120s。
+      // 每 90s（<120s stall 窗）吐一次 reasoning，共 3 次 = 270s 总时长（远超 158s）。
+      const err = await runLegitLongThinking(
+        { ...BASE, providerName: 'glm', thinking: 'enabled', thinkingStallTimeoutMs: 120_000 },
+        90_000,
+        3,
+      )
+      assert.equal(err, null, '相邻 reasoning 间隔 < stall 窗时，长思考不应被 stall 误杀')
     } finally {
       mock.timers.reset()
     }

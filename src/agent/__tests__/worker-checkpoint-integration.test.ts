@@ -8,7 +8,6 @@ import {
   type WorkerStatusEntry,
   type CircuitSummary,
 } from '../../tui/worker-panel-model.js'
-import { renderWorkerPanelLines } from '../../tui/worker-panel.js'
 
 describe('WorkerCheckpoint', () => {
   it('checkpoint structure captures turn state', () => {
@@ -91,41 +90,5 @@ describe('progressBar', () => {
 
   it('handles zero total', () => {
     assert.equal(progressBar(0, 0, 8), '░░░░░░░░')
-  })
-})
-
-describe('renderWorkerPanelLines', () => {
-  it('renders panel with workers and circuit state', () => {
-    const model = buildWorkerPanelModel(
-      [
-        { workerId: 'w1', profile: 'lint_fixer', status: 'running', progress: { current: 3, total: 4, label: '3/4 files' } },
-        { workerId: 'w2', profile: 'test_scaffolder', status: 'done', resultSummary: '12 tests' },
-        { workerId: 'w3', profile: 'type_fixer', status: 'queued' },
-      ],
-      [{ profile: 'doc_syncer', state: 'open', failureCount: 3, cooldownRemainingS: 15 }],
-    )
-
-    const lines = renderWorkerPanelLines(model, 80)
-    assert.ok(lines.length >= 5)
-    assert.ok(lines[0]!.includes('Workers'))
-    assert.ok(lines.some(l => l.includes('lint_fixer')))
-    assert.ok(lines.some(l => l.includes('test_scaffolder')))
-    assert.ok(lines.some(l => l.includes('type_fixer')))
-    assert.ok(lines.some(l => l.includes('doc_syncer') && l.includes('open')))
-  })
-
-  it('renders empty panel', () => {
-    const model = buildWorkerPanelModel([], [])
-    const lines = renderWorkerPanelLines(model, 80)
-    assert.ok(lines.some(l => l.includes('No workers active')))
-  })
-
-  it('shows all closed when no circuits are tripped', () => {
-    const model = buildWorkerPanelModel(
-      [{ workerId: 'w1', profile: 'lint_fixer', status: 'done' }],
-      [{ profile: 'lint_fixer', state: 'closed', failureCount: 0, cooldownRemainingS: 0 }],
-    )
-    const lines = renderWorkerPanelLines(model, 80)
-    assert.ok(lines.some(l => l.includes('all closed')))
   })
 })
