@@ -7,7 +7,8 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
-import type { CockpitSnapshot, PanelStatus } from '../cockpit/types.js'
+import type { CockpitSnapshot, PanelStatus, Panel } from '../cockpit/types.js'
+import { PANELS, PANEL_LABELS } from '../cockpit/types.js'
 
 function statusGlyph(s: PanelStatus): string {
   switch (s) {
@@ -27,30 +28,42 @@ function formatBar(value: number, max: number, width: number, okColor: string, w
   return color('█'.repeat(filled), barColor) + color('░'.repeat(empty), '#374151')
 }
 
-export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: number, theme: RivetTheme): string[] {
+export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: number, theme: RivetTheme, panel: Panel = 'summary'): string[] {
   const lines: string[] = []
   const w = width - 4 // inner content width
+  // panel === 'summary'（或缺省）渲染全部；指定单面板时仅渲染该节（聚焦视图）。
+  const show = (p: Panel): boolean => panel === 'summary' || panel === p
 
   // Title
   lines.push('')
   lines.push(`  ${color('⚙  Cockpit', theme.primary, { bold: true })}  ${color('— 运行时仪表盘', theme.dim)}`)
 
+  // Panel rail — 显示可切换的子面板，当前面板高亮（/cockpit <panel> 切换）。
+  const rail = PANELS.map(p => p === panel
+    ? color(`[${PANEL_LABELS[p]}]`, theme.primary, { bold: true })
+    : color(` ${PANEL_LABELS[p]} `, theme.dim)).join('')
+  lines.push(`  ${rail}`)
+
   // Safety panel
-  lines.push('')
-  lines.push(`  ${statusGlyph(snapshot.panelStatuses.safety)} ${color('Safety', theme.primary, { bold: true })}  ${color(snapshot.safety.riskLevel, theme.muted)}  doom:${snapshot.safety.doomLoopLevel}`)
-  if (snapshot.safety.suggestedAction) {
-    lines.push(`    ${color(snapshot.safety.suggestedAction, theme.muted)}`)
+  if (show('safety')) {
+    lines.push('')
+    lines.push(`  ${statusGlyph(snapshot.panelStatuses.safety)} ${color('Safety', theme.primary, { bold: true })}  ${color(snapshot.safety.riskLevel, theme.muted)}  doom:${snapshot.safety.doomLoopLevel}`)
+    if (snapshot.safety.suggestedAction) {
+      lines.push(`    ${color(snapshot.safety.suggestedAction, theme.muted)}`)
+    }
   }
 
   // Verification panel
-  lines.push('')
-  lines.push(`  ${statusGlyph(snapshot.panelStatuses.verify)} ${color('Verify', theme.primary, { bold: true })}  ${snapshot.verification.deliveryStatus}  read:${snapshot.verification.filesRead} mod:${snapshot.verification.filesModified}`)
-  for (const run of snapshot.verification.runs.slice(0, 3)) {
-    lines.push(`    ${run.tool}: ${run.summary} ${run.status}`)
+  if (show('verify')) {
+    lines.push('')
+    lines.push(`  ${statusGlyph(snapshot.panelStatuses.verify)} ${color('Verify', theme.primary, { bold: true })}  ${snapshot.verification.deliveryStatus}  read:${snapshot.verification.filesRead} mod:${snapshot.verification.filesModified}`)
+    for (const run of snapshot.verification.runs.slice(0, 3)) {
+      lines.push(`    ${run.tool}: ${run.summary} ${run.status}`)
+    }
   }
 
   // Context panel
-  if (snapshot.context) {
+  if (show('context') && snapshot.context) {
     lines.push('')
     const ctx = snapshot.context
     const ratio = ctx.maxTokens > 0 ? ctx.estimatedTokens / ctx.maxTokens : 0
@@ -63,15 +76,17 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
   }
 
   // Model panel
-  lines.push('')
-  const m = snapshot.model
-  lines.push(`  ${statusGlyph(snapshot.panelStatuses.model)} ${color('Model', theme.primary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  $${m.cost.toFixed(4)}`)
-  if (m.reasoningEffort) {
-    lines.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
+  if (show('model')) {
+    lines.push('')
+    const m = snapshot.model
+    lines.push(`  ${statusGlyph(snapshot.panelStatuses.model)} ${color('Model', theme.primary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  $${m.cost.toFixed(4)}`)
+    if (m.reasoningEffort) {
+      lines.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
+    }
   }
 
   // MCP panel
-  if (snapshot.mcp.servers.length > 0) {
+  if (show('mcp') && snapshot.mcp.servers.length > 0) {
     lines.push('')
     lines.push(`  ${statusGlyph(snapshot.panelStatuses.mcp)} ${color('MCP', theme.primary, { bold: true })}  tools:${snapshot.mcp.totalTools}  connected:${snapshot.mcp.connectedServers}/${snapshot.mcp.servers.length}`)
     for (const srv of snapshot.mcp.servers.slice(0, 4)) {
@@ -81,7 +96,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
   }
 
   // Trace panel — recent events
-  if (snapshot.trace.events.length > 0) {
+  if (show('trace') && snapshot.trace.events.length > 0) {
     lines.push('')
     lines.push(`  ${statusGlyph(snapshot.panelStatuses.trace)} ${color('Trace', theme.primary, { bold: true })}  ${snapshot.trace.totalEvents} events`)
     for (const evt of snapshot.trace.events.slice(-5)) {
@@ -97,7 +112,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     lines.push('')
   }
 
-  lines.push(`  ${color('q to close', theme.dim)}`)
+  lines.push(`  ${color(panel === 'summary' ? 'q to close · /cockpit <panel> to focus' : `${PANEL_LABELS[panel]} · /cockpit summary for all · q to close`, theme.dim)}`)
 
   return lines
 }

@@ -127,4 +127,25 @@ describe('renderChronicle', () => {
     // Current should have ANSI formatting (bold/color)
     assert.ok(/\x1B\[/.test(currentLine!), 'current entry has ANSI color')
   })
+
+  it('shows ▸ cursor on selectedIndex row (G5 导航高亮)', () => {
+    const data: ChronicleData = {
+      entries: [
+        { index: 1, time: 'a', summary: 'first', current: false, id: 'aaa' },
+        { index: 2, time: 'b', summary: 'second', current: false, id: 'bbb' },
+      ],
+      selectedIndex: 1,
+    }
+    const lines = renderChronicle(data, 80, 20, theme)
+    const secondLine = lines.find(l => stripAnsi(l).includes('second'))
+    const firstLine = lines.find(l => stripAnsi(l).includes('first'))
+    assert.ok(secondLine && stripAnsi(secondLine).includes('▸'), '选中行有 ▸ 游标')
+    assert.ok(firstLine && !stripAnsi(firstLine).includes('▸'), '未选中行无游标')
+  })
+
+  it('footer 引导 Enter → resume（G5 诚实文案）', () => {
+    const data: ChronicleData = { entries: [{ index: 1, time: 'a', summary: 's', current: false, id: 'x' }] }
+    const lines = renderChronicle(data, 80, 20, theme)
+    assert.ok(lines.some(l => stripAnsi(l).includes('resume')), 'footer 含 resume 提示')
+  })
 })

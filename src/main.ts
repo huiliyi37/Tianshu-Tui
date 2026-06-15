@@ -29,6 +29,7 @@ import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
 import { resolveAppPromptInput } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
+import { SessionPersist } from './agent/session-persist.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
@@ -323,6 +324,7 @@ async function main() {
             time: '',
             summary: `Session ${id.slice(0, 8)}`,
             current: id === ctx!.sessionId,
+            id,
           }
         })
         return { entries }
@@ -386,6 +388,15 @@ async function main() {
     }
     // Always populate input (even if match not found — user can still edit)
     tuiApp.setInput(content)
+  }, /* chronicleExec: */ (id: string) => {
+    // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
+    // 用 SessionPersist.listSessions() 求真实序号（与 /resume 同源），避免 readdir 顺序错位。
+    const n = SessionPersist.listSessions().indexOf(id)
+    if (n >= 0) {
+      tuiApp.setInput(`/resume ${n + 1}`)
+    } else {
+      tuiApp.commitStatic(`Session ${id.slice(0, 8)} not resumable.`)
+    }
   })
 
   // ── SlashRouter ──────────────────────────────────────────────

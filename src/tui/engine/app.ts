@@ -48,7 +48,7 @@ import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
-import type { CockpitSnapshot } from '../cockpit/types.js'
+import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
 import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
 import { searchHistory, loadHistory } from '../history.js'
@@ -169,7 +169,7 @@ export class TuiApp {
 
   // Overlay 交互导航状态（pager 翻页 / palette 选中）。
   // 渲染器是纯函数，page/selectedIndex 由此状态注入并在激活时复位。
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
+  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
   /** 注册时保存的 overlay 数据提供函数（供导航处理器查边界 / 执行命令） */
   private overlayData?: {
     pagerContent?: () => PagerData
@@ -185,6 +185,10 @@ export class TuiApp {
   private paletteExec?: (index: number) => void
   /** rewind Enter 执行回调：参数为选中条目的 content */
   private rewindExec?: (content: string) => void
+  /** chronicle Enter 执行回调：参数为选中会话 id（映射为 /resume 命令） */
+  private chronicleExec?: (id: string) => void
+  /** 当前 cockpit 聚焦面板（/cockpit <panel> 切换）。 */
+  private cockpitPanel: Panel = 'summary'
 
   // State
   private state: TuiState
@@ -542,7 +546,7 @@ export class TuiApp {
       }
       if (key.name === 'escape' && key.ctrl) {
         // Ctrl+Esc → 激活命令面板
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
         this.overlay.activate('command-palette')
         return
       }
@@ -563,7 +567,7 @@ export class TuiApp {
           } else if (now - this.lastEscAt < 400) {
             // Double-ESC → rewind
             this.lastEscAt = 0
-            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
+            this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
             this.overlay.activate('rewind')
             this.renderLive()
           } else {
@@ -591,7 +595,7 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_r') {
         if (!this.isAgentActive()) {
-          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
+          this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
           this.overlay.activate('history-search')
         }
         return
@@ -781,6 +785,17 @@ export class TuiApp {
     return this.inputLine.vimEnabled
   }
 
+  /** 设置 cockpit 聚焦面板（供 /cockpit <panel>）。激活时即时重渲染。 */
+  setCockpitPanel(panel: Panel): void {
+    this.cockpitPanel = panel
+    if (this.overlay.activeId() === 'cockpit') this.overlay.rerender()
+  }
+
+  /** 当前 cockpit 聚焦面板。 */
+  getCockpitPanel(): Panel {
+    return this.cockpitPanel
+  }
+
   /** 激活 overlay */
   activateOverlay(id: string): boolean {
     switch (id) {
@@ -793,7 +808,7 @@ export class TuiApp {
       case 'chronicle':
       case 'tasks': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
-        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, query: '' }
+        this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, query: '' }
         return this.overlay.activate(id)
       }
       default:
@@ -945,6 +960,26 @@ export class TuiApp {
       }
       if (key.name === 'backspace') { this.editOverlayQuery(null); return true }
       if (this.isPrintableKey(key)) { this.editOverlayQuery(key.char); return true }
+      return false
+    }
+
+    if (id === 'chronicle') {
+      const count = this.overlayData?.chronicleEntries?.().entries.length ?? 0
+      const cur = this.overlayNav.chronicleIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayNav.chronicleIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayNav.chronicleIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = count > 0 ? this.overlayData?.chronicleEntries?.().entries[cur] : undefined
+        this.deactivateOverlay()
+        if (entry?.id && this.chronicleExec) this.chronicleExec(entry.id)
+        return true
+      }
       return false
     }
 
@@ -1996,10 +2031,11 @@ export class TuiApp {
     rewindEntries?: () => RewindData
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void): void {
     this.overlayData = overlayData
     this.paletteExec = paletteExec
     this.rewindExec = rewindExec
+    this.chronicleExec = chronicleExec
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -2029,7 +2065,7 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.cockpitSnapshot?.()
         if (!data) return ['Cockpit data not available.']
-        return renderCockpit(data, this.columns, this.rows, this.theme)
+        return renderCockpit(data, this.columns, this.rows, this.theme, this.cockpitPanel)
       },
     })
 
@@ -2053,7 +2089,7 @@ export class TuiApp {
     this.overlay.register('chronicle', {
       render: (_w, _h) => {
         const data = overlayData?.chronicleEntries?.() ?? { entries: [] }
-        return renderChronicle(data, this.columns, this.rows, this.theme)
+        return renderChronicle({ ...data, selectedIndex: this.overlayNav.chronicleIndex }, this.columns, this.rows, this.theme)
       },
     })
 

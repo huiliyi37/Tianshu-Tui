@@ -260,11 +260,15 @@ export interface ChronicleEntry {
   summary: string
   /** 是否当前会话 */
   current: boolean
+  /** 会话 id（Enter → resume 用；缺省则该条不可恢复） */
+  id?: string
 }
 
 export interface ChronicleData {
   entries: ChronicleEntry[]
   title?: string
+  /** 选中游标（↑↓ 导航高亮） */
+  selectedIndex?: number
 }
 
 /**
@@ -282,26 +286,27 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 
   const maxEntries = height - 5
   const visible = data.entries.slice(0, maxEntries)
+  const sel = data.selectedIndex ?? -1
 
-  for (const entry of visible) {
-    const idx = entry.current
-      ? color(` #${String(entry.index)}`.padEnd(idxWidth), theme.primary, { bold: true })
-      : color(` #${String(entry.index)}`.padEnd(idxWidth), theme.dim)
-    const time = entry.current
-      ? color(entry.time.padEnd(timeWidth), theme.primary)
-      : color(entry.time.padEnd(timeWidth), theme.dim)
-    const summary = entry.current
-      ? entry.summary.slice(0, summaryWidth).padEnd(summaryWidth)
-      : color(entry.summary.slice(0, summaryWidth).padEnd(summaryWidth), theme.dim)
+  for (let i = 0; i < visible.length; i++) {
+    const entry = visible[i]!
+    const selected = i === sel
+    // 选中游标 ▸；当前会话用 primary 高亮（与选中区分：选中靠游标，当前靠色）。
+    const cursor = selected ? color('▸', theme.primary, { bold: true }) : ' '
+    const idxColor = entry.current ? theme.primary : theme.dim
+    const idx = color(`#${String(entry.index)}`.padEnd(idxWidth - 1), idxColor, entry.current ? { bold: true } : undefined)
+    const time = color(entry.time.padEnd(timeWidth), entry.current ? theme.primary : theme.dim)
+    const summaryText = entry.summary.slice(0, summaryWidth).padEnd(summaryWidth)
+    const summary = selected || entry.current ? summaryText : color(summaryText, theme.dim)
 
-    lines.push(padLine(`${idx}${time}${summary}`, width, theme))
+    lines.push(padLine(`${cursor}${idx}${time}${summary}`, width, theme))
   }
 
   for (let i = visible.length; i < maxEntries; i++) {
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ scroll  Enter view  q quit', width, theme))
+  lines.push(formatFooter('↑↓ select  Enter → resume  q quit', width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines

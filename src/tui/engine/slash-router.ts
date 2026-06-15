@@ -18,6 +18,7 @@ import type { BootstrapContext } from '../../bootstrap.js'
 import { createCoordinatorReviewDeps } from '../../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../../agent/review-router.js'
 import type { ChangeSet } from '../../agent/review-discipline.js'
+import { PANELS, type Panel } from '../cockpit/types.js'
 
 // ── React-free mutable ref adapter ─────────────────────────────
 
@@ -164,7 +165,19 @@ export class SlashRouter {
       return true
     }
     if (command === '/cockpit') {
+      const arg = parts[1]?.toLowerCase()
+      if (arg === 'off') {
+        this.app.deactivateOverlay()
+        this.app.commitStatic('Cockpit collapsed.')
+        this.app.setStreamingState(false)
+        return true
+      }
+      const panel: Panel = (arg && (PANELS as string[]).includes(arg)) ? (arg as Panel) : 'summary'
+      this.app.setCockpitPanel(panel)
       this.app.activateOverlay('cockpit')
+      if (arg && panel === 'summary' && arg !== 'summary') {
+        this.app.commitStatic(`Unknown cockpit panel "${arg}". Showing summary. Panels: ${PANELS.join(', ')}`)
+      }
       return true
     }
     if (command === '/palette') {
