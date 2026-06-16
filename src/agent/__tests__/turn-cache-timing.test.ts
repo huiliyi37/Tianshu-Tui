@@ -166,4 +166,26 @@ describe('turn-step cache setter timing (terminal-wave safety net)', () => {
       `invalidation count scaled with tool turns: 1-turn=${oneTurn} vs 5-turn=${manyTurns} (A-class setter leaked into the tool loop)`,
     )
   })
+
+  it('A-class updateTools fingerprint recalculation is never triggered mid-loop', async () => {
+    const engine = makeEngine()
+    const order: string[] = []
+    spyOrder(engine, 'updateTools', 'updateTools', order)
+    spyOrder(engine, 'buildOaiRequest', 'build', order)
+
+    const agent = makeAgent(engine, makeMultiTurnClient(3), new SessionContext())
+    await agent.run('read the file', makeCallbacks())
+
+    // updateTools recalculates fingerprint directly (not via invalidateFreshCache).
+    // It must NEVER fire between the first buildOaiRequest and the end of the run —
+    // a mid-loop fingerprint change would break prefix cache across tool turns.
+    const builds = order.filter(x => x === 'build')
+    const updates = order.filter(x => x === 'updateTools')
+    assert.ok(builds.length > 0, 'expected at least one buildOaiRequest call')
+    assert.equal(
+      updates.length,
+      0,
+      `updateTools (fingerprint recalculation) fired mid-loop: ${order.join(',')} (A-class fingerprint mutation leaked into the tool loop)`,
+    )
+  })
 })

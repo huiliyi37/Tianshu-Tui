@@ -344,7 +344,7 @@ export function createTurnStepProducer(self: AgentLoop): TurnStepProducer {
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   return new TurnOrchestrator({
     // === Lifecycle ===
-    initializeRun: (userInput, callbacks) => self.turnStepProducer.initializeRun(userInput, callbacks),
+    initializeRun: (userInput, callbacks, images) => self.turnStepProducer.initializeRun(userInput, callbacks, images),
     stopFsWatcher: () => { self.stopFsWatcher() },
 
     // === Config ===

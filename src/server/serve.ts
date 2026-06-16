@@ -301,7 +301,7 @@ function buildManagedAgent(
   }
   let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
   return {
-    run: (prompt, callbacks) => agent.run(prompt, callbacks),
+    run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
     abort: () => agent.abort(),
     setApprovalMode: (mode) => agent.setApprovalMode(mode),
     enterPlanMode: () => agent.enterPlanMode(),
