@@ -1,6 +1,6 @@
 # Rivet
 
-A terminal coding agent powered by DeepSeek V4, with prefix cache optimization for the 1M context window. Ink 6 + React TUI, streaming responses, tool execution loop.
+A terminal coding agent powered by DeepSeek V4, with prefix cache optimization for the 1M context window. T9 pure-ANSI TUI (zero React/Ink), streaming responses, tool execution loop.
 
 ## Status
 
@@ -59,8 +59,8 @@ rivet
 
 ```
 src/
-├── main.tsx              Entry: CLI routing → config → tools → prompt engine → agent → TUI
-├── headless.ts           Headless mode: -p/--print with text/JSON output, no Ink
+├── main.ts               Entry (T9 ANSI, zero React/Ink): CLI routing → config → tools → prompt engine → agent → TuiApp
+├── headless.ts           Headless mode: -p/--print with text/JSON output, no TUI
 ├── onboarding.ts         First-run onboarding sentinel state and dismissal helpers
 ├── validation.ts         Shared input validation (sessionId regex)
 ├── agent/
@@ -295,7 +295,7 @@ cd ../project-feature-a && rivet
 ## Features
 
 - **Prefix cache optimization** — Frozen system prompt + structured message ordering
-- **Streaming TUI** — Ink 6 (React for CLI), 50ms render batching (~20fps)
+- **Streaming TUI** — T9 pure-ANSI engine (zero React/Ink), 50ms render batching (~20fps)
 - **17 builtin tools** — bash, diff, edit_file, read_file, write_file, grep, glob, run_tests, git, todo, web_fetch, undo, inspect_project, repo_map, related_tests, lsp_goto_definition, lsp_find_references
 - **Non-blocking git status** — Stale cache + async refresh, no event loop blocking
 - **Approval workflow** — y/n confirmation for dangerous operations
@@ -320,7 +320,7 @@ cd ../project-feature-a && rivet
 - **MCP client** — Model Context Protocol: connect external tool servers via stdio or SSE, auto-discover tools, register as `mcp__<server>__<tool>` (with `__` sanitization), parallel init, approval heuristics, 5-class error classifier (config/auth/network/protocol/tool_error), `/mcp` + `/debug mcp` status
 - **LSP integration** — Language Server Protocol: `lsp_goto_definition` and `lsp_find_references` tools powered by typescript-language-server, symbol-level navigation replaces blind grep for TypeScript projects
 - **.gitignore filter** — Skips node_modules, .git, build artifacts
-- **Headless mode** — `-p`/`--print` flag runs AgentLoop without Ink; `--json` returns structured JSON with success/text/usage/error
+- **Headless mode** — `-p`/`--print` flag runs AgentLoop without the TUI; `--json` returns structured JSON with success/text/usage/error
 - **Permission allow rules** — Configurable allowlist with exact, wildcard, and pattern matching; allowlisted tools skip approval while preserving risk tracking
 - **Cost/token display** — Live input/output/cache token counts and estimated cost in SummaryBar; derived from SessionContext usage, no duplicate counting
 - **Custom slash commands** — Project-local `.rivet/commands/*.md` with `$ARGUMENTS` interpolation; resolved after built-in slash commands
