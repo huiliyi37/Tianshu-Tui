@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { createMcpToolWrapper, mcpToolName } from '../wrapper.js'
+import { createMcpToolWrapper, createMcpConnectorConsent, mcpToolName } from '../wrapper.js'
 
 describe('mcpToolName', () => {
   it('prefixes with server id', () => {
@@ -134,5 +134,55 @@ describe('createMcpToolWrapper', () => {
     const tool = createMcpToolWrapper('grep', mcpDef, callTool)
 
     assert.equal(tool.requiresApproval({ input: {}, toolUseId: '1', cwd: '/tmp' }), false)
+  })
+})
+
+describe('MCP connector opt-in (first-use consent)', () => {
+  const readDef = {
+    name: 'search_code',
+    description: 'Search code in repository',
+    inputSchema: { type: 'object' as const, properties: {} },
+  }
+  const okCall = async () => ({ content: [{ type: 'text' as const, text: 'ok' }], isError: false })
+  const callParams = { input: {}, toolUseId: '1', cwd: '/tmp' }
+
+  it('requires approval on first use of a connector when consent is wired', () => {
+    const consent = createMcpConnectorConsent()
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent)
+    assert.equal(tool.requiresApproval(callParams), true)
+  })
+
+  it('stops requiring approval after the connector has been used (opted in)', async () => {
+    const consent = createMcpConnectorConsent()
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall, consent)
+    assert.equal(tool.requiresApproval(callParams), true)
+    await tool.execute(callParams)
+    assert.equal(tool.requiresApproval(callParams), false)
+  })
+
+  it('opt-in is per connector — approving one does not unlock another', async () => {
+    const consent = createMcpConnectorConsent()
+    const a = createMcpToolWrapper('serverA', readDef, okCall, consent)
+    const b = createMcpToolWrapper('serverB', readDef, okCall, consent)
+    await a.execute(callParams)
+    assert.equal(a.requiresApproval(callParams), false)
+    assert.equal(b.requiresApproval(callParams), true)
+  })
+
+  it('write-capable tools still require approval even after opt-in', async () => {
+    const consent = createMcpConnectorConsent()
+    const writeDef = {
+      name: 'create_issue',
+      description: 'Create an issue',
+      inputSchema: { type: 'object' as const, properties: {} },
+    }
+    const tool = createMcpToolWrapper('gh', writeDef, okCall, consent)
+    await tool.execute(callParams)
+    assert.equal(tool.requiresApproval(callParams), true)
+  })
+
+  it('without a consent store, read-only tools behave as before (no opt-in gate)', () => {
+    const tool = createMcpToolWrapper('ctx7', readDef, okCall)
+    assert.equal(tool.requiresApproval(callParams), false)
   })
 })

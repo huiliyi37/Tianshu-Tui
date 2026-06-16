@@ -7,6 +7,27 @@ export function mcpToolName(serverId: string, toolName: string): string {
   return `mcp__${safeServerId}__${safeToolName}`
 }
 
+/**
+ * Per-session record of which MCP connectors the user has opted into.
+ *
+ * Borrowed from the connector opt-in principle: never silently use a connector
+ * the user did not choose. The FIRST tool call from a given connector requires
+ * approval; once approved (and executed), the connector's read-only tools no
+ * longer prompt. Write-capable tools keep their own per-call approval.
+ */
+export interface McpConnectorConsent {
+  hasConsented(serverId: string): boolean
+  grantConsent(serverId: string): void
+}
+
+export function createMcpConnectorConsent(): McpConnectorConsent {
+  const consented = new Set<string>()
+  return {
+    hasConsented: (serverId: string) => consented.has(serverId),
+    grantConsent: (serverId: string) => { consented.add(serverId) },
+  }
+}
+
 const WRITE_TOOL_PATTERNS = /\b(write|create|update|delete|remove|push|post|put|patch|execute)\b/i
 
 interface McpToolDefinition {
@@ -30,6 +51,7 @@ export function createMcpToolWrapper(
   serverId: string,
   mcpDef: McpToolDefinition,
   callTool: CallToolFn,
+  consent?: McpConnectorConsent,
 ): Tool {
   const rivetName = mcpToolName(serverId, mcpDef.name)
   const desc = mcpDef.description ?? `MCP tool: ${mcpDef.name} (from ${serverId})`
@@ -47,6 +69,9 @@ export function createMcpToolWrapper(
     },
 
     async execute(params: ToolCallParams): Promise<ToolResult> {
+      // By the time execute runs, the connector use was either approval-free or
+      // approved — record the opt-in so later read-only calls don't re-prompt.
+      consent?.grantConsent(serverId)
       try {
         const result = await callTool(params.input)
         const textParts = result.content
@@ -71,7 +96,11 @@ export function createMcpToolWrapper(
     },
 
     requiresApproval(_params: ToolCallParams): boolean {
-      return needsApproval
+      // Write-capable tools always require approval. Read-only tools require a
+      // one-time opt-in per connector (when a consent store is wired in).
+      if (needsApproval) return true
+      if (consent && !consent.hasConsented(serverId)) return true
+      return false
     },
 
     isConcurrencySafe(): boolean {

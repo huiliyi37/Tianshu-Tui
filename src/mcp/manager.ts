@@ -3,7 +3,7 @@ import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotoc
 import type { Tool } from '../tools/types.js'
 import type { McpConfig, McpServerConfig } from './config.js'
 import type { McpConnectionState } from './types.js'
-import { createMcpToolWrapper } from './wrapper.js'
+import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 
 const DEFAULT_MCP_TIMEOUT_MS = 15_000
 
@@ -39,6 +39,8 @@ export class McpManager {
   private states: Map<string, McpConnectionState> = new Map()
   private tools: Tool[] = []
   private timeoutMs: number
+  // Shared across all wrappers: first use of each connector requires explicit opt-in.
+  private connectorConsent: McpConnectorConsent = createMcpConnectorConsent()
 
   constructor(config: McpConfig) {
     this.config = config
@@ -147,7 +149,7 @@ export class McpManager {
               throw err
             }
           }
-          return createMcpToolWrapper(serverId, mcpDef, perToolCallFn)
+          return createMcpToolWrapper(serverId, mcpDef, perToolCallFn, this.connectorConsent)
         })
 
         this.tools.push(...rivetTools)
