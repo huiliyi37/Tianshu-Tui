@@ -1,8 +1,10 @@
 # 天枢 Skills 指南
 
-> 技能（Skill）是可复用的工作流模板。天枢采用与 Claude Code / Codex 同款的**渐进式披露（progressive disclosure）**两层模型：
-> 默认只把所有 skill 的 **name + description** 放进上下文（Tier-1 发现层，极小、cache-safe），**完整正文按需加载**（Tier-2，模型用 `skill` 工具 / 用户用 `/skill`）。
-> 因此**不再有任何截断**——大型 skill 的正文要么没进上下文（仅占用一行描述），要么被完整加载。
+> 技能（Skill）是可复用的工作流模板。天枢采用与 Claude Code / Codex 同款的**渐进式披露（progressive disclosure）**模型：
+> Tier-1 发现层只把所有 skill 的 **name + description** 放进上下文（极小、cache-safe）；Tier-2 激活层**按需加载完整 SKILL.md 正文**（模型用 `skill` 工具 / 用户用 `/skill`）；Tier-3 对**目录型技能**（带 `references/`、`scripts/`、`assets/` 子文件夹）按需用 `read_file`/`grep`/`glob` 读取子文件。
+> 因此**不再有任何截断**——大型 skill 的正文要么没进上下文（仅占用一行描述），要么被完整加载；多文件夹技能的子文件用到才读，绝不全量灌入。
+>
+> **装载模型（重要）：** 运行时**只从 `.rivet/skills/` 加载**，**默认不扫描任何外部目录**。外部技能（如 `~/.claude/skills` 里的某几个）要用，先**复制进 `.rivet/skills/`**——只装你显式指定需要的，不与外部技能目录混用。
 > 本文档涵盖安装、使用、格式规范、已知限制和竞品对比。
 
 ---
@@ -86,18 +88,32 @@ triggers: [review, 审查, CR, code review]
 /skill code-review       → 把该 skill 的完整正文一次性追加进会话
 ```
 
-`/skill <name>` 以 append-only 的方式把完整 body 注入会话（不再用持久锚点反复渲染，也不再 `slice` 截断）。
+`/skill <name>` 以 append-only 的方式把完整 body 注入会话（不再用持久锚点反复渲染，也不再 `slice` 截断）。目录型技能还会附带子文件清单（`<skill-files>`），告诉模型有哪些子文件可按需读。
 
-**默认只扫描 `.rivet/skills/`。** Claude 目录（`.claude/skills/`）按需导入——在配置中声明你要的 skill 名称，避免一次性加载全部 Claude skills。
+### Tier-3 — 目录技能的子文件按需读取（无损）
 
-| 目录 | 格式 | 默认 | 说明 |
-|------|------|------|------|
-| `.rivet/skills/*.md` | Rivet frontmatter | **始终扫描** | 项目级 Rivet 原生格式 |
-| `.claude/skills/*/SKILL.md` | Claude 格式 | 需配置 | 项目级 Claude Code 兼容 |
-| `~/.claude/skills/*/SKILL.md` | Claude 格式 | 需配置 | 全局 Claude Code 兼容 |
+目录型技能（`<name>/SKILL.md` + `references/`/`scripts/`/`assets/`）加载时，`skill` 工具 / `/skill` 会在正文后附上一份**文件树清单**（相对路径）。模型按 SKILL.md 里的指引，用现有 `read_file`/`grep`/`glob` **按需完整读取**用到的子文件——不摘要、不截断。技能已复制进 `.rivet/skills/`（workspace 内），子文件天然可读，无需任何跨目录授权。
 
-> **从 Claude Code 导入 skill**：在 `~/.rivet/config.json` 或项目 `.rivet-config.json` 中配置 `skills.importFromClaude`，列出需要导入的 skill 名称（目录名）。只有列出的 skill 会被加载，不是全量扫描。
+> SKILL.md 应写成**短"路由"**（< 500 行）：概述 + 指向子文件的链接；重料放进 `references/`，脚本放进 `scripts/`。这样主上下文只进路由 + 实际用到的子文件。
+
+### 运行时单一来源：`.rivet/skills/`
+
+**运行时只加载 `.rivet/skills/`（+ 内置技能），绝不在运行时扫描任何外部目录。** `.rivet/skills/` 同时支持两种形态：
+
+| 形态 | 路径 | 说明 |
+|------|------|------|
+| 扁平 | `.rivet/skills/<name>.md` | Rivet 原生单文件技能 |
+| 目录 | `.rivet/skills/<name>/SKILL.md` | 目录技能，带 `references/`/`scripts/`/`assets/` 子文件夹（Tier-3） |
+
+> **导入外部技能 = 复制进 `.rivet/skills/`**（只装你要的那几个，不全量）。两种方式：
 >
+> **① 手动复制**（agent 也可这样做）：
+> ```bash
+> cp -r ~/.claude/skills/pdf-extract .rivet/skills/pdf-extract
+> ```
+> 复制后当场即可用 `read_file .rivet/skills/pdf-extract/SKILL.md` 立即使用；下次会话自动进发现层。
+>
+> **② 配置 `importFromClaude`**：在 `~/.rivet/config.json` 或项目 `.rivet-config.json` 列出技能名，bootstrap 时自动从 `.claude/skills/`（项目优先、回退全局 `~/.claude`）**复制**进 `.rivet/skills/`（幂等，已存在则跳过，不覆盖本地修改）：
 > ```json
 > {
 >   "skills": {
@@ -105,8 +121,7 @@ triggers: [review, 审查, CR, code review]
 >   }
 > }
 > ```
->
-> 不配置 = 只用 `.rivet/skills/`，不碰 Claude 目录。
+> 不配置 = 只用 `.rivet/skills/` 现有内容。无论哪种方式，外部 `.claude` 目录都**只在导入那一刻被读取一次用于复制**，运行时绝不再碰——不与外部技能混用。
 
 ---
 
@@ -138,40 +153,48 @@ tierLock: balanced
 | `triggers` | 否 | string[] | 正则数组，任意匹配即触发自动注入 |
 | `tierLock` | 否 | `cheap`/`balanced`/`strong` | 锁定模型 tier（预留字段） |
 
-### Claude Code 兼容格式（`.claude/skills/<name>/SKILL.md`）
+### 目录技能格式（`.rivet/skills/<name>/SKILL.md`，Claude Code 兼容）
 
 ```
-.claude/skills/
-  my-skill/
-    SKILL.md       ← 必须叫这个名字
+.rivet/skills/
+  pdf-extract/
+    SKILL.md          ← 必须叫这个名字（短"路由"）
+    references/
+      api.md          ← Tier-3：用到才 read_file
+      examples.md
+    scripts/
+      extract.py      ← Tier-3：经 bash 审批执行
+    assets/template.json
 ```
 
-`SKILL.md` 内容同样是 YAML frontmatter + Markdown body。这种格式与 `.rivet/skills/*.md` 一样进入统一的 `skillRegistry`——既出现在发现清单里，也能被 `skill` 工具和 `/skill` 命令加载。
+`SKILL.md` 内容同样是 YAML frontmatter + Markdown body。目录技能与扁平 `.rivet/skills/*.md` 一样进入统一的 `skillRegistry`——既出现在发现清单里，也能被 `skill` 工具和 `/skill` 命令加载；加载时额外附带子文件树（`<skill-files>`），子文件由模型按需读取（Tier-3）。这种格式与 Claude Code / agentskills.io 的多文件夹技能兼容——从 `~/.claude/skills/<name>` **复制整个目录**进 `.rivet/skills/<name>` 即可。
 
 ---
 
 ## Skill 安装位置
 
+**运行时只加载 `.rivet/skills/`**——扁平 `.md` 与目录技能并存：
+
 ```
 项目根目录/
-├── .rivet/
-│   └── skills/              ← 默认扫描（Rivet 原生，始终加载）
-│       ├── code-review.md
-│       ├── tdd.md
-│       └── deploy-check.md
-├── .claude/
-│   └── skills/              ← 需配置 importFromClaude（项目级 Claude 兼容）
-│       └── pdf-extract/
-│           └── SKILL.md
-~/.claude/
-    └── skills/              ← 需配置 importFromClaude（全局 Claude 兼容）
-        └── git-flow/
-            └── SKILL.md
+└── .rivet/
+    └── skills/              ← 唯一运行时来源
+        ├── code-review.md       (扁平)
+        ├── tdd.md               (扁平)
+        └── pdf-extract/         (目录技能，从 ~/.claude 复制而来)
+            ├── SKILL.md
+            ├── references/api.md
+            └── scripts/extract.py
 ```
 
-**默认行为**：只加载 `.rivet/skills/` 下的 skill。
+外部 Claude 技能目录（`.claude/skills/`、`~/.claude/skills/`）**不在运行时被扫描**——它们只是复制来源：
 
-**导入 Claude skill**：在配置文件中添加 `skills.importFromClaude`，按名称（目录名）选择性导入：
+```bash
+# 手动复制（agent 也可这样做）
+cp -r ~/.claude/skills/pdf-extract .rivet/skills/pdf-extract
+```
+
+或配置 `skills.importFromClaude`（bootstrap 期自动复制进 `.rivet/skills/`，幂等）：
 
 ```json
 // ~/.rivet/config.json 或 .rivet-config.json
@@ -182,7 +205,7 @@ tierLock: balanced
 }
 ```
 
-配置后，天枢会从 `.claude/skills/` 和 `~/.claude/skills/` 中只加载列出的 skill。名称冲突时 `.rivet/skills` 优先。
+天枢只复制列出的 skill（项目 `.claude` 优先、回退全局 `~/.claude`），**不全量吃掉你的 70+ Claude 技能**；已存在于 `.rivet/skills/` 的同名技能不会被覆盖（保护本地修改）。
 
 ---
 
@@ -259,7 +282,7 @@ description: 祈使句，小写，不加句号
 |---|------|------|---------|
 | 1 | 发现层 `relevant` 标记用正则匹配，非语义匹配 | "帮我看看代码" 不会把 "review" skill 标 relevant（但它仍在清单里可被加载） | 在 `triggers` 中加更多同义词 |
 | 2 | 发现清单在会话内稳定，不热加载 | 会话中途新增的 skill 本会话不可见 | 新开会话或重启天枢 |
-| 3 | 无 skill 内文件引用 | 不能在 skill 中引用同目录的其他文件 | 将所有内容写在一个 .md 中 |
+| 3 | 子文件引用仅限**目录技能** | 扁平 `.rivet/skills/*.md` 不能引用同目录其他文件 | 用目录技能格式（`<name>/SKILL.md` + 子文件夹），子文件按 Tier-3 read_file 读取 |
 | 4 | skill 文件内 `` !`cmd` `` 动态 shell 注入暂未实现 | 不能在 skill 里内联执行命令 | 等后续 wave（须走沙箱/审批门） |
 
 > **截断问题已根除**：渐进式披露下，正文要么不进上下文（仅占一行描述），要么被完整加载——不再存在 4000/8000 字符的静默丢弃或硬截断。
@@ -279,7 +302,7 @@ description: 祈使句，小写，不加句号
 
 | 维度 | 天枢 (Rivet) | Claude Code | Cursor Rules |
 |------|-------------|-------------|--------------|
-| **文件格式** | `.rivet/skills/*.md`（+ 可选导入 `.claude/skills/*/SKILL.md`） | `.claude/skills/*/SKILL.md` | `.cursor/rules/*.mdc` |
+| **文件格式** | `.rivet/skills/*.md` + `.rivet/skills/*/SKILL.md`（外部技能复制进来） | `.claude/skills/*/SKILL.md` | `.cursor/rules/*.mdc` |
 | **披露模型** | 两层：描述常驻 + 正文按需 | 两层：描述常驻 + 正文按需 | 单层（按 glob 注入） |
 | **发现机制** | 全部 skill 的 name+desc 常驻；正则命中标 relevant | 模型语义判断 | glob 匹配文件路径 |
 | **加载机制** | `skill` 工具 / `/skill` 取完整正文 | 模型自动加载 SKILL.md | — |
@@ -312,8 +335,10 @@ description: 祈使句，小写，不加句号
 
 ```
 bootstrap.ts          loadProjectSkills(cwd)
-                       → 统一扫描 .rivet/skills/*.md + 项目/全局 .claude/skills/*/SKILL.md
-                       → 解析 frontmatter 到 skillRegistry（记录 source / bodyPath）
+                       → (可选) importSkillsIntoRivet：把 importFromClaude 列出的技能
+                          从 .claude 复制进 .rivet/skills（幂等，仅复制不扫描）
+                       → 加载 .rivet/skills/（扁平 *.md + 目录 <name>/SKILL.md）
+                       → 解析 frontmatter 到 skillRegistry（记录 source / bodyPath / skillDir）
                               ↓
 loop.ts                skillRegistry.renderDiscoveryBlock(userInput)
                        → 渲染所有 skill 的 name+description（命中 triggers 标 relevant）
@@ -342,9 +367,9 @@ src/tools/skill.ts                          slash-commands.ts
 
 | 文件 | 职责 |
 |------|------|
-| `src/skills/skill-loader.ts` | Skill 解析、统一三目录加载、发现层渲染（`renderDiscoveryBlock`） |
-| `src/tools/skill.ts` | `skill` 工具：按名返回完整正文（Tier-2 模型入口） |
-| `src/bootstrap.ts` | 启动时 `loadProjectSkills(cwd)` 加载三目录 |
+| `src/skills/skill-loader.ts` | Skill 解析、`.rivet/skills` 单一来源加载（扁平+目录）、复制式导入（`importSkillsIntoRivet`）、文件树（`listSkillFiles`）、发现层渲染（`renderDiscoveryBlock`） |
+| `src/tools/skill.ts` | `skill` 工具：按名返回完整正文 + 目录技能文件树（Tier-2/3 模型入口） |
+| `src/bootstrap.ts` | 启动时 `loadProjectSkills(cwd)` 加载 `.rivet/skills` |
 | `src/agent/loop.ts` | 每轮调用 `renderDiscoveryBlock` 注入发现清单 |
 | `src/prompt/engine.ts` | `setSkillAdvisoryBlock` 存储发现块 |
 | `src/prompt/volatile.ts` | 渲染发现块到 dynamic appendix |

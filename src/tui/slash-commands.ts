@@ -28,7 +28,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
-import { skillRegistry } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
   loadConstellation,
@@ -1143,15 +1143,16 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const sub = parts[1]?.toLowerCase()
 
       // Single source of truth: the shared skillRegistry (loaded at bootstrap
-      // from .rivet/skills + project/global .claude/skills). No re-scan, no
-      // truncation — same Tier-1/Tier-2 model the model itself uses.
+      // from .rivet/skills only — external .claude dirs are never scanned in
+      // place; designated skills are copied in via importFromClaude). No
+      // re-scan, no truncation — same Tier-1/Tier-2 model the model uses.
       const sourceTag = (source?: string): string =>
         source === 'global-claude' ? '🌐' : '📁'
       const allSkills = skillRegistry.list()
 
       if (!sub || sub === 'list' || sub === 'ls') {
         if (allSkills.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No skills found.\nScanned:\n  .rivet/skills/\n  .claude/skills/ (project)\n  ~/.claude/skills/ (global)' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nCopy a skill in with:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
         } else {
           const lines = [...allSkills]
             .sort((a, b) => a.name.localeCompare(b.name))
@@ -1180,8 +1181,17 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       // Append-only one-shot: the complete body becomes a normal message in
       // history (visible all session). We deliberately do NOT use a persistent
       // anchor — that would re-render the whole body every turn and bloat the
-      // prefix. No slice(): the full body is preserved.
-      ctx.session.addUserMessage(`[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`)
+      // prefix. No slice(): the full body is preserved. For directory skills we
+      // also append the sub-file tree (Tier-3 entry points), matching the
+      // `skill` tool's behaviour.
+      let payload = `[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`
+      if (skill.skillDir) {
+        const files = listSkillFiles(skill.skillDir)
+        if (files.length > 0) {
+          payload += `\n<skill-files dir="${skill.skillDir}">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
+        }
+      }
+      ctx.session.addUserMessage(payload)
       setIsStreaming(false)
       return true
     }
