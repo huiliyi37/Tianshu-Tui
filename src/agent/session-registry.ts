@@ -507,7 +507,11 @@ export class SessionRegistry {
  * All method calls succeed silently — session features degrade gracefully.
  */
 function createNullDb(): any {
-  const noopStmt = { run: () => {}, all: () => [] as any[], get: () => undefined }
+  const noopStmt = {
+    run: () => ({ changes: 0, lastInsertRowid: 0 }),
+    all: () => [] as any[],
+    get: () => undefined,
+  }
   return new Proxy(Object.create(null), {
     get: (_target, prop: string) => {
       if (prop === 'prepare') return () => noopStmt
