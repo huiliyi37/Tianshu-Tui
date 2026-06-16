@@ -87,14 +87,18 @@ export function Composer(props: {
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setImageError(null)
-    const arr = Array.from(files).filter(f => ACCEPTED_IMAGE_TYPES.has(f.type))
+    const arr = Array.from(files).filter(f => f.type.startsWith('image/') || ACCEPTED_IMAGE_TYPES.has(f.type))
     if (arr.length === 0) { setImageError('不支持的格式（仅 PNG/JPEG/WebP/GIF）'); return }
     for (const f of arr) {
       if (f.size > MAX_IMAGE_SIZE) { setImageError(`${f.name} 超过 5MB 限制`); return }
     }
     if (images.length + arr.length > MAX_IMAGES) { setImageError(`最多 ${MAX_IMAGES} 张图片`); return }
-    const urls = await Promise.all(arr.map(readFileAsDataURL))
-    setImages(prev => [...prev, ...urls])
+    try {
+      const urls = await Promise.all(arr.map(readFileAsDataURL))
+      setImages(prev => [...prev, ...urls])
+    } catch {
+      setImageError('图片读取失败，请重试')
+    }
   }, [images.length])
 
   const removeImage = (index: number) => {
@@ -205,16 +209,28 @@ export function Composer(props: {
   }
 
   const onPaste = (e: React.ClipboardEvent) => {
-    // Extract image files from BOTH .files and .items — WebKit/Tauri may
-    // populate only items for clipboard image paste (e.g. macOS screenshots).
+    // Extract image files from clipboard. Use DataTransferItem.type for MIME
+    // detection because the File object produced by getAsFile() often has an
+    // empty .type for clipboard images (macOS screenshot → File.type="").
+    // Also deduplicate: items and files overlap, so track by a content hash.
+    const seen = new Set<string>()
     const files: File[] = []
-    for (const f of Array.from(e.clipboardData.files)) {
-      if (ACCEPTED_IMAGE_TYPES.has(f.type)) files.push(f)
-    }
-    for (const item of Array.from(e.clipboardData.items)) {
-      if (item.kind === 'file') {
+    const items = e.clipboardData.items
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
         const f = item.getAsFile()
-        if (f && ACCEPTED_IMAGE_TYPES.has(f.type)) files.push(f)
+        if (f && f.size > 0 && !seen.has(`${f.name}:${f.size}`)) {
+          seen.add(`${f.name}:${f.size}`)
+          files.push(f)
+        }
+      }
+    }
+    // Fallback: some platforms only populate .files (file drag into window).
+    for (const f of Array.from(e.clipboardData.files)) {
+      if (f.type.startsWith('image/') && !seen.has(`${f.name}:${f.size}`)) {
+        seen.add(`${f.name}:${f.size}`)
+        files.push(f)
       }
     }
     if (files.length > 0) {
