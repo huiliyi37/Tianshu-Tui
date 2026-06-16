@@ -17,6 +17,7 @@ import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
+import { PrewarmController } from './prewarm-controller.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -31,7 +32,7 @@ return new TurnStreamController({
       appendStreamedText: text => { self.streamedText += text },
       getLastPrewarmAt: () => self.lastPrewarmAt,
       setLastPrewarmAt: position => { self.lastPrewarmAt = position },
-      maybePrewarm: text => { self.maybePrewarm(text) },
+      maybePrewarm: text => { self.prewarmController.maybePrewarm(text) },
       prewarmFile: async filePath => {
         const value = await buildPrewarmValue(self.cwd, filePath)
         if (value && !self.prewarm.has(value.canonicalPath)) {
@@ -271,7 +272,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     runReplanCheck: () => { self.runReplanCheck() },
     buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
       self.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
-    prewarmRecentReads: () => self.prewarmRecentReads(),
+    prewarmRecentReads: () => self.prewarmController.prewarmRecentReads(),
     runPostSession: (callbacks) => self.runPostSession(callbacks),
     recordProviderOutcome: (ok) => { self.recordProviderOutcome(ok) },
 
@@ -343,6 +344,14 @@ export function createReasoningEffortController(self: AgentLoop): ReasoningEffor
     getMaxTurns: () => self.config.maxTurns,
     getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     setCurrentEffortShadow: record => { self._currentEffortShadow = record },
+  })
+}
+
+export function createPrewarmController(self: AgentLoop): PrewarmController {
+  return new PrewarmController({
+    getCwd: () => self.cwd,
+    getPrewarmCache: () => self.prewarm,
+    getRecentToolHistory: () => self.recentToolHistory,
   })
 }
 

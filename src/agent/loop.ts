@@ -10,9 +10,8 @@ import { ToolRegistry } from '../tools/registry.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
-import { extractIntents } from './intent-extractor.js'
 import { PrewarmCache } from './prewarm.js'
-import { batchPrewarm, buildPrewarmValue, buildPrewarmValueAsync } from './prewarm-file.js'
+import { batchPrewarm, buildPrewarmValueAsync } from './prewarm-file.js'
 import { validatePathSafe } from '../tools/path-validate.js'
 import { type CompactionConfig } from '../compact/constants.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
@@ -118,11 +117,12 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, buildRuntimeSnapshot } from "./loop-factory.js";
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
+import { PrewarmController } from './prewarm-controller.js'
 import { loadSessionMemories } from './session-memory-warmup.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
@@ -252,6 +252,7 @@ export class AgentLoop {
   private intentRoute: IntentRetrievalRouteController
   private antiAnchoring: AntiAnchoringController
   private modelRoutingShadow: ModelRoutingShadowController
+  prewarmController: PrewarmController
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -461,6 +462,7 @@ export class AgentLoop {
     this.intentRoute = createIntentRetrievalRouteController(this)
     this.antiAnchoring = createAntiAnchoringController(this)
     this.modelRoutingShadow = createModelRoutingShadowController(this)
+    this.prewarmController = createPrewarmController(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -666,25 +668,6 @@ export class AgentLoop {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
     this.config.promptEngine.setActiveDomain(this.sessionDomain)
-  }
-
-  async maybePrewarm(text: string): Promise<void> {
-    const intents = extractIntents(text)
-    for (const intent of intents) {
-      if (intent.type !== 'file') continue
-      const value = await buildPrewarmValue(this.cwd, intent.value)
-      if (!value) continue
-      if (!this.prewarm.has(value.canonicalPath)) {
-        this.prewarm.set(value.canonicalPath, value)
-      }
-    }
-  }
-
-  async prewarmRecentReads(): Promise<void> {
-    const paths = this.recentToolHistory
-      .filter(entry => entry.tool === 'read_file' && entry.status === 'success')
-      .map(entry => entry.target)
-    await batchPrewarm(this.cwd, paths, this.prewarm)
   }
 
   abort(): void {
