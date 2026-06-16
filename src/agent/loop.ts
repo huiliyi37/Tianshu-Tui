@@ -73,10 +73,6 @@ import { getThetaPhase } from './star-event.js'
 import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
 import { computeEFE } from './prediction-error.js'
 import { computeAffordanceScores } from './affordance.js'
-import { buildModelRoutingShadowEvent, inferLegacyRoutingRecommendation, persistModelRoutingShadow } from './model-routing-shadow.js'
-import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-selection.js'
-import { buildHistoricalModelRewards } from './model-reward-summary.js'
-import { recordRoutingRewardClosure } from './reward-loop.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { createTelemetryWriter } from './telemetry-writer.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
@@ -122,10 +118,11 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, buildRuntimeSnapshot } from "./loop-factory.js";
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
+import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
@@ -253,6 +250,7 @@ export class AgentLoop {
   private reasoningEffort: ReasoningEffortController
   private intentRoute: IntentRetrievalRouteController
   private antiAnchoring: AntiAnchoringController
+  private modelRoutingShadow: ModelRoutingShadowController
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -320,7 +318,7 @@ export class AgentLoop {
   /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
   turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
-  private initialUserMessage: string | null = null
+  initialUserMessage: string | null = null
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   recentTextFingerprints: string[] = []
   /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
@@ -461,6 +459,7 @@ export class AgentLoop {
     this.reasoningEffort = createReasoningEffortController(this)
     this.intentRoute = createIntentRetrievalRouteController(this)
     this.antiAnchoring = createAntiAnchoringController(this)
+    this.modelRoutingShadow = createModelRoutingShadowController(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -659,39 +658,7 @@ export class AgentLoop {
   }
 
   private recordModelRoutingShadow(currentSensorium: Sensorium, efe: EFEComponents): void {
-    if (this.config.modelRoutingShadowEnabled === false) return
-    const store = this.config.meridianIndexer?.getDb()
-    if (!store) return
-
-    try {
-      const recentCalls = this.trajectory.getEntries().slice(-10).map(entry => ({
-        name: entry.tool,
-        isError: entry.status === 'failed' || entry.status === 'retried-failed',
-      }))
-      const modelCards = this.config.modelRoutingShadowModelCards ?? this.config.modelCards
-      const legacyRouting = inferLegacyRoutingRecommendation(recentCalls, modelCards)
-      const historicalRewards = buildHistoricalModelRewards(store)
-      const efeRecommendation = selectModelPolicy({
-        candidates: buildModelPolicyCandidates(modelCards, { historicalRewards }),
-        efe,
-        sensorium: currentSensorium,
-        topK: 1,
-      })[0]
-      const event = buildModelRoutingShadowEvent({
-        sessionId: this.config.sessionId ?? 'unknown',
-        turn: this.session.getTurnCount(),
-        objective: this.initialUserMessage ?? '',
-        currentModel: this.config.getCurrentModel?.() ?? this.config.promptEngine.getModel(),
-        selectedBy: this.config.getCurrentModel ? 'human' : 'config',
-        legacyRouting,
-        ...(efeRecommendation ? { efeRecommendedModel: efeRecommendation.model } : {}),
-        sensorium: currentSensorium,
-      })
-      persistModelRoutingShadow(store, event)
-      recordRoutingRewardClosure(store, event)
-    } catch {
-      // Shadow telemetry must never affect the turn.
-    }
+    this.modelRoutingShadow.record(currentSensorium, efe)
   }
 
   private bindSessionDomain(taskDescription: string): void {

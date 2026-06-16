@@ -16,6 +16,7 @@ import { TurnOrchestrator } from './turn-orchestrator.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
+import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -342,6 +343,21 @@ export function createReasoningEffortController(self: AgentLoop): ReasoningEffor
     getMaxTurns: () => self.config.maxTurns,
     getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     setCurrentEffortShadow: record => { self._currentEffortShadow = record },
+  })
+}
+
+export function createModelRoutingShadowController(self: AgentLoop): ModelRoutingShadowController {
+  return new ModelRoutingShadowController({
+    getShadowEnabled: () => self.config.modelRoutingShadowEnabled,
+    getDb: () => self.config.meridianIndexer?.getDb(),
+    getTrajectoryEntries: () => self.trajectory.getEntries(),
+    getModelCards: () => self.config.modelRoutingShadowModelCards ?? self.config.modelCards,
+    getSessionId: () => self.config.sessionId,
+    getTurnCount: () => self.session.getTurnCount(),
+    getInitialUserMessage: () => self.initialUserMessage,
+    getCurrentModel: () => self.config.getCurrentModel?.(),
+    hasCurrentModelOverride: () => !!self.config.getCurrentModel,
+    getFallbackModel: () => self.config.promptEngine.getModel(),
   })
 }
 
