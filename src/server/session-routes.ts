@@ -28,6 +28,21 @@ import { listProjectFiles, rankFiles } from './file-list.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
+/** Vision upload guards — provider-safe formats and a per-image byte ceiling. */
+const MAX_IMAGES = 4
+/** Per-image decoded byte cap (safety net; the client compresses to ~256KB). */
+const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024
+const ACCEPTED_IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp|gif);base64,.+$/i
+
+/** Decoded byte size of a `data:...;base64,<payload>` URL (without decoding it). */
+function decodedBase64Bytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(',')
+  if (comma < 0) return 0
+  const b64 = dataUrl.slice(comma + 1)
+  const padding = b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0
+  return Math.floor((b64.length * 3) / 4) - padding
+}
+
 /** S — accepted autonomy levels for per-session approval-mode overrides. */
 const APPROVAL_MODES: ReadonlySet<ApprovalMode> = new Set<ApprovalMode>([
   'auto-accept', 'auto-safe', 'manual', 'dangerously-skip-permissions',
@@ -259,18 +274,23 @@ export function buildSessionRoutes(
       if (!data.prompt || typeof data.prompt !== 'string' || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing or empty "prompt" field' } }
       }
-      // Validate images: must be an array of data:image/...;base64,... URLs.
+      // Validate images: array of provider-safe base64 data URLs. Defense in
+      // depth — the desktop already compresses + transcodes, but the server is
+      // the trust boundary (formats the model can't consume, oversized payloads).
       let images: string[] | undefined
       if (data.images !== undefined) {
         if (!Array.isArray(data.images) || data.images.length === 0) {
           return { status: 400, body: { error: '"images" must be a non-empty array' } }
         }
-        if (data.images.length > 4) {
-          return { status: 400, body: { error: 'Max 4 images allowed' } }
+        if (data.images.length > MAX_IMAGES) {
+          return { status: 400, body: { error: `Max ${MAX_IMAGES} images allowed` } }
         }
         for (const img of data.images) {
-          if (typeof img !== 'string' || !img.startsWith('data:image/')) {
-            return { status: 400, body: { error: 'Each image must be a data:image/... URL' } }
+          if (typeof img !== 'string' || !ACCEPTED_IMAGE_DATA_URL.test(img)) {
+            return { status: 400, body: { error: 'Each image must be a data:image/(png|jpeg|webp|gif);base64 URL' } }
+          }
+          if (decodedBase64Bytes(img) > MAX_IMAGE_BYTES) {
+            return { status: 400, body: { error: `Each image must be <= ${Math.round(MAX_IMAGE_BYTES / 1024)}KB` } }
           }
         }
         images = data.images as string[]
@@ -377,6 +397,23 @@ export function buildSessionRoutes(
       if (!found) return { status: 404, body: { error: 'Artifact not found' } }
       const raw = await manager.readArtifact(id, artifactId)
       return { status: 200, body: { artifact: artifactSummary(found), raw: raw ?? '' } }
+    }, apiToken),
+
+    // Vision — serve a persisted user-attached image by id. The desktop fetches
+    // this with the Bearer header (img src cannot carry headers, so the client
+    // turns the bytes into a blob object URL). Binary response: take over `res`.
+    'GET /sessions/:id/images/:imgId': withAuth((_body, params, _headers, res) => {
+      if (!res) return { status: 500, body: { error: 'Response stream is unavailable' } }
+      const img = manager.readImage(params!.id!, params!.imgId!)
+      if (!img) return { status: 404, body: { error: 'Image not found' } }
+      res.writeHead(200, {
+        'Content-Type': img.mime,
+        'Content-Length': img.bytes.length,
+        'Cache-Control': 'private, max-age=31536000, immutable',
+        'Access-Control-Allow-Origin': '*',
+      })
+      res.end(img.bytes)
+      return { status: 200, handled: true }
     }, apiToken),
 
     // R3 — rollback preview. Returns the agent-owned files that would be

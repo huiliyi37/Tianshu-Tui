@@ -236,6 +236,15 @@ export interface SessionPersistenceAdapter {
   saveRecord(record: SessionRecord): void
   appendEvent(sessionId: string, event: SessionEvent): void
   loadAll(): PersistedSession[]
+  /**
+   * Persist a user-attached image as a standalone file so the event log only
+   * carries a small reference id (not the base64). Optional — adapters that
+   * predate vision attachments may omit it. `base64` is the raw payload (no
+   * data: prefix). Returns nothing; the caller already owns `imgId`.
+   */
+  saveImage?(sessionId: string, imgId: string, base64: string, mime: string): void
+  /** Read back a persisted image by id. Returns undefined if missing. */
+  readImage?(sessionId: string, imgId: string): { bytes: Buffer; mime: string } | undefined
 }
 
 export interface RuntimeSessionManagerOptions {
@@ -509,9 +518,17 @@ export class RuntimeSessionManager {
     // R1 — keep the registry heartbeat fresh while this session is active.
     try { this.getRegistry?.()?.heartbeat(id) } catch { /* non-fatal */ }
     this.touch(session)
-    // Echo the user's turn into the event log so the conversation persists it
-    // (the agent loop only emits assistant/tool events). Must precede 'status'.
-    this.append(session, 'user', { text: prompt, ...(images?.length ? { imageCount: images.length, images } : {}) })
+    // Persist each attached image as a standalone file and echo only small
+    // reference ids into the event log — NOT the base64. This keeps events.jsonl
+    // (and its full replay/restore) tiny while the model still receives the data
+    // URLs inline via agent.run below.
+    const imageIds = this.persistImages(id, images)
+    this.append(session, 'user', {
+      text: prompt,
+      ...(images?.length
+        ? { imageCount: images.length, ...(imageIds.length ? { imageIds } : {}) }
+        : {}),
+    })
     this.append(session, 'status', { status: 'running' })
     this.persistRecord(session)
 
@@ -1379,6 +1396,33 @@ export class RuntimeSessionManager {
     }
   }
 
+  /**
+   * Decode user-attached image data URLs and persist each as a file, returning
+   * the generated ids. Best-effort: a malformed URL or persistence gap is
+   * skipped (the model still gets the inline image; only its thumbnail is lost).
+   */
+  private persistImages(sessionId: string, images?: string[]): string[] {
+    if (!images?.length || !this.persistence?.saveImage) return []
+    const ids: string[] = []
+    for (const url of images) {
+      const parsed = parseImageDataUrl(url)
+      if (!parsed) continue
+      const imgId = randomId()
+      try {
+        this.persistence.saveImage(sessionId, imgId, parsed.base64, parsed.mime)
+        ids.push(imgId)
+      } catch {
+        // non-fatal — skip this thumbnail, keep the rest
+      }
+    }
+    return ids
+  }
+
+  /** Read a persisted user image (for the GET image route). */
+  readImage(sessionId: string, imgId: string): { bytes: Buffer; mime: string } | undefined {
+    return this.persistence?.readImage?.(sessionId, imgId)
+  }
+
   private touch(session: InternalSession): void {
     session.record.updatedAt = this.now()
   }
@@ -1388,6 +1432,13 @@ function randomId(): string {
   return (
     Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
   )
+}
+
+/** Parse a `data:image/<mime>;base64,<payload>` URL. Returns null if malformed. */
+function parseImageDataUrl(url: string): { mime: string; base64: string } | null {
+  const m = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(url)
+  if (!m) return null
+  return { mime: m[1]!.toLowerCase(), base64: m[2]! }
 }
 
 /**

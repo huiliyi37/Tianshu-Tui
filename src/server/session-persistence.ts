@@ -54,6 +54,29 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
     appendFileSync(join(d, 'events.jsonl'), JSON.stringify(event) + '\n', 'utf8')
   }
 
+  saveImage(sessionId: string, imgId: string, base64: string, mime: string): void {
+    const d = join(this.ensureDir(sessionId), 'images')
+    if (!existsSync(d)) mkdirSync(d, { recursive: true })
+    const ext = extForMime(mime)
+    writeFileSync(join(d, `${sanitize(imgId)}.${ext}`), Buffer.from(base64, 'base64'))
+  }
+
+  readImage(sessionId: string, imgId: string): { bytes: Buffer; mime: string } | undefined {
+    const dir = join(this.dir(sessionId), 'images')
+    const safe = sanitize(imgId)
+    for (const [ext, mime] of EXT_MIME) {
+      const file = join(dir, `${safe}.${ext}`)
+      if (existsSync(file)) {
+        try {
+          return { bytes: readFileSync(file), mime }
+        } catch {
+          return undefined
+        }
+      }
+    }
+    return undefined
+  }
+
   loadAll(): PersistedSession[] {
     if (!existsSync(this.baseDir)) return []
     const out: PersistedSession[] = []
@@ -127,4 +150,17 @@ export class FileSessionPersistence implements SessionPersistenceAdapter {
 
 function sanitize(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_')
+}
+
+/** Provider-safe image MIMEs ↔ file extensions (single source of truth). */
+const EXT_MIME: ReadonlyArray<readonly [string, string]> = [
+  ['png', 'image/png'],
+  ['jpg', 'image/jpeg'],
+  ['webp', 'image/webp'],
+  ['gif', 'image/gif'],
+]
+
+function extForMime(mime: string): string {
+  const hit = EXT_MIME.find(([, m]) => m === mime)
+  return hit ? hit[0] : 'png'
 }

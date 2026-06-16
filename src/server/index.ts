@@ -2,7 +2,11 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { isAuthorizedRequest } from './auth.js'
 import { errorContext, serverLogger } from './logger.js'
 
-const MAX_BODY_BYTES = 1_048_576
+// 10MB — the prompt route carries up to 4 base64 image data URLs. Compressed
+// images are ~256KB each, but the per-image server cap is 1.5MB decoded
+// (~2MB base64), so 4 images plus prompt JSON must fit. The server is a
+// localhost-bound, token-gated sidecar, so a larger ceiling is acceptable.
+const MAX_BODY_BYTES = 10 * 1024 * 1024
 
 export interface RouteResponse {
   status: number
