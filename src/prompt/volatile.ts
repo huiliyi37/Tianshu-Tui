@@ -117,6 +117,8 @@ export interface VolatileContext {
   harnessAdvisoryBlock?: string | null
   /** Cross-session events formatted for injection (cache-safe: only in dynamic appendix) */
   crossSessionEvents?: string
+  /** Companion presence block — other active sessions working on the same project. */
+  companionPresence?: string
   /**
    * Session-state snapshot from SessionStateManager.renderForVolatile().
    * Cache-safe: rendered ONLY into the dynamic appendix of the latest user message.
@@ -378,6 +380,10 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Cross-session events: rare, keep at end
   if (ctx.crossSessionEvents) {
     parts.push(ctx.crossSessionEvents)
+  }
+
+  if (ctx.companionPresence) {
+    parts.push(ctx.companionPresence)
   }
 
   // Affordance hint: cognitive-state-driven tool selection guidance.

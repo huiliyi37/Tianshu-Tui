@@ -20,6 +20,7 @@ import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
+import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
 import { STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
 import { classifySeason } from './cognitive-season.js'
 import { renderAffordanceHint, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
@@ -320,6 +321,13 @@ export class TurnStepProducer {
         }
       }
       this.self.config.promptEngine.setCrossSessionEvents(appendix || null)
+    }
+    // Companion presence: load other live sessions for awareness
+    {
+      const companions = loadPresence(this.self.cwd, this.self.config.sessionId)
+      this.self.config.promptEngine.setCompanionPresence(
+        companions.length > 0 ? formatPresenceForAppendix(companions) : null,
+      )
     }
     // Inject session state snapshot into volatile block before building request
     if (this.self.sessionStateManager) {
