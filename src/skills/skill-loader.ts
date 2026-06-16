@@ -363,16 +363,61 @@ export function registerBuiltinSkills(registry: SkillRegistry = skillRegistry): 
 }
 
 /**
+ * Copy the named skills from a `.claude/skills/` directory INTO `.rivet/skills/`
+ * (idempotent). This is the "import = copy" model: the runtime never reads
+ * external skill directories in place — designated skills are brought into the
+ * workspace once, then loaded from `.rivet/skills/` like any native skill.
+ *
+ * Source precedence: project `.claude/skills/<name>` wins over global
+ * `~/.claude/skills/<name>`. A skill already present in `.rivet/skills/`
+ * (directory `<name>/` or flat `<name>.md`) is skipped — never overwritten —
+ * so local edits are preserved. Directory skills are copied recursively
+ * (sub-folders included).
+ */
+export function importSkillsIntoRivet(
+  cwd: string,
+  names: string[],
+): { copied: string[]; skipped: string[]; errors: string[] } {
+  const copied: string[] = []
+  const skipped: string[] = []
+  const errors: string[] = []
+  const rivetDir = join(cwd, '.rivet', 'skills')
+  for (const name of names) {
+    try {
+      const dest = join(rivetDir, name)
+      if (existsSync(dest) || existsSync(`${dest}.md`)) {
+        skipped.push(name)
+        continue
+      }
+      const projectSrc = join(cwd, '.claude', 'skills', name)
+      const globalSrc = join(homedir(), '.claude', 'skills', name)
+      const src = existsSync(projectSrc) ? projectSrc : existsSync(globalSrc) ? globalSrc : null
+      if (!src) {
+        errors.push(`${name}: not found in .claude/skills (project or global)`)
+        continue
+      }
+      cpSync(src, dest, { recursive: true })
+      copied.push(name)
+    } catch (e) {
+      errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+  return { copied, skipped, errors }
+}
+
+/**
  * Load skills into the shared registry.
  *
- * Default: only scans .rivet/skills/ (Rivet-native format).
+ * Single runtime source: built-ins + `.rivet/skills/` (flat `name.md` AND
+ * directory `name/SKILL.md`). The runtime NEVER scans external `.claude`
+ * directories in place — external skills must first be copied into
+ * `.rivet/skills/`.
  *
- * Claude skills (.claude/skills/<name>/SKILL.md) are opt-in via the
- * skills.importFromClaude config field — only listed skill names are
- * imported, preventing accidental loading of 70+ Claude skills.
- *
- * Precedence (later overrides earlier on name collision):
- * global Claude -> project Claude -> project Rivet (native wins).
+ * `skills.importFromClaude` is the user's explicit allow-list: at load time the
+ * listed skills are COPIED from `.claude/skills/` into `.rivet/skills/` (via
+ * importSkillsIntoRivet, idempotent), then loaded from there. This prevents
+ * accidentally pulling in a user's 70+ Claude skills and keeps external skill
+ * directories out of the runtime path entirely.
  */
 export function loadProjectSkills(
   cwd: string,
@@ -380,18 +425,14 @@ export function loadProjectSkills(
 ): { loaded: string[]; errors: string[] } {
   const loaded: string[] = []
   const errors: string[] = []
-  const merge = (r: { loaded: string[]; errors: string[] }): void => {
-    loaded.push(...r.loaded)
-    errors.push(...r.errors)
-  }
-  // Built-in skills first; project files may override by name.
+  // Built-in skills first; .rivet/skills files may override by name.
   loaded.push(...registerBuiltinSkills())
-  const claudeFilter = options?.importFromClaude
-  if (claudeFilter && claudeFilter.length > 0) {
-    const filterSet = new Set(claudeFilter)
-    merge(skillRegistry.loadFromClaudeDirectory(join(homedir(), '.claude', 'skills'), 'global-claude', filterSet))
-    merge(skillRegistry.loadFromClaudeDirectory(join(cwd, '.claude', 'skills'), 'project-claude', filterSet))
+  const names = options?.importFromClaude
+  if (names && names.length > 0) {
+    errors.push(...importSkillsIntoRivet(cwd, names).errors)
   }
-  merge(skillRegistry.loadFromDirectory(join(cwd, '.rivet', 'skills'), 'rivet'))
+  const r = skillRegistry.loadFromDirectory(join(cwd, '.rivet', 'skills'), 'rivet')
+  loaded.push(...r.loaded)
+  errors.push(...r.errors)
   return { loaded, errors }
 }

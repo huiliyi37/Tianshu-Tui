@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles } from '../skill-loader.js'
+import { existsSync } from 'node:fs'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet } from '../skill-loader.js'
 
 describe('skill-loader', () => {
   it('parses frontmatter and triggers', () => {
@@ -86,5 +87,32 @@ Router body.`, 'utf-8')
     assert.ok(paths.includes('references/a.md'))
     assert.ok(paths.includes('scripts/run.py'))
     assert.ok(!paths.includes('SKILL.md'))
+  })
+
+  it('importSkillsIntoRivet copies a project .claude skill into .rivet/skills (idempotent)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-import-'))
+    const srcDir = join(cwd, '.claude', 'skills', 'foo')
+    mkdirSync(join(srcDir, 'references'), { recursive: true })
+    writeFileSync(join(srcDir, 'SKILL.md'), '---\ndescription: foo\n---\n\nbody', 'utf-8')
+    writeFileSync(join(srcDir, 'references', 'r.md'), 'r', 'utf-8')
+
+    const res = importSkillsIntoRivet(cwd, ['foo'])
+    assert.deepEqual(res.copied, ['foo'])
+    assert.deepEqual(res.skipped, [])
+    assert.ok(existsSync(join(cwd, '.rivet', 'skills', 'foo', 'SKILL.md')))
+    assert.ok(existsSync(join(cwd, '.rivet', 'skills', 'foo', 'references', 'r.md')))
+
+    // second run is a no-op (does not overwrite local copy)
+    const again = importSkillsIntoRivet(cwd, ['foo'])
+    assert.deepEqual(again.copied, [])
+    assert.deepEqual(again.skipped, ['foo'])
+  })
+
+  it('importSkillsIntoRivet reports missing skills as errors', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-import-miss-'))
+    const res = importSkillsIntoRivet(cwd, ['nope'])
+    assert.deepEqual(res.copied, [])
+    assert.equal(res.errors.length, 1)
+    assert.match(res.errors[0]!, /nope: not found/)
   })
 })

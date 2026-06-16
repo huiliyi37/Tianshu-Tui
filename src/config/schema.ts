@@ -168,9 +168,12 @@ export const workersSchema = z.object({
 }).default({})
 
 export const skillsSchema = z.object({
-  /** Skill names to import from ~/.claude/skills/ and .claude/skills/. Only
-   *  listed skills are loaded — avoids importing all 70+ Claude skills when
-   *  the user only needs a few. Empty array (default) = don't scan .claude/. */
+  /** Skill names to COPY from .claude/skills/ (project then global ~/.claude)
+   *  into .rivet/skills/ at load time. Only listed skills are imported — avoids
+   *  pulling in all 70+ Claude skills when the user only needs a few. The copy
+   *  is idempotent (existing .rivet/skills entries are never overwritten) and
+   *  the runtime only ever loads from .rivet/skills — external dirs are never
+   *  scanned in place. Empty array (default) = import nothing. */
   importFromClaude: z.array(z.string()).default([]),
 }).default({})
 
