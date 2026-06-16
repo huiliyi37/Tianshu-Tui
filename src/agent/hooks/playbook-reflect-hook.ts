@@ -57,6 +57,10 @@ export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSe
         const allFingerprints = [fingerprint, ...historical]
         const patternBullets = detectCrossSessionPatterns(fingerprint, historical, existingBullets)
 
+        if (patternBullets.length > 0) {
+          deps.store.addBullets(patternBullets)
+        }
+
         // 抑制 stale 模式
         const updatedBullets = suppressStalePatterns(deps.store.load(), allFingerprints)
         deps.store.save(updatedBullets)

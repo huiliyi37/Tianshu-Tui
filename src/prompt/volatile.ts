@@ -63,6 +63,8 @@ export interface VolatileContext {
   contextLedger?: ContextLedger
   sessionMemoryBlock?: string
   playbookLessons?: PlaybookBullet[]
+  /** Recent user query text for lesson relevance scoring. */
+  recentQuery?: string
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
@@ -274,6 +276,7 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
   // Historical lessons: rarely change after first few turns
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
     const { selected } = scoreLessons(ctx.playbookLessons, {
+      query: ctx.recentQuery,
       recentToolTargets: ctx.toolHistory?.map(t => t.target),
     })
     const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
@@ -648,6 +651,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
     const { selected } = scoreLessons(ctx.playbookLessons, {
+      query: ctx.recentQuery,
       recentToolTargets: ctx.toolHistory?.map(t => t.target),
     })
     const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)

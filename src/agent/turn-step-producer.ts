@@ -152,6 +152,7 @@ export class TurnStepProducer {
     this.self.bindSessionDomain(userInput)
     this.self.contextInjection.recordUserInputClaims(userInput)
     this.self.contextInjection.refreshPlaybookLessons(userInput)
+    this.self.config.promptEngine.setRecentQuery(userInput.slice(0, 300))
 
     // Phase 2.3: Proactive session split — MUST run BEFORE addUserMessage.
     await this.self.compactBoundaryCoordinator.preUserMessageSplit()
@@ -370,7 +371,8 @@ export class TurnStepProducer {
       strategy: pressureResult.shouldThrottleCvm ? null : this.self.strategy,
       vigor: pressureResult.shouldThrottleCvm ? null : this.self.vigorState,
       season: pressureResult.shouldThrottleCvm ? null : this.self.currentSeason,
-      // CVM uncertainty trap: risk level from latest tool assessment
+      seasonIntensity: pressureResult.shouldThrottleCvm ? undefined : (this.self.currentSeasonIntensity ?? undefined),
+      regulationPressure: pressureResult.cvmOverheadRatio > 0 ? pressureResult.cvmOverheadRatio : undefined,
       riskLevel: this.self.latestRisk.level,
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
@@ -458,6 +460,7 @@ export class TurnStepProducer {
       sensoriumStability: currentSensorium.stability,
     })
     this.self.currentSeason = seasonResult.season
+    this.self.currentSeasonIntensity = seasonResult.intensity
 
     // ── Embodied Cognition: affordance-gated tool selection hint ──
     const affordanceState: AffordanceState = {
