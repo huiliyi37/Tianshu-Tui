@@ -85,7 +85,7 @@ import type { TelemetryWriter } from './telemetry-writer.js'
 import { PressureMonitor } from '../context/pressure-monitor.js'
 import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
-import { type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot, type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { CacheAdvisor } from '../cache/advisor.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { TurnHeartbeat } from './turn-heartbeat.js'
@@ -95,6 +95,7 @@ import { classifyApiError } from '../api/error-classifier.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { ImmuneHook } from './immune-hook.js'
+import { formatImmuneContext } from './immune-context.js'
 import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, disciplineReanchorEntry, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
 import { checkTddGate } from './tdd-gate.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
@@ -1668,13 +1669,48 @@ export class AgentLoop {
     return { action: 'proceed', request }
   }
 
-  /** @deprecated Dead code — never wired into the turn pipeline. Kept as no-op stub. */
+  /**
+   * Build and inject the cognitive projection (cognitive-mirror + task-contract
+   * + verification-gap + uncertainty + immune hint) into the prompt engine.
+   * Reconnected after the loop-split refactor silently orphaned it.
+   *
+   * Note: the sycophancy trap is intentionally NOT recorded here — it needs a
+   * redesign before re-wiring (blind-execution heuristic too coarse). The
+   * `sycophancyHint` therefore stays undefined, matching the prior behavior.
+   */
   private runCognitivePrep(
-    _turn: number,
-    _actionable: boolean,
-    _pressureResult: import('../context/pressure-monitor.js').PressureResult,
+    turn: number,
+    actionable: boolean,
+    pressureResult: import('../context/pressure-monitor.js').PressureResult,
   ): void {
-    // No-op: cognitive projection path removed.
+    const cognitiveLedger = createCognitiveLedger({
+      contract: this.taskContract,
+      evidence: this.evidence.getState(),
+      trace: this.traceStore,
+      turn,
+      // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
+      sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
+      strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
+      vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
+      season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
+      // CVM uncertainty trap: risk level from latest tool assessment
+      riskLevel: this.latestRisk.level,
+    })
+    this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
+    const sycophancyHint = undefined
+    const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
+    this._lastImmuneHint = undefined // consume once
+    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
+    this.config.promptEngine.setCognitiveProjection(projection)
+
+    // ── CVM overhead tracking ──
+    // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
+    // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
+    // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
+    if (actionable) {
+      const cvmTokenEstimate = Math.ceil(projection.length / 4)
+      this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+    }
   }
 
   async runConvergenceCheck(
@@ -1768,7 +1804,7 @@ export class AgentLoop {
     // ── StarFlow v2: Sensorium computation ──
     const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
     if (!actionable) {
-      this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
+      this.config.promptEngine.setCognitiveProjection(null)
       this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
     }
     callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
@@ -1875,6 +1911,12 @@ export class AgentLoop {
         if (tddHint) this._lastImmuneHint = tddHint
       }
     }
+
+    // ── Cognitive projection — build & inject cognitive-mirror + contract +
+    // verification-gap + uncertainty + immune hint. Runs last so it sees the
+    // freshly-advanced contract status and consumes the TDD-gate immune hint
+    // produced above (reproduces the original _runInner step-6e ordering).
+    this.runCognitivePrep(turn, actionable, pressureResult)
 
     return { sensorium: perceptionResult.sensorium, strategy: perceptionResult.strategy, phaseClass, pressureResult }
   }
