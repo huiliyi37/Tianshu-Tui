@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentLoop } from '../loop.js'
+import { AgentLoop, formatActivePlanPointer } from '../loop.js'
 import { SessionContext } from '../context.js'
 import { RuntimeHookPipeline } from '../runtime-hooks.js'
 import { PromptEngine } from '../../prompt/engine.js'
@@ -1461,5 +1461,24 @@ describe('AgentLoop — no-tool forced abort', () => {
 
     // Text-only turns break immediately (1 turn per run)
     assert.equal(turnCompletes, 1, 'text-only run should complete after 1 turn')
+  })
+})
+
+describe('formatActivePlanPointer', () => {
+  it('emits a slug/title/path pointer without the plan body', () => {
+    const out = formatActivePlanPointer({ slug: 'my-plan', title: 'My Plan' })
+    assert.match(out, /^<active-plan /)
+    assert.match(out, /slug="my-plan"/)
+    assert.match(out, /title="My Plan"/)
+    assert.match(out, /path="\.rivet\/plans\/my-plan\.md"/)
+    assert.match(out, /todo/)
+  })
+
+  it('escapes XML special characters in slug and title', () => {
+    const out = formatActivePlanPointer({ slug: 'a&b', title: 'Fix <tag> & "q"' })
+    assert.doesNotMatch(out.replace(/path="[^"]*"/, ''), /<tag>/)
+    assert.match(out, /&amp;/)
+    assert.match(out, /&lt;tag&gt;/)
+    assert.match(out, /&quot;q&quot;/)
   })
 })

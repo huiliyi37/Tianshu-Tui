@@ -131,6 +131,20 @@ import { type EffortShadowRecord } from './p3-reward.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
+/**
+ * Build the tiny approved-plan pointer block injected into the dynamic appendix.
+ * Carries only slug/title/path — NOT the plan body, which stays the single
+ * source of truth on disk at `.rivet/plans/<slug>.md`. The agent reads it on
+ * demand and tracks steps via the existing todo mechanism.
+ */
+export function formatActivePlanPointer(plan: { slug: string; title: string }): string {
+  const esc = (s: string) =>
+    s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
+  const slug = esc(plan.slug)
+  const title = esc(plan.title)
+  return `<active-plan slug="${slug}" title="${title}" path=".rivet/plans/${slug}.md">已批准,正在执行此方案。完整步骤见该文件,需要时用 read_file 查看;开工前先用 todo 列出有序步骤跟踪进度,完成后 plan_close。</active-plan>`
+}
+
 
 export class AgentLoop {
     session!: SessionContext;
@@ -801,11 +815,30 @@ export class AgentLoop {
     return this.latestPolicySignals
   }
 
-  /** Enter plan mode — only read-only tools allowed */
-  enterPlanMode(): void { this.planModeState = 'planning' }
+  /** Enter plan mode — only read-only tools allowed. Clears any stale approved-plan pointer. */
+  enterPlanMode(): void {
+    this.planModeState = 'planning'
+    this.config.promptEngine.setActivePlan(null)
+  }
 
   /** Exit plan mode — user approved, all tools allowed */
   exitPlanMode(): void { this.planModeState = 'off' }
+
+  /**
+   * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
+   * reminder into the dynamic appendix — NOT the plan body (which stays on disk).
+   * Approving releases plan mode (state→off) so execution tools are unblocked.
+   * Cache-safe: the pointer never enters the frozen base.
+   */
+  setActivePlan(plan: { slug: string; title: string } | null): void {
+    if (!plan) {
+      this.config.promptEngine.setActivePlan(null)
+      return
+    }
+    this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
+    this.planModeState = 'off'
+    this.syncPlanModeToConfig()
+  }
 
   /** Get current plan mode state */
   getPlanModeState(): PlanModeState { return this.planModeState }
