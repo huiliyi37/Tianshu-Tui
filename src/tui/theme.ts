@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity'
 
 interface ColorSet {
   primary: string
@@ -297,6 +297,38 @@ const SLATE_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Antigravity 2.0 — Codex cool azure, aligned with desktop tokens.css.
+// Single restrained accent: #5aa9ff sky-blue. Semantic colors lifted from
+// desktop --success / --warning / --error. Zero purple — no ziwei residue.
+// Dark-background tuned: chroma up ~8% vs web so truecolor glows on near-black.
+const ANTIGRAVITY_TRUECOLOR: ColorSet = {
+  primary: '#5aa9ff',   // cool azure — 唯一 accent (desktop --accent)
+  secondary: '#8ab4ff', // 浅天青 — 结构强调 / edit·write 头
+  success: '#43c463',   // 翠绿 — 测试通过/完成 (desktop --success)
+  warning: '#e0a93a',   // 琥珀 — 注意/委派 (desktop --warning)
+  error: '#f76b6b',     // 珊瑚红 — 错误 (desktop --error)
+  dim: '#6c6e7a',       // 暗灰 — 分隔/快捷键 (desktop --faint)
+  pulseQuiet: '#2a2a32', // 边框灰 — quiet pulse (desktop --border)
+  pulseActive: '#5aa9ff', // azure — active pulse (= primary)
+  pulseAlert: '#f76b6b',  // coral — alert pulse (= error)
+  toolShell: '#7aa2cf',   // 钢蓝 — bash/grep/glob
+  toolEdit: '#6fb3ab',    // 雾青 — edit_file/write_file (区别于 shell 蓝)
+  toolTest: '#43c463',    // 翠绿 — run_tests
+  toolDelegate: '#e0a93a', // 琥珀 — delegate
+}
+
+const ANTIGRAVITY_FALLBACK: ColorSet = {
+  primary: 'blue',
+  secondary: 'cyan',
+  success: 'green',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'blue',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -380,9 +412,16 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     truecolor: buildTheme(SLATE_TRUECOLOR, { userColor: '#e2e6ec', assistantColor: '#c4c9d2', muted: '#8b93a3' }),
     fallback: buildTheme(SLATE_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
   },
+  antigravity: {
+    // userColor = 干净中性亮白 ▌ 标记，不抢 accent 蓝
+    // assistantColor = 柔中性灰正文 (desktop --text 降档)
+    // muted = 桌面端 --muted 灰
+    truecolor: buildTheme(ANTIGRAVITY_TRUECOLOR, { userColor: '#e2e6ec', assistantColor: '#c4c9d2', muted: '#989aa6' }),
+    fallback: buildTheme(ANTIGRAVITY_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
+  },
 }
 
-let activeTheme: ThemeName = 'claude'
+let activeTheme: ThemeName = 'antigravity'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

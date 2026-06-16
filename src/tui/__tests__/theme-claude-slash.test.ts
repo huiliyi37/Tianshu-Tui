@@ -12,7 +12,7 @@ test('/theme validThemes is derived from THEMES — adding a theme to theme.ts m
   // the integration below.
   const keys = Object.keys(THEMES)
   assert.ok(keys.includes('claude'), 'THEMES must include claude')
-  assert.ok(keys.includes('tianshu'), 'THEMES must include tianshu (default)')
+  assert.ok(keys.includes('antigravity'), 'THEMES must include antigravity (default)')
   assert.ok(keys.includes('starfield'), 'THEMES must include starfield')
 })
 

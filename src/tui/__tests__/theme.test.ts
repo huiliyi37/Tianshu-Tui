@@ -2,22 +2,24 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('claude') })
+afterEach(() => { setTheme('antigravity') })
 
 describe('getTheme', () => {
-  it('defaults to claude theme (对标 Claude Code TUI — brand orange accent)', () => {
-    assert.equal(getActiveThemeName(), 'claude')
+  it('defaults to antigravity theme (对标桌面端 Antigravity 2.0 — cool azure accent)', () => {
+    assert.equal(getActiveThemeName(), 'antigravity')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#d77757') // Claude brand orange — 唯一 accent
-    assert.equal(theme.error, '#ff6b80')   // bright red
+    assert.equal(theme.primary, '#5aa9ff') // cool azure — 唯一 accent
+    assert.equal(theme.error, '#f76b6b')   // coral red
+    assert.notEqual(theme.primary, '#d77757') // 不是 Claude 品牌橙
     assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
+    assert.notEqual(theme.secondary, '#af87ff') // secondary 也不是紫
   })
 
-  it('claude uses brand-orange user mark + neutral gray body text', () => {
+  it('antigravity uses neutral white user mark + soft gray body text', () => {
     const theme = getTheme(3)
-    assert.equal(theme.userColor, '#d77757')      // brand orange ▌ mark
-    assert.equal(theme.assistantColor, '#d9d9d9') // 中性灰白正文
-    assert.equal(theme.pulseActive, '#d77757')    // brand orange active pulse
+    assert.equal(theme.userColor, '#e2e6ec')      // 中性亮白 ▌ mark
+    assert.equal(theme.assistantColor, '#c4c9d2') // 柔中性灰正文
+    assert.equal(theme.pulseActive, '#5aa9ff')    // azure active pulse
   })
 
   it('slate still available via explicit switch (cool teal accent)', () => {
@@ -45,10 +47,10 @@ describe('getTheme', () => {
     assert.equal(theme.assistantColor, '#c5c8d2') // brightened neutral body
   })
 
-  it('returns 256-color fallback when colorLevel < 3 (claude → redBright accent)', () => {
+  it('returns 256-color fallback when colorLevel < 3 (antigravity → blue accent)', () => {
     const theme = getTheme(1)
-    assert.equal(theme.primary, 'redBright')
-    assert.equal(theme.error, 'redBright')
+    assert.equal(theme.primary, 'blue')
+    assert.equal(theme.error, 'red')
   })
 
   it('maps tool names to colors (ziwei: multi-color per HTML design)', () => {
