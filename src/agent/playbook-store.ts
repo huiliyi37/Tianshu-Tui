@@ -74,9 +74,9 @@ export class PlaybookStore {
     this.save(enforceCapacity(merged, this.capacity))
   }
 
-  query(keywords: string[], topK = 3): PlaybookBullet[] {
+  query(keywords: string[], topK = 3, options: { minImportance?: number } = {}): PlaybookBullet[] {
     const playbook = this.load()
-    const matched = matchBullets(playbook, keywords, topK, { now: this.now() })
+    const matched = matchBullets(playbook, keywords, topK, { now: this.now(), minImportance: options.minImportance })
     if (matched.length > 0) {
       const replacements = new Map(matched.map(b => [b.id, b]))
       this.save(playbook.map(b => replacements.get(b.id) ?? b))

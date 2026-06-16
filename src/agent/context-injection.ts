@@ -51,7 +51,7 @@ export class ContextInjectionController {
     const playbookStore = this.deps.getPlaybookStore()
     if (!playbookStore) return
     const keywords = extractKeywords(`${userInput} ${this.deps.getRecentToolHistory().map(h => `${h.tool} ${h.target}`).join(' ')}`, 12)
-    const lessons = playbookStore.query(keywords, 3)
+    const lessons = playbookStore.query(keywords, 3, { minImportance: 0.6 })
     this.deps.promptEngine.updatePlaybookLessons(lessons)
   }
 
