@@ -623,10 +623,17 @@ export class CompactionController {
   }
 
   refreshCacheDiagnostic(loopTurn: number): string | null {
+    const history = this.deps.session.getCacheHistory()
+    // No provider cache data this turn (both counters 0) → no-data, not a 0%
+    // hit. getLatestTurnHitRate reports 0 here (inputTokens denominator), which
+    // would otherwise surface a spurious "First turn" diagnostic. Nothing to
+    // diagnose when the provider reported no cache numbers at all.
+    const latest = history[history.length - 1]
+    if (latest && latest.cacheRead === 0 && latest.cacheCreation === 0) return null
     const hitRate = this.deps.session.getLatestTurnHitRate()
     if (hitRate !== null && hitRate < 0.8) {
       const diagnostic = diagnoseCacheMiss(
-        this.deps.session.getCacheHistory(),
+        history,
         this.deps.session.getTurnCount(),
         this.deps.promptEngine.checkDrift(),
         this.deps.session.wasCompactedAt(loopTurn),
