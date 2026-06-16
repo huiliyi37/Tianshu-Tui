@@ -6,6 +6,7 @@ import { createThetaRuntimeHook } from './hooks/theta-hook.js'
 import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
+import { createAnchorBreakShadowHook } from './hooks/anchor-break-shadow-hook.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createPhysarumShadowTelemetryHook } from './hooks/physarum-shadow-telemetry-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
@@ -204,6 +205,19 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       registry: deps.sessionRegistry,
       sessionId: deps.sessionId,
       cwd: deps.cwd,
+    }))
+  }
+
+  // Anchor-break shadow (P1, observe-only): records "under-explored convergence"
+  // candidates at session end. Always registered when retrospect is available;
+  // no-ops when the meridian DB store is absent. Never mutates the session.
+  if (deps.buildRetrospectInput && deps.sessionId) {
+    hooks.push(createAnchorBreakShadowHook({
+      store: deps.meridianIndexer?.getDb() ?? null,
+      buildRetrospectInput: deps.buildRetrospectInput,
+      getSessionId: () => deps.sessionId,
+      getObjective: deps.getObjective,
+      getActiveDomainId: deps.getDomainId ? () => deps.getDomainId!() ?? null : undefined,
     }))
   }
 
