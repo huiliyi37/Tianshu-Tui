@@ -336,6 +336,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         objective: ev.data.objective != null ? String(ev.data.objective) : (prev?.objective ?? ''),
         status: ev.data.status != null ? String(ev.data.status) : (prev?.status ?? ''),
         phase: ev.data.phase != null ? String(ev.data.phase) : prev?.phase,
+        profile: ev.data.profile != null ? String(ev.data.profile) : prev?.profile,
         progressLine: ev.data.progressLine != null ? String(ev.data.progressLine) : prev?.progressLine,
         elapsedMs: ev.data.elapsedMs != null ? Number(ev.data.elapsedMs) : prev?.elapsedMs,
         updatedAt: ev.ts,

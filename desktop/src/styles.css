@@ -367,24 +367,49 @@ body {
 .schedule-card .title { font-weight: 600; }
 .schedule-card .meta { color: var(--muted); font-size: 12px; margin: 4px 0 8px; }
 
-.delegation-tree { border-top: 1px solid var(--border); padding: 8px 14px; max-height: 220px; overflow-y: auto; }
-.deleg-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.deleg-node { font-size: 13px; padding: 2px 0; }
+/* T4 — subagent fleet panel. Visual language ported from the 子代理流程 design
+   prototype; colors strictly from design tokens so it tracks the active theme. */
+.delegation-tree { border-top: 1px solid var(--border); padding: 10px 14px; max-height: 260px; overflow-y: auto; }
+
+/* Summary header — title + done/total count + per-status chips. */
+.deleg-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.deleg-title { font-size: 12px; color: var(--text); font-weight: var(--weight-semibold); }
+.deleg-count { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.deleg-chips { display: flex; align-items: center; gap: 12px; margin-left: auto; font-size: 11px; }
+.deleg-chip { font-family: var(--font-mono); white-space: nowrap; }
+.deleg-chip.running { color: var(--accent); }
+.deleg-chip.ok { color: var(--success); }
+.deleg-chip.warn { color: var(--warning); }
+.deleg-chip.bad { color: var(--error); }
+
+.deleg-node { font-size: 13px; padding: 3px 0; }
+/* blocked / failed / escalated → attention rail. */
+.deleg-node.attention { padding: 4px 8px; border-radius: var(--radius-sm); margin-top: 2px; }
+.deleg-node.attention.warn { border-left: 2px solid var(--warning); background: var(--warning-soft); }
+.deleg-node.attention.bad { border-left: 2px solid var(--error); background: var(--error-soft); }
+
 .deleg-row { display: flex; align-items: center; gap: 8px; }
-.deleg-node .obj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deleg-id { flex: none; font-family: var(--font-mono); font-weight: var(--weight-semibold); color: var(--text); font-size: 12px; }
+.deleg-profile {
+  flex: none; font-size: 10.5px; padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--panel-3); color: var(--muted); font-family: var(--font-mono);
+}
+.deleg-node .obj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .deleg-node .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
 .deleg-node .dot.running { background: var(--accent); }
 .deleg-node .dot.ok { background: var(--success); }
+.deleg-node .dot.warn { background: var(--warning); }
 .deleg-node .dot.bad { background: var(--error); }
 .deleg-node .dot.pulse { animation: pulse 1.2s var(--ease) infinite; }
-/* T4 — per-worker status badge + elapsed + progress line. */
+/* per-worker status badge + elapsed + progress line. */
 .deleg-badge {
-  flex: none; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-pill);
+  margin-left: auto; flex: none; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-pill);
   background: var(--panel-2); color: var(--muted);
 }
 .deleg-badge.running { background: var(--accent-soft); color: var(--accent); }
-.deleg-badge.ok { color: var(--success); }
-.deleg-badge.bad { color: var(--error); }
+.deleg-badge.ok { background: var(--success-soft); color: var(--success); }
+.deleg-badge.warn { background: var(--warning-soft); color: var(--warning); }
+.deleg-badge.bad { background: var(--error-soft); color: var(--error); }
 .deleg-elapsed { flex: none; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
 .deleg-progress {
   margin-left: 16px; color: var(--muted); font-size: 12px; font-family: var(--font-mono);

@@ -168,6 +168,8 @@ export interface DelegationNode {
   status: string
   phase?: string
   updatedAt: number
+  /** Worker role profile (e.g. "code_scout", "patcher", "reviewer"). */
+  profile?: string
   /** T4 — latest worker activity line (e.g. "edit_file src/x.ts"). */
   progressLine?: string
   /** T4 — elapsed wall-clock since the worker started, ms. */
