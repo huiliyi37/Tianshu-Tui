@@ -13,7 +13,14 @@ export interface TelemetryWriter {
 const MAX_SENSORIUM_LINES = 2_000
 const TRIM_CHECK_EVERY = 200
 
+const NOOP_WRITER: TelemetryWriter = {
+  write() {},
+  async flush() {},
+}
+
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
+  if (!process.env['RIVET_DEBUG_TELEMETRY']) return NOOP_WRITER
+
   const dir = sessionId ? join(cwd, '.rivet', 'sessions', sessionId) : join(cwd, '.rivet')
   const path = join(dir, 'sensorium.jsonl')
   const pendingWrites: Promise<void>[] = []

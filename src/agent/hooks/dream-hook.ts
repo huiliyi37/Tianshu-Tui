@@ -1,5 +1,5 @@
 import type { EvidenceState } from '../evidence.js'
-import { persistDream } from '../dream.js'
+import { persistDream, cleanupProjectMemory } from '../dream.js'
 import type { TrajectoryEntry as DreamTrajectoryEntry } from '../dream.js'
 import type { TrajectoryEntry } from '../trajectory.js'
 import type { PostSessionRuntimeHook } from '../runtime-hooks.js'
@@ -60,7 +60,10 @@ export function createDreamHook(deps: DreamHookDeps): PostSessionRuntimeHook {
         trajectoryEntries: deps.getTrajectory().map(toDreamTrajectoryEntry),
         sessionId: deps.sessionId,
       }
-      setImmediate(() => persistDream(cwd, input))
+      setImmediate(() => {
+        cleanupProjectMemory(cwd)
+        persistDream(cwd, input)
+      })
     },
   }
 }

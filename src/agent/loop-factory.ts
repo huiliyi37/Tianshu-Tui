@@ -218,6 +218,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     getPredictionAccumulator: () => self.predictionAccumulator,
     playbookStore: self.config.playbookStore,
     sessionRegistry: self.config.sessionRegistry,
+    cwd: self.cwd,
     buildRetrospectInput: () => {
       const es = self.evidence.getState()
       return {

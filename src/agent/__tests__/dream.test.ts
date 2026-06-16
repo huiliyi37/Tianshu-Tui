@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, rmSync, mkdtempSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { distillSession, persistDream, type DreamInput } from '../dream.js'
+import { distillSession, persistDream, cleanupProjectMemory, type DreamInput } from '../dream.js'
 
 function knowledgePath(cwd: string): string {
   return join(cwd, '.rivet', 'knowledge', 'project-memory.md')
@@ -176,6 +176,38 @@ describe('persistDream', () => {
       assert.ok(content.includes('future judgment rules'))
       const sessionsDir = join(dir, '.rivet', 'sessions')
       assert.ok(!existsSync(sessionsDir), 'should not create .rivet/sessions/')
+    })
+  })
+})
+
+describe('cleanupProjectMemory', () => {
+  it('removes entries without dream-key', () => {
+    withTempDir('dream-cleanup-nokey-', dir => {
+      persistDream(dir, baseInput({
+        decisions: ['Convergence insight: valid entry with dream-key and criterion match.'],
+        sessionId: 'valid-session',
+      }))
+
+      const path = knowledgePath(dir)
+      const before = readFileSync(path, 'utf-8')
+      const legacy = '### 2026-01-01 — Legacy session\n\nSome old telemetry without dream-key.\n\n'
+      writeFileSync(path, before + legacy)
+
+      const result = cleanupProjectMemory(dir)
+      assert.strictEqual(result.removed, 1)
+      assert.strictEqual(result.kept, 1)
+
+      const after = readFileSync(path, 'utf-8')
+      assert.ok(!after.includes('Legacy session'))
+      assert.ok(after.includes('valid entry with dream-key'))
+    })
+  })
+
+  it('returns zero counts for nonexistent file', () => {
+    withTempDir('dream-cleanup-missing-', dir => {
+      const result = cleanupProjectMemory(dir)
+      assert.strictEqual(result.removed, 0)
+      assert.strictEqual(result.kept, 0)
     })
   })
 })

@@ -69,6 +69,8 @@ export interface RuntimeHookDeps {
   getDoomLoopLevel?: () => DoomLoopLevel
   /** SessionRegistry for cross-session fingerprint storage (playbook-reflect). */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
+  /** Current working directory — used for project-scoped fingerprint partitioning. */
+  cwd?: string
   chronicle?: { addRadio: (message: string, turn: number) => void; addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void }
   /** Returns current star domain id for radio voice modulation. null when no domain matched. */
   getDomainId?: () => DomainVoiceId
@@ -201,6 +203,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getDoomLoopLevel: deps.getDoomLoopLevel,
       registry: deps.sessionRegistry,
       sessionId: deps.sessionId,
+      cwd: deps.cwd,
     }))
   }
 

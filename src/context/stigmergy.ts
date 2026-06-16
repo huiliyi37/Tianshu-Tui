@@ -63,10 +63,10 @@ export function computeCurrentStrength(
 // ─── StigmergyStore ─────────────────────────────────────────────────
 
 /**
- * Cross-session spatial memory via pheromone deposition.
+ * Session-scoped spatial memory via pheromone deposition.
  *
  * Manages `.rivet/pheromones.json` — a persistent file that
- * accumulates signals about files across sessions:
+ * accumulates signals about files within a session:
  * - fragile (test failures)
  * - well-tested (test coverage)
  * - entry-point (frequently read)
@@ -74,9 +74,9 @@ export function computeCurrentStrength(
  * - coupling-hub (high import degree)
  * - performance-critical / refactor-candidate
  *
- * Pheromones decay exponentially over time and are pruned
- * when they fall below the strength threshold or exceed
- * the capacity limit (LRU eviction).
+ * Note: despite file persistence, pheromones are effectively session-scoped.
+ * The 7-day half-life decay means signals from prior sessions are near-zero
+ * by the next session, and no cross-session coordination reads them.
  *
  * Memory caching: avoids repeated disk reads during tool batches.
  * Deposits are debounced (200ms) to batch rapid writes into one

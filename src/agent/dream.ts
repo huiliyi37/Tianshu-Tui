@@ -199,3 +199,32 @@ function buildCandidateHash(candidates: CuratedMemoryCandidate[]): string {
 function simpleHash(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 12)
 }
+
+/**
+ * Remove legacy noise entries from project-memory.md.
+ *
+ * Valid entries have a `dream-key` comment AND at least one claim matching
+ * the curated criteria. Entries missing the dream-key or containing only
+ * session telemetry (e.g., tool counts, file lists without insight) are
+ * removed.
+ */
+export function cleanupProjectMemory(cwd: string): { removed: number; kept: number } {
+  const path = join(cwd, '.rivet', 'knowledge', 'project-memory.md')
+  let content: string
+  try { content = readFileSync(path, 'utf-8') } catch { return { removed: 0, kept: 0 } }
+  if (!content.trim()) return { removed: 0, kept: 0 }
+
+  const entries = content.split(/(?=^### )/m).filter(e => e.trim())
+  const valid = entries.filter(entry => {
+    if (!extractDreamKey(entry)) return false
+    return CRITERIA.some(c => c.pattern.test(entry))
+  })
+
+  const removed = entries.length - valid.length
+  if (removed > 0) {
+    const dir = join(cwd, '.rivet', 'knowledge')
+    ensureDir(dir)
+    writeFileAtomicSync(path, valid.join('') + '\n')
+  }
+  return { removed, kept: valid.length }
+}

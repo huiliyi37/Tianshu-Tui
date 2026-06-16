@@ -4,7 +4,7 @@ import type { RetrospectInput } from '../retrospect.js'
 import { generateRetrospect } from '../retrospect.js'
 import type { PlaybookStore } from '../playbook-store.js'
 import type { DoomLoopLevel } from '../trace-store.js'
-import type { SessionRegistry } from '../session-registry.js'
+import { type SessionRegistry, projectHash } from '../session-registry.js'
 import { buildRetrospectFingerprint } from '../retrospect-fingerprint.js'
 
 export interface PlaybookReflectHookDeps {
@@ -15,6 +15,8 @@ export interface PlaybookReflectHookDeps {
   registry?: SessionRegistry
   /** 当前 session ID */
   sessionId?: string
+  /** 当前工作目录，用于指纹项目分区 */
+  cwd?: string
 }
 
 export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSessionRuntimeHook {
@@ -25,9 +27,11 @@ export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSe
       const { vigor, sensorium } = ctx.snapshot
       if (!vigor || !sensorium) return
 
+      const ph = deps.cwd ? projectHash(deps.cwd) : undefined
+
       // 计算 sessionCount（用于 shouldRunREM 门控）
       const sessionCount = deps.registry
-        ? deps.registry.loadFingerprints(100).length
+        ? deps.registry.loadFingerprints(100, undefined, ph).length
         : 0
 
       const remMode = shouldRunREM(vigor, sensorium, deps.getDoomLoopLevel(), sessionCount)
@@ -38,17 +42,15 @@ export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSe
       if (remMode === 'light') {
         if (!deps.registry || !deps.sessionId) return
 
-        // 加载历史指纹
-        const historical = deps.registry.loadFingerprints(10, deps.sessionId)
+        // 加载历史指纹（project-scoped）
+        const historical = deps.registry.loadFingerprints(10, deps.sessionId, ph)
         if (historical.length === 0) return
 
-        // 构建空指纹（无 retrospect 报告）
         const fingerprint = buildRetrospectFingerprint(deps.sessionId, '', [], {
           now: Date.now(),
         })
 
-        // 存储指纹
-        deps.registry.storeFingerprint(fingerprint)
+        deps.registry.storeFingerprint({ ...fingerprint, projectHash: ph })
 
         // 加载现有 bullets
         const existingBullets = deps.store.load()
@@ -84,14 +86,12 @@ export function createPlaybookReflectHook(deps: PlaybookReflectHookDeps): PostSe
         { now: Date.now() },
       )
 
-      // 存储 fingerprint
       if (deps.registry && deps.sessionId) {
-        deps.registry.storeFingerprint(fingerprint)
+        deps.registry.storeFingerprint({ ...fingerprint, projectHash: ph })
       }
 
-      // 加载历史指纹
       const historical = deps.registry && deps.sessionId
-        ? deps.registry.loadFingerprints(10, deps.sessionId)
+        ? deps.registry.loadFingerprints(10, deps.sessionId, ph)
         : []
 
       // 执行模式检测
