@@ -104,23 +104,23 @@ describe('resolveAppPromptInput', () => {
     const resolved = resolveAppPromptInput('/plan add workflow aliases', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('我正在使用 writing-plans 技能创建实现计划。'))
-    assert.ok(resolved.includes('Create a comprehensive implementation plan for: add workflow aliases'))
-    assert.ok(resolved.includes('Do not write implementation code yet.'))
+    assert.ok(resolved.includes('创建实现计划：add workflow aliases'))
+    assert.ok(resolved.includes('计划模板路由'))
     assert.ok(resolved.includes('docs/superpowers/plans/'))
-    assert.ok(resolved.includes('Forbidden placeholders'))
+    assert.ok(resolved.includes('禁用占位符'))
+    assert.ok(resolved.includes('不要写实现代码'))
   })
 
   it('resolves /write-plan into a writing-plans workflow prompt', async () => {
     const resolved = resolveAppPromptInput('/write-plan 你说的很好，把这个内容记录到设计文档。如果行数太长就拆分两个，一个背景说明，一个是设计文档。其次，即便我使用 claude code 也是多个会话来并行执行。', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('writing-plans'))
-    assert.ok(resolved.includes('Create a comprehensive implementation plan for: 你说的很好，把这个内容记录到设计文档。'))
+    assert.ok(resolved.includes('创建实现计划：你说的很好，把这个内容记录到设计文档。'))
+    assert.ok(resolved.includes('计划模板路由'))
     assert.ok(resolved.includes('docs/superpowers/plans/'))
     assert.ok(resolved.includes('多会话并行开发设计文档.md'))
     assert.ok(!resolved.includes('你说的很好-把这个内容记录到设计文档-如果行数太长'))
-    assert.ok(resolved.includes('Execution handoff'))
+    assert.ok(resolved.includes('收尾'))
   })
 
   it('resolves /plan close into a plan_close workflow prompt', async () => {
