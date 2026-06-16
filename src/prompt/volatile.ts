@@ -281,22 +281,10 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     }
   }
 
-  // Decisions + task progress: skip when sessionState is present (it includes both,
-  // rendering separately causes triple repetition in the prompt).
-  if (!ctx.sessionState) {
-    if (ctx.decisions && ctx.decisions.length > 0) {
-      const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
-      parts.push(`<decisions>\n${entries}\n</decisions>`)
-    }
-
-    if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
-      const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
-      const remaining = ctx.taskProgress.remaining.length > 0
-        ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
-        : ''
-      parts.push(`<task-progress current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
-    }
-  }
+  // Unified progress block: merges session-state, task-progress, and decisions
+  // into a single <progress> to eliminate triple repetition in the prompt.
+  const progressBlock = renderProgressBlock(ctx)
+  if (progressBlock) parts.push(progressBlock)
 
   // Tool history: most recent tools appended at end → prefix cacheable
   if (ctx.toolHistory && ctx.toolHistory.length > 0) {
@@ -367,11 +355,6 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
 
   if (ctx.mentionContextBlock) {
     parts.push(ctx.mentionContextBlock)
-  }
-
-  // Session state: may change per-turn — keep at end
-  if (ctx.sessionState) {
-    parts.push(ctx.sessionState)
   }
 
   // Cross-session events: rare, keep at end
@@ -459,6 +442,49 @@ export interface SalientBlock {
  * - 0.4: session housekeeping (session-state, cross-session-events)
  * - 0.3: deduplication hints (read-file-dedup-hint)
  */
+/**
+ * Unified progress block: merges session-state, task-progress, and decisions
+ * into a single `<progress>` XML block. Eliminates triple repetition where
+ * these three independent blocks each reported overlapping objective/status/decisions.
+ */
+function renderProgressBlock(ctx: VolatileContext): string | null {
+  // When sessionState is available, it's the richest source (objective + plan step
+  // + modified files + decisions + failed tests). Extract its content and wrap as <progress>.
+  if (ctx.sessionState) {
+    // sessionState is pre-rendered as `<session-state>...\n</session-state>`
+    // Re-wrap as <progress> to unify the tag namespace
+    const inner = ctx.sessionState
+      .replace(/^<session-state>\n?/, '')
+      .replace(/\n?<\/session-state>$/, '')
+    return `<progress>\n${inner}\n</progress>`
+  }
+
+  // Fallback: build from individual fields (early turns before sessionStateManager is ready)
+  const lines: string[] = []
+
+  if (ctx.taskProgress) {
+    if (ctx.taskProgress.current) {
+      lines.push(`current: ${escapeXml(ctx.taskProgress.current)}`)
+    }
+    if (ctx.taskProgress.completed.length > 0) {
+      lines.push(`done: ${ctx.taskProgress.completed.map(escapeXml).join(', ')}`)
+    }
+    if (ctx.taskProgress.remaining.length > 0) {
+      lines.push(`next: ${ctx.taskProgress.remaining.map(escapeXml).join(', ')}`)
+    }
+  }
+
+  if (ctx.decisions && ctx.decisions.length > 0) {
+    lines.push('Decisions:')
+    for (const d of ctx.decisions) {
+      lines.push(`  - ${escapeXml(d)}`)
+    }
+  }
+
+  if (lines.length === 0) return null
+  return `<progress>\n${lines.join('\n')}\n</progress>`
+}
+
 export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
   if (blockContent.startsWith('<repair-hint>')) return 0.8
@@ -472,13 +498,14 @@ export function assignSalience(blockContent: string): number {
   // Active-plan pointer is execution-critical: never drop under budget pressure.
   if (blockContent.startsWith('<active-plan')) return 0.8
   if (blockContent.startsWith('<intent-retrieval-route')) return 0.7
+  if (blockContent.startsWith('<progress>') || blockContent.startsWith('<progress ')) return 0.8
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7
   if (blockContent.startsWith('<worktree-warning')) return 0.7
   if (blockContent.startsWith('<git-status>')) return 0.7
   if (blockContent.startsWith('<recent-commits>')) return 0.7
   if (blockContent.startsWith('<tool-history>')) return 0.5
-  if (blockContent.startsWith('<session-state>')) return 0.4
+  if (blockContent.startsWith('<session-state>')) return 0.4 // legacy fallback
   if (blockContent.startsWith('<cross-session')) return 0.4
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
   return 0.5 // default: moderate salience
@@ -614,22 +641,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (ctx.decisions && ctx.decisions.length > 0) {
     const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
     parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
-  }
-
-  if (ctx.activeClaims && ctx.activeClaims.length > 0) {
-    const relevanceInput: ClaimRelevanceInput = {
-      workingSet: ctx.workingSet,
-      recentTools: ctx.toolHistory?.map(t => ({ tool: t.tool, target: t.target, status: t.status })),
-    }
-    const { selected, omitted } = selectRelevantClaims(ctx.activeClaims, relevanceInput)
-    if (selected.length > 0) {
-      const block = renderActiveClaimsBlock(selected)
-      if (block && omitted.length > 0) {
-        parts.push(block.replace('<active-claims', `<active-claims omitted="${omitted.length}"`))
-      } else if (block) {
-        parts.push(block)
-      }
-    }
   }
 
   if (ctx.sessionMemoryBlock) {

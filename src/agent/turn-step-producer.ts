@@ -394,8 +394,9 @@ export class TurnStepProducer {
     // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
     // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
     if (actionable) {
-      const cvmTokenEstimate = Math.ceil(projection.length / 4)
-      this.self.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
+      const toolCtxLen = this.self.config.promptEngine.getToolContextLength()
+      const cvmTokenEstimate = Math.ceil((projection.length + toolCtxLen) / 4)
+      this.self.pressureMonitor.recordCvmInjection(cvmTokenEstimate)
     }
   }
 
@@ -486,7 +487,11 @@ export class TurnStepProducer {
     this.self.latestPolicySignals = { efe, sensorium: currentSensorium }
     const affordances = computeAffordanceScores(affordanceState, this.self.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
-    this.self.config.promptEngine.setToolContext(renderToolContext(affordanceState, policies, efe) || null)
+    if (pressureResult.shouldThrottleCvm) {
+      this.self.config.promptEngine.setToolContext(null)
+    } else {
+      this.self.config.promptEngine.setToolContext(renderToolContext(affordanceState, policies, efe) || null)
+    }
     this.self.recordModelRoutingShadow(currentSensorium, efe)
 
     // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──

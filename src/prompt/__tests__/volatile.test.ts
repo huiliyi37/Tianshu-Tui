@@ -208,15 +208,15 @@ describe('behavior-mirror XML section', () => {
 describe('decisions XML section', () => {
   const base: VolatileContext = { cwd: '/project' }
 
-  it('renders <decisions> with entries', () => {
+  it('renders decisions inside unified <progress> block', () => {
     const ctx: VolatileContext = {
       ...base,
       decisions: ['use middleware pattern for auth', 'split loop into harness + orchestrator'],
     }
     const block = buildVolatileBlock(ctx)
-    assert.ok(block.includes('<decisions>'))
-    assert.ok(block.includes('<decision>use middleware pattern for auth</decision>'))
-    assert.ok(block.includes('</decisions>'))
+    assert.ok(block.includes('<progress>'))
+    assert.ok(block.includes('use middleware pattern for auth'))
+    assert.ok(block.includes('</progress>'))
   })
 
   it('omits when empty or undefined', () => {
@@ -306,10 +306,11 @@ describe('stable/latest volatile split', () => {
       decisions: ['use middleware'],
     })
     assert.ok(latest.includes('<tool-history'))
-    assert.ok(latest.includes('<task-progress'))
+    // task-progress and decisions are now merged into <progress>
+    assert.ok(latest.includes('<progress>'))
+    assert.ok(latest.includes('use middleware'))
     // behaviorMirror is harness-only — no longer rendered (direction A)
     assert.ok(!latest.includes('<behavior-mirror'))
-    assert.ok(latest.includes('<decisions'))
   })
 
   it('buildVolatileBlock aliases buildLatestTurnVolatileBlock', () => {

@@ -603,6 +603,10 @@ export class PromptEngine {
     this.toolContext = ctx ?? undefined
   }
 
+  getToolContextLength(): number {
+    return this.toolContext?.length ?? 0
+  }
+
   /** @deprecated Use setToolContext. Kept for backward compat. */
   setAffordanceHint(hint: string | null): void {
     // noop — merged into setToolContext
