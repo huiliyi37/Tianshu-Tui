@@ -143,6 +143,15 @@ body {
   font-size: 11px; font-family: var(--font-mono); color: var(--muted);
   padding: 0 8px; white-space: nowrap;
 }
+.cache-chip {
+  font-size: 11px; font-family: var(--font-mono); color: var(--warning);
+  padding: 1px 6px; border-radius: var(--radius-sm); background: var(--panel-2);
+  white-space: nowrap;
+}
+.ctx-delta {
+  font-size: 11px; font-family: var(--font-mono); color: var(--accent);
+  white-space: nowrap;
+}
 .composer-actions { display: flex; align-items: center; gap: var(--space-2); }
 .composer-spacer { flex: 1; }
 .mode-toggle {

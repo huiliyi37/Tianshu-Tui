@@ -838,6 +838,16 @@ export class AgentLoop {
     this.lastCacheDiagnostic = this.compaction.refreshCacheDiagnostic(turn)
   }
 
+  /** Estimated token count for the current conversation (live, for desktop ctx-bar). */
+  getEstimatedTokens(): number {
+    return this.session.getEstimatedTokens()
+  }
+
+  /** Model context window size in tokens. */
+  getContextWindow(): number {
+    return this.config.contextWindow
+  }
+
   getLedger() { return this.session.getContextLedger() }
 
   getCognitiveSnapshot(): CognitivePhaseSnapshot | undefined { return this.latestCognitiveSnapshot }

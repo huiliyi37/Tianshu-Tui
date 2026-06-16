@@ -110,6 +110,19 @@ export function ThreadView(props: {
     return 0
   }, [view.blocks])
 
+  // Cache hit rate from cumulative cache tokens in turn_complete events.
+  const cacheHitRate = useMemo(() => {
+    const total = view.cacheReadTokens + view.cacheCreationTokens
+    if (total <= 0) return null
+    return Math.round((view.cacheReadTokens / total) * 100)
+  }, [view.cacheReadTokens, view.cacheCreationTokens])
+
+  // Context increment: delta between last and previous turn totals.
+  const ctxDelta = useMemo(() => {
+    if (view.prevTotalTokens <= 0 || view.lastTotalTokens <= view.prevTotalTokens) return 0
+    return view.lastTotalTokens - view.prevTotalTokens
+  }, [view.lastTotalTokens, view.prevTotalTokens])
+
   // D3 — composer slash commands: only desktop-actionable items (no agent slashes).
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
@@ -163,6 +176,16 @@ export function ThreadView(props: {
             </div>
           ) : latestTokens > 0 ? (
             <span className="ctx-meter" title="上一轮上下文 tokens">{formatTokens(latestTokens)} tok</span>
+          ) : null}
+          {cacheHitRate !== null ? (
+            <span className="cache-chip" title={`缓存读 {formatTokens(view.cacheReadTokens)} / 创建 {formatTokens(view.cacheCreationTokens)}`}>
+              ⚡{cacheHitRate}%
+            </span>
+          ) : null}
+          {ctxDelta > 0 ? (
+            <span className="ctx-delta" title="本轮上下文增量">
+              +{formatTokens(ctxDelta)}
+            </span>
           ) : null}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>

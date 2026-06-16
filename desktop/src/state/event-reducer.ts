@@ -79,6 +79,14 @@ export interface EventViewState {
   private_textOpen: boolean
   /** T1 — whether the last block is an open reasoning run that thinking deltas append to. */
   private_thinkingOpen: boolean
+  /** Cumulative cache read tokens (latest turn_complete). */
+  cacheReadTokens: number
+  /** Cumulative cache creation tokens. */
+  cacheCreationTokens: number
+  /** Latest turn's total tokens (for increment display). */
+  lastTotalTokens: number
+  /** Previous turn's total tokens. */
+  prevTotalTokens: number
 }
 
 export const initialEventState: EventViewState = {
@@ -94,6 +102,10 @@ export const initialEventState: EventViewState = {
   menuRev: 0,
   private_textOpen: false,
   private_thinkingOpen: false,
+  cacheReadTokens: 0,
+  cacheCreationTokens: 0,
+  lastTotalTokens: 0,
+  prevTotalTokens: 0,
 }
 
 export type EventAction =
@@ -135,18 +147,11 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_textOpen && next.blocks.length > 0) {
-        // Append to the existing assistant block (fast path). Immutable update:
-        // only the last block gets a new reference, so historical blocks keep
-        // identity and Block's React.memo (a.block === b.block) skips them.
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
         next.blocks = [...next.blocks]
         next.blocks[lastIdx] = { ...last, text: last.text + text }
       } else if (text) {
-        // Starting a new assistant block — close any open thinking block so
-        // a subsequent thinking_delta creates a fresh block instead of
-        // appending to the old one. This preserves correct ordering while
-        // avoiding the cross-close fragmentation bug on the append path.
         next.private_thinkingOpen = false
         next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
         next.private_textOpen = true
@@ -156,8 +161,6 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'thinking_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_thinkingOpen && next.blocks.length > 0) {
-        // Immutable update — same rationale as text_delta: keep historical block
-        // references stable so memoized rows skip re-render.
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
         next.blocks = [...next.blocks]
@@ -198,15 +201,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'turn_complete': {
       next.private_textOpen = false
       next.private_thinkingOpen = false
-      // Only the FINAL completion of a run draws a "第 N 轮" boundary. A single
-      // user-prompt run emits many intermediate turn_complete events
-      // (isFinal=false): one after every tool batch (turn-orchestrator:668) and
-      // on each TTSR / thinking retry (535, 697). Rendering each as a divider
-      // produced empty + duplicate "第 N 轮" rows. The TUI likewise treats the
-      // per-turn count as sequential noise and only resets state on completion.
       if (!ev.data.isFinal) return next
-      // Even on the final completion, skip the divider if no content precedes it
-      // (nothing to delimit — e.g. an immediate empty run).
       const lastBlock = next.blocks[next.blocks.length - 1]
       if (!lastBlock || lastBlock.kind === 'turn') {
         return next
@@ -215,6 +210,18 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       const totalTokens = Number(
         usage.totalTokens ?? usage.total_tokens ?? usage.total ?? 0,
       ) || undefined
+      // Extract cumulative cache tokens for hit rate display.
+      const cacheRead = Number(usage.cache_read_input_tokens ?? 0)
+      const cacheCreation = Number(usage.cache_creation_input_tokens ?? 0)
+      if (cacheRead > 0 || cacheCreation > 0) {
+        next.cacheReadTokens = cacheRead
+        next.cacheCreationTokens = cacheCreation
+      }
+      // Track context increment: shift on final completion.
+      if (totalTokens && totalTokens > 0) {
+        next.prevTotalTokens = next.lastTotalTokens
+        next.lastTotalTokens = totalTokens
+      }
       next.blocks = [...next.blocks, {
         key: `turn-${ev.seq}`,
         kind: 'turn',
@@ -228,7 +235,6 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     }
     case 'checkpoint': {
-      // T1 — inline rollback anchor created before the first mutating tool of a turn.
       next.private_textOpen = false
       next.private_thinkingOpen = false
       const hash = String(ev.data.hash ?? '')
@@ -272,14 +278,6 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'rewind': {
       const prompt = String(ev.data.prompt ?? '')
-      // Anchor the truncation to the exact user block.
-      //  1. anchorSeq (preferred): the seq of the rewound `user` event. User
-      //     blocks are keyed `u-${seq}`, so this is an exact, duplicate-proof
-      //     match — no more prompt-prefix collisions matching the wrong turn.
-      //  2. prompt full-text (fallback, older servers): most-recent exact match.
-      // The backend truncated messages with `slice(0, messageIndex)` (the
-      // rewound user message is REMOVED and restored to the input box), so we
-      // mirror that: drop the matched user block and everything after it.
       const anchorSeq = typeof ev.data.anchorSeq === 'number' ? ev.data.anchorSeq : undefined
       let cutIdx = -1
       if (anchorSeq !== undefined) {
@@ -331,8 +329,6 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'delegation': {
       const workerId = String(ev.data.workerId ?? '')
       if (!workerId) return next
-      // T4 — merge with the prior node so terminal updates (which omit profile /
-      // objective) don't wipe fields set by earlier running updates.
       const prev = next.delegation[workerId]
       const node: DelegationNode = {
         workerId,
@@ -352,7 +348,6 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     case 'plan_mode':
       next.planMode = ev.data.state === 'planning' ? 'planning' : 'off'
-      // Bump so the plan list re-fetches when entering/leaving planning.
       next.planRev = next.planRev + 1
       return next
     case 'plan_submitted': {
@@ -373,12 +368,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'model_switched':
     case 'domain_changed':
     case 'skills_changed':
-      // PlusMenu — bump so an open panel re-fetches; the lists carry the live
-      // `current`/`enabled` flags, so we don't track the values here.
       next.menuRev = next.menuRev + 1
       return next
     case 'todo_state': {
-      // T2 — full-replace active task list (the tool is replace-only).
       const raw = Array.isArray(ev.data.items) ? (ev.data.items as unknown[]) : []
       const todos: TodoStateItem[] = []
       for (const entry of raw) {
