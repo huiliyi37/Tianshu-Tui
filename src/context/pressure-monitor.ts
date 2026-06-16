@@ -105,37 +105,3 @@ export class PressureMonitor {
     return this.compactionTurns.filter(turn => currentTurn - turn <= 4).length >= 3
   }
 }
-
-// ─── Pure function exports ───────────────────────────────────────
-
-export interface CvmOverheadInput {
-  cvmInjectedTokens: number
-  totalEstimatedTokens: number
-}
-
-export interface CvmOverheadResult {
-  ratio: number
-  shouldThrottle: boolean
-  shouldHardStop: boolean
-}
-
-/**
- * Compute CVM overhead ratio and throttling decision.
- *
- * CVM runs on the context window — the resource it protects is
- * the resource it consumes. When CVM injections exceed 5% of
- * total context, throttle non-essential injections (mirror only
- * every other turn). At 8%, hard-stop all non-essential injections.
- *
- * 道常无为而无不为。侯王若能守之，万物将自化。（道德经 37）
- * CVM 的最高境界：当它不需要注入时，它不注入。
- */
-export function computeCvmOverhead(input: CvmOverheadInput): CvmOverheadResult {
-  const { cvmInjectedTokens, totalEstimatedTokens } = input
-  const ratio = totalEstimatedTokens > 0 ? cvmInjectedTokens / totalEstimatedTokens : 0
-  return {
-    ratio,
-    shouldThrottle: ratio >= 0.05,
-    shouldHardStop: ratio >= 0.08,
-  }
-}

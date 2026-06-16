@@ -13,14 +13,6 @@ describe('AnchorRegistry', () => {
     assert.match(anchors[0]?.text ?? '', /不要动缓存代码/)
   })
 
-  it('extracts decision from assistant message', () => {
-    const registry = new AnchorRegistry(10_000)
-    registry.processDecision('选择方案 V3：三层存储 + 结构性锚点', 8)
-    const anchors = registry.getAnchors()
-
-    assert.equal(anchors[0]?.kind, 'decision')
-  })
-
   it('respects budget limit', () => {
     const registry = new AnchorRegistry(100)
     for (let index = 0; index < 20; index++) {
@@ -39,16 +31,5 @@ describe('AnchorRegistry', () => {
 
     assert.equal(texts.some(text => text.includes('never delete')), true)
     assert.equal(texts.some(text => text.includes('always run tests')), true)
-  })
-
-  it('renders anchors as compact text block', () => {
-    const registry = new AnchorRegistry(10_000)
-    registry.processUserMessage('use TDD workflow', 1)
-    registry.processDecision('chose Zod for validation', 2)
-    const block = registry.renderBlock()
-
-    assert.match(block, /<pinned-anchors>/)
-    assert.match(block, /use TDD/)
-    assert.match(block, /chose Zod/)
   })
 })

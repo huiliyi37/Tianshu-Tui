@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { PheromoneRef, Sensorium, StrategyProfile } from '../sensorium.js'
 import { createVigorState } from '../vigor.js'
-import { buildIntentPreview, formatIntentPreview, shouldShowIntent } from '../intent-preview.js'
+import { buildIntentPreview, shouldShowIntent } from '../intent-preview.js'
 
 function strategy(overrides: Partial<StrategyProfile> = {}): StrategyProfile {
   return {
@@ -69,14 +69,5 @@ describe('intent preview core', () => {
     // phasic 警告已移除——vigor-hook 自动适应
     assert.ok(!intent.warnings!.some(w => w.includes('警觉模式')))
     assert.ok(intent.alternatives!.length > 0)
-  })
-
-  it('formats single-line TUI text without self-rating confidence', () => {
-    const formatted = formatIntentPreview({ summary: '修改 src/a.ts', confidence: 0.62, warnings: ['hot path'] })
-
-    assert.match(formatted, /^⟡ 修改 src\/a\.ts/)
-    assert.doesNotMatch(formatted, /信心/)  // self-rating removed — face-2 bleed stop
-    assert.match(formatted, /hot path/)
-    assert.match(formatted, /Enter\/y 继续/)
   })
 })

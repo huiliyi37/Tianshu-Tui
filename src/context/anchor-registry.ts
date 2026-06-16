@@ -35,27 +35,12 @@ export class AnchorRegistry {
     })
   }
 
-  processDecision(text: string, round: number): void {
-    this.addAnchor({
-      kind: 'decision',
-      text: text.slice(0, 200),
-      sourceRoundIndex: round,
-      salience: scoreSalience(text, round),
-    })
-  }
-
   getAnchors(): ContextAnchor[] {
     return [...this.anchors]
   }
 
   estimateTokens(): number {
     return this.anchors.reduce((sum, anchor) => sum + estimateAnchorTokens(anchor.text), 0)
-  }
-
-  renderBlock(): string {
-    if (this.anchors.length === 0) return ''
-    const entries = this.anchors.map(anchor => `  <anchor kind="${anchor.kind}" round="${anchor.sourceRoundIndex}">${anchor.text}</anchor>`)
-    return `<pinned-anchors>\n${entries.join('\n')}\n</pinned-anchors>`
   }
 
   private addAnchor(anchor: ContextAnchor): void {

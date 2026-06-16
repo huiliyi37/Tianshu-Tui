@@ -66,11 +66,3 @@ export function buildIntentPreview(input: BuildIntentPreviewInput): IntentPrevie
     ...(warnings.length > 0 ? { warnings } : {}),
   }
 }
-
-export function formatIntentPreview(intent: IntentPreview): string {
-  // 不呈现"信心 X%"——这个数字由 phasic penalty 反推出来，
-  // TDD 红灯等预期内失败会压低 phasic，导致 self-fulfilling 信心崩溃。
-  // 只保留客观 warning，让居民看见"为什么"该停一下，而非打击性自评分。
-  const warning = intent.warnings && intent.warnings.length > 0 ? ` — ${intent.warnings[0]}` : ''
-  return `⟡ ${intent.summary}${warning} — [Enter/y 继续 / n 否决${intent.alternatives?.length ? ' / a 替代' : ''}]`
-}
