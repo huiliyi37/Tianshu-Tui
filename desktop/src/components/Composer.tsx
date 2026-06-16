@@ -16,6 +16,15 @@ const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', '
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 
+function isImageMime(type: string): boolean {
+  return type.startsWith('image/')
+}
+
+/** File-name heuristic for when MIME is unavailable (Windows clipboard edge case). */
+function isImageFileName(name: string): boolean {
+  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name)
+}
+
 type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
   | { mode: 'command'; items: ComposerCommand[]; index: number }
@@ -87,8 +96,9 @@ export function Composer(props: {
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setImageError(null)
-    const arr = Array.from(files).filter(f => f.type.startsWith('image/') || ACCEPTED_IMAGE_TYPES.has(f.type))
-    if (arr.length === 0) { setImageError('不支持的格式（仅 PNG/JPEG/WebP/GIF）'); return }
+    // Accept any image/* MIME, or known extensions when MIME is empty (Windows).
+    const arr = Array.from(files).filter(f => isImageMime(f.type) || ACCEPTED_IMAGE_TYPES.has(f.type) || (f.type === '' && isImageFileName(f.name)))
+    if (arr.length === 0) { setImageError('不支持的格式（仅 PNG/JPEG/WebP/GIF/BMP）'); return }
     for (const f of arr) {
       if (f.size > MAX_IMAGE_SIZE) { setImageError(`${f.name} 超过 5MB 限制`); return }
     }
@@ -209,26 +219,32 @@ export function Composer(props: {
   }
 
   const onPaste = (e: React.ClipboardEvent) => {
-    // Extract image files from clipboard. Use DataTransferItem.type for MIME
-    // detection because the File object produced by getAsFile() often has an
-    // empty .type for clipboard images (macOS screenshot → File.type="").
-    // Also deduplicate: items and files overlap, so track by a content hash.
+    // Extract image files from clipboard. Strategy:
+    //  1. Scan DataTransferItemList (has MIME metadata; most reliable).
+    //     - macOS screenshots: item.type="image/png" but File.type=""
+    //     - Windows clipboard: item.type may be "image/bmp" or empty
+    //  2. Fallback to DataTransfer.files (some platforms only populate this).
+    // Deduplicate by name:size since items and files overlap.
     const seen = new Set<string>()
     const files: File[] = []
     const items = e.clipboardData.items
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!
-      if (item.kind === 'file' && item.type.startsWith('image/')) {
-        const f = item.getAsFile()
-        if (f && f.size > 0 && !seen.has(`${f.name}:${f.size}`)) {
+      if (item.kind !== 'file') continue
+      const f = item.getAsFile()
+      if (!f || f.size === 0) continue
+      // item.type is the clipboard's declared MIME (most trustworthy).
+      // f.type may be empty on macOS/Windows clipboard images.
+      if (isImageMime(item.type) || isImageMime(f.type) || isImageFileName(f.name)) {
+        if (!seen.has(`${f.name}:${f.size}`)) {
           seen.add(`${f.name}:${f.size}`)
           files.push(f)
         }
       }
     }
-    // Fallback: some platforms only populate .files (file drag into window).
+    // Fallback: platforms where .files is the sole source (e.g. drag-into-window).
     for (const f of Array.from(e.clipboardData.files)) {
-      if (f.type.startsWith('image/') && !seen.has(`${f.name}:${f.size}`)) {
+      if (!seen.has(`${f.name}:${f.size}`) && (isImageMime(f.type) || isImageFileName(f.name))) {
         seen.add(`${f.name}:${f.size}`)
         files.push(f)
       }
