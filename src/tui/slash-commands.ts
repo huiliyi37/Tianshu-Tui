@@ -551,12 +551,11 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
 
-      // Inject plan context as session memory so agent can see it
-      ctx.agent.updateSessionMemory(
-        `<approved-plan slug="${slug}">\n${approved.content}\n</approved-plan>\n\nYou are now executing the approved plan above. Follow it step by step. Use /plan-list to review, call plan_close when done.`
-      )
-      ctx.agent.exitPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\nPlan content has been loaded into context. Plan Mode exited — execution may now begin.\n\nUse /plan-list to view all plans.` }))
+      // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
+      // plan body stays on disk to keep the prefix cache intact. setActivePlan
+      // also releases plan mode internally.
+      ctx.agent.setActivePlan({ slug, title: approved.title })
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
       setIsStreaming(false)
       return true
     }

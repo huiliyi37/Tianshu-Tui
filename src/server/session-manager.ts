@@ -23,6 +23,14 @@ import { ArtifactStore } from '../artifact/store.js'
 import type { OaiMessage } from '../api/oai-types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { DecisionShift } from '../agent/loop-types.js'
+import type { PlanModeState } from '../agent/plan-mode.js'
+import {
+  listPlans as storeListPlans,
+  readPlan as storeReadPlan,
+  approvePlan as storeApprovePlan,
+  rejectPlan as storeRejectPlan,
+  type PlanDocument,
+} from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
 import { join, resolve } from 'node:path'
 
@@ -51,6 +59,9 @@ export type SessionEventType =
   | 'todo_state'
   // T3 — mid-run user guidance accepted into the steer buffer.
   | 'steer_queued'
+  // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
+  | 'plan_mode'
+  | 'plan_submitted'
   | 'done'
 
 export interface SessionEvent {
@@ -77,6 +88,12 @@ export interface SessionRecord {
    * another stays supervised. Absent → the agent uses the global config default.
    */
   approvalMode?: ApprovalMode
+  /**
+   * Plan mode — when 'planning', the agent is restricted to read-only tools and
+   * is expected to call plan_submit to produce a reviewable plan. Absent/'off' →
+   * normal execution. Mirrors AgentLoop.planModeState.
+   */
+  planMode?: PlanModeState
 }
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
@@ -92,6 +109,19 @@ export interface ManagedAgent {
    * Optional so lightweight test doubles need not implement it.
    */
   setApprovalMode?(mode: ApprovalMode): void
+  /**
+   * Plan mode — restrict the agent to read-only tools (planning) or release it
+   * (off). Mirrors AgentLoop.enterPlanMode/exitPlanMode. Optional so lightweight
+   * test doubles need not implement it.
+   */
+  enterPlanMode?(): void
+  exitPlanMode?(): void
+  /**
+   * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
+   * reminder into the agent's dynamic appendix (NOT the plan body, which stays
+   * on disk). Mirrors AgentLoop.setActivePlan. Optional for lightweight doubles.
+   */
+  setActivePlan?(plan: { slug: string; title: string } | null): void
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
@@ -431,6 +461,111 @@ export class RuntimeSessionManager {
     try { session.agent?.setApprovalMode?.(mode) } catch { /* non-fatal */ }
     this.touch(session)
     this.persistRecord(session)
+    return true
+  }
+
+  /**
+   * Plan mode — toggle the session between read-only planning and normal
+   * execution. Building the agent eagerly here (ensureAgent) so the toggle binds
+   * to the same instance a later run() reuses. Emits a `plan_mode` event so the
+   * desktop can flip its mode chip / open the plan column. Returns false when the
+   * session is missing.
+   */
+  setPlanMode(id: string, state: PlanModeState): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    const agent = this.ensureAgent(session)
+    session.record.planMode = state
+    try {
+      if (state === 'planning') agent.enterPlanMode?.()
+      else agent.exitPlanMode?.()
+    } catch { /* non-fatal */ }
+    this.touch(session)
+    this.append(session, 'plan_mode', { state })
+    this.persistRecord(session)
+    return true
+  }
+
+  /** List this session's plans (newest first). null when the session is gone. */
+  async listPlans(id: string): Promise<PlanDocument[] | null> {
+    const session = this.sessions.get(id)
+    if (!session) return null
+    try {
+      return await storeListPlans(session.record.cwd)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Read a single plan's full content. Returns `undefined` when the session is
+   * missing and `null` when the session exists but the plan does not — letting
+   * the route distinguish 404 reasons.
+   */
+  async readPlan(id: string, slug: string): Promise<PlanDocument | null | undefined> {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    try {
+      return await storeReadPlan(session.record.cwd, slug)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Build (approve) a plan: mark it approved on disk, release plan mode, then
+   * inject the approved plan as the next turn so the agent executes it. Refuses
+   * when the session is missing/running or the plan can't be approved.
+   */
+  async approvePlan(id: string, slug: string): Promise<boolean> {
+    const session = this.sessions.get(id)
+    if (!session || session.running) return false
+    let approved: PlanDocument | null
+    try {
+      approved = await storeApprovePlan(session.record.cwd, slug)
+    } catch {
+      return false
+    }
+    if (!approved) return false
+    const agent = this.ensureAgent(session)
+    // Inject a tiny pointer (slug/title/path) instead of the full plan body —
+    // the body stays the single source of truth on disk, keeping the prefix
+    // cache intact and the user turn short. setActivePlan also releases plan mode.
+    try { agent.setActivePlan?.({ slug, title: approved.title }) } catch { /* non-fatal */ }
+    try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
+    session.record.planMode = 'off'
+    this.append(session, 'plan_mode', { state: 'off' })
+    this.touch(session)
+    this.persistRecord(session)
+    this.run(id, `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`)
+    return true
+  }
+
+  /**
+   * Reject a plan with optional feedback. Keeps the plan on disk (marked
+   * rejected) and, when a comment is given on an idle session, kicks a revision
+   * turn so the agent can re-plan. Emits `plan_submitted` to refresh viewers.
+   */
+  async rejectPlan(id: string, slug: string, comment?: string): Promise<boolean> {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    let rejected: PlanDocument | null
+    try {
+      rejected = await storeRejectPlan(session.record.cwd, slug)
+    } catch {
+      return false
+    }
+    if (!rejected) return false
+    this.append(session, 'plan_submitted', { slug, title: rejected.title, status: 'rejected' })
+    this.touch(session)
+    const note = comment?.trim()
+    if (note && !session.running) {
+      const prompt =
+        `[PLAN REJECTED] ${rejected.title} (slug: ${slug})\n` +
+        `Feedback: ${note}\n\n` +
+        `Revise the plan to address this feedback, then call plan_submit again.`
+      this.run(id, prompt)
+    }
     return true
   }
 
@@ -792,6 +927,11 @@ export class RuntimeSessionManager {
             status: isError ? 'failed' : 'completed',
           })
         }
+        // Plan mode — a successful plan_submit wrote a new .rivet/plans/*.md.
+        // Surface it as an event so the desktop's plan column refreshes live.
+        if (name === 'plan_submit' && !isError) {
+          void this.emitPlanSubmitted(session)
+        }
         this.scanArtifacts(session)
       },
       onTurnComplete: (usage, turnNumber, isFinal) =>
@@ -919,6 +1059,27 @@ export class RuntimeSessionManager {
     let count = 0
     for (const p of session.pending.values()) if (p.kind === 'approval') count++
     session.record.pendingApprovals = count
+  }
+
+  /**
+   * After a plan_submit tool result, read the newest plan off disk and emit a
+   * `plan_submitted` event. Async/best-effort: the tool already persisted the
+   * file, so a read failure here only delays the live refresh, not the data.
+   */
+  private async emitPlanSubmitted(session: InternalSession): Promise<void> {
+    try {
+      const plans = await storeListPlans(session.record.cwd)
+      const latest = plans[0]
+      if (latest) {
+        this.append(session, 'plan_submitted', {
+          slug: latest.slug,
+          title: latest.title,
+          status: latest.status,
+        })
+      }
+    } catch {
+      // non-fatal — the desktop can still poll GET /plans
+    }
   }
 
   private scanArtifacts(session: InternalSession): void {

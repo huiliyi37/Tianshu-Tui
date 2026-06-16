@@ -6,6 +6,9 @@ import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -13,9 +16,12 @@ const AUTH = { authorization: `Bearer ${TOKEN}` }
 class FakeAgent implements ManagedAgent {
   callbacks?: AgentCallbacks
   artifacts: Artifact[] = []
+  runPrompts: string[] = []
+  activePlanCalls: ({ slug: string; title: string } | null)[] = []
   private resolveRun?: () => void
-  run(_p: string, cb: AgentCallbacks) { this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
+  run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   abort() { this.resolveRun?.() }
+  setActivePlan(plan: { slug: string; title: string } | null) { this.activePlanCalls.push(plan) }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }
   getMessages(): OaiMessage[] { return [] }
@@ -219,6 +225,106 @@ test('S: approval-mode route is Bearer-gated (fail-closed)', async () => {
   const s = manager.createSession({})
   const res = await router('POST', `/sessions/${s.id}/approval-mode`, { approvalMode: 'manual' }, {})
   assert.equal(res.status, 401)
+})
+
+// ── Plan mode routes ────────────────────────────────────────────────
+
+test('Plan: POST /plan-mode toggles state and 404s a missing session', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const on = await router('POST', `/sessions/${s.id}/plan-mode`, { state: 'planning' }, AUTH)
+  assert.equal(on.status, 200)
+  assert.equal((on.body as { planMode: string }).planMode, 'planning')
+  assert.equal(manager.getSession(s.id)!.planMode, 'planning')
+
+  const bad = await router('POST', `/sessions/${s.id}/plan-mode`, { state: 'nope' }, AUTH)
+  assert.equal(bad.status, 400)
+
+  const missing = await router('POST', '/sessions/nope/plan-mode', { state: 'off' }, AUTH)
+  assert.equal(missing.status, 404)
+})
+
+test('Plan: plan-mode route is Bearer-gated (fail-closed)', async () => {
+  const { manager, router } = setup()
+  const s = manager.createSession({})
+  const res = await router('POST', `/sessions/${s.id}/plan-mode`, { state: 'planning' }, {})
+  assert.equal(res.status, 401)
+})
+
+test('Plan: GET /plans lists plans (newest first) and 404s a missing session', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'alpha.md'), '# Alpha Plan\n\nbody', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('GET', `/sessions/${s.id}/plans`, {}, AUTH)
+  assert.equal(res.status, 200)
+  const plans = (res.body as { plans: Array<{ slug: string; title: string; status: string }> }).plans
+  assert.equal(plans.length, 1)
+  assert.equal(plans[0]!.slug, 'alpha')
+  assert.equal(plans[0]!.title, 'Alpha Plan')
+  assert.equal(plans[0]!.status, 'submitted')
+
+  const missing = await router('GET', '/sessions/nope/plans', {}, AUTH)
+  assert.equal(missing.status, 404)
+})
+
+test('Plan: GET /plans/:slug returns content; 404 for unknown plan', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'beta.md'), '# Beta\n\ncontent here', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const ok = await router('GET', `/sessions/${s.id}/plans/beta`, {}, AUTH)
+  assert.equal(ok.status, 200)
+  assert.match((ok.body as { plan: { content: string } }).plan.content, /content here/)
+
+  const gone = await router('GET', `/sessions/${s.id}/plans/ghost`, {}, AUTH)
+  assert.equal(gone.status, 404)
+})
+
+test('Plan: POST /plans/:slug/approve marks approved and starts a run', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'gamma.md'), '# Gamma\n\ndo it', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('POST', `/sessions/${s.id}/plans/gamma/approve`, {}, AUTH)
+  assert.equal(res.status, 200)
+  const after = readFileSync(join(plansDir, 'gamma.md'), 'utf-8')
+  assert.match(after, /Status: APPROVED/)
+  assert.equal(manager.getSession(s.id)!.planMode, 'off')
+
+  // Pointer injected via setActivePlan (slug/title only — never the body),
+  // and the kickoff run is a short one-liner, not the full plan content.
+  const agent = agents[0]!
+  assert.equal(agent.activePlanCalls.length, 1)
+  assert.deepEqual(agent.activePlanCalls[0], { slug: 'gamma', title: 'Gamma' })
+  assert.equal(agent.runPrompts.length, 1)
+  const kickoff = agent.runPrompts[0]!
+  assert.match(kickoff, /Gamma/)
+  assert.match(kickoff, /\.rivet\/plans\/gamma\.md/)
+  assert.ok(!kickoff.includes('do it'), 'kickoff must not embed the plan body')
+})
+
+test('Plan: POST /plans/:slug/reject keeps the file and marks rejected', async () => {
+  const { manager, router } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  writeFileSync(join(plansDir, 'delta.md'), '# Delta\n\nnope', 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('POST', `/sessions/${s.id}/plans/delta/reject`, { comment: 'too vague' }, AUTH)
+  assert.equal(res.status, 200)
+  const after = readFileSync(join(plansDir, 'delta.md'), 'utf-8')
+  assert.match(after, /Status: REJECTED/)
 })
 
 test('classifyArtifact taxonomy mapping', () => {

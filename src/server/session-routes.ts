@@ -22,6 +22,7 @@ import type { RuntimeSessionManager } from './session-manager.js'
 import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
+import type { PlanDocument } from '../plan/plan-store.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 import { listProjectFiles, rankFiles } from './file-list.js'
 
@@ -62,6 +63,23 @@ function artifactSummary(a: Artifact) {
     charCount: a.charCount,
     lineCount: a.lineCount,
     createdAt: a.createdAt,
+  }
+}
+
+/** Plan slugs may contain CJK (slugify allows \u4e00-\u9fff); URLs encode them. */
+function decodeSlug(raw: string): string {
+  try { return decodeURIComponent(raw) } catch { return raw }
+}
+
+/** Plan list entry — summary only (no markdown body), createdAt as epoch ms. */
+function planSummary(p: PlanDocument) {
+  return {
+    slug: p.slug,
+    title: p.title,
+    status: p.status,
+    path: p.path,
+    createdAt: p.createdAt instanceof Date ? p.createdAt.getTime() : p.createdAt,
+    approvedAt: p.approvedAt instanceof Date ? p.approvedAt.getTime() : p.approvedAt,
   }
 }
 
@@ -114,6 +132,52 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found' } }
       }
       return { status: 200, body: { id, approvalMode: data.approvalMode } }
+    }, apiToken),
+
+    // Plan mode — toggle the session into read-only planning ('planning') or back
+    // to normal execution ('off'). Emits a plan_mode event for live viewers.
+    'POST /sessions/:id/plan-mode': withAuth((body, params) => {
+      const id = params!.id!
+      const data = (body ?? {}) as { state?: unknown }
+      if (data.state !== 'off' && data.state !== 'planning') {
+        return { status: 400, body: { error: 'Invalid or missing "state" (off|planning)' } }
+      }
+      if (!manager.setPlanMode(id, data.state)) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id, planMode: data.state } }
+    }, apiToken),
+
+    // Plan list — this session's plans (newest first), summary only (no content).
+    'GET /sessions/:id/plans': withAuth(async (_body, params) => {
+      const plans = await manager.listPlans(params!.id!)
+      if (!plans) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { plans: plans.map(planSummary) } }
+    }, apiToken),
+
+    // Plan read — full markdown content for one plan.
+    'GET /sessions/:id/plans/:slug': withAuth(async (_body, params) => {
+      const plan = await manager.readPlan(params!.id!, decodeSlug(params!.slug!))
+      if (plan === undefined) return { status: 404, body: { error: 'Session not found' } }
+      if (!plan) return { status: 404, body: { error: 'Plan not found' } }
+      return { status: 200, body: { plan } }
+    }, apiToken),
+
+    // Build — approve a plan and inject it as the next turn for execution.
+    'POST /sessions/:id/plans/:slug/approve': withAuth(async (_body, params) => {
+      const ok = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!))
+      if (!ok) {
+        return { status: 409, body: { error: 'Session missing/running or plan not found' } }
+      }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
+    // Reject — mark a plan rejected (kept on disk) with optional revision feedback.
+    'POST /sessions/:id/plans/:slug/reject': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { comment?: string }
+      const ok = await manager.rejectPlan(params!.id!, decodeSlug(params!.slug!), data.comment)
+      if (!ok) return { status: 404, body: { error: 'Session or plan not found' } }
+      return { status: 200, body: { ok: true } }
     }, apiToken),
 
     'GET /sessions': withAuth(() => ({
