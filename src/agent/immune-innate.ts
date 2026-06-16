@@ -12,6 +12,8 @@ export interface InnateCheckInput {
   fingerprint: string
   turn: number
   tokenUsage?: number
+  /** When true, this call was an error — do not count toward tool_repeat signals. */
+  isError?: boolean
 }
 
 const WINDOW_SIZE = 20
@@ -25,20 +27,23 @@ export class InnateLayer {
   check(input: InnateCheckInput): DangerSignal[] {
     const signals: DangerSignal[] = []
 
-    // Track fingerprint
-    this.fingerprints.push(input.fingerprint)
-    if (this.fingerprints.length > WINDOW_SIZE) this.fingerprints.shift()
+    // Track fingerprint — only for successful calls. Error calls (isError=true)
+    // are infrastructure failures, not "stuck in a loop" behavior.
+    if (!input.isError) {
+      this.fingerprints.push(input.fingerprint)
+      if (this.fingerprints.length > WINDOW_SIZE) this.fingerprints.shift()
 
-    // Tool repeat detection
-    const count = this.fingerprints.filter(f => f === input.fingerprint).length
-    if (count >= REPEAT_THRESHOLD) {
-      signals.push({
-        kind: 'tool_repeat',
-        severity: Math.min(count / 5, 1),
-        turn: input.turn,
-        source: input.toolName,
-        context: `fingerprint repeated ${count}x in last ${WINDOW_SIZE}`,
-      })
+      // Tool repeat detection (successful calls only)
+      const count = this.fingerprints.filter(f => f === input.fingerprint).length
+      if (count >= REPEAT_THRESHOLD) {
+        signals.push({
+          kind: 'tool_repeat',
+          severity: Math.min(count / 5, 1),
+          turn: input.turn,
+          source: input.toolName,
+          context: `fingerprint repeated ${count}x in last ${WINDOW_SIZE}`,
+        })
+      }
     }
 
     // Token spike detection

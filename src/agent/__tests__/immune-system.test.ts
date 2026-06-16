@@ -5,14 +5,22 @@ import { ApcAggregator } from '../immune-apc.js'
 import { ImmuneAdaptiveLayer } from '../immune-adaptive.js'
 
 describe('InnateLayer', () => {
-  it('detects tool repetition', () => {
+  it('detects tool repetition for successful calls', () => {
     const layer = new InnateLayer()
-    const signals1 = layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 1 })
+    const signals1 = layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 1, isError: false })
     assert.equal(signals1.length, 0)
-    layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 2 })
-    const signals3 = layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 3 })
+    layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 2, isError: false })
+    const signals3 = layer.check({ toolName: 'grep', fingerprint: 'abc123', turn: 3, isError: false })
     assert.equal(signals3.length, 1)
     assert.equal(signals3[0]!.kind, 'tool_repeat')
+  })
+
+  it('does NOT flag tool_repeat for error-only calls — infra failures ≠ logic loops', () => {
+    const layer = new InnateLayer()
+    layer.check({ toolName: 'grep', fingerprint: 'err1', turn: 1, isError: true })
+    layer.check({ toolName: 'grep', fingerprint: 'err1', turn: 2, isError: true })
+    const signals = layer.check({ toolName: 'grep', fingerprint: 'err1', turn: 3, isError: true })
+    assert.equal(signals.length, 0, '3 error-only calls should not trigger tool_repeat')
   })
 
   it('detects token spike', () => {

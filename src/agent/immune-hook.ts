@@ -38,6 +38,8 @@ export interface ImmuneHookContext {
   targetFile?: string
   tokenUsage?: number
   trajectoryHealth?: HealthSignal
+  /** When true, tool result was an error — innate layer skips fingerprint for tool_repeat. */
+  isError?: boolean
 }
 
 export interface ImmuneHookResult {
@@ -77,6 +79,7 @@ export class ImmuneHook {
         fingerprint: ctx.fingerprint,
         turn: ctx.turn,
         tokenUsage: ctx.tokenUsage,
+        isError: ctx.isError,
       })
 
       // 2. Trajectory health as danger signal

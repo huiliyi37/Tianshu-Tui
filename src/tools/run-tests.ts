@@ -571,10 +571,21 @@ function runTestCommandIn(
         else signal.addEventListener('abort', onAbort, { once: true })
       }
 
-      child.on('close', async (code) => {
+      child.on('close', async (code, _exitSignal) => {
         clearTimeout(timer)
         if (signal) signal.removeEventListener('abort', onAbort)
         const raw = stdout + (stderr ? '\n' + stderr : '')
+
+        // EPERM auto-degradation: tsx IPC pipe fails in sandboxed environments.
+        // When stderr contains EPERM and the runner is tsx, retry once with
+        // node --import tsx (equivalent semantics, no IPC pipe).
+        if (testCommand.command === 'tsx' && raw.includes('EPERM') && testCommand.args[0] === '--test') {
+          const args = ['--import', 'tsx', '--test', ...testCommand.args.slice(1)]
+          const retryCmd: RunnableTestCommand = { ...testCommand, command: 'node', args, display: `node --import tsx --test ${testCommand.args.slice(1).join(' ')}` }
+          resolve(await runTestCommandIn(cwd, retryCmd, params, filter, timeout))
+          return
+        }
+
         const durationMs = Date.now() - startTime
         const exitCode = code ?? 1
 

@@ -86,6 +86,7 @@ const target = typeof input?.path === 'string'
           targetFile: target,
           tokenUsage: capturedTokens,
           trajectoryHealth,
+          isError,
         })
         if (immuneResult.contextHint) {
           self._lastImmuneHint = immuneResult.contextHint

@@ -38,7 +38,7 @@ const CONSECUTIVE_THRESHOLD = 4
  */
 const READER_CONSECUTIVE_THRESHOLD = 12
 
-const READER_TOOLS = new Set(['read_file', 'glob', 'grep', 'read_section'])
+const READER_TOOLS = new Set(['read_file', 'glob', 'grep', 'read_section', 'run_tests'])
 const MAX_AGGREGATE_LINES = 30
 
 export class ToolAccumulator {

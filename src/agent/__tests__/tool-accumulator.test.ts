@@ -28,7 +28,7 @@ describe('ToolAccumulator', () => {
     assert.ok(result!.summary.includes('4 bash calls'))
   })
 
-  it('reader tools (read_file/grep) use higher threshold (12)', () => {
+  it('reader tools (read_file/grep/run_tests) use higher threshold (12)', () => {
     // 11 read_file calls: below threshold (12), no collapse
     for (let i = 0; i < 11; i++) {
       acc.record({ toolName: 'read_file', toolUseId: `r${i}`, content: 'x'.repeat(500), turn: 1 })
@@ -42,6 +42,15 @@ describe('ToolAccumulator', () => {
     assert.equal(result!.collapsedIds.length, 11)
     assert.ok(result!.summary.includes('storm-collapsed'))
     assert.ok(result!.summary.includes('read_file'))
+  })
+
+  it('run_tests uses reader threshold — 4 calls should NOT collapse', () => {
+    // 4 calls with default threshold (4) would trigger collapse. With reader
+    // threshold (12), they should be safe.
+    for (let i = 0; i < 4; i++) {
+      acc.record({ toolName: 'run_tests', toolUseId: `t${i}`, content: `✓ ${i + 1} passed`, turn: 1 })
+    }
+    assert.equal(acc.tryCollapse('run_tests'), null, '4 run_tests should not collapse (reader threshold=12)')
   })
 
   it('does not collapse different tool types', () => {
