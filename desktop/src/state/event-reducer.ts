@@ -189,7 +189,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         key: `tr-${ev.seq}`,
         kind: 'result',
         role: `result · ${String(ev.data.name ?? '')}`,
-        text: String(ev.data.result ?? ''),
+        // Prefer uiContent (display override) over the model-facing result, matching
+        // TUI semantics — e.g. ask_user_question shows the question + options here.
+        text: String(ev.data.uiContent ?? ev.data.result ?? ''),
         isError: !!ev.data.isError,
       }]
       return next

@@ -18,11 +18,21 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 export const ASK_USER_QUESTION_TOOL: Tool = {
   definition: {
     name: 'ask_user_question',
-    description: 'Ask the user a question and wait for their typed response. Use this when you need clarifying information, preferences, or decisions from the user. Prefer A/B/C choices when possible.',
+    description: `Ask the user a question and wait for their typed response. Use when you need clarifying information, preferences, or a decision you cannot infer from context.
+
+Provide \`options\` for a small set of mutually exclusive choices (the UI renders them as a numbered list the user can answer by number). Omit \`options\` for open-ended questions.
+
+Do NOT use this to bounce a decision back when the user asked for YOUR analysis, recommendation, or opinion — answer directly in that case. Ask at most one question; address what you can determine first.`,
     input_schema: {
       type: 'object',
       properties: {
         question: { type: 'string', description: 'The question to ask the user. Be clear and specific.' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional 2-4 short, mutually exclusive choices. Omit for open-ended questions or when the user wants your analysis rather than a menu.',
+        },
+        allow_multiple: { type: 'boolean', description: 'Allow selecting more than one option (default: false).' },
       },
       required: ['question'],
     },
@@ -30,11 +40,25 @@ export const ASK_USER_QUESTION_TOOL: Tool = {
 
   async execute(params: ToolCallParams): Promise<ToolResult> {
     const question = params.input.question as string
+    const rawOptions = params.input.options
+    const options = Array.isArray(rawOptions)
+      ? rawOptions.filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
+      : []
+    const allowMultiple = params.input.allow_multiple === true
+
     // content: what the LLM sees (placeholder only — it already knows the question)
-    // uiContent: what the user sees in the TUI (the actual question + prompt)
+    // uiContent: what the user sees (the question, plus a numbered choice list when
+    //            structured options are supplied). The user answers by number or text.
+    let uiContent = question
+    if (options.length > 0) {
+      const numbered = options.map((opt, i) => `  ${i + 1}. ${opt}`).join('\n')
+      const hint = allowMultiple ? '\n\n(You can pick more than one.)' : ''
+      uiContent = `${question}\n\n${numbered}${hint}`
+    }
+
     return {
       content: '[Awaiting your response…]',
-      uiContent: question,
+      uiContent,
     }
   },
 

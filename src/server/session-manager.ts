@@ -1215,12 +1215,15 @@ export class RuntimeSessionManager {
           if (items) this.append(session, 'todo_state', { items })
         }
       },
-      onToolResult: (toolId, name, result, isError) => {
+      onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {
         this.append(session, 'tool_result', {
           id: toolId,
           name,
           isError: !!isError,
           result: redactText(result).slice(0, 2000),
+          // uiContent is the display override (e.g. ask_user_question renders the
+          // question + numbered options here, not the model-facing placeholder).
+          ...(uiContent ? { uiContent: redactText(uiContent).slice(0, 2000) } : {}),
         })
         if (DELEGATION_TOOLS.has(name)) {
           this.append(session, 'delegation', {

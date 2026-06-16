@@ -32,6 +32,29 @@ test('tool_use breaks the text run; later text starts a new block', () => {
   assert.equal(s.blocks[2]!.text, 'b')
 })
 
+test('tool_result prefers uiContent over the model-facing result for display', () => {
+  seq = 0
+  const s = fold([
+    ev('tool_result', {
+      name: 'ask_user_question',
+      result: '[Awaiting your response…]',
+      uiContent: 'Which database?\n\n  1. Postgres\n  2. SQLite',
+    }),
+  ])
+  const block = s.blocks.find((b) => b.kind === 'result')
+  assert.ok(block)
+  assert.ok(block!.text.includes('Which database?'))
+  assert.ok(block!.text.includes('1. Postgres'))
+  assert.ok(!block!.text.includes('Awaiting'))
+})
+
+test('tool_result falls back to result when uiContent is absent', () => {
+  seq = 0
+  const s = fold([ev('tool_result', { name: 'bash', result: 'ok' })])
+  const block = s.blocks.find((b) => b.kind === 'result')
+  assert.equal(block!.text, 'ok')
+})
+
 test('approval_required sets pending, approval_resolved clears it', () => {
   seq = 0
   const after = fold([ev('approval_required', { requestId: 'r1', toolName: 'bash', input: {} })])

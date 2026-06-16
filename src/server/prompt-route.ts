@@ -61,8 +61,8 @@ export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prom
     onToolUse: (id, name, input) => {
       send('tool_use', { id, name, input: redactValue(input) })
     },
-    onToolResult: (id, name, result, isError) => {
-      send('tool_result', { id, name, isError: !!isError, result: redactText(result).slice(0, 500) })
+    onToolResult: (id, name, result, isError, _rawPath, uiContent) => {
+      send('tool_result', { id, name, isError: !!isError, result: redactText(result).slice(0, 500), ...(uiContent ? { uiContent: redactText(uiContent).slice(0, 500) } : {}) })
     },
     onTurnComplete: (usage, turnNumber, isFinal) => {
       send('turn_complete', { usage, turnNumber, isFinal: !!isFinal })
