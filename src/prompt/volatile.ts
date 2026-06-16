@@ -520,15 +520,18 @@ export function selectTopKBlocks(blocks: SalientBlock[], maxChars: number): stri
   const sorted = [...blocks].sort((a, b) => b.salience - a.salience)
   const selected: string[] = []
   let used = 0
+  const blockCap = Math.max(Math.floor(maxChars * 0.4), 2_000)
 
   for (const block of sorted) {
-    // Overhead: 2 chars for '\n\n' separator when not first
+    const content = block.content.length > blockCap
+      ? block.content.slice(0, blockCap) + '\n[truncated]'
+      : block.content
     const overhead = selected.length > 0 ? 2 : 0
-    if (used + overhead + block.content.length > maxChars && selected.length > 0) {
+    if (used + overhead + content.length > maxChars && selected.length > 0) {
       continue
     }
-    selected.push(block.content)
-    used += overhead + block.content.length
+    selected.push(content)
+    used += overhead + content.length
   }
 
   return selected

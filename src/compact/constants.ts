@@ -310,9 +310,13 @@ export interface ToolTypeBudget {
 
 export function toolTypeBudgets(contextWindow: number): Record<string, ToolTypeBudget> {
   const w = contextWindow
+  // grep/search: scale with window on large contexts to avoid premature summarization
+  // during exploration. perTurnCumulative is not consumed by enforceToolTypeBudgets.
+  const grepPerCall = w >= 200_000 ? Math.min(Math.floor(w * 0.004), 8_000) : 2_000
+  const grepSummarize = w >= 200_000 ? Math.min(Math.floor(w * 0.008), 16_000) : 4_000
   return {
-    grep:      { perCall: 2_000,  perTurnCumulative: 8_000,   summarizeAfter: 4_000 },
-    search:    { perCall: 2_000,  perTurnCumulative: 8_000,   summarizeAfter: 4_000 },
+    grep:      { perCall: grepPerCall, perTurnCumulative: grepSummarize * 2, summarizeAfter: grepSummarize },
+    search:    { perCall: grepPerCall, perTurnCumulative: grepSummarize * 2, summarizeAfter: grepSummarize },
     read_file: { perCall: Math.min(w * 0.1, 20_000), perTurnCumulative: Math.min(w * 0.25, 50_000), summarizeAfter: Math.min(w * 0.15, 30_000) },
     bash:      { perCall: 5_000,  perTurnCumulative: 15_000,  summarizeAfter: 8_000 },
     default:   { perCall: 5_000,  perTurnCumulative: 20_000,  summarizeAfter: 10_000 },
