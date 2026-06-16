@@ -1182,6 +1182,46 @@ describe('artifactIntercept in tool pipeline', () => {
     }
   })
 
+  it('delivers a large skill body COMPLETE and inline (fidelity-exempt, no artifact, no truncation)', async () => {
+    setup()
+    try {
+      // 20000 chars — well above the 7500 effective artifact threshold, so a
+      // non-exempt tool (see run_tests test above) would be summarized to an
+      // [artifact:...] ref. The skill tool must NOT: it loads instructions the
+      // model will follow verbatim, so the body must arrive whole.
+      const skillBody = `<skill name="huge">\n${'Z'.repeat(20000)}\n</skill>`
+      const deps = makeDepsWithStore({
+        config: {
+          ...makeDepsWithStore().config,
+          toolRegistry: {
+            execute: async () => ({ content: skillBody, isError: false }),
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-skill-fidelity', name: 'skill', input: { name: 'huge' } },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      assert.ok(!content.startsWith('[artifact:'),
+        `skill output must not be artifact-intercepted, got: ${content.slice(0, 100)}`)
+      assert.ok(!content.includes('[truncated'),
+        'skill output must not be head/tail truncated')
+      assert.ok(!content.includes('<stored '),
+        'skill output must not be collapsed to a budget preview')
+      // The ENTIRE body survives intact.
+      assert.ok(content.includes('Z'.repeat(20000)),
+        'full skill body must be present inline')
+      assert.equal(store.list().length, 0, 'skill should not create artifacts')
+    } finally {
+      cleanup()
+    }
+  })
+
   it('does NOT intercept small non-read tool output below threshold', async () => {
     setup()
     try {

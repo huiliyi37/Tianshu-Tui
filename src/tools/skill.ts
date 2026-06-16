@@ -61,7 +61,7 @@ Example: skill(name="brainstorming")`,
     // read on demand (Tier-3). The body itself is never truncated.
     const tree = files.map(f => `  ${f.path}`).join('\n')
     const filesBlock = [
-      `<skill-files dir="${skill.skillDir}" note="Read these on demand with read_file/grep/glob as the instructions above reference them. Do not load all of them preemptively.">`,
+      `<skill-files dir="${skill.skillDir}" note="Read these on demand with read_file/grep/glob as the instructions above reference them. Do not load all of them preemptively. For a large sub-file, page through it COMPLETELY with read_file offset/limit — never act on a partial read.">`,
       tree,
       '</skill-files>',
     ].join('\n')

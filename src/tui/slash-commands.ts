@@ -1188,7 +1188,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       if (skill.skillDir) {
         const files = listSkillFiles(skill.skillDir)
         if (files.length > 0) {
-          payload += `\n<skill-files dir="${skill.skillDir}">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
+          payload += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
         }
       }
       ctx.session.addUserMessage(payload)

@@ -235,6 +235,20 @@ function truncateSuccessfulToolResult(content: string, config: AgentConfig): str
 const ARTIFACT_INTERCEPT_THRESHOLD = 2500 // chars — success results (raised from 800; review workflows need more inline content)
 const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inline context for debugging
 
+/**
+ * Tools whose output MUST reach the model complete and inline — never replaced by
+ * a lossy artifact summary, nor head/tail truncated, nor collapsed to a budget
+ * preview. The `skill` tool loads a skill's full instructions that the model
+ * explicitly asked for and will follow verbatim; a summary or a truncated middle
+ * would make it act on partial/wrong instructions and force a whole-session redo
+ * (fidelity is the #1 priority over context cleanliness). Unlike read tools,
+ * `skill` has no offset/section param, so any truncation is unrecoverable. Heavy
+ * reference material is split into sub-files (Tier-3) read on demand via
+ * read_file (which DOES page), so the SKILL.md body stays bounded by author
+ * convention and is safe to deliver in full.
+ */
+const FIDELITY_EXEMPT_TOOLS: ReadonlySet<string> = new Set(['skill'])
+
 /** Tools whose output is the agent's "eyes" — intercept only at very high thresholds. */
 const READ_TOOLS: ReadonlySet<string> = new Set([
   'read_file', 'grep', 'glob', 'find_files', 'search', 'repo_map', 'inspect_project',
@@ -871,25 +885,32 @@ export async function executeToolUse(
     }
 
     if (!harnessResult.isError) {
-      // Artifact intercept: persist long output to disk, replace with compact ref.
-      // This must run BEFORE truncation — if we store an artifact, truncation is unnecessary.
-      const successThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', false)
-      const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
-        ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
-        : 1
-      finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction, deps.config.contextWindow)
-      // Track eviction for GhostRegistry
-      const evictedId = extractArtifactId(finalContent)
-      if (evictedId) deps.artifactIdsEvicted?.push(evictedId)
-      finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
-      const contentChars = finalContent.length
-      const tokenEstimate = Math.ceil(contentChars / 4)
-      deps.turnBudget.consume(tokenEstimate)
-      if (deps.turnBudget.isExhausted()) {
-        const preview = finalContent.slice(0, 500)
-        const refPath = rawToolResult?.rawPath ?? 'unknown'
-        finalContent = `<stored ref="${refPath}" chars=${contentChars} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
-     }
+      if (FIDELITY_EXEMPT_TOOLS.has(tu.name)) {
+        // Fidelity-first: deliver the skill instructions verbatim. We still
+        // account for the budget so later tools see the cost, but we never
+        // rewrite the content (no artifact summary, no truncation, no preview).
+        deps.turnBudget.consume(Math.ceil(finalContent.length / 4))
+      } else {
+        // Artifact intercept: persist long output to disk, replace with compact ref.
+        // This must run BEFORE truncation — if we store an artifact, truncation is unnecessary.
+        const successThreshold = deps.cacheAdvisor?.getArtifactThreshold(deps.phaseHint ?? 'execute', false)
+        const budgetFraction = deps.turnBudget.maxTokensPerTurn > 0
+          ? 1 - (deps.turnBudget.usedTokens / deps.turnBudget.maxTokensPerTurn)
+          : 1
+        finalContent = await artifactIntercept(finalContent, tu.name, tu.input, deps.artifactStore, false, successThreshold, budgetFraction, deps.config.contextWindow)
+        // Track eviction for GhostRegistry
+        const evictedId = extractArtifactId(finalContent)
+        if (evictedId) deps.artifactIdsEvicted?.push(evictedId)
+        finalContent = truncateSuccessfulToolResult(finalContent, deps.config)
+        const contentChars = finalContent.length
+        const tokenEstimate = Math.ceil(contentChars / 4)
+        deps.turnBudget.consume(tokenEstimate)
+        if (deps.turnBudget.isExhausted()) {
+          const preview = finalContent.slice(0, 500)
+          const refPath = rawToolResult?.rawPath ?? 'unknown'
+          finalContent = `<stored ref="${refPath}" chars=${contentChars} tool="${tu.name}">\n${preview}\n...(turn budget exceeded — use read_file with offset/limit for full content)</stored>`
+        }
+      }
    } else {
       // Error results can also be very long (e.g. failed test output).
       // Artifact-intercept them too to keep message history append-only.

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet } from '../skill-loader.js'
+import { validatePathSafe } from '../../tools/path-validate.js'
 
 describe('skill-loader', () => {
   it('parses frontmatter and triggers', () => {
@@ -114,5 +115,25 @@ Router body.`, 'utf-8')
     assert.deepEqual(res.copied, [])
     assert.equal(res.errors.length, 1)
     assert.match(res.errors[0]!, /nope: not found/)
+  })
+
+  it('Tier-3 sub-files of a .rivet/skills directory skill are readable (path boundary)', () => {
+    // A directory skill lives under cwd/.rivet/skills — its sub-files must pass
+    // the read boundary so the model can actually open what <skill-files> lists.
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-tier3-'))
+    const skillDir = join(cwd, '.rivet', 'skills', 'pdf')
+    mkdirSync(join(skillDir, 'references'), { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\ndescription: x\n---\n\nbody', 'utf-8')
+    writeFileSync(join(skillDir, 'references', 'api.md'), 'api', 'utf-8')
+
+    const reg = new SkillRegistry()
+    reg.loadFromDirectory(join(cwd, '.rivet', 'skills'))
+    const def = reg.get('pdf')!
+    const sub = join(def.skillDir!, 'references', 'api.md')
+
+    // both absolute and as the model would receive it from <skill-files>
+    assert.equal(validatePathSafe(cwd, sub, 'read').ok, true)
+    // boundary still bites for escapes
+    assert.equal(validatePathSafe(cwd, '../../etc/passwd', 'read').ok, false)
   })
 })
