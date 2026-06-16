@@ -427,3 +427,67 @@ test('classifyArtifact taxonomy mapping', () => {
   assert.equal(classifyArtifact({ ...base, tool: 'run_tests', target: 'x' }), 'test-result')
   assert.equal(classifyArtifact({ ...base, tool: 'bash', target: 'ls' }), 'walkthrough')
 })
+
+// ── Archive (DELETE /sessions/:id) ────────────────────────────────
+
+test('DELETE /sessions/:id archives a session — removes from list, getSession still works', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { title: 'Close Me' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  // Before archive: visible in list
+  const listBefore = await router('GET', '/sessions', {}, AUTH)
+  assert.equal((listBefore.body as { sessions: unknown[] }).sessions.length, 1)
+
+  // Archive it
+  const del = await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  assert.equal(del.status, 200)
+  assert.equal((del.body as { archived: boolean }).archived, true)
+
+  // After archive: excluded from list
+  const listAfter = await router('GET', '/sessions', {}, AUTH)
+  assert.equal((listAfter.body as { sessions: unknown[] }).sessions.length, 0)
+
+  // getSession still returns the record (data survives)
+  const one = await router('GET', `/sessions/${id}`, {}, AUTH)
+  assert.equal(one.status, 200)
+  assert.equal((one.body as { archived?: boolean }).archived, true)
+})
+
+test('DELETE /sessions/:id returns 404 for missing or already-archived session', async () => {
+  const { router } = setup()
+
+  // Missing session
+  const missing = await router('DELETE', '/sessions/ghost', {}, AUTH)
+  assert.equal(missing.status, 404)
+
+  // Create + archive + archive-again → second 404
+  const created = await router('POST', '/sessions', {}, AUTH)
+  const id = (created.body as { id: string }).id
+  await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  const again = await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  assert.equal(again.status, 404)
+})
+
+test('DELETE /sessions/:id aborts a running session before archiving', async () => {
+  const { router, agents } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  // Session is running (prompt started). Archive should abort + mark archived.
+  const del = await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  assert.equal(del.status, 200)
+
+  const one = await router('GET', `/sessions/${id}`, {}, AUTH)
+  const rec = one.body as { archived?: boolean; status: string }
+  assert.equal(rec.archived, true)
+  assert.equal(rec.status, 'aborted')
+})
+
+test('DELETE /sessions/:id is Bearer-gated', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', {}, AUTH)
+  const id = (created.body as { id: string }).id
+  const unauth = await router('DELETE', `/sessions/${id}`, {}, {})
+  assert.equal(unauth.status, 401)
+})

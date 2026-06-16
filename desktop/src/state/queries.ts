@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   abortSession,
   approvePlan,
+  closeSession,
   createSchedule,
   createSession,
   deleteSchedule,
@@ -125,6 +126,14 @@ export function useAbortSession() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => abortSession(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useCloseSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => closeSession(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

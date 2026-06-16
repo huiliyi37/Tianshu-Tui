@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useSessions } from '../state/queries'
+import { useCloseSession, useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
@@ -18,6 +18,7 @@ export function ProjectSidebar() {
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
+  const closeSession = useCloseSession()
   const [known, setKnown] = useState<string[]>(() => loadKnownProjects())
   const [filter, setFilter] = useState('')
 
@@ -106,16 +107,33 @@ export function ProjectSidebar() {
           className={`thread-card ${s.id === ui.activeSessionId ? 'active' : ''}`}
           onClick={() => dispatch({ type: 'setActive', id: s.id })}
         >
-          <div className="title">
-            <span className={`status-dot status-${s.status}`} />
-            {s.title ?? s.id.slice(0, 8)}
-            {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
+          <div className="thread-card-main">
+            <div className="title">
+              <span className={`status-dot status-${s.status}`} />
+              {s.title ?? s.id.slice(0, 8)}
+              {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
+            </div>
+            <div className="meta">
+              {STATUS_GLYPH[s.status] ?? '·'} {s.status}
+              {s.currentPhase ? ` · ${s.currentPhase}` : ''}
+              {s.pendingApprovals > 0 ? ` · ⚠ ${s.pendingApprovals}` : ''}
+            </div>
           </div>
-          <div className="meta">
-            {STATUS_GLYPH[s.status] ?? '·'} {s.status}
-            {s.currentPhase ? ` · ${s.currentPhase}` : ''}
-            {s.pendingApprovals > 0 ? ` · ⚠ ${s.pendingApprovals}` : ''}
-          </div>
+          <button
+            className="thread-card-close"
+            title="关闭"
+            aria-label="关闭会话"
+            onClick={(e) => {
+              e.stopPropagation()
+              closeSession.mutate(s.id)
+              if (s.id === ui.activeSessionId) dispatch({ type: 'setActive', id: '' })
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       ))}
     </div>

@@ -34,8 +34,9 @@ export function ThreadView(props: {
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
   onSetPlanMode?: (state: PlanModeState) => void
+  onClose: () => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
@@ -157,6 +158,12 @@ export function ThreadView(props: {
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
         </div>
+        <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
       </header>
       {autonomous && (
         <div className="autonomy-banner">

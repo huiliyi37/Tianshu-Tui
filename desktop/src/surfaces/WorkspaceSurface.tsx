@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useAbortSession, useArtifacts, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
+import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, answerIntent, setApprovalMode, steerSession } from '../runtime/client'
@@ -18,6 +18,7 @@ export function WorkspaceSurface() {
   const artifacts = useArtifacts(activeId, view.artifactRev)
   const sendPrompt = useSendPrompt()
   const abortSession = useAbortSession()
+  const closeSession = useCloseSession()
   const setPlanMode = useSetPlanMode()
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
@@ -62,6 +63,12 @@ export function WorkspaceSurface() {
     setPlanMode.mutate({ id: activeId, state })
   }, [activeId, setPlanMode])
 
+  const handleClose = useCallback(() => {
+    if (!activeId) return
+    closeSession.mutate(activeId)
+    dispatch({ type: 'setActive', id: '' })
+  }, [activeId, closeSession, dispatch])
+
   return (
     <div className="workspace">
       <ProjectSidebar />
@@ -76,6 +83,7 @@ export function WorkspaceSurface() {
             onAbort={() => abortSession.mutate(active.id)}
             onSetApprovalMode={handleSetApprovalMode}
             onSetPlanMode={handleSetPlanMode}
+            onClose={handleClose}
           />
         ) : (
           <div className="empty thread-empty">

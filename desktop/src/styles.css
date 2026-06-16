@@ -303,11 +303,22 @@ body {
 .thread-card {
   padding: var(--space-2) var(--space-3); margin: 0 var(--space-2) var(--space-1);
   border-radius: var(--radius-sm); cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-1);
 }
 .thread-card:hover { background: var(--panel-2); }
 .thread-card.active { background: var(--accent-soft); }
+.thread-card-main { flex: 1; min-width: 0; }
 .thread-card .title { font-weight: var(--weight-medium); display: flex; gap: 6px; align-items: center; }
 .thread-card .meta { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
+.thread-card-close {
+  flex-shrink: 0; opacity: 0; border: none; background: none; cursor: pointer;
+  color: var(--muted); padding: 2px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+}
+.thread-card:hover .thread-card-close { opacity: 0.6; }
+.thread-card-close:hover { opacity: 1 !important; color: var(--text); background: var(--panel-3); }
+.thread-close { opacity: 0.6; }
+.thread-close:hover { opacity: 1; }
 .empty.sm { padding: var(--space-4); font-size: var(--text-sm); }
 .thread-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }
 

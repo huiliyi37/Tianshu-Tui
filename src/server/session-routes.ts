@@ -4,6 +4,7 @@
  *
  *   POST   /sessions                                   create (+optional prompt)
  *   GET    /sessions                                   list
+ *   DELETE /sessions/:id                               archive (soft-close)
  *   GET    /sessions/:id                               one record
  *   POST   /sessions/:id/prompt                        start a run
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
@@ -262,6 +263,15 @@ export function buildSessionRoutes(
       status: 200,
       body: { sessions: manager.listSessions() },
     }), apiToken),
+
+    // Archive (soft-close) a session. Aborts if running, marks archived, hides
+    // from listSessions. Data survives on disk for potential recovery.
+    'DELETE /sessions/:id': withAuth((_body, params) => {
+      if (!manager.archiveSession(params!.id!)) {
+        return { status: 404, body: { error: 'Session not found or already archived' } }
+      }
+      return { status: 200, body: { archived: true } }
+    }, apiToken),
 
     'GET /sessions/:id': withAuth((_body, params) => {
       const rec = manager.getSession(params!.id!)

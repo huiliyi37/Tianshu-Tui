@@ -119,6 +119,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
   contextWindow?: number
+  /** Archived (closed) sessions are excluded from listSessions() and hidden in the desktop sidebar. */
+  archived?: boolean
 }
 
 /** PlusMenu — a selectable model across all configured providers. */
@@ -921,7 +923,9 @@ export class RuntimeSessionManager {
   }
 
   listSessions(): SessionRecord[] {
-    return [...this.sessions.values()].map((s) => ({ ...s.record }))
+    return [...this.sessions.values()]
+      .filter((s) => !s.record.archived)
+      .map((s) => ({ ...s.record }))
   }
 
   getSession(id: string): SessionRecord | undefined {
@@ -967,6 +971,30 @@ export class RuntimeSessionManager {
 
   abortAll(): void {
     for (const id of this.sessions.keys()) this.abort(id)
+  }
+
+  /**
+   * Archive (soft-close) a session: abort if running, mark `archived=true`, and
+   * persist. The session is excluded from listSessions() but its data survives on
+   * disk (events.jsonl / artifacts) — rehydrate still restores it as archived.
+   * Returns false when the session is missing or already archived.
+   */
+  archiveSession(id: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s || s.record.archived) return false
+    // Stop any in-flight run first (mirrors abort's cleanup).
+    if (s.running) {
+      s.record.status = 'aborted'
+      s.agent?.abort()
+      this.rejectAllPending(s, 'aborted')
+    }
+    s.record.archived = true
+    s.running = false
+    this.touch(s)
+    this.append(s, 'status', { status: 'archived' })
+    this.persistRecord(s)
+    try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
+    return true
   }
 
   /**

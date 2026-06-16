@@ -177,6 +177,13 @@ export function abortSession(id: string): Promise<{ aborted: boolean }> {
   return apiPost<{ aborted: boolean }>(`/sessions/${id}/abort`)
 }
 
+/** Archive (soft-close) a session — hides it from the sidebar list. Data survives on disk. */
+export async function closeSession(id: string): Promise<{ archived: boolean }> {
+  const res = await rivetFetch(`/sessions/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE /sessions/${id} -> ${res.status}`)
+  return res.json() as Promise<{ archived: boolean }>
+}
+
 export function fetchEvents(id: string, since: number): Promise<{ events: SessionEvent[]; lastSeq: number }> {
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }

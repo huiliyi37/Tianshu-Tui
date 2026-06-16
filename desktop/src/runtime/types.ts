@@ -35,6 +35,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size in tokens. */
   contextWindow?: number
+  /** Archived (closed) sessions are hidden from the sidebar. */
+  archived?: boolean
 }
 
 /** PlusMenu — a selectable model annotated with the session's current flag. */
