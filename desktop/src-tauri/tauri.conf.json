@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
