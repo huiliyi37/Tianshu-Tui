@@ -100,6 +100,24 @@ describe('skill discovery (Tier-1)', () => {
     assert.ok(!block!.includes('name="huge"'), 'oversized entry must be skipped')
   })
 
+  it('emits <more count="N"> when budget overflow drops entries', () => {
+    const reg = new SkillRegistry()
+    // several long-description skills so the small budget can't fit them all
+    for (let i = 0; i < 5; i++) {
+      reg.register({ name: `s${i}`, description: big(180), triggers: [/go/i], body: 'b' })
+    }
+    const block = reg.renderDiscoveryBlock('go', { maxChars: 250 })!
+    assert.match(block, /<more count="\d+"/)
+  })
+
+  it('omits <more> when the budget fits every skill', () => {
+    const reg = new SkillRegistry()
+    reg.register({ name: 'a', description: 'short', triggers: [/go/i], body: 'b' })
+    reg.register({ name: 'b', description: 'short', triggers: [/go/i], body: 'b' })
+    const block = reg.renderDiscoveryBlock('go')!
+    assert.ok(!block.includes('<more'))
+  })
+
   it('renderMatchedBlock (deprecated) uses continue not break — oversized skill does not drop subsequent ones', () => {
     const reg = new SkillRegistry()
     // First skill has a body that exceeds the budget

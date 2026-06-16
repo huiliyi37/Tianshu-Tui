@@ -227,19 +227,28 @@ export class SkillRegistry {
 
     const lines: string[] = []
     let budget = maxChars
+    let dropped = 0
     for (const skill of ordered) {
       const desc = (skill.description || '').replace(/\s+/g, ' ').trim().slice(0, maxDescChars)
       const rel = isRelevant(skill) ? ' relevant="true"' : ''
       const line = `<skill name="${skill.name}"${rel}>${desc}</skill>`
-      if (line.length > budget) continue // try smaller entries instead of cutting off the rest
+      if (line.length > budget) { dropped++; continue } // try smaller entries instead of cutting off the rest
       lines.push(line)
       budget -= line.length
     }
     if (lines.length === 0) return null
 
+    // Scale safety net: when the budget overflowed and entries were dropped,
+    // tell the model how many are omitted so it never silently misses a skill
+    // (recall-first — fidelity priority). Relevant skills are sorted first, so
+    // the dropped tail is the least-relevant.
+    const tail = dropped > 0
+      ? [`<more count="${dropped}" note="More skills available but omitted for space. Refine your request to surface them, or the user can run /skill list."/>`]
+      : []
     return [
       '<available-skills note="Call the skill tool with a name to load its full instructions on demand.">',
       ...lines,
+      ...tail,
       '</available-skills>',
     ].join('\n')
   }
