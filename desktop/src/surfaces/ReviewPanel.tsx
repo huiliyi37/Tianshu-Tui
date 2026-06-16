@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getArtifact,
   sendArtifactFeedback,
@@ -6,12 +6,13 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
+import { PlanPanel } from './PlanPanel'
 import { editableKey, previewOf } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 
-type ReviewTab = 'review' | 'council' | 'cognition'
+type ReviewTab = 'review' | 'plan'
 
 // Review panel (P3/Q3) — Codex's third pane. Aggregates the trust-layer surfaces
 // of the active thread: pending approvals/intents handled INLINE (no blocking
@@ -23,13 +24,29 @@ export function ReviewPanel(props: {
   pendingApproval: ApprovalRequest | null
   pendingIntent: IntentRequest | null
   approvalMode?: ApprovalMode
+  planMode?: PlanModeState
+  planRev?: number
+  latestPlanSlug?: string
   onApproval: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
   onIntent: (decision: 'continue' | 'veto' | 'alternative') => void
   onFeedbackSent?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, onApproval, onIntent, onFeedbackSent } = props
+  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent } = props
   const autonomous = isAutonomous(approvalMode)
   const [tab, setTab] = useState<ReviewTab>('review')
+
+  // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
+  // reviewable plan surfaces without a manual tab switch (Cursor 3.0 flow).
+  const prevSlug = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (planMode === 'planning') setTab('plan')
+  }, [planMode])
+  useEffect(() => {
+    if (latestPlanSlug && latestPlanSlug !== prevSlug.current) {
+      prevSlug.current = latestPlanSlug
+      setTab('plan')
+    }
+  }, [latestPlanSlug])
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [comment, setComment] = useState('')
   const [sending, setSending] = useState(false)
@@ -65,10 +82,16 @@ export function ReviewPanel(props: {
         <button className={`review-tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>
           审查{pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
         </button>
-        <button className="review-tab" disabled title="后续：CVM 议事会">议事会</button>
-        <button className="review-tab" disabled title="后续：认知镜像">认知</button>
+        <button className={`review-tab ${tab === 'plan' ? 'active' : ''}`} onClick={() => setTab('plan')}>
+          方案{planMode === 'planning' && <span className="tab-badge dot" aria-label="规划中" />}
+        </button>
       </div>
 
+      {tab === 'plan' ? (
+        <div className="review-body">
+          <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />
+        </div>
+      ) : (
       <div className="review-body">
         {(pendingApproval || pendingIntent) && (
           <section className="review-section">
@@ -110,6 +133,7 @@ export function ReviewPanel(props: {
           </section>
         )}
       </div>
+      )}
 
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>

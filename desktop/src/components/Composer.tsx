@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { listFiles } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
+import type { PlanModeState } from '../runtime/types'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -36,8 +37,14 @@ export function Composer(props: {
   onAbort: () => void
   onDoubleEscape: () => void
   commands?: ComposerCommand[]
+  planMode?: PlanModeState
+  onSetPlanMode?: (state: PlanModeState) => void
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode } = props
+  const planning = planMode === 'planning'
+  const togglePlan = useCallback(() => {
+    onSetPlanMode?.(planning ? 'off' : 'planning')
+  }, [planning, onSetPlanMode])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const lastEscAt = useRef(0)
@@ -156,6 +163,12 @@ export function Composer(props: {
       if (e.key === 'Escape') { e.preventDefault(); closeSuggest(); return }
     }
 
+    if (e.key === 'Tab' && e.shiftKey && onSetPlanMode) {
+      e.preventDefault()
+      togglePlan()
+      return
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
@@ -204,7 +217,7 @@ export function Composer(props: {
 
   return (
     <div
-      className={`composer${dragOver ? ' drag-over' : ''}`}
+      className={`composer${dragOver ? ' drag-over' : ''}${planning ? ' planning' : ''}`}
       onDrop={onDrop}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
@@ -255,7 +268,9 @@ export function Composer(props: {
         <textarea
           ref={taRef}
           value={value}
-          placeholder={busy
+          placeholder={planning
+            ? '描述你的目标，天枢将只读探索并产出方案（不改文件）…'
+            : busy
             ? '运行中 · Enter 插入引导（下一步生效）· @ 引用文件'
             : '和天枢对话…  (Enter 发送, Shift+Enter 换行, 粘贴/拖入图片)'}
           onChange={handleChange}
@@ -281,14 +296,29 @@ export function Composer(props: {
           aria-label="选择图片"
         >📎</button>
       </div>
-      {busy ? (
-        <div className="composer-actions">
-          <button className="btn ghost" onClick={submit} disabled={!canSend}>引导</button>
-          <button className="btn ghost danger" onClick={onAbort}>停止</button>
-        </div>
-      ) : (
-        <button className="btn" onClick={submit} disabled={!canSend}>发送</button>
-      )}
+      <div className="composer-actions">
+        {onSetPlanMode && (
+          <button
+            className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
+            onClick={togglePlan}
+            title="Shift+Tab 切换 Plan / Agent 模式"
+          >
+            <span className="mode-dot" aria-hidden />
+            {planning ? 'Plan' : 'Agent'}
+          </button>
+        )}
+        <span className="composer-spacer" />
+        {busy ? (
+          <>
+            <button className="btn ghost" onClick={submit} disabled={!canSend}>引导</button>
+            <button className="btn ghost danger" onClick={onAbort}>停止</button>
+          </>
+        ) : (
+          <button className="btn" onClick={submit} disabled={!canSend}>
+            {planning ? '生成方案' : '发送'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

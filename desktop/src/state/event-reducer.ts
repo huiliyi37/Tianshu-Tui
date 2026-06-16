@@ -2,6 +2,7 @@ import type {
   ApprovalRequest,
   DelegationNode,
   IntentRequest,
+  PlanModeState,
   SessionEvent,
   TodoStateItem,
 } from '../runtime/types'
@@ -59,6 +60,12 @@ export interface EventViewState {
   todos: TodoStateItem[]
   status?: string
   phase?: string
+  /** Plan mode — current read-only planning vs execution state for this session. */
+  planMode: PlanModeState
+  /** Bumped on plan_mode/plan_submitted so the plan list query can re-fetch. */
+  planRev: number
+  /** Slug of the most recently submitted plan (drives auto-select + Build hint). */
+  latestPlanSlug?: string
   /** Whether the last block is an open assistant run that text deltas append to. */
   private_textOpen: boolean
   /** T1 — whether the last block is an open reasoning run that thinking deltas append to. */
@@ -73,6 +80,8 @@ export const initialEventState: EventViewState = {
   artifactRev: 0,
   delegation: {},
   todos: [],
+  planMode: 'off',
+  planRev: 0,
   private_textOpen: false,
   private_thinkingOpen: false,
 }
@@ -114,8 +123,13 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_textOpen && next.blocks.length > 0) {
-        // Append to the existing assistant block (fast path).
-        next.blocks[next.blocks.length - 1]!.text += text
+        // Append to the existing assistant block (fast path). Immutable update:
+        // only the last block gets a new reference, so historical blocks keep
+        // identity and Block's React.memo (a.block === b.block) skips them.
+        const lastIdx = next.blocks.length - 1
+        const last = next.blocks[lastIdx]!
+        next.blocks = [...next.blocks]
+        next.blocks[lastIdx] = { ...last, text: last.text + text }
       } else if (text) {
         // Starting a new assistant block — close any open thinking block so
         // a subsequent thinking_delta creates a fresh block instead of
@@ -130,7 +144,12 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'thinking_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_thinkingOpen && next.blocks.length > 0) {
-        next.blocks[next.blocks.length - 1]!.text += text
+        // Immutable update — same rationale as text_delta: keep historical block
+        // references stable so memoized rows skip re-render.
+        const lastIdx = next.blocks.length - 1
+        const last = next.blocks[lastIdx]!
+        next.blocks = [...next.blocks]
+        next.blocks[lastIdx] = { ...last, text: last.text + text }
       } else if (text) {
         next.private_textOpen = false
         next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
@@ -314,6 +333,17 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'artifact':
       next.artifactRev = next.artifactRev + 1
       return next
+    case 'plan_mode':
+      next.planMode = ev.data.state === 'planning' ? 'planning' : 'off'
+      // Bump so the plan list re-fetches when entering/leaving planning.
+      next.planRev = next.planRev + 1
+      return next
+    case 'plan_submitted': {
+      next.planRev = next.planRev + 1
+      const slug = typeof ev.data.slug === 'string' ? ev.data.slug : ''
+      if (slug) next.latestPlanSlug = slug
+      return next
+    }
     case 'steer_queued':
       next.private_textOpen = false
       next.private_thinkingOpen = false

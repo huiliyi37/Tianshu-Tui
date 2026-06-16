@@ -1,9 +1,9 @@
 import { useCallback } from 'react'
-import { useAbortSession, useArtifacts, useSendPrompt, useSessions } from '../state/queries'
+import { useAbortSession, useArtifacts, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, answerIntent, setApprovalMode, steerSession } from '../runtime/client'
-import type { ApprovalMode } from '../runtime/types'
+import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
@@ -18,6 +18,7 @@ export function WorkspaceSurface() {
   const artifacts = useArtifacts(activeId, view.artifactRev)
   const sendPrompt = useSendPrompt()
   const abortSession = useAbortSession()
+  const setPlanMode = useSetPlanMode()
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
 
@@ -56,6 +57,11 @@ export function WorkspaceSurface() {
     void setApprovalMode(activeId, mode).then(() => sessions.refetch())
   }, [activeId, sessions])
 
+  const handleSetPlanMode = useCallback((state: PlanModeState) => {
+    if (!activeId) return
+    setPlanMode.mutate({ id: activeId, state })
+  }, [activeId, setPlanMode])
+
   return (
     <div className="workspace">
       <ProjectSidebar />
@@ -69,6 +75,7 @@ export function WorkspaceSurface() {
             onSteer={handleSteer}
             onAbort={() => abortSession.mutate(active.id)}
             onSetApprovalMode={handleSetApprovalMode}
+            onSetPlanMode={handleSetPlanMode}
           />
         ) : (
           <div className="empty thread-empty">
@@ -86,6 +93,9 @@ export function WorkspaceSurface() {
         pendingApproval={view.pendingApproval}
         pendingIntent={view.pendingIntent}
         approvalMode={active?.approvalMode}
+        planMode={view.planMode}
+        planRev={view.planRev}
+        latestPlanSlug={view.latestPlanSlug}
         onApproval={handleApproval}
         onIntent={handleIntent}
         onFeedbackSent={() => sessions.refetch()}

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ApprovalMode, SessionRecord } from '../runtime/types'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
-import { ToolBlock } from '../components/ToolBlock'
+import { ToolGroup } from '../components/ToolGroup'
 import { Markdown } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
@@ -31,8 +31,9 @@ export function ThreadView(props: {
   onSteer: (text: string) => void
   onAbort: () => void
   onSetApprovalMode: (mode: ApprovalMode) => void
+  onSetPlanMode?: (state: PlanModeState) => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
@@ -67,6 +68,19 @@ export function ThreadView(props: {
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
+  // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
+  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks])
+  const lastKey = view.blocks[view.blocks.length - 1]?.key
+
+  // Context usage — latest turn's total tokens (Cursor 3.0 "expose context usage").
+  const latestTokens = useMemo(() => {
+    for (let i = view.blocks.length - 1; i >= 0; i--) {
+      const t = view.blocks[i]!.turn
+      if (t?.totalTokens) return t.totalTokens
+    }
+    return 0
+  }, [view.blocks])
+
   // D3 — composer slash commands: only desktop-actionable items (no agent slashes).
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
@@ -100,6 +114,12 @@ export function ThreadView(props: {
           onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
         />
         <div className="thread-status">
+          <span className={`mode-chip ${view.planMode === 'planning' ? 'plan' : 'agent'}`}>
+            {view.planMode === 'planning' ? 'Plan' : 'Agent'}
+          </span>
+          {latestTokens > 0 && (
+            <span className="ctx-meter" title="上一轮上下文 tokens">{formatTokens(latestTokens)} tok</span>
+          )}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
@@ -125,17 +145,22 @@ export function ThreadView(props: {
             <span>发一条消息开始</span>
           </div>
         )}
-        {view.blocks.map((b, i) => (
-          <Block
-            key={b.key}
-            block={b}
-            isStreaming={
-              b.kind === 'thinking' &&
-              i === view.blocks.length - 1 &&
-              view.private_thinkingOpen
-            }
-          />
-        ))}
+        {rendered.map((item) =>
+          item.kind === 'tools' ? (
+            <ToolGroup key={item.key} items={item.items} />
+          ) : (
+            <Block
+              key={item.block.key}
+              block={item.block}
+              isStreaming={
+                item.block.key === lastKey && (
+                  (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
+                  (item.block.kind === 'assistant' && view.private_textOpen)
+                )
+              }
+            />
+          ),
+        )}
         {showThinking && (
           <div className="thinking">
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
@@ -169,6 +194,8 @@ export function ThreadView(props: {
         onAbort={onAbort}
         onDoubleEscape={() => setShowRewind(true)}
         commands={commands}
+        planMode={view.planMode}
+        onSetPlanMode={onSetPlanMode}
       />
       {showRewind && (
         <RewindOverlay
@@ -185,7 +212,34 @@ export function ThreadView(props: {
   )
 }
 
-function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolean }) {
+type RenderItem =
+  | { kind: 'tools'; key: string; items: ConvoBlock[] }
+  | { kind: 'block'; block: ConvoBlock }
+
+/** Collapse runs of tool/result blocks into a single grouped render item. */
+function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
+  const out: RenderItem[] = []
+  let run: ConvoBlock[] | null = null
+  for (const b of blocks) {
+    if (b.kind === 'tool' || b.kind === 'result') {
+      if (!run) { run = []; out.push({ kind: 'tools', key: `tg-${b.key}`, items: run }) }
+      run.push(b)
+    } else {
+      run = null
+      out.push({ kind: 'block', block: b })
+    }
+  }
+  return out
+}
+
+// Row-level memo (Cursor 3.0): with the reducer's immutable updates, historical
+// blocks keep object identity, so memo skips their reconciliation entirely —
+// only the actively-growing last block re-renders during streaming.
+const Block = memo(BlockImpl, (a, b) =>
+  a.block === b.block && a.isStreaming === b.isStreaming
+)
+
+function BlockImpl({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolean }) {
   if (block.kind === 'user') {
     return (
       <MsgBlock role="你">
@@ -195,9 +249,6 @@ function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolea
         ) : null}
       </MsgBlock>
     )
-  }
-  if (block.kind === 'tool' || block.kind === 'result') {
-    return <ToolBlock title={block.role ?? block.kind} body={block.text} isError={block.isError} />
   }
   if (block.kind === 'thinking') {
     return <ThinkingBlock block={block} streaming={!!isStreaming} />
@@ -253,9 +304,16 @@ function Block({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolea
   }
   return (
     <MsgBlock role="天枢">
-      <Markdown source={block.text} />
+      {isStreaming ? <StreamingText source={block.text} /> : <Markdown source={block.text} />}
     </MsgBlock>
   )
+}
+
+// During streaming we render plain text (Codex/Claude Code strategy): skip the
+// per-frame react-markdown + remark-gfm + rehype-highlight re-parse and only do
+// the full Markdown render once the turn completes.
+function StreamingText({ source }: { source: string }) {
+  return <div className="md md-streaming">{source}</div>
 }
 
 /** MsgBlock — message wrapper with a copy button that appears on hover. */
@@ -301,36 +359,55 @@ function MsgBlock(props: {
 }
 
 /**
- * T1 — reasoning stream. Defaults to OPEN while streaming (user sees live
- * token flow), collapsible for review after the run finishes.
- *
- * Replaces the old `<details>` approach which (a) defaulted to collapsed,
- * hiding the live stream, and (b) used browser-managed `open` state that
- * could desync under React's high-frequency re-renders during streaming.
+ * T1 — reasoning stream (Cursor 3.0 style). Streams OPEN by default so the user
+ * sees live token flow, but stays freely collapsible mid-stream (the manual
+ * toggle is honored, no force-open per delta). On completion it auto-collapses
+ * to a single muted summary line unless the user pinned it open.
  */
 function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boolean }) {
   const [open, setOpen] = useState(true)
+  const manual = useRef(false)
+  const wasStreaming = useRef(streaming)
   const bodyRef = useRef<HTMLDivElement>(null)
 
-  // While streaming, force-open and auto-scroll to the bottom.
+  // Auto-collapse when the reasoning run completes (unless user pinned it open).
   useEffect(() => {
-    if (streaming) {
-      setOpen(true)
-      if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    if (wasStreaming.current && !streaming && !manual.current) setOpen(false)
+    wasStreaming.current = streaming
+  }, [streaming])
+
+  // Auto-scroll the body to the tail while it streams and is open.
+  useEffect(() => {
+    if (streaming && open && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
     }
-  }, [streaming, block.text])
+  }, [streaming, open, block.text])
+
+  const toggle = useCallback(() => { manual.current = true; setOpen((o) => !o) }, [])
+  const summary = useMemo(() => summarizeThinking(block.text), [block.text])
 
   return (
-    <div className="reasoning">
-      <div className="reasoning-summary" onClick={() => setOpen((o) => !o)}>
+    <div className={`reasoning${open ? ' open' : ''}${streaming ? ' streaming' : ''}`}>
+      <div className="reasoning-summary" onClick={toggle}>
         <span className={`reasoning-glyph${streaming ? ' streaming' : ''}`} aria-hidden>{streaming ? '⟳' : '✶'}</span>
-        {streaming ? '推理中…' : '推理过程'}
+        <span className="reasoning-label">{streaming ? '推理中…' : '已推理'}</span>
+        {!open && summary && <span className="reasoning-peek">{summary}</span>}
+        <span className="reasoning-caret" aria-hidden>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
         <div className="reasoning-body" ref={bodyRef}>{block.text}</div>
       )}
     </div>
   )
+}
+
+/** First meaningful line + char count, for the collapsed reasoning peek. */
+function summarizeThinking(text: string): string {
+  const firstLine = text.split('\n').map((l) => l.trim()).find(Boolean) ?? ''
+  const clean = firstLine.replace(/^[#>*\-\s]+/, '').slice(0, 80)
+  const chars = text.replace(/\s/g, '').length
+  if (!clean) return chars > 0 ? `${chars} 字` : ''
+  return `${clean}${firstLine.length > 80 ? '…' : ''} · ${chars} 字`
 }
 
 function formatTokens(n: number): string {

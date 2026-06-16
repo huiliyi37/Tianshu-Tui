@@ -77,6 +77,74 @@ body {
   display: inline-flex; align-items: center; justify-content: center;
 }
 .review-body { flex: 1; overflow-y: auto; }
+.tab-badge.dot {
+  min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ── Plan panel (Cursor 3.0 Build column) ──────────────────────── */
+.plan-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.plan-list { border-bottom: 1px solid var(--border); flex-shrink: 0; max-height: 38%; overflow-y: auto; }
+.plan-item {
+  width: 100%; text-align: left; background: transparent; border: none; cursor: pointer;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+  color: var(--text); font-size: var(--text-sm);
+}
+.plan-item:hover { background: var(--panel-2); }
+.plan-item.active { background: var(--panel-2); box-shadow: inset 2px 0 0 var(--accent); }
+.plan-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-badge {
+  flex-shrink: 0; font-size: 10px; padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--warning-soft); color: var(--warning); text-transform: uppercase; letter-spacing: 0.3px;
+}
+.plan-badge.st-approved, .plan-badge.st-executed { background: var(--success-soft); color: var(--success); }
+.plan-badge.st-rejected { background: var(--error-soft); color: var(--error); }
+.plan-detail { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.plan-doc { flex: 1; overflow-y: auto; padding: var(--space-3); }
+.plan-actions {
+  display: flex; justify-content: flex-end; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.plan-reject { border-top: 1px solid var(--border); padding: var(--space-2) var(--space-3); flex-shrink: 0; }
+.plan-reject textarea {
+  width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: var(--space-2); font-size: var(--text-sm);
+}
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
+/* ── Plan/Agent mode chip + composer toggle (Cursor 3.0) ───────── */
+.mode-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: var(--weight-medium); letter-spacing: 0.3px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
+}
+.mode-chip.plan { color: var(--accent); border-color: var(--accent); background: transparent; }
+.ctx-meter {
+  font-size: 11px; color: var(--muted); font-family: var(--font-mono);
+  padding: 2px 6px; border-radius: var(--radius-pill); background: var(--panel-2);
+}
+.composer-actions { display: flex; align-items: center; gap: var(--space-2); }
+.composer-spacer { flex: 1; }
+.mode-toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  padding: 4px 10px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+}
+.mode-toggle:hover { color: var(--text); }
+.mode-toggle .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.mode-toggle.plan { color: var(--accent); border-color: var(--accent); background: transparent; }
+.mode-toggle.plan .mode-dot { background: var(--accent); }
+.composer.planning { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius-md); }
+.thread-plan-badge {
+  margin-left: auto; font-size: 10px; font-weight: var(--weight-medium);
+  color: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-pill);
+  padding: 0 6px; line-height: 1.5;
+}
+.thread-card .title { display: flex; align-items: center; gap: var(--space-2); }
 .review-section { padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
 .review-section h4 { margin: 0 var(--space-3) var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .pending-card {
@@ -466,6 +534,7 @@ body {
 /* .msg sets pre-wrap for plain blocks; Markdown subtree resets to normal flow
    so block elements (lists/tables/headings) lay out correctly. Code keeps pre. */
 .md { white-space: normal; color: inherit; font-size: var(--text-base); line-height: var(--leading); }
+.md-streaming { white-space: pre-wrap; word-break: break-word; }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p { margin: 0 0 var(--md-gap); }
@@ -548,6 +617,25 @@ body {
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* Tool stream group (Cursor 3.0) — compact rows with status dots. */
+.tool-group {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--panel);
+}
+.tool-row + .tool-row { border-top: 1px solid var(--border); }
+.tool-row.err { background: var(--error-soft); }
+.tool-row-head {
+  width: 100%; display: flex; align-items: center; gap: var(--space-2);
+  background: transparent; color: var(--text); border: none; cursor: pointer;
+  padding: 4px var(--space-3); font-size: var(--text-sm); text-align: left; min-width: 0;
+}
+.tool-row-head:hover { background: var(--panel-2); }
+.tool-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+.tool-dot.ok { background: var(--success); }
+.tool-dot.err { background: var(--error); }
+.tool-dot.run { background: var(--accent); }
+.tool-row .tool-body { border-top: 1px solid var(--border); }
+
 .thinking { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
 .dot-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s var(--ease) infinite; }
 .dot-pulse:nth-child(2) { animation-delay: 0.2s; }
@@ -555,19 +643,28 @@ body {
 .thinking-label { margin-left: var(--space-1); }
 @keyframes pulse { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
 
-/* T1 — reasoning stream. Open by default while streaming; collapsible. */
+/* T1 — reasoning stream (Cursor 3.0). Subtle muted block; collapses to a single
+   summary line on completion. Left rule only when expanded. */
 .reasoning {
-  border: 1px solid var(--border); border-left: 2px solid var(--muted);
-  border-radius: var(--radius-md); background: var(--panel);
-  padding: 0; overflow: hidden;
+  border-radius: var(--radius-md);
+  border-left: 2px solid transparent;
+  background: transparent; padding: 0; overflow: hidden;
 }
+.reasoning.open { border-left-color: var(--border); background: var(--panel); }
 .reasoning-summary {
   display: flex; align-items: center; gap: var(--space-2); cursor: pointer;
-  padding: var(--space-2) var(--space-3); color: var(--muted); font-size: var(--text-sm);
-  user-select: none;
+  padding: var(--space-1) var(--space-2); color: var(--muted); font-size: var(--text-sm);
+  font-style: italic; user-select: none; min-width: 0;
 }
-.reasoning-glyph { color: var(--muted); }
+.reasoning-summary:hover { color: var(--text); }
+.reasoning-glyph { color: var(--muted); flex-shrink: 0; }
 .reasoning-glyph.streaming { animation: spin 1.5s linear infinite; }
+.reasoning-label { flex-shrink: 0; }
+.reasoning-peek {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  opacity: 0.75; font-style: normal;
+}
+.reasoning-caret { flex-shrink: 0; opacity: 0.5; font-style: normal; }
 .reasoning-body {
   padding: var(--space-3); color: var(--muted); font-size: var(--text-sm); line-height: 1.55;
   white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);

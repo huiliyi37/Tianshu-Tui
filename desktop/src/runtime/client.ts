@@ -4,6 +4,9 @@ import type {
   ApprovalMode,
   ArtifactSummary,
   HealthInfo,
+  PlanDoc,
+  PlanModeState,
+  PlanSummary,
   ScheduledTask,
   SessionEvent,
   SessionRecord,
@@ -188,6 +191,35 @@ export function answerIntent(
   decision: 'continue' | 'veto' | 'alternative',
 ): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
+}
+
+// ── Plan mode ───────────────────────────────────────────────────────
+
+/** Toggle the session into read-only planning ('planning') or execution ('off'). */
+export function setPlanMode(id: string, state: PlanModeState): Promise<{ id: string; planMode: PlanModeState }> {
+  return apiPost<{ id: string; planMode: PlanModeState }>(`/sessions/${id}/plan-mode`, { state })
+}
+
+/** List this session's plans (newest first). */
+export async function listPlans(id: string): Promise<PlanSummary[]> {
+  const { plans } = await apiGet<{ plans: PlanSummary[] }>(`/sessions/${id}/plans`)
+  return plans
+}
+
+/** Read a single plan's full markdown content. */
+export async function getPlan(id: string, slug: string): Promise<PlanDoc> {
+  const { plan } = await apiGet<{ plan: PlanDoc }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}`)
+  return plan
+}
+
+/** Build — approve a plan and start executing it. */
+export function approvePlan(id: string, slug: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}/approve`)
+}
+
+/** Reject a plan with optional revision feedback. */
+export function rejectPlan(id: string, slug: string, comment?: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}/reject`, comment ? { comment } : undefined)
 }
 
 // ── Rollback (R3) ───────────────────────────────────────────────────

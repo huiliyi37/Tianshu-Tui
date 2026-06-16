@@ -6,6 +6,12 @@ export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'abort
 /** S — autonomy level. Mirrors the backend ApprovalMode (loop-types.ts). */
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
 
+/** Plan mode — read-only planning vs normal execution. Mirrors PlanModeState. */
+export type PlanModeState = 'off' | 'planning'
+
+/** Lifecycle of a submitted plan document on disk. */
+export type PlanStatus = 'submitted' | 'approved' | 'executed' | 'rejected'
+
 export interface SessionRecord {
   id: string
   status: SessionStatus
@@ -19,6 +25,29 @@ export interface SessionRecord {
   pendingApprovals: number
   /** S — per-session autonomy override; absent → global config default. */
   approvalMode?: ApprovalMode
+  /** Plan mode — 'planning' restricts the agent to read-only exploration. */
+  planMode?: PlanModeState
+}
+
+/** Plan list entry (no markdown body). createdAt/approvedAt are epoch ms. */
+export interface PlanSummary {
+  slug: string
+  title: string
+  status: PlanStatus
+  path: string
+  createdAt: number
+  approvedAt?: number
+}
+
+/** Full plan document including markdown content. */
+export interface PlanDoc {
+  slug: string
+  title: string
+  content: string
+  path: string
+  status: PlanStatus
+  createdAt: number | string
+  approvedAt?: number | string
 }
 
 export type SessionEventType =
@@ -42,6 +71,8 @@ export type SessionEventType =
   | 'rewind'
   | 'todo_state'
   | 'steer_queued'
+  | 'plan_mode'
+  | 'plan_submitted'
   | 'done'
 
 export interface SessionEvent {

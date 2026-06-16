@@ -300,3 +300,20 @@ test('consecutive turn_complete without content between them skips the second', 
   const turnBlocks = s.blocks.filter(b => b.kind === 'turn')
   assert.equal(turnBlocks.length, 1, 'second consecutive turn_complete should be filtered')
 })
+
+test('plan_mode toggles state and bumps planRev', () => {
+  seq = 0
+  const on = fold([ev('plan_mode', { state: 'planning' })])
+  assert.equal(on.planMode, 'planning')
+  assert.equal(on.planRev, 1)
+  const off = eventReducer(on, { type: 'event', event: ev('plan_mode', { state: 'off' }) })
+  assert.equal(off.planMode, 'off')
+  assert.equal(off.planRev, 2)
+})
+
+test('plan_submitted bumps planRev and records latest slug', () => {
+  seq = 0
+  const s = fold([ev('plan_submitted', { slug: 'my-plan', title: 'My Plan' })])
+  assert.equal(s.planRev, 1)
+  assert.equal(s.latestPlanSlug, 'my-plan')
+})

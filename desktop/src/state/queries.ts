@@ -1,17 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   abortSession,
+  approvePlan,
   createSchedule,
   createSession,
   deleteSchedule,
   getHealth,
+  getPlan,
   listArtifacts,
+  listPlans,
   listSchedule,
   listSessions,
   pauseSchedule,
+  rejectPlan,
   sendArtifactFeedback,
   sendPrompt,
+  setPlanMode,
 } from '../runtime/client'
+import type { PlanModeState } from '../runtime/types'
 
 // Server state lives in TanStack Query: sessions/health poll on an interval,
 // artifacts refetch on demand (driven by artifact events). UI state is separate
@@ -21,6 +27,8 @@ export const qk = {
   health: ['health'] as const,
   sessions: ['sessions'] as const,
   artifacts: (id: string | null) => ['artifacts', id] as const,
+  plans: (id: string | null) => ['plans', id] as const,
+  plan: (id: string | null, slug: string | null) => ['plan', id, slug] as const,
   schedule: ['schedule'] as const,
 }
 
@@ -46,6 +54,54 @@ export function useArtifacts(sessionId: string | null, rev: number) {
     queryKey: [...qk.artifacts(sessionId), rev],
     queryFn: () => (sessionId ? listArtifacts(sessionId) : Promise.resolve([])),
     enabled: !!sessionId,
+  })
+}
+
+// ── Plan mode ───────────────────────────────────────────────────────
+
+/** List this session's plans; re-fetches when `rev` (planRev) bumps. */
+export function usePlans(sessionId: string | null, rev: number) {
+  return useQuery({
+    queryKey: [...qk.plans(sessionId), rev],
+    queryFn: () => (sessionId ? listPlans(sessionId) : Promise.resolve([])),
+    enabled: !!sessionId,
+  })
+}
+
+/** Fetch one plan's full markdown content. */
+export function usePlan(sessionId: string | null, slug: string | null, rev: number) {
+  return useQuery({
+    queryKey: [...qk.plan(sessionId, slug), rev],
+    queryFn: () => (sessionId && slug ? getPlan(sessionId, slug) : Promise.resolve(null)),
+    enabled: !!sessionId && !!slug,
+  })
+}
+
+export function useSetPlanMode() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, state }: { id: string; state: PlanModeState }) => setPlanMode(id, state),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useApprovePlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, slug }: { id: string; slug: string }) => approvePlan(id, slug),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.plans(id) })
+      qc.invalidateQueries({ queryKey: qk.sessions })
+    },
+  })
+}
+
+export function useRejectPlan() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, slug, comment }: { id: string; slug: string; comment?: string }) =>
+      rejectPlan(id, slug, comment),
+    onSuccess: (_d, { id }) => qc.invalidateQueries({ queryKey: qk.plans(id) }),
   })
 }
 
