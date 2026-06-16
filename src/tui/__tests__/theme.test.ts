@@ -2,24 +2,33 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('antigravity') })
+afterEach(() => { setTheme('cobalt') })
 
 describe('getTheme', () => {
-  it('defaults to antigravity theme (对标桌面端 Antigravity 2.0 — cool azure accent)', () => {
-    assert.equal(getActiveThemeName(), 'antigravity')
+  it('defaults to cobalt theme (钴蓝·冷调中性 — oklch 调和，antigravity 精炼继任者)', () => {
+    assert.equal(getActiveThemeName(), 'cobalt')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#5aa9ff') // cool azure — 唯一 accent
-    assert.equal(theme.error, '#f76b6b')   // coral red
+    assert.equal(theme.primary, '#61aef4') // 钴蓝 — 唯一 accent
+    assert.equal(theme.success, '#58cbb4') // 青绿 ok
+    assert.equal(theme.error, '#ed7665')   // 珊瑚砖红
     assert.notEqual(theme.primary, '#d77757') // 不是 Claude 品牌橙
     assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
-    assert.notEqual(theme.secondary, '#af87ff') // secondary 也不是紫
   })
 
-  it('antigravity uses neutral white user mark + soft gray body text', () => {
+  it('cobalt uses cool-white user mark + cool gray body text', () => {
     const theme = getTheme(3)
-    assert.equal(theme.userColor, '#e2e6ec')      // 中性亮白 ▌ mark
-    assert.equal(theme.assistantColor, '#c4c9d2') // 柔中性灰正文
-    assert.equal(theme.pulseActive, '#5aa9ff')    // azure active pulse
+    assert.equal(theme.userColor, '#e6ecf2')      // 冷调亮白 ▌ mark
+    assert.equal(theme.assistantColor, '#bdc3ca') // 冷中性灰正文
+    assert.equal(theme.muted, '#8c939a')          // 元信息灰
+    assert.equal(theme.pulseActive, '#61aef4')    // 钴蓝 active pulse
+  })
+
+  it('antigravity still available via explicit switch (cool azure accent)', () => {
+    setTheme('antigravity')
+    const theme = getTheme(3)
+    assert.equal(theme.primary, '#5aa9ff') // cool azure
+    assert.equal(theme.error, '#f76b6b')   // coral red
+    assert.equal(theme.userColor, '#e2e6ec')
   })
 
   it('slate still available via explicit switch (cool teal accent)', () => {
@@ -47,7 +56,7 @@ describe('getTheme', () => {
     assert.equal(theme.assistantColor, '#c5c8d2') // brightened neutral body
   })
 
-  it('returns 256-color fallback when colorLevel < 3 (antigravity → blue accent)', () => {
+  it('returns 256-color fallback when colorLevel < 3 (cobalt → blue accent)', () => {
     const theme = getTheme(1)
     assert.equal(theme.primary, 'blue')
     assert.equal(theme.error, 'red')

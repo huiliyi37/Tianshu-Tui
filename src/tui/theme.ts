@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity' | 'cobalt'
 
 interface ColorSet {
   primary: string
@@ -329,6 +329,38 @@ const ANTIGRAVITY_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Cobalt theme — 钴蓝·冷调中性 (default). 由子代理/team TUI 设计稿提炼，oklch 调和：
+// 中性灰阶统一色相 ~250°（微偏蓝冷，不发死灰），状态色全部拽进与 azure 同一和谐色环
+// （青绿 ok / 珊瑚 err / 冷琥珀 warn），不刺眼但仍可语义辨识。是 antigravity 的精炼继任者：
+// 同源冷 azure，但语义色去糖果化、明度梯度更清晰。可与桌面端 tokens.css 对照移植。
+const COBALT_TRUECOLOR: ColorSet = {
+  primary: '#61aef4',   // 钴蓝 accent — 唯一 accent：链接/选中/相位字形/流式指示 (--tui-accent)
+  secondary: '#8db5e0', // 钢青 — 正文结构强调 / edit·write 头
+  success: '#58cbb4',   // 青绿 — 测试通过/完成 (--tui-ok, teal-green 偏冷)
+  warning: '#e0c071',   // 冷琥珀 — 注意/委派 (--tui-warn)
+  error: '#ed7665',     // 珊瑚砖红 — 错误/高风险 (--tui-err, 去糖果感)
+  dim: '#6f757c',       // 冷板岩灰 — 分隔/快捷键 (--tui-dim, 安静可见)
+  pulseQuiet: '#30363d', // 冷边框灰 — quiet pulse (--tui-border)
+  pulseActive: '#61aef4', // 钴蓝 — active pulse (= primary)
+  pulseAlert: '#ed7665',  // 珊瑚 — alert pulse (= error)
+  toolShell: '#78a3cf',   // 钢蓝 — bash/grep/glob
+  toolEdit: '#65b9ca',    // 冷青 — edit_file/write_file (区别于 shell 蓝与 success 青绿)
+  toolTest: '#58cbb4',    // 青绿 — run_tests (= success)
+  toolDelegate: '#e0c071', // 冷琥珀 — delegate (= warning)
+}
+
+const COBALT_FALLBACK: ColorSet = {
+  primary: 'blue',
+  secondary: 'cyan',
+  success: 'green',
+  warning: 'yellow',
+  error: 'red',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'blue',
+  pulseAlert: 'red',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -419,9 +451,16 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     truecolor: buildTheme(ANTIGRAVITY_TRUECOLOR, { userColor: '#e2e6ec', assistantColor: '#c4c9d2', muted: '#989aa6' }),
     fallback: buildTheme(ANTIGRAVITY_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
   },
+  cobalt: {
+    // userColor = 冷调亮白 ▌ 标记 (--tui-bright)，不抢 accent 钴蓝
+    // assistantColor = 冷中性灰正文 (--tui-fg)，降眩光不疲劳
+    // muted = 元信息灰 (--tui-label)
+    truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#bdc3ca', muted: '#8c939a' }),
+    fallback: buildTheme(COBALT_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
+  },
 }
 
-let activeTheme: ThemeName = 'antigravity'
+let activeTheme: ThemeName = 'cobalt'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name
