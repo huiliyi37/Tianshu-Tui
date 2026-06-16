@@ -26,6 +26,9 @@ export function diagnoseCacheMiss(
 
   const current = history[history.length - 1]!
 
+  // Provider reported no cache counters at all — nothing to diagnose
+  if (current.cacheRead + current.cacheCreation === 0) return null
+
   // First turn — no cache to hit
   if (history.length === 1) {
     return {

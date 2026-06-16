@@ -3,13 +3,23 @@ import assert from 'node:assert/strict'
 import { diagnoseCacheMiss } from '../cache-diagnostic.js'
 
 describe('diagnoseCacheMiss', () => {
-  it('reports low hit rate on latest turn', () => {
+  it('reports first_turn on a single turn with cache counters present', () => {
+    // A single-turn history with non-zero counters has no prior prefix to hit yet:
+    // the real semantic is first_turn (cache being built), not low-hit-rate.
     const diagnostic = diagnoseCacheMiss([
       { turn: 1, cacheRead: 20, cacheCreation: 80, inputTokens: 100, outputTokens: 10 },
     ], 1, null, false)
 
     assert.ok(diagnostic)
-    assert.match(diagnostic!.message, /cache/i)
+    assert.equal(diagnostic!.reason, 'first_turn')
+  })
+
+  it('returns null on first turn when provider reports no cache counters', () => {
+    const diagnostic = diagnoseCacheMiss([
+      { turn: 1, cacheRead: 0, cacheCreation: 0, inputTokens: 100, outputTokens: 10 },
+    ], 1, null, false)
+
+    assert.equal(diagnostic, null)
   })
 
   it('returns null when hit rate is healthy', () => {
