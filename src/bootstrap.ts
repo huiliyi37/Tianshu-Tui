@@ -59,6 +59,7 @@ import { PlaybookStore } from './agent/playbook-store.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
+import { WEB_SEARCH_TOOL } from './tools/web-search.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createRecallTool } from './tools/recall.js'
 import { createRememberTool } from './tools/remember.js'
@@ -381,6 +382,10 @@ export function createInteractiveToolRegistry(
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
 
   reg.register(SEMANTIC_SEARCH_TOOL)
+  // web_search: registered at the interactive layer (not the kernel default-registry,
+  // to preserve the ≤25 kernel budget). Available to the primary agent and referenced
+  // by PLAN_MODE_ALLOWED_TOOLS alongside recall.
+  reg.register(WEB_SEARCH_TOOL)
   reg.register(createPlanTaskTool({
     getCoordinator: () => refs.coordinator,
   }))

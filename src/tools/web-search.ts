@@ -92,7 +92,23 @@ function extractActualUrl(ddgUrl: string): string {
 export const WEB_SEARCH_TOOL: Tool = {
   definition: {
     name: 'web_search',
-    description: 'Search the web for real-time information. Results include titles, URLs, and content summaries from search engines.',
+    description: `Search the web for real-time information. Results include titles, URLs, and content summaries.
+
+### When to search
+- Current/time-sensitive facts (latest releases, breaking changes, today's status)
+- A specific library/version/API/error you don't recognize or can't recall precisely
+- Anything that may have changed since your training cutoff
+- Unrecognized capitalized names (products, tools, packages): an unfamiliar name is more likely a real thing that postdates training than something to guess at — search rather than confabulate
+
+### When NOT to search
+- Stable facts, language syntax, or well-established concepts you already know
+- Code already present in this repo — use grep/read_file/semantic_search instead
+
+### Using results (attribution and copyright)
+- Synthesize and paraphrase in your own words; cite the source URL for non-obvious claims
+- Keep any direct quote short (under ~15 words) and use at most one quote per source
+- Never reproduce article paragraphs, song lyrics, or poems verbatim
+- Follow web_fetch to read a full page when a snippet is insufficient`,
     input_schema: {
       type: 'object',
       properties: {
