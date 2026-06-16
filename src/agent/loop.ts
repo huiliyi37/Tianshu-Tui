@@ -104,7 +104,8 @@ import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
-import type { Pheromone, PheromoneQueryResult } from '../context/stigmergy.js'
+import type { Pheromone } from '../context/stigmergy.js'
+import { mapQueriedPheromones } from './pheromone-map.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
@@ -144,17 +145,6 @@ const PHASE_CLASS_MAP: Record<string, string> = {
   'tianshu-encore': 'plan',
 }
 
-
-function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone[] {
-  return results.map(r => ({
-    path: r.path,
-    signal: r.signal,
-    strength: r.currentStrength,
-    depositedAt: r.depositedAt,
-    halfLife: r.halfLife,
-    ...(r.context ? { context: r.context } : {}),
-  }))
-}
 
 export class AgentLoop {
     session!: SessionContext;
