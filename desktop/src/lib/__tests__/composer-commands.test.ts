@@ -7,10 +7,12 @@ const CMDS: ComposerCommand[] = [
   { name: '/rewind', desc: '回滚到某条消息', run: noop },
   { name: '/default', desc: '默认档', run: noop },
   { name: '/theme', desc: '切换主题', run: noop },
+  { name: '/review', desc: 'L2 审查 · 单审查员', run: noop },
+  { name: '/review max', desc: 'L3 审查 · 编队 5 审查员', run: noop },
 ]
 
 test('filterCommands: empty query returns all', () => {
-  assert.equal(filterCommands(CMDS, '').length, 3)
+  assert.equal(filterCommands(CMDS, '').length, 5)
 })
 
 test('filterCommands: matches by name', () => {
@@ -26,6 +28,17 @@ test('filterCommands: leading slash in query is ignored', () => {
 test('filterCommands: matches by description', () => {
   const out = filterCommands(CMDS, '回滚')
   assert.deepEqual(out.map((c) => c.name), ['/rewind'])
+})
+
+test('filterCommands: /review matches both review commands', () => {
+  const out = filterCommands(CMDS, 'review')
+  assert.equal(out.length, 2)
+  assert.deepEqual(out.map((c) => c.name), ['/review', '/review max'])
+})
+
+test('filterCommands: review max matches by desc keyword', () => {
+  const out = filterCommands(CMDS, '编队')
+  assert.deepEqual(out.map((c) => c.name), ['/review max'])
 })
 
 test('detectSlash: line-start slash token', () => {

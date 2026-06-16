@@ -117,6 +117,16 @@ export function ThreadView(props: {
     { name: '/default', desc: '默认档 · 低风险自动', run: () => onSetApprovalMode(levelToMode('default')) },
     { name: '/autonomous', desc: '自治档 · 项目内全自动', run: () => onSetApprovalMode(levelToMode('autonomous')) },
     {
+      name: '/review',
+      desc: 'L2 审查 · 单审查员',
+      run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L2". This triggers L2 adversarial verifier.'),
+    },
+    {
+      name: '/review max',
+      desc: 'L3 审查 · 编队 5 审查员',
+      run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L3". This triggers L3 Review Squadron (5 inspectors).'),
+    },
+    {
       name: '/theme',
       desc: '切换主题 (system→light→dark)',
       run: () => {
@@ -125,7 +135,7 @@ export function ThreadView(props: {
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },
     },
-  ], [onSetApprovalMode])
+  ], [onSetApprovalMode, onSend])
 
   return (
     <div className="thread">
