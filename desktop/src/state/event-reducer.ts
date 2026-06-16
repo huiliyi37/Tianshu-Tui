@@ -186,10 +186,15 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'turn_complete': {
       next.private_textOpen = false
       next.private_thinkingOpen = false
-      // Filter empty turns: skip the divider if no content block precedes it.
-      // Agent internal retries (TTSR, thinking-retry, veto) emit turn_complete
-      // without any text_delta/tool_use — rendering these as visible "第 N 轮"
-      // dividers creates visual noise with empty gaps.
+      // Only the FINAL completion of a run draws a "第 N 轮" boundary. A single
+      // user-prompt run emits many intermediate turn_complete events
+      // (isFinal=false): one after every tool batch (turn-orchestrator:668) and
+      // on each TTSR / thinking retry (535, 697). Rendering each as a divider
+      // produced empty + duplicate "第 N 轮" rows. The TUI likewise treats the
+      // per-turn count as sequential noise and only resets state on completion.
+      if (!ev.data.isFinal) return next
+      // Even on the final completion, skip the divider if no content precedes it
+      // (nothing to delimit — e.g. an immediate empty run).
       const lastBlock = next.blocks[next.blocks.length - 1]
       if (!lastBlock || lastBlock.kind === 'turn') {
         return next

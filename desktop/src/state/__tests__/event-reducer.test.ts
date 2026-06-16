@@ -161,17 +161,30 @@ test('T1: thinking and text are separate runs that interrupt each other', () => 
   assert.equal(s.blocks[2]!.kind, 'thinking')
 })
 
-test('T1: turn_complete adds a turn block with usage metadata', () => {
+test('T1: final turn_complete adds a turn block with usage metadata', () => {
   seq = 0
   const s = fold([
     ev('text_delta', { text: 'response' }),
-    ev('turn_complete', { turnNumber: 2, isFinal: false, usage: { totalTokens: 1500 } }),
+    ev('turn_complete', { turnNumber: 2, isFinal: true, usage: { totalTokens: 1500 } }),
   ])
   assert.equal(s.blocks.length, 2)
   assert.equal(s.blocks[1]!.kind, 'turn')
   assert.equal(s.blocks[1]!.turn?.turnNumber, 2)
   assert.equal(s.blocks[1]!.turn?.totalTokens, 1500)
-  assert.equal(s.blocks[1]!.turn?.isFinal, false)
+  assert.equal(s.blocks[1]!.turn?.isFinal, true)
+})
+
+test('intermediate turn_complete (isFinal=false) draws no divider', () => {
+  seq = 0
+  const s = fold([
+    ev('text_delta', { text: 'partial' }),
+    ev('turn_complete', { turnNumber: 1, isFinal: false }),
+    ev('tool_use', { name: 'bash' }),
+    ev('tool_result', { name: 'bash', result: 'ok' }),
+    ev('turn_complete', { turnNumber: 2, isFinal: false }),
+  ])
+  // A run emits many intermediate completions; only the final one delimits.
+  assert.equal(s.blocks.filter((b) => b.kind === 'turn').length, 0)
 })
 
 test('T1: checkpoint adds an anchor block; empty hash is ignored', () => {
@@ -289,13 +302,13 @@ test('empty turn_complete (no preceding content) creates no turn block', () => {
   assert.equal(s.blocks.length, 0, 'turn_complete with no preceding content should not create a block')
 })
 
-test('consecutive turn_complete without content between them skips the second', () => {
+test('consecutive final turn_complete without content between them skips the second', () => {
   seq = 0
   const s = fold([
     ev('user', { text: 'hi' }),
     ev('text_delta', { text: 'hello' }),
-    ev('turn_complete', { turnNumber: 0, isFinal: false }),
-    ev('turn_complete', { turnNumber: 1, isFinal: false }),
+    ev('turn_complete', { turnNumber: 0, isFinal: true }),
+    ev('turn_complete', { turnNumber: 1, isFinal: true }),
   ])
   const turnBlocks = s.blocks.filter(b => b.kind === 'turn')
   assert.equal(turnBlocks.length, 1, 'second consecutive turn_complete should be filtered')

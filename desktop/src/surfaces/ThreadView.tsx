@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
-import { ToolGroup } from '../components/ToolGroup'
+import { ToolGroup, ToolCard, isCollapsibleTool, toolNameOf } from '../components/ToolGroup'
 import { Markdown } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
@@ -216,12 +216,19 @@ type RenderItem =
   | { kind: 'tools'; key: string; items: ConvoBlock[] }
   | { kind: 'block'; block: ConvoBlock }
 
-/** Collapse runs of tool/result blocks into a single grouped render item. */
+/** Only exploration tools (read/search/list) that succeeded fold into the
+ *  compact group; action tools and errors render expanded as standalone cards. */
+function isFoldable(b: ConvoBlock): boolean {
+  return (b.kind === 'tool' || b.kind === 'result') && !b.isError && isCollapsibleTool(toolNameOf(b))
+}
+
+/** Collapse runs of *collapsible* tool/result blocks into a single grouped
+ *  render item; everything else (incl. action tools & errors) stays standalone. */
 function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
   const out: RenderItem[] = []
   let run: ConvoBlock[] | null = null
   for (const b of blocks) {
-    if (b.kind === 'tool' || b.kind === 'result') {
+    if (isFoldable(b)) {
       if (!run) { run = []; out.push({ kind: 'tools', key: `tg-${b.key}`, items: run }) }
       run.push(b)
     } else {
@@ -249,6 +256,9 @@ function BlockImpl({ block, isStreaming }: { block: ConvoBlock; isStreaming?: bo
         ) : null}
       </MsgBlock>
     )
+  }
+  if (block.kind === 'tool' || block.kind === 'result') {
+    return <ToolCard block={block} />
   }
   if (block.kind === 'thinking') {
     return <ThinkingBlock block={block} streaming={!!isStreaming} />

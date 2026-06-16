@@ -623,6 +623,12 @@ body {
   overflow: hidden; background: var(--panel);
 }
 .tool-row + .tool-row { border-top: 1px solid var(--border); }
+/* Standalone action-tool card (bash/edit/write/run_tests/errors) — same frame
+   as a group of one, sits outside the read/search fold and renders expanded. */
+.tool-card {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  overflow: hidden; background: var(--panel);
+}
 .tool-row.err { background: var(--error-soft); }
 .tool-row-head {
   width: 100%; display: flex; align-items: center; gap: var(--space-2);
