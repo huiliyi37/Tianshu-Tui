@@ -21,6 +21,7 @@ import { IntentRetrievalRouteController } from './intent-retrieval-route-control
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import { PrewarmController } from './prewarm-controller.js'
+import { TurnStepProducer } from './turn-step-producer.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -336,10 +337,14 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
   })
 }
 
+export function createTurnStepProducer(self: AgentLoop): TurnStepProducer {
+  return new TurnStepProducer(self)
+}
+
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   return new TurnOrchestrator({
     // === Lifecycle ===
-    initializeRun: (userInput, callbacks) => self.initializeRun(userInput, callbacks),
+    initializeRun: (userInput, callbacks) => self.turnStepProducer.initializeRun(userInput, callbacks),
     stopFsWatcher: () => { self.stopFsWatcher() },
 
     // === Config ===
@@ -366,12 +371,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Sub-processes (thin wrappers) ===
     runCompaction: (turn, snap) => self.runCompaction(turn, snap),
-    runPerception: (turn, estTokens, actionable, callbacks) => self.runPerception(turn, estTokens, actionable, callbacks),
+    runPerception: (turn, estTokens, actionable, callbacks) => self.turnStepProducer.runPerception(turn, estTokens, actionable, callbacks),
     runConvergenceCheck: (turn, phaseClass, assistantResponded, userMessageConsumed, callbacks) =>
       self.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
     runReplanCheck: () => { self.runReplanCheck() },
     buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
-      self.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
+      self.turnStepProducer.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
     prewarmRecentReads: () => self.prewarmController.prewarmRecentReads(),
     runPostSession: (callbacks) => self.runPostSession(callbacks),
     recordProviderOutcome: (ok) => { self.recordProviderOutcome(ok) },

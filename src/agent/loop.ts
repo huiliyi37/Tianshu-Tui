@@ -115,7 +115,8 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
+import type { TurnStepProducer } from './turn-step-producer.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -130,31 +131,19 @@ import { type EffortShadowRecord } from './p3-reward.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
-/** Map StarPhase values to PromptEngine phaseClass strings. */
-const PHASE_CLASS_MAP: Record<string, string> = {
-  'tianshu-planning': 'plan',
-  'tianxuan-locating': 'explore',
-  'tianji-decomposing': 'plan',
-  'tianquan-contracting': 'plan',
-  'yuheng-implementing': 'execute',
-  'kaiyang-testing': 'verify',
-  'yaoguang-delivering': 'deliver',
-  'tianshu-encore': 'plan',
-}
-
 
 export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
   abortController: AbortController | null = null
   /** Count of user interrupts within the current turn (中#5). */
-  private _turnInterruptCount = 0
+  _turnInterruptCount = 0
   /**
    * Pending-abort latch: set by abort() so an interrupt fired during the
    * init/warmup window (before the turn loop) is honored rather than lost.
    * Reset at the start of each run().
    */
-  private _pendingAbort = false
+  _pendingAbort = false
   cwd: string
   evidence: EvidenceTracker
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
@@ -174,7 +163,7 @@ export class AgentLoop {
   private lastCacheDiagnostic: string | null = null
   latestRisk: import('./approval-risk.js').RiskAssessment = { level: 'none', reasons: [], suggestedAction: 'No additional approval required.' }
   /** Latest per-turn free-energy signals — consumed by coordinator EFE worker routing. */
-  private latestPolicySignals?: { efe: EFEComponents; sensorium: Sensorium }
+  latestPolicySignals?: { efe: EFEComponents; sensorium: Sensorium }
   planModeState: PlanModeState = 'off'
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
@@ -212,12 +201,12 @@ export class AgentLoop {
    *  persistent deviation doesn't spam an identical nudge every turn. */
   lastReplanInjection = ''
   /** Session-local affordance adaptations — per-session, never mutates global registry */
-  private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
+  sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
   prevAnchorGraphHash: string | null = null
   /** Previous turn's streamed assistant text for dedup-guard P5. */
   prevStreamedText: string | null = null
-  private pressureMonitor: PressureMonitor
+  pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
   turnBudget: TurnBudget = createTurnBudget(0)
@@ -225,18 +214,19 @@ export class AgentLoop {
   strategy: StrategyProfile | null = null
   vigorState: VigorState = createVigorState()
   runtimeHooks: RuntimeHookPipeline
-  private perception: TurnPerceptionController
-  private intent: TurnIntentController
+  perception: TurnPerceptionController
+  intent: TurnIntentController
   contextInjection: ContextInjectionController
   compaction: CompactionController
   turnStream: TurnStreamController | null = null
   turnCompletion: TurnCompletionController
   toolExecution: ToolExecutionController
   planTraceCoordinator: PlanTraceCoordinator
-  private compactBoundaryCoordinator: CompactBoundaryCoordinator
+  compactBoundaryCoordinator: CompactBoundaryCoordinator
   private turnOrchestrator: TurnOrchestrator
+  turnStepProducer: TurnStepProducer
   private reasoningEffort: ReasoningEffortController
-  private intentRoute: IntentRetrievalRouteController
+  intentRoute: IntentRetrievalRouteController
   antiAnchoring: AntiAnchoringController
   private modelRoutingShadow: ModelRoutingShadowController
   prewarmController: PrewarmController
@@ -268,14 +258,14 @@ export class AgentLoop {
   stigmergyStore: StigmergyStore
   loadedPheromones: Pheromone[] = []
   readonly stanceTally = createStanceTally()
-  private lastSeenEventId = 0
+  lastSeenEventId = 0
   gitChangeRate = 0
   telemetryWriter: TelemetryWriter
-  private baselineFingerprint: PrefixFingerprint | null = null
+  baselineFingerprint: PrefixFingerprint | null = null
   sensoriumSnapshots: SensoriumEntry[] = []
   taskContract?: TaskContract
-  private latestCognitiveSnapshot?: CognitivePhaseSnapshot
-  private persist: SessionPersist | null = null
+  latestCognitiveSnapshot?: CognitivePhaseSnapshot
+  persist: SessionPersist | null = null
   private resourceSensor: ResourceSensor
   latestResourceSnapshot: ResourceSensorSnapshot | null = null
   latestReliabilityDecision: ReliabilityDecision | null = null
@@ -284,8 +274,8 @@ export class AgentLoop {
   currentSeason: CognitiveSeason | null = null
   lastCompactTurn: number | null = null
   _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
-  private _taskDepthLayer: TaskDepthLayer | undefined = undefined
-  private _planMethodology: PlanMethodology | undefined = undefined
+  _taskDepthLayer: TaskDepthLayer | undefined = undefined
+  _planMethodology: PlanMethodology | undefined = undefined
   _prevPhaseHint: string | undefined = undefined
   /**
    * P2-5: mid-round history rewrites break the prefix cache between two API
@@ -445,6 +435,7 @@ export class AgentLoop {
     this.planTraceCoordinator = createPlanTraceCoordinator(this)
     this.compactBoundaryCoordinator = createCompactBoundaryCoordinator(this)
     this.turnOrchestrator = createTurnOrchestrator(this)
+    this.turnStepProducer = createTurnStepProducer(this)
     this.reasoningEffort = createReasoningEffortController(this)
     this.intentRoute = createIntentRetrievalRouteController(this)
     this.antiAnchoring = createAntiAnchoringController(this)
@@ -471,11 +462,11 @@ export class AgentLoop {
     }
   }
 
-  private createTurnStreamController(): TurnStreamController {
+  createTurnStreamController(): TurnStreamController {
       return createTurnStreamController(this);
   }
 
-  private createTurnCompletionController(callbacks?: AgentCallbacks): TurnCompletionController {
+  createTurnCompletionController(callbacks?: AgentCallbacks): TurnCompletionController {
       return createTurnCompletionController(this, callbacks);
   }
 
@@ -551,11 +542,11 @@ export class AgentLoop {
       }
   }
 
-  private recordModelRoutingShadow(currentSensorium: Sensorium, efe: EFEComponents): void {
+  recordModelRoutingShadow(currentSensorium: Sensorium, efe: EFEComponents): void {
     this.modelRoutingShadow.record(currentSensorium, efe)
   }
 
-  private bindSessionDomain(taskDescription: string): void {
+  bindSessionDomain(taskDescription: string): void {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
     this.config.promptEngine.setActiveDomain(this.sessionDomain)
@@ -600,7 +591,7 @@ export class AgentLoop {
    * interrupt and must not be mislabeled as one, especially when combined
    * with a genuine earlier interrupt in the same run.
    */
-  private abortStalledTurn(): void {
+  abortStalledTurn(): void {
     this.abortController?.abort()
   }
 
@@ -709,7 +700,7 @@ export class AgentLoop {
     return this.persist?.getFilePath()
   }
 
-  private refreshReliabilityDecision(): void {
+  refreshReliabilityDecision(): void {
     this.latestResourceSnapshot = this.resourceSensor.sample(this.sessionPersistPath())
     const disk = this.latestResourceSnapshot.disk
     const trigger = classifyRecoveryTrigger({
@@ -896,7 +887,7 @@ export class AgentLoop {
     } catch { /* ignore */ }
   }
 
-  private async startFsWatcher(): Promise<void> {
+  async startFsWatcher(): Promise<void> {
     try {
       await this.fsWatcher?.start()
     } catch {
@@ -956,352 +947,6 @@ export class AgentLoop {
    */
   applyEffortDelta(baseEffort: string): string {
     return this.reasoningEffort.applyDelta(baseEffort)
-  }
-
-  /**
-   * Step 6a: Per-run initialization — warmup, heartbeat, state resets,
-   * worktree detection, session split, user message, task contract.
-   *
-   * Returns the heartbeat (for cleanup) and the wrapped callbacks (which
-   * the caller must use for the rest of the run).
-   */
-  async initializeRun(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<{ heartbeat: TurnHeartbeat, wrappedCallbacks: AgentCallbacks, actionable: boolean, turnMode: TurnMode }> {
-    await this.warmupMemories()
-    // The controller is created eagerly in run() before any await, so an abort
-    // fired during warmup is honored (not discarded). Only create one here if a
-    // caller invoked the loop outside run().
-    this.abortController ??= new AbortController()
-    if (this._pendingAbort) {
-      // Interrupt arrived during the warmup window — keep the count and ensure
-      // the (already-aborted) controller stays aborted so the turn loop bails.
-      this.abortController.abort()
-    } else {
-      this._turnInterruptCount = 0
-    }
-    await this.startFsWatcher()
-    // P7: heartbeat watchdog — surfaces "still working" signal during long
-    // silent operations so the UI doesn't appear frozen and users don't
-    // interrupt the agent mid-task. ALSO acts as a watchdog with teeth: if
-    // silence exceeds hardStallMs (turn-boundary blind spot — postTurn hooks /
-    // compaction / prewarm hang with no abort cooperation), it aborts the turn
-    // so the loop's rejectOnAbort races break out instead of freezing forever.
-    const heartbeat = new TurnHeartbeat({
-      silentMs: 20_000,
-      repeatMs: 15_000,
-      hardStallMs: 240_000,
-      onHeartbeat: (elapsed, lastActivity) => {
-        const seconds = Math.round(elapsed / 1000)
-        callbacks.onPhaseChange?.('heartbeat', {
-          reason: `still working — last activity: ${lastActivity} (${seconds}s ago)`,
-        })
-      },
-      onHardStall: (elapsed, lastActivity) => {
-        const seconds = Math.round(elapsed / 1000)
-        debugLog(`[watchdog] hard stall after ${seconds}s (last activity: ${lastActivity}) — aborting wedged turn`)
-        callbacks.onPhaseChange?.('heartbeat', {
-          reason: `recovering — turn stalled ${seconds}s at "${lastActivity}", aborting`,
-        })
-        this.abortStalledTurn()
-      },
-    })
-    callbacks = wrapCallbacksWithHeartbeat(callbacks, heartbeat)
-    heartbeat.start()
-    this.turnStream = this.createTurnStreamController()
-    this.turnCompletion = this.createTurnCompletionController(callbacks)
-    this.trajectory.reset()
-    this.decisions = []
-    this.traceStore = createTraceStore()
-    this.predictionAccumulator = createPredictionAccumulator()
-    this.initialUserMessage = userInput
-    // Reset accumulations from previous run
-    this.thinkingOnlyRetries = 0
-    this.lastThinkingContent = ''
-    this.consecutiveNoToolTurns = 0
-    this.lastTurnTextFingerprint = ''
-    this.evidence.reset()
-    this.repairHintTracker = new RepairHintTracker()
-    this.contextInjection.reset()
-    this.recentTextFingerprints = []
-    this.sensorium = null
-    this.strategy = null
-    this.latestResourceSnapshot = null
-    this.latestReliabilityDecision = null
-    this.thetaState = createThetaState(7)
-    this.loadedPheromones = []
-    this.intent.reset()
-    this.perception.reset()
-    this.sensoriumSnapshots = this.perception.getSnapshots()
-    this.latestCognitiveSnapshot = undefined
-    // Capture baseline canonical prefix fingerprint for drift detection
-    this.baselineFingerprint = this.config.promptEngine.getFingerprint()
-    // Load cross-session pheromones for Sensorium.freshness computation.
-    // Use query() so Sensorium sees decayed currentStrength, and prune stale entries opportunistically.
-    this.stigmergyStore.prune().catch(() => {})
-    this.stigmergyStore.query().then(p => { this.loadedPheromones = mapQueriedPheromones(p) }).catch(() => {})
-
-    // Detect worktree reality: compare injected git context with actual worktree state
-    try {
-      const ctx = await getGitInjectedContext(this.cwd)
-      const injected: InjectedWorktreeContext | undefined = ctx
-        ? { branch: ctx.branch, head: ctx.head }
-        : undefined
-      const reality = await detectWorktreeReality(this.cwd, injected)
-      this.config.promptEngine.setWorktreeReality(reality)
-    } catch {
-      // Detection failure must not crash AgentLoop — clear stale warning
-      this.config.promptEngine.setWorktreeReality(null)
-    }
-
-    this.bindSessionDomain(userInput)
-    this.contextInjection.recordUserInputClaims(userInput)
-    this.contextInjection.refreshPlaybookLessons(userInput)
-
-    // Phase 2.3: Proactive session split — MUST run BEFORE addUserMessage.
-    await this.compactBoundaryCoordinator.preUserMessageSplit()
-
-    // History invariant probe: a new run must start with the previous turn
-    // answered. A trailing user message (or a thinking-only assistant with
-    // empty content and no tool_calls) means the previous reply was never
-    // persisted — the exact precondition for the "re-answers the previous
-    // turn" bug. Log loudly so recurrences are diagnosable from debug logs.
-    {
-      const tailMsgs = this.session.getMessages()
-      const tail = tailMsgs[tailMsgs.length - 1]
-      if (tail && (
-        tail.role === 'user' ||
-        (tail.role === 'assistant' && !tail.content && !tail.tool_calls)
-      )) {
-        debugLog(`[history-invariant] run starts with unanswered tail: role=${tail.role} msgCount=${tailMsgs.length} — previous assistant reply was not persisted; model may re-answer the previous turn`)
-      }
-    }
-
-    this.session.addUserMessage(userInput, images)
-    const turnMode = classifyTurnMode(userInput, this.taskContract)
-    const actionable = turnMode !== 'chat'
-    this.config.promptEngine.setActionableTurn(actionable)
-
-    if (turnMode === 'task') {
-      this.taskContract = extractTaskContract(userInput, this.session.getTurnCount())
-    } else if (turnMode === 'followUp') {
-      // Inherit active contract — no new extraction
-    } else if (!this.taskContract || this.taskContract.status === 'ready_to_deliver') {
-      this.taskContract = undefined
-    }
-
-    await this.intentRoute.buildForTurn(userInput, actionable, turnMode)
-
-    // Classify task dependency depth for TDD strategy / verifier selection
-    if (this.taskContract && actionable) {
-      const routeKinds = this._lastRetrievalRoute?.taskKinds
-      this._taskDepthLayer = classifyTaskDepth(this.taskContract, undefined, routeKinds)
-      this.config.promptEngine.setTaskDepthLayer(this._taskDepthLayer)
-      this._planMethodology = classifyPlanMethodology(this.taskContract, this._taskDepthLayer)
-      this.config.promptEngine.setPlanMethodology(this._planMethodology)
-      // U6: open a fresh execution trace for a new task (or a changed contract).
-      if (this._taskDepthLayer) {
-        this.planTraceCoordinator.openTrace(this.taskContract.id, this._taskDepthLayer)
-      }
-    } else {
-      this._taskDepthLayer = undefined
-      this._planMethodology = undefined
-      this.config.promptEngine.setTaskDepthLayer(undefined)
-      this.config.promptEngine.setPlanMethodology(undefined)
-      // U6: no active task — drop any prior trace + clear its prompt surfaces.
-      this.planTraceCoordinator.closeTrace()
-    }
-
-    this.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderDiscoveryBlock(userInput))
-    this.config.promptEngine.setCrossSessionMemoryBlock(renderMemoryBlock(this.cwd, userInput))
-    this.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
-
-    this.config.promptEngine.setPlanCacheAdvisory(
-      turnMode === 'task' ? renderPlanCacheAdvisory(this.p3.planCacheSuggest(userInput)) : null,
-    )
-
-    if (this.config.autoReasoning && turnMode === 'task') {
-      const ruleEffort = selectReasoningEffort(userInput, this.config.reasoningFloor)
-      const banditAdjusted = this.applyEffortDelta(ruleEffort) as import('./auto-reasoning.js').ReasoningEffort
-      this.config.reasoningEffort = banditAdjusted
-      this.config.client.setReasoningEffort?.(banditAdjusted)
-      this.shadowEffortTelemetry(ruleEffort)
-    }
-    return { heartbeat, wrappedCallbacks: callbacks, actionable, turnMode }
-  }
-
-  /**
-   * Step 6b: Per-turn compaction — session split, maybeCompact, stale round,
-   * heap-driven forced compaction. Returns the result for the caller to
-   * handle abort logic and userMessageConsumed propagation.
-   */
-  /**
-   * Step 6c: Per-turn perception — pressure check, sensorium computation,
-   * season classification, phase class wiring, and contract status advancement.
-   * Pure data transformation with no control flow (no return/continue).
-   */
-  /**
-   * Step 6d: Convergence detection — multi-signal stagnation check before
-   * the API call. Level 2+ injects guidance; Level 3 forces session split
-   * or abort. Returns the action for the caller to handle control flow.
-   */
-  /**
-   * Step 6e: Cognitive prep — sycophancy trap, CVM cognitive ledger,
-   * projection building, and CVM overhead tracking.
-   * Pure data transformation with no control flow.
-   */
-  /**
-   * Step 6f: Build turn request — intent evaluation, repair hint injection,
-   * reliability decision, context ceiling enforcement, cross-session event
-   * sync, and OAI request building. Returns the action and request.
-   */
-  async buildTurnRequest(
-    turn: number,
-    currentStrategy: StrategyProfile,
-    currentSensorium: Sensorium,
-    pressureResult: import('../context/pressure-monitor.js').PressureResult,
-    assistantResponded: boolean,
-    userMessageConsumed: boolean,
-    callbacks: AgentCallbacks,
-  ): Promise<{
-    action: 'proceed' | 'veto' | 'abort'
-    request?: OaiChatRequest
-  }> {
-    let _tb = Date.now()
-    const intentResult = await this.intent.evaluate({
-      strategy: currentStrategy,
-      vigor: this.vigorState,
-      sensorium: currentSensorium,
-      pheromones: this.loadedPheromones,
-      pressureResult,
-      recentToolHistory: this.recentToolHistory,
-      onIntentPreview: callbacks.onIntentPreview,
-    })
-    debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
-    if (intentResult === 'veto') {
-      callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
-      callbacks.onTurnComplete(this.session.getTotalUsage(), this.session.getTurnCount(), false)
-      return { action: 'veto' }
-    }
-
-    // Pass 5: adaptive repair hint injection
-    this.contextInjection.refreshRepairHint()
-
-    // Anti-habituation: staleness gate — fire when session is long and no objections raised
-    this.turnsSinceLastObjection++
-    if (turn >= STALENESS_GATE_TURN_THRESHOLD && this.turnsSinceLastObjection >= STALENESS_GATE_QUIET_WINDOW) {
-      this.advisoryBus.submit(stalenessGateEntry(this.turnsSinceLastObjection))
-    }
-    // Anti-habituation: vigor-low refresh — wake up when execution energy is depleted
-    if (this.vigorState.tonic < 0.3) {
-      this.advisoryBus.submit(vigorLowEntry())
-    }
-
-    // A1: flush advisory bus into prompt engine (unified corrective guidance)
-    this.config.promptEngine.setHarnessAdvisoryBlock(this.advisoryBus.render())
-
-    this.refreshReliabilityDecision()
-
-    _tb = Date.now()
-    await this.compaction.enforceContextCeiling()
-    debugLog(`[turn-boundary] turn=${turn} enforceContextCeiling: ${Date.now() - _tb}ms`)
-    // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
-    if (this.abortController!.signal.aborted) {
-      if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-      callbacks.onAbort()
-      return { action: 'abort' }
-    }
-    this.contextInjection.refreshActiveClaims()
-
-    // Read events from other sessions (cache-safe: injected into dynamic appendix only)
-    if (this.config.sessionRegistry && this.config.sessionId) {
-      const events = this.config.sessionRegistry.consumeEvents(this.config.sessionId, this.lastSeenEventId)
-      let appendix = ''
-      if (events.length > 0) {
-        this.lastSeenEventId = Math.max(...events.map(e => e.id))
-        appendix = formatEventsForAppendix(events)
-      }
-      // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
-      const claims = this.config.sessionRegistry.getActiveClaims(this.config.sessionId)
-      if (claims.length > 0) {
-        const grouped = new Map<string, string[]>()
-        for (const c of claims) {
-          const key = c.filePath
-          if (!grouped.has(key)) grouped.set(key, [])
-          grouped.get(key)!.push(`${c.sessionId}(${c.claimType})`)
-        }
-        const claimLines = [...grouped.entries()].map(([file, holders]) =>
-          `  ${file} — claimed by ${holders.join(', ')}`)
-      }
-      if (this.persist) {
-        const prevHandoff = SessionPersist.loadPrevHandoff(
-          this.config.sessionId,
-          this.sessionDomain?.id,
-        )
-        if (prevHandoff) {
-          appendix = (appendix ? appendix + '\n' : '') +
-            '<prev-session-handoff>\n' + prevHandoff + '\n</prev-session-handoff>'
-        }
-      }
-      this.config.promptEngine.setCrossSessionEvents(appendix || null)
-    }
-    // Inject session state snapshot into volatile block before building request
-    if (this.sessionStateManager) {
-      this.config.promptEngine.setSessionState(this.sessionStateManager.renderForVolatile())
-    }
-    // Pre-refresh git status so buildOaiRequest doesn't return stale cached data
-    _tb = Date.now()
-    await this.config.promptEngine.refreshGitContextIfNeeded(this.cwd)
-    debugLog(`[turn-boundary] turn=${turn} refreshGitContext: ${Date.now() - _tb}ms`)
-    const request = this.config.promptEngine.buildOaiRequest(
-      this.session.getMessages(),
-      this.recentToolHistory,
-      this.config.contextWindow,
-    )
-
-    return { action: 'proceed', request }
-  }
-
-  /**
-   * Build and inject the cognitive projection (cognitive-mirror + task-contract
-   * + verification-gap + uncertainty + immune hint) into the prompt engine.
-   * Reconnected after the loop-split refactor silently orphaned it.
-   *
-   * Note: the sycophancy trap is intentionally NOT recorded here — it needs a
-   * redesign before re-wiring (blind-execution heuristic too coarse). The
-   * `sycophancyHint` therefore stays undefined, matching the prior behavior.
-   */
-  private runCognitivePrep(
-    turn: number,
-    actionable: boolean,
-    pressureResult: import('../context/pressure-monitor.js').PressureResult,
-  ): void {
-    const cognitiveLedger = createCognitiveLedger({
-      contract: this.taskContract,
-      evidence: this.evidence.getState(),
-      trace: this.traceStore,
-      turn,
-      // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
-      sensorium: pressureResult.shouldThrottleCvm ? null : this.sensorium,
-      strategy: pressureResult.shouldThrottleCvm ? null : this.strategy,
-      vigor: pressureResult.shouldThrottleCvm ? null : this.vigorState,
-      season: pressureResult.shouldThrottleCvm ? null : this.currentSeason,
-      // CVM uncertainty trap: risk level from latest tool assessment
-      riskLevel: this.latestRisk.level,
-    })
-    this.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-    const sycophancyHint = undefined
-    const immuneHint = this._lastImmuneHint ? formatImmuneContext(this._lastImmuneHint) : undefined
-    this._lastImmuneHint = undefined // consume once
-    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
-    this.config.promptEngine.setCognitiveProjection(projection)
-
-    // ── CVM overhead tracking ──
-    // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
-    // 追踪每次注入的 token 估计，防止认知氧气被自身消耗殆尽。
-    // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
-    if (actionable) {
-      const cvmTokenEstimate = Math.ceil(projection.length / 4)
-      this.pressureMonitor.recordCvmInjection(cvmTokenEstimate) // Called after setting projection
-    }
   }
 
   async runConvergenceCheck(
@@ -1379,137 +1024,6 @@ export class AgentLoop {
     }
 
     return { action: 'proceed' }
-  }
-
-  async runPerception(
-    turn: number,
-    estTokens: number,
-    actionable: boolean,
-    callbacks: AgentCallbacks,
-  ): Promise<{
-    sensorium: Sensorium
-    strategy: StrategyProfile
-    phaseClass: string
-    pressureResult: import('../context/pressure-monitor.js').PressureResult
-  }> {
-    // ── StarFlow v2: Sensorium computation ──
-    const pressureResult = this.pressureMonitor.check(estTokens, this.session.getTurnCount())
-    if (!actionable) {
-      this.config.promptEngine.setCognitiveProjection(null)
-      this.config.promptEngine.setTaskProgress({ completed: [], current: 'chat-mode', remaining: [], decisions: [] })
-    }
-    callbacks.onPhaseChange?.('preparing', { reason: 'preparing next turn' })
-
-    // ── Event-loop gap detection ──
-    // If >30s elapsed since last tool completion, the event loop may have
-    // been blocked. Log a warning to help diagnose session freeze bugs.
-    if (this.lastToolCompleteTime > 0) {
-      const gapMs = Date.now() - this.lastToolCompleteTime
-      if (gapMs > 30_000) {
-        debugLog(`[event-loop] WARNING: ${(gapMs / 1000).toFixed(1)}s gap since last tool completion (turn ${this.session.getTurnCount()})`)
-      }
-    }
-
-    const _tb = Date.now()
-    const perceptionResult = await this.perception.perceive({
-      turn,
-      estimatedTokens: estTokens,
-      pressureResult,
-      evidenceState: this.evidence.getState(),
-      predictionAccumulator: this.predictionAccumulator,
-      recentToolHistory: this.recentToolHistory,
-      loadedPheromones: this.loadedPheromones,
-      traceStore: this.traceStore,
-      gitChangeRate: this.gitChangeRate,
-      fsEventRate: this.latestFsWatcherState.eventRate,
-      sensorium: this.sensorium,
-      strategy: this.strategy,
-      vigor: this.vigorState,
-      thetaState: this.thetaState,
-      thetaTelemetry: this.thetaTelemetry,
-      thetaCheckInFlight: this.thetaCheckInFlight,
-      baselineFingerprint: this.baselineFingerprint,
-    }, {
-      emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-      emitDecisionShift: (shift) => { callbacks.onDecisionShift?.(shift) },
-    })
-    this.sensorium = perceptionResult.sensorium
-    debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)
-    this.strategy = perceptionResult.strategy
-    this.vigorState = perceptionResult.vigor
-    this.thetaState = perceptionResult.thetaState
-    this.sensoriumSnapshots = this.perception.getSnapshots()
-    const currentSensorium: Sensorium = perceptionResult.sensorium
-
-    // ── 认知季节 — 道德经四章螺旋 ──
-    const seasonResult = classifySeason({
-      turn,
-      doomLevel: this.getDoomLoopLevel(),
-      recentCompactTurn: this.lastCompactTurn,
-      sensoriumStability: currentSensorium.stability,
-    })
-    this.currentSeason = seasonResult.season
-
-    // ── Embodied Cognition: affordance-gated tool selection hint ──
-    const affordanceState: AffordanceState = {
-      sensorium: currentSensorium,
-      vigor: this.vigorState,
-      thetaPhase: getThetaPhase(this.thetaState),
-      season: this.currentSeason,
-      workingSetSize: this.evidence.getState().filesModified.size,
-      recentToolNames: this.recentToolHistory.map(t => t.tool),
-      contractStatus: this.taskContract?.status,
-    }
-    this.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
-
-    // ── Free Energy Engine: EFE-driven policy guidance ──
-    // Meridian 结构喂 EFE：探索信息增益由 physarum 图的边疆度估计（Track 1）。
-    let structuralEpistemic: number | undefined
-    try { structuralEpistemic = this.immuneHook.getPhysarum().structuralEpistemic() } catch { /* graph signal is optional */ }
-    const efe = computeEFE(this.predictionAccumulator, this.currentSeason, this.vigorState, currentSensorium, structuralEpistemic)
-    this.latestPolicySignals = { efe, sensorium: currentSensorium }
-    const affordances = computeAffordanceScores(affordanceState, this.sessionAffordanceAdaptations)
-    const policies = selectPolicy(efe, affordances, { topK: 5 })
-    this.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
-    this.recordModelRoutingShadow(currentSensorium, efe)
-
-    // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──
-    if (this.session.getTurnCount() % 10 === 0) {
-      try {
-        const db = this.config.meridianIndexer?.getDb()
-        if (db) {
-          this.sessionAffordanceAdaptations = adaptAffordanceFromHistory(toolName => db.getToolSuccessRate(toolName, 20))
-        }
-      } catch { /* affordance adaptation is non-critical */ }
-    }
-
-    // Wire StarPhase → phaseClass for field habituation modulation
-    const phaseClass = PHASE_CLASS_MAP[perceptionResult.event.phase] ?? 'plan'
-    this.config.promptEngine.setPhaseHint(phaseClass)
-    const contractStatus = contractStatusFromPhaseClass(phaseClass)
-    if (this.taskContract && contractStatus) {
-      const prevStatus = this.taskContract.status
-      this.taskContract = advanceContractStatus(this.taskContract, contractStatus, this.session.getTurnCount())
-
-      // TDD Gate: one-shot check on planning→executing transition
-      if (prevStatus === 'planning' && this.taskContract.status === 'executing' && !this._lastImmuneHint) {
-        const es = this.evidence.getState()
-        const tddHint = checkTddGate({
-          filesRead: es.filesRead,
-          filesModified: es.filesModified,
-          isActionable: this.taskContract.isActionable,
-        })
-        if (tddHint) this._lastImmuneHint = tddHint
-      }
-    }
-
-    // ── Cognitive projection — build & inject cognitive-mirror + contract +
-    // verification-gap + uncertainty + immune hint. Runs last so it sees the
-    // freshly-advanced contract status and consumes the TDD-gate immune hint
-    // produced above (reproduces the original _runInner step-6e ordering).
-    this.runCognitivePrep(turn, actionable, pressureResult)
-
-    return { sensorium: perceptionResult.sensorium, strategy: perceptionResult.strategy, phaseClass, pressureResult }
   }
 
   async runCompaction(
