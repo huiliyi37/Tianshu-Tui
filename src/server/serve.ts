@@ -326,6 +326,9 @@ function buildManagedAgent(
       agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
       return spec.model.id
     },
+    // Context usage display (desktop header progress bar).
+    getEstimatedTokens: () => agent.session.getEstimatedTokens(),
+    getContextWindow: () => spec.model.contextWindow,
   }
 }
 

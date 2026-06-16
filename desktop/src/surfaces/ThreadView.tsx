@@ -89,7 +89,15 @@ export function ThreadView(props: {
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
-  // Context usage — latest turn's total tokens (Cursor 3.0 "expose context usage").
+  // Context usage bar: live token estimate vs model window.
+  const ctxPct = useMemo(() => {
+    const tokens = session.contextTokens
+    const window = session.contextWindow
+    if (!tokens || !window || window <= 0) return 0
+    return Math.min(Math.round((tokens / window) * 100), 100)
+  }, [session.contextTokens, session.contextWindow])
+
+  // Latest turn's total tokens for the compact "tok" chip.
   const latestTokens = useMemo(() => {
     for (let i = view.blocks.length - 1; i >= 0; i--) {
       const t = view.blocks[i]!.turn
@@ -134,9 +142,14 @@ export function ThreadView(props: {
           <span className={`mode-chip ${view.planMode === 'planning' ? 'plan' : 'agent'}`}>
             {view.planMode === 'planning' ? 'Plan' : 'Agent'}
           </span>
-          {latestTokens > 0 && (
+          {session.contextWindow && session.contextWindow > 0 ? (
+            <div className="ctx-bar" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens`}>
+              <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />
+              <span className="ctx-bar-label">{ctxPct}%</span>
+            </div>
+          ) : latestTokens > 0 ? (
             <span className="ctx-meter" title="上一轮上下文 tokens">{formatTokens(latestTokens)} tok</span>
-          )}
+          ) : null}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}

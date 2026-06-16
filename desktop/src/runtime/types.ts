@@ -31,6 +31,10 @@ export interface SessionRecord {
   model?: string
   /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
   domain?: string
+  /** Estimated token count for the current conversation (from live agent). */
+  contextTokens?: number
+  /** Model context window size in tokens. */
+  contextWindow?: number
 }
 
 /** PlusMenu — a selectable model annotated with the session's current flag. */

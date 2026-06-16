@@ -115,6 +115,10 @@ export interface SessionRecord {
    * live ActiveStarDomain. Absent → 'auto'.
    */
   domain?: string
+  /** Estimated token count for the current conversation. Absent → session is idle/rehydrated. */
+  contextTokens?: number
+  /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
+  contextWindow?: number
 }
 
 /** PlusMenu — a selectable model across all configured providers. */
@@ -192,6 +196,10 @@ export interface ManagedAgent {
    * lightweight test doubles.
    */
   setDisabledSkills?(names: Set<string>): void
+  /** Estimated token count for the current conversation (including prefix overhead). */
+  getEstimatedTokens?(): number
+  /** Model context window size (max tokens). */
+  getContextWindow?(): number
 }
 
 /**
@@ -901,7 +909,14 @@ export class RuntimeSessionManager {
 
   getSession(id: string): SessionRecord | undefined {
     const s = this.sessions.get(id)
-    return s ? { ...s.record } : undefined
+    if (!s) return undefined
+    const record = { ...s.record }
+    // Enrich with live context usage when the agent is awake.
+    if (s.agent) {
+      try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
+      try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
+    }
+    return record
   }
 
   getEvents(id: string, since = 0): { events: SessionEvent[]; lastSeq: number } | undefined {
