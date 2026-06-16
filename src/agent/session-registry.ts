@@ -126,9 +126,11 @@ export class SessionRegistry {
       db.pragma('journal_mode = WAL')
       db.pragma('busy_timeout = 3000')
       db.pragma('foreign_keys = ON')
-      db.exec(SCHEMA)
-      // Migration: add project_hash column to existing databases
+      // Migration: add project_hash column BEFORE exec(SCHEMA), because SCHEMA's
+      // CREATE INDEX on project_hash fails if the column doesn't exist yet in
+      // databases created before the project_hash column was added.
       try { db.exec('ALTER TABLE retrospect_fingerprints ADD COLUMN project_hash TEXT') } catch { /* already exists */ }
+      db.exec(SCHEMA)
     } catch (err) {
       // Distinguish "library missing" from "schema execution failed"
       if (err instanceof Error && err.message?.includes('better-sqlite3')) {
