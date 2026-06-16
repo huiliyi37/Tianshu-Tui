@@ -1,0 +1,71 @@
+name: Build Windows Desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+    paths:
+      - 'desktop/**'
+      - 'src/**'
+      - '.github/workflows/build-windows.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install rivet runtime deps
+        working-directory: .
+        run: npm ci
+
+      - name: Build rivet runtime
+        working-directory: .
+        run: npm run build
+
+      - name: Install desktop frontend deps
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Tauri app (Windows)
+        working-directory: desktop
+        run: npx tauri build
+        env:
+          # CI 环境不需要签名
+          TAURI_SIGNING_PRIVATE_KEY: ''
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: tianshu-windows-installer
+          path: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            desktop/src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: warn
+
+      - name: Upload portable exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: tianshu-windows-exe
+          path: |
+            desktop/src-tauri/target/release/*.exe
+          if-no-files-found: warn
