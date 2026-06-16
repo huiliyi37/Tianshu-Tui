@@ -60,8 +60,6 @@ import { buildActiveDomain, type ActiveStarDomain } from './star-domain.js'
 import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
 import { appendMilestone } from '../constellation/store.js'
-import { createAnchorGraph } from '../prompt/anchor-graph.js'
-import { createHash } from 'node:crypto'
 import { ArtifactStore } from '../artifact/store.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -124,9 +122,10 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, buildRuntimeSnapshot } from "./loop-factory.js";
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
+import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
@@ -253,6 +252,7 @@ export class AgentLoop {
   private turnOrchestrator: TurnOrchestrator
   private reasoningEffort: ReasoningEffortController
   private intentRoute: IntentRetrievalRouteController
+  private antiAnchoring: AntiAnchoringController
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -460,6 +460,7 @@ export class AgentLoop {
     this.turnOrchestrator = createTurnOrchestrator(this)
     this.reasoningEffort = createReasoningEffortController(this)
     this.intentRoute = createIntentRetrievalRouteController(this)
+    this.antiAnchoring = createAntiAnchoringController(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -523,7 +524,7 @@ export class AgentLoop {
         getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
         antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
         getInitialUserMessage: () => this.initialUserMessage,
-        callAntiAnchoringSeedModel: prompt => this.callAntiAnchoringSeedModel(prompt),
+        callAntiAnchoringSeedModel: prompt => this.antiAnchoring.callSeedModel(prompt),
         songlineEnabled: this.config.songlineEnabled,
         getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
         setCycleClose: this.config.sessionRegistry
@@ -534,7 +535,7 @@ export class AgentLoop {
         getConstellationPendingMark: () => this.pendingLeaveMark,
         getConstellationNumericId: () => this._sessionNumericId,
         hearthObserveEnabled: this.config.hearthObserveEnabled,
-        getAnchorGraph: () => this.buildAnchorGraph(),
+        getAnchorGraph: () => this.antiAnchoring.buildAnchorGraph(),
         getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
         setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
         getStreamedText: () => this.streamedText,
@@ -697,63 +698,6 @@ export class AgentLoop {
     if (this.sessionDomain !== undefined) return
     this.sessionDomain = isStarSoulEnabled() ? buildActiveDomain(taskDescription) : null
     this.config.promptEngine.setActiveDomain(this.sessionDomain)
-  }
-
-  /**
-   * Build the HEARTH anchor graph from current runtime state.
-   *
-   * - pole_structure = hash of system + tools fingerprint
-   * - pole_void = XOR complement of pole_structure
-   * - cycle_close = last session's cycle_close (or empty if first)
-   * - cycle_open = current session's sessionId (deterministic seed)
-   * - center_belief = hash of system prompt alone (founding covenant)
-   */
-  private buildAnchorGraph(): ReturnType<typeof createAnchorGraph> {
-    const fp = this.config.promptEngine.getFingerprint()
-    const structureHash = createHash('sha256')
-      .update(`${fp.systemSha256}:${fp.toolsSha256}`)
-      .digest('hex')
-    const voidShape = hexComplement(structureHash)
-
-    const prevCycleClose =
-      this.config.sessionRegistry?.getLastCycleClose() ?? ''
-
-    const currentCycleOpen = createHash('sha256')
-      .update(`cycle-open:${this.config.sessionId ?? 'unknown'}`)
-      .digest('hex')
-
-    const centerBeliefHash = fp.systemSha256
-
-    return createAnchorGraph({
-      structureHash,
-      voidShape,
-      prevCycleClose,
-      currentCycleOpen,
-      centerBeliefHash,
-    })
-  }
-
-  private async callAntiAnchoringSeedModel(prompt: string): Promise<string> {
-    const antiAnchoring = normalizeAntiAnchoringConfig(this.config.antiAnchoring)
-    const request: OaiChatRequest = {
-      model: this.config.promptEngine.getModel(),
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: antiAnchoring.seedMaxTokens,
-      stream: true,
-      temperature: 0.9,
-      tool_choice: 'none',
-    }
-    let text = ''
-    await this.config.client.stream(request, {
-      onTextDelta: delta => { text += delta },
-      onThinkingDelta: () => {},
-      onContentBlock: block => {
-        if (block.type === 'text') text += block.text
-      },
-      onStopReason: () => {},
-      onError: error => { throw error },
-    }, this.abortController?.signal)
-    return text.trim()
   }
 
   async maybePrewarm(text: string): Promise<void> {
@@ -1763,15 +1707,3 @@ export class AgentLoop {
 
 }
 
-/**
- * Compute the bitwise XOR complement of a hex string.
- * Each hex digit is XOR'd with 0xf, producing its complement.
- * Used by HEARTH to compute pole_void from pole_structure.
- */
-function hexComplement(hex: string): string {
-  let result = ''
-  for (let i = 0; i < hex.length; i++) {
-    result += (0xf ^ parseInt(hex[i]!, 16)).toString(16)
-  }
-  return result
-}

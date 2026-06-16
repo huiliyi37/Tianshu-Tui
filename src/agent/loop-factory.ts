@@ -15,6 +15,7 @@ import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
+import { AntiAnchoringController } from './anti-anchoring-controller.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -341,6 +342,18 @@ export function createReasoningEffortController(self: AgentLoop): ReasoningEffor
     getMaxTurns: () => self.config.maxTurns,
     getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     setCurrentEffortShadow: record => { self._currentEffortShadow = record },
+  })
+}
+
+export function createAntiAnchoringController(self: AgentLoop): AntiAnchoringController {
+  return new AntiAnchoringController({
+    getFingerprint: () => self.config.promptEngine.getFingerprint(),
+    getModel: () => self.config.promptEngine.getModel(),
+    getLastCycleClose: () => self.config.sessionRegistry?.getLastCycleClose(),
+    getSessionId: () => self.config.sessionId,
+    getAntiAnchoringConfig: () => self.config.antiAnchoring,
+    streamClient: self.config.client,
+    getAbortSignal: () => self.abortController?.signal,
   })
 }
 
