@@ -13,6 +13,7 @@ import { isSystemReminder, wrapSystemReminder } from '../prompt/system-reminder.
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
+import { ReasoningEffortController } from './reasoning-effort-controller.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -322,5 +323,22 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getLatestRisk: () => self.latestRisk,
     setLatestRisk: (v) => { self.latestRisk = v },
     setThetaRequestsThisTurn: (v) => { self.thetaRequestsThisTurn = v },
+  })
+}
+
+export function createReasoningEffortController(self: AgentLoop): ReasoningEffortController {
+  return new ReasoningEffortController({
+    getReasoningFloor: () => self.config.reasoningFloor,
+    getConfigReasoningEffort: () => self.config.reasoningEffort,
+    setConfigReasoningEffort: effort => { self.config.reasoningEffort = effort },
+    setClientReasoningEffort: effort => { self.config.client.setReasoningEffort?.(effort) },
+    isEffortBanditEnabled: () => self.config.effortBanditEnabled ?? false,
+    p3: self.p3,
+    hasTaskContract: () => !!self.taskContract,
+    getPredictionAccumulator: () => self.predictionAccumulator,
+    getTurnCount: () => self.session.getTurnCount(),
+    getMaxTurns: () => self.config.maxTurns,
+    getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
+    setCurrentEffortShadow: record => { self._currentEffortShadow = record },
   })
 }

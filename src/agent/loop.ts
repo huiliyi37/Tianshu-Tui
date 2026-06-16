@@ -44,7 +44,6 @@ import { ToolExecutionController } from './tool-execution.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
 import { createPredictionAccumulator } from './prediction-error.js'
 import type { PredictionAccumulator, EFEComponents } from './prediction-error.js'
-import { getErrorRate } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { StrategyProfile } from './sensorium.js'
 import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
@@ -127,13 +126,13 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
 import { wrapCallbacksWithHeartbeat } from "./turn-orchestrator.js";
-import { buildEffortContext, type EffortShadowRecord } from './p3-reward.js'
-import { resolveEffortDelta } from './effort-delta.js'
+import { type EffortShadowRecord } from './p3-reward.js'
 
 export type { ApprovalMode, AgentConfig, AgentCallbacks }
 
@@ -253,6 +252,7 @@ export class AgentLoop {
   planTraceCoordinator: PlanTraceCoordinator
   private compactBoundaryCoordinator: CompactBoundaryCoordinator
   private turnOrchestrator: TurnOrchestrator
+  private reasoningEffort: ReasoningEffortController
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -286,7 +286,7 @@ export class AgentLoop {
   telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
   private sensoriumSnapshots: SensoriumEntry[] = []
-  private taskContract?: TaskContract
+  taskContract?: TaskContract
   private latestCognitiveSnapshot?: CognitivePhaseSnapshot
   private persist: SessionPersist | null = null
   private resourceSensor: ResourceSensor
@@ -324,7 +324,7 @@ export class AgentLoop {
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   recentTextFingerprints: string[] = []
   /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
-  private _currentEffortShadow: EffortShadowRecord | null = null
+  _currentEffortShadow: EffortShadowRecord | null = null
 
   constructor(
     config: AgentConfig,
@@ -458,6 +458,7 @@ export class AgentLoop {
     this.planTraceCoordinator = createPlanTraceCoordinator(this)
     this.compactBoundaryCoordinator = createCompactBoundaryCoordinator(this)
     this.turnOrchestrator = createTurnOrchestrator(this)
+    this.reasoningEffort = createReasoningEffortController(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -885,80 +886,22 @@ export class AgentLoop {
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
-    const floor = this.config.reasoningFloor
-    const rank: Record<string, number> = { off: 0, low: 1, medium: 2, high: 3, max: 4 }
-    const effective = (floor && (rank[effort] ?? 2) < (rank[floor] ?? 0)) ? floor : effort
-    // T2-02 Track A2: apply bandit delta (no-op when flag off or gate closed)
-    const banditAdjusted = this.applyEffortDelta(effective) as import('./auto-reasoning.js').ReasoningEffort
-    this.config.reasoningEffort = banditAdjusted
-    this.config.client.setReasoningEffort?.(banditAdjusted)
+    this.reasoningEffort.set(effort)
   }
 
-  /**
-   * T2-02 P0: Shadow telemetry for effort bandit.
-   * Records recommendation without changing behavior.
-   * Called at effort decision points (initial selection + intervention adjustments).
-   *
-   * @param ruleBaseline The effort the rule-based heuristic selected (e.g., 'medium')
-   * @param overrides Partial context overrides from the caller
-   */
   shadowEffortTelemetry(
     ruleBaseline: string,
     overrides?: { errorRate?: number; isRepeat?: boolean },
   ): void {
-    try {
-      const ctx = buildEffortContext({
-        taskComplexity: this.taskContract ? 0.5 : 0.3,
-        errorRate: overrides?.errorRate ?? getErrorRate(this.predictionAccumulator),
-        turnDepth: this.session.getTurnCount() / Math.max(this.config.maxTurns ?? 50, 1),
-        fileCount: this.evidence.getState().filesModified.size,
-        isRepeat: overrides?.isRepeat ?? false,
-        timeOfDay: new Date().getHours() / 24,
-      })
-      const record = this.p3.shadowRecommendEffort(ctx, ruleBaseline)
-      if (record) {
-        this._currentEffortShadow = record
-      }
-    } catch {
-      // Shadow telemetry must never affect behavior
-    }
+    this.reasoningEffort.shadowTelemetry(ruleBaseline, overrides)
   }
 
-  /**
-   * T2-02 P3: Get bandit-recommended effort delta if confidence threshold is met.
-   * Returns null if bandit declines or insufficient data.
-   */
-  /**
-   * T2-02 P3: Get bandit-recommended effort delta.
-   *
-   * Returns null in three cases:
-   * 1. Feature flag effortBanditEnabled is false (zero behavior change).
-   * 2. Consistency gate not open (totalPulls < 30 or agreement rate < 0.8).
-   * 3. Bandit itself declines the recommendation.
-   *
-   * Only when all three pass does the bandit get a vote.
-   */
   getEffortDelta(): number | null {
-    if (!this.config.effortBanditEnabled) return null
-    if (!this.p3.isEffortGateOpen()) return null
-    try {
-      const ctx = buildEffortContext({
-        taskComplexity: this.taskContract ? 0.5 : 0.3,
-        errorRate: getErrorRate(this.predictionAccumulator),
-        turnDepth: this.session.getTurnCount() / Math.max(this.config.maxTurns ?? 50, 1),
-        fileCount: this.evidence.getState().filesModified.size,
-        isRepeat: false,
-        timeOfDay: new Date().getHours() / 24,
-      })
-      const rec = this.p3.recommendEffortDelta(ctx)
-      return rec?.delta ?? null
-    } catch {
-      return null
-    }
+    return this.reasoningEffort.getDelta()
   }
 
   getReasoningEffort(): import('./auto-reasoning.js').ReasoningEffort | undefined {
-    return this.config.reasoningEffort
+    return this.reasoningEffort.get()
   }
 
   updateSessionMemory(block: string): void {
@@ -1303,12 +1246,7 @@ export class AgentLoop {
    * When any gate is closed, returns baseEffort unchanged — zero behavior delta.
    */
   applyEffortDelta(baseEffort: string): string {
-    try {
-      const delta = this.getEffortDelta()
-      return resolveEffortDelta(baseEffort, delta, this.config.reasoningFloor)
-    } catch {
-      return baseEffort
-    }
+    return this.reasoningEffort.applyDelta(baseEffort)
   }
 
   /**
