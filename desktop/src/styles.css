@@ -49,6 +49,7 @@ body {
 }
 
 .surface { flex: 1; min-height: 0; }
+.surface-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
 
 .workspace {
   display: grid;

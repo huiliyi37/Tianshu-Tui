@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useHealth, useSessions, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
 import { useGlobalNotifications } from './state/use-global-notifications'
@@ -9,11 +9,19 @@ import type { Command } from './lib/commands'
 import { Rail } from './components/Rail'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
-import { InboxSurface } from './surfaces/InboxSurface'
-import { AutomationsSurface } from './surfaces/AutomationsSurface'
-import { SettingsSurface } from './surfaces/SettingsSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
+
+// L1 #10: 非首屏 Surface 懒加载，减小首屏 chunk
+const InboxSurface = lazy(() =>
+  import('./surfaces/InboxSurface').then((m) => ({ default: m.InboxSurface })),
+)
+const AutomationsSurface = lazy(() =>
+  import('./surfaces/AutomationsSurface').then((m) => ({ default: m.AutomationsSurface })),
+)
+const SettingsSurface = lazy(() =>
+  import('./surfaces/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
+)
 
 const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'settings']
 const SURFACE_LABEL: Record<Surface, string> = {
@@ -107,10 +115,12 @@ export function App() {
 
         <div className="surface">
           <ErrorBoundary label="工作台">
-            {ui.surface === 'workspace' && <WorkspaceSurface />}
-            {ui.surface === 'automations' && <AutomationsSurface />}
-            {ui.surface === 'attention' && <InboxSurface />}
-            {ui.surface === 'settings' && <SettingsSurface />}
+            <Suspense fallback={<div className="surface-loading">加载中…</div>}>
+              {ui.surface === 'workspace' && <WorkspaceSurface />}
+              {ui.surface === 'automations' && <AutomationsSurface />}
+              {ui.surface === 'attention' && <InboxSurface />}
+              {ui.surface === 'settings' && <SettingsSurface />}
+            </Suspense>
           </ErrorBoundary>
         </div>
       </div>
