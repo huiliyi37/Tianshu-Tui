@@ -10,7 +10,7 @@
 - **保真是 #1 硬约束，上下文污染控制是 #2。** 二者冲突时，选保真。
 - **无损渐进装载**：用到某子文件就把它**完整**读入主上下文，**绝不摘要、绝不截断**。
 - **`fork`（子代理隔离）被降级**：它只回摘要 = 有损，**不得用于质量关键技能**。fork 仅作"明确非关键的超重技能"的可选项；默认走主上下文无损 lazy。
-- **artifact-intercept 不得静默截断 skill 内容**：技能 body / 子文件超大时，模型**分页完整读取**，而非被截断成残缺。
+- **artifact-intercept 不得静默截断 skill 内容**：技能 body / 子文件超大时，模型**分页完整读取**，而非被截断成残缺。✅ **已实现**（2026-06-16）：`skill` 工具列入 `FIDELITY_EXEMPT_TOOLS`，在 `executeToolUse` 成功分支全文 inline——不 artifact 摘要、不头尾截断、不被 turnBudget `<stored>` 预览替换。注意**不能简单地把 `skill` 加进 `READ_TOOLS`**：那会改走 `truncateSuccessfulToolResult` 头尾硬截断，而 `skill` 无 offset/section 参数 → 中段不可恢复，比 artifact 更糟。子文件读经 `read_file`（offset/limit 分页）。
 - **召回优先于收窄**：相关技能宁可多surface也不可漏——scope/过滤永远 additive，绝不硬删 registry。
 
 ## 装载模型（定稿·用户拍板）
@@ -110,7 +110,9 @@
 ## 风险与应对
 | 风险 | 应对 |
 |------|------|
-| agent 不知道技能里有哪些子文件 → 盲探 | `skill` 工具加载 body 时**必须随附文件树**（回收自 V3） |
+| agent 不知道技能里有哪些子文件 → 盲探 | `skill` 工具加载 body 时**必须随附文件树**（回收自 V3）✅ 已实现 |
+| **skill body 被工具流水线静默截断/摘要 → 主控据残缺执行** | `FIDELITY_EXEMPT_TOOLS` 让 `skill` 全文 inline，绕 artifact + 截断 + `<stored>`；pipeline 级守护测试 ✅ 已实现（曾是 live bug：`skill` 不在 READ_TOOLS → 超阈值被 artifact 摘要） |
+| **agent 不知道怎么装载外部技能** | 内置 `skill-management` 技能（发现层常驻描述、按需载正文）讲清"复制进 `.rivet/skills/` + 三级装载"✅ 已实现 |
 | fork 蒸馏丢上下文连续性 | 重技能保留 `lazy` 退路 + 显式确认 |
 | scripts / 子文件安全 | scripts 强制 bash 审批；技能已复制进 `.rivet/skills/`（workspace 内），子文件读天然受 workspace 边界保护，无需跨界授权 |
 | 破前缀缓存 | discovery 留 volatile（事实）；`skill` 工具定义字节稳定；目录解析在 bootstrap 期，不进 prompt 静态区 |

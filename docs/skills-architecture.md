@@ -86,7 +86,9 @@ frontmatter 缺 `name` 时回退为文件名/目录名。
 
 ### 3.3 内置技能
 
-`BUILTIN_SKILLS`(`src/skills/skill-loader.ts`),`builtIn: true`,无 backing 文件,始终可用。当前:`leave-ritual`(离开仪式 → `leave_mark` 工具)。
+`BUILTIN_SKILLS`(`src/skills/skill-loader.ts`),`builtIn: true`,无 backing 文件,始终可用。当前:
+- `leave-ritual` —— 离开仪式 → `leave_mark` 工具。
+- `skill-management` —— **让 agent 自己知道技能怎么装载**:复制进 `.rivet/skills/` + 三级装载机制。走我们自己的三级披露(发现层常驻描述、按需载正文),dogfood 本系统;用户说"装/导入某技能"时 agent 据此执行。
 
 ---
 
