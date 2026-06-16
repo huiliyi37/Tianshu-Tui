@@ -117,6 +117,28 @@ describe('ImmuneHook', () => {
     assert.ok(hook.getDangerLevel(1) >= 0.8)
   })
 
+  it('maps APC quarantine response for high danger scores', () => {
+    const physarum = new PhysarumEngine(stubDb)
+    const frozenNodes: Array<{ file: string; duration: number }> = []
+    physarum.freezeNode = (file: string, duration: number) => { frozenNodes.push({ file, duration }) }
+    const hook = new ImmuneHook({ physarum })
+
+    // Inject high-severity signals to push dangerScore above quarantine threshold (1.5)
+    for (let i = 0; i < 6; i++) {
+      hook.injectSignal({ kind: 'graph_anomaly', severity: 0.9, turn: i + 1, source: 'test' })
+    }
+    // Trigger with doom to pass dual-signal gate
+    const result = hook.run({
+      toolName: 'edit_file', fingerprint: 'q-test', turn: 7,
+      doomLevel: 'blocked', targetFile: 'src/danger.ts',
+    })
+
+    assert.equal(result.activated, true)
+    assert.equal(result.response?.type, 'quarantine')
+    assert.ok(frozenNodes.some(n => n.file === 'src/danger.ts' && n.duration === 20),
+      'should freeze the target file in Physarum')
+  })
+
   it('getDangerLevel reflects accumulated signals', () => {
     const hook = createHook()
     hook.run({ toolName: 'grep', fingerprint: 'same', turn: 1, doomLevel: 'none', targetFile: 'a.ts' })

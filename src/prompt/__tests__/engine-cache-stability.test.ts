@@ -531,40 +531,26 @@ describe('sessionState injection — cache safety + path coverage', () => {
     })
   }
 
-  it('sessionState reaches fresh volatile block under tracker-enabled (default) path', () => {
+  it('sessionState reaches fresh volatile block as <progress> under tracker-enabled (default) path', () => {
     const engine = makeEngine(5)
     engine.setSessionState('<session-state>\nTask: alpha [executing]\n</session-state>')
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
-    // P1: sessionState is in standalone appendix (last message), not in user message
     const appendix = req.messages[req.messages.length - 1]!
-    assert.match(
-      typeof appendix.content === 'string' ? appendix.content : '',
-      /<session-state>/,
-      'sessionState must appear in standalone appendix when tracker enabled',
-    )
-    assert.match(
-      typeof appendix.content === 'string' ? appendix.content : '',
-      /Task: alpha/,
-    )
+    const content = typeof appendix.content === 'string' ? appendix.content : ''
+    assert.match(content, /<progress>/, 'sessionState must appear as <progress> in appendix when tracker enabled')
+    assert.match(content, /Task: alpha/)
   })
 
-  it('sessionState reaches fresh volatile block under tracker-disabled (fallback) path', () => {
+  it('sessionState reaches fresh volatile block as <progress> under tracker-disabled (fallback) path', () => {
     const engine = makeEngine(0)
     engine.setSessionState('<session-state>\nTask: beta [verifying]\n</session-state>')
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
-    // P1: sessionState is in standalone appendix (last message)
     const appendix = req.messages[req.messages.length - 1]!
-    assert.match(
-      typeof appendix.content === 'string' ? appendix.content : '',
-      /<session-state>/,
-      'sessionState must appear in standalone appendix when tracker disabled',
-    )
-    assert.match(
-      typeof appendix.content === 'string' ? appendix.content : '',
-      /Task: beta/,
-    )
+    const content = typeof appendix.content === 'string' ? appendix.content : ''
+    assert.match(content, /<progress>/, 'sessionState must appear as <progress> in appendix when tracker disabled')
+    assert.match(content, /Task: beta/)
   })
 
   it('volatile block stays byte-identical across 5 tool-call turns even when setSessionState is called per turn', () => {
