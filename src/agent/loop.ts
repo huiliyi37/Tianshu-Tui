@@ -247,6 +247,7 @@ export class AgentLoop {
   fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
+  currentSeasonIntensity: number | null = null
   lastCompactTurn: number | null = null
   _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
   _taskDepthLayer: TaskDepthLayer | undefined = undefined
@@ -290,6 +291,7 @@ export class AgentLoop {
     this.harness = new TurnHarness(
       { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,
+      this.failureJournal,
     )
     this.pressureMonitor = new PressureMonitor(this.config.contextWindow)
     this.resourceSensor = new ResourceSensor(this.config.resourceSensorOptions)

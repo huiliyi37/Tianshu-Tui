@@ -17,6 +17,8 @@ export interface CognitiveLedgerInput {
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
   season?: CognitiveSeason | null
+  /** Season intensity (0-1), from classifySeason().intensity */
+  seasonIntensity?: number
   /** CVM trap: latest tool risk level for uncertainty framing */
   riskLevel?: RiskLevel
   /** Meta-regulation: current regulation pressure (0-1) */
@@ -32,6 +34,7 @@ export interface CognitiveLedger {
   strategy?: StrategyProfile | null
   vigor?: VigorState | null
   season?: CognitiveSeason | null
+  seasonIntensity?: number
   riskLevel?: RiskLevel
   regulationPressure?: number
 }
@@ -55,6 +58,7 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     strategy: input.strategy ?? null,
     vigor: input.vigor ?? null,
     season: input.season ?? null,
+    seasonIntensity: input.seasonIntensity,
     riskLevel: input.riskLevel,
     regulationPressure: input.regulationPressure,
   }
@@ -118,16 +122,20 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     if (st.shouldEscalate) parts.push(`escalation="true"`)
   }
 
-  // Vigor: phasic arousal level — when high, model should act with urgency
+  // Vigor: integrated activation level (tonic + phasic + curiosity blend)
   if (ledger.vigor) {
     const v = ledger.vigor
-    const tonic = v.tonic ?? v.phasic ?? 0.5
-    parts.push(`vigor="${formatDim(tonic)}"`)
+    parts.push(`vigor="${formatDim(v.vigor)}"`)
+    if (v.curiosity > 0.3) parts.push(`curiosity="${formatDim(v.curiosity)}"`)
   }
 
-  // Season: 道德经四章螺旋 — session lifecycle phase
+  // Season: 道德经四章螺旋 — session lifecycle phase + intensity
   if (ledger.season) {
-    parts.push(`season="${ledger.season}"`)
+    const intensity = ledger.seasonIntensity
+    const seasonVal = intensity !== undefined && intensity < 1.0
+      ? `${ledger.season}:${formatDim(intensity)}`
+      : ledger.season
+    parts.push(`season="${seasonVal}"`)
   }
 
   // Regulation cost: let model see its own regulation overhead

@@ -340,15 +340,9 @@ export function renderAffordanceHint(state: AffordanceState): string {
 
   const lines: string[] = []
 
-  // Cognitive state summary
+  // Theta phase (not in cognitive-mirror — keep here as tool-cycle context)
   const theta = state.thetaPhase ?? 'unknown'
-  const vigorVal = v ? v.vigor.toFixed(1) : '?'
-  const season = state.season ?? '?'
-  const conf = s ? (s.confidence * 100).toFixed(0) : '?'
-
-  lines.push(
-    `Cognitive state: theta=${theta}, vigor=${vigorVal}, season=${season}, confidence=${conf}%`,
-  )
+  lines.push(`Theta phase: ${theta}`)
 
   // Prefer epistemic OR instrumental guidance
   if (hint.preferEpistemic) {

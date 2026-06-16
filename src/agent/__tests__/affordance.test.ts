@@ -126,9 +126,7 @@ describe('renderAffordanceHint', () => {
       recentToolNames: ['read_file', 'grep'],
     })
     assert.ok(result.startsWith('<affordance-hint>'))
-    assert.ok(result.includes('Cognitive state:'))
-    assert.ok(result.includes('theta=encoding'))
-    assert.ok(result.includes('season=genesis'))
+    assert.ok(result.includes('Theta phase: encoding'))
     assert.ok(result.endsWith('</affordance-hint>'))
   })
 
