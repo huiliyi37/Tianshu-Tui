@@ -14,9 +14,9 @@
  * turn" model, whose 4000/8000-char budgets caused silent truncation.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 export type SkillSource = 'rivet' | 'project-claude' | 'global-claude'
 
@@ -32,6 +32,14 @@ export interface SkillDefinition {
   source?: SkillSource
   /** Absolute path to the backing file (set by the loader). */
   bodyPath?: string
+  /** Skill 根目录（仅目录型技能有；扁平 .rivet/skills/*.md 为 undefined）。 */
+  skillDir?: string
+}
+
+/** A sub-file inside a directory skill (relative to its skillDir). */
+export interface SkillFileEntry {
+  path: string
+  kind: 'file' | 'dir'
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
@@ -94,23 +102,41 @@ export class SkillRegistry {
     this.skills.set(skill.name, skill)
   }
 
-  /** Load flat `.rivet/skills/*.md` files (Rivet-native format). */
+  /**
+   * Load skills from `.rivet/skills/`. Supports two shapes side by side:
+   *  - flat `name.md` (Rivet-native format) — no skillDir.
+   *  - directory `name/SKILL.md` (Claude/agentskills format, copied in) — the
+   *    directory is preserved (NOT flattened) so its sub-files (references/,
+   *    scripts/, assets/) can be read on demand (Tier-3). `skillDir` is set.
+   */
   loadFromDirectory(dir: string, source: SkillSource = 'rivet'): { loaded: string[]; errors: string[] } {
     const loaded: string[] = []
     const errors: string[] = []
     if (!existsSync(dir)) return { loaded, errors }
 
-    for (const file of readdirSync(dir).filter(f => f.endsWith('.md'))) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
       try {
-        const skillFile = join(dir, file)
-        const content = readFileSync(skillFile, 'utf-8')
-        const def = parseSkillMarkdown(content, file)
-        def.source = source
-        def.bodyPath = skillFile
-        this.skills.set(def.name, def)
-        loaded.push(def.name)
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          const skillFile = join(dir, entry.name)
+          const def = parseSkillMarkdown(readFileSync(skillFile, 'utf-8'), entry.name)
+          def.source = source
+          def.bodyPath = skillFile
+          this.skills.set(def.name, def)
+          loaded.push(def.name)
+        } else if (entry.isDirectory()) {
+          const skillFile = join(dir, entry.name, 'SKILL.md')
+          if (!existsSync(skillFile)) continue
+          // Directory skills derive their name from the folder; pass it as the
+          // fallback so a frontmatter-less SKILL.md is named after its folder.
+          const def = parseSkillMarkdown(readFileSync(skillFile, 'utf-8'), entry.name)
+          def.source = source
+          def.bodyPath = skillFile
+          def.skillDir = join(dir, entry.name)
+          this.skills.set(def.name, def)
+          loaded.push(def.name)
+        }
       } catch (e) {
-        errors.push(`${file}: ${e instanceof Error ? e.message : String(e)}`)
+        errors.push(`${entry.name}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
     return { loaded, errors }
@@ -239,6 +265,45 @@ export class SkillRegistry {
     parts.push('</skills>')
     return parts.join('\n')
   }
+}
+
+/**
+ * List the sub-files of a directory skill (relative to `skillDir`, excluding the
+ * SKILL.md router itself). Bounded by depth and entry count so a pathological
+ * skill folder can't flood the model's context. This is the "safety net" tree:
+ * the author's hand-written links in SKILL.md are the primary path; this list
+ * keeps the model from blind-probing when a link is missing.
+ */
+export function listSkillFiles(
+  skillDir: string,
+  opts?: { maxDepth?: number; maxEntries?: number },
+): SkillFileEntry[] {
+  const maxDepth = opts?.maxDepth ?? 3
+  const maxEntries = opts?.maxEntries ?? 50
+  const out: SkillFileEntry[] = []
+  const walk = (d: string, depth: number): void => {
+    if (depth > maxDepth || out.length >= maxEntries) return
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = readdirSync(d, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (out.length >= maxEntries) return
+      const abs = join(d, e.name)
+      const rel = relative(skillDir, abs)
+      if (rel === 'SKILL.md') continue
+      if (e.isDirectory()) {
+        out.push({ path: rel + '/', kind: 'dir' })
+        walk(abs, depth + 1)
+      } else if (e.isFile()) {
+        out.push({ path: rel, kind: 'file' })
+      }
+    }
+  }
+  walk(skillDir, 1)
+  return out
 }
 
 export const skillRegistry = new SkillRegistry()
