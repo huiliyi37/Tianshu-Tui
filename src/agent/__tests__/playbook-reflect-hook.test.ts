@@ -59,15 +59,20 @@ function withStore(fn: (store: PlaybookStore) => void): void {
   }
 }
 
-function createMockRegistry(fingerprints: Array<{ sessionId: string; createdAt: number; rootCauseKeywords: string[]; recommendationKeywords: string[]; stabilityTrend: string; confidenceTrend: string; maxPressure: number; toolFailureRate: number; bulletIds: string[] }> = []): SessionRegistry {
-  const stored: typeof fingerprints = []
+type MockFingerprint = { sessionId: string; createdAt: number; rootCauseKeywords: string[]; recommendationKeywords: string[]; stabilityTrend: string; confidenceTrend: string; maxPressure: number; toolFailureRate: number; bulletIds: string[]; projectHash?: string }
+
+function createMockRegistry(fingerprints: MockFingerprint[] = []): SessionRegistry {
+  const stored: MockFingerprint[] = []
   return {
-    loadFingerprints(limit?: number, excludeSessionId?: string) {
-      return fingerprints
+    loadFingerprints(limit?: number, excludeSessionId?: string, projectHash?: string) {
+      let filtered = fingerprints
         .filter(fp => fp.sessionId !== excludeSessionId)
-        .slice(0, limit ?? 10)
+      if (projectHash) {
+        filtered = filtered.filter(fp => fp.projectHash === projectHash)
+      }
+      return filtered.slice(0, limit ?? 10)
     },
-    storeFingerprint(fp: typeof fingerprints[0]) {
+    storeFingerprint(fp: MockFingerprint) {
       stored.push(fp)
     },
     // 其他方法不需要实现
