@@ -1,0 +1,122 @@
+import { describe, it } from 'node:test'
+import assert from 'node:assert/strict'
+import { SessionContext } from '../context.js'
+import type { ContentBlock } from '../../api/types.js'
+import type { OaiAssistantMessage } from '../../api/oai-types.js'
+
+function findAssistantWithTools(msgs: ReturnType<SessionContext['getMessages']>): OaiAssistantMessage {
+  const found = msgs.find((m): m is OaiAssistantMessage => m.role === 'assistant' && !!(m.tool_calls?.length))
+  assert.ok(found, 'assistant message with tool_calls should exist')
+  return found!
+}
+
+describe('SessionContext + plan_submit arg processor integration', () => {
+  it('plan_submit arguments are replaced with file pointer in oaiMessages', () => {
+    const session = new SessionContext()
+    const bigPlan = '# My Plan\n\n'.repeat(100) // ~1200 chars
+    const blocks: ContentBlock[] = [
+      { type: 'text', text: 'Submitting plan' },
+      { type: 'tool_use', id: 'tc-plan-1', name: 'plan_submit', input: { title: 'Test Plan', plan: bigPlan } },
+    ]
+
+    session.addUserMessage('create a plan')
+    session.addAssistantBlocks(blocks)
+
+    const msgs = session.getMessages()
+    const asst = findAssistantWithTools(msgs)
+    const tc = asst.tool_calls![0]!
+    assert.equal(tc.function.name, 'plan_submit')
+    // Arguments should contain the file pointer, NOT the full plan
+    assert.ok(tc.function.arguments.includes('[plan persisted to'), 'arguments should contain file pointer')
+    assert.ok(tc.function.arguments.includes('.rivet/plans/test-plan.md'), 'should reference correct slug')
+    // The full plan content should NOT be in arguments
+    assert.ok(!tc.function.arguments.includes(bigPlan.slice(0, 50)), 'full plan content should be replaced')
+  })
+
+  it('plan_submit tool_call_id is preserved after processing', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-preserve-id', name: 'plan_submit', input: { title: 'ID Test', plan: '# x\n'.repeat(50) } },
+    ]
+
+    session.addUserMessage('test')
+    session.addAssistantBlocks(blocks)
+
+    const asst = findAssistantWithTools(session.getMessages())
+    assert.equal(asst.tool_calls![0]!.id, 'tc-preserve-id', 'tool_call_id must not change')
+  })
+
+  it('non-plan_submit tools are not affected', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-read', name: 'read_file', input: { file_path: '/src/foo.ts' } },
+    ]
+
+    session.addUserMessage('read file')
+    session.addAssistantBlocks(blocks)
+
+    const asst = findAssistantWithTools(session.getMessages())
+    const args = asst.tool_calls![0]!.function.arguments
+    assert.ok(args.includes('/src/foo.ts'), 'read_file arguments should be unchanged')
+  })
+
+  it('block.input is not mutated — execute still gets original plan', () => {
+    const session = new SessionContext()
+    const bigPlan = '# Original Plan\n'.repeat(50)
+    const block: ContentBlock & { type: 'tool_use' } = {
+      type: 'tool_use',
+      id: 'tc-mutation',
+      name: 'plan_submit',
+      input: { title: 'Mutation Test', plan: bigPlan },
+    }
+
+    session.addUserMessage('test')
+    session.addAssistantBlocks([block])
+
+    // block.input.plan should still be the original full plan
+    const input = block.input as { title: string; plan: string }
+    assert.equal(input.plan, bigPlan, 'block.input.plan must not be mutated')
+    assert.equal(input.title, 'Mutation Test', 'block.input.title must not be mutated')
+  })
+
+  it('multiple tool calls in one message — only plan_submit is processed', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-a', name: 'read_file', input: { file_path: '/foo.ts' } },
+      { type: 'tool_use', id: 'tc-b', name: 'plan_submit', input: { title: 'Multi', plan: '# plan\n'.repeat(50) } },
+      { type: 'tool_use', id: 'tc-c', name: 'grep', input: { pattern: 'test' } },
+    ]
+
+    session.addUserMessage('multi')
+    session.addAssistantBlocks(blocks)
+
+    const asst = findAssistantWithTools(session.getMessages())
+    const calls = asst.tool_calls!
+    assert.equal(calls.length, 3)
+    // read_file unchanged
+    assert.ok(calls[0]!.function.arguments.includes('/foo.ts'))
+    // plan_submit replaced
+    assert.ok(calls[1]!.function.arguments.includes('[plan persisted to'))
+    // grep unchanged
+    assert.ok(calls[2]!.function.arguments.includes('test'))
+    // all ids preserved
+    assert.equal(calls[0]!.id, 'tc-a')
+    assert.equal(calls[1]!.id, 'tc-b')
+    assert.equal(calls[2]!.id, 'tc-c')
+  })
+
+  it('persisted message also has pointer (byte-identical guarantee)', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-persist', name: 'plan_submit', input: { title: 'Persist', plan: '# p\n'.repeat(50) } },
+    ]
+
+    session.addUserMessage('test')
+    session.addAssistantBlocks(blocks)
+
+    // Verify the stored message has the pointer, not the full plan
+    const asst = findAssistantWithTools(session.getMessages())
+    const args = JSON.parse(asst.tool_calls![0]!.function.arguments)
+    assert.ok(args.plan.startsWith('[plan persisted to'), 'persisted args should have pointer')
+  })
+})

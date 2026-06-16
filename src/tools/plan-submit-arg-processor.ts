@@ -25,9 +25,12 @@ export const planSubmitArgProcessor: ToolArgProcessor = {
 
     const planLen = parsed.plan.length
     const planLines = parsed.plan.split('\n').length
+    // No valid title → plan_submit.execute will error and not write a file.
+    // Return null to avoid leaving a dangling pointer to a file that won't exist.
     const title = typeof parsed.title === 'string' && parsed.title.trim()
       ? parsed.title.trim()
-      : 'untitled'
+      : null
+    if (!title) return null
     const slug = slugify(title)
     const fileRef = `.rivet/plans/${slug}.md`
 

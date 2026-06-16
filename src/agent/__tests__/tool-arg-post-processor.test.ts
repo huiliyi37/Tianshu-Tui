@@ -112,11 +112,13 @@ describe('planSubmitArgProcessor', () => {
     JSON.parse(result!)
   })
 
-  it('uses "untitled" slug when title is missing', () => {
+  it('returns null when title is missing (no dangling pointer)', () => {
     const args = JSON.stringify({ plan: '# Plan\n'.repeat(50) })
-    const result = planSubmitArgProcessor.process(args)
-    assert.ok(result)
-    const parsed = JSON.parse(result!)
-    assert.ok(parsed.plan.includes('.rivet/plans/'))
+    assert.equal(planSubmitArgProcessor.process(args), null)
+  })
+
+  it('returns null when title is empty string', () => {
+    const args = JSON.stringify({ title: '  ', plan: '# Plan\n'.repeat(50) })
+    assert.equal(planSubmitArgProcessor.process(args), null)
   })
 })
