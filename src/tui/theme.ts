@@ -382,7 +382,7 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
   },
 }
 
-let activeTheme: ThemeName = 'slate'
+let activeTheme: ThemeName = 'claude'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

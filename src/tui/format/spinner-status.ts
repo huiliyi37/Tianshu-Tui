@@ -1,71 +1,38 @@
 /**
- * T9 格式化函数 — spinner 状态行（运行态符号系统）。
+ * T9 格式化函数 — spinner 状态行（运行态指示器）。
  *
- * 字形设计（对标 Claude Code 的克制单色风格，不花哨）：用同一「菱形家族」
- * ◇/◆/◈/◌ 表达「一个系统的不同状态」，而非 5 个风格不一的装饰符号
- * （旧版 ◐✦⚙▲❧ 混了圆/星/齿轮/三角/花饰，视觉吵）。五行标签保留承载叙事。
- * - 思考 (thinking)、书写 (streaming)、运作 (analyzing)、待命 (waiting/idle)。
- * - 各状态有定制动画帧，但收敛到菱形/盈缺一族。
- * - 回合完成/收束态用实心菱 ◆（沉淀/落定），取代旧花饰 ❧。
+ * 对标 Claude Code 的克制形态：单一 spinner 字形（不分相位）+ 一个缓慢轮换的
+ * 中文俏皮词 + 计时，例如 `⠹ 推演中… 12s · esc 中断`。
+ * - 不再有「思考/书写/运作/待命」多相位 × 多字形 × 各自动画的复杂叙事。
+ * - 词从词池里按 elapsed 每 4s 缓慢轮换（确定性、可测、不闪）。
+ * - stall（10s 无 token）时整行转琥珀色。
  * - 提供 ASCII fallback 兼容。
  */
 
 import chalk from 'chalk'
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
-import { circleSpinnerFrame } from '../braille-spinner.js'
+import { brailleSpinnerFrame } from '../braille-spinner.js'
 
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
-const PHASE_LABELS: Record<Exclude<SpinnerPhase, 'idle'>, string> = {
-  thinking: '思考',
-  streaming: '书写',
-  analyzing: '运作',
-  waiting: '待命',
+/** CC 风格的运行态俏皮词池（中文，面向中国市场）。按 elapsed 缓慢轮换。 */
+const WORD_POOL = [
+  '思索中', '推演中', '打磨中', '运筹中', '琢磨中', '梳理中',
+  '编织中', '雕琢中', '求索中', '测算中', '沉淀中', '校准中',
+] as const
+
+/** 每 4s 推进一个词，独立于 120ms 帧 tick，保持平静不闪。 */
+function pickWord(elapsedMs: number): string {
+  const idx = Math.floor(Math.max(0, elapsedMs) / 4000) % WORD_POOL.length
+  return WORD_POOL[idx]!
 }
 
-function getSpinnerFrame(phase: SpinnerPhase, tick: number, useAscii: boolean): string {
-  if (useAscii) {
-    switch (phase) {
-      case 'thinking': return ['~', '=', '~', '-'][((tick % 4) + 4) % 4]!
-      case 'streaming': return ['*', '+', 'x', '+'][((tick % 4) + 4) % 4]!
-      case 'analyzing': return ['>', 'v', '<', '^'][((tick % 4) + 4) % 4]!
-      case 'waiting': return '^'
-      default: return '.'
-    }
-  } else {
-    switch (phase) {
-      case 'thinking': return circleSpinnerFrame(tick) // ['◐', '◓', '◑', '◒'] — 盈缺，凝思
-      case 'streaming': return ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][((tick % 10) + 10) % 10]!
-      case 'analyzing': return ['◇', '◈', '◆', '◈'][((tick % 4) + 4) % 4]! // 菱形脉动，取代齿轮
-      case 'waiting': return '◌'
-      default: return '·'
-    }
-  }
-}
+const ASCII_FRAMES = ['-', '\\', '|', '/'] as const
 
-/** GlanceBar 用的 phase glyph + 标签 — 菱形家族运行态（克制、对标 Claude Code）
- *  ◐ 思考  ◆ 书写  ◈ 运作  ◇ 待命  · 空闲
- *  五行标签保留承载叙事；字形收敛到盈缺/菱形一族，不再混星/齿轮/三角/花饰。 */
-export function phaseIndicator(phase: SpinnerPhase): { glyph: string; label: string } {
-  const useAscii = chalk.level < 3
-  if (useAscii) {
-    switch (phase) {
-      case 'thinking': return { glyph: '~', label: '思考' }
-      case 'streaming': return { glyph: '*', label: '书写' }
-      case 'analyzing': return { glyph: '>', label: '运作' }
-      case 'waiting': return { glyph: '^', label: '待命' }
-      case 'idle': return { glyph: '.', label: '空闲' }
-    }
-  } else {
-    switch (phase) {
-      case 'thinking': return { glyph: '◐', label: '思考' }
-      case 'streaming': return { glyph: '◆', label: '书写' }
-      case 'analyzing': return { glyph: '◈', label: '运作' }
-      case 'waiting': return { glyph: '◇', label: '待命' }
-      case 'idle': return { glyph: '·', label: '空闲' }
-    }
-  }
+function spinnerFrame(tick: number, useAscii: boolean): string {
+  if (useAscii) return ASCII_FRAMES[((tick % 4) + 4) % 4]!
+  return brailleSpinnerFrame(tick)
 }
 
 export function formatElapsedHuman(ms: number): string {
@@ -84,9 +51,9 @@ export interface SpinnerStatusInput {
 export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme): string | null {
   if (input.phase === 'idle') return null
   const useAscii = chalk.level < 3
-  const frame = getSpinnerFrame(input.phase, input.tick, useAscii)
-  const phaseLabel = PHASE_LABELS[input.phase]
-  const text = `${frame} ${phaseLabel} ${formatElapsedHuman(input.elapsedMs)}`
+  const frame = spinnerFrame(input.tick, useAscii)
+  const word = pickWord(input.elapsedMs)
+  const text = `${frame} ${word}… ${formatElapsedHuman(input.elapsedMs)} · esc 中断`
   return color(text, input.stalled ? theme.warning : theme.muted)
 }
 

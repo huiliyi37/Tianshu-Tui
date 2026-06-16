@@ -2,22 +2,30 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('slate') })
+afterEach(() => { setTheme('claude') })
 
 describe('getTheme', () => {
-  it('defaults to slate theme (专业/不疲劳，去强调紫)', () => {
-    assert.equal(getActiveThemeName(), 'slate')
+  it('defaults to claude theme (对标 Claude Code TUI — brand orange accent)', () => {
+    assert.equal(getActiveThemeName(), 'claude')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#56b6c2') // 冷静 teal — 唯一 accent
-    assert.equal(theme.error, '#e08891')   // 柔玫瑰
-    assert.notEqual(theme.primary, '#c9b8ff') // 不再是紫微紫
+    assert.equal(theme.primary, '#d77757') // Claude brand orange — 唯一 accent
+    assert.equal(theme.error, '#ff6b80')   // bright red
+    assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
   })
 
-  it('slate uses clean neutral user mark + soft body text', () => {
+  it('claude uses brand-orange user mark + neutral gray body text', () => {
     const theme = getTheme(3)
-    assert.equal(theme.userColor, '#e2e6ec')      // 中性亮白 ▌ mark
+    assert.equal(theme.userColor, '#d77757')      // brand orange ▌ mark
+    assert.equal(theme.assistantColor, '#d9d9d9') // 中性灰白正文
+    assert.equal(theme.pulseActive, '#d77757')    // brand orange active pulse
+  })
+
+  it('slate still available via explicit switch (cool teal accent)', () => {
+    setTheme('slate')
+    const theme = getTheme(3)
+    assert.equal(theme.primary, '#56b6c2') // 冷静 teal
+    assert.equal(theme.userColor, '#e2e6ec') // 中性亮白 ▌ mark
     assert.equal(theme.assistantColor, '#c4c9d2') // 柔中性正文
-    assert.equal(theme.pulseActive, '#56b6c2')    // teal active pulse
   })
 
   it('ziwei still available via explicit switch (cinnabar seal)', () => {
@@ -37,10 +45,10 @@ describe('getTheme', () => {
     assert.equal(theme.assistantColor, '#c5c8d2') // brightened neutral body
   })
 
-  it('returns 256-color fallback when colorLevel < 3 (slate → cyan accent)', () => {
+  it('returns 256-color fallback when colorLevel < 3 (claude → redBright accent)', () => {
     const theme = getTheme(1)
-    assert.equal(theme.primary, 'cyan')
-    assert.equal(theme.error, 'red')
+    assert.equal(theme.primary, 'redBright')
+    assert.equal(theme.error, 'redBright')
   })
 
   it('maps tool names to colors (ziwei: multi-color per HTML design)', () => {

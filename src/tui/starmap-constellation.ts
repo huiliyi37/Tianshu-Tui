@@ -1,3 +1,8 @@
+/**
+ * [未接线 / NOT WIRED] ASCII 北斗工作流图（国风装饰）。生产 Starmap overlay 使用
+ * format/overlay.ts 的 renderStarmap()，本模块仅测试引用。Claude Code 对标方向下
+ * 不接入主路径；保留为可选/遗留视觉资产，最终去留待产品决定。
+ */
 import { PHASE_SHORT_LABELS, PHASE_GLYPHS, type StarPhase } from '../agent/star-event.js'
 
 const STAR_ORDER: StarPhase[] = [

@@ -14,6 +14,7 @@
 import stringWidth from 'string-width'
 import { ANSI, color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { formatElapsed } from '../tool-elapsed.js'
 
 // ── Shared Layout Helpers ─────────────────────────────────────
 
@@ -349,10 +350,6 @@ const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
   escalated: '↑',
 }
 
-function tasksElapsed(ms: number): string {
-  return ms > 1000 ? `${(ms / 1000).toFixed(0)}s` : `${ms}ms`
-}
-
 /** done/total 进度条（复用 worker 面板风格）。 */
 function tasksProgressBar(done: number, total: number, width = 8): string {
   if (total <= 0) return '░'.repeat(width)
@@ -360,10 +357,107 @@ function tasksProgressBar(done: number, total: number, width = 8): string {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
+// ── Domain Picker ──────────────────────────────────────────────
+
+export interface DomainPickerEntry {
+  /** 选择键：'auto' | 'off' | domain id */
+  key: string
+  /** 展示名（中文星域名或 Auto/Off 标签） */
+  name: string
+  /** 座右铭（可空） */
+  motto: string
+  /** 次要元信息（dim）：decisionStyle · keywords */
+  meta: string
+  /** 选中项的一段式 essence 预览（不转储整段 volatileBlock） */
+  essence: string
+  /** 是否为当前生效项 */
+  current: boolean
+}
+
+export interface DomainPickerData {
+  entries: DomainPickerEntry[]
+  selectedIndex: number
+}
+
+/** 按显示宽度（CJK 感知）软换行为多行，最多 maxLines 行。 */
+function wrapToWidth(text: string, width: number, maxLines: number): string[] {
+  if (width <= 0 || maxLines <= 0) return []
+  const out: string[] = []
+  let line = ''
+  let w = 0
+  for (const ch of text.replace(/\s+/g, ' ').trim()) {
+    const cw = stringWidth(ch)
+    if (w + cw > width) {
+      out.push(line)
+      if (out.length >= maxLines) {
+        // 末行加省略号标记溢出
+        const last = out[maxLines - 1]!
+        out[maxLines - 1] = last.length > 1 ? last.slice(0, -1) + '…' : '…'
+        return out.slice(0, maxLines)
+      }
+      line = ''
+      w = 0
+    }
+    line += ch
+    w += cw
+  }
+  if (line) out.push(line)
+  return out.slice(0, maxLines)
+}
+
+/**
+ * 渲染 Domain Picker overlay（CC 风星域选择器）。
+ *
+ * 列表（cursor + current 标记 + name + dim meta）→ 分隔线 → 选中项 essence 预览。
+ * 应用后只写单行确认，完整方法论照常由引擎注入（UI 不转储 volatileBlock）。
+ */
+export function renderDomainPicker(data: DomainPickerData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar('Domain · /domain', width, theme))
+
+  const innerWidth = width - 4 // padLine 占 2，左右各留 1 空隙
+  const contentRows = Math.max(3, height - 4) // border + title + footer + bottom
+  const previewRows = Math.min(4, Math.max(2, contentRows - data.entries.length - 1))
+  const listRows = Math.max(1, contentRows - previewRows - 1)
+
+  const sel = data.selectedIndex
+  const visible = data.entries.slice(0, listRows)
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i]!
+    const selected = i === sel
+    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const mark = e.current ? color('●', theme.primary) : ' '
+    const name = selected ? color(e.name, theme.primary, { bold: true }) : color(e.name, theme.secondary)
+    const motto = e.motto ? `  ${e.motto}` : ''
+    const head = `${cursor} ${mark} ${name}${color(motto, theme.dim)}`
+    // meta 接在 motto 之后（dim），按内宽截断（用 plain 长度估算，避免 SGR 计入）
+    const plainHead = `  ${e.current ? '●' : ' '} ${e.name}${motto}`
+    const metaRoom = Math.max(0, innerWidth - stringWidth(plainHead) - 2)
+    const metaText = e.meta && metaRoom > 6 ? `  ${e.meta}`.slice(0, metaRoom) : ''
+    lines.push(padLine(`${head}${color(metaText, theme.dim)}`, width, theme))
+  }
+  for (let i = visible.length; i < listRows; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  // 分隔线 + 选中项 essence 预览（左缩进 1 列，与列表行的游标内缩对齐）
+  lines.push(padLine(` ${color('─'.repeat(Math.max(0, innerWidth - 1)), theme.dim)}`, width, theme))
+  const current = data.entries[sel]
+  const essenceLines = current ? wrapToWidth(current.essence || current.motto || '', innerWidth - 1, previewRows) : []
+  for (let i = 0; i < previewRows; i++) {
+    lines.push(padLine(essenceLines[i] ? ` ${color(essenceLines[i]!, theme.muted)}` : '', width, theme))
+  }
+
+  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
 export function renderTasks(data: TasksData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('⚙ Running Agents', width, theme))
+  lines.push(formatTitleBar('Running Agents', width, theme))
 
   const maxEntries = Math.max(1, height - 5)
   const totalActive = data.groups.reduce((n, g) => n + g.workers.length, 0)
@@ -387,7 +481,7 @@ export function renderTasks(data: TasksData, width: number, height: number, them
           : color(glyph, theme.warning)
       const label = `${w.shortLabel}·${w.profile}`.slice(0, 22).padEnd(22)
       const activity = w.activity ? ` ${w.activity}` : ''
-      const elapsed = color(`(${tasksElapsed(w.elapsedMs)})`, theme.muted)
+      const elapsed = color(`(${formatElapsed(w.elapsedMs)})`, theme.muted)
       const detailMax = Math.max(0, width - 32 - stringWidth(elapsed))
       const detail = activity.slice(0, detailMax)
       body.push(`   ${glyphColored} ${label}${detail} ${elapsed}`)

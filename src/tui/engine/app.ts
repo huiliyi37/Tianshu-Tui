@@ -47,13 +47,13 @@ import {
   domainBadge,
   isDelegationTool,
 } from '../format/tool-domain.js'
-import { formatSpinnerStatus, formatTurnWorkSummary, phaseIndicator } from '../format/spinner-status.js'
+import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-status.js'
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -777,6 +777,14 @@ export class TuiApp {
         this.overlayController.resetNav()
         return this.overlay.activate(id)
       }
+      case 'domain-picker': {
+        this.overlayController.resetNav()
+        // 光标初始定位到当前生效星域，便于确认/切换。
+        const entries = this.overlayController.getData()?.domainPickerData?.().entries ?? []
+        const curIdx = entries.findIndex(e => e.current)
+        if (curIdx > 0) this.overlayController.nav().domainPickerIndex = curIdx
+        return this.overlay.activate(id)
+      }
       default:
         return false
     }
@@ -955,6 +963,26 @@ export class TuiApp {
         const entry = count > 0 ? this.overlayController.getData()?.chronicleEntries?.().entries[cur] : undefined
         this.deactivateOverlay()
         if (entry?.id && this.overlayController.getChronicleExec()) this.overlayController.getChronicleExec()?.(entry.id)
+        return true
+      }
+      return false
+    }
+
+    if (id === 'domain-picker') {
+      const count = this.overlayController.getData()?.domainPickerData?.().entries.length ?? 0
+      const cur = this.overlayController.nav().domainPickerIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayController.nav().domainPickerIndex = (cur + 1) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayController.nav().domainPickerIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
+        this.deactivateOverlay()
+        if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
         return true
       }
       return false
@@ -1858,9 +1886,9 @@ export class TuiApp {
       for (const taskLine of taskLines) lines.push({ text: taskLine })
     }
 
-    // 4. GlanceBar（phase glyph / context% / cache / cost / git branch）
+    // 4. GlanceBar（context% / cache / cost / git branch）
     // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
-    const phaseInd = phaseIndicator(this.state.phase)
+    // 运行态相位已收敛到顶部 spinner 状态行，GlanceBar 不再重复显示 phase。
     const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
     let glanceCacheHitRate: number | undefined
     let glanceContextRatio: number | undefined
@@ -1883,8 +1911,6 @@ export class TuiApp {
       domainGlyph: this.state.domainGlyph,
       domainName: this.state.domainName,
       branch: this.metricsGlanceController.gitBranch,
-      phaseGlyph: phaseInd.glyph,
-      phaseLabel: phaseInd.label,
       modelName: this.state.modelName,
       cacheHitRate: glanceCacheHitRate,
       contextRatio: glanceContextRatio,
@@ -2103,11 +2129,13 @@ export class TuiApp {
     rewindEntries?: () => RewindData
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void): void {
+    domainPickerData?: () => DomainPickerData
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
     this.overlayController.setChronicleExec(chronicleExec)
+    this.overlayController.setDomainPickerExec(domainPickerExec)
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -2170,6 +2198,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.tasksData?.() ?? { groups: [] }
         return renderTasks(data, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Domain Picker — 裸 /domain 打开 CC 风星域选择器；selectedIndex 由 overlayNav 注入
+    this.overlay.register('domain-picker', {
+      render: (_w, _h) => {
+        const data = overlayData?.domainPickerData?.() ?? { entries: [], selectedIndex: 0 }
+        return renderDomainPicker({ ...data, selectedIndex: this.overlayController.nav().domainPickerIndex }, this.columns, this.rows, this.theme)
       },
     })
   }

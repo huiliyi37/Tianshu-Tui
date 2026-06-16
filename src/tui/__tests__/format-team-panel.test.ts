@@ -27,7 +27,7 @@ const model: TeamPanelModel = {
 describe('formatTeamPanel', () => {
   it('renders waves, star identities, and task status glyphs', () => {
     const plain = buildTeamPanelLines(model, 80).join('\n')
-    assert.ok(plain.includes('团队 · /team standard'), 'title')
+    assert.ok(plain.includes('Team · /team standard'), 'title')
     assert.ok(plain.includes('wave 1/2'), 'wave label')
     assert.ok(plain.includes('wave-1'), 'wave id')
     assert.ok(plain.includes('✓ done'), 'done glyph')

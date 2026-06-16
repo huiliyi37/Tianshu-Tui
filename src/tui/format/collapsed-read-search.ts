@@ -257,8 +257,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     for (const entry of completed) {
       const lineCount = entry.content ? entry.content.split('\n').length : 0
       const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
-      const kindGlyph = entry.kind === 'read' ? '📖' : entry.kind === 'search' ? '🔍' : '📂'
-      lines.push(`  ⎿  ${kindGlyph} ${color(entry.displayName, theme.muted)}${lc}`)
+      lines.push(`  ⎿  ${color(entry.displayName, theme.muted)}${lc}`)
       if (entry.content) {
         const previewLines = entry.content.split('\n').slice(0, 30)
         for (const pl of previewLines) {
@@ -275,8 +274,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     for (const entry of completed) {
       const lineCount = entry.content ? entry.content.split('\n').length : 0
       const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
-      const kindGlyph = entry.kind === 'read' ? '📖' : entry.kind === 'search' ? '🔍' : '📂'
-      lines.push(`  ⎿  ${kindGlyph} ${color(entry.displayName, theme.muted)}${lc}`)
+      lines.push(`  ⎿  ${color(entry.displayName, theme.muted)}${lc}`)
       if (entry.content) {
         const previewLines = entry.content.split('\n').slice(0, 3)
         for (const pl of previewLines) {

@@ -25,9 +25,9 @@ describe('buildWorkerFleetLines', () => {
   it('单 worker：汇总头 + 行含标签/活动/elapsed', () => {
     const lines = buildWorkerFleetLines([worker()], { done: 0, total: 2, running: 1 }, 80)
     assert.equal(lines.length, 2)
-    assert.ok(lines[0]!.includes('子代理'))
+    assert.ok(lines[0]!.includes('Agents'))
     assert.ok(lines[0]!.includes('0/2'))
-    assert.ok(lines[0]!.includes('1↻'))
+    assert.ok(lines[0]!.includes('1 running'))
     assert.ok(lines[1]!.includes('T1·reviewer'))
     assert.ok(lines[1]!.includes('read_file'))
     assert.ok(lines[1]!.includes('2s'))
@@ -35,7 +35,7 @@ describe('buildWorkerFleetLines', () => {
 
   it('无 summary：头显示 ×N', () => {
     const lines = buildWorkerFleetLines([worker(), worker({ workerId: 'wo:T2', shortLabel: 'T2' })], undefined, 80)
-    assert.ok(lines[0]!.includes('×2'))
+    assert.ok(lines[0]!.includes('·2'))
   })
 
   it('多 worker 超 maxRows：折叠 …(+N)', () => {

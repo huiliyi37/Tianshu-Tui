@@ -1,33 +1,37 @@
 export type ToolFamily = 'read' | 'write' | 'run' | 'find' | 'other'
 
+/**
+ * 工具家族元数据。仅 `family`（截断/diff 分支判定）与 `verb`（卡片标题动词）
+ * 参与渲染。曾有的 `glyph` 字段在 CC 对标的 tool-card 中未使用（卡片统一 `●`），
+ * 已移除以避免误导。
+ */
 export interface ToolFamilyInfo {
   family: ToolFamily
-  glyph: string
   verb: string
 }
 
 const TOOL_MAP: Record<string, ToolFamilyInfo> = {
-  read_file:       { family: 'read',  glyph: '◇', verb: 'read'     },
-  glob:            { family: 'find',  glyph: '◎', verb: 'find'     },
-  grep:            { family: 'find',  glyph: '◎', verb: 'search'   },
-  bash:            { family: 'run',   glyph: '▶', verb: 'run'      },
-  edit_file:       { family: 'write', glyph: '◈', verb: 'patch'    },
-  write_file:      { family: 'write', glyph: '◈', verb: 'write'    },
-  run_tests:       { family: 'run',   glyph: '▶', verb: 'test'     },
-  delegate_task:   { family: 'run',   glyph: '▶', verb: 'delegate' },
-  delegate_batch:  { family: 'run',   glyph: '▶', verb: 'batch'    },
-  team_orchestrate:{ family: 'run',   glyph: '✸', verb: 'team'     },
-  git:             { family: 'run',   glyph: '▶', verb: 'git'      },
-  undo:            { family: 'write', glyph: '◈', verb: 'undo'     },
-  web_fetch:       { family: 'read',  glyph: '◇', verb: 'fetch'    },
-  inspect_project: { family: 'find',  glyph: '◎', verb: 'inspect'  },
-  repo_map:        { family: 'find',  glyph: '◎', verb: 'map'      },
-  todo:            { family: 'other', glyph: '•', verb: 'todo'     },
-  recall:          { family: 'find',  glyph: '◎', verb: 'recall'   },
-  ask_user_question: { family: 'other', glyph: '?', verb: 'ask'    },
+  read_file:       { family: 'read',  verb: 'read'     },
+  glob:            { family: 'find',  verb: 'find'     },
+  grep:            { family: 'find',  verb: 'search'   },
+  bash:            { family: 'run',   verb: 'run'      },
+  edit_file:       { family: 'write', verb: 'patch'    },
+  write_file:      { family: 'write', verb: 'write'    },
+  run_tests:       { family: 'run',   verb: 'test'     },
+  delegate_task:   { family: 'run',   verb: 'delegate' },
+  delegate_batch:  { family: 'run',   verb: 'batch'    },
+  team_orchestrate:{ family: 'run',   verb: 'team'     },
+  git:             { family: 'run',   verb: 'git'      },
+  undo:            { family: 'write', verb: 'undo'     },
+  web_fetch:       { family: 'read',  verb: 'fetch'    },
+  inspect_project: { family: 'find',  verb: 'inspect'  },
+  repo_map:        { family: 'find',  verb: 'map'      },
+  todo:            { family: 'other', verb: 'todo'     },
+  recall:          { family: 'find',  verb: 'recall'   },
+  ask_user_question: { family: 'other', verb: 'ask'    },
 }
 
-const DEFAULT: ToolFamilyInfo = { family: 'other', glyph: '•', verb: 'tool' }
+const DEFAULT: ToolFamilyInfo = { family: 'other', verb: 'tool' }
 
 export function getToolFamily(toolName: string): ToolFamilyInfo {
   return TOOL_MAP[toolName] ?? DEFAULT

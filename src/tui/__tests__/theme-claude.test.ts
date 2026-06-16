@@ -84,13 +84,13 @@ test('claude theme preserves toolColor/contextColor semantic mapping', () => {
   assert.equal(t.toolColor('unknown_tool_xyz'), t.dim)
 })
 
-test('claude theme contextColor threshold ladder is unchanged from base ColorSet contract', () => {
+test('claude theme contextColor threshold ladder matches base ColorSet contract (dim<0.75<warning<0.88<error)', () => {
   setTheme('claude')
   const t = getTheme(3)
-  assert.equal(t.contextColor(0.0), t.primary)
-  assert.equal(t.contextColor(0.59), t.primary)
-  assert.equal(t.contextColor(0.6), t.warning)
-  assert.equal(t.contextColor(0.79), t.warning)
-  assert.equal(t.contextColor(0.8), t.error)
+  assert.equal(t.contextColor(0.0), t.dim)
+  assert.equal(t.contextColor(0.74), t.dim)
+  assert.equal(t.contextColor(0.75), t.warning)
+  assert.equal(t.contextColor(0.87), t.warning)
+  assert.equal(t.contextColor(0.88), t.error)
   assert.equal(t.contextColor(1.0), t.error)
 })

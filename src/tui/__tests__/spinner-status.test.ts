@@ -6,9 +6,8 @@ import {
   formatTokenCount,
   formatTurnWorkSummary,
   formatElapsedHuman,
-  phaseIndicator,
 } from '../format/spinner-status.js'
-import { circleSpinnerFrame } from '../braille-spinner.js'
+import { brailleSpinnerFrame } from '../braille-spinner.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -21,24 +20,28 @@ describe('formatSpinnerStatus', () => {
     assert.equal(formatSpinnerStatus({ tick: 0, phase: 'idle', elapsedMs: 0 }, theme), null)
   })
 
-  it('thinking shows braille frame + verb + elapsed', () => {
+  it('shows single spinner frame + rotating word + elapsed + esc hint', () => {
     const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 12_000 }, theme)
     assert.ok(line)
     const plain = stripAnsi(line!)
     const useAscii = chalk.level < 3
-    const expectedFrame = useAscii ? '-' : '◒'
-    assert.ok(plain.includes(expectedFrame), 'spinner frame matches tick')
-    assert.ok(plain.includes('思考'))
+    const expectedFrame = useAscii ? '/' : brailleSpinnerFrame(3)
+    assert.ok(plain.startsWith(expectedFrame), 'leads with single spinner frame matching tick')
+    assert.ok(plain.includes('…'), 'word carries ellipsis')
     assert.ok(plain.includes('12s'))
+    assert.ok(plain.includes('esc 中断'))
   })
 
-  it('verb rotates with phase', () => {
-    const streaming = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'streaming', elapsedMs: 0 }, theme)!)
-    const analyzing = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'analyzing', elapsedMs: 0 }, theme)!)
-    const waiting = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'waiting', elapsedMs: 0 }, theme)!)
-    assert.ok(streaming.includes('书写'))
-    assert.ok(analyzing.includes('运作'))
-    assert.ok(waiting.includes('待命'))
+  it('spinner frame is phase-agnostic (same frame regardless of phase)', () => {
+    const a = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'thinking', elapsedMs: 0 }, theme)!)
+    const b = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'streaming', elapsedMs: 0 }, theme)!)
+    assert.equal(a, b, 'thinking and streaming render identically')
+  })
+
+  it('word rotates slowly with elapsed', () => {
+    const early = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 0 }, theme)!)
+    const later = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 4000 }, theme)!)
+    assert.notEqual(early, later, 'word advances every 4s')
   })
 
   it('spinner frame advances with tick', () => {
@@ -89,21 +92,3 @@ describe('formatTurnWorkSummary', () => {
   })
 })
 
-describe('phaseIndicator', () => {
-  it('maps each phase to glyph + label', () => {
-    const useAscii = chalk.level < 3
-    if (useAscii) {
-      assert.deepEqual(phaseIndicator('thinking'), { glyph: '~', label: '思考' })
-      assert.deepEqual(phaseIndicator('streaming'), { glyph: '*', label: '书写' })
-      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '>', label: '运作' })
-      assert.deepEqual(phaseIndicator('waiting'), { glyph: '^', label: '待命' })
-      assert.deepEqual(phaseIndicator('idle'), { glyph: '.', label: '空闲' })
-    } else {
-      assert.deepEqual(phaseIndicator('thinking'), { glyph: '◐', label: '思考' })
-      assert.deepEqual(phaseIndicator('streaming'), { glyph: '◆', label: '书写' })
-      assert.deepEqual(phaseIndicator('analyzing'), { glyph: '◈', label: '运作' })
-      assert.deepEqual(phaseIndicator('waiting'), { glyph: '◇', label: '待命' })
-      assert.deepEqual(phaseIndicator('idle'), { glyph: '·', label: '空闲' })
-    }
-  })
-})

@@ -7,7 +7,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
-import { starFor, type TeamPanelModel, type TeamPanelStatus } from '../team-panel-model.js'
+import type { TeamPanelModel, TeamPanelStatus } from '../team-panel-model.js'
 
 function statusGlyph(status: TeamPanelStatus): string {
   switch (status) {
@@ -36,7 +36,7 @@ function truncate(text: string, max: number): string {
  */
 export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[] {
   const rule = Math.min(Math.max(48, width), 72)
-  const title = `团队 · /team ${model.mode}`
+  const title = `Team · /team ${model.mode}`
   const waveLabel = model.totalWaves > 0 ? `wave ${Math.min(model.currentWave + 1, model.totalWaves)}/${model.totalWaves}` : ''
   const lines = [waveLabel ? `${title}  ${waveLabel}` : title]
   const tasks = new Map(model.tasks.map(t => [t.id, t]))
@@ -53,10 +53,11 @@ export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[]
     for (const id of wave.taskIds) {
       const task = tasks.get(id)
       if (!task) continue
-      const star = starFor(task.authority)
-      const identity = task.identity ?? { name: star.name, glyph: star.glyph }
       const status = `${statusGlyph(task.status)} ${task.status}`
-      lines.push(truncate(`    ${identity.glyph} ${identity.name} ${task.id}  ${task.title}  ${status}`, rule))
+      // CC 极简：任务行以 id+title+status 为主；星域 identity 降级为可选尾注
+      // （仅显式 task.identity 时弱化展示，默认不再注入 authority→星君 persona）。
+      const idTag = task.identity ? `  ${task.identity.name}` : ''
+      lines.push(truncate(`    ${task.id}  ${task.title}  ${status}${idTag}`, rule))
       if (task.dependsOn.length > 0) {
         lines.push(truncate(`      depends: ${task.dependsOn.join(', ')}`, rule))
       }

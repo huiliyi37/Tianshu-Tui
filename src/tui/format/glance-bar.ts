@@ -9,10 +9,12 @@ import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { color } from '../engine/ansi.js'
 import stringWidth from 'string-width'
-import type { RivetTheme } from '../theme.js'
+import { getActiveThemeName, type RivetTheme } from '../theme.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
 export function resolveStarDomainAccent(domainName: string | undefined, theme: RivetTheme): string {
+  // Claude Code 对标：claude 主题下输入框边框收敛为中性 muted，不再按星域变色（克制单色）。
+  if (getActiveThemeName() === 'claude') return theme.muted
   if (!domainName) return theme.muted
   for (const [id, domain] of Object.entries(STAR_DOMAINS)) {
     if (domain.name === domainName || id === domainName) {
@@ -43,9 +45,6 @@ export interface GlanceBarInput {
   domainName?: string
   /** Git 分支名 */
   branch?: string
-  /** 阶段标识（glyph） */
-  phaseGlyph?: string
-  phaseLabel?: string
   /** 模型名称 */
   modelName?: string
   /** 推理 effort glyph */
@@ -71,26 +70,19 @@ export interface GlanceBarInput {
 /**
  * 格式化 GlanceBar 为单行 ANSI 字符串。
  *
- * Zone 布局：domain ┃ phase ┃ model cache tokens ┃ … elapsed
+ * Zone 布局：domain ┃ model cache tokens ┃ … elapsed
+ * 运行态相位已收敛到顶部 spinner 状态行（CC 对标），GlanceBar 不再重复显示。
  */
 export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): string {
   const narrow = input.narrow ?? input.width < 60
 
   // Zone 1: Domain identity — muted (NOT primary/gold). 95% 墨灰.
-  const domainGlyph = input.domainGlyph ?? '❂'
+  // CC 对标：去掉重符号默认 glyph（❂），仅在显式提供 glyph 时渲染；克制单标记。
+  const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
   const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
-  const zone1 = `${color(domainGlyph, theme.muted)} ${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
-
-  // Zone 2: Phase — glyph uses primary (slate teal, the ONE accent); label muted.
-  // 菱形家族（◐◆◈◇）是状态栏唯一的彩色亮点，克制不花哨。
-  let zone2Glyph = ''
-  let zone2Label = ''
-  if (input.phaseGlyph) {
-    zone2Glyph = color(input.phaseGlyph, theme.primary)
-    zone2Label = color(input.phaseLabel || '待命', theme.muted)
-  }
-  const zone2 = `${zone2Glyph} ${zone2Label}`.trim()
+  const glyphPart = domainGlyph ? `${color(domainGlyph, theme.muted)} ` : ''
+  const zone1 = `${glyphPart}${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
 
   // Zone 3: Model + metrics — model + tokens(常驻) + cost + elapsed。
   // tokens/cost 常驻（对标 Claude Code /context 的常显占用），窄终端降级隐藏 tokens；
@@ -123,12 +115,10 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   zone4 = color(zone4, theme.dim)
 
   // ── Assembly — 双 cluster 左右分布 ──────────────────────
-  // 左 cluster: identity + phase    右 cluster: metrics + elapsed
+  // 左 cluster: identity    右 cluster: metrics + elapsed
   // 中间用空格撑满终端宽度，呼吸感拉满
 
-  const leftParts: string[] = [zone1]
-  if (zone2) leftParts.push(zone2)
-  const left = leftParts.join('  ')
+  const left = zone1
 
   // Build right cluster items for progressive truncation
   const rightItems: string[] = []

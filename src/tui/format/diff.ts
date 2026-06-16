@@ -44,8 +44,8 @@ export function isDiffContent(text: string): boolean {
  * - 删除行 (-): theme.error (红)
  * - hunk header (@@): theme.secondary
  * - 文件头 (---/+++): theme.warning
- * - 上下文行: theme.dim
- * - meta (diff --git 等): theme.muted
+ * - 上下文行: theme.muted（上下文是真实代码=数据，dim 在墨夜底几乎不可见）
+ * - meta (diff --git 等): theme.dim
  */
 export function formatDiff(input: FormatDiffInput, theme: RivetTheme): string[] {
   const maxLines = input.maxLines ?? DEFAULT_MAX_LINES
@@ -94,7 +94,7 @@ function getDiffColor(type: DiffLineType, theme: RivetTheme): string {
     case 'del': return theme.error
     case 'hunk': return theme.secondary
     case 'header': return theme.warning
-    case 'meta': return theme.muted
-    case 'context': return theme.dim
+    case 'meta': return theme.dim
+    case 'context': return theme.muted
   }
 }

@@ -193,6 +193,12 @@ export class SlashRouter {
       return true
     }
 
+    // ── 裸 /domain（无参）→ 打开 CC 风星域选择器；带参（list/auto/off/status/<name>）走文本路径 ──
+    if (command === '/domain' && parts.length === 1) {
+      this.app.activateOverlay('domain-picker')
+      return true
+    }
+
     // ── /vim — 切换 vim 键位（InputLine 状态，shared handler 无 app 句柄，故在此特判）──
     if (command === '/vim') {
       const next = this.app.toggleVim()

@@ -16,6 +16,7 @@ import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { getToolFamily } from '../tool-family.js'
 import { toolArgSummary } from '../tool-label.js'
+import { formatElapsed } from '../tool-elapsed.js'
 import { formatDiff, isDiffContent } from './diff.js'
 
 export interface FormatToolCardInput {
@@ -61,14 +62,6 @@ export function toolCardTitle(toolName: string, toolInput?: Record<string, unkno
   let arg = toolInput ? toolArgSummary(toolName, toolInput) : ''
   if (!arg && rawPath) arg = rawPath.split('/').pop() ?? rawPath
   return arg ? `${verb}(${arg})` : verb
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
-  const mins = Math.floor(ms / 60_000)
-  const secs = Math.round((ms % 60_000) / 1000)
-  return `${mins}m${secs}s`
 }
 
 /** 缩进 body 行：第一行 `⎿  `，后续行对齐缩进 */

@@ -50,9 +50,9 @@ export function buildWorkerFleetLines(
   const running = summary?.running ?? workers.filter(w => w.status === 'running').length
   if (summary && summary.total > 0) {
     const bar = progressBar(summary.done, summary.total)
-    lines.push(` ✦ 子代理 ${bar} ${summary.done}/${summary.total}  ${running}↻`)
+    lines.push(` Agents ${bar} ${summary.done}/${summary.total}  ${running} running`)
   } else {
-    lines.push(` ✦ 子代理 ×${workers.length}`)
+    lines.push(` Agents ·${workers.length}`)
   }
 
   const visible = workers.slice(0, maxRows)

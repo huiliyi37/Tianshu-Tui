@@ -5,10 +5,11 @@ import { getFace, phaseToMood, phaseToMode } from './expressions.js'
 import { buildFrame } from './frames.js'
 
 /**
- * 星君渲染器
+ * [未接线 / NOT WIRED] 星君头像渲染器（国风装饰）。
+ * 主渲染路径（engine/app.ts）不 import avatar/*，仅测试引用。Claude Code 对标方向下
+ * 不接入；保留为可选/遗留视觉资产，最终去留待产品决定。
  *
- * 组合表情系统 + 帧模板 + 着色
- * 纯函数，无 UI 依赖。
+ * 星君渲染器：组合表情系统 + 帧模板 + 着色。纯函数，无 UI 依赖。
  */
 
 // ─── Idle 情绪覆盖 ──────────────────────────────────────────────────

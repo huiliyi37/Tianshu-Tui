@@ -1,8 +1,10 @@
 /**
- * T9 格式化函数 — assistant 消息（极简水墨风格）。
+ * [未接线 / NOT WIRED] T9 格式化函数 — assistant 消息（· 前缀水墨风格）。
+ * 主路径（engine/app.ts）使用 StreamRenderer + formatMarkdown，不走此模块（仅测试引用）。
+ * Claude Code 对标方向下保留为可选/遗留视觉资产，最终去留待产品决定。
  *
  * 渲染结构：
- * · 消息 Markdown 第一行    (助手标记，assistantColor — 紫微紫)
+ * · 消息 Markdown 第一行    (助手标记，assistantColor)
  *   消息后续行             (缩进对齐，中性正文，自动换行减 2 列宽)
  */
 

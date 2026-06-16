@@ -119,7 +119,7 @@ describe('formatGlanceBar', () => {
       const result = formatGlanceBar({
         width,
         domainGlyph: '⚙', domainName: '天枢', branch: 't9-ui-refactor',
-        phaseGlyph: '·', phaseLabel: 'idle', modelName: 'opus-4-8',
+        modelName: 'opus-4-8',
         contextRatio: 0, estimatedTokens: 0, maxTokens: 1_000_000,
         cost: 0, elapsedMs: 0, turnCount: 1,
       }, theme)
@@ -131,7 +131,7 @@ describe('formatGlanceBar', () => {
   it('status line stays bounded with wide CJK domain names', () => {
     const result = formatGlanceBar({
       width: 80, domainGlyph: '❂', domainName: '天枢测试星域', branch: 'feature/中文分支名',
-      phaseGlyph: '◐', phaseLabel: '凝思', modelName: 'claude-opus-4-8',
+      modelName: 'claude-opus-4-8',
       contextRatio: 0.5, estimatedTokens: 123_456, maxTokens: 1_000_000,
       cost: 1.23, elapsedMs: 65_000,
     }, theme)
