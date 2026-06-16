@@ -4,6 +4,7 @@ import { detectMention, applyMention, type MentionToken } from '../lib/mention-i
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import type { PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
+import { compressImage } from '../lib/image-compress'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -12,31 +13,24 @@ import { PlusMenu } from './PlusMenu'
 // Controlled value: the parent owns input state so rewind/clear can set it.
 // Vision: paste/drop/select images → base64 data URLs → sent as image_url parts.
 
-const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 
+// Accept any raster image/* (canvas transcodes BMP/etc into a provider-safe
+// PNG/JPEG on send). SVG is excluded: it is vector, useless for vision, and
+// rasterizing it through canvas is fraught (taint, sizing, scripts).
 function isImageMime(type: string): boolean {
-  return type.startsWith('image/')
+  return type.startsWith('image/') && type !== 'image/svg+xml'
 }
 
 /** File-name heuristic for when MIME is unavailable (Windows clipboard edge case). */
 function isImageFileName(name: string): boolean {
-  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name)
+  return /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)
 }
 
 type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
   | { mode: 'command'; items: ComposerCommand[]; index: number }
-
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error('Failed to read file'))
-    reader.readAsDataURL(file)
-  })
-}
 
 export function Composer(props: {
   sessionId: string
@@ -96,18 +90,21 @@ export function Composer(props: {
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
     setImageError(null)
-    // Accept any image/* MIME, or known extensions when MIME is empty (Windows).
-    const arr = Array.from(files).filter(f => isImageMime(f.type) || ACCEPTED_IMAGE_TYPES.has(f.type) || (f.type === '' && isImageFileName(f.name)))
+    // Accept any raster image/* (transcoded on compress), or a known extension
+    // when MIME is empty (Windows clipboard). SVG is rejected by isImageMime.
+    const arr = Array.from(files).filter(f => isImageMime(f.type) || (f.type === '' && isImageFileName(f.name)))
     if (arr.length === 0) { setImageError('不支持的格式（仅 PNG/JPEG/WebP/GIF/BMP）'); return }
     for (const f of arr) {
       if (f.size > MAX_IMAGE_SIZE) { setImageError(`${f.name} 超过 5MB 限制`); return }
     }
     if (images.length + arr.length > MAX_IMAGES) { setImageError(`最多 ${MAX_IMAGES} 张图片`); return }
     try {
-      const urls = await Promise.all(arr.map(readFileAsDataURL))
-      setImages(prev => [...prev, ...urls])
+      // Compress once: the resulting data URL is sent to the model AND rendered
+      // as the thumbnail AND persisted server-side — one artifact, three uses.
+      const results = await Promise.all(arr.map(f => compressImage(f)))
+      setImages(prev => [...prev, ...results.map(r => r.dataUrl)])
     } catch {
-      setImageError('图片读取失败，请重试')
+      setImageError('图片处理失败，请重试')
     }
   }, [images.length])
 
@@ -236,16 +233,18 @@ export function Composer(props: {
       // item.type is the clipboard's declared MIME (most trustworthy).
       // f.type may be empty on macOS/Windows clipboard images.
       if (isImageMime(item.type) || isImageMime(f.type) || isImageFileName(f.name)) {
-        if (!seen.has(`${f.name}:${f.size}`)) {
-          seen.add(`${f.name}:${f.size}`)
+        const key = `${f.name}:${f.size}:${f.lastModified}`
+        if (!seen.has(key)) {
+          seen.add(key)
           files.push(f)
         }
       }
     }
     // Fallback: platforms where .files is the sole source (e.g. drag-into-window).
     for (const f of Array.from(e.clipboardData.files)) {
-      if (!seen.has(`${f.name}:${f.size}`) && (isImageMime(f.type) || isImageFileName(f.name))) {
-        seen.add(`${f.name}:${f.size}`)
+      const key = `${f.name}:${f.size}:${f.lastModified}`
+      if (!seen.has(key) && (isImageMime(f.type) || isImageFileName(f.name))) {
+        seen.add(key)
         files.push(f)
       }
     }

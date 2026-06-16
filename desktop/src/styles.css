@@ -737,8 +737,38 @@ body {
 .msg-images img.msg-thumb {
   max-width: 200px; max-height: 160px; object-fit: cover;
   border-radius: 6px; border: 1px solid var(--border);
-  margin: 4px 4px 0 0; display: inline-block;
+  margin: 4px 4px 0 0; display: inline-block; cursor: zoom-in;
+  transition: filter 0.12s ease;
 }
+.msg-images img.msg-thumb:hover { filter: brightness(1.06); }
+.msg-thumb-skeleton {
+  display: inline-block; width: 120px; height: 90px;
+  border-radius: 6px; border: 1px solid var(--border);
+  margin: 4px 4px 0 0; background: var(--surface-2, rgba(127,127,127,0.12));
+  animation: thumb-pulse 1.2s ease-in-out infinite;
+}
+.msg-thumb-fail {
+  display: inline-block; padding: 8px 10px; margin: 4px 4px 0 0;
+  border-radius: 6px; border: 1px dashed var(--border);
+  color: var(--muted); font-size: var(--text-xs);
+}
+@keyframes thumb-pulse { 0%,100% { opacity: 0.5; } 50% { opacity: 0.85; } }
+
+.lightbox {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.78); cursor: zoom-out; padding: 32px;
+}
+.lightbox-img {
+  max-width: 92vw; max-height: 92vh; object-fit: contain;
+  border-radius: 8px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); cursor: default;
+}
+.lightbox-close {
+  position: absolute; top: 16px; right: 20px;
+  font-size: 28px; line-height: 1; color: #fff;
+  background: transparent; border: none; cursor: pointer; opacity: 0.8;
+}
+.lightbox-close:hover { opacity: 1; }
 .composer-actions { display: flex; flex-direction: row; align-items: center; gap: var(--space-2); }
 .btn.ghost.danger { color: var(--error); }
 

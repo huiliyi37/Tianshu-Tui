@@ -141,6 +141,19 @@ export function sendPrompt(id: string, prompt: string, images?: string[]): Promi
 }
 
 /**
+ * Fetch a server-persisted user image and return a blob object URL. The image
+ * route is Bearer-gated (an `<img src>` cannot carry the header), so we fetch
+ * the bytes with auth and hand back an object URL. Callers MUST revoke it via
+ * URL.revokeObjectURL when the image unmounts to avoid a memory leak.
+ */
+export async function fetchSessionImageObjectUrl(id: string, imgId: string): Promise<string> {
+  const res = await rivetFetch(`/sessions/${id}/images/${imgId}`)
+  if (!res.ok) throw new Error(`GET /sessions/${id}/images/${imgId} -> ${res.status}`)
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/**
  * T3 — queue mid-run guidance into a running session. Does not start a turn.
  * Returns 'queued' on success, 'idle' if the session isn't running (caller
  * should fall back to sendPrompt). Does not throw on the 409 idle case.

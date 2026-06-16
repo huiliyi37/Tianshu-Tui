@@ -46,7 +46,9 @@ export interface ConvoBlock {
   hash?: string
   /** Vision — number of images attached to a user message. */
   imageCount?: number
-  /** Vision — image data URLs for thumbnail rendering in message flow. */
+  /** Vision — reference ids for server-persisted images (fetched on demand). */
+  imageIds?: string[]
+  /** Vision — legacy inline image data URLs (pre-imageIds events). */
   images?: string[]
 }
 
@@ -126,6 +128,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'user',
         text: String(ev.data.text ?? ''),
         ...(typeof ev.data.imageCount === 'number' && ev.data.imageCount > 0 ? { imageCount: ev.data.imageCount } : {}),
+        ...(Array.isArray(ev.data.imageIds) && ev.data.imageIds.length > 0 ? { imageIds: ev.data.imageIds as string[] } : {}),
         ...(Array.isArray(ev.data.images) && ev.data.images.length > 0 ? { images: ev.data.images as string[] } : {}),
       }]
       return next

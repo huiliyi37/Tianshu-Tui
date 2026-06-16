@@ -13,6 +13,7 @@ import { RewindOverlay } from '../components/RewindOverlay'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
+import { fetchSessionImageObjectUrl } from '../runtime/client'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -37,6 +38,8 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
+  const [lightbox, setLightbox] = useState<string | null>(null)
+  const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
   const busy = session.status === 'running'
@@ -192,6 +195,8 @@ export function ThreadView(props: {
                   ) : (
                     <Block
                       block={item.block}
+                      sessionId={session.id}
+                      onOpenImage={openImage}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -252,6 +257,55 @@ export function ThreadView(props: {
           }}
         />
       )}
+      {lightbox && <ImageLightbox src={lightbox} onClose={() => setLightbox(null)} />}
+    </div>
+  )
+}
+
+/** A user-attached image: fetch its bytes (Bearer-gated) into a blob object URL,
+ *  render a thumbnail, and revoke the URL on unmount to avoid a leak. */
+function SessionImage({ sessionId, imgId, index, onOpen }: {
+  sessionId: string
+  imgId: string
+  index: number
+  onOpen?: (src: string) => void
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    let objectUrl: string | null = null
+    fetchSessionImageObjectUrl(sessionId, imgId)
+      .then((u) => {
+        if (!alive) { URL.revokeObjectURL(u); return }
+        objectUrl = u
+        setUrl(u)
+      })
+      .catch(() => { if (alive) setFailed(true) })
+    return () => {
+      alive = false
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [sessionId, imgId])
+  if (failed) return <span className="msg-thumb-fail" title="图片加载失败">🖼 加载失败</span>
+  if (!url) return <span className="msg-thumb-skeleton" aria-hidden />
+  return (
+    <img className="msg-thumb" src={url} alt={`图片 ${index + 1}`} loading="lazy"
+      onClick={() => onOpen?.(url)} />
+  )
+}
+
+/** Full-size image overlay. Click anywhere or press Esc to close. */
+function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true">
+      <img className="lightbox-img" src={src} alt="图片" onClick={(e) => e.stopPropagation()} />
+      <button className="lightbox-close" onClick={onClose} aria-label="关闭">×</button>
     </div>
   )
 }
@@ -287,18 +341,31 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 // blocks keep object identity, so memo skips their reconciliation entirely —
 // only the actively-growing last block re-renders during streaming.
 const Block = memo(BlockImpl, (a, b) =>
-  a.block === b.block && a.isStreaming === b.isStreaming
+  a.block === b.block && a.isStreaming === b.isStreaming &&
+  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage
 )
 
-function BlockImpl({ block, isStreaming }: { block: ConvoBlock; isStreaming?: boolean }) {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
+  block: ConvoBlock
+  isStreaming?: boolean
+  sessionId?: string
+  onOpenImage?: (src: string) => void
+}) {
   if (block.kind === 'user') {
     return (
       <MsgBlock role="你">
         <Markdown source={block.text} />
-        {block.images && block.images.length > 0 ? (
+        {block.imageIds && block.imageIds.length > 0 && sessionId ? (
+          <div className="msg-images">
+            {block.imageIds.map((imgId, i) => (
+              <SessionImage key={imgId} sessionId={sessionId} imgId={imgId} index={i} onOpen={onOpenImage} />
+            ))}
+          </div>
+        ) : block.images && block.images.length > 0 ? (
           <div className="msg-images">
             {block.images.map((src, i) => (
-              <img key={i} className="msg-thumb" src={src} alt={`图片 ${i + 1}`} />
+              <img key={i} className="msg-thumb" src={src} alt={`图片 ${i + 1}`}
+                onClick={() => onOpenImage?.(src)} />
             ))}
           </div>
         ) : block.imageCount && block.imageCount > 0 ? (
