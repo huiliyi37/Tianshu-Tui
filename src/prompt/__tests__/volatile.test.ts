@@ -661,4 +661,27 @@ describe('GWT salience and Top-K selection', () => {
       assert.doesNotMatch(out, /plan-execution-trace/)
     })
   })
+
+  describe('activePlanPointer rendering (cache-safe)', () => {
+    const pointer = '<active-plan slug="my-plan" title="My Plan" path=".rivet/plans/my-plan.md">已批准</active-plan>'
+
+    it('renders the pointer into the dynamic appendix', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', activePlanPointer: pointer })
+      assert.match(out, /<active-plan slug="my-plan"/)
+    })
+
+    it('keeps the pointer OUT of the frozen base (no prefix-cache shatter)', () => {
+      const stable = buildStableVolatileBlock({ cwd: '/repo', activePlanPointer: pointer })
+      assert.doesNotMatch(stable, /active-plan/)
+    })
+
+    it('omits the pointer when unset', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo' })
+      assert.doesNotMatch(out, /active-plan/)
+    })
+
+    it('assigns high salience so Top-K never drops it', () => {
+      assert.equal(assignSalience(pointer), 0.8)
+    })
+  })
 })

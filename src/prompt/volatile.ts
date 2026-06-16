@@ -86,6 +86,12 @@ export interface VolatileContext {
   /** U6: serialized PlanExecutionTrace appendix (survives compaction).
    *  Cache-safe: rendered ONLY into the dynamic appendix. */
   planTraceAppendix?: string | null
+  /** Approved-plan pointer (slug/title/path only, NOT the plan body).
+   *  Cache-safe: rendered ONLY into the dynamic appendix — never enters frozen
+   *  base, so approving/revising plans does not shatter the prefix cache. The
+   *  plan body stays the single source of truth on disk (.rivet/plans/<slug>.md);
+   *  the agent reads it on demand and tracks steps via the todo mechanism. */
+  activePlanPointer?: string | null
   /** Intent retrieval route for the current user turn.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal and historical user-message injection. */
@@ -398,6 +404,13 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.planTraceAppendix)
   }
 
+  // Approved-plan pointer: tiny slug/title/path reminder of the plan under
+  // execution. Body lives on disk; agent reads on demand. Cache-safe (appendix
+  // only) — keeps approve/revise from rebuilding the frozen base.
+  if (ctx.activePlanPointer) {
+    parts.push(ctx.activePlanPointer)
+  }
+
   // Repair hint: routed through A1 harness-advisory bus — legacy <repair-hint> block removed.
 
   // Harness advisory: unified corrective guidance (A1 bus, max 3 entries)
@@ -460,6 +473,8 @@ export function assignSalience(blockContent: string): number {
   // U6: plan trace is task-relevant baseline/progress. Explicit salience so
   // Top-K never drops it under appendix budget pressure.
   if (blockContent.startsWith('<plan-execution-trace')) return 0.7
+  // Active-plan pointer is execution-critical: never drop under budget pressure.
+  if (blockContent.startsWith('<active-plan')) return 0.8
   if (blockContent.startsWith('<intent-retrieval-route')) return 0.7
   if (blockContent.startsWith('<task-progress')) return 0.7
   if (blockContent.startsWith('<decisions>')) return 0.7

@@ -596,6 +596,49 @@ describe('frozenUserMerged eviction', () => {
   })
 })
 
+describe('setActivePlan pointer (dynamic appendix, cache-safe)', () => {
+  function pointerEngine() {
+    return new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/repo' },
+    })
+  }
+
+  it('renders the pointer in the dynamic appendix, not the frozen prefix', () => {
+    const engine = pointerEngine()
+    engine.setActivePlan('<active-plan slug="p1" title="P1" path=".rivet/plans/p1.md">go</active-plan>')
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'start' }])
+    const merged = req.messages.find(m => m.role === 'user')!.content as string
+    assert.match(merged, /<active-plan slug="p1"/)
+    // Pointer lives in the appendix (after the user content), not the frozen
+    // volatileBlock prefix (before the '\n---\n' separator).
+    const frozenPrefix = merged.split('\n---\n')[0]!
+    assert.doesNotMatch(frozenPrefix, /active-plan/)
+  })
+
+  it('does not break the frozen base / fresh cache (no swap, no rebuild)', () => {
+    const engine = pointerEngine()
+    engine.buildOaiRequest([{ role: 'user', content: 'start' }])
+    const before = engine.getCacheEventStats().volatileSwaps
+    engine.setActivePlan('<active-plan slug="p1" title="P1" path=".rivet/plans/p1.md">go</active-plan>')
+    // Same user message → cached fresh reused; setActivePlan must not invalidate it.
+    engine.buildOaiRequest([{ role: 'user', content: 'start' }])
+    assert.equal(engine.getCacheEventStats().volatileSwaps, before, 'setActivePlan must not swap the frozen base')
+  })
+
+  it('clears the pointer with null', () => {
+    const engine = pointerEngine()
+    engine.setActivePlan('<active-plan slug="p1" title="P1" path=".rivet/plans/p1.md">go</active-plan>')
+    engine.buildOaiRequest([{ role: 'user', content: 'a' }])
+    engine.setActivePlan(null)
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'b' }])
+    const merged = req.messages.filter(m => m.role === 'user').map(m => m.content as string).join('\n')
+    assert.doesNotMatch(merged, /active-plan/)
+  })
+})
+
 describe('injected system-reminder messages (P1-4)', () => {
   function makeEngine() {
     return new PromptEngine({
