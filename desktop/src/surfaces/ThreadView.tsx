@@ -295,7 +295,13 @@ function BlockImpl({ block, isStreaming }: { block: ConvoBlock; isStreaming?: bo
     return (
       <MsgBlock role="你">
         <Markdown source={block.text} />
-        {block.imageCount && block.imageCount > 0 ? (
+        {block.images && block.images.length > 0 ? (
+          <div className="msg-images">
+            {block.images.map((src, i) => (
+              <img key={i} className="msg-thumb" src={src} alt={`图片 ${i + 1}`} />
+            ))}
+          </div>
+        ) : block.imageCount && block.imageCount > 0 ? (
           <div className="msg-images">📷 {block.imageCount} 张图片</div>
         ) : null}
       </MsgBlock>

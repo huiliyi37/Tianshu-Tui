@@ -511,7 +511,7 @@ export class RuntimeSessionManager {
     this.touch(session)
     // Echo the user's turn into the event log so the conversation persists it
     // (the agent loop only emits assistant/tool events). Must precede 'status'.
-    this.append(session, 'user', { text: prompt, ...(images?.length ? { imageCount: images.length } : {}) })
+    this.append(session, 'user', { text: prompt, ...(images?.length ? { imageCount: images.length, images } : {}) })
     this.append(session, 'status', { status: 'running' })
     this.persistRecord(session)
 

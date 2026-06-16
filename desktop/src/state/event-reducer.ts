@@ -46,6 +46,8 @@ export interface ConvoBlock {
   hash?: string
   /** Vision — number of images attached to a user message. */
   imageCount?: number
+  /** Vision — image data URLs for thumbnail rendering in message flow. */
+  images?: string[]
 }
 
 export interface EventViewState {
@@ -124,6 +126,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'user',
         text: String(ev.data.text ?? ''),
         ...(typeof ev.data.imageCount === 'number' && ev.data.imageCount > 0 ? { imageCount: ev.data.imageCount } : {}),
+        ...(Array.isArray(ev.data.images) && ev.data.images.length > 0 ? { images: ev.data.images as string[] } : {}),
       }]
       return next
     case 'text_delta': {
