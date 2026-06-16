@@ -462,7 +462,7 @@ export class PromptEngine {
     // Gated at 50% window usage, with a watermark boundary that only advances
     // when crossing a 50K-token step — so the break happens once per step,
     // not on every turn (rolling break would defeat the prefix cache).
-    if (contextWindow && contextWindow >= 1_000_000) {
+    if (contextWindow && contextWindow >= 200_000) {
       const collapseAge = this.config.attentionProfile?.collapseAgeTurns ?? 8
       let estChars = 0
       for (const m of result) {
@@ -475,7 +475,11 @@ export class PromptEngine {
         }
       }
       const estTokens = Math.ceil(estChars / 4)
-      if (estTokens / contextWindow > 0.5) {
+      const fillRatio = estTokens / contextWindow
+
+      // Lightweight pass (0-50%): strip reasoning + fold duplicate grep/read.
+      // Full pass (>50%): also collapse old tool results via semantic summaries.
+      if (fillRatio > 0) {
         // History rewrite (compact / session split) invalidates stored indices.
         if (this.collapseWatermark > result.length) {
           this.collapseWatermark = 0
@@ -488,7 +492,7 @@ export class PromptEngine {
           debugLog('prompt-engine', `T7 watermark advanced: step=${step} boundary=${this.collapseWatermark} estTokens=${estTokens}`)
         }
         if (this.collapseWatermark > 0) {
-          requestTimeCollapse(result, this.collapseWatermark, contextWindow)
+          requestTimeCollapse(result, this.collapseWatermark, contextWindow, fillRatio < 0.5)
         }
       }
     }
@@ -845,14 +849,41 @@ export function computeCollapseBoundary(messages: OaiMessage[], collapseAge: num
  * because the strip happens at exactly the same boundary/step as the tool
  * collapse, it adds zero additional prefix-cache breaks.
  */
-export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: number, contextWindow: number): void {
+export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: number, contextWindow: number, lightOnly = false): void {
   let currentTurn = 0
   for (const m of messages) {
     if (m.role === 'user') currentTurn++
   }
 
-  let turnCounter = 0
+  // Build dedup index: for each tool+target pair, track all occurrences
+  // below the boundary so older duplicates can be folded.
+  const toolOccurrences = new Map<string, number[]>()
   const end = Math.min(boundaryIndex, messages.length)
+  for (let i = 0; i < end; i++) {
+    const msg = messages[i]!
+    if (msg.role !== 'tool' || msg.content.length < 200) continue
+    if (msg.content.startsWith('[collapsed ') || msg.content.startsWith('[storm-collapsed') || msg.content.startsWith('[tiered-')) continue
+    const toolName = inferToolName(messages, i)
+    if (toolName === 'grep' || toolName === 'search' || toolName === 'read_file') {
+      const target = inferToolTarget(messages, i, toolName)
+      if (target) {
+        const key = `${toolName}:${target}`
+        const indices = toolOccurrences.get(key)
+        if (indices) indices.push(i)
+        else toolOccurrences.set(key, [i])
+      }
+    }
+  }
+
+  // Indices of tool results that are superseded by a later call with the same target
+  const superseded = new Set<number>()
+  for (const indices of toolOccurrences.values()) {
+    if (indices.length > 1) {
+      for (let k = 0; k < indices.length - 1; k++) superseded.add(indices[k]!)
+    }
+  }
+
+  let turnCounter = 0
   for (let i = 0; i < end; i++) {
     const msg = messages[i]!
     if (msg.role === 'user') turnCounter++
@@ -869,13 +900,56 @@ export function requestTimeCollapse(messages: OaiMessage[], boundaryIndex: numbe
     if (msg.content.length < 200) continue
     if (msg.content.startsWith('[collapsed ') || msg.content.startsWith('[storm-collapsed') || msg.content.startsWith('[tiered-')) continue
 
-    const turnAge = currentTurn - turnCounter
     const toolName = inferToolName(messages, i)
+
+    // Dedup fold: if a newer call to the same tool+target exists below boundary,
+    // collapse this older result regardless of lightOnly mode.
+    if (superseded.has(i)) {
+      const target = inferToolTarget(messages, i, toolName)
+      messages[i] = { ...msg, content: `[collapsed ${toolName}: superseded by later ${toolName} on ${target ?? 'same target'}]` }
+      continue
+    }
+
+    // In light-only mode, skip full semantic collapse — only dedup + reasoning strip.
+    if (lightOnly) continue
+
+    const turnAge = currentTurn - turnCounter
     const collapsed = collapseToolResult(toolName, msg.content, turnAge, contextWindow)
     if (collapsed) {
       messages[i] = { ...msg, content: collapsed.summary }
     }
   }
+}
+
+/**
+ * Extract tool target from the assistant's tool_call arguments.
+ * For grep/search: the pattern or path argument.
+ * For read_file: the file path argument.
+ */
+function inferToolTarget(messages: OaiMessage[], toolMsgIndex: number, toolName: string): string | null {
+  const toolMsg = messages[toolMsgIndex]!
+  if (toolMsg.role !== 'tool' || !('tool_call_id' in toolMsg)) return null
+  const toolCallId = (toolMsg as { tool_call_id?: string }).tool_call_id
+  if (!toolCallId) return null
+
+  for (let j = toolMsgIndex - 1; j >= 0; j--) {
+    const prev = messages[j]!
+    if (prev.role !== 'assistant') continue
+    const calls = (prev as { tool_calls?: Array<{ id: string; function: { arguments: string } }> }).tool_calls
+    if (!calls) continue
+    const call = calls.find(c => c.id === toolCallId)
+    if (!call) continue
+    try {
+      const args = JSON.parse(call.function.arguments) as Record<string, unknown>
+      if (toolName === 'grep' || toolName === 'search') {
+        return (args['pattern'] as string | undefined) ?? (args['query'] as string | undefined) ?? null
+      }
+      if (toolName === 'read_file') {
+        return (args['path'] as string | undefined) ?? (args['file'] as string | undefined) ?? null
+      }
+    } catch { return null }
+  }
+  return null
 }
 
 function inferToolName(messages: OaiMessage[], toolMsgIndex: number): string {

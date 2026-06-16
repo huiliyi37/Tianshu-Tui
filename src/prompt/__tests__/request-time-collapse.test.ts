@@ -7,11 +7,11 @@ function makeToolResult(toolCallId: string, content: string): OaiMessage {
   return { role: 'tool', tool_call_id: toolCallId, content }
 }
 
-function makeAssistantWithToolCall(callId: string, fnName: string): OaiMessage {
+function makeAssistantWithToolCall(callId: string, fnName: string, args = '{}'): OaiMessage {
   return {
     role: 'assistant',
     content: '',
-    tool_calls: [{ id: callId, type: 'function', function: { name: fnName, arguments: '{}' } }],
+    tool_calls: [{ id: callId, type: 'function', function: { name: fnName, arguments: args } }],
   }
 }
 
@@ -203,12 +203,69 @@ describe('requestTimeCollapse', () => {
       makeUser('turn 5'),
       makeUser('turn 6'),
     ]
-    // Same boundary applied to the same history (plus a newer trailing turn)
-    // must yield byte-identical content for the collapsed region.
     const a = build()
     requestTimeCollapse(a, 3, 1_000_000)
     const b = [...build(), makeUser('turn 7')]
     requestTimeCollapse(b, 3, 1_000_000)
     assert.equal(a[2]!.content, b[2]!.content)
+  })
+
+  it('folds superseded grep results (same pattern re-searched)', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      makeAssistantWithToolCall('c1', 'grep', JSON.stringify({ pattern: 'foo' })),
+      makeToolResult('c1', Array.from({ length: 20 }, (_, i) => `src/f${i}.ts:1: foo`).join('\n')),
+      makeAssistantWithToolCall('c2', 'grep', JSON.stringify({ pattern: 'foo' })),
+      makeToolResult('c2', Array.from({ length: 20 }, (_, i) => `src/f${i}.ts:1: foo updated`).join('\n')),
+      makeUser('turn 2'),
+      makeUser('turn 3'),
+      makeUser('turn 4'),
+      makeUser('turn 5'),
+      makeUser('turn 6'),
+    ]
+    requestTimeCollapse(messages, 5, 1_000_000)
+    assert.match(messages[2]!.content as string, /superseded/)
+    assert.doesNotMatch(messages[4]!.content as string, /superseded/)
+  })
+
+  it('folds duplicate read_file results (same file re-read)', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      makeAssistantWithToolCall('c1', 'read_file', JSON.stringify({ path: 'src/app.ts' })),
+      makeToolResult('c1', 'x'.repeat(500)),
+      makeAssistantWithToolCall('c2', 'read_file', JSON.stringify({ path: 'src/app.ts' })),
+      makeToolResult('c2', 'y'.repeat(500)),
+      makeUser('turn 2'),
+      makeUser('turn 3'),
+      makeUser('turn 4'),
+      makeUser('turn 5'),
+      makeUser('turn 6'),
+    ]
+    requestTimeCollapse(messages, 5, 1_000_000)
+    assert.match(messages[2]!.content as string, /superseded/)
+    assert.doesNotMatch(messages[4]!.content as string, /superseded/)
+  })
+
+  it('lightOnly mode strips reasoning and folds dedup but skips semantic collapse', () => {
+    const messages: OaiMessage[] = [
+      makeUser('turn 1'),
+      {
+        role: 'assistant',
+        content: '',
+        reasoning_content: 'old thinking',
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'grep', arguments: '{}' } }],
+      },
+      makeToolResult('c1', 'x'.repeat(500)),
+      makeUser('turn 2'),
+      makeUser('turn 3'),
+      makeUser('turn 4'),
+      makeUser('turn 5'),
+      makeUser('turn 6'),
+    ]
+    requestTimeCollapse(messages, 3, 1_000_000, true)
+    // reasoning stripped
+    assert.equal('reasoning_content' in messages[1]!, false)
+    // non-dedup tool result NOT collapsed in lightOnly mode
+    assert.equal(messages[2]!.content, 'x'.repeat(500))
   })
 })
