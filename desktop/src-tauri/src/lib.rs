@@ -126,96 +126,39 @@ fn http_health_ok(port: u16, token: &str) -> bool {
         Err(_) => return false,
     };
     let head = String::from_utf8_lossy(&buf[..n]);
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    let tray_icon_bytes =
-        include_bytes!("../icons/32x32.png");
-
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![runtime_info])
-        .setup(|app| {
-            let (info, child) = spawn_sidecar(app);
-            app.manage(Sidecar {
-                info,
-                child: Mutex::new(child),
-            });
-
-            // ── 系统托盘 ──
-            let show = MenuItemBuilder::with_id("show", "显示天枢").build(app)?;
-            let hide = MenuItemBuilder::with_id("hide", "隐藏天枢").build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "退出天枢").build(app)?;
-            let tray_menu = MenuBuilder::new(app)
-                .item(&show)
-                .item(&hide)
-                .separator()
-                .item(&quit)
-                .build()?;
-
-            let _tray = TrayIconBuilder::new()
-                .icon(Image::from_bytes(tray_icon_bytes)?)
-                .tooltip("天枢 · Tianshu")
-                .menu(&tray_menu)
-                .on_menu_event(|app, event| {
-                    let id = event.id().as_ref();
-                    if let Some(w) = app.get_webview_window("main") {
-                        match id {
-                            "show" => {
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
-                            "hide" => {
-                                let _ = w.hide();
-                            }
-                            _ => {}
-                        }
-                    }
-                    if id == "quit" {
-                        kill_sidecar(app);
-                        app.exit(0);
-                    }
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: _, .. } = event {
-                        let app = tray.app_handle();
-                        if let Some(w) = app.get_webview_window("main") {
-                            if w.is_visible().unwrap_or(false) {
-                                let _ = w.hide();
-                            } else {
-                                let _ = w.show();
-                                let _ = w.set_focus();
-                            }
-                        }
-                    }
-                })
-                .build(app)?;
-
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    // 关闭窗口 → 隐藏到托盘，不杀 sidecar
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
-                tauri::WindowEvent::Destroyed => {
-                    // 真正的退出（托盘菜单的 quit → exit(0)）才会走到这里
-                    kill_sidecar(window.app_handle());
-                }
-                _ => {}
-            }
-        })
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                kill_sidecar(app_handle);
-            }
-        });
+    head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
 }
+
+fn wait_until_ready(port: u16, token: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if http_health_ok(port, token) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    }
+    false
+}
+
+fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
+    let port = pick_free_port();
+    let token = random_token();
+    let node = detect_node();
+    let entry = sidecar_entry(app);
+
+    // Report spawn failures instead of swallowing them with `.ok()`: a missing
+    // node / bad entry path otherwise leaves the UI with a valid-looking handle
+    // pointing at nothing, surfacing only as opaque fetch failures later.
+    let child = match Command::new(&node)
+        .arg(&entry)
+        .arg("serve")
+        .arg("--port")
+        .arg(port.to_string())
+        .env("RIVET_SERVER_TOKEN", &token)
+        .spawn()
+    {
+        Ok(c) => Some(c),
+        Err(e) => {
             eprintln!(
                 "[rivet] failed to spawn sidecar (node='{}', entry='{}'): {}",
                 node,
@@ -249,30 +192,84 @@ fn kill_sidecar(app_handle: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let tray_icon_bytes = include_bytes!("../icons/32x32.png");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .invoke_handler(tauri::generate_handler![runtime_info])
         .setup(|app| {
-            // Spawn inside setup so the sidecar entry can be resolved against the
-            // packaged resource dir (only available once the app handle exists).
             let (info, child) = spawn_sidecar(app);
             app.manage(Sidecar {
                 info,
                 child: Mutex::new(child),
             });
+
+            // ── 系统托盘（L1 #7）──
+            let show = MenuItemBuilder::with_id("show", "显示天枢").build(app)?;
+            let hide = MenuItemBuilder::with_id("hide", "隐藏天枢").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "退出天枢").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&show)
+                .item(&hide)
+                .separator()
+                .item(&quit)
+                .build()?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(Image::from_bytes(tray_icon_bytes)?)
+                .tooltip("天枢 · Tianshu")
+                .menu(&tray_menu)
+                .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
+                    let id = event.id().as_ref();
+                    if let Some(w) = app.get_webview_window("main") {
+                        match id {
+                            "show" => {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                            "hide" => {
+                                let _ = w.hide();
+                            }
+                            _ => {}
+                        }
+                    }
+                    if id == "quit" {
+                        kill_sidecar(app);
+                        app.exit(0);
+                    }
+                })
+                .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
+                    if let TrayIconEvent::Click { button: _, .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            if w.is_visible().unwrap_or(false) {
+                                let _ = w.hide();
+                            } else {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                // 关闭窗口 → 隐藏到托盘，不杀 sidecar
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            tauri::WindowEvent::Destroyed => {
                 kill_sidecar(window.app_handle());
             }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        // RunEvent::Exit fires on app quit even when no window Destroyed event
-        // reaches us (e.g. Cmd+Q on macOS) — guarantees the sidecar is reaped.
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
                 kill_sidecar(app_handle);
