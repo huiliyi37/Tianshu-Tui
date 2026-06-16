@@ -327,12 +327,19 @@ export function detectCrossSessionPatterns(
       )
 
       if (sharedKeywords.length >= 2) {
-        // 创建新的 PatternBullet
-        const lesson = `跨 session 重复模式：${sharedKeywords.join('、')} 问题反复出现`
+        const recommendations = unique([
+          ...historical.recommendationKeywords,
+          ...currentFingerprint.recommendationKeywords,
+        ]).slice(0, 6)
+        const rootCauses = sharedKeywords.slice(0, 4).join('、')
+        const advice = recommendations.length > 0
+          ? `建议关注：${recommendations.join('、')}`
+          : '尚无具体建议，需进一步诊断'
+        const lesson = `${rootCauses} 跨 ${similarSessions.length + 1} session 重复出现。${advice}`
         patternBullets.push({
           id: hashId(`pattern:${sharedKeywords.join(':')}`),
           createdAt: now,
-          keywords: sharedKeywords,
+          keywords: [...sharedKeywords, ...recommendations.slice(0, 3)],
           lesson,
           context: 'pattern:recurring',
           useCount: 1,

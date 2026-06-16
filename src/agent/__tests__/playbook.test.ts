@@ -244,6 +244,9 @@ describe('detectCrossSessionPatterns', () => {
     assert.ok(patterns.length > 0)
     assert.equal(patterns[0]!.context, 'pattern:recurring')
     assert.ok(patterns[0]!.keywords.some(k => k.includes('验证') || k.includes('振荡')))
+    assert.ok(patterns[0]!.lesson.includes('建议关注'), 'lesson should include actionable recommendations')
+    assert.ok(patterns[0]!.lesson.includes('doom') || patterns[0]!.lesson.includes('阈值'),
+      'lesson should surface recommendation keywords from fingerprints')
   })
 
   it('boosts existing pattern bullet importance', () => {
