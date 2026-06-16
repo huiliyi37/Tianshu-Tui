@@ -11,7 +11,6 @@ import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
-import { batchPrewarm, buildPrewarmValueAsync } from './prewarm-file.js'
 import { validatePathSafe } from '../tools/path-validate.js'
 import { type CompactionConfig } from '../compact/constants.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
@@ -50,7 +49,6 @@ import { createThetaState } from './star-event.js'
 import type { ThetaState } from './star-event.js'
 import { runThetaCheck } from './theta-check.js'
 import { RuntimeHookPipeline, createRuntimeHookContext, type RuntimeHookSnapshot } from './runtime-hooks.js'
-import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
 import { TurnPerceptionController } from './turn-perception.js'
 import { TurnIntentController } from './turn-intent.js'
 import { ContextInjectionController } from './context-injection.js'
@@ -111,14 +109,13 @@ import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
-import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -189,13 +186,13 @@ export class AgentLoop {
   importGraph: ImportGraph | null = null
   lastConflictCheckCount = 0
   predictionAccumulator: PredictionAccumulator = createPredictionAccumulator()
-  private sessionDomain: ActiveStarDomain | null | undefined
+  sessionDomain: ActiveStarDomain | null | undefined
   /** Agent's self-chosen departure mark (leave_mark tool); sealed by the
    *  constellation post-session hook. Null until the agent leaves a mark. */
-  private pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
+  pendingLeaveMark: import('../tools/types.js').LeaveMarkInput | null = null
   /** Ephemeral per-session numeric id, minted on first run. Used in welcome
    *  display and passed to buildAgentMark when the agent departs. */
-  private _sessionNumericId: number | null = null
+  _sessionNumericId: number | null = null
 
   /** The session's ephemeral numeric identity (e.g. 7281). Minted lazily. */
   get sessionNumericId(): number {
@@ -217,9 +214,9 @@ export class AgentLoop {
   /** Session-local affordance adaptations — per-session, never mutates global registry */
   private sessionAffordanceAdaptations: Record<string, import('./affordance.js').BaseAffordance> = {}
   /** Previous anchor graph hash for HEARTH INV-5 intra-session drift detection. */
-  private prevAnchorGraphHash: string | null = null
+  prevAnchorGraphHash: string | null = null
   /** Previous turn's streamed assistant text for dedup-guard P5. */
-  private prevStreamedText: string | null = null
+  prevStreamedText: string | null = null
   private pressureMonitor: PressureMonitor
   private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
@@ -240,7 +237,7 @@ export class AgentLoop {
   private turnOrchestrator: TurnOrchestrator
   private reasoningEffort: ReasoningEffortController
   private intentRoute: IntentRetrievalRouteController
-  private antiAnchoring: AntiAnchoringController
+  antiAnchoring: AntiAnchoringController
   private modelRoutingShadow: ModelRoutingShadowController
   prewarmController: PrewarmController
   thetaCheckInFlight = false
@@ -265,17 +262,17 @@ export class AgentLoop {
   }
   /** Max theta checks per session. Prevents runaway tsc spawning. */
   thetaRequestsThisTurn = 0
-  private thetaState: ThetaState = createThetaState(7)
+  thetaState: ThetaState = createThetaState(7)
   artifactStore: import('../artifact/store.js').ArtifactStore | undefined
   sessionStateManager: SessionStateManager | undefined
-  private stigmergyStore: StigmergyStore
-  private loadedPheromones: Pheromone[] = []
-  private readonly stanceTally = createStanceTally()
+  stigmergyStore: StigmergyStore
+  loadedPheromones: Pheromone[] = []
+  readonly stanceTally = createStanceTally()
   private lastSeenEventId = 0
   gitChangeRate = 0
   telemetryWriter: TelemetryWriter
   private baselineFingerprint: PrefixFingerprint | null = null
-  private sensoriumSnapshots: SensoriumEntry[] = []
+  sensoriumSnapshots: SensoriumEntry[] = []
   taskContract?: TaskContract
   private latestCognitiveSnapshot?: CognitivePhaseSnapshot
   private persist: SessionPersist | null = null
@@ -377,7 +374,7 @@ export class AgentLoop {
     this.physarumForWarmup = physarum
     this.meridianDbForWarmup = meridianDb
 
-    this.runtimeHooks = this.config.runtimeHooks ?? this.createRuntimeHooksPipeline()
+    this.runtimeHooks = this.config.runtimeHooks ?? createRuntimeHooksPipeline(this)
     this.perception = new TurnPerceptionController({
       cwd: this.cwd,
       maxTurns: this.config.maxTurns,
@@ -484,102 +481,6 @@ export class AgentLoop {
 
   private createToolExecutionController(): ToolExecutionController {
       return createToolExecutionController(this);
-  }
-  private createRuntimeHooksPipeline(): RuntimeHookPipeline {
-      return new RuntimeHookPipeline(createDefaultRuntimeHooks({
-        stigmergyDeposit: deposit => this.stigmergyStore.deposit(deposit),
-        stigmergyQuery: () => this.stigmergyStore.query(),
-        getEvidenceState: () => this.evidence.getState(),
-        setLoadedPheromones: pheromones => { this.loadedPheromones = mapQueriedPheromones(pheromones) },
-        recordStance: signal => this.stanceTally.record(signal),
-        publishEvent: this.config.sessionRegistry && this.config.sessionId
-          ? (input) => this.config.sessionRegistry!.publishEvent(this.config.sessionId!, input)
-          : undefined,
-        sessionId: this.config.sessionId,
-        getThetaState: () => this.thetaState,
-        setThetaState: state => { this.thetaState = state },
-        getPredictionAccumulator: () => this.predictionAccumulator,
-        playbookStore: this.config.playbookStore,
-        buildRetrospectInput: () => {
-          const es = this.evidence.getState()
-          return {
-            sensoriumEntries: this.sensoriumSnapshots, gitLog: [],
-            toolEvents: this.traceStore.events.filter(e => e.kind === 'tool').map(e => ({ turn: e.turn, name: e.name, status: e.status === 'passed' ? 'passed' : 'failed' })),
-            evidenceSummary: { filesModified: es.filesModified.size, verifiedCount: es.verifications.filter(v => v.status === 'passed').length },
-            pheromoneSignals: this.loadedPheromones.map(p => ({ signal: p.signal, path: p.path, strength: p.strength })),
-          }
-        },
-        getDoomLoopLevel: () => this.getDoomLoopLevel(),
-        telemetryWriter: this.telemetryWriter,
-        getPhysarumShadowStats: () => this.getPhysarumShadowStats(),
-        getDomainId: () => this.sessionDomain?.id ?? null,
-        getFileObservations: () => this.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
-        antiAnchoring: normalizeAntiAnchoringConfig(this.config.antiAnchoring),
-        getInitialUserMessage: () => this.initialUserMessage,
-        callAntiAnchoringSeedModel: prompt => this.antiAnchoring.callSeedModel(prompt),
-        songlineEnabled: this.config.songlineEnabled,
-        getTaskSummary: this.config.taskLedger ? () => this.config.taskLedger!.getSummary() : undefined,
-        setCycleClose: this.config.sessionRegistry
-          ? (sessionId, closeHash) => this.config.sessionRegistry!.setCycleClose(sessionId, closeHash)
-          : undefined,
-        constellationEnabled: this.config.sessionId !== undefined,
-        constellationCwd: this.cwd,
-        getConstellationPendingMark: () => this.pendingLeaveMark,
-        getConstellationNumericId: () => this._sessionNumericId,
-        hearthObserveEnabled: this.config.hearthObserveEnabled,
-        getAnchorGraph: () => this.antiAnchoring.buildAnchorGraph(),
-        getPrevAnchorGraphHash: () => this.prevAnchorGraphHash,
-        setPrevAnchorGraphHash: (hash: string) => { this.prevAnchorGraphHash = hash },
-        getStreamedText: () => this.streamedText,
-        getPrevStreamedText: () => this.prevStreamedText,
-        setPrevStreamedText: (text: string) => { this.prevStreamedText = text },
-        getPrevCycleOpen: this.config.sessionRegistry && this.config.sessionId
-          ? () => this.config.sessionRegistry!.getLastCycleClose()
-          : undefined,
-        getPrevSessionCycleClose: this.config.sessionRegistry
-          ? () => this.config.sessionRegistry!.getLastCycleClose()
-          : undefined,
-        ...(this.config.sessionId ? {
-          dream: {
-            cwd: this.cwd,
-            sessionId: this.config.sessionId,
-            getDecisions: () => this.decisions,
-            getTrajectory: () => this.trajectory.getEntries(),
-          },
-        } : {}),
-        meridianIndexer: this.config.meridianIndexer,
-        physarumFileAccess: {
-          getPhysarum: () => this.immuneHook.getPhysarum(),
-          onPredictions: batch => {
-            this.p3.enqueuePhysarumFilePredictions({
-              afterToolName: batch.afterToolName,
-              predictions: batch.predictions,
-            })
-            void batchPrewarm(
-              this.cwd,
-              batch.predictions.map(prediction => prediction.file),
-              this.prewarm,
-            ).catch(() => {})
-          },
-        },
-        autoDelegate: (this.config.coordinatorRef && this.config.autoDelegateEnabled) ? {
-          coordinator: () => this.config.coordinatorRef?.() ?? null,
-          getTaskContract: () => this.getTaskContract(),
-          getSensorium: () => this.sensorium,
-        } : undefined,
-        memoryLearning: {
-          cwd: this.cwd,
-          sessionId: this.config.sessionId,
-          getUserMessage: () => this.initialUserMessage,
-          getStreamedText: () => this.streamedText,
-        },
-        userHooksBridge: {
-          cwd: this.cwd,
-          sessionId: this.config.sessionId,
-          getTurn: () => this.session.getTurnCount(),
-        },
-        advisoryBus: this.advisoryBus,
-      }))
   }
   buildRuntimeSnapshot(extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
       return buildRuntimeSnapshot(this, extra);
