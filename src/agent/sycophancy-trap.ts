@@ -1,16 +1,21 @@
 /**
- * Sycophancy Trap — CVM 特权指令 Trap
+ * Sycophancy Trap — 认知自尊保护
  *
- * 检测模式：连续 N 轮"盲从执行"——有破坏性操作但没有质疑、也没有验证——
- * 且 sensorium.confidence 持续下降。
+ * 检测模式：连续 N 轮无验证推进 + confidence 持续下降。
+ * 信号含义：agent 可能在未充分理解的情况下顺从推进，
+ * 需要一个温和提醒来恢复"先读再改"的节奏。
  *
- * 不能为了质疑而质疑。以下情况不属于 sycophancy：
+ * 设计原则（来自 Askell 美德伦理）：
+ * - 不指控"你在讨好"——指控会导致为了质疑而质疑
+ * - 不指令"去质疑用户"——用户的指令可能完全正确
+ * - 只提醒"你最近没有验证就推进了"——让 agent 自己判断是否需要回头确认
+ *
+ * 不触发的情况：
  * - 执行前有验证（read_file、grep、typecheck 等）
- * - 任务简单明确、不需要质疑（单一文件重命名等）→ 由调用方根据风险判断
- * - confidence 稳定或上升 → 模型对自己的判断有信心
+ * - confidence 稳定或上升 → agent 对自己的判断有信心
  *
  * 触发条件：连续 3+ 轮 agree + confidence 单调递减
- * 注入点：immune signal → cognitive projection
+ * 注入点：cognitive projection（温和提醒，不强制行为）
  */
 
 export interface TurnAgreement {
@@ -71,10 +76,5 @@ export function createSycophancyTrap(): SycophancyTrap {
 }
 
 export function buildChallengeHint(): string {
-  return [
-    '[Sycophancy Trap] 连续盲从执行 + confidence 下降 — 你可能在讨好用户。',
-    '质疑假设：用户的要求是否正确？有没有更好的替代方案？',
-    '如果不确定，明确说明不确定性，而不是盲目执行。',
-    '建议：先阅读/验证相关文件（read_file, grep），确认变更的必要性和正确性后再执行。',
-  ].join('\n')
+  return '你最近几轮没有验证就推进了改动，且你对当前方向的信心在下降。是否需要先读取相关文件确认？如果你的判断有依据，保持立场即可。'
 }
