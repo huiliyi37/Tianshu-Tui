@@ -1,5 +1,5 @@
 import type { Tool } from './types.js'
-import { skillRegistry } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
 
 /**
  * Tier-2 skill activation. The discovery block (volatile appendix) lists every
@@ -48,9 +48,26 @@ Example: skill(name="brainstorming")`,
       }
     }
 
+    const body = `<skill name="${skill.name}">\n${skill.body}\n</skill>`
+    // Flat (no skillDir) skills have no sub-files — return body as-is.
+    if (!skill.skillDir) {
+      return { content: body, uiContent: `Loaded skill: ${skill.name}` }
+    }
+    const files = listSkillFiles(skill.skillDir)
+    if (files.length === 0) {
+      return { content: body, uiContent: `Loaded skill: ${skill.name}` }
+    }
+    // Directory skill: append the sub-file tree so the model knows what it can
+    // read on demand (Tier-3). The body itself is never truncated.
+    const tree = files.map(f => `  ${f.path}`).join('\n')
+    const filesBlock = [
+      `<skill-files dir="${skill.skillDir}" note="Read these on demand with read_file/grep/glob as the instructions above reference them. Do not load all of them preemptively.">`,
+      tree,
+      '</skill-files>',
+    ].join('\n')
     return {
-      content: `<skill name="${skill.name}">\n${skill.body}\n</skill>`,
-      uiContent: `Loaded skill: ${skill.name}`,
+      content: `${body}\n${filesBlock}`,
+      uiContent: `Loaded skill: ${skill.name} (+${files.length} files)`,
     }
   },
 

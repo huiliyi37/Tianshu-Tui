@@ -1,5 +1,8 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { SKILL_TOOL } from '../skill.js'
 import { skillRegistry } from '../../skills/skill-loader.js'
 import type { ToolCallParams } from '../types.js'
@@ -59,5 +62,31 @@ describe('skill tool', () => {
     assert.equal(res.isError, undefined)
     // Empty body should still produce a valid wrapped result
     assert.equal(res.content, '<skill name="empty">\n\n</skill>')
+  })
+
+  it('flat skill (no skillDir) → no <skill-files> block', async () => {
+    const res = await call('small')
+    assert.ok(!res.content.includes('<skill-files'))
+  })
+
+  it('directory skill → appends <skill-files> tree after the full body', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'rivet-skill-tool-'))
+    const dir = join(root, 'pdf')
+    mkdirSync(join(dir, 'references'), { recursive: true })
+    writeFileSync(join(dir, 'references', 'api.md'), 'api', 'utf-8')
+    writeFileSync(join(dir, 'extract.py'), 'x', 'utf-8')
+    skillRegistry.register({
+      name: 'pdf', description: 'pdf skill', triggers: [], body: 'ROUTER', skillDir: dir,
+    })
+
+    const res = await call('pdf')
+    assert.equal(res.isError, undefined)
+    // full body preserved
+    assert.ok(res.content.includes('<skill name="pdf">\nROUTER\n</skill>'))
+    // file tree appended
+    assert.ok(res.content.includes(`<skill-files dir="${dir}"`))
+    assert.ok(res.content.includes('references/api.md'))
+    assert.ok(res.content.includes('extract.py'))
+    assert.ok(!res.content.includes('SKILL.md'))
   })
 })
