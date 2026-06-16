@@ -78,7 +78,7 @@ describe('PlaybookStore', () => {
     })
   })
 
-  it('queries matching bullets and persists usage metadata', () => {
+  it('queries matching bullets without side effects', () => {
     withTempDir((dir) => {
       const store = new PlaybookStore(dir, { now: () => 50_000 })
       store.save([
@@ -90,8 +90,13 @@ describe('PlaybookStore', () => {
 
       assert.deepEqual(result.map(b => b.id), ['hit'])
       const loaded = store.load()
-      assert.equal(loaded.find(b => b.id === 'hit')!.useCount, 1)
-      assert.equal(loaded.find(b => b.id === 'hit')!.lastUsedAt, 50_000)
+      assert.equal(loaded.find(b => b.id === 'hit')!.useCount, 0, 'query should not bump useCount')
+      assert.equal(loaded.find(b => b.id === 'hit')!.lastUsedAt, null, 'query should not set lastUsedAt')
+
+      store.recordUsage(['hit'])
+      const afterUsage = store.load()
+      assert.equal(afterUsage.find(b => b.id === 'hit')!.useCount, 1)
+      assert.equal(afterUsage.find(b => b.id === 'hit')!.lastUsedAt, 50_000)
     })
   })
 

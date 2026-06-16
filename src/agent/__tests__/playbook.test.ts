@@ -141,8 +141,8 @@ describe('playbook core', () => {
     const matched = matchBullets(playbook, ['tests', 'agent'], 2, { now: 20_000 })
 
     assert.deepEqual(matched.map(b => b.id), ['best', 'hit'])
-    assert.equal(matched[0]!.useCount, 1)
-    assert.equal(matched[0]!.lastUsedAt, 20_000)
+    assert.equal(matched[0]!.useCount, 0, 'matchBullets should not bump useCount')
+    assert.equal(matched[0]!.lastUsedAt, null, 'matchBullets should not set lastUsedAt')
   })
 
   it('decays importance over age while preserving used bullets advantage', () => {

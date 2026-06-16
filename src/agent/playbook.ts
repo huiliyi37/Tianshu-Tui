@@ -228,7 +228,6 @@ export function matchBullets(
   topK = 3,
   options: MatchBulletsOptions = {},
 ): PlaybookBullet[] {
-  const now = options.now ?? Date.now()
   const minImportance = options.minImportance ?? 0
   return playbook
     .filter(b => b.importance >= minImportance)
@@ -236,12 +235,7 @@ export function matchBullets(
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK)
-    .map(({ bullet }) => ({
-      ...bullet,
-      useCount: bullet.useCount + 1,
-      lastUsedAt: now,
-      importance: clamp01(bullet.importance + 0.05),
-    }))
+    .map(({ bullet }) => bullet)
 }
 
 export function decayImportance(playbook: PlaybookBullet[], now = Date.now()): PlaybookBullet[] {

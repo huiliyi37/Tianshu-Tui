@@ -375,6 +375,9 @@ export class AgentLoop {
       getCwd: () => this.cwd,
       advisoryBus: this.advisoryBus,
     })
+    this.config.promptEngine.setOnLessonsRendered(ids => {
+      try { this.config.playbookStore?.recordUsage(ids) } catch { /* non-critical */ }
+    })
     this.compaction = new CompactionController({
       session: this.session,
       promptEngine: this.config.promptEngine,

@@ -65,6 +65,8 @@ export interface VolatileContext {
   playbookLessons?: PlaybookBullet[]
   /** Recent user query text for lesson relevance scoring. */
   recentQuery?: string
+  /** Callback to record which bullet IDs were actually rendered. */
+  onLessonsRendered?: (ids: string[]) => void
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
@@ -279,14 +281,16 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
       query: ctx.recentQuery,
       recentToolTargets: ctx.toolHistory?.map(t => t.target),
     })
-    const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
-    const lessons = toRender
-      .map(b => {
-        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
-        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
-      })
-      .join('\n')
-    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+    if (selected.length > 0) {
+      const lessons = selected
+        .map(b => {
+          const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+          return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+        })
+        .join('\n')
+      parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+      ctx.onLessonsRendered?.(selected.map(b => b.id))
+    }
   }
 
   // Decisions: only grow (appended), prefix stable
@@ -654,14 +658,16 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
       query: ctx.recentQuery,
       recentToolTargets: ctx.toolHistory?.map(t => t.target),
     })
-    const toRender = selected.length > 0 ? selected : ctx.playbookLessons.slice(0, 2)
-    const lessons = toRender
-      .map(b => {
-        const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
-        return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
-      })
-      .join('\n')
-    parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+    if (selected.length > 0) {
+      const lessons = selected
+        .map(b => {
+          const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
+          return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
+        })
+        .join('\n')
+      parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
+      ctx.onLessonsRendered?.(selected.map(b => b.id))
+    }
   }
 
 
