@@ -44,11 +44,9 @@ describe('ice-mirror: cache stability', () => {
     const frozen = buildStableVolatileBlock({
       ...baseCtx,
       toolHistory: [{ tool: 'read_file', target: 'x', status: 'success' as const }],
-      behaviorMirror: 'test mirror',
       decisions: ['decision 1'],
     })
     assert.ok(!frozen.includes('<tool-history'))
-    assert.ok(!frozen.includes('<behavior-mirror'))
     assert.ok(!frozen.includes('<decisions'))
   })
 

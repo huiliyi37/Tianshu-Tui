@@ -202,13 +202,7 @@ describe('recent-commits XML section', () => {
 describe('behavior-mirror XML section', () => {
   const base: VolatileContext = { cwd: '/project' }
 
-  // behaviorMirror is harness-only — no longer rendered into LLM prompt (direction A)
-  // Tests for rendering and XML escaping removed.
-
-  it('omits when null or undefined', () => {
-    assert.ok(!buildVolatileBlock({ ...base, behaviorMirror: null }).includes('<behavior-mirror>'))
-    assert.ok(!buildVolatileBlock(base).includes('<behavior-mirror>'))
-  })
+  // behaviorMirror removed from VolatileContext — was never rendered into LLM prompt (dead plumbing)
 })
 
 describe('decisions XML section', () => {
@@ -296,13 +290,11 @@ describe('stable/latest volatile split', () => {
       sessionMemoryBlock: '<session-memory><entry>remember</entry></session-memory>',
       toolHistory: [{ tool: 'read_file', target: 'src/a.ts', status: 'success' }],
       taskProgress: { completed: ['read docs'], current: 'fix cache', remaining: ['write tests'], decisions: [] },
-      behaviorMirror: 'repeated edits',
       decisions: ['use middleware'],
     })
     assert.ok(stable.includes('<session-memory>'))
     assert.equal(stable.includes('<tool-history'), false)
     assert.equal(stable.includes('<task-progress'), false)
-    assert.equal(stable.includes('<behavior-mirror'), false)
     assert.equal(stable.includes('<decisions'), false)
   })
 

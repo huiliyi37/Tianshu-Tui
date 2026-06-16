@@ -42,10 +42,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
     config.promptEngine.setTaskProgress(taskState)
  }
 
-  const mirror = session.getTurnCount() > 3
-    ? detectMirror(trajectory.getEntries())
-    : null
-  config.promptEngine.setBehaviorMirror(mirror)
+  // behaviorMirror removed — computed but never rendered into prompt (dead plumbing)
 
   if (config.modelCards && config.modelCards.length > 1 && config.getCurrentModel) {
     const currentModel = config.getCurrentModel()

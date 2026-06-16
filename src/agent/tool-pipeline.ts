@@ -570,7 +570,6 @@ export async function executeToolUse(
    }))
     const doomLevel = deps.getDoomLoopLevel()
     const hint = suggestStrategyShift(trajectorySummary, doomLevel)
-    deps.config.promptEngine.setStrategyShift(hint)
     if (doomLevel === 'blocked') {
       // Block ONLY repeats of the call(s) that are actually looping — not every
       // tool. The looping fingerprints are recorded with outputClass 'error'
@@ -1120,7 +1119,6 @@ export async function executeToolUse(
     // Repair hint + antibody
     if (!harnessResult.isError) {
       deps.repairHintTracker.recordSuccess(tu.name)
-      deps.config.promptEngine.setStrategyShift(null)
    } else {
       const failureClass = classifyFailure(harnessResult.content)
       deps.repairHintTracker.recordFailure(tu.name, failureClass.class)
@@ -1199,7 +1197,6 @@ export async function executeToolUse(
         const hint = generateImpactHint(importGraph, tu.input.file_path as string, deps.cwd)
         if (hint) {
           deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
-          deps.config.promptEngine.setImpactHint(hint.summary)
        }
      }
    } else if (tu.name === 'run_tests' && rawToolResult) {

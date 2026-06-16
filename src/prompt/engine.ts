@@ -65,12 +65,8 @@ export class PromptEngine {
   /** Maximum total entries across all content keys before eviction kicks in. */
   private static readonly MAX_FROZEN_USER_MERGED = 64
   private taskProgress?: TaskState
-  private behaviorMirror?: string | null
-  private strategyShift?: string | null
   private repairHint?: string | null
-  private impactHint?: string | null
-  private affordanceHint?: string | null
-  private policyGuidance?: string | null
+  private toolContext?: string | null
   private planCacheAdvisory?: string | null
   /** U6: serialized PlanExecutionTrace appendix (survives compaction). */
   private planTraceAppendix?: string | null
@@ -250,7 +246,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, behaviorMirror: this.behaviorMirror, strategyShift: this.strategyShift, repairHint: this.repairHint, impactHint: this.impactHint, affordanceHint: this.affordanceHint, policyGuidance: this.policyGuidance, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -588,30 +584,33 @@ export class PromptEngine {
     this.taskProgress = state
   }
 
-  setBehaviorMirror(mirror: string | null): void {
-    this.behaviorMirror = mirror
-  }
+  /** @deprecated Dead field — behaviorMirror never rendered into prompt. */
+  setBehaviorMirror(_mirror: string | null): void { /* noop */ }
 
-  setStrategyShift(hint: string | null): void {
-    this.strategyShift = hint
-  }
+  /** @deprecated Dead field — strategyShift never rendered into prompt. */
+  setStrategyShift(_hint: string | null): void { /* noop */ }
 
   setRepairHint(hint: string | null): void {
     this.repairHint = hint
   }
 
-  setImpactHint(hint: string | null): void {
-    this.impactHint = hint
+  /** @deprecated Dead field — impactHint never rendered into prompt. */
+  setImpactHint(_hint: string | null): void { /* noop */ }
+
+
+
+  setToolContext(ctx: string | null): void {
+    this.toolContext = ctx ?? undefined
   }
 
-
-
+  /** @deprecated Use setToolContext. Kept for backward compat. */
   setAffordanceHint(hint: string | null): void {
-    this.affordanceHint = hint ?? undefined
+    // noop — merged into setToolContext
   }
 
+  /** @deprecated Use setToolContext. Kept for backward compat. */
   setPolicyGuidance(guidance: string | null): void {
-    this.policyGuidance = guidance ?? undefined
+    // noop — merged into setToolContext
   }
 
   setPlanCacheAdvisory(advisory: string | null): void {
@@ -782,12 +781,7 @@ export class PromptEngine {
       ...this.config.volatileCtx,
       toolHistory,
       taskProgress: this.taskProgress,
-      behaviorMirror: this.behaviorMirror,
-      strategyShift: this.strategyShift,
-      repairHint: this.repairHint,
-      impactHint: this.impactHint,
-      affordanceHint: this.affordanceHint,
-      policyGuidance: this.policyGuidance,
+      toolContext: this.toolContext,
       planCacheAdvisory: this.planCacheAdvisory,
       planTraceAppendix: this.planTraceAppendix,
       intentRetrievalRoute: this.intentRetrievalRoute,

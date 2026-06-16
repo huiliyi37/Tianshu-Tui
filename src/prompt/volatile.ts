@@ -70,19 +70,12 @@ export interface VolatileContext {
   activeClaims?: ContextClaim[]
   toolHistory?: ToolHistoryEntry[]
   taskProgress?: TaskState
-  behaviorMirror?: string | null
   decisions?: string[]
-  strategyShift?: string | null
-  repairHint?: string | null
-  impactHint?: string | null
-  /** Affordance hint from Embodied Cognition engine.
+  /** Unified tool context from Embodied Cognition + Free Energy Engine.
+   *  Replaces the old separate affordanceHint + policyGuidance blocks.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
-  affordanceHint?: string | null
-  /** Policy guidance from Free Energy Engine (EFE + softmax selection).
-   *  Cache-safe: rendered ONLY into the dynamic appendix.
-   *  MUST stay out of buildVolatileBlockInternal — changes every turn. */
-  policyGuidance?: string | null
+  toolContext?: string | null
   /** PlanCache suggestion for the current user turn.
    *  Cache-safe: rendered ONLY into the dynamic appendix.
    *  Advisory-only: never auto-executes cached tool sequences. */
@@ -216,13 +209,8 @@ export function buildStableVolatileBlock(ctx: VolatileContext): string {
     playbookLessons: undefined,
     toolHistory: undefined,
     taskProgress: undefined,
-    behaviorMirror: undefined,
     decisions: undefined,
-    strategyShift: undefined,
-    repairHint: undefined,
-    impactHint: undefined,
-    affordanceHint: undefined,
-    policyGuidance: undefined,
+    toolContext: undefined,
     planCacheAdvisory: undefined,
     planTraceAppendix: undefined,
     intentRetrievalRoute: undefined,
@@ -293,19 +281,21 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     }
   }
 
-  // Decisions: only grow (appended), prefix stable
-  if (ctx.decisions && ctx.decisions.length > 0) {
-    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
-    parts.push(`<decisions>\n${entries}\n</decisions>`)
-  }
+  // Decisions + task progress: skip when sessionState is present (it includes both,
+  // rendering separately causes triple repetition in the prompt).
+  if (!ctx.sessionState) {
+    if (ctx.decisions && ctx.decisions.length > 0) {
+      const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
+      parts.push(`<decisions>\n${entries}\n</decisions>`)
+    }
 
-  // Task progress: steps change but completed items stay (prefix stable)
-  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
-    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
-    const remaining = ctx.taskProgress.remaining.length > 0
-      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
-      : ''
-    parts.push(`<task-progress current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
+    if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
+      const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
+      const remaining = ctx.taskProgress.remaining.length > 0
+        ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
+        : ''
+      parts.push(`<task-progress current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
+    }
   }
 
   // Tool history: most recent tools appended at end → prefix cacheable
@@ -393,16 +383,10 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(ctx.companionPresence)
   }
 
-  // Affordance hint: cognitive-state-driven tool selection guidance.
-  // Changes per turn based on sensorium / vigor / theta / season.
-  if (ctx.affordanceHint) {
-    parts.push(ctx.affordanceHint)
-  }
-
-  // Policy guidance: EFE-driven softmax action ranking.
-  // Changes per turn based on EFE + affordance scores.
-  if (ctx.policyGuidance) {
-    parts.push(ctx.policyGuidance)
+  // Unified tool context: theta + EFE + top-3 ranking.
+  // Replaces old separate affordance-hint + policy-guidance blocks.
+  if (ctx.toolContext) {
+    parts.push(ctx.toolContext)
   }
 
   // PlanCache advisory: current-turn, informational-only hint.
@@ -480,8 +464,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<星域-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
-  if (blockContent.startsWith('<affordance-hint>')) return 0.7
-  if (blockContent.startsWith('<policy-guidance>')) return 0.7
+  if (blockContent.startsWith('<tool-context>')) return 0.7
   if (blockContent.startsWith('<plan-cache-advisory>')) return 0.7
   // U6: plan trace is task-relevant baseline/progress. Explicit salience so
   // Top-K never drops it under appendix budget pressure.

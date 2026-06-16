@@ -23,8 +23,8 @@ import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
 import { STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
 import { classifySeason } from './cognitive-season.js'
-import { renderAffordanceHint, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
-import { selectPolicy, renderPolicyGuidance } from './policy-selection.js'
+import { renderToolContext, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
+import { selectPolicy } from './policy-selection.js'
 import { checkTddGate } from './tdd-gate.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
@@ -276,7 +276,10 @@ export class TurnStepProducer {
     }
 
     // A1: flush advisory bus into prompt engine (unified corrective guidance)
-    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render())
+    // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
+    // matches the domain already rendered in the frozen base.
+    const activeStarName = this.self.sessionDomain?.name
+    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName))
 
     this.self.refreshReliabilityDecision()
 
@@ -476,17 +479,14 @@ export class TurnStepProducer {
       recentToolNames: this.self.recentToolHistory.map(t => t.tool),
       contractStatus: this.self.taskContract?.status,
     }
-    this.self.config.promptEngine.setAffordanceHint(renderAffordanceHint(affordanceState) || null)
-
     // ── Free Energy Engine: EFE-driven policy guidance ──
-    // Meridian 结构喂 EFE：探索信息增益由 physarum 图的边疆度估计（Track 1）。
     let structuralEpistemic: number | undefined
     try { structuralEpistemic = this.self.immuneHook.getPhysarum().structuralEpistemic() } catch { /* graph signal is optional */ }
     const efe = computeEFE(this.self.predictionAccumulator, this.self.currentSeason, this.self.vigorState, currentSensorium, structuralEpistemic)
     this.self.latestPolicySignals = { efe, sensorium: currentSensorium }
     const affordances = computeAffordanceScores(affordanceState, this.self.sessionAffordanceAdaptations)
     const policies = selectPolicy(efe, affordances, { topK: 5 })
-    this.self.config.promptEngine.setPolicyGuidance(renderPolicyGuidance(policies, efe) || null)
+    this.self.config.promptEngine.setToolContext(renderToolContext(affordanceState, policies, efe) || null)
     this.self.recordModelRoutingShadow(currentSensorium, efe)
 
     // ── Adaptive Affordance: periodically recalibrate base affordances from sensorimotor history ──
