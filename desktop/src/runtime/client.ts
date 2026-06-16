@@ -184,6 +184,11 @@ export async function closeSession(id: string): Promise<{ archived: boolean }> {
   return res.json() as Promise<{ archived: boolean }>
 }
 
+/** Restore a previously archived session back to the active list. */
+export async function unarchiveSession(id: string): Promise<{ archived: boolean }> {
+  return apiPost<{ archived: boolean }>(`/sessions/${id}/unarchive`)
+}
+
 export function fetchEvents(id: string, since: number): Promise<{ events: SessionEvent[]; lastSeq: number }> {
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }

@@ -317,7 +317,7 @@ body {
 }
 .thread-card:hover .thread-card-close { opacity: 0.6; }
 .thread-card-close:hover { opacity: 1 !important; color: var(--text); background: var(--panel-3); }
-.thread-close { opacity: 0.6; }
+.thread-close { opacity: 0.6; cursor: pointer; }
 .thread-close:hover { opacity: 1; }
 .empty.sm { padding: var(--space-4); font-size: var(--text-sm); }
 .thread-empty { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); }

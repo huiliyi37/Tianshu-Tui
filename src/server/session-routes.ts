@@ -5,6 +5,7 @@
  *   POST   /sessions                                   create (+optional prompt)
  *   GET    /sessions                                   list
  *   DELETE /sessions/:id                               archive (soft-close)
+ *   POST   /sessions/:id/unarchive                     restore an archived session
  *   GET    /sessions/:id                               one record
  *   POST   /sessions/:id/prompt                        start a run
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
@@ -271,6 +272,14 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found or already archived' } }
       }
       return { status: 200, body: { archived: true } }
+    }, apiToken),
+
+    // Restore a previously archived session back to the active list.
+    'POST /sessions/:id/unarchive': withAuth((_body, params) => {
+      if (!manager.unarchiveSession(params!.id!)) {
+        return { status: 404, body: { error: 'Session not found or not archived' } }
+      }
+      return { status: 200, body: { archived: false } }
     }, apiToken),
 
     'GET /sessions/:id': withAuth((_body, params) => {

@@ -993,7 +993,21 @@ export class RuntimeSessionManager {
     this.touch(s)
     this.append(s, 'status', { status: 'archived' })
     this.persistRecord(s)
-    try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* non-fatal */ }
+    try { this.getRegistry?.()?.releaseAllClaims(id) } catch (e) { console.warn('releaseAllClaims failed during archive:', e) }
+    return true
+  }
+
+  /**
+   * Unarchive (restore) a previously archived session. Returns it to the active
+   * list and resets status to idle. Returns false when missing or not archived.
+   */
+  unarchiveSession(id: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s || !s.record.archived) return false
+    s.record.archived = false
+    s.record.status = 'idle'
+    this.touch(s)
+    this.persistRecord(s)
     return true
   }
 

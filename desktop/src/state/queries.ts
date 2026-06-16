@@ -17,6 +17,7 @@ import {
   sendArtifactFeedback,
   sendPrompt,
   setPlanMode,
+  unarchiveSession,
 } from '../runtime/client'
 import type { PlanModeState } from '../runtime/types'
 
@@ -134,6 +135,14 @@ export function useCloseSession() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => closeSession(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useUnarchiveSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => unarchiveSession(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

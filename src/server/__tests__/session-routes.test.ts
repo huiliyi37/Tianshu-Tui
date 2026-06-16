@@ -491,3 +491,43 @@ test('DELETE /sessions/:id is Bearer-gated', async () => {
   const unauth = await router('DELETE', `/sessions/${id}`, {}, {})
   assert.equal(unauth.status, 401)
 })
+
+// ── Unarchive (POST /sessions/:id/unarchive) ─────────────────────
+
+test('POST /sessions/:id/unarchive restores an archived session to the list', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { title: 'Restore Me' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  // Archive first
+  await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  const listAfter = await router('GET', '/sessions', {}, AUTH)
+  assert.equal((listAfter.body as { sessions: unknown[] }).sessions.length, 0)
+
+  // Unarchive
+  const restore = await router('POST', `/sessions/${id}/unarchive`, {}, AUTH)
+  assert.equal(restore.status, 200)
+  assert.equal((restore.body as { archived: boolean }).archived, false)
+
+  // Back in list
+  const listFinal = await router('GET', '/sessions', {}, AUTH)
+  assert.equal((listFinal.body as { sessions: unknown[] }).sessions.length, 1)
+
+  // Record status reset to idle
+  const one = await router('GET', `/sessions/${id}`, {}, AUTH)
+  assert.equal((one.body as { status: string }).status, 'idle')
+  assert.equal((one.body as { archived?: boolean }).archived, false)
+})
+
+test('POST /sessions/:id/unarchive 404 for missing or non-archived session', async () => {
+  const { router } = setup()
+
+  const missing = await router('POST', '/sessions/ghost/unarchive', {}, AUTH)
+  assert.equal(missing.status, 404)
+
+  // Not archived yet
+  const created = await router('POST', '/sessions', {}, AUTH)
+  const id = (created.body as { id: string }).id
+  const notArchived = await router('POST', `/sessions/${id}/unarchive`, {}, AUTH)
+  assert.equal(notArchived.status, 404)
+})
