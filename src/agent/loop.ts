@@ -68,6 +68,7 @@ import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.j
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
 import { StigmergyStore } from '../context/stigmergy.js'
 import { createStanceTally } from './stance-tally.js'
+import { createFailureJournal, type FailureJournal } from './failure-journal.js'
 import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
@@ -140,6 +141,7 @@ export class AgentLoop {
   planModeState: PlanModeState = 'off'
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
+  failureJournal: FailureJournal = createFailureJournal()
   repairPipeline = new RepairPipeline([ctclSanitizerPass, fourHorsemenPass, semanticRepairPass])
   repairHintTracker = new RepairHintTracker()
   traceStore: TraceStore

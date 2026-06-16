@@ -61,6 +61,7 @@ export interface RuntimeHookDeps {
     sessionId: string
     getDecisions: () => string[]
     getTrajectory: () => TrajectoryEntry[]
+    getFailureJournal?: () => import('./failure-journal.js').FailureJournal
   }
   playbookStore?: PlaybookStore
   buildRetrospectInput?: () => RetrospectInput
@@ -195,6 +196,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getEvidenceState: deps.getEvidenceState,
       getDecisions: deps.dream.getDecisions,
       getTrajectory: deps.dream.getTrajectory,
+      getFailureJournal: deps.dream.getFailureJournal,
+      getPlaybookStore: deps.playbookStore ? () => deps.playbookStore : undefined,
     }))
   }
 

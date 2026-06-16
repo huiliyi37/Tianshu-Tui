@@ -3,6 +3,9 @@ import { persistDream } from '../dream.js'
 import type { TrajectoryEntry as DreamTrajectoryEntry } from '../dream.js'
 import type { TrajectoryEntry } from '../trajectory.js'
 import type { PostSessionRuntimeHook } from '../runtime-hooks.js'
+import type { FailureJournal } from '../failure-journal.js'
+import { distillFromFailures } from '../playbook.js'
+import type { PlaybookStore } from '../playbook-store.js'
 
 export interface DreamHookDeps {
   cwd: string
@@ -10,6 +13,8 @@ export interface DreamHookDeps {
   getEvidenceState: () => EvidenceState
   getDecisions: () => string[]
   getTrajectory: () => TrajectoryEntry[]
+  getFailureJournal?: () => FailureJournal
+  getPlaybookStore?: () => PlaybookStore | undefined
 }
 
 function toDreamTrajectoryEntry(entry: TrajectoryEntry): DreamTrajectoryEntry {
@@ -45,6 +50,20 @@ export function createDreamHook(deps: DreamHookDeps): PostSessionRuntimeHook {
         sessionId: deps.sessionId,
       }
       setImmediate(() => persistDream(cwd, input))
+
+      // Experience distillation: extract diagnostic patterns from FailureJournal
+      const journal = deps.getFailureJournal?.()
+      const store = deps.getPlaybookStore?.()
+      if (journal && store) {
+        const entries = journal.getEntries()
+        if (entries.length > 0) {
+          const patterns = journal.detectPatterns()
+          const bullets = distillFromFailures(entries, patterns)
+          if (bullets.length > 0) {
+            store.addBullets(bullets)
+          }
+        }
+      }
     },
   }
 }

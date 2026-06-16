@@ -258,6 +258,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         sessionId: self.config.sessionId,
         getDecisions: () => self.decisions,
         getTrajectory: () => self.trajectory.getEntries(),
+        getFailureJournal: () => self.failureJournal,
       },
     } : {}),
     meridianIndexer: self.config.meridianIndexer,
