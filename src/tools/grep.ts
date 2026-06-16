@@ -45,6 +45,7 @@ export const GREP_TOOL: Tool = {
 - Prefer grep over bash grep/rg — this tool is faster and respects .gitignore
 - Results are grouped by file with line numbers
 - Pattern can be a regex (default) or literal string
+- For concept-based search when you don't know the exact string or symbol, use semantic_search instead
 
 ### Examples
 Good: grep(pattern="function handleSubmit", path="src/")

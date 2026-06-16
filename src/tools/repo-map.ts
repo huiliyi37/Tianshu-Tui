@@ -140,6 +140,7 @@ export const REPO_MAP_TOOL: Tool = {
 - Use repo_map when entering a project to understand its file layout
 - Shows directory tree with important files annotated
 - Excludes node_modules, .git, dist, build, .next, coverage
+- repo_map shows the file tree; for structural relationships (what imports/calls a file, blast radius) use repo_graph instead
 
 ### On-demand exploration
 - Start with a shallow scan: \`repo_map({ depth: 2 })\` for a high-level overview

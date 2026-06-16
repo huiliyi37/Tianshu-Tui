@@ -24,6 +24,7 @@ export const EDIT_FILE_TOOL: Tool = {
 - Preserve exact indentation (tabs/spaces) from the file
 - Use replace_all to replace every occurrence of old_string
 - Prefer editing existing files over creating new ones
+- Choosing between editors: edit_file for exact unique-string swaps; hash_edit when whitespace makes old_string ambiguous or for large files; apply_patch for multi-file unified diffs
 
 ### Examples
 Good: reading the file, finding the exact string with surrounding context, then replacing
@@ -32,7 +33,7 @@ Bad: using a too-short old_string that matches multiple locations`,
     input_schema: {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Absolute path to the file to edit' },
+        file_path: { type: 'string', description: 'Absolute path to the file to edit. Provide this parameter first.' },
         old_string: { type: 'string', description: 'The exact text to replace (must be unique in the file)' },
         new_string: { type: 'string', description: 'The replacement text' },
         replace_all: { type: 'boolean', description: 'Replace all occurrences of old_string (default: false)' },

@@ -27,8 +27,8 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     input_schema: {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Absolute path to the file' },
-        content: { type: 'string', description: 'Content to write' },
+        file_path: { type: 'string', description: 'Absolute path to the file. Provide this parameter first.' },
+        content: { type: 'string', description: 'Complete file contents (not a diff). Provide this parameter last.' },
       },
       required: ['file_path', 'content'],
     },

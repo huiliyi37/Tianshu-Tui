@@ -117,13 +117,13 @@ This avoids the read→truncate→re-read loop for large files.`,
     input_schema: {
       type: 'object',
       properties: {
-        file_path: { type: 'string', description: 'Absolute path to the file to edit' },
+        file_path: { type: 'string', description: 'Absolute path to the file to edit. Provide this parameter first.' },
         anchors: {
           type: 'array',
           items: { type: 'string' },
           description: '1-3 anchors in "L<line>:<8-char-hex>" (full) or "L<line>" (position-only) format. First and last define the inclusive replacement range.',
         },
-        new_string: { type: 'string', description: 'Replacement text for the anchored block. Use "" to delete.' },
+        new_string: { type: 'string', description: 'Replacement text for the anchored block. Use "" to delete. Provide this parameter last.' },
       },
       required: ['file_path', 'anchors', 'new_string'],
     },
