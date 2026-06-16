@@ -129,6 +129,10 @@ return new TurnCompletionController({
       runBeforeComplete: async () => {
         if (callbacks) await self.runPostSession(callbacks)
       },
+      getEffortShadow: () => self._currentEffortShadow,
+      clearEffortShadow: () => { self._currentEffortShadow = null },
+      completeEffortShadow: (id, input) => { self.p3?.completeEffortShadow(id, input) },
+      getDoomLoopLevel: () => self.getDoomLoopLevel(),
     })
 }
 export function createToolExecutionController(self: AgentLoop): ToolExecutionController {

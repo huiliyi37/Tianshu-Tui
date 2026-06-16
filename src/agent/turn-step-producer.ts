@@ -352,9 +352,6 @@ export class TurnStepProducer {
    * + verification-gap + uncertainty + immune hint) into the prompt engine.
    * Reconnected after the loop-split refactor silently orphaned it.
    *
-   * Note: the sycophancy trap is intentionally NOT recorded here — it needs a
-   * redesign before re-wiring (blind-execution heuristic too coarse). The
-   * `sycophancyHint` therefore stays undefined, matching the prior behavior.
    */
   private runCognitivePrep(
     turn: number,
@@ -366,7 +363,6 @@ export class TurnStepProducer {
       evidence: this.self.evidence.getState(),
       trace: this.self.traceStore,
       turn,
-      // 道常无为而无不为：CVM throttle — skip mirror when overhead > 5%
       sensorium: pressureResult.shouldThrottleCvm ? null : this.self.sensorium,
       strategy: pressureResult.shouldThrottleCvm ? null : this.self.strategy,
       vigor: pressureResult.shouldThrottleCvm ? null : this.self.vigorState,
@@ -376,7 +372,15 @@ export class TurnStepProducer {
       riskLevel: this.self.latestRisk.level,
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
-    const sycophancyHint = undefined
+
+    // Sycophancy trap: record previous turn's behavior
+    if (turn > 1 && this.self.recentToolHistory.length > 0) {
+      const EPISTEMIC_TOOLS = new Set(['read_file', 'grep', 'list_dir', 'glob', 'search', 'recall', 'read_image'])
+      const hadEpistemic = this.self.recentToolHistory.some(t => EPISTEMIC_TOOLS.has(t.tool))
+      const confidence = this.self.sensorium?.confidence ?? 0.5
+      this.self.sycophancyTrap.recordTurn({ agreedWithUser: !hadEpistemic, confidence })
+    }
+    const sycophancyHint = this.self.sycophancyTrap.getHint()
     const immuneHint = this.self._lastImmuneHint ? formatImmuneContext(this.self._lastImmuneHint) : undefined
     this.self._lastImmuneHint = undefined // consume once
     const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''

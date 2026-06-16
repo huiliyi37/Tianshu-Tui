@@ -182,7 +182,7 @@ export class AgentLoop {
   /** Previous turn's streamed assistant text for dedup-guard P5. */
   prevStreamedText: string | null = null
   pressureMonitor: PressureMonitor
-  private sycophancyTrap: SycophancyTrap = createSycophancyTrap()
+  sycophancyTrap: SycophancyTrap = createSycophancyTrap()
   private sycophancyWasActive = false
   turnBudget: TurnBudget = createTurnBudget(0)
   sensorium: Sensorium | null = null

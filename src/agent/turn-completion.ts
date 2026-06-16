@@ -4,6 +4,7 @@ import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { EvidenceTracker } from './evidence.js'
+import type { RewardInput, EffortShadowRecord } from './p3-integration.js'
 import { processTurnEnd } from './turn-end.js'
 
 export interface TurnCompletionCallbacks {
@@ -24,6 +25,10 @@ export interface TurnCompletionDeps {
   refreshCacheDiagnostic: (turn: number) => void
   runPostTurn: () => Promise<void>
   runBeforeComplete?: () => Promise<void>
+  getEffortShadow?: () => EffortShadowRecord | null
+  clearEffortShadow?: () => void
+  completeEffortShadow?: (pendingRewardId: string, input: RewardInput) => void
+  getDoomLoopLevel?: () => 'none' | 'warn' | 'blocked'
 }
 
 export interface CompleteTurnInput {
@@ -50,6 +55,7 @@ export class TurnCompletionController {
     if (input.emitBadge && result.badge) input.callbacks.onTextDelta('\n' + result.badge)
     this.deps.refreshLedger()
     this.deps.refreshCacheDiagnostic(input.turn)
+    this.completeEffortReward()
     await this.deps.runPostTurn()
     if (input.isFinal) await this.deps.runBeforeComplete?.()
     input.callbacks.onTurnComplete(
@@ -57,5 +63,37 @@ export class TurnCompletionController {
       this.deps.session.getTurnCount(),
       input.isFinal,
     )
- }
+  }
+
+  private completeEffortReward(): void {
+    try {
+      const shadow = this.deps.getEffortShadow?.()
+      if (!shadow) return
+
+      const summary = this.deps.trajectory.summarize()
+      const total = Math.max(summary.totalTools, 1)
+      const toolSuccessRate = (total - summary.failures) / total
+      const repairRate = summary.retries / total
+      const doomDetected = this.deps.getDoomLoopLevel?.() === 'blocked'
+
+      const usage = this.deps.session.getTotalUsage()
+      const outputTokens = usage.output_tokens ?? 0
+      const PER_TURN_BUDGET = 8192
+      const expectedTokens = PER_TURN_BUDGET * this.deps.session.getTurnCount()
+      const tokenEfficiency = expectedTokens > 0
+        ? 1 - Math.min(outputTokens / expectedTokens, 2)
+        : 0
+
+      this.deps.completeEffortShadow?.(shadow.pendingRewardId, {
+        toolSuccessRate,
+        repairRate,
+        doomDetected: doomDetected ?? false,
+        tokenEfficiency,
+        userCorrected: false,
+      })
+      this.deps.clearEffortShadow?.()
+    } catch {
+      // Effort reward must never disrupt turn completion
+    }
+  }
 }
