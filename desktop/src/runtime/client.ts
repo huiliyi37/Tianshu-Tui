@@ -3,13 +3,16 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   ArtifactSummary,
+  DomainEntry,
   HealthInfo,
+  ModelEntry,
   PlanDoc,
   PlanModeState,
   PlanSummary,
   ScheduledTask,
   SessionEvent,
   SessionRecord,
+  SkillStatus,
 } from './types'
 
 export interface RuntimeInfo {
@@ -191,6 +194,45 @@ export function answerIntent(
   decision: 'continue' | 'veto' | 'alternative',
 ): Promise<{ ok: boolean }> {
   return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
+}
+
+// ── PlusMenu: models / star-domains / skills ────────────────────────
+
+/** List selectable models for a session (current one flagged). */
+export async function listModels(id: string): Promise<ModelEntry[]> {
+  const { models } = await apiGet<{ models: ModelEntry[] }>(`/sessions/${id}/models`)
+  return models
+}
+
+/** Hot-switch a session's model (preserves history). Returns the updated record. */
+export function switchModel(id: string, modelId: string): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/model`, { modelId })
+}
+
+/** List the star-domain picker entries (Auto / Off / domains, current flagged). */
+export async function listDomains(id: string): Promise<DomainEntry[]> {
+  const { entries } = await apiGet<{ entries: DomainEntry[] }>(`/sessions/${id}/domains`)
+  return entries
+}
+
+/** Set a session's star domain by key ('auto' | 'off' | <domainId>). */
+export function setDomain(id: string, key: string): Promise<{ id: string; domain: string }> {
+  return apiPost<{ id: string; domain: string }>(`/sessions/${id}/domain`, { key })
+}
+
+/** List every loaded skill with its per-session enablement status. */
+export async function listSkills(id: string): Promise<SkillStatus[]> {
+  const { skills } = await apiGet<{ skills: SkillStatus[] }>(`/sessions/${id}/skills`)
+  return skills
+}
+
+/** Enable/disable a skill for a session (affects the discovery block). */
+export function setSkillEnabled(
+  id: string,
+  name: string,
+  enabled: boolean,
+): Promise<{ id: string; name: string; enabled: boolean }> {
+  return apiPost<{ id: string; name: string; enabled: boolean }>(`/sessions/${id}/skills`, { name, enabled })
 }
 
 // ── Plan mode ───────────────────────────────────────────────────────

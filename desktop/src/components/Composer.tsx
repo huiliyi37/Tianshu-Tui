@@ -40,8 +40,10 @@ export function Composer(props: {
   commands?: ComposerCommand[]
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
+  menuRev?: number
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, menuRev } = props
   const planning = planMode === 'planning'
   const togglePlan = useCallback(() => {
     onSetPlanMode?.(planning ? 'off' : 'planning')
@@ -322,6 +324,8 @@ export function Composer(props: {
           >+</button>
           {plusOpen && (
             <PlusMenu
+              sessionId={sessionId}
+              menuRev={menuRev}
               planMode={planMode}
               onSetPlanMode={onSetPlanMode}
               onPickImage={() => fileInputRef.current?.click()}

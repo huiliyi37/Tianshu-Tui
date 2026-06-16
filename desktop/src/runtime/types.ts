@@ -27,6 +27,41 @@ export interface SessionRecord {
   approvalMode?: ApprovalMode
   /** Plan mode — 'planning' restricts the agent to read-only exploration. */
   planMode?: PlanModeState
+  /** PlusMenu — current provider model id (resolved id). Absent → global default. */
+  model?: string
+  /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
+  domain?: string
+}
+
+/** PlusMenu — a selectable model annotated with the session's current flag. */
+export interface ModelEntry {
+  id: string
+  alias: string
+  provider: string
+  contextWindow?: number
+  current: boolean
+}
+
+/** PlusMenu — a star-domain picker entry (Auto / Off / built-in & custom). */
+export interface DomainEntry {
+  /** Selection key: 'auto' | 'off' | <domainId>. */
+  key: string
+  name: string
+  motto: string
+  /** Secondary dim meta: decisionStyle · keywords. */
+  meta: string
+  /** One-shot essence preview (never the full volatileBlock). */
+  essence: string
+  /** Whether this is the session's current selection. */
+  current: boolean
+}
+
+/** PlusMenu — a skill with its per-session enablement status. */
+export interface SkillStatus {
+  name: string
+  description: string
+  source: string
+  enabled: boolean
 }
 
 /** Plan list entry (no markdown body). createdAt/approvedAt are epoch ms. */
@@ -73,6 +108,9 @@ export type SessionEventType =
   | 'steer_queued'
   | 'plan_mode'
   | 'plan_submitted'
+  | 'model_switched'
+  | 'domain_changed'
+  | 'skills_changed'
   | 'done'
 
 export interface SessionEvent {

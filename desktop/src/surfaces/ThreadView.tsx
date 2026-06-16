@@ -226,6 +226,7 @@ export function ThreadView(props: {
         commands={commands}
         planMode={view.planMode}
         onSetPlanMode={onSetPlanMode}
+        menuRev={view.menuRev}
       />
       {showRewind && (
         <RewindOverlay

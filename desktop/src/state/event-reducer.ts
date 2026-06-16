@@ -66,6 +66,11 @@ export interface EventViewState {
   planRev: number
   /** Slug of the most recently submitted plan (drives auto-select + Build hint). */
   latestPlanSlug?: string
+  /**
+   * PlusMenu — bumped on model_switched / domain_changed / skills_changed so an
+   * open Models/Skills/星域 panel re-fetches its list (current flags stay live).
+   */
+  menuRev: number
   /** Whether the last block is an open assistant run that text deltas append to. */
   private_textOpen: boolean
   /** T1 — whether the last block is an open reasoning run that thinking deltas append to. */
@@ -82,6 +87,7 @@ export const initialEventState: EventViewState = {
   todos: [],
   planMode: 'off',
   planRev: 0,
+  menuRev: 0,
   private_textOpen: false,
   private_thinkingOpen: false,
 }
@@ -357,6 +363,13 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'steer',
         text: String(ev.data.text ?? ''),
       }]
+      return next
+    case 'model_switched':
+    case 'domain_changed':
+    case 'skills_changed':
+      // PlusMenu — bump so an open panel re-fetches; the lists carry the live
+      // `current`/`enabled` flags, so we don't track the values here.
+      next.menuRev = next.menuRev + 1
       return next
     case 'todo_state': {
       // T2 — full-replace active task list (the tool is replace-only).
