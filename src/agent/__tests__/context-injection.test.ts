@@ -84,7 +84,8 @@ describe('ContextInjectionController', () => {
       const request = engine.buildOaiRequest([{ role: 'user', content: 'next' }])
       const joined = request.messages.map(m => typeof m.content === 'string' ? m.content : '').join('\n')
       assert.doesNotMatch(joined, /<active-claims/)
-      assert.ok(claimStore.listClaims().some(c => c.consumers.some(consumer => consumer.kind === 'prompt')))
+      // Claims are no longer falsely marked as consumed by prompt on refresh
+      assert.ok(claimStore.listClaims().every(c => c.consumers.length === 0))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

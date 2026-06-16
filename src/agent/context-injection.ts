@@ -86,16 +86,6 @@ export class ContextInjectionController {
     }
 
     contextClaimStore.promoteEligibleClaims(Date.now(), this.deps.getCwd?.())
-    const activeClaims = contextClaimStore.listActiveClaims()
-    const usedAt = Date.now()
-    const consumerId = `turn-${this.deps.session.getTurnCount()}:prompt`
-    for (const claim of activeClaims) {
-      contextClaimStore.recordClaimUsed(claim.id, {
-        consumerId,
-        consumerKind: 'prompt',
-        usedAt,
-      })
-    }
 
     const toEvict = selectEvictionCandidates(contextClaimStore.listActiveClaims())
     for (const claim of toEvict) {

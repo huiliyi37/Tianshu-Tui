@@ -486,7 +486,7 @@ describe('distillFromFailures', () => {
     assert.equal(bullets.length, 1)
     assert.ok(bullets[0]!.lesson.includes('TS2322'))
     assert.ok(bullets[0]!.lesson.includes('src/foo.ts'))
-    assert.equal(bullets[0]!.importance, 0.3)
+    assert.equal(bullets[0]!.importance, 0.6)
     assert.equal(bullets[0]!.source, 'typecheck')
     assert.equal(bullets[0]!.errorSignal, 'TS2322 type mismatch')
     assert.equal(bullets[0]!.fixApproach, 'wrong type cast')

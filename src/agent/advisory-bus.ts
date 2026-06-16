@@ -166,10 +166,20 @@ export class AdvisoryBus {
    * 渲染本轮劝导为 `<星域-advisory>` XML 块。
    * 去重 → Top-3 排序 → 减 TTL → 返回字符串（无条目时返回空串）。
    * 调用后清空本轮 entries，alive 条目进入下轮。
+   *
+   * @param activeStarDomain — active star domain name (e.g. '天枢'). When set,
+   *   advisory entries whose content starts with the same star name are suppressed
+   *   to avoid duplicating the domain presence signal already in the frozen base.
    */
-  render(): string {
+  render(activeStarDomain?: string): string {
     // 合并 alive（上轮未过期） + 本轮新投递
-    const all = [...this.alive, ...this.entries]
+    let all = [...this.alive, ...this.entries]
+
+    // Star-domain dedup: suppress entries whose 【星名】 tag matches the active domain
+    if (activeStarDomain) {
+      const tag = `【${activeStarDomain}】`
+      all = all.filter(e => !e.content.startsWith(tag))
+    }
 
     // 去重：同 key 只保留优先级最高的一条
     const deduped = new Map<string, AdvisoryEntry>()
