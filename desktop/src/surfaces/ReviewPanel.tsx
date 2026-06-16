@@ -9,7 +9,7 @@ import {
 import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { PlanPanel } from './PlanPanel'
-import { editableKey, previewOf } from '../lib/approval-preview'
+import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 
 type ReviewTab = 'review' | 'plan'
@@ -172,6 +172,7 @@ function ApprovalReview(props: {
   onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
 }) {
   const { request, onDecision } = props
+  const mcp = parseMcpToolName(request.toolName)
   const preview = previewOf(request)
   const editKey = editableKey(request)
   const [editing, setEditing] = useState(false)
@@ -182,6 +183,28 @@ function ApprovalReview(props: {
   const approve = () => {
     if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
     else onDecision('approve')
+  }
+
+  // MCP connector opt-in card — never silently use a connector the user didn't
+  // choose. Surfaces the connector identity + the tool/input, and frames the
+  // approval as authorizing the connector (read-only tools won't re-prompt).
+  if (mcp) {
+    return (
+      <div className="review-pending approval mcp-consent">
+        <div className="rp-head">
+          <span className="kind mcp">MCP 连接器</span>
+          <span className="rp-tool">{mcp.serverId}</span>
+        </div>
+        <div className="mcp-consent-note">
+          调用工具 <code>{mcp.toolName}</code>。授权即允许此次调用；只读工具在首次授权后将不再逐次询问。
+        </div>
+        <pre className="rp-preview">{preview.text}</pre>
+        <div className="rp-actions">
+          <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+          <button className="btn sm" onClick={() => onDecision('approve')}>授权连接器</button>
+        </div>
+      </div>
+    )
   }
 
   return (

@@ -199,6 +199,13 @@ body {
 .rp-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 .review-pending .edit-input { width: 100%; min-height: 140px; margin-bottom: var(--space-2); }
 .review-pending .kind.warn { color: var(--warning); }
+
+/* MCP connector opt-in card (W4) — distinct from warn-toned write approvals;
+   framed as a connector authorization rather than a danger gate. */
+.review-pending.mcp-consent { border-color: var(--accent); background: var(--accent-soft, var(--panel-2)); }
+.review-pending.mcp-consent .kind.mcp { color: var(--accent); font-size: var(--text-xs); text-transform: uppercase; }
+.mcp-consent-note { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-sm); word-break: break-word; }
+.mcp-consent-note code { font-family: var(--font-mono); color: var(--text-strong); }
 .btn.danger { background: var(--error); color: #fff; }
 .btn.ghost.danger { background: transparent; color: var(--error); }
 
