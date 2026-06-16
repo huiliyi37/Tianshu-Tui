@@ -3,40 +3,27 @@
  * arguments with a file pointer, because plan_submit.execute already writes
  * the full plan to .rivet/plans/{slug}.md.
  *
- * This is a PURE SYNC operation — no artifactStore needed, no async.
+ * This is a PURE SYNC operation — no artifactStore needed, no async. It is the
+ * threshold-0 instance of the shared createFileContentArgProcessor factory
+ * (same pattern as write_file). When `title` is missing/empty, resolvePath
+ * returns null so no dangling pointer is produced (execute would error anyway).
  */
 
-import type { ToolArgProcessor } from '../agent/tool-arg-post-processor.js'
+import { createFileContentArgProcessor } from '../agent/tool-arg-post-processor.js'
 import { slugify } from '../plan/plan-store.js'
 
 const PLAN_POINTER_PREFIX = '[plan persisted to'
 
-export const planSubmitArgProcessor: ToolArgProcessor = {
+export const planSubmitArgProcessor = createFileContentArgProcessor({
   toolName: 'plan_submit',
-
-  process(args: string): string | null {
-    let parsed: { title?: string; plan?: string; [k: string]: unknown }
-    try { parsed = JSON.parse(args) } catch { return null }
-
-    if (typeof parsed.plan !== 'string' || parsed.plan.length === 0) return null
-
-    // Idempotent: already replaced
-    if (parsed.plan.startsWith(PLAN_POINTER_PREFIX)) return null
-
-    const planLen = parsed.plan.length
-    const planLines = parsed.plan.split('\n').length
-    // No valid title → plan_submit.execute will error and not write a file.
-    // Return null to avoid leaving a dangling pointer to a file that won't exist.
-    const title = typeof parsed.title === 'string' && parsed.title.trim()
-      ? parsed.title.trim()
-      : null
+  contentField: 'plan',
+  pointerPrefix: PLAN_POINTER_PREFIX,
+  threshold: 0,
+  resolvePath: parsed => {
+    const title = typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : null
     if (!title) return null
-    const slug = slugify(title)
-    const fileRef = `.rivet/plans/${slug}.md`
-
-    return JSON.stringify({
-      ...parsed,
-      plan: `${PLAN_POINTER_PREFIX} ${fileRef} — ${planLines} lines, ${planLen} chars. Use read_file to review.]`,
-    })
+    return `.rivet/plans/${slugify(title)}.md`
   },
-}
+  render: ({ path, lines, chars }) =>
+    `${PLAN_POINTER_PREFIX} ${path} — ${lines} lines, ${chars} chars. Use read_file to review.]`,
+})

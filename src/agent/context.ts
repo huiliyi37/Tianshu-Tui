@@ -8,6 +8,8 @@ import { sanitizeForJsonTransport } from '../utils/sanitize.js'
 import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
 import { ToolArgPostProcessorRegistry } from './tool-arg-post-processor.js'
 import { planSubmitArgProcessor } from '../tools/plan-submit-arg-processor.js'
+import { writeFileArgProcessor } from '../tools/write-file-arg-processor.js'
+import { editFileArgProcessor } from '../tools/edit-file-arg-processor.js'
 
 const MAX_TRACKED_FILES = 500
 const MAX_TEST_RESULTS = 500
@@ -83,6 +85,8 @@ export class SessionContext {
     // Register built-in arg processors
     this.argProcessors = new ToolArgPostProcessorRegistry()
     this.argProcessors.register(planSubmitArgProcessor)
+    this.argProcessors.register(writeFileArgProcessor)
+    this.argProcessors.register(editFileArgProcessor)
   }
 
   /**

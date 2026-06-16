@@ -29,7 +29,9 @@ export const EDIT_FILE_TOOL: Tool = {
 ### Examples
 Good: reading the file, finding the exact string with surrounding context, then replacing
 Bad: editing without reading the file first
-Bad: using a too-short old_string that matches multiple locations`,
+Bad: using a too-short old_string that matches multiple locations
+
+**Note:** For unusually large edits, the message history keeps only a short pointer (file path + a preview of the old block) instead of the full old_string/new_string. The edit is still applied to disk in full — use \`read_file\` to review the current content in a later turn.`,
     input_schema: {
       type: 'object',
       properties: {

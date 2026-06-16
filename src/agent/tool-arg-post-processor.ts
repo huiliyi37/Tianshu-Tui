@@ -64,3 +64,57 @@ export class ToolArgPostProcessorRegistry {
     return changed ? result : calls
   }
 }
+
+/**
+ * Options for {@link createFileContentArgProcessor} — the common "single large
+ * text field → file pointer" pattern shared by tools whose `execute` persists
+ * the field to a known on-disk path (e.g. write_file.content → file_path,
+ * plan_submit.plan → .rivet/plans/{slug}.md).
+ */
+export interface FileContentArgProcessorOptions {
+  toolName: string
+  /** Name of the parsed-args field that holds the large text payload. */
+  contentField: string
+  /** Replacement always starts with this — used for the idempotency check. */
+  pointerPrefix: string
+  /** Min content length (chars) to trigger replacement. 0 = always replace. */
+  threshold: number
+  /** Resolve the on-disk path the content is/will-be persisted to. null = skip. */
+  resolvePath: (parsed: Record<string, unknown>) => string | null
+  /** Render the pointer string that replaces the content field. */
+  render: (info: { path: string; lines: number; chars: number }) => string
+}
+
+/**
+ * Build a {@link ToolArgProcessor} that replaces one large text field with a
+ * file pointer. The original field is left untouched on `block.input` (the
+ * processor only sees the stringified arguments), so the tool's `execute` still
+ * receives the full content to write. The on-disk file is the single source of
+ * truth; later turns read it back via read_file.
+ */
+export function createFileContentArgProcessor(opts: FileContentArgProcessorOptions): ToolArgProcessor {
+  return {
+    toolName: opts.toolName,
+    process(args: string): string | null {
+      let parsed: Record<string, unknown>
+      try { parsed = JSON.parse(args) } catch { return null }
+
+      const content = parsed[opts.contentField]
+      if (typeof content !== 'string' || content.length === 0) return null
+      // Idempotent: already replaced.
+      if (content.startsWith(opts.pointerPrefix)) return null
+      // Threshold gate: leave small payloads inline (avoid read-back reflux).
+      if (opts.threshold > 0 && content.length < opts.threshold) return null
+
+      const path = opts.resolvePath(parsed)
+      if (typeof path !== 'string' || path.length === 0) return null
+
+      const chars = content.length
+      const lines = content.split('\n').length
+      return JSON.stringify({
+        ...parsed,
+        [opts.contentField]: opts.render({ path, lines, chars }),
+      })
+    },
+  }
+}

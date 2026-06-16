@@ -23,7 +23,9 @@ export const WRITE_FILE_TOOL: Tool = {
 
 ### Examples
 Good: write_file(file_path="/abs/path/src/new-component.tsx", content="...full file content...")
-Bad: using write_file to change one line in an existing file (use edit_file instead)`,
+Bad: using write_file to change one line in an existing file (use edit_file instead)
+
+**Note:** The file on disk is the source of truth. For large writes, the message history keeps only a short pointer to \`file_path\` instead of the full content — use \`read_file\` if you need to review what was written in a later turn.`,
     input_schema: {
       type: 'object',
       properties: {

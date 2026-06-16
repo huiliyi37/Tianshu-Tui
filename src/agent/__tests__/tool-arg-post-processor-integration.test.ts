@@ -120,3 +120,86 @@ describe('SessionContext + plan_submit arg processor integration', () => {
     assert.ok(args.plan.startsWith('[plan persisted to'), 'persisted args should have pointer')
   })
 })
+
+describe('SessionContext + write_file arg processor integration', () => {
+  it('large write_file content is replaced with a file pointer in oaiMessages', () => {
+    const session = new SessionContext()
+    const bigContent = 'const x = 1\n'.repeat(2000) // ~24KB — the real cache-break shape
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-write-1', name: 'write_file', input: { file_path: '/abs/src/big.ts', content: bigContent } },
+    ]
+
+    session.addUserMessage('write a big file')
+    session.addAssistantBlocks(blocks)
+
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.equal(tc.function.name, 'write_file')
+    assert.ok(tc.function.arguments.includes('[file written to'), 'should contain file pointer')
+    assert.ok(tc.function.arguments.includes('/abs/src/big.ts'), 'should reference file_path')
+    assert.ok(!tc.function.arguments.includes(bigContent.slice(0, 50)), 'full content should be gone')
+  })
+
+  it('small write_file content stays inline (below threshold)', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-write-small', name: 'write_file', input: { file_path: '/a.txt', content: 'hello world' } },
+    ]
+    session.addUserMessage('small write')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('hello world'), 'small content stays inline')
+  })
+
+  it('write_file block.input is not mutated — execute still gets full content', () => {
+    const session = new SessionContext()
+    const bigContent = 'data\n'.repeat(1000)
+    const block: ContentBlock & { type: 'tool_use' } = {
+      type: 'tool_use', id: 'tc-write-mut', name: 'write_file', input: { file_path: '/a.ts', content: bigContent },
+    }
+    session.addUserMessage('write')
+    session.addAssistantBlocks([block])
+    assert.equal((block.input as { content: string }).content, bigContent, 'block.input.content must not be mutated')
+  })
+})
+
+describe('SessionContext + edit_file arg processor integration', () => {
+  it('very large edit collapses old/new strings into pointers', () => {
+    const session = new SessionContext()
+    const bigOld = 'OLD LINE\n'.repeat(1000)
+    const bigNew = 'NEW LINE\n'.repeat(1000)
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-edit-1', name: 'edit_file', input: { file_path: '/abs/foo.ts', old_string: bigOld, new_string: bigNew } },
+    ]
+    session.addUserMessage('big edit')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('[edit on'), 'should collapse to pointer')
+    assert.ok(!tc.function.arguments.includes(bigOld.slice(0, 60)), 'old_string literal gone')
+  })
+
+  it('ordinary edit_file stays inline (below threshold)', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-edit-small', name: 'edit_file', input: { file_path: '/a.ts', old_string: 'foo()', new_string: 'bar()' } },
+    ]
+    session.addUserMessage('small edit')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('foo()'), 'small edit stays inline')
+    assert.ok(tc.function.arguments.includes('bar()'))
+  })
+
+  it('edit_file block.input is not mutated — execute still gets real strings', () => {
+    const session = new SessionContext()
+    const bigOld = 'X'.repeat(5000)
+    const bigNew = 'Y'.repeat(5000)
+    const block: ContentBlock & { type: 'tool_use' } = {
+      type: 'tool_use', id: 'tc-edit-mut', name: 'edit_file', input: { file_path: '/a.ts', old_string: bigOld, new_string: bigNew },
+    }
+    session.addUserMessage('edit')
+    session.addAssistantBlocks([block])
+    const input = block.input as { old_string: string; new_string: string }
+    assert.equal(input.old_string, bigOld, 'block.input.old_string must not be mutated')
+    assert.equal(input.new_string, bigNew, 'block.input.new_string must not be mutated')
+  })
+})
