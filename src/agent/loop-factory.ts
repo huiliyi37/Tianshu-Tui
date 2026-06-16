@@ -213,6 +213,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     setThetaState: state => { self.thetaState = state },
     getPredictionAccumulator: () => self.predictionAccumulator,
     playbookStore: self.config.playbookStore,
+    sessionRegistry: self.config.sessionRegistry,
     buildRetrospectInput: () => {
       const es = self.evidence.getState()
       return {
@@ -239,6 +240,17 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     constellationCwd: self.cwd,
     getConstellationPendingMark: () => self.pendingLeaveMark,
     getConstellationNumericId: () => self._sessionNumericId,
+    companionPresenceEnabled: self.config.sessionId !== undefined,
+    companionPresenceCwd: self.cwd,
+    getCognitiveSnapshot: () => {
+      if (!self.vigorState || !self.sensorium) return null
+      return {
+        vigor: self.vigorState.tonic,
+        stability: self.sensorium.stability,
+        season: self.currentSeason ?? 'unknown',
+      }
+    },
+    getObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 120) ?? null,
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,

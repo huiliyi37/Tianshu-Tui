@@ -23,6 +23,7 @@ import { createMCTSPlanningHook } from './hooks/mcts-planning-hook.js'
 import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatcher-hook.js'
 import { createMemoryLearningPostTurnHook, type MemoryLearningHookDeps } from './hooks/memory-learning-hook.js'
 import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-hooks-bridge.js'
+import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -66,6 +67,8 @@ export interface RuntimeHookDeps {
   playbookStore?: PlaybookStore
   buildRetrospectInput?: () => RetrospectInput
   getDoomLoopLevel?: () => DoomLoopLevel
+  /** SessionRegistry for cross-session fingerprint storage (playbook-reflect). */
+  sessionRegistry?: import('./session-registry.js').SessionRegistry
   chronicle?: { addRadio: (message: string, turn: number) => void; addPhaseTransition: (input: { fromPhase: string; toPhase: string; turn: number; summary: string }) => void }
   /** Returns current star domain id for radio voice modulation. null when no domain matched. */
   getDomainId?: () => DomainVoiceId
@@ -93,6 +96,16 @@ export interface RuntimeHookDeps {
   getConstellationPendingMark?: () => import('../tools/types.js').LeaveMarkInput | null
   /** Session numeric id for departure mark consistency. */
   getConstellationNumericId?: () => number | null
+
+  // ── Companion Presence (postTurn heartbeat → .rivet/presence.json) ──
+  /** Opt-in for companion heartbeat hook. Default: false (only useful with multiple concurrent sessions). */
+  companionPresenceEnabled?: boolean
+  /** Project root for `.rivet/presence.json`. */
+  companionPresenceCwd?: string
+  /** Cognitive state accessor for heartbeat payload. */
+  getCognitiveSnapshot?: () => { vigor: number; stability: number; season: string } | null
+  /** Current task objective for heartbeat. */
+  getObjective?: () => string | null
 
   // ── Anti-anchoring (explicit opt-in, prompt-flow intervention) ──
   /** Explicit opt-in for anti-anchoring harness hooks. Default: disabled. */
@@ -186,6 +199,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       store: deps.playbookStore,
       buildRetrospectInput: deps.buildRetrospectInput,
       getDoomLoopLevel: deps.getDoomLoopLevel,
+      registry: deps.sessionRegistry,
+      sessionId: deps.sessionId,
     }))
   }
 
@@ -262,6 +277,16 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       setPrevStreamedText: deps.setPrevStreamedText,
       threshold: deps.dedupGuardThreshold,
       advisoryBus: deps.advisoryBus,
+    }))
+  }
+
+  if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {
+    hooks.push(createCompanionHeartbeatHook({
+      cwd: deps.companionPresenceCwd,
+      getSessionId: () => deps.sessionId,
+      getDomainId: deps.getDomainId ?? (() => null),
+      getCognitiveSnapshot: deps.getCognitiveSnapshot ?? (() => null),
+      getObjective: deps.getObjective ?? (() => null),
     }))
   }
 
