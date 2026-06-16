@@ -123,6 +123,7 @@ import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
+import { loadSessionMemories } from './session-memory-warmup.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
@@ -1061,32 +1062,12 @@ export class AgentLoop {
     this.memoriesWarmed = true
     const db = this.meridianDbForWarmup
     if (!db) return
-    this.physarumForWarmup?.loadFromDb()
-    const physarumLoadStats = this.physarumForWarmup?.getLastLoadStats()
-    if (physarumLoadStats && physarumLoadStats.discarded > 0) {
-      this.physarumForWarmup?.cleanupPersistedEdges()
-      debugLog(`[physarum] filtered ${physarumLoadStats.discarded} polluted persisted edges; loaded=${physarumLoadStats.loaded}; samples=${JSON.stringify(physarumLoadStats.discardedSamples)}`)
-    }
-    try { this.immuneHook.importMemories(db.loadImmuneMemories()) } catch { /* non-critical */ }
-    try { this.p3?.notebook.importEntries(db.loadMistakeEntries()) } catch { /* non-critical */ }
-    try {
-      const snapshot = db.loadToolPatternMinerSnapshot()
-      if (snapshot) this.p3.miner.importSnapshot(snapshot)
-    } catch { /* non-critical */ }
-    // T2-02 P1: Restore bandit states from MeridianDb (cross-session learning).
-    // effortBandit / bandit are readonly on P3Integration, so we restore them
-    // in place via importState rather than reassigning the references.
-    try {
-      const effortBanditJson = db.loadBanditState('bandit:reasoning_effort')
-      if (effortBanditJson) this.p3.effortBandit.importState(effortBanditJson)
-      const modelBanditJson = db.loadBanditState('bandit:model_style')
-      if (modelBanditJson) this.p3.bandit.importState(modelBanditJson)
-    } catch { /* non-critical */ }
-    // Track B1: Restore PlanCache from MeridianDb
-    try {
-      const planCacheJson = db.loadBanditState('p3:plan_cache')
-      if (planCacheJson) this.p3.importPlanCache(planCacheJson)
-    } catch { /* non-critical */ }
+    loadSessionMemories({
+      db,
+      physarum: this.physarumForWarmup,
+      immuneHook: this.immuneHook,
+      p3: this.p3,
+    })
   }
 
   /**
