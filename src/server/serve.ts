@@ -86,6 +86,158 @@ export interface BuiltAgent {
 }
 
 /**
+ * A resolved provider/model/auth tuple for one model id — the cross-provider
+ * lookup result that switchModel rebuilds an agent on. Mirrors the resolution
+ * logic in bootstrap.switchAgentRuntime (provider/OAuth/apiKey handling).
+ */
+export interface ResolvedModelSpec {
+  provider: ProviderConfig
+  apiKey: string
+  auth?: AuthProvider
+  model: { id: string; maxTokens: number; contextWindow: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
+}
+
+/**
+ * Resolve a model id (or alias) to its provider/apiKey/auth/model spec, scanning
+ * every configured provider. Returns null when the id is unknown or the target
+ * provider has no usable API key (kept fail-closed, like switchAgentRuntime).
+ */
+export function resolveModelSpec(ctx: ServeContext, modelId: string): ResolvedModelSpec | null {
+  for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
+    const found = prov.models.find((m) => m.id === modelId || m.alias === modelId)
+    if (!found) continue
+
+    let provider = ctx.provider
+    let apiKey = ctx.apiKey
+    let auth = ctx.auth
+
+    if (prov.auth?.type === 'oauth') {
+      if (provName !== ctx.provider.name) {
+        provider = prov
+        apiKey = ''
+        auth = createAuthProvider(prov.auth, process.env, prov.apiKey)
+      }
+    } else {
+      const provKey =
+        prov.apiKey ??
+        process.env[prov.apiKeyEnv ?? ''] ??
+        (() => { try { return resolveApiKey(prov) } catch { return undefined } })()
+      if (!provKey) return null
+      if (provName !== ctx.provider.name) {
+        provider = prov
+        apiKey = provKey
+        auth = undefined
+      }
+    }
+
+    return {
+      provider,
+      apiKey,
+      auth,
+      model: {
+        id: found.id,
+        maxTokens: found.maxTokens,
+        contextWindow: found.contextWindow,
+        reasoningEffort: found.reasoningEffort,
+      },
+    }
+  }
+  return null
+}
+
+/** Enumerate every selectable model across all configured providers. */
+export function listAllModels(ctx: ServeContext): { id: string; alias: string; provider: string; contextWindow?: number }[] {
+  const out: { id: string; alias: string; provider: string; contextWindow?: number }[] = []
+  for (const [provName, prov] of Object.entries(ctx.config.provider.providers)) {
+    for (const m of prov.models) {
+      out.push({ id: m.id, alias: m.alias ?? m.id, provider: provName, contextWindow: m.contextWindow })
+    }
+  }
+  return out
+}
+
+/**
+ * Per-session, model-independent pieces. Built once and reused across model
+ * rebuilds so switchModel preserves conversation (same SessionContext) and
+ * shared stores (claims/file-history/playbook/tools/ledgers).
+ */
+interface SessionStores {
+  persist: SessionPersist
+  claimStore: ReturnType<SessionPersist['createClaimStore']>
+  fileHistory: FileHistory
+  playbookStore: PlaybookStore
+  toolRegistry: ReturnType<typeof createDefaultToolRegistry>
+  session: SessionContext
+  taskLedger: ReturnType<typeof createTaskLedger>
+  ownershipLedger: ReturnType<typeof createOwnershipLedger>
+}
+
+function buildSessionStores(ctx: ServeContext, cwd: string, sessionId: string): SessionStores {
+  const persist = new SessionPersist(sessionId)
+  const claimStore = persist.createClaimStore()
+  persist.injectDurableClaims(claimStore)
+  for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
+  const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
+  const playbookStore = new PlaybookStore(cwd)
+  const toolRegistry = createDefaultToolRegistry([], {
+    desktopTools: ctx.config.agent.desktopTools,
+    browserTool: process.env.RIVET_BROWSER_ENABLED === '1',
+  })
+  const session = new SessionContext()
+  const taskLedger = createTaskLedger({ taskId: sessionId })
+  const ownershipLedger = createOwnershipLedger({
+    baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
+    taskLedger,
+  })
+  return { persist, claimStore, fileHistory, playbookStore, toolRegistry, session, taskLedger, ownershipLedger }
+}
+
+/**
+ * Assemble an AgentLoop from prebuilt session stores + a resolved model spec.
+ * Reusing `stores.session` across calls is what lets switchModel hot-swap the
+ * model while keeping the conversation history intact.
+ */
+function assembleAgentLoop(
+  ctx: ServeContext,
+  cwd: string,
+  sessionId: string,
+  stores: SessionStores,
+  spec: ResolvedModelSpec,
+  approvalMode: ApprovalMode | undefined,
+  registry?: SessionRegistry,
+): AgentLoop {
+  const agentCfg = createAgentConfig(createMainAgentConfigInput({
+    apiKey: spec.apiKey,
+    model: {
+      id: spec.model.id,
+      maxTokens: spec.model.maxTokens,
+      contextWindow: spec.model.contextWindow,
+      reasoningEffort: spec.model.reasoningEffort,
+    },
+    cwd,
+    provider: spec.provider,
+    config: ctx.config,
+    sessionId,
+    toolDefinitions: stores.toolRegistry.getDefinitions(),
+    sessionMemoryBlock: stores.persist.buildMemoryBlock(),
+    auth: spec.auth,
+  }))
+  if (approvalMode) agentCfg.approvalMode = approvalMode
+  return new AgentLoop({
+    ...agentCfg,
+    toolRegistry: stores.toolRegistry,
+    maxTurns: ctx.config.agent.maxTurns,
+    contextClaimStore: stores.claimStore,
+    getSessionMemoryState: () => stores.persist.getSessionMemoryState(),
+    fileHistory: stores.fileHistory,
+    playbookStore: stores.playbookStore,
+    sessionRegistry: registry,
+    taskLedger: stores.taskLedger,
+    ownershipLedger: stores.ownershipLedger,
+  }, stores.session, cwd)
+}
+
+/**
  * Build a fully-wired AgentLoop for one session rooted at `cwd`. Each call gets
  * its own SessionPersist / claim store / FileHistory / PlaybookStore / tool
  * registry / PromptEngine (via createAgentConfig) and its own ArtifactStore
@@ -105,58 +257,76 @@ export function buildAgentLoop(
   registry?: SessionRegistry,
   approvalMode?: ApprovalMode,
 ): BuiltAgent {
-  const persist = new SessionPersist(sessionId)
-  const claimStore = persist.createClaimStore()
-  persist.injectDurableClaims(claimStore)
-  for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
-  const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
-  const playbookStore = new PlaybookStore(cwd)
-  const toolRegistry = createDefaultToolRegistry([], {
-    desktopTools: ctx.config.agent.desktopTools,
-    // N4: browser verification — opt-in (new attack surface, needs Playwright).
-    browserTool: process.env.RIVET_BROWSER_ENABLED === '1',
-  })
-  const agentCfg = createAgentConfig(createMainAgentConfigInput({
+  const stores = buildSessionStores(ctx, cwd, sessionId)
+  const spec: ResolvedModelSpec = {
+    provider: ctx.provider,
     apiKey: ctx.apiKey,
+    auth: ctx.auth,
     model: {
       id: ctx.model.id,
       maxTokens: ctx.model.maxTokens,
       contextWindow: ctx.model.contextWindow,
       reasoningEffort: ctx.model.reasoningEffort,
     },
-    cwd,
-    provider: ctx.provider,
-    config: ctx.config,
-    sessionId,
-    toolDefinitions: toolRegistry.getDefinitions(),
-    sessionMemoryBlock: persist.buildMemoryBlock(),
-    auth: ctx.auth,
-  }))
-  // S — per-session autonomy override. When the desktop creates a session with
-  // an explicit level it wins over the global config approval mode; otherwise
-  // the global default (createMainAgentConfigInput) stands.
-  if (approvalMode) agentCfg.approvalMode = approvalMode
-  const session = new SessionContext()
-  // R1 — per-session ownership bookkeeping. Cheap to build (one git snapshot);
-  // only meaningful when a registry is wired, but harmless otherwise.
-  const taskLedger = createTaskLedger({ taskId: sessionId })
-  const ownershipLedger = createOwnershipLedger({
-    baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
-    taskLedger,
-  })
-  const agent = new AgentLoop({
-    ...agentCfg,
-    toolRegistry,
-    maxTurns: ctx.config.agent.maxTurns,
-    contextClaimStore: claimStore,
-    getSessionMemoryState: () => persist.getSessionMemoryState(),
-    fileHistory,
-    playbookStore,
-    sessionRegistry: registry,
-    taskLedger,
-    ownershipLedger,
-  }, session, cwd)
+  }
+  const agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
   return { agent, sessionId }
+}
+
+/**
+ * Build a ManagedAgent whose underlying AgentLoop can be hot-swapped onto a new
+ * model (switchModel) without losing the conversation. The shared SessionStores
+ * (including SessionContext) are built once; switchModel re-assembles only the
+ * AgentLoop on a freshly resolved model spec and re-points the holder, so every
+ * delegating method below transparently uses the live agent.
+ */
+function buildManagedAgent(
+  ctx: ServeContext,
+  cwd: string,
+  sessionId: string,
+  registry: SessionRegistry | undefined,
+  approvalMode: ApprovalMode | undefined,
+): import('./session-manager.js').ManagedAgent {
+  const stores = buildSessionStores(ctx, cwd, sessionId)
+  let spec: ResolvedModelSpec = {
+    provider: ctx.provider,
+    apiKey: ctx.apiKey,
+    auth: ctx.auth,
+    model: {
+      id: ctx.model.id,
+      maxTokens: ctx.model.maxTokens,
+      contextWindow: ctx.model.contextWindow,
+      reasoningEffort: ctx.model.reasoningEffort,
+    },
+  }
+  let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+  return {
+    run: (prompt, callbacks) => agent.run(prompt, callbacks),
+    abort: () => agent.abort(),
+    setApprovalMode: (mode) => agent.setApprovalMode(mode),
+    enterPlanMode: () => agent.enterPlanMode(),
+    exitPlanMode: () => agent.exitPlanMode(),
+    setActivePlan: (plan) => agent.setActivePlan(plan),
+    listArtifacts: () => agent.artifactStore?.list() ?? [],
+    readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
+    getMessages: () => agent.session.getMessages(),
+    replaceMessages: (msgs) => agent.session.replaceMessages(msgs),
+    rewindToMessages: (msgs) => agent.session.rewindToMessages(msgs),
+    // PlusMenu — star domain (delegate to the live agent).
+    setSessionDomain: (domain) => agent.setSessionDomain(domain),
+    resetSessionDomain: () => agent.resetSessionDomain(),
+    getSessionDomain: () => agent.getSessionDomain(),
+    // PlusMenu — skills (per-session discovery filter on the live agent).
+    setDisabledSkills: (names) => agent.setDisabledSkills(names),
+    // PlusMenu — model hot-switch (rebuild on the same SessionContext).
+    switchModel: (modelId) => {
+      const next = resolveModelSpec(ctx, modelId)
+      if (!next) return null
+      spec = next
+      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+      return spec.model.id
+    },
+  }
 }
 
 export interface RunServeOptions {
@@ -228,26 +398,15 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // manager's session id is threaded into buildAgentLoop so the agent's stores
   // align with the session.
   const sessions = new RuntimeSessionManager({
-    createAgent: (cwd, sessionId, approvalMode) => {
-      const { agent } = buildAgentLoop(ctx, cwd ?? process.cwd(), sessionId, sessionRegistry, approvalMode)
-      return {
-        run: (prompt, callbacks) => agent.run(prompt, callbacks),
-        abort: () => agent.abort(),
-        setApprovalMode: (mode) => agent.setApprovalMode(mode),
-        enterPlanMode: () => agent.enterPlanMode(),
-        exitPlanMode: () => agent.exitPlanMode(),
-        setActivePlan: (plan) => agent.setActivePlan(plan),
-        listArtifacts: () => agent.artifactStore?.list() ?? [],
-        readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
-        getMessages: () => agent.session.getMessages(),
-        replaceMessages: (msgs) => agent.session.replaceMessages(msgs),
-        rewindToMessages: (msgs) => agent.session.rewindToMessages(msgs),
-      }
-    },
+    createAgent: (cwd, sessionId, approvalMode) =>
+      buildManagedAgent(ctx, cwd ?? process.cwd(), sessionId ?? randomUUID(), sessionRegistry, approvalMode),
     defaultCwd: process.cwd(),
     persistence,
     // R1 — late-bound getter: registry resolves async after server start.
     getSessionRegistry: () => sessionRegistry,
+    // PlusMenu — provider model source + default for the model picker.
+    listModels: () => listAllModels(ctx),
+    defaultModelId: ctx.model.id,
   })
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.

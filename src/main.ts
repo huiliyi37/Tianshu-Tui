@@ -29,6 +29,7 @@ import { killAllSync } from './tools/process-tracker.js'
 import { getTheme } from './tui/theme.js'
 import { resolveAppPromptInput } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
+import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
@@ -353,41 +354,11 @@ async function main() {
     },
     // Tasks — /tasks 显示运行中子代理（per-worker，来自舰队读模型）
     tasksData: () => tuiApp.getRunningWorkers(),
-    // Domain Picker — 裸 /domain 打开的 CC 风星域选择器
-    domainPickerData: () => {
-      const current = ctx!.agent.getSessionDomain() // domain | null | undefined
-      const entries = [
-        {
-          key: 'auto',
-          name: 'Auto',
-          motto: '按任务匹配',
-          meta: 'auto · 关键词自动匹配星域',
-          essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时不激活任何人格。',
-          current: current === undefined,
-        },
-        {
-          key: 'off',
-          name: 'Off',
-          motto: '无星域',
-          meta: '关闭星域人格',
-          essence: '本会话不激活任何星域方法论，仅使用基础执行纪律。',
-          current: current === null,
-        },
-        ...starDomainRegistry.list().map(d => {
-          const firstLine = (d.volatileBlock || '').split('\n').map(s => s.trim()).find(s => s.length > 0) ?? ''
-          const essence = [d.motto, firstLine].filter(Boolean).join(' — ').slice(0, 400)
-          return {
-            key: d.id,
-            name: d.name,
-            motto: d.motto ?? '',
-            meta: `${d.decisionStyle} · ${d.keywords.slice(0, 4).join(',')}`,
-            essence,
-            current: current != null && current.id === d.id,
-          }
-        }),
-      ]
-      return { entries, selectedIndex: 0 }
-    },
+    // Domain Picker — 裸 /domain 打开的 CC 风星域选择器（entries 由共享 builder 构造）
+    domainPickerData: () => ({
+      entries: buildDomainPickerEntries(ctx!.agent.getSessionDomain()),
+      selectedIndex: 0,
+    }),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。

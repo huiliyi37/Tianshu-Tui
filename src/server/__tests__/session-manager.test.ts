@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
+import { RuntimeSessionManager, type ManagedAgent, type ModelOption } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import type { ActiveStarDomain } from '../../agent/star-domain.js'
 
 class FakeAgent implements ManagedAgent {
   callbacks?: AgentCallbacks
@@ -511,4 +512,127 @@ test('T4: onDelegationActivity emits per-worker delegation with progress + elaps
   assert.equal(evs[0]!.data.progressLine, '⚙ grep')
   assert.equal(typeof evs[0]!.data.elapsedMs, 'number')
   assert.equal(evs[1]!.data.status, 'passed')
+})
+
+// ── PlusMenu: model / star-domain / skills ──────────────────────────
+
+/** Richer fake exposing the optional PlusMenu surface for wiring assertions. */
+class PlusFakeAgent implements ManagedAgent {
+  callbacks?: AgentCallbacks
+  messages: OaiMessage[] = []
+  domain: ActiveStarDomain | null | undefined = undefined
+  disabled = new Set<string>()
+  model = 'model-a'
+  private resolveRun?: () => void
+  run(_p: string, cb: AgentCallbacks): Promise<void> { this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
+  finish(): void { this.resolveRun?.() }
+  abort(): void { this.resolveRun?.() }
+  listArtifacts(): Artifact[] { return [] }
+  readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return this.messages }
+  replaceMessages(m: OaiMessage[]): void { this.messages = m }
+  rewindToMessages(m: OaiMessage[]): void { this.messages = m }
+  setSessionDomain(d: ActiveStarDomain | null): void { this.domain = d }
+  resetSessionDomain(): void { this.domain = undefined }
+  getSessionDomain(): ActiveStarDomain | null | undefined { return this.domain }
+  setDisabledSkills(names: Set<string>): void { this.disabled = new Set(names) }
+  switchModel(modelId: string): string | null {
+    if (modelId === 'model-a' || modelId === 'model-b') { this.model = modelId; return modelId }
+    return null
+  }
+}
+
+function makePlusManager() {
+  const agents: PlusFakeAgent[] = []
+  const models: ModelOption[] = [
+    { id: 'model-a', alias: 'Model A', provider: 'p', contextWindow: 128000 },
+    { id: 'model-b', alias: 'Model B', provider: 'p', contextWindow: 256000 },
+  ]
+  const manager = new RuntimeSessionManager({
+    createAgent: () => { const a = new PlusFakeAgent(); agents.push(a); return a },
+    defaultCwd: '/tmp/work',
+    listModels: () => models,
+    defaultModelId: 'model-a',
+  })
+  return { manager, agents }
+}
+
+test('PlusMenu: listDomains flags Auto by default; setDomain pins a domain', () => {
+  const { manager } = makePlusManager()
+  const s = manager.createSession({})
+  const entries = manager.listDomains(s.id)!
+  assert.ok(entries.length >= 3)
+  const auto = entries.find((e) => e.key === 'auto')!
+  assert.equal(auto.current, true)
+
+  assert.equal(manager.setDomain(s.id, 'tianshu'), true)
+  const after = manager.listDomains(s.id)!
+  assert.equal(after.find((e) => e.key === 'tianshu')!.current, true)
+  assert.equal(after.find((e) => e.key === 'auto')!.current, false)
+  assert.equal(manager.getSession(s.id)!.domain, 'tianshu')
+
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'domain_changed')!
+  assert.equal(ev.data.key, 'tianshu')
+})
+
+test('PlusMenu: setDomain rejects an unknown key', () => {
+  const { manager } = makePlusManager()
+  const s = manager.createSession({})
+  assert.equal(manager.setDomain(s.id, 'nope-xyz'), false)
+})
+
+test('PlusMenu: domain selection applies to a lazily-built agent', () => {
+  const { manager, agents } = makePlusManager()
+  const s = manager.createSession({})
+  manager.setDomain(s.id, 'tianshu') // before any agent exists
+  manager.run(s.id, 'go')            // builds the agent → applySelections runs
+  assert.equal(agents[0]!.domain?.id, 'tianshu')
+})
+
+test('PlusMenu: listModels flags current; switchModel updates record + emits', () => {
+  const { manager } = makePlusManager()
+  const s = manager.createSession({})
+  const before = manager.listModels(s.id)!
+  assert.equal(before.find((m) => m.id === 'model-a')!.current, true)
+
+  assert.equal(manager.switchModel(s.id, 'model-b'), true)
+  assert.equal(manager.getSession(s.id)!.model, 'model-b')
+  const after = manager.listModels(s.id)!
+  assert.equal(after.find((m) => m.id === 'model-b')!.current, true)
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'model_switched')!
+  assert.equal(ev.data.modelId, 'model-b')
+})
+
+test('PlusMenu: switchModel rejects unknown id and refuses while running', () => {
+  const { manager } = makePlusManager()
+  const s = manager.createSession({})
+  assert.equal(manager.switchModel(s.id, 'ghost'), false)
+
+  manager.run(s.id, 'go') // now running
+  assert.equal(manager.switchModel(s.id, 'model-b'), false)
+})
+
+test('PlusMenu: setSkillEnabled toggles disabled set + applies to live agent', () => {
+  const { manager, agents } = makePlusManager()
+  const s = manager.createSession({})
+  manager.run(s.id, 'go') // build agent so live-apply path runs
+  assert.equal(manager.setSkillEnabled(s.id, 'leave-ritual', false), true)
+  assert.ok(agents[0]!.disabled.has('leave-ritual'))
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'skills_changed')!
+  assert.equal(ev.data.name, 'leave-ritual')
+  assert.equal(ev.data.enabled, false)
+
+  // Re-enabling removes it from the disabled set.
+  manager.setSkillEnabled(s.id, 'leave-ritual', true)
+  assert.equal(agents[0]!.disabled.has('leave-ritual'), false)
+})
+
+test('PlusMenu: missing session yields undefined/false from menu methods', () => {
+  const { manager } = makePlusManager()
+  assert.equal(manager.listModels('nope'), undefined)
+  assert.equal(manager.listDomains('nope'), undefined)
+  assert.equal(manager.listSkills('nope'), undefined)
+  assert.equal(manager.setDomain('nope', 'auto'), false)
+  assert.equal(manager.switchModel('nope', 'model-a'), false)
+  assert.equal(manager.setSkillEnabled('nope', 'x', false), false)
 })

@@ -327,6 +327,97 @@ test('Plan: POST /plans/:slug/reject keeps the file and marks rejected', async (
   assert.match(after, /Status: REJECTED/)
 })
 
+// ── PlusMenu routes (models / domains / skills) ─────────────────────
+
+class ModelFakeAgent extends FakeAgent {
+  switchModel(modelId: string): string | null {
+    return modelId === 'model-b' ? modelId : null
+  }
+}
+
+function setupPlus() {
+  const agents: ModelFakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => { const a = new ModelFakeAgent(); agents.push(a); return a },
+    defaultCwd: '/tmp/work',
+    listModels: () => [
+      { id: 'model-a', alias: 'Model A', provider: 'p', contextWindow: 128000 },
+      { id: 'model-b', alias: 'Model B', provider: 'p', contextWindow: 256000 },
+    ],
+    defaultModelId: 'model-a',
+  })
+  const router = createRouter(buildSessionRoutes(manager, TOKEN))
+  return { manager, agents, router }
+}
+
+test('GET /models lists provider models with current flag', async () => {
+  const { router } = setupPlus()
+  const s = await router('POST', '/sessions', {}, AUTH)
+  const id = (s.body as { id: string }).id
+  const res = await router('GET', `/sessions/${id}/models`, {}, AUTH)
+  assert.equal(res.status, 200)
+  const models = (res.body as { models: Array<{ id: string; current: boolean }> }).models
+  assert.equal(models.length, 2)
+  assert.equal(models.find((m) => m.id === 'model-a')!.current, true)
+})
+
+test('POST /model switches model on an idle session; 409 on unknown', async () => {
+  const { router } = setupPlus()
+  const s = await router('POST', '/sessions', {}, AUTH)
+  const id = (s.body as { id: string }).id
+  const ok = await router('POST', `/sessions/${id}/model`, { modelId: 'model-b' }, AUTH)
+  assert.equal(ok.status, 200)
+  assert.equal((ok.body as { model: string }).model, 'model-b')
+
+  const bad = await router('POST', `/sessions/${id}/model`, { modelId: 'ghost' }, AUTH)
+  assert.equal(bad.status, 409)
+
+  const missing = await router('POST', `/sessions/${id}/model`, {}, AUTH)
+  assert.equal(missing.status, 400)
+})
+
+test('GET /domains + POST /domain round-trips a selection', async () => {
+  const { router } = setupPlus()
+  const s = await router('POST', '/sessions', {}, AUTH)
+  const id = (s.body as { id: string }).id
+  const before = await router('GET', `/sessions/${id}/domains`, {}, AUTH)
+  const entries = (before.body as { entries: Array<{ key: string; current: boolean }> }).entries
+  assert.equal(entries.find((e) => e.key === 'auto')!.current, true)
+
+  const set = await router('POST', `/sessions/${id}/domain`, { key: 'tianshu' }, AUTH)
+  assert.equal(set.status, 200)
+  const after = await router('GET', `/sessions/${id}/domains`, {}, AUTH)
+  const e2 = (after.body as { entries: Array<{ key: string; current: boolean }> }).entries
+  assert.equal(e2.find((e) => e.key === 'tianshu')!.current, true)
+
+  const bad = await router('POST', `/sessions/${id}/domain`, { key: 'nope' }, AUTH)
+  assert.equal(bad.status, 404)
+})
+
+test('GET /skills + POST /skills toggles enablement', async () => {
+  const { router } = setupPlus()
+  const s = await router('POST', '/sessions', {}, AUTH)
+  const id = (s.body as { id: string }).id
+  const res = await router('GET', `/sessions/${id}/skills`, {}, AUTH)
+  assert.equal(res.status, 200)
+  assert.ok(Array.isArray((res.body as { skills: unknown[] }).skills))
+
+  const toggled = await router('POST', `/sessions/${id}/skills`, { name: 'demo', enabled: false }, AUTH)
+  assert.equal(toggled.status, 200)
+  assert.equal((toggled.body as { enabled: boolean }).enabled, false)
+
+  const bad = await router('POST', `/sessions/${id}/skills`, { name: 'demo' }, AUTH)
+  assert.equal(bad.status, 400)
+})
+
+test('PlusMenu read routes 404 on a missing session', async () => {
+  const { router } = setupPlus()
+  for (const path of ['models', 'domains', 'skills']) {
+    const res = await router('GET', `/sessions/ghost/${path}`, {}, AUTH)
+    assert.equal(res.status, 404)
+  }
+})
+
 test('classifyArtifact taxonomy mapping', () => {
   const base = { id: 'x', sessionId: 's', createdAt: 0, summary: '', sections: [], rawPath: '', charCount: 0, lineCount: 0, sha256: '' }
   assert.equal(classifyArtifact({ ...base, tool: 'write_plan', target: 'plan.md' }), 'plan')

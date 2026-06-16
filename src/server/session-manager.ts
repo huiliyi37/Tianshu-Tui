@@ -32,6 +32,11 @@ import {
   type PlanDocument,
 } from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
+import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
+import { starDomainRegistry } from '../agent/star-domain-registry.js'
+import type { ActiveStarDomain } from '../agent/star-domain.js'
+import type { StarDomainId } from '../agent/star-domain.js'
+import { skillRegistry } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
@@ -62,6 +67,10 @@ export type SessionEventType =
   // Plan mode — state toggle (off|planning) + a plan was submitted to disk.
   | 'plan_mode'
   | 'plan_submitted'
+  // PlusMenu — per-session model / star-domain / skill selection changes.
+  | 'model_switched'
+  | 'domain_changed'
+  | 'skills_changed'
   | 'done'
 
 export interface SessionEvent {
@@ -94,6 +103,39 @@ export interface SessionRecord {
    * normal execution. Mirrors AgentLoop.planModeState.
    */
   planMode?: PlanModeState
+  /**
+   * PlusMenu — current provider model id for this session (the resolved model
+   * id, not an alias). Absent → the global default. Surfaced in the model picker
+   * and persisted so a reconnecting viewer sees the live model.
+   */
+  model?: string
+  /**
+   * PlusMenu — star-domain selection KEY ('auto' | 'off' | <domainId>). Stored
+   * as the round-trippable key (not a display name) so rehydrate can restore the
+   * live ActiveStarDomain. Absent → 'auto'.
+   */
+  domain?: string
+}
+
+/** PlusMenu — a selectable model across all configured providers. */
+export interface ModelOption {
+  id: string
+  alias: string
+  provider: string
+  contextWindow?: number
+}
+
+/** PlusMenu — a model option annotated with whether it's the session's current. */
+export interface ModelEntry extends ModelOption {
+  current: boolean
+}
+
+/** PlusMenu — a skill's per-session enablement status. */
+export interface SkillStatus {
+  name: string
+  description: string
+  source: string
+  enabled: boolean
 }
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
@@ -128,6 +170,28 @@ export interface ManagedAgent {
   replaceMessages(msgs: OaiMessage[]): void
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
   rewindToMessages(msgs: OaiMessage[]): void
+  /**
+   * PlusMenu (domain) — pin a star domain (or null to disable). Mirrors
+   * AgentLoop.setSessionDomain. Optional for lightweight test doubles.
+   */
+  setSessionDomain?(domain: ActiveStarDomain | null): void
+  /** PlusMenu (domain) — reset to Auto (next run auto-detects from input). */
+  resetSessionDomain?(): void
+  /** PlusMenu (domain) — read the current selection (Auto when undefined). */
+  getSessionDomain?(): ActiveStarDomain | null | undefined
+  /**
+   * PlusMenu (model) — rebuild this session's agent on a new model, preserving
+   * the conversation (same SessionContext) and shared stores. Returns the
+   * resolved model id, or null when the model id is unknown / unauthorized.
+   * Optional for lightweight test doubles.
+   */
+  switchModel?(modelId: string): string | null
+  /**
+   * PlusMenu (skills) — set the per-session disabled skill set. Filters the
+   * discovery block so disabled skills are hidden from the model. Optional for
+   * lightweight test doubles.
+   */
+  setDisabledSkills?(names: Set<string>): void
 }
 
 /**
@@ -183,6 +247,17 @@ export interface RuntimeSessionManagerOptions {
    * server starts. Returns undefined when concurrency features are disabled.
    */
   getSessionRegistry?: () => SessionRegistry | undefined
+  /**
+   * PlusMenu (model) — enumerate selectable models across all configured
+   * providers. Injected by serve.ts (which owns the provider config). Absent in
+   * tests → the model picker returns an empty list.
+   */
+  listModels?: () => ModelOption[]
+  /**
+   * PlusMenu (model) — the default model id new sessions start on. Used for the
+   * initial record.model and the picker's `current` flag.
+   */
+  defaultModelId?: string
 }
 
 type InterventionKind = 'approval' | 'intent'
@@ -215,6 +290,15 @@ interface InternalSession {
    * both the index and raw files keyed by sessionId.
    */
   rehydratedArtifacts?: ArtifactStore
+  /**
+   * PlusMenu (domain) — live star-domain selection. Tri-state mirrors
+   * AgentLoop.getSessionDomain: undefined=Auto, null=Off, object=pinned. Applied
+   * to the agent on ensureAgent (so lazy build is consistent) and after a model
+   * rebuild (so the selection survives switchModel).
+   */
+  domainState: ActiveStarDomain | null | undefined
+  /** PlusMenu (skills) — per-session disabled skill names (in-memory). */
+  disabledSkills: Set<string>
 }
 
 const REDACTED = '[REDACTED]'
@@ -273,6 +357,8 @@ export class RuntimeSessionManager {
   private readonly approvalTimeoutMs: number
   private readonly persistence?: SessionPersistenceAdapter
   private readonly getRegistry?: () => SessionRegistry | undefined
+  private readonly listModelsFn?: () => ModelOption[]
+  private readonly defaultModelId?: string
 
   constructor(opts: RuntimeSessionManagerOptions) {
     this.createAgent = opts.createAgent
@@ -283,6 +369,8 @@ export class RuntimeSessionManager {
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
     this.persistence = opts.persistence
     this.getRegistry = opts.getSessionRegistry
+    this.listModelsFn = opts.listModels
+    this.defaultModelId = opts.defaultModelId
     if (this.persistence) this.rehydrate()
   }
 
@@ -320,6 +408,10 @@ export class RuntimeSessionManager {
           events.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
         ),
         steer: new SteerBuffer(),
+        // Restore the live domain selection from the persisted key so a rebuilt
+        // agent re-applies it. Skills are in-memory only → start clean.
+        domainState: resolveDomainState(ps.record.domain ?? 'auto')?.state,
+        disabledSkills: new Set(),
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
@@ -370,6 +462,8 @@ export class RuntimeSessionManager {
         lastSeq: 0,
         pendingApprovals: 0,
         approvalMode: input.approvalMode,
+        model: this.defaultModelId,
+        domain: 'auto',
       },
       agent: null,
       approvalMode: input.approvalMode,
@@ -380,6 +474,8 @@ export class RuntimeSessionManager {
       listeners: new Set(),
       knownArtifacts: new Set(),
       steer: new SteerBuffer(),
+      domainState: undefined,
+      disabledSkills: new Set(),
     }
     this.sessions.set(id, session)
     this.persistRecord(session)
@@ -442,8 +538,139 @@ export class RuntimeSessionManager {
   private ensureAgent(session: InternalSession): ManagedAgent {
     if (!session.agent) {
       session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
+      this.applySelections(session)
     }
     return session.agent
+  }
+
+  /**
+   * Re-apply the session's PlusMenu selections (star domain, disabled skills) to
+   * its live agent. Idempotent — called both after a lazy build (ensureAgent)
+   * and after a model rebuild (switchModel) so the selections survive a fresh
+   * AgentLoop. A domainState of undefined means Auto → leave the agent's own
+   * auto-detection untouched.
+   */
+  private applySelections(session: InternalSession): void {
+    const agent = session.agent
+    if (!agent) return
+    try {
+      if (session.domainState === null) agent.setSessionDomain?.(null)
+      else if (session.domainState !== undefined) agent.setSessionDomain?.(session.domainState)
+    } catch { /* non-fatal */ }
+    try {
+      if (session.disabledSkills.size > 0) agent.setDisabledSkills?.(new Set(session.disabledSkills))
+    } catch { /* non-fatal */ }
+  }
+
+  // ── PlusMenu: star domain ─────────────────────────────────────
+
+  /**
+   * PlusMenu — list the domain picker entries for this session (Auto / Off /
+   * built-in + custom domains) with the session's current selection flagged.
+   * Returns undefined when the session is missing.
+   */
+  listDomains(id: string): DomainPickerEntry[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return buildDomainPickerEntries(session.domainState)
+  }
+
+  /**
+   * PlusMenu — set the session's star domain by selection key (auto | off |
+   * <domainId>). Updates the stored selection (applied on lazy build), live-
+   * mutates an already-built agent, persists the key, and emits domain_changed.
+   * Returns false when the session is missing or the key is unknown.
+   */
+  setDomain(id: string, key: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    const resolved = resolveDomainState(key)
+    if (!resolved) return false
+    session.domainState = resolved.state
+    session.record.domain = resolved.key
+    try {
+      if (resolved.state === undefined) session.agent?.resetSessionDomain?.()
+      else session.agent?.setSessionDomain?.(resolved.state)
+    } catch { /* non-fatal */ }
+    this.touch(session)
+    this.append(session, 'domain_changed', { key: resolved.key, name: resolved.label })
+    this.persistRecord(session)
+    return true
+  }
+
+  // ── PlusMenu: model ───────────────────────────────────────────
+
+  /**
+   * PlusMenu — list selectable models for this session, flagging the current
+   * one. Returns undefined when the session is missing. Empty when no provider
+   * model source was injected (tests).
+   */
+  listModels(id: string): ModelEntry[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    const current = session.record.model
+    const all = this.listModelsFn?.() ?? []
+    return all.map((m) => ({ ...m, current: m.id === current || m.alias === current }))
+  }
+
+  /**
+   * PlusMenu — hot-switch the session's model, preserving conversation history.
+   * Refuses while the session is running (caller must abort first), rebuilds the
+   * agent on the new model (same SessionContext), re-applies domain/skill
+   * selections, persists record.model, and emits model_switched. Returns false
+   * when the session is missing/running or the model id is unknown.
+   */
+  switchModel(id: string, modelId: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session || session.running) return false
+    const agent = this.ensureAgent(session)
+    let resolved: string | null
+    try {
+      resolved = agent.switchModel?.(modelId) ?? null
+    } catch {
+      return false
+    }
+    if (!resolved) return false
+    // The rebuild produced a fresh AgentLoop — re-bind per-session selections.
+    this.applySelections(session)
+    session.record.model = resolved
+    this.touch(session)
+    this.append(session, 'model_switched', { modelId: resolved })
+    this.persistRecord(session)
+    return true
+  }
+
+  // ── PlusMenu: skills ──────────────────────────────────────────
+
+  /**
+   * PlusMenu — list every loaded skill with its per-session enablement status.
+   * Returns undefined when the session is missing.
+   */
+  listSkills(id: string): SkillStatus[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return skillRegistry.list().map((s) => ({
+      name: s.name,
+      description: s.description,
+      source: s.source ?? (s.builtIn ? 'builtin' : 'rivet'),
+      enabled: !session.disabledSkills.has(s.name),
+    }))
+  }
+
+  /**
+   * PlusMenu — enable/disable a skill for this session. Updates the disabled
+   * set, live-applies it to an already-built agent's discovery filter, and emits
+   * skills_changed. Returns false when the session is missing.
+   */
+  setSkillEnabled(id: string, name: string, enabled: boolean): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    if (enabled) session.disabledSkills.delete(name)
+    else session.disabledSkills.add(name)
+    try { session.agent?.setDisabledSkills?.(new Set(session.disabledSkills)) } catch { /* non-fatal */ }
+    this.touch(session)
+    this.append(session, 'skills_changed', { name, enabled })
+    return true
   }
 
   /**
@@ -1146,6 +1373,28 @@ function randomId(): string {
   return (
     Date.now().toString(36) + Math.random().toString(36).slice(2, 10)
   )
+}
+
+/**
+ * Resolve a star-domain selection KEY into the live tri-state + canonical key +
+ * display label. Mirrors AgentLoop.getSessionDomain semantics:
+ *  - 'auto' → state undefined (per-message auto-detect)
+ *  - 'off'  → state null (no persona)
+ *  - <id>   → the ActiveStarDomain, when the id is a known domain
+ * Returns null for an unknown key so callers can 400/return false.
+ */
+function resolveDomainState(
+  key: string,
+): { state: ActiveStarDomain | null | undefined; key: string; label: string } | null {
+  if (key === 'auto') return { state: undefined, key: 'auto', label: 'Auto' }
+  if (key === 'off') return { state: null, key: 'off', label: 'Off' }
+  const d = starDomainRegistry.get(key)
+  if (!d) return null
+  return {
+    state: { id: d.id as StarDomainId, name: d.name, volatileBlock: d.volatileBlock, motto: d.motto },
+    key: d.id,
+    label: d.name,
+  }
 }
 
 function redactValue(value: unknown): unknown {

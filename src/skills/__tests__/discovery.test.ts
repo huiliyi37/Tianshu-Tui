@@ -45,6 +45,22 @@ describe('skill discovery (Tier-1)', () => {
     assert.ok(block!.includes('name="second"'))
   })
 
+  it('excludes per-session disabled skills from the discovery block', () => {
+    const reg = new SkillRegistry()
+    reg.register({ name: 'keep', description: 'stays visible', triggers: [/go/i], body: 'b' })
+    reg.register({ name: 'drop', description: 'hidden when disabled', triggers: [/go/i], body: 'b' })
+
+    const block = reg.renderDiscoveryBlock('go', { exclude: new Set(['drop']) })!
+    assert.ok(block.includes('name="keep"'))
+    assert.ok(!block.includes('name="drop"'))
+  })
+
+  it('returns null when every skill is excluded', () => {
+    const reg = new SkillRegistry()
+    reg.register({ name: 'only', description: 'sole skill', triggers: [/go/i], body: 'b' })
+    assert.equal(reg.renderDiscoveryBlock('go', { exclude: new Set(['only']) }), null)
+  })
+
   it('marks hint matches relevant and surfaces them first', () => {
     const reg = new SkillRegistry()
     reg.register({ name: 'zeta', description: 'unrelated', triggers: [/zeta/i], body: 'b' })

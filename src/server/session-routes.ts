@@ -180,6 +180,69 @@ export function buildSessionRoutes(
       return { status: 200, body: { ok: true } }
     }, apiToken),
 
+    // ── PlusMenu: model picker ──
+    // Read — selectable models across all providers, current one flagged.
+    'GET /sessions/:id/models': withAuth((_body, params) => {
+      const models = manager.listModels(params!.id!)
+      if (!models) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { models } }
+    }, apiToken),
+
+    // Write — hot-switch the session's model (preserves history). Non-running only.
+    'POST /sessions/:id/model': withAuth((body, params) => {
+      const data = (body ?? {}) as { modelId?: unknown }
+      if (typeof data.modelId !== 'string' || !data.modelId.trim()) {
+        return { status: 400, body: { error: 'Missing or invalid "modelId"' } }
+      }
+      if (!manager.switchModel(params!.id!, data.modelId.trim())) {
+        return { status: 409, body: { error: 'Session missing/running or model not found' } }
+      }
+      return { status: 200, body: manager.getSession(params!.id!) }
+    }, apiToken),
+
+    // ── PlusMenu: star-domain picker ──
+    // Read — Auto / Off / domains, current selection flagged (shared builder).
+    'GET /sessions/:id/domains': withAuth((_body, params) => {
+      const entries = manager.listDomains(params!.id!)
+      if (!entries) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { entries } }
+    }, apiToken),
+
+    // Write — set the session's star domain by key (auto | off | <domainId>).
+    'POST /sessions/:id/domain': withAuth((body, params) => {
+      const data = (body ?? {}) as { key?: unknown }
+      if (typeof data.key !== 'string' || !data.key.trim()) {
+        return { status: 400, body: { error: 'Missing or invalid "key"' } }
+      }
+      if (!manager.setDomain(params!.id!, data.key.trim())) {
+        return { status: 404, body: { error: 'Session not found or unknown domain key' } }
+      }
+      return { status: 200, body: { id: params!.id!, domain: data.key.trim() } }
+    }, apiToken),
+
+    // ── PlusMenu: skills toggle ──
+    // Read — every loaded skill with its per-session enablement status.
+    'GET /sessions/:id/skills': withAuth((_body, params) => {
+      const skills = manager.listSkills(params!.id!)
+      if (!skills) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { skills } }
+    }, apiToken),
+
+    // Write — enable/disable a skill for this session (affects discovery block).
+    'POST /sessions/:id/skills': withAuth((body, params) => {
+      const data = (body ?? {}) as { name?: unknown; enabled?: unknown }
+      if (typeof data.name !== 'string' || !data.name.trim()) {
+        return { status: 400, body: { error: 'Missing or invalid "name"' } }
+      }
+      if (typeof data.enabled !== 'boolean') {
+        return { status: 400, body: { error: 'Missing or invalid "enabled" (boolean)' } }
+      }
+      if (!manager.setSkillEnabled(params!.id!, data.name.trim(), data.enabled)) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id: params!.id!, name: data.name.trim(), enabled: data.enabled } }
+    }, apiToken),
+
     'GET /sessions': withAuth(() => ({
       status: 200,
       body: { sessions: manager.listSessions() },

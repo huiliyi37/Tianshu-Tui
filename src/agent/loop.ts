@@ -650,6 +650,23 @@ export class AgentLoop {
     this.config.promptEngine.setActiveDomain(undefined)
   }
 
+  /**
+   * PlusMenu — per-session disabled skill names. Filters the skill discovery
+   * block (turn-step-producer) so disabled skills are hidden from the model.
+   * Empty set = all skills available (default).
+   */
+  private _disabledSkills: Set<string> = new Set()
+
+  /** Replace the per-session disabled skill set (desktop skill toggle). */
+  setDisabledSkills(names: Set<string>): void {
+    this._disabledSkills = new Set(names)
+  }
+
+  /** Read the per-session disabled skill set (consumed by turn-step-producer). */
+  getDisabledSkills(): Set<string> {
+    return this._disabledSkills
+  }
+
   getLatestPheromones() { return this.loadedPheromones }
 
   /** Expose MeridianIndexer for /index command */

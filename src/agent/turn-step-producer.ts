@@ -206,7 +206,9 @@ export class TurnStepProducer {
       this.self.planTraceCoordinator.closeTrace()
     }
 
-    this.self.config.promptEngine.setSkillAdvisoryBlock(skillRegistry.renderDiscoveryBlock(userInput))
+    this.self.config.promptEngine.setSkillAdvisoryBlock(
+      skillRegistry.renderDiscoveryBlock(userInput, { exclude: this.self.getDisabledSkills() }),
+    )
     this.self.config.promptEngine.setCrossSessionMemoryBlock(renderMemoryBlock(this.self.cwd, userInput))
     this.self.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 

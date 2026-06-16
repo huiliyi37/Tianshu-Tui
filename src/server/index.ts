@@ -22,11 +22,11 @@ export type RouteHandler = (
 export function createRouter(routes: Record<string, RouteHandler>) {
   // Build exact match map + parameterized routes
   const exact = new Map<string, RouteHandler>()
-  const parameterized: Array<{ pattern: RegExp; paramNames: string[]; handler: RouteHandler }> = []
+  const parameterized: Array<{ method: string; pattern: RegExp; paramNames: string[]; handler: RouteHandler }> = []
 
   for (const [key, handler] of Object.entries(routes)) {
     const parts = key.split(' ')
-    const method = parts[0]
+    const method = parts[0]!
     const path = parts.slice(1).join(' ')
     if (path.includes(':')) {
       // Parameterized route: /tasks/:id → capture group
@@ -36,6 +36,7 @@ export function createRouter(routes: Record<string, RouteHandler>) {
         return '([^/]+)'
       })
       parameterized.push({
+        method,
         pattern: new RegExp('^' + regexStr + '$'),
         paramNames,
         handler,
@@ -66,8 +67,11 @@ export function createRouter(routes: Record<string, RouteHandler>) {
     const exactHandler = exact.get(exactKey)
     if (exactHandler) return await exactHandler(body, query, reqHeaders, res)
 
-    // Try parameterized routes
-    for (const { pattern, paramNames, handler } of parameterized) {
+    // Try parameterized routes. Match on BOTH method and path so a GET and a
+    // POST can share the same parameterized path (e.g. GET/POST
+    // /sessions/:id/skills) without the first-registered one shadowing the other.
+    for (const { method: routeMethod, pattern, paramNames, handler } of parameterized) {
+      if (routeMethod !== method) continue
       const match = cleanPath.match(pattern)
       if (match) {
         const params: Record<string, string> = { ...query }

@@ -174,9 +174,14 @@ export class SkillRegistry {
    */
   renderDiscoveryBlock(
     hint?: string,
-    opts?: { maxChars?: number; maxDescChars?: number },
+    opts?: { maxChars?: number; maxDescChars?: number; exclude?: Set<string> },
   ): string | null {
-    const all = this.list()
+    // PlusMenu — drop per-session disabled skills so the model never sees them
+    // in the discovery block (and thus won't try to load them via the tool).
+    const exclude = opts?.exclude
+    const all = exclude && exclude.size > 0
+      ? this.list().filter((s) => !exclude.has(s.name))
+      : this.list()
     if (all.length === 0) return null
 
     const maxChars = opts?.maxChars ?? 1500
