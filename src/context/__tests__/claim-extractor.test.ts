@@ -245,6 +245,29 @@ describe('claim-extractor', () => {
     assert.match(proposals[0]!.text, /^Commit def5678 /)
   })
 
+  it('throttles insignificant commits (no feat/fix prefix, < 3 files)', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { action: 'commit', message: 'chore: update comments' },
+      result: '[main aaa1111] chore: update comments\n 1 file changed, 1 insertion(+)',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 0, 'insignificant commit should not produce a claim')
+  })
+
+  it('allows significant commit with 3+ files even without conventional prefix', () => {
+    const ctx: ToolResultContext = {
+      toolName: 'git',
+      input: { action: 'commit', message: 'update multiple modules' },
+      result: '[main bbb2222] update multiple modules\n 4 files changed\n\n--- actual changes (git show --stat) ---\nbbb2222 (HEAD -> main)\n src/a.ts | 1 +\n src/b.ts | 2 +-\n src/c.ts | 3 ++-\n 3 files changed, 4 insertions(+), 2 deletions(-)',
+      isError: false,
+    }
+    const proposals = extractClaimsFromToolResult(ctx, meta)
+    assert.equal(proposals.length, 1, 'commit touching 3+ files should persist')
+    assert.ok(proposals[0]!.tags.includes('commit_fact'))
+  })
+
   it('does not extract claim from failed commit', () => {
     const ctx: ToolResultContext = {
       toolName: 'git',

@@ -52,10 +52,13 @@ export function extractClaimsFromToolResult(ctx: ToolResultContext, meta: ClaimE
     return [securityFinding(ctx, meta, now)]
   }
 
-  // Commit fact: extract hash + message as a decision claim (Infinity TTL via decision kind)
+  // Commit fact: extract hash + message as a decision claim (Infinity TTL via decision kind).
+  // Throttled: only significant commits (feat/fix/breaking, or 3+ files) persist to
+  // memory.jsonl. Routine single-file commits are session-only — reduces file bloat
+  // while preserving recall for meaningful milestones.
   const isCommitResult = (ctx.toolName === 'git' && String(ctx.input.action ?? '') === 'commit')
     || (ctx.toolName === 'deliver_task' && ctx.input.commit === true)
-  if (isCommitResult && !ctx.isError) {
+  if (isCommitResult && !ctx.isError && isSignificantCommit(ctx)) {
     return [commitFact(ctx, meta, now)]
   }
 
@@ -151,6 +154,15 @@ function securityFinding(ctx: ToolResultContext, meta: ClaimExtractionMeta, now:
     expiresAt: now + TTL.security_finding,
     tags: ['tool', 'security'],
   }
+}
+
+const SIGNIFICANT_COMMIT_RE = /\b(feat|fix|breaking|refactor|perf)\b/i
+
+function isSignificantCommit(ctx: ToolResultContext): boolean {
+  const message = String(ctx.input.message ?? '')
+  if (SIGNIFICANT_COMMIT_RE.test(message)) return true
+  const fileCount = ctx.result.split('\n').filter(l => l.includes('|')).length
+  return fileCount >= 3
 }
 
 // git commit / deliver_task echo the new commit as "[branch <hash>] subject".
