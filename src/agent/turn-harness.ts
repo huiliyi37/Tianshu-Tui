@@ -1,6 +1,7 @@
 import { TrajectoryRecorder, type TrajectoryEntry } from './trajectory.js'
 import type { FailureClass } from './failure-classifier.js'
 import { shouldRetryToolFailure } from './retry-policy.js'
+import type { FailureJournal } from './failure-journal.js'
 
 export interface ToolExecution {
   id: string
@@ -28,6 +29,7 @@ export class TurnHarness {
   constructor(
     private config: TurnHarnessConfig,
     private trajectory: TrajectoryRecorder,
+    private failureJournal?: FailureJournal,
   ) {}
 
   async executeTool(exec: ToolExecution): Promise<ToolExecutionResult> {
@@ -87,6 +89,18 @@ export class TurnHarness {
       inputSummary: JSON.stringify(exec.input).slice(0, 100),
       resultSummary: result.content.slice(0, 200),
     })
+
+    if (result.isError && this.failureJournal) {
+      try {
+        this.failureJournal.record({
+          turn: exec.turn,
+          tool: exec.name,
+          target,
+          error: errorClass ?? 'unknown',
+          context: result.content.slice(0, 200),
+        })
+      } catch { /* non-critical — never block tool execution */ }
+    }
 
     return { content: result.content, isError: result.isError ?? false, retried, errorClass }
   }

@@ -8,6 +8,7 @@ import {
   enforceCapacity,
   matchBullets,
   type PlaybookBullet,
+  type ExperienceSource,
 } from './playbook.js'
 
 export interface PlaybookStoreOptions {
@@ -26,6 +27,11 @@ const playbookBulletSchema = z.object({
   useCount: z.number().int().min(0),
   lastUsedAt: z.number().nullable(),
   importance: z.number().min(0).max(1),
+  details: z.string().optional(),
+  bulletIds: z.array(z.string()).optional(),
+  source: z.enum(['review-gate', 'test-failure', 'typecheck', 'delivery-gate', 'self-correction'] satisfies [ExperienceSource, ...ExperienceSource[]]).optional(),
+  errorSignal: z.string().optional(),
+  fixApproach: z.string().optional(),
 }) satisfies z.ZodType<PlaybookBullet>
 
 export function playbookPathForCwd(cwd: string): string {
