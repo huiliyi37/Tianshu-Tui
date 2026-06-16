@@ -91,16 +91,19 @@ export function computeEFE(
   // ── Epistemic Value: 信息增益预期 ──
   // 低 confidence → 高 epistemic（需要探索减少不确定性）
   // genesis 季节 → 天然偏向探索
+  // 高 error rate → epistemic boost（连续出错说明当前理解不足，应优先探索）
   // Meridian 结构信号可用时：结构边疆度（un-traversed structure）占 30%，
   // 不确定性权重相应下调，总量保持与原公式同一量级。
   const uncertainty = 1 - confidence
   const seasonEpiBoost = season === 'genesis' ? 0.2 : 0
+  const errorRate = getErrorRate(acc)
+  const errorEpiBoost = errorRate * 0.3
   const structural = (structuralEpistemic !== undefined && structuralEpistemic !== null && Number.isFinite(structuralEpistemic))
     ? clamp(structuralEpistemic)
     : null
   const epistemicValue = structural === null
-    ? clamp(uncertainty * 0.7 + seasonEpiBoost)
-    : clamp(uncertainty * 0.45 + structural * 0.3 + seasonEpiBoost)
+    ? clamp(uncertainty * 0.7 + seasonEpiBoost + errorEpiBoost)
+    : clamp(uncertainty * 0.45 + structural * 0.3 + seasonEpiBoost + errorEpiBoost)
 
   // ── Pragmatic Value: 目标推进预期 ──
   // 高 confidence + 高 vigor → 高 pragmatic（可以执行）

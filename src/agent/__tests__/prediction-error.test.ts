@@ -244,4 +244,16 @@ describe('computeEFE', () => {
     const ret = computeEFE(baseAcc, 'return', null, s)
     assert.ok(genesis.epistemicValue >= ret.epistemicValue)
   })
+
+  it('high error rate boosts epistemic value', () => {
+    const s = { momentum: 0.5, pressure: 0.3, confidence: 0.5, complexity: 0.4, freshness: 0.5, stability: 0.5 }
+    let errorAcc = createPredictionAccumulator(10)
+    for (let i = 0; i < 8; i++) errorAcc = recordPrediction(errorAcc, false)
+    for (let i = 0; i < 2; i++) errorAcc = recordPrediction(errorAcc, true)
+
+    const withErrors = computeEFE(errorAcc, 'return', null, s)
+    const noErrors = computeEFE(baseAcc, 'return', null, s)
+    assert.ok(withErrors.epistemicValue > noErrors.epistemicValue,
+      `error acc epistemic ${withErrors.epistemicValue} should exceed no-error ${noErrors.epistemicValue}`)
+  })
 })
