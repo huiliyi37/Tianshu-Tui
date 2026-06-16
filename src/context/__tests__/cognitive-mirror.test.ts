@@ -141,13 +141,15 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.ok(!mirror.includes('caution'), 'low commit threshold should not show caution')
   })
 
-  it('includes vigor dimension', () => {
+  it('includes vigor dimension (integrated vigor value)', () => {
     const sensorium = makeSensorium()
     const vigor = { tonic: 0.8, phasic: 0.7, curiosity: 0.3, vigor: 0.75, variability: 0.1, history: [0.7, 0.8] }
     const ledger = makeLedger({ sensorium, vigor })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('vigor="0.80"'))
+    assert.ok(mirror.includes('vigor="0.75"'))
+    // curiosity === 0.3 时不展示（阈值 > 0.3）
+    assert.ok(!mirror.includes('curiosity'))
   })
 
   it('formats dimensions to 2 decimal places', () => {
