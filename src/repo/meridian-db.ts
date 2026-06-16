@@ -154,8 +154,9 @@ export class MeridianDb {
     if (!this.conn) {
       if (!existsSync(this.stateDir)) mkdirSync(this.stateDir, { recursive: true })
       try {
-        const require = createRequire(import.meta.url)
-        const Database = require('better-sqlite3')
+        const req = createRequire(import.meta.url)
+        const { resolveBetterSqlite3 } = req('./native-resolver.js')
+        const Database = resolveBetterSqlite3(import.meta.url)
         if (!Database) throw new Error('better-sqlite3 not installed')
         const dbPath = join(this.stateDir, 'meridian.db')
         this.conn = new Database(dbPath)
@@ -662,7 +663,7 @@ export class MeridianDb {
 
 /** No-op database proxy when better-sqlite3 is unavailable */
 function createNullDb(): any {
-  const noopStmt = { run: () => {}, all: () => [] as any[], get: () => undefined }
+  const noopStmt = { run: () => ({ changes: 0, lastInsertRowid: 0 }), all: () => [] as any[], get: () => undefined }
   return new Proxy(Object.create(null), {
     get: (_target: any, prop: string) => {
       if (prop === 'prepare') return () => noopStmt

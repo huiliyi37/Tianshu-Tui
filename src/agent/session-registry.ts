@@ -118,8 +118,8 @@ export class SessionRegistry {
     if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
     let db: any
     try {
-      const nodeModule = await import('node:module')
-      const Database = nodeModule.createRequire(import.meta.url)('better-sqlite3')
+      const { resolveBetterSqlite3 } = await import('../repo/native-resolver.js')
+      const Database = resolveBetterSqlite3(import.meta.url)
       if (!Database) throw new Error('better-sqlite3 not installed')
       const dbPath = join(stateDir, 'registry.db')
       db = new Database(dbPath)
