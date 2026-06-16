@@ -103,7 +103,7 @@ worker 卡住或超时时，标注降级并继续内联执行。
 export type ModelFamily = 'deepseek' | 'mimo' | 'glm' | 'openai' | 'anthropic' | 'unknown'
 
 const MODEL_CALIBRATIONS: Partial<Record<ModelFamily, string>> = {
-  deepseek: '<calibration>你已具备精确推进能力。特别关注跨模块边界影响——修改前用 grep 验证调用方不被破坏。完成后主动报告遗留项和设计偏离。</calibration>',
+  deepseek: '<calibration>你已具备精确执行能力。特别关注跨模块边界影响——修改前用 grep 验证调用方不被破坏。完成后主动报告遗留项和设计偏离。</calibration>',
   mimo: '<calibration>你擅长全景探索，但需收敛：每次探索设定明确目标，达到目标后停止扩展。探索结果用一句话结论收束，再决定下一步。</calibration>',
   glm: '<calibration>你擅长排除法定位问题。给结论时直接给最终答案，排除过程留在思考中。完成后检查是否有遗留路径未覆盖。</calibration>',
 }
