@@ -118,16 +118,15 @@ import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
-import { classifyIntentRetrievalRoute } from './intent-retrieval-router.js'
-import { renderIntentRetrievalRoute } from './intent-retrieval-route.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
-import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, buildRuntimeSnapshot } from "./loop-factory.js";
+import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createReasoningEffortController, createIntentRetrievalRouteController, buildRuntimeSnapshot } from "./loop-factory.js";
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
+import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import type { PlanTraceCoordinator } from "./plan-trace-coordinator.js";
 import type { CompactBoundaryCoordinator } from "./compact-boundary-coordinator.js";
 import type { TurnOrchestrator } from "./turn-orchestrator.js";
@@ -253,6 +252,7 @@ export class AgentLoop {
   private compactBoundaryCoordinator: CompactBoundaryCoordinator
   private turnOrchestrator: TurnOrchestrator
   private reasoningEffort: ReasoningEffortController
+  private intentRoute: IntentRetrievalRouteController
   thetaCheckInFlight = false
   thetaTelemetry: {
     lastReason: string | null
@@ -296,7 +296,7 @@ export class AgentLoop {
   latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
   lastCompactTurn: number | null = null
-  private _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
+  _lastRetrievalRoute: import('./intent-retrieval-route.js').RetrievalRoute | null = null
   private _taskDepthLayer: TaskDepthLayer | undefined = undefined
   private _planMethodology: PlanMethodology | undefined = undefined
   _prevPhaseHint: string | undefined = undefined
@@ -459,6 +459,7 @@ export class AgentLoop {
     this.compactBoundaryCoordinator = createCompactBoundaryCoordinator(this)
     this.turnOrchestrator = createTurnOrchestrator(this)
     this.reasoningEffort = createReasoningEffortController(this)
+    this.intentRoute = createIntentRetrievalRouteController(this)
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
@@ -753,64 +754,6 @@ export class AgentLoop {
       onError: error => { throw error },
     }, this.abortController?.signal)
     return text.trim()
-  }
-
-  private getLastAssistantMessageContent(messages: OaiMessage[]): string | null {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]
-      if (msg?.role === 'assistant' && typeof msg.content === 'string') {
-        return msg.content
-      }
-    }
-    return null
-  }
-
-  private async buildIntentRetrievalRouteForTurn(userInput: string, actionable: boolean, turnMode: TurnMode = 'task'): Promise<void> {
-    if (!actionable || !this.taskContract) {
-      this.config.promptEngine.setIntentRetrievalRoute(null)
-      return
-    }
-
-    try {
-      const messages = this.session.getMessages()
-      const lastAssistant = this.getLastAssistantMessageContent(messages) || undefined
-      if (lastAssistant && this.sessionStateManager) {
-        this.sessionStateManager.extractTaskList(lastAssistant, this.session.getTurnCount())
-      }
-      if (this.sessionStateManager) {
-        const referenced = userInput.match(/\b([PpTtSs]\d+)\b/g)
-        if (referenced) {
-          const turn = this.session.getTurnCount()
-          for (const ref of new Set(referenced.map(r => r.toUpperCase()))) {
-            this.sessionStateManager.updateTaskListItem(ref, 'in_progress', turn)
-          }
-        }
-      }
-      // followUp mode: pass previous route's taskKinds for inheritance
-      const previousRoute = this._lastRetrievalRoute
-      const inheritedTaskKinds = turnMode === 'followUp' && previousRoute ? previousRoute.taskKinds : undefined
-      const route = await classifyIntentRetrievalRoute({
-        userMessage: userInput,
-        lastAssistantMessage: lastAssistant,
-        taskList: this.sessionStateManager?.getTaskList(),
-        taskContract: this.taskContract,
-        inheritedTaskKinds,
-        config: this.config.intentRetrievalRouter,
-        client: this.config.client,
-        model: this.config.promptEngine.getModel(),
-        signal: this.abortController?.signal,
-        onTelemetry: telemetry => {
-          debugLog(`[intent-router] mode=${turnMode} classifier=${telemetry.classifier} fallback=${telemetry.fallbackUsed} kinds=${telemetry.taskKinds.join(',')} sources=${telemetry.sources.join(',')} directions=${telemetry.directionCount} latencyMs=${telemetry.latencyMs}`)
-        },
-      })
-      this._lastRetrievalRoute = route
-      this.config.promptEngine.setIntentRetrievalRoute(
-        route && route.confidence >= 0.6 ? renderIntentRetrievalRoute(route) : null
-      )
-    } catch (err) {
-      debugLog(`[intent-router] failed: ${(err as Error).message}`)
-      this.config.promptEngine.setIntentRetrievalRoute(null)
-    }
   }
 
   async maybePrewarm(text: string): Promise<void> {
@@ -1379,7 +1322,7 @@ export class AgentLoop {
       this.taskContract = undefined
     }
 
-    await this.buildIntentRetrievalRouteForTurn(userInput, actionable, turnMode)
+    await this.intentRoute.buildForTurn(userInput, actionable, turnMode)
 
     // Classify task dependency depth for TDD strategy / verifier selection
     if (this.taskContract && actionable) {

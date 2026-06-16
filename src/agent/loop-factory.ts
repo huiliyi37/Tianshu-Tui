@@ -14,6 +14,7 @@ import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
+import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -340,5 +341,21 @@ export function createReasoningEffortController(self: AgentLoop): ReasoningEffor
     getMaxTurns: () => self.config.maxTurns,
     getFilesModifiedCount: () => self.evidence.getState().filesModified.size,
     setCurrentEffortShadow: record => { self._currentEffortShadow = record },
+  })
+}
+
+export function createIntentRetrievalRouteController(self: AgentLoop): IntentRetrievalRouteController {
+  return new IntentRetrievalRouteController({
+    setIntentRetrievalRoute: route => { self.config.promptEngine.setIntentRetrievalRoute(route) },
+    getTaskContract: () => self.taskContract,
+    getMessages: () => self.session.getMessages(),
+    getSessionStateManager: () => self.sessionStateManager,
+    getTurnCount: () => self.session.getTurnCount(),
+    getLastRetrievalRoute: () => self._lastRetrievalRoute,
+    setLastRetrievalRoute: route => { self._lastRetrievalRoute = route },
+    getRouterConfig: () => self.config.intentRetrievalRouter,
+    getClient: () => self.config.client,
+    getModel: () => self.config.promptEngine.getModel(),
+    getAbortSignal: () => self.abortController?.signal,
   })
 }
