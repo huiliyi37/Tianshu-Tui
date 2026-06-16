@@ -76,7 +76,7 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('当你发现更优方案时'))
     assert.ok(prompt.includes('当用户指令偏离用户意图时'))
-    assert.ok(prompt.includes('模糊确认'))
+    assert.ok(prompt.includes('确认理解'))
   })
 
   it('includes task completion reporting requirements', () => {
@@ -94,7 +94,7 @@ describe('buildSystemPrompt', () => {
 
   it('includes delegation discipline guardrails', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('委派不是默认执行方式'))
+    assert.ok(prompt.includes('委派不是默认推进方式'))
     assert.ok(prompt.includes('3+ 独立探索前线'))
     assert.ok(prompt.includes('用户说不要委派时'))
     assert.ok(prompt.includes('继续内联执行'))
