@@ -3,6 +3,7 @@ import { listFiles } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import type { PlanModeState } from '../runtime/types'
+import { PlusMenu } from './PlusMenu'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -47,6 +48,8 @@ export function Composer(props: {
   }, [planning, onSetPlanMode])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const plusRef = useRef<HTMLDivElement>(null)
+  const [plusOpen, setPlusOpen] = useState(false)
   const lastEscAt = useRef(0)
   const reqSeq = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout>>()
@@ -66,6 +69,17 @@ export function Composer(props: {
   }, [value])
 
   useEffect(() => () => clearTimeout(debounce.current), [])
+
+  // Close the "+" menu when clicking outside its wrapper (which includes the
+  // trigger button, so toggling on the button doesn't immediately re-close).
+  useEffect(() => {
+    if (!plusOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (plusRef.current && !plusRef.current.contains(e.target as Node)) setPlusOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [plusOpen])
 
   const closeSuggest = () => setSuggest(null)
 
@@ -297,6 +311,27 @@ export function Composer(props: {
         >📎</button>
       </div>
       <div className="composer-actions">
+        <div className="plus-wrap" ref={plusRef}>
+          <button
+            className={`plus-btn ${plusOpen ? 'open' : ''}`}
+            onClick={() => setPlusOpen((o) => !o)}
+            title="添加模式 / 图片 / 命令"
+            aria-label="添加"
+            aria-haspopup="menu"
+            aria-expanded={plusOpen}
+          >+</button>
+          {plusOpen && (
+            <PlusMenu
+              planMode={planMode}
+              onSetPlanMode={onSetPlanMode}
+              onPickImage={() => fileInputRef.current?.click()}
+              imageDisabled={images.length >= MAX_IMAGES}
+              commands={commands}
+              onRunCommand={runCommand}
+              onClose={() => setPlusOpen(false)}
+            />
+          )}
+        </div>
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}

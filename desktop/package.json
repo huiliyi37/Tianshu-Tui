@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-virtual": "^3.14.3",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.0.0",

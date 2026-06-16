@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
@@ -36,7 +37,6 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
-  const endRef = useRef<HTMLDivElement>(null)
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
   const busy = session.status === 'running'
@@ -48,12 +48,33 @@ export function ThreadView(props: {
     return el.scrollHeight - el.scrollTop - el.clientHeight < 120
   }, [])
 
-  // Auto-scroll only when user is near the bottom.
+  // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
+  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks])
+  const lastKey = view.blocks[view.blocks.length - 1]?.key
+  // P2 — only render the visible window of the message list. Long sessions keep
+  // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
+  // measured dynamically via measureElement (ResizeObserver under the hood).
+  const virtualizer = useVirtualizer({
+    count: rendered.length,
+    getScrollElement: () => msgRef.current,
+    estimateSize: () => 80,
+    overscan: 8,
+    getItemKey: (i) => {
+      const item = rendered[i]!
+      return item.kind === 'tools' ? item.key : item.block.key
+    },
+  })
+
+  // The last block's text length drives streaming auto-scroll: blocks.length
+  // stays constant while a reply streams in, so we pin the bottom on text growth.
+  const lastBlockTextLen = view.blocks[view.blocks.length - 1]?.text.length ?? 0
+
+  // Auto-scroll only when the user is near the bottom (incl. streaming growth).
   useEffect(() => {
-    if (!scrolledUp && endRef.current) {
-      endRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (!scrolledUp && rendered.length > 0) {
+      virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     }
-  }, [view.blocks.length, scrolledUp])
+  }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
 
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
@@ -62,15 +83,11 @@ export function ThreadView(props: {
   }, [isNearBottom])
 
   const scrollToBottom = useCallback(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (rendered.length > 0) virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     setScrolledUp(false)
-  }, [])
+  }, [rendered.length, virtualizer])
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
-
-  // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
-  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks])
-  const lastKey = view.blocks[view.blocks.length - 1]?.key
 
   // Context usage — latest turn's total tokens (Cursor 3.0 "expose context usage").
   const latestTokens = useMemo(() => {
@@ -145,21 +162,35 @@ export function ThreadView(props: {
             <span>发一条消息开始</span>
           </div>
         )}
-        {rendered.map((item) =>
-          item.kind === 'tools' ? (
-            <ToolGroup key={item.key} items={item.items} />
-          ) : (
-            <Block
-              key={item.block.key}
-              block={item.block}
-              isStreaming={
-                item.block.key === lastKey && (
-                  (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
-                  (item.block.kind === 'assistant' && view.private_textOpen)
-                )
-              }
-            />
-          ),
+        {rendered.length > 0 && (
+          <div className="vlist" style={{ height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((vi) => {
+              const item = rendered[vi.index]!
+              return (
+                <div
+                  key={vi.key}
+                  className="vrow"
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  style={{ transform: `translateY(${vi.start}px)` }}
+                >
+                  {item.kind === 'tools' ? (
+                    <ToolGroup items={item.items} />
+                  ) : (
+                    <Block
+                      block={item.block}
+                      isStreaming={
+                        item.block.key === lastKey && (
+                          (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
+                          (item.block.kind === 'assistant' && view.private_textOpen)
+                        )
+                      }
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
         {showThinking && (
           <div className="thinking">
@@ -175,7 +206,6 @@ export function ThreadView(props: {
             </svg>
           </button>
         )}
-        <div ref={endRef} />
       </div>
 
       <TaskList items={view.todos} />
