@@ -151,7 +151,7 @@ export function fingerprintSimilarity(a: RetrospectFingerprint, b: RetrospectFin
 function keywordOverlap(a: string[], b: string[]): number {
   const left = new Set(a)
   const right = new Set(b)
-  if (left.size === 0 && right.size === 0) return 1 // vacuously true
+  if (left.size === 0 && right.size === 0) return 0 // no signal — not similar
   const intersection = [...left].filter(k => right.has(k)).length
   const denominator = Math.max(1, Math.min(left.size, right.size))
   return intersection / denominator

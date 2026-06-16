@@ -127,8 +127,8 @@ describe('fingerprintSimilarity', () => {
     }
     const b: RetrospectFingerprint = { ...a, sessionId: 'b' }
 
-    // Two empty sets have overlap 1 (vacuously true)
-    assert.equal(fingerprintSimilarity(a, b), 1)
+    // Two empty sets have overlap 0 (no signal, not similar)
+    assert.equal(fingerprintSimilarity(a, b), 0)
   })
 })
 
