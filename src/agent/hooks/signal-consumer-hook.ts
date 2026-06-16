@@ -2,10 +2,14 @@ import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
 import type { PheromoneRef } from '../sensorium.js'
 import { compressDeadEnds, formatDeadEndRules } from '../../context/dead-end-rules.js'
 import type { DeadEndEntry } from '../../context/dead-end-rules.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
+import { shouldKick } from '../dissipative-kick.js'
 
 export interface SignalConsumerRuntimeHookOptions {
   /** Avoid repeating identical injected hints across turns. Default true. */
   dedupe?: boolean
+  /** When provided, dead-end signals route through the advisory bus instead of injectUserMessage. */
+  advisoryBus?: AdvisoryBus
 }
 
 export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHookOptions = {}): PreTurnRuntimeHook {
@@ -46,9 +50,12 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       const deadEnds = pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0)
       if (deadEnds.length > 0) {
-        // A4: cross-session relevance gate — only inject dead-end rules for
-        // files that intersect with current working set or recent tool targets.
-        // When no file context is available yet, skip the gate (don't block all).
+        // Kick mutual exclusion: if sensorium shows the kick condition
+        // (momentum < 0.2 && stability < 0.3), the kick hook will fire this
+        // turn and inject its own reframing — suppress dead-end advisory
+        // to avoid redundant "you're stuck" noise.
+        if (ctx.snapshot.sensorium && shouldKick(ctx.snapshot.sensorium)) return
+
         const recentTargets = ctx.snapshot.recentToolHistory.map(t => t.target).filter(Boolean)
         const hasFileContext = recentTargets.length > 0
         const relevant = hasFileContext
@@ -72,7 +79,17 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
         if (rules.length > 0) {
           const key = `dead-end:${rules.map(r => r.kind).sort().join('|')}`
           once(key, () => {
-            ctx.effects.injectUserMessage(formatDeadEndRules(rules))
+            if (options.advisoryBus) {
+              options.advisoryBus.submit({
+                key,
+                priority: 0.65,
+                category: 'dead_end',
+                content: formatDeadEndRules(rules),
+                ttl: 2,
+              })
+            } else {
+              ctx.effects.injectUserMessage(formatDeadEndRules(rules))
+            }
           })
         }
       }

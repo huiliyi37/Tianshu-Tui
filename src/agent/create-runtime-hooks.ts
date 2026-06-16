@@ -157,7 +157,7 @@ export interface RuntimeHookDeps {
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
   const hooks: RuntimeHook[] = [
     createPerceptionRuntimeHook(),
-    createSignalConsumerRuntimeHook(),
+    createSignalConsumerRuntimeHook({ advisoryBus: deps.advisoryBus }),
     ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5 })] : []),
     createKickRuntimeHook({ deposit: deps.stigmergyDeposit }),
     createVigorAfterPerceptionHook(),

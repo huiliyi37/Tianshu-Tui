@@ -39,6 +39,8 @@ export type AdvisoryCategory =
 
 /** 每轮最大渲染条数 */
 const MAX_ADVISORIES_PER_TURN = 3
+/** 每个 category 最多保留条数，防止单一信号源垄断 advisory 预算 */
+const MAX_PER_CATEGORY = 2
 
 // ─── F-fix（session 803d897d）：纪律抗习惯化重锚 ─────────────────────
 // execute 阶段 field habituation（alpha=0.35）让 activeDomain 纪律约 4 轮后
@@ -190,10 +192,19 @@ export class AdvisoryBus {
       }
     }
 
-    // 按优先级倒序取 Top-3
-    const sorted = [...deduped.values()]
-      .sort((a, b) => b.priority - a.priority)
-      .slice(0, MAX_ADVISORIES_PER_TURN)
+    // Category-level cap: at most MAX_PER_CATEGORY entries from the same
+    // category to prevent a single signal source from monopolizing the budget.
+    const catCounts = new Map<AdvisoryCategory, number>()
+    const catFiltered: AdvisoryEntry[] = []
+    for (const entry of [...deduped.values()].sort((a, b) => b.priority - a.priority)) {
+      const count = catCounts.get(entry.category) ?? 0
+      if (count < MAX_PER_CATEGORY) {
+        catCounts.set(entry.category, count + 1)
+        catFiltered.push(entry)
+      }
+    }
+
+    const sorted = catFiltered.slice(0, MAX_ADVISORIES_PER_TURN)
 
     // 渲染
     if (sorted.length === 0) {

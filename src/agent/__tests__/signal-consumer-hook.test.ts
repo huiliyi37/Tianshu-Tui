@@ -2,8 +2,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRuntimeHookContext } from '../runtime-hooks.js'
 import { createSignalConsumerRuntimeHook } from '../hooks/signal-consumer-hook.js'
-import type { SensoriumInput, StrategyProfile } from '../sensorium.js'
+import type { SensoriumInput, StrategyProfile, Sensorium } from '../sensorium.js'
 import type { PheromoneRef } from '../sensorium.js'
+import { AdvisoryBus } from '../advisory-bus.js'
 
 function makeStrategy(overrides: Partial<StrategyProfile> = {}): StrategyProfile {
   return {
@@ -43,7 +44,9 @@ function makeDeadEnd(path: string, context?: string): PheromoneRef {
 function runHook(options: {
   strategy?: StrategyProfile | null
   sensoriumInput?: SensoriumInput
+  sensorium?: Sensorium | null
   dedupe?: boolean
+  advisoryBus?: AdvisoryBus
 } = {}) {
   const messages: string[] = []
   const phases: Array<{ phase: string; reason?: string }> = []
@@ -51,7 +54,7 @@ function runHook(options: {
     cwd: '/tmp/project',
     turn: 1,
     recentToolHistory: [],
-    sensorium: null,
+    sensorium: options.sensorium ?? null,
     sensoriumInput: options.sensoriumInput ?? makeInput(),
     strategy: options.strategy === undefined ? makeStrategy() : options.strategy,
     vigor: null,
@@ -61,7 +64,7 @@ function runHook(options: {
     injectUserMessage: message => { messages.push(message) },
     emitPhaseChange: (phase, detail) => { phases.push({ phase, reason: detail?.reason }) },
   })
-  const hook = createSignalConsumerRuntimeHook({ dedupe: options.dedupe })
+  const hook = createSignalConsumerRuntimeHook({ dedupe: options.dedupe, advisoryBus: options.advisoryBus })
   return { hook, ctx, messages, phases }
 }
 
@@ -162,5 +165,45 @@ describe('createSignalConsumerRuntimeHook', () => {
     assert.equal(messages.length, 1)
     assert.match(messages[0]!, /<天枢-观测/)
     assert.match(messages[0]!, /npm run build failed with TS2345/)
+  })
+
+  it('routes dead-end through advisory bus when provided', async () => {
+    const bus = new AdvisoryBus()
+    const { hook, ctx, messages } = runHook({
+      sensoriumInput: makeInput({
+        pheromones: [makeDeadEnd('src/a.ts')],
+      }),
+      advisoryBus: bus,
+    })
+
+    await hook.run(ctx)
+
+    assert.equal(messages.length, 0, 'should not inject user message')
+    const rendered = bus.render()
+    assert.match(rendered, /dead-end/)
+  })
+
+  it('suppresses dead-end when kick condition is met', async () => {
+    const bus = new AdvisoryBus()
+    const kickSensorium: Sensorium = {
+      momentum: 0.1,
+      pressure: 0.5,
+      confidence: 0.5,
+      complexity: 0.5,
+      freshness: 0.5,
+      stability: 0.2,
+    }
+    const { hook, ctx, messages } = runHook({
+      sensoriumInput: makeInput({
+        pheromones: [makeDeadEnd('src/a.ts')],
+      }),
+      sensorium: kickSensorium,
+      advisoryBus: bus,
+    })
+
+    await hook.run(ctx)
+
+    assert.equal(messages.length, 0)
+    assert.equal(bus.render(), '', 'no advisory when kick would fire')
   })
 })
