@@ -16,6 +16,8 @@ export const PLAN_SUBMIT_TOOL: Tool = {
     name: 'plan_submit',
     description: `Submit a completed implementation plan for user approval.
 
+**Note:** The plan content is persisted to \`.rivet/plans/<slug>.md\`. In the message history, only a file pointer is retained — use \`read_file\` to review the full plan in later turns.
+
 ### When to call
 Call this tool once you have fully explored the codebase and designed a solution.
 

@@ -6,6 +6,8 @@ import { stableStringify } from '../api/stable-json.js'
 import { sanitizeForJsonTransport } from '../utils/sanitize.js'
 
 import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
+import { ToolArgPostProcessorRegistry } from './tool-arg-post-processor.js'
+import { planSubmitArgProcessor } from '../tools/plan-submit-arg-processor.js'
 
 const MAX_TRACKED_FILES = 500
 const MAX_TEST_RESULTS = 500
@@ -60,6 +62,8 @@ export type MessageMutation =
 export class SessionContext {
   private state: SessionState
   private onMutation: ((m: MessageMutation) => void) | null = null
+  /** Tool argument post-processors — intercept large args before entering oaiMessages */
+  private argProcessors: ToolArgPostProcessorRegistry
 
   constructor() {
     this.state = {
@@ -76,6 +80,9 @@ export class SessionContext {
       compactedAtTurns: new Set(),
       compactEvents: [],
     }
+    // Register built-in arg processors
+    this.argProcessors = new ToolArgPostProcessorRegistry()
+    this.argProcessors.register(planSubmitArgProcessor)
   }
 
   /**
@@ -166,12 +173,15 @@ export class SessionContext {
     const toolCalls: OaiToolCall[] = blocks
       .filter((b): b is ContentBlock & { type: 'tool_use' } => b.type === 'tool_use')
       .map(b => ({ id: b.id, type: 'function' as const, function: { name: b.name, arguments: stableStringify(b.input) } }))
+    // Intercept large tool call arguments before they enter oaiMessages.
+    // IMPORTANT: operates on the stringified arguments only — never touches b.input.
+    const processedCalls = this.argProcessors.processToolCalls(toolCalls)
 
     const msg: OaiMessage = {
       role: 'assistant',
-      content: text || (toolCalls.length === 0 ? '' : null),
+      content: text || (processedCalls.length === 0 ? '' : null),
       ...(reasoning ? { reasoning_content: reasoning } : {}),
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      ...(processedCalls.length > 0 ? { tool_calls: processedCalls } : {}),
     }
     this.state.oaiMessages.push(msg)
     this.state.estimatedTokens += estimateOaiMessageTokens(msg)
