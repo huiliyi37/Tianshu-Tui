@@ -47,3 +47,6 @@ docs/sessions/
 .tmp_*
 截图/
 .omx/
+.tmp-iso-*
+.tmp-abort-*
+.tmp-test-fixture
