@@ -30,14 +30,13 @@ import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhas
 import { formatImmuneContext } from './immune-context.js'
 
 /**
- * Kill-switch for cross-session loading (memory block / events / companion presence).
- * Set RIVET_NO_CROSS_SESSION=1 to start a clean session with no cross-session
- * appendix injection — used to isolate cache/behavior measurements from other
- * sessions' state. Default (unset) preserves existing behavior. Fully reversible.
+ * Cross-session loading is DISABLED by default for clean isolated sessions.
+ * Set RIVET_NO_CROSS_SESSION=0 to opt IN to cross-session appendix injection
+ * (memory block / events / companion presence from other sessions).
  */
 export function crossSessionDisabled(): boolean {
   const v = process.env.RIVET_NO_CROSS_SESSION
-  return v === '1' || v === 'true'
+  return v !== '0' && v !== 'false'
 }
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */

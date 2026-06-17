@@ -951,9 +951,9 @@ export class AgentLoop {
   async warmupMemories(): Promise<void> {
     if (this.memoriesWarmed) return
     this.memoriesWarmed = true
-    // Kill-switch: RIVET_NO_CROSS_SESSION=1 skips cross-session learning load
-    // (bandit/physarum/immune state from MeridianDb) for clean isolated sessions.
-    if (process.env.RIVET_NO_CROSS_SESSION === '1' || process.env.RIVET_NO_CROSS_SESSION === 'true') return
+    // Cross-session learning load DISABLED by default for clean isolated sessions.
+    // Set RIVET_NO_CROSS_SESSION=0 to opt IN (loads bandit/physarum/immune state).
+    if (process.env.RIVET_NO_CROSS_SESSION !== '0' && process.env.RIVET_NO_CROSS_SESSION !== 'false') return
     const db = this.meridianDbForWarmup
     if (!db) return
     loadSessionMemories({
