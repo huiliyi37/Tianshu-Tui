@@ -65,6 +65,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
       },
       thinking: 'enabled',
       maxTokens: 131072,
+      usageCalibrationFactor: 0,
       models: [
         {
           id: 'glm-5.2',

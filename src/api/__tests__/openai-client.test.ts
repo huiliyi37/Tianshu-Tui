@@ -565,3 +565,74 @@ describe('DeepSeek-specific features', () => {
     assert.equal(stopReason, 'tool_use')
   })
 })
+
+describe('usage calibration (GLM prompt_tokens inflation)', () => {
+  // Helper: create client with given calibration factor and pre-set messages
+  function makeClient(factor: number | undefined, messages?: object[]): OpenAIClient {
+    const client = new OpenAIClient({
+      ...TEST_CONFIG,
+      usageCalibrationFactor: factor,
+      providerName: factor === 0 ? 'glm' : undefined,
+    })
+    // processDelta reads this.lastRequestMessages for estimation
+    ;(client as any).lastRequestMessages = messages ?? []
+    return client
+  }
+
+  function getUsage(client: OpenAIClient): any {
+    let usage: any = null
+    client.processDelta(
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      { onStopReason: (_r: string, u: any) => { usage = u } },
+    )
+    client.processDelta(
+      { usage: { prompt_tokens: 1_970_432, completion_tokens: 500, prompt_cache_hit_tokens: 1_778_816, prompt_cache_miss_tokens: 0 } },
+      { onStopReason: (_r: string, u: any) => { usage = u } },
+    )
+    return usage
+  }
+
+  it('GLM factor=0: replaces input_tokens with local estimate', () => {
+    // 1000 chars of content → ~250 tokens estimated
+    const bigText = 'x'.repeat(1000)
+    const client = makeClient(0, [{ role: 'user', content: bigText }])
+
+    const usage = getUsage(client)
+
+    // Should NOT be 1,970,432 (the inflated GLM value)
+    assert.ok(usage.input_tokens < 1_000_000,
+      `input_tokens should be estimated, not 1.97M (got ${usage.input_tokens})`)
+    assert.equal(usage.input_tokens, 250, '1000 chars / 4 = 250 tokens')
+  })
+
+  it('default (no factor): trusts API prompt_tokens as-is', () => {
+    const client = makeClient(undefined, [{ role: 'user', content: 'hi' }])
+
+    const usage = getUsage(client)
+
+    assert.equal(usage.input_tokens, 1_970_432,
+      'without calibration, API value should pass through')
+  })
+
+  it('factor=1: trusts API prompt_tokens as-is', () => {
+    const client = makeClient(1, [{ role: 'user', content: 'hi' }])
+
+    const usage = getUsage(client)
+
+    assert.equal(usage.input_tokens, 1_970_432)
+  })
+
+  it('GLM factor=0: scales cache_read proportionally', () => {
+    const bigText = 'x'.repeat(1000)
+    const client = makeClient(0, [{ role: 'user', content: bigText }])
+
+    const usage = getUsage(client)
+
+    // apiRatio = 250 / 1_970_432 ≈ 0.000127
+    // cache_read = round(1_778_816 * 0.000127) ≈ 226
+    assert.ok(usage.cache_read_input_tokens < usage.input_tokens,
+      'cache_read should be scaled down proportionally')
+    assert.ok(usage.cache_read_input_tokens > 0,
+      'cache_read should be non-zero after proportional scaling')
+  })
+})

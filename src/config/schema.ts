@@ -48,6 +48,14 @@ export const providerSchema = z.object({
    */
   thinkingStallTimeoutMs: z.number().int().positive().optional(),
   unsupported: z.array(z.string()).default([]),
+  /**
+   * Provider usage calibration factor for `prompt_tokens` (0–1).
+   * 1.0 (default) = trust the API's prompt_tokens as-is.
+   * 0 = discard prompt_tokens entirely; use local estimateOaiTokens instead.
+   * GLM coding API returns prompt_tokens inflated ~20-100x due to server-side
+   * reasoning token re-counting; set to 0 for GLM.
+   */
+  usageCalibrationFactor: z.number().min(0).max(1).optional(),
 })
 
 export const permissionAllowRuleSchema = z.object({

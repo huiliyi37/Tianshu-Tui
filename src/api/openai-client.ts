@@ -48,6 +48,12 @@ export interface OpenAIClientConfig {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
     hasToolJsonInContentBug?: boolean
   }
+  /**
+   * Provider usage calibration factor for `prompt_tokens` (0–1).
+   * 1.0 (default) = trust the API's prompt_tokens as-is.
+   * 0 = discard prompt_tokens; use local estimate instead.
+   */
+  usageCalibrationFactor?: number
 }
 
 interface ToolCallChunk {
@@ -106,6 +112,8 @@ export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
   private toolCallHintFired = new Set<number>()
   private pendingStopReason: string | null = null
+  /** Messages from the current stream request — used for usage calibration. */
+  private lastRequestMessages: OaiChatRequest['messages'] = []
   /** Accumulated text for DeepSeek tool-JSON-in-content fallback (网#1). */
   private _textAccum = ''
   /** Stable suffix appended to system message for Chinese thinking (computed once, cache-safe). */
@@ -141,6 +149,7 @@ export class OpenAIClient implements StreamClient {
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.lastRequestMessages = request.messages
     // DeepSeek thinking mode reasoning_content rules (official docs):
     // - Tool-call turns: reasoning_content MUST be echoed in all subsequent requests.
     // - Pure text turns (no tool_calls): reasoning_content is ignored by the API;
@@ -643,12 +652,12 @@ export class OpenAIClient implements StreamClient {
       const stopReason = this.pendingStopReason ?? 'end_turn'
       this.pendingStopReason = null
       const cacheRead = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0
-      callbacks.onStopReason?.(mapFinishReason(stopReason), {
+      callbacks.onStopReason?.(mapFinishReason(stopReason), this.calibrateUsage({
         input_tokens: usage.prompt_tokens ?? 0,
         output_tokens: usage.completion_tokens ?? 0,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
-      })
+      }))
       return
     }
 
@@ -712,12 +721,12 @@ export class OpenAIClient implements StreamClient {
       const stopReason = this.pendingStopReason
       this.pendingStopReason = null
       const cacheRead = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens ?? 0
-      callbacks.onStopReason?.(mapFinishReason(stopReason), {
+      callbacks.onStopReason?.(mapFinishReason(stopReason), this.calibrateUsage({
         input_tokens: usage.prompt_tokens ?? 0,
         output_tokens: usage.completion_tokens ?? 0,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
-      })
+      }))
     }
   }
 
@@ -738,6 +747,41 @@ export class OpenAIClient implements StreamClient {
       })
     }
     this.toolCallBuffer.clear()
+  }
+
+  /**
+   * Calibrate API-reported usage for providers with inflated prompt_tokens.
+   * When usageCalibrationFactor=0 (GLM coding API), replace input_tokens with
+   * a local chars/4 estimate and scale cache fields proportionally.
+   */
+  private calibrateUsage(usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_read_input_tokens: number
+    cache_creation_input_tokens: number
+  }): typeof usage {
+    const factor = this.config.usageCalibrationFactor
+    if (factor === undefined || factor >= 1) return usage
+    if (factor <= 0) {
+      // Complete replacement: estimate from request messages
+      const estTokens = estimateRequestTokens(this.lastRequestMessages)
+      const apiRatio = usage.input_tokens > 0
+        ? estTokens / usage.input_tokens
+        : 1
+      return {
+        ...usage,
+        input_tokens: estTokens,
+        cache_read_input_tokens: Math.round(usage.cache_read_input_tokens * apiRatio),
+        cache_creation_input_tokens: Math.round(usage.cache_creation_input_tokens * apiRatio),
+      }
+    }
+    // Partial: scale by factor
+    return {
+      ...usage,
+      input_tokens: Math.round(usage.input_tokens * factor),
+      cache_read_input_tokens: Math.round(usage.cache_read_input_tokens * factor),
+      cache_creation_input_tokens: Math.round(usage.cache_creation_input_tokens * factor),
+    }
   }
 
   /** 网#1: Parse tool JSON from accumulated text content (DeepSeek bug workaround).
@@ -768,6 +812,33 @@ export class OpenAIClient implements StreamClient {
       return emitted
     } catch { return 0 /* Not valid JSON */ }
   }
+}
+
+/**
+ * Quick token estimate from request messages (chars/4 for ASCII, chars/1.5 for CJK).
+ * Used for providers (GLM coding API) whose prompt_tokens is inflated.
+ */
+function estimateRequestTokens(messages: OaiChatRequest['messages']): number {
+  let chars = 0
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') chars += msg.content.length
+    else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (typeof part === 'object' && part !== null && 'text' in part) {
+          chars += String((part as { text: string }).text).length
+        }
+      }
+    }
+    if (msg.role === 'assistant') {
+      const m = msg as unknown as Record<string, unknown>
+      if (typeof m.reasoning_content === 'string') chars += m.reasoning_content.length
+      if (Array.isArray(m.tool_calls)) chars += JSON.stringify(m.tool_calls).length
+    }
+  }
+  // For a coding agent, content is mostly ASCII (code + English text).
+  // chars/4 is a good baseline; CJK-heavy sessions will slightly underestimate
+  // but this is far better than GLM's 20-100x overcounting.
+  return Math.ceil(chars / 4)
 }
 
 function mapFinishReason(reason: string): string {
