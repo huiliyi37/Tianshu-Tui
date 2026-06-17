@@ -29,6 +29,17 @@ import { checkTddGate } from './tdd-gate.js'
 import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
 
+/**
+ * Kill-switch for cross-session loading (memory block / events / companion presence).
+ * Set RIVET_NO_CROSS_SESSION=1 to start a clean session with no cross-session
+ * appendix injection — used to isolate cache/behavior measurements from other
+ * sessions' state. Default (unset) preserves existing behavior. Fully reversible.
+ */
+export function crossSessionDisabled(): boolean {
+  const v = process.env.RIVET_NO_CROSS_SESSION
+  return v === '1' || v === 'true'
+}
+
 /** Map StarPhase values to PromptEngine phaseClass strings. */
 const PHASE_CLASS_MAP: Record<string, string> = {
   'tianshu-planning': 'plan',
@@ -211,7 +222,9 @@ export class TurnStepProducer {
     this.self.config.promptEngine.setSkillAdvisoryBlock(
       skillRegistry.renderDiscoveryBlock(userInput, { exclude: this.self.getDisabledSkills() }),
     )
-    this.self.config.promptEngine.setCrossSessionMemoryBlock(renderMemoryBlock(this.self.cwd, userInput))
+    this.self.config.promptEngine.setCrossSessionMemoryBlock(
+      crossSessionDisabled() ? null : renderMemoryBlock(this.self.cwd, userInput),
+    )
     this.self.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 
     this.self.config.promptEngine.setPlanCacheAdvisory(
@@ -295,7 +308,7 @@ export class TurnStepProducer {
     this.self.contextInjection.refreshActiveClaims()
 
     // Read events from other sessions (cache-safe: injected into dynamic appendix only)
-    if (this.self.config.sessionRegistry && this.self.config.sessionId) {
+    if (!crossSessionDisabled() && this.self.config.sessionRegistry && this.self.config.sessionId) {
       const events = this.self.config.sessionRegistry.consumeEvents(this.self.config.sessionId, this.self.lastSeenEventId)
       let appendix = ''
       if (events.length > 0) {
@@ -322,7 +335,7 @@ export class TurnStepProducer {
     }
     // Companion presence: load other live sessions for awareness
     {
-      const companions = loadPresence(this.self.cwd, this.self.config.sessionId)
+      const companions = crossSessionDisabled() ? [] : loadPresence(this.self.cwd, this.self.config.sessionId)
       this.self.config.promptEngine.setCompanionPresence(
         companions.length > 0 ? formatPresenceForAppendix(companions) : null,
       )
