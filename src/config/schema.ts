@@ -73,6 +73,13 @@ export const antiAnchoringSchema = z.object({
   planningTurn: z.number().int().positive().default(1),
   projectionThreshold: z.number().min(0).max(1).default(0.4),
   seedMaxTokens: z.number().int().positive().default(512),
+  anchorBreakScout: z.object({
+    enabled: z.boolean().default(false),
+    complexityThreshold: z.number().min(0).max(1).default(0.5),
+    minTurn: z.number().int().positive().default(3),
+    scoutBudgetMs: z.number().int().positive().default(60_000),
+    scoutMaxTokens: z.number().int().positive().default(2048),
+  }).default({}),
 }).default({})
 
 export const intentRetrievalRouterSchema = z.preprocess(

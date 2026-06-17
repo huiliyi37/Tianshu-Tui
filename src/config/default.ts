@@ -103,6 +103,13 @@ export const DEFAULT_CONFIG: Config = {
       planningTurn: 1,
       projectionThreshold: 0.4,
       seedMaxTokens: 512,
+      anchorBreakScout: {
+        enabled: false,
+        complexityThreshold: 0.5,
+        minTurn: 3,
+        scoutBudgetMs: 60_000,
+        scoutMaxTokens: 2048,
+      },
     },
     autoDelegateEnabled: false,
     intentRetrievalRouter: {

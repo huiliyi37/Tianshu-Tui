@@ -298,6 +298,16 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       getTaskContract: () => self.getTaskContract(),
       getSensorium: () => self.sensorium,
     } : undefined,
+    anchorBreakScout: (() => {
+      const aa = normalizeAntiAnchoringConfig(self.config.antiAnchoring)
+      return aa.enabled && aa.anchorBreakScout.enabled && self.config.coordinatorRef
+        ? {
+            config: aa.anchorBreakScout,
+            getCoordinator: () => self.config.coordinatorRef?.() ?? null,
+            getAbortSignal: () => self.abortController?.signal,
+          }
+        : undefined
+    })(),
     memoryLearning: {
       cwd: self.cwd,
       sessionId: self.config.sessionId,

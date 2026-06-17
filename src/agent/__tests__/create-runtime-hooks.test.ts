@@ -217,7 +217,7 @@ describe('createDefaultRuntimeHooks', () => {
       getThetaState: () => ({ interval: 7, lastCheckTurn: 0, toolCallCount: 0, lastThetaAt: 0, phase: 0, cycleCount: 0 }),
       setThetaState: () => {},
       getPredictionAccumulator: () => ({ history: [] }),
-      antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 512 },
+      antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 512, anchorBreakScout: { enabled: false, complexityThreshold: 0.5, minTurn: 3, scoutBudgetMs: 60_000, scoutMaxTokens: 2048 } },
       getInitialUserMessage: () => 'refactor auth module',
       callAntiAnchoringSeedModel: async () => 'independent path',
     })

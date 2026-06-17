@@ -7,6 +7,8 @@ import { createStigmergyRuntimeHook } from './hooks/stigmergy-hook.js'
 import { createSignalConsumerRuntimeHook } from './hooks/signal-consumer-hook.js'
 import { createPlaybookReflectHook } from './hooks/playbook-reflect-hook.js'
 import { createAnchorBreakShadowHook } from './hooks/anchor-break-shadow-hook.js'
+import { createAnchorBreakScoutHook, type AnchorBreakScoutConfig } from './hooks/anchor-break-scout-hook.js'
+import type { DelegationCoordinator } from './coordinator.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createPhysarumShadowTelemetryHook } from './hooks/physarum-shadow-telemetry-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
@@ -153,6 +155,14 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+
+  // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
+  /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
+  anchorBreakScout?: {
+    config: AnchorBreakScoutConfig
+    getCoordinator: () => DelegationCoordinator | null
+    getAbortSignal?: () => AbortSignal | undefined
+  }
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -218,6 +228,21 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getSessionId: () => deps.sessionId,
       getObjective: deps.getObjective,
       getActiveDomainId: deps.getDomainId ? () => deps.getDomainId!() ?? null : undefined,
+    }))
+  }
+
+  // P2 break-anchor scout: real orthogonal-domain sub-agent dispatched mid-loop
+  // when a complex task is converging without breadth exploration. Opt-in only.
+  if (deps.anchorBreakScout?.config.enabled && deps.sessionId) {
+    hooks.push(createAnchorBreakScoutHook({
+      config: deps.anchorBreakScout.config,
+      getCoordinator: deps.anchorBreakScout.getCoordinator,
+      getSessionId: () => deps.sessionId,
+      getObjective: deps.getObjective ?? (() => null),
+      getActiveDomainId: deps.getDomainId ? () => deps.getDomainId!() ?? null : undefined,
+      getDoomLoopLevel: deps.getDoomLoopLevel,
+      getAbortSignal: deps.anchorBreakScout.getAbortSignal,
+      store: deps.meridianIndexer?.getDb() ?? null,
     }))
   }
 
