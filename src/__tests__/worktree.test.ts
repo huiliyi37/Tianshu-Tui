@@ -1,10 +1,10 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef } from '../agent/worktree.js'
+import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree } from '../agent/worktree.js'
 
 function git(dir: string, args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -73,5 +73,46 @@ describe('getCurrentGitRef', () => {
 
   it('returns the current branch instead of assuming main', () => {
     assert.equal(getCurrentGitRef(repo), 'feature-base')
+  })
+})
+
+describe('createWorktree failure cleanup (S1a)', () => {
+  const _savedTmpdir = process.env.TMPDIR
+  let _testTmp: string
+
+  // Redirect TMPDIR to workspace — agent Seatbelt sandbox blocks writes to /var/folders T/.
+  before(() => {
+    _testTmp = mkdtempSync(join(process.cwd(), '.tmp-wt-s1a-'))
+    process.env.TMPDIR = _testTmp
+  })
+  after(() => {
+    if (_savedTmpdir === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = _savedTmpdir
+    rmSync(_testTmp, { recursive: true, force: true })
+  })
+
+  it('cleans up mkdtemp directory when git worktree add fails', () => {
+    // Non-git directory → git worktree add will fail
+    const nonGit = mkdtempSync(join(tmpdir(), 'rivet-test-nongit-'))
+    const sessionId = 'cleanup-t1' // slice(0,8) = 'cleanup-'
+    const wtPrefix = 'rivet-wt-cleanup-'
+
+    try {
+      // Before: no rivet-wt-cleanup- dirs in tmpdir
+      const before = readdirSync(tmpdir()).filter(n => n.startsWith(wtPrefix))
+      assert.equal(before.length, 0)
+
+      // Should throw because cwd is not a git repo
+      assert.throws(
+        () => createWorktree(nonGit, sessionId),
+        /failed to create git worktree/,
+      )
+
+      // After: still no dirs — mkdtemp dir was cleaned up
+      const after = readdirSync(tmpdir()).filter(n => n.startsWith(wtPrefix))
+      assert.equal(after.length, 0, 'mkdtemp dir must be cleaned up after git worktree add failure')
+    } finally {
+      try { rmSync(nonGit, { recursive: true, force: true }) } catch {}
+    }
   })
 })
