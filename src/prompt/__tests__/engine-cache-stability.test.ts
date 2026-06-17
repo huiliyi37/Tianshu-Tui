@@ -355,6 +355,31 @@ describe('habituation: three-zone consolidation', () => {
       'Fresh trailer prefix must include consolidated dynamic appendix')
   })
 
+  it('consolidated prefix stays byte-identical across turns after promotion — cacheable', () => {
+    const engine = createEngineH(3)
+    engine.setPhaseHint('execute')
+
+    // Warm up: promote tracker until consolidatedBlock is non-empty.
+    for (let t = 0; t < 5; t++) {
+      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
+    }
+
+    // Turn N: extract the prefix (volatileBlock + consolidatedBlock, before \n---\n).
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'turn-n' }])
+    const { fresh: prefix1 } = latestUserTrailer(req1.messages)
+
+    // Turn N+1: same domain, new user message — prefix must be byte-identical.
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'turn-n1' }])
+    const { fresh: prefix2 } = latestUserTrailer(req2.messages)
+
+    assert.ok(prefix1.includes('<consolidated>'), 'Turn N prefix must include consolidated block')
+    assert.equal(prefix1, prefix2,
+      'volatileBlock + consolidatedBlock prefix must be byte-identical across turns → cacheable')
+  })
+
   it('disabling habituation (threshold=0) falls back to v1 behavior', () => {
     const engine = new PromptEngine({
       model: 'test',
