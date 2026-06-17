@@ -3,9 +3,12 @@ import {
   loadActiveProject,
   loadActiveSessionId,
   loadAttentionSeen,
+  loadToolDensity,
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
+  saveToolDensity,
+  type ToolDensity,
 } from '../lib/persist'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
@@ -19,6 +22,7 @@ export interface UiState {
   newSessionOpen: boolean
   error: string | null
   attentionSeen: string[] // seen attention signatures (Q2)
+  toolDensity: ToolDensity
 }
 
 type UiAction =
@@ -28,6 +32,7 @@ type UiAction =
   | { type: 'openNew'; open: boolean }
   | { type: 'setError'; error: string | null }
   | { type: 'markSeen'; sigs: string[] }
+  | { type: 'setToolDensity'; density: ToolDensity }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -47,6 +52,8 @@ function reducer(state: UiState, action: UiAction): UiState {
       const merged = new Set([...state.attentionSeen, ...action.sigs])
       return { ...state, attentionSeen: [...merged] }
     }
+    case 'setToolDensity':
+      return { ...state, toolDensity: action.density }
     default:
       return state
   }
@@ -63,6 +70,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     newSessionOpen: false,
     error: null,
     attentionSeen: loadAttentionSeen(),
+    toolDensity: loadToolDensity(),
   }))
 
   useEffect(() => {
@@ -76,6 +84,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveAttentionSeen(state.attentionSeen)
   }, [state.attentionSeen])
+
+  useEffect(() => {
+    saveToolDensity(state.toolDensity)
+  }, [state.toolDensity])
 
   return (
     <StateCtx.Provider value={state}>

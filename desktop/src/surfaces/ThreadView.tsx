@@ -4,7 +4,6 @@ import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/type
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolGroup, ToolCard, isCollapsibleTool, isRunTestsTool, toolNameOf } from '../components/ToolGroup'
-import { loadToolDensity, type ToolDensity } from '../lib/persist'
 import { Markdown } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
@@ -13,6 +12,7 @@ import { AutonomyControl } from '../components/AutonomyControl'
 import { RewindOverlay } from '../components/RewindOverlay'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
+import { useUiState } from '../state/store'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl } from '../runtime/client'
 
@@ -40,7 +40,7 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
-  const [toolDensity] = useState<ToolDensity>(() => loadToolDensity())
+  const toolDensity = useUiState().toolDensity
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)

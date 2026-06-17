@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useHealth } from '../state/queries'
+import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
-import { loadDefaultAutonomy, saveDefaultAutonomy, loadToolDensity, saveToolDensity, type ToolDensity } from '../lib/persist'
+import { loadDefaultAutonomy, saveDefaultAutonomy, type ToolDensity } from '../lib/persist'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -19,9 +20,10 @@ const DENSITY_LABEL: Record<ToolDensity, string> = {
 
 export function SettingsSurface() {
   const health = useHealth()
+  const ui = useUiState()
+  const dispatch = useUiDispatch()
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
-  const [density, setDensity] = useState<ToolDensity>(() => loadToolDensity())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -34,8 +36,7 @@ export function SettingsSurface() {
   }
 
   const pickDensity = (d: ToolDensity) => {
-    setDensity(d)
-    saveToolDensity(d)
+    dispatch({ type: 'setToolDensity', density: d })
   }
 
   return (
@@ -69,14 +70,14 @@ export function SettingsSurface() {
           {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
             <button
               key={d}
-              className={`seg-item ${density === d ? 'active' : ''}`}
+              className={`seg-item ${ui.toolDensity === d ? 'active' : ''}`}
               onClick={() => pickDensity(d)}
             >
               {DENSITY_LABEL[d]}
             </button>
           ))}
         </div>
-        <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。新会话生效。</div>
+        <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。</div>
       </section>
 
       <section className="settings-group">
