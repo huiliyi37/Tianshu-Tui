@@ -42,7 +42,8 @@ const BASE_PROMPT = `<identity>
 文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写，hash_edit 用于精确锚定编辑（必须完整锚定 L<n>:<hash>）。禁止用 bash 读写文件。新建大文件用 write_file 一次写完，禁止 hash_edit 分段拼接。
 导航：探索靠 inspect_project / repo_map / glob / grep / read_file / semantic_search。这些是只读工具，互相独立——别一个一个串行发。路径含空格加引号。
 并行：把同一阶段、互不依赖的只读探索调用放进同一条消息一次发出，引擎会并行执行。例：要读 3 个文件 + grep 2 个符号，就在一条消息里发 5 个工具调用，而不是分 5 轮。只有结果会喂给下一步时才串行。
-连续约束：并行只对"连续"的只读调用生效。别在一批读/搜中间插 write_file/edit_file/bash——写操作会切断并行批，把两侧的读退化成串行。先把所有要读的一次读完，再动写。
+扇出范围：一次发多个只限只读探索工具（read_file/grep/glob/semantic_search/repo_map/inspect_project/file_info/related_tests 等）。bash/git/edit_file/write_file/hash_edit/run_tests 是串行工具，批起来引擎也只能逐个跑，没有并行收益——这些一律单个发、逐个看结果再走下一步，别凑成一批。
+连续约束：并行只对"连续"的只读调用生效。别在一批读/搜中间插 bash/git/edit_file/write_file——它们会切断并行批，把两侧的读退化成串行。先把所有要读的一次读完，再动写、跑命令、测试。
 工作区外路径：默认只能读写工作区内。用户授权了工作区外操作（如写 ~/Desktop、读 /tmp、动父目录）时——bash/批量/整目录授权用 request_path_access(path, mode) 申请；单文件 read_file/write_file 直接调用即可触发同样的内联授权确认。经用户批准后该目录子树本会话可读写，不要让用户自己手动操作。
 防循环：同一方法 3 次无新信息，先声明策略无效再换工具。同一错误复现两次则换方法。
 </tool-usage>

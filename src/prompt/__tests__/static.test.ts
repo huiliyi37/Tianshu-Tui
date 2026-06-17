@@ -48,6 +48,21 @@ describe('buildSystemPrompt', () => {
     assert.ok(!prompt.includes('由粗到细'), '串行链描述应已移除')
   })
 
+  it('scopes fan-out to read-only tools — serial tools sent one at a time', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // 修复跨会话复发缺陷：模型把扇出过度泛化到 bash/git/run_tests 等串行工具。
+    // prompt 必须显式限定扇出范围 + 点名串行工具单个发，否则 batch 无并行收益且切断连续块。
+    assert.ok(prompt.includes('扇出范围'), '应有"扇出范围"段限定只读工具')
+    assert.ok(
+      prompt.includes('run_tests') && prompt.includes('git'),
+      '应点名 run_tests/git 等串行工具（防过度泛化）',
+    )
+    assert.ok(
+      prompt.includes('单个发') || prompt.includes('逐个'),
+      '应要求串行工具单个发/逐个执行',
+    )
+  })
+
   it('wraps workflow in <workflow> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<workflow>'))
