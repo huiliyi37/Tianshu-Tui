@@ -24,6 +24,15 @@ import { debugLog } from '../utils/debug.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
+/**
+ * T7 request-time collapse: window fill-ratio above which the *full* pass runs
+ * (collapsing old tool results into summaries, not just the lightweight
+ * reasoning-strip + dup-fold). The full pass breaks the exact-prefix cache on
+ * DeepSeek-class providers, so it is deferred until the window is genuinely
+ * near-full. See the call site in {@link PromptEngine} for the cost rationale.
+ */
+const FULL_COLLAPSE_FILL_RATIO = 0.85
+
 /** Fast non-crypto hash for content dedup (djb2 on first 2000 chars + length). */
 function simpleHash(s: string): string {
   let h = 5381
@@ -497,8 +506,22 @@ export class PromptEngine {
       const estTokens = Math.ceil(estChars / 4)
       const fillRatio = estTokens / contextWindow
 
-      // Lightweight pass (0-50%): strip reasoning + fold duplicate grep/read.
-      // Full pass (>50%): also collapse old tool results via semantic summaries.
+      // Lightweight pass (0–85%): strip reasoning + fold duplicate grep/read.
+      // Full pass (>85%): also collapse old tool results via semantic summaries.
+      //
+      // The full pass rewrites old tool results into summaries. On exact-prefix
+      // providers (DeepSeek) that rewrite invalidates the whole prefix after the
+      // touched message — one full pass costs a real cache-miss rebuild of the
+      // collapsed region (observed: 240K tokens at 3元/M ≈ 0.71元 on a single
+      // request, ~27% of a session's total spend). estTokens here is a char/4
+      // estimate that *includes* echoed reasoning_content, so it runs well ahead
+      // of the real billed prompt. Triggering the full pass at 0.5 fired while
+      // the real prompt was only ~27% of the window — paying the cache break for
+      // headroom that was never needed. FULL_COLLAPSE_FILL_RATIO defers the full
+      // pass until the window is genuinely near-full (when avoiding overflow is
+      // worth more than cache protection); the lightweight pass still runs the
+      // whole time. Tunable: lower it to collapse more aggressively, raise it to
+      // protect cache longer.
       if (fillRatio > 0) {
         // History rewrite (compact / session split) invalidates stored indices.
         if (this.collapseWatermark > result.length) {
@@ -512,7 +535,7 @@ export class PromptEngine {
           debugLog('prompt-engine', `T7 watermark advanced: step=${step} boundary=${this.collapseWatermark} estTokens=${estTokens}`)
         }
         if (this.collapseWatermark > 0) {
-          requestTimeCollapse(result, this.collapseWatermark, contextWindow, fillRatio < 0.5)
+          requestTimeCollapse(result, this.collapseWatermark, contextWindow, fillRatio < FULL_COLLAPSE_FILL_RATIO)
         }
       }
     }
