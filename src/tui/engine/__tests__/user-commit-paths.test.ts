@@ -26,9 +26,10 @@ function makeApp() {
 
 const tick = () => new Promise(r => setTimeout(r, 10))
 
-/** 检查 scrollback 包含指定文本（忽略 ANSI 转义码干扰） */
+/** 检查 scrollback 包含指定文本（忽略 ANSI 转义码干扰）。
+ *  CC 对标重构（f9001b16）后用户气泡去掉 "You" 标签，改用 ❯/▌ 标记（formatUserMessage）。 */
 function hasUserBubbleFor(scrollback: string, text: string): boolean {
-  return scrollback.includes('You') && scrollback.includes(text)
+  return /[❯▌]/.test(scrollback) && scrollback.includes(text)
 }
 
 // ── 路径 1: Idle submit ────────────────────────────────────────
@@ -127,9 +128,9 @@ test('steer 归并后：不重复生成用户气泡', async () => {
   // note 1 在 steer 路径中已单独 commit
   assert.ok(hasUserBubbleFor(sb, 'note 1'), 'steer 路径的 note 1 应有独立气泡')
   // task B 是合并提交（steerMerged），不 commit 用户气泡
-  const youCount = (sb.match(/You/g) ?? []).length
-  // task A 1个 + note 1 1个 = 2个 You，不应有第 3 个（task B merged bubble）
-  assert.equal(youCount, 2, `应为 2 个 You 气泡（task A + note 1），实际 ${youCount}`)
+  const bubbleCount = (sb.match(/[❯▌]/g) ?? []).length
+  // task A 1个 + note 1 1个 = 2个气泡标记，不应有第 3 个（task B merged bubble）
+  assert.equal(bubbleCount, 2, `应为 2 个用户气泡（task A + note 1），实际 ${bubbleCount}`)
 })
 
 // ── rejectSubmit：main 层 resolve null 时清 busy ─────────────────

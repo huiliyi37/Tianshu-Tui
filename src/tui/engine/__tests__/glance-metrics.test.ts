@@ -1,8 +1,8 @@
 /**
  * T9 GlanceBar 真实指标测试（B）。
  *
- * 契约：
- *  1. 设置 metricsProvider 后，GlanceBar 用真实 ctx%/Xk·Yk/$cost/⚡% 渲染。
+ * 契约（CC 对标 f9001b16：ctx% 并入 ◧token 常驻，cache ⚡ 仅 <50% 浮出）：
+ *  1. 设置 metricsProvider 后，GlanceBar 用真实 ◧Xk/Yk·$cost·⚡% 渲染。
  *  2. 无 provider 时回退内部估算；cost 单次计算，不随 onTurnComplete 累计膨胀
  *     （agent 传入的 usage 已是累计快照，旧实现 += 会指数级膨胀）。
  */
@@ -45,7 +45,25 @@ function makeApp() {
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))
 
-test('metricsProvider 提供真实 ctx%/Xk·Yk/$cost/⚡% ', () => {
+test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（CC 对标 f9001b16：ctx% 并入 ◧token，cache 仅 <50% 浮出）', () => {
+  const { app, out } = makeApp()
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 50_000,
+    maxTokens: 200_000,
+    cacheHitRate: 0.3, // < 0.5 → ⚡ 浮出（健康态会被门控隐藏）
+    cost: 1.23,
+    inputTokens: 50_000,
+    outputTokens: 1_000,
+  }))
+  // setModelInfo 触发一次 renderLive
+  app.setModelInfo('test', 200_000)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('◧50k/200k'), `Xk/Yk: ${plain}`)
+  assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
+  assert.ok(plain.includes('⚡30%'), `cache(<50% 才浮出): ${plain}`)
+})
+
+test('cache 健康态（≥50%）门控隐藏 ⚡，避免正常态噪声', () => {
   const { app, out } = makeApp()
   app.setMetricsProvider(() => ({
     estimatedTokens: 50_000,
@@ -55,13 +73,10 @@ test('metricsProvider 提供真实 ctx%/Xk·Yk/$cost/⚡% ', () => {
     inputTokens: 50_000,
     outputTokens: 1_000,
   }))
-  // setModelInfo 触发一次 renderLive
   app.setModelInfo('test', 200_000)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('ctx 25%'), `ctx%: ${plain}`)
-  assert.ok(plain.includes('◧ 50k/200k'), `Xk/Yk: ${plain}`)
-  assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
-  assert.ok(plain.includes('⚡60%'), `cache: ${plain}`)
+  assert.ok(!plain.includes('⚡'), `健康态不应渲染 ⚡: ${plain}`)
+  assert.ok(plain.includes('◧50k/200k'), `token 仍常驻: ${plain}`)
 })
 
 test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀', async () => {
