@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, type VolatileContext, type SalientBlock } from '../volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, type VolatileContext, type SalientBlock } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -675,6 +675,45 @@ describe('GWT salience and Top-K selection', () => {
 
     it('assigns high salience so Top-K never drops it', () => {
       assert.equal(assignSalience(pointer), 0.8)
+    })
+  })
+
+  describe('plan-mode architecture diagram revival', () => {
+    it('renders the plan-mode block in the dynamic appendix (live path) when planning', () => {
+      // Regression: the block used to live only in buildVolatileBlockInternal,
+      // which buildStableVolatileBlock calls with planModeState=undefined — so it
+      // never reached the model. It must render in the dynamic appendix.
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning' })
+      assert.match(out, /<plan-mode>/)
+      // two skeletons (architecture + dataflow) both present
+      const fences = out.match(/```mermaid/g) ?? []
+      assert.ok(fences.length >= 2, `expected >=2 mermaid skeletons, got ${fences.length}`)
+      assert.match(out, /flowchart TD/)
+      assert.match(out, /flowchart LR/)
+      // semantic shape legend present
+      assert.match(out, /\{\{LLM\/核心逻辑\}\}/)
+    })
+
+    it('keeps the plan-mode block under Top-K budget pressure (high salience)', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning' }, 3_000)
+      assert.match(out, /<plan-mode>/)
+    })
+
+    it('does not render the plan-mode block outside planning state', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo' })
+      assert.doesNotMatch(out, /<plan-mode>/)
+      assert.doesNotMatch(out, /flowchart LR/)
+    })
+
+    it('integration: buildVolatileBlock surfaces the plan-mode block when planning', () => {
+      const out = buildVolatileBlock({ cwd: '/repo', planModeState: 'planning' })
+      assert.match(out, /<plan-mode>/)
+    })
+
+    it('lightweight methodology advisory now requires at least one diagram', () => {
+      const advisory = renderPlanMethodologyAdvisory('lightweight')
+      assert.ok(advisory)
+      assert.match(advisory!, /至少画一张架构或数据流图/)
     })
   })
 })

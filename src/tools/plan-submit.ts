@@ -11,6 +11,24 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { writePlan, slugify } from '../plan/plan-store.js'
 
+/**
+ * Slugs that have already been warned once for a missing diagram. The soft gate
+ * nudges at most once per slug — a resubmit of the same slug always passes
+ * through, so the agent can never get stuck if a diagram is genuinely
+ * unnecessary. Module-level (process-lived) is intentional: one nudge per plan.
+ */
+const warnedSlugs = new Set<string>()
+
+const MERMAID_FENCE = /```\s*mermaid/i
+
+const MISSING_DIAGRAM_SKELETON = `\`\`\`mermaid
+flowchart TD
+    U(用户输入) --> R[[入口/路由]]
+    R --> L{{LLM/核心逻辑}}
+    R --> S[(存储/状态)]
+    L --产出--> OUT([结果])
+\`\`\``
+
 export const PLAN_SUBMIT_TOOL: Tool = {
   definition: {
     name: 'plan_submit',
@@ -65,6 +83,9 @@ Include these sections:
 
 Reference files with full paths: \`src/agent/loop.ts:123\`
 
+### Diagram soft gate
+A plan with no Mermaid diagram is not saved on first submit — you'll be asked once to add an architecture/data-flow diagram. Resubmitting the same title (with or without a diagram) always saves it, so this never blocks you for more than one extra round.
+
 ### Required fields
 - title: Short descriptive plan title
 - plan: Complete plan Markdown (can be long — include code snippets and Mermaid diagrams)`,
@@ -90,6 +111,28 @@ Reference files with full paths: \`src/agent/loop.ts:123\`
     }
 
     const slug = slugify(title)
+
+    // One-shot soft gate: if the plan has no Mermaid diagram, nudge once (do
+    // NOT write), then let any resubmit of the same slug through. Never blocks
+    // more than a single extra round-trip, so it cannot cause a doom loop.
+    if (!MERMAID_FENCE.test(planContent) && !warnedSlugs.has(slug)) {
+      warnedSlugs.add(slug)
+      return {
+        content: [
+          `⚠️ Plan not yet saved — it has no Mermaid diagram.`,
+          '',
+          `A good plan visualizes architecture or data flow. Add one diagram (even just the core 3-5 nodes) and resubmit. Copy this skeleton and replace the node text:`,
+          '',
+          MISSING_DIAGRAM_SKELETON,
+          '',
+          `Shapes: (rounded)=input/user · [[subroutine]]=agent · {{hexagon}}=LLM · [(cylinder)]=store · {rhombus}=decision. Edges: --> read · ==> write · -.-> async/event.`,
+          '',
+          `If a diagram is genuinely unnecessary for this task, resubmit \`plan_submit\` as-is (same title) and it will be saved.`,
+        ].join('\n'),
+        isError: true,
+      }
+    }
+
     const fullContent = `# ${title.trim()}
 
 ${planContent.trim()}

@@ -28,7 +28,7 @@ import type { PlanMethodology } from '../context/task-contract.js'
 // first `todo write` becomes the plan baseline that the replan loop tracks
 // against. Zero new tools; just nudges the model toward the existing todo tool.
 const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
-  lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
+  lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。至少画一张架构或数据流图（Mermaid），哪怕只画核心 3-5 个节点。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
   full: '<plan-methodology route="full">推荐使用完整版计划模板（9阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-template.md。必须包含: 安全不变量、触发路径清单、双门对齐数据流图。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
@@ -41,6 +41,54 @@ export function renderPlanMethodologyAdvisory(
   if (!reason || methodology === 'lightweight') return base
   // For 'full' with a reason, append it for traceability
   return base.replace('</plan-methodology>', `\n路由理由: ${reason}</plan-methodology>`)
+}
+
+/**
+ * Plan Mode instruction block. Cache-safe: rendered ONLY into the dynamic
+ * appendix (after history), never the frozen base — planModeState flips
+ * mid-session and must not invalidate the exact-prefix cache.
+ *
+ * Carries copyable Mermaid skeletons so the planning model reliably produces an
+ * architecture/data-flow diagram (the salience for this lives in the appendix,
+ * close to where the model is reasoning, instead of a far-away tool description).
+ */
+export function renderPlanModeBlock(): string {
+  return `<plan-mode>
+You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state.
+
+WORKFLOW:
+1. Explore the codebase using read_file, grep, glob, repo_map, inspect_project
+2. Understand the full scope: which files need changes, what existing patterns to follow
+3. When your plan is complete, call \`plan_submit\` with a polished design document
+
+PLAN QUALITY STANDARD — your plan should be a comprehensive design document:
+- Include at least one Mermaid diagram (architecture or data flow). Shapes carry meaning — (rounded)=user/input, [[subroutine]]=agent/processor, {{hexagon}}=LLM/model, [(cylinder)]=store/DB, {rhombus}=decision; edges --> sync/read, ==> write/strong, -.-> async/event. Copy a skeleton below and replace the node text:
+\`\`\`mermaid
+flowchart TD
+    U(用户输入) --> R[[入口/路由]]
+    R --> L{{LLM/核心逻辑}}
+    R --> S[(存储/状态)]
+    L --产出--> OUT([结果])
+\`\`\`
+\`\`\`mermaid
+flowchart LR
+    SRC(来源) -->|读取| P[[处理]]
+    P -->|校验| D{通过?}
+    D -->|是| W[(写入目标)]
+    D -.失败.-> ERR([报错/回退])
+\`\`\`
+- Include root cause analysis, not just surface symptoms
+- Reference files with full paths like \`src/agent/loop.ts:643\`
+- Show proposed code with diff/pseudocode per file
+- Compare alternatives in a table when design decisions exist
+- Include a verification plan with test cases and manual verification steps
+
+4. After submitting plan_submit, WAIT for the user to approve or reject. Do not proceed without approval.
+
+The user will respond with:
+- /plan-approve <slug> — approved, start execution
+- /plan-reject <slug> — rejected, revise
+</plan-mode>`
 }
 
 export interface ToolHistoryEntry {
@@ -406,6 +454,12 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(`<worktree-warning severity="${escapeXml(ctx.worktreeReality.severity)}">\n${reasons}\n</worktree-warning>`)
   }
 
+  // Plan-mode instruction block: governs the whole planning turn (read-only +
+  // plan quality standard + diagram skeletons). Cache-safe — appendix only.
+  if (ctx.planModeState === 'planning') {
+    parts.push(renderPlanModeBlock())
+  }
+
   if (parts.length === 0) return ''
 
   // ── GWT Top-K selection (when budget is set) ────────────────────
@@ -487,6 +541,8 @@ function renderProgressBlock(ctx: VolatileContext): string | null {
 
 export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<star-domain')) return 1.0
+  // Plan-mode block governs the entire planning turn — never drop under budget.
+  if (blockContent.startsWith('<plan-mode>')) return 0.95
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<星域-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
@@ -668,30 +724,9 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   }
 
 
-  if (ctx.planModeState === 'planning') {
-    parts.push(`<plan-mode>
-You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state.
-
-WORKFLOW:
-1. Explore the codebase using read_file, grep, glob, repo_map, inspect_project
-2. Understand the full scope: which files need changes, what existing patterns to follow
-3. When your plan is complete, call \`plan_submit\` with a polished design document
-
-PLAN QUALITY STANDARD — your plan should be a comprehensive design document:
-- Use Mermaid diagrams (flowchart/graph) for architecture and data flow visualization
-- Include root cause analysis, not just surface symptoms
-- Reference files with full paths like \`src/agent/loop.ts:643\`
-- Show proposed code with diff/pseudocode per file
-- Compare alternatives in a table when design decisions exist
-- Include a verification plan with test cases and manual verification steps
-
-4. After submitting plan_submit, WAIT for the user to approve or reject. Do not proceed without approval.
-
-The user will respond with:
-- /plan-approve <slug> — approved, start execution
-- /plan-reject <slug> — rejected, revise
-</plan-mode>`)
-  }
+  // NOTE: plan-mode block is rendered in buildDynamicAppendix (cache-safe),
+  // not here — buildStableVolatileBlock forces planModeState undefined for the
+  // frozen base, so rendering it here would be dead code.
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
 }
