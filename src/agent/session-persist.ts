@@ -338,6 +338,7 @@ export class SessionPersist {
 
   writeMetadata(metadata: SessionMetadata): void {
     writeFileAtomicSync(this.metadataPath, JSON.stringify(metadata, null, 2) + '\n')
+    SessionPersist.invalidateListCache()
   }
 
   /** Upsert specific metadata fields without overwriting others */
@@ -518,8 +519,25 @@ export class SessionPersist {
     }
   }
 
+  /**
+   * Cache for listSessionsWithMetadata — avoids re-reading hundreds of session
+   * meta files on every user boundary when cross-session handoff is requested.
+   * TTL: 60s. Invalidated on write (saveMetadata / saveHandoff).
+   */
+  private static _listCache: { ts: number; data: Array<SessionMetadata & { id: string }> } | null = null
+  private static readonly LIST_CACHE_TTL_MS = 60_000
+
+  static invalidateListCache(): void {
+    SessionPersist._listCache = null
+  }
+
   /** List sessions with metadata, sorted by updatedAt descending (most recent first) */
   static listSessionsWithMetadata(): Array<SessionMetadata & { id: string }> {
+    const now = Date.now()
+    if (SessionPersist._listCache && (now - SessionPersist._listCache.ts) < SessionPersist.LIST_CACHE_TTL_MS) {
+      return SessionPersist._listCache.data
+    }
+
     const ids = SessionPersist.listSessions()
     const results: Array<SessionMetadata & { id: string }> = []
     for (const id of ids) {
@@ -538,7 +556,9 @@ export class SessionPersist {
         // Skip corrupted sessions
       }
     }
-    return results.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    results.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+    SessionPersist._listCache = { ts: now, data: results }
+    return results
   }
 }
 
