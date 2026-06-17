@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCrossSessionHook, formatEventsForAppendix } from '../hooks/cross-session-hook.js'
+import { createCrossSessionHook, formatEventsForAppendix, renderCrossSessionClaims } from '../hooks/cross-session-hook.js'
 import type { EventRecord } from '../session-registry.js'
 
 describe('cross-session-hook', () => {
@@ -25,6 +25,24 @@ describe('cross-session-hook', () => {
 
   test('formatEventsForAppendix returns empty string for no events', () => {
     assert.equal(formatEventsForAppendix([]), '')
+  })
+
+  test('renderCrossSessionClaims surfaces grouped claims (B-line: signal was computed but discarded)', () => {
+    const claims = [
+      { sessionId: 'sessA', filePath: 'src/loop.ts', claimType: 'edit' },
+      { sessionId: 'sessB', filePath: 'src/loop.ts', claimType: 'read' },
+      { sessionId: 'sessC', filePath: 'src/engine.ts', claimType: 'edit' },
+    ]
+    const out = renderCrossSessionClaims(claims)
+    assert.ok(out.includes('<cross-session-claims'))
+    assert.ok(out.includes('</cross-session-claims>'))
+    // Same file groups multiple holders onto one line.
+    assert.match(out, /src\/loop\.ts — claimed by sessA\(edit\), sessB\(read\)/)
+    assert.match(out, /src\/engine\.ts — claimed by sessC\(edit\)/)
+  })
+
+  test('renderCrossSessionClaims returns empty string for no claims', () => {
+    assert.equal(renderCrossSessionClaims([]), '')
   })
 
   test('createCrossSessionHook reads events and updates state', () => {

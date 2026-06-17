@@ -19,7 +19,7 @@ import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
-import { formatEventsForAppendix } from './hooks/cross-session-hook.js'
+import { formatEventsForAppendix, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
 import { STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
 import { classifySeason } from './cognitive-season.js'
@@ -304,15 +304,9 @@ export class TurnStepProducer {
       }
       // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
       const claims = this.self.config.sessionRegistry.getActiveClaims(this.self.config.sessionId)
-      if (claims.length > 0) {
-        const grouped = new Map<string, string[]>()
-        for (const c of claims) {
-          const key = c.filePath
-          if (!grouped.has(key)) grouped.set(key, [])
-          grouped.get(key)!.push(`${c.sessionId}(${c.claimType})`)
-        }
-        const claimLines = [...grouped.entries()].map(([file, holders]) =>
-          `  ${file} — claimed by ${holders.join(', ')}`)
+      const claimsBlock = renderCrossSessionClaims(claims)
+      if (claimsBlock) {
+        appendix = (appendix ? appendix + '\n' : '') + claimsBlock
       }
       if (this.self.persist) {
         const prevHandoff = SessionPersist.loadPrevHandoff(
