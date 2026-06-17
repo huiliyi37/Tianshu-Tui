@@ -56,7 +56,7 @@ describe('courage-hook constitutional override', () => {
     assert.equal(messages.length, 0)
   })
 
-  it('constitutional message bars no-risk dismissal', () => {
+  it('constitutional message requires structural verification, bars dismissal', () => {
     const trap = createSycophancyTrap()
     trap.recordTurn({ agreedWithUser: true, confidence: 0.7 })
     trap.recordTurn({ agreedWithUser: true, confidence: 0.6 })
@@ -70,8 +70,18 @@ describe('courage-hook constitutional override', () => {
     } as any)
 
     assert.equal(messages.length, 1)
-    assert.ok(!messages[0]!.includes('无阻塞风险'), 'constitutional message must not allow no-risk dismissal')
-    assert.ok(messages[0]!.includes('验证'), 'constitutional must reference verification')
+    const msg = messages[0]!
+    // Bars simple dismissal — message explicitly forbids these phrases
+    assert.ok(!msg.includes('无阻塞风险'), 'constitutional must not allow no-risk dismissal')
+    // Requires structural verification: file + lines + fact + impact
+    assert.ok(msg.includes('文件'), 'must reference file path')
+    assert.ok(msg.includes('行'), 'must reference line numbers')
+    assert.ok(msg.includes('事实'), 'must reference specific facts')
+    assert.ok(msg.includes('下一步'), 'must reference next-step impact')
+    // Contains consequence for non-compliance
+    assert.ok(msg.includes('方向暂停'), 'must specify consequence')
+    // Forbids trivial fulfillment
+    assert.ok(msg.includes('不可用'), 'must explicitly forbid trivial responses')
   })
 
   it('respects cooldown in regular (non-sycophancy) mode', () => {
