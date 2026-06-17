@@ -1,5 +1,6 @@
 import { memo, useState, useMemo } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
+import type { ToolDensity } from '../lib/persist'
 
 const TOOL_BODY_MAX = 10000
 
@@ -83,20 +84,23 @@ function buildGroupSummary(entries: PairedEntry[]): string {
 
 // ── ToolGroup: Cursor 3.0-style compact group with summary header ──
 
-function ToolGroupImpl({ items }: { items: ConvoBlock[] }) {
-  const [collapsed, setCollapsed] = useState(true)
+function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; density?: ToolDensity }) {
+  const compact = density === 'compact'
+  const [collapsed, setCollapsed] = useState(density !== 'detailed')
   const entries = useMemo(() => pairEntries(items), [items])
   const summary = useMemo(() => buildGroupSummary(entries), [entries])
   const hasPending = entries.some(e => !e.result)
 
   return (
-    <div className="tool-group">
+    <div className={`tool-group ${density}`}>
       <button
         className="tool-group-summary"
-        onClick={() => setCollapsed(c => !c)}
-        aria-expanded={!collapsed}
+        onClick={() => !compact && setCollapsed(c => !c)}
+        aria-expanded={compact ? false : !collapsed}
+        disabled={compact}
+        title={compact ? '密度设为 compact，工具组已永久折叠。在 设置 > 工具密度 中调整。' : undefined}
       >
-        <span className={`chev ${collapsed ? '' : 'open'}`} aria-hidden>▸</span>
+        {!compact && <span className={`chev ${collapsed ? '' : 'open'}`} aria-hidden>▸</span>}
         <span className={`tool-dot ${hasPending ? 'run' : 'ok'}`} aria-hidden />
         <span className="tool-group-label">{summary}</span>
         <span className="tool-group-count">{entries.length}</span>
@@ -109,7 +113,7 @@ function ToolGroupImpl({ items }: { items: ConvoBlock[] }) {
 }
 
 export const ToolGroup = memo(ToolGroupImpl, (a, b) =>
-  a.items.length === b.items.length && a.items.every((x, i) => x === b.items[i])
+  a.density === b.density && a.items.length === b.items.length && a.items.every((x, i) => x === b.items[i])
 )
 
 function PairedRowImpl({ entry }: { entry: PairedEntry }) {

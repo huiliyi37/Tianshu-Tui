@@ -4,6 +4,7 @@ import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/type
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolGroup, ToolCard, isCollapsibleTool, toolNameOf } from '../components/ToolGroup'
+import { loadToolDensity, type ToolDensity } from '../lib/persist'
 import { Markdown } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
@@ -39,6 +40,7 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
+  const [toolDensity] = useState<ToolDensity>(() => loadToolDensity())
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
@@ -231,7 +233,7 @@ export function ThreadView(props: {
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
                   {item.kind === 'tools' ? (
-                    <ToolGroup items={item.items} />
+                    <ToolGroup items={item.items} density={toolDensity} />
                   ) : (
                     <Block
                       block={item.block}

@@ -3,7 +3,7 @@ import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
-import { loadDefaultAutonomy, saveDefaultAutonomy } from '../lib/persist'
+import { loadDefaultAutonomy, saveDefaultAutonomy, loadToolDensity, saveToolDensity, type ToolDensity } from '../lib/persist'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -11,10 +11,17 @@ const THEME_LABEL: Record<ThemePref, string> = {
   dark: '暗色',
 }
 
+const DENSITY_LABEL: Record<ToolDensity, string> = {
+  compact: '紧凑',
+  balanced: '均衡',
+  detailed: '详细',
+}
+
 export function SettingsSurface() {
   const health = useHealth()
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
+  const [density, setDensity] = useState<ToolDensity>(() => loadToolDensity())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -24,6 +31,11 @@ export function SettingsSurface() {
   const pickAutonomy = (lvl: AutonomyLevel) => {
     setAutonomy(lvl)
     saveDefaultAutonomy(lvl)
+  }
+
+  const pickDensity = (d: ToolDensity) => {
+    setDensity(d)
+    saveToolDensity(d)
   }
 
   return (
@@ -49,6 +61,22 @@ export function SettingsSurface() {
         <h4>新线程默认自治档位</h4>
         <AutonomyControl value={autonomy} onChange={pickAutonomy} />
         <div className="meta">自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。</div>
+      </section>
+
+      <section className="settings-group">
+        <h4>工具组密度</h4>
+        <div className="seg">
+          {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
+            <button
+              key={d}
+              className={`seg-item ${density === d ? 'active' : ''}`}
+              onClick={() => pickDensity(d)}
+            >
+              {DENSITY_LABEL[d]}
+            </button>
+          ))}
+        </div>
+        <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。新会话生效。</div>
       </section>
 
       <section className="settings-group">

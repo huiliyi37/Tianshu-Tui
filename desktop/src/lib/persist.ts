@@ -6,6 +6,29 @@ const KEY_ACTIVE = 'tianshu.activeSessionId'
 const KEY_PROJECT = 'tianshu.activeProject'
 const KEY_SEEN = 'tianshu.attentionSeen'
 const KEY_AUTONOMY = 'tianshu.defaultAutonomy'
+const KEY_TOOL_DENSITY = 'tianshu.toolDensity'
+
+// ── Tool density ──
+
+export type ToolDensity = 'compact' | 'balanced' | 'detailed'
+
+export function loadToolDensity(): ToolDensity {
+  try {
+    const v = localStorage.getItem(KEY_TOOL_DENSITY)
+    if (v === 'compact' || v === 'balanced' || v === 'detailed') return v
+  } catch {
+    // private mode / disabled storage — non-fatal
+  }
+  return 'balanced'
+}
+
+export function saveToolDensity(d: ToolDensity): void {
+  try {
+    localStorage.setItem(KEY_TOOL_DENSITY, d)
+  } catch {
+    // non-fatal
+  }
+}
 
 export function loadActiveSessionId(): string | null {
   try {
