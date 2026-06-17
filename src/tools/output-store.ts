@@ -4,7 +4,12 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { applyCommandFilter } from './command-filters.js'
 
-const RAW_DIR = join(tmpdir(), 'rivet-raw')
+// Lazily compute RAW_DIR so tests (or agents inside a Seatbelt boundary) can
+// redirect TMPDIR at runtime. Module-level `const RAW_DIR = join(tmpdir(), ...)`
+// captures the path at import time — before any before() hook runs.
+function rawDir(): string {
+  return join(tmpdir(), 'rivet-raw')
+}
 const STALE_TTL_MS = 3_600_000 // 1 hour
 const CLEAN_INTERVAL = 10 // clean every N calls
 
@@ -26,8 +31,8 @@ function safeRawFileName(id: string): string {
 }
 
 export async function persistRawOutput(id: string, raw: string): Promise<string> {
-  await mkdir(RAW_DIR, { recursive: true })
-  const filePath = join(RAW_DIR, safeRawFileName(id))
+  await mkdir(rawDir(), { recursive: true })
+  const filePath = join(rawDir(), safeRawFileName(id))
   await writeFile(filePath, raw, 'utf-8')
 
   persistCount++
@@ -41,13 +46,13 @@ export async function persistRawOutput(id: string, raw: string): Promise<string>
 async function cleanStaleRawOutputs(): Promise<void> {
   let names: string[]
   try {
-    names = await readdir(RAW_DIR)
+    names = await readdir(rawDir())
   } catch {
     return
   }
   const cutoff = Date.now() - STALE_TTL_MS
   for (const name of names) {
-    const filePath = join(RAW_DIR, name)
+    const filePath = join(rawDir(), name)
     try {
       const s = await stat(filePath)
       if (s.mtimeMs < cutoff) {
