@@ -66,11 +66,12 @@ userContent 每轮新 → 从 userContent 首个变字节起，后续全部 miss
 
 ---
 
-## Entry #2.1 — 基线实测（当前 deepseek 会话，改前）
+## Entry #2.1 — 基线实测（consolidatedBlock 前置前，本会话）
 
 **日期**：2026-06-17
-**commit**：`a80c250e`（T7 阈值修复，引擎未变）
-**数据来源**：`.rivet/cache-log.jsonl`（项目根，1206 行，跨 58 会话），取最新 deepseek 会话（8 turns，22 API 请求）
+**commit**：`a80c250e`（T7 阈值修复，consolidatedBlock 未改动）
+**日志路径**：`.rivet/cache-log.jsonl`（项目根聚合日志，1206 行，跨 ~58 会话）
+**基线会话**：deepseek 会话（8 turns，22 API 请求，timestamp 1779653245847–1779653355814）
 **状态**：实测，无代码变更
 
 ### 会话特征
@@ -111,10 +112,12 @@ userContent 每轮新 → 从 userContent 首个变字节起，后续全部 miss
 ## Entry #2.2 — consolidatedBlock 前置
 
 **日期**：2026-06-17
-**commit**：（待提交）
+**commit**：`1044fa1b`（consolidatedBlock 前置）+ `7c64d6d5`（测试适配）+ `dc759cd5`（跨轮一致性测试）
 **方案**：consolidatedBlock 从 cachedAppendix 中拆出，放到 userContent 之前，与 volatileBlock 相邻
-**改动文件**：`src/prompt/engine.ts`（+12/-8 行）
+**改动文件**：`src/prompt/engine.ts`（+22/-8 行）
 **预期影响**：稳定块（star-domain、稳定的 playbookLessons）进入前缀缓存，user 边界 cacheCreate 降低 ~3-4K tokens
+**实测会话**：`mqgket7d5mfflfiz`（本会话，45+ turns，运行改后代码）— 日志 `.rivet/sessions/mqgket7d5mfflfiz/cache-log.jsonl`
+**状态**：代码已提交，待新会话独立测试后填入实测数据
 
 ### 改动描述
 
