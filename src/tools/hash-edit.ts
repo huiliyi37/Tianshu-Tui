@@ -113,7 +113,9 @@ For large files, you can skip read_file entirely:
 1. grep(pattern="targetCode", path="/abs/path/file.ts") → grep results include hash_edit anchor hints
 2. Copy the anchor from the hints (e.g. L580:a1b2c3d4)
 3. hash_edit(file_path="/abs/path/file.ts", anchors=["L580:a1b2c3d4"], new_string="replacement")
-This avoids the read→truncate→re-read loop for large files.`,
+This avoids the read→truncate→re-read loop for large files.
+
+**Note:** For large new_string blocks, the message history keeps only a short pointer (file_path + size) instead of the full replacement text. The edit is still applied to disk in full — use \`read_file\` to review the current content in a later turn.`,
     input_schema: {
       type: 'object',
       properties: {

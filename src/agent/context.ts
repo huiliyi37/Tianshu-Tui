@@ -10,6 +10,8 @@ import { ToolArgPostProcessorRegistry } from './tool-arg-post-processor.js'
 import { planSubmitArgProcessor } from '../tools/plan-submit-arg-processor.js'
 import { writeFileArgProcessor } from '../tools/write-file-arg-processor.js'
 import { editFileArgProcessor } from '../tools/edit-file-arg-processor.js'
+import { hashEditArgProcessor } from '../tools/hash-edit-arg-processor.js'
+import { applyPatchArgProcessor } from '../tools/apply-patch-arg-processor.js'
 
 const MAX_TRACKED_FILES = 500
 const MAX_TEST_RESULTS = 500
@@ -87,6 +89,8 @@ export class SessionContext {
     this.argProcessors.register(planSubmitArgProcessor)
     this.argProcessors.register(writeFileArgProcessor)
     this.argProcessors.register(editFileArgProcessor)
+    this.argProcessors.register(hashEditArgProcessor)
+    this.argProcessors.register(applyPatchArgProcessor)
   }
 
   /**

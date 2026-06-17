@@ -203,3 +203,89 @@ describe('SessionContext + edit_file arg processor integration', () => {
     assert.equal(input.new_string, bigNew, 'block.input.new_string must not be mutated')
   })
 })
+
+describe('SessionContext + hash_edit arg processor integration', () => {
+  it('large hash_edit new_string is replaced with a file pointer, anchors kept', () => {
+    const session = new SessionContext()
+    const bigNew = 'const x = 1\n'.repeat(500)
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-hash-1', name: 'hash_edit', input: { file_path: '/abs/foo.ts', anchors: ['L5:a1b2c3d4'], new_string: bigNew } },
+    ]
+    session.addUserMessage('big hash edit')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('[hash_edit applied to'), 'should collapse to pointer')
+    assert.ok(tc.function.arguments.includes('/abs/foo.ts'))
+    assert.ok(tc.function.arguments.includes('L5:a1b2c3d4'), 'anchors preserved')
+    assert.ok(!tc.function.arguments.includes(bigNew.slice(0, 50)), 'new_string literal gone')
+  })
+
+  it('small hash_edit stays inline', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-hash-small', name: 'hash_edit', input: { file_path: '/a.ts', anchors: ['L1'], new_string: 'tiny' } },
+    ]
+    session.addUserMessage('small hash edit')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('tiny'), 'small new_string stays inline')
+  })
+
+  it('hash_edit block.input is not mutated — execute still gets real new_string', () => {
+    const session = new SessionContext()
+    const bigNew = 'Z'.repeat(3000)
+    const block: ContentBlock & { type: 'tool_use' } = {
+      type: 'tool_use', id: 'tc-hash-mut', name: 'hash_edit', input: { file_path: '/a.ts', anchors: ['L1'], new_string: bigNew },
+    }
+    session.addUserMessage('hash edit')
+    session.addAssistantBlocks([block])
+    assert.equal((block.input as { new_string: string }).new_string, bigNew, 'block.input.new_string must not be mutated')
+  })
+})
+
+describe('SessionContext + apply_patch arg processor integration', () => {
+  function bigDiff(files: number): string {
+    const body = 'context line\n'.repeat(400)
+    let out = ''
+    for (let i = 0; i < files; i++) {
+      out += `--- a/src/f${i}.ts\n+++ b/src/f${i}.ts\n@@ -1 +1 @@\n-a\n+b\n${body}`
+    }
+    return out
+  }
+
+  it('large applied patch collapses diff into a file-list pointer', () => {
+    const session = new SessionContext()
+    const diff = bigDiff(3)
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-patch-1', name: 'apply_patch', input: { diff } },
+    ]
+    session.addUserMessage('apply patch')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('[patch applied to'), 'should collapse to pointer')
+    assert.ok(tc.function.arguments.includes('3 file(s)'))
+    assert.ok(!tc.function.arguments.includes('context line\ncontext line'), 'diff body gone')
+  })
+
+  it('check_only patch stays inline', () => {
+    const session = new SessionContext()
+    const blocks: ContentBlock[] = [
+      { type: 'tool_use', id: 'tc-patch-check', name: 'apply_patch', input: { diff: bigDiff(3), check_only: true } },
+    ]
+    session.addUserMessage('check patch')
+    session.addAssistantBlocks(blocks)
+    const tc = findAssistantWithTools(session.getMessages()).tool_calls![0]!
+    assert.ok(tc.function.arguments.includes('context line'), 'check_only diff stays inline')
+  })
+
+  it('apply_patch block.input is not mutated — execute still gets real diff', () => {
+    const session = new SessionContext()
+    const diff = bigDiff(2)
+    const block: ContentBlock & { type: 'tool_use' } = {
+      type: 'tool_use', id: 'tc-patch-mut', name: 'apply_patch', input: { diff },
+    }
+    session.addUserMessage('patch')
+    session.addAssistantBlocks([block])
+    assert.equal((block.input as { diff: string }).diff, diff, 'block.input.diff must not be mutated')
+  })
+})

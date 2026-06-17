@@ -61,7 +61,7 @@ export async function applyPatch(cwd: string, input: ApplyPatchInput, abortSigna
 export const APPLY_PATCH_TOOL: Tool = {
   definition: {
     name: 'apply_patch',
-    description: 'Apply a unified diff to the current git repository using git apply. Supports check-only validation before applying. Use for multi-file changes or applying an existing patch; for a single targeted edit prefer edit_file or hash_edit.',
+    description: 'Apply a unified diff to the current git repository using git apply. Supports check-only validation before applying. Use for multi-file changes or applying an existing patch; for a single targeted edit prefer edit_file or hash_edit. Note: after a large patch is applied, the message history keeps only a summary pointer (changed file list + size) instead of the verbatim diff — use read_file or git diff to inspect the result. check_only validations keep the full diff inline.',
     input_schema: {
       type: 'object',
       properties: {
