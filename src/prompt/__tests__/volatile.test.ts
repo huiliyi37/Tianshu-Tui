@@ -716,4 +716,29 @@ describe('GWT salience and Top-K selection', () => {
       assert.match(advisory!, /至少画一张架构或数据流图/)
     })
   })
+
+  describe('salience completeness (A-line: no actionable block defaults to 0.5)', () => {
+    it('assigns explicit salience to previously-uncovered dynamic blocks', () => {
+      // @-mentions are a direct user intent signal — must outrank housekeeping.
+      assert.equal(assignSalience('<mentions>\n@src/foo.ts\n</mentions>'), 0.8)
+      assert.equal(assignSalience('<task-depth layer="system">…</task-depth>'), 0.7)
+      assert.equal(assignSalience('<plan-methodology route="full">…</plan-methodology>'), 0.7)
+      assert.equal(assignSalience('<available-skills note="…">…</available-skills>'), 0.6)
+      assert.equal(assignSalience('<companion-presence>\n…\n</companion-presence>'), 0.4)
+    })
+
+    it('mentions/task-depth survive Top-K when a tiny budget would drop a 0.5 default', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        skillAdvisoryBlock: '<available-skills note="x">' + 'a'.repeat(400) + '</available-skills>',
+        mentionContextBlock: '<mentions>\n@src/critical.ts\n</mentions>',
+        taskDepthAdvisory: '<task-depth layer="system">strategy</task-depth>',
+      }
+      // Budget large enough for the two high-salience blocks but not the bulky skill block.
+      const out = buildDynamicAppendix(ctx, 200)
+      assert.match(out, /<mentions>/)
+      assert.match(out, /<task-depth/)
+      assert.doesNotMatch(out, /<available-skills/)
+    })
+  })
 })

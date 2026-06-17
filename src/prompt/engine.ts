@@ -64,6 +64,13 @@ export class PromptEngine {
   private frozenFetchIndex: Map<string, number> = new Map()
   /** Maximum total entries across all content keys before eviction kicks in. */
   private static readonly MAX_FROZEN_USER_MERGED = 64
+  /**
+   * Content key of the FIRST user message in the current session. Its frozen
+   * snapshot is the byte-0 anchor of the whole prefix — if eviction deletes it,
+   * the first user message rebuilds with the current (possibly swapped)
+   * volatileBlock → full 0% prefix cache break. Excluded from eviction.
+   */
+  private firstUserKey: string | null = null
   private taskProgress?: TaskState
   private repairHint?: string | null
   private toolContext?: string | null
@@ -203,6 +210,14 @@ export class PromptEngine {
         if (firstUserIdx === -1) firstUserIdx = i
         lastUserIdx = i
       }
+    }
+
+    // Remember the first user message's key so eviction never deletes its
+    // frozen snapshot (the byte-0 prefix anchor). Refreshed each call so it
+    // tracks the post-compaction anchor when history is rewritten.
+    if (firstUserIdx >= 0) {
+      const fm = oaiMessages[firstUserIdx]!
+      this.firstUserKey = typeof fm.content === 'string' ? fm.content : ''
     }
 
     for (let i = 0; i < oaiMessages.length; i++) {
@@ -446,8 +461,13 @@ export class PromptEngine {
     while (totalFrozen > PromptEngine.MAX_FROZEN_USER_MERGED && this.frozenUserMerged.size > 0) {
       let maxKey = '', maxLen = 0
       for (const [k, arr] of this.frozenUserMerged) {
+        // Never evict the first user message's snapshot — it's the byte-0
+        // prefix anchor; losing it forces a full 0% cache rebuild.
+        if (k === this.firstUserKey) continue
         if (arr.length > maxLen) { maxKey = k; maxLen = arr.length }
       }
+      // Only the protected first-user key remains — stop rather than break it.
+      if (maxLen === 0) break
       if (maxLen <= 1) {
         this.frozenUserMerged.delete(maxKey)
       } else {

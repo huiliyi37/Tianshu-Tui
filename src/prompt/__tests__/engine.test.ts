@@ -565,6 +565,40 @@ describe('frozenUserMerged eviction', () => {
     assert.equal(engine.getCacheEventStats().frozenFallbackRebuilds, 0, 'no fallback rebuild occurred')
   })
 
+  it('never evicts the FIRST user message snapshot under 70 distinct-turn pressure (A-line byte-0 anchor)', () => {
+    const engine = new PromptEngine({
+      model: 'test',
+      maxTokens: 1024,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+    })
+    // The first user message is the byte-0 prefix anchor. With 70 distinct
+    // user turns, totalFrozen blows past the 64 cap and eviction runs. Map
+    // insertion order makes the first key the FIRST length-1 eviction victim —
+    // so without protection this snapshot is the first to die.
+    const history: OaiMessage[] = [{ role: 'user', content: 'FIRST anchor task' }]
+    const req1 = engine.buildOaiRequest([...history])
+    const firstContent = req1.messages.find(m => m.role === 'user')!.content as string
+
+    for (let i = 0; i < 70; i++) {
+      history.push({ role: 'assistant', content: `ok ${i}` })
+      history.push({ role: 'user', content: `distinct turn ${i}` })
+      engine.buildOaiRequest([...history])
+    }
+
+    // Swap volatileBlock so a FATAL rebuild (evicted → rebuild with CURRENT
+    // block) would differ from the original frozen snapshot. If the anchor is
+    // protected, it serves byte-identically regardless.
+    engine.updateSessionMemory('<session-memory><entry>swapped after eviction</entry></session-memory>')
+
+    const final = engine.buildOaiRequest([...history])
+    const firstNow = final.messages.find(
+      m => m.role === 'user' && typeof m.content === 'string' && (m.content as string).includes('FIRST anchor task'),
+    )
+    assert.ok(firstNow, 'first user message still present')
+    assert.equal(firstNow!.content, firstContent, 'first-user snapshot byte-identical after 70-turn eviction pressure')
+  })
+
   it('clamps to surviving snapshot instead of volatileBlock rebuild when fetch index overruns', () => {
     const engine = new PromptEngine({
       model: 'test',

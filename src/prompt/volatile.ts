@@ -546,6 +546,14 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<repair-hint>')) return 0.8
   if (blockContent.startsWith('<星域-advisory>')) return 0.8
   if (blockContent.startsWith('<historical-lessons>')) return 0.8
+  // User explicitly @-referenced these files/paths — direct intent signal,
+  // must survive budget pressure (was silently defaulting to 0.5).
+  if (blockContent.startsWith('<mentions>')) return 0.8
+  // Task-relevant strategy/route guidance — same tier as other 0.7 advisories.
+  if (blockContent.startsWith('<task-depth')) return 0.7
+  if (blockContent.startsWith('<plan-methodology')) return 0.7
+  // Skill discovery: helpful but model can re-list on demand via the skill tool.
+  if (blockContent.startsWith('<available-skills')) return 0.6
   if (blockContent.startsWith('<tool-context>')) return 0.7
   if (blockContent.startsWith('<plan-cache-advisory>')) return 0.7
   // U6: plan trace is task-relevant baseline/progress. Explicit salience so
@@ -563,6 +571,7 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<tool-history>')) return 0.5
   if (blockContent.startsWith('<session-state>')) return 0.4 // legacy fallback
   if (blockContent.startsWith('<cross-session')) return 0.4
+  if (blockContent.startsWith('<companion-presence>')) return 0.4 // ambient presence, housekeeping tier
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
   return 0.5 // default: moderate salience
 }
