@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
-import { ToolGroup, ToolCard, isCollapsibleTool, toolNameOf } from '../components/ToolGroup'
+import { ToolGroup, ToolCard, isCollapsibleTool, isRunTestsTool, toolNameOf } from '../components/ToolGroup'
 import { loadToolDensity, type ToolDensity } from '../lib/persist'
 import { Markdown } from '../components/Markdown'
 import { Composer } from '../components/Composer'
@@ -67,7 +67,7 @@ export function ThreadView(props: {
     overscan: 8,
     getItemKey: (i) => {
       const item = rendered[i]!
-      return item.kind === 'tools' ? item.key : item.block.key
+      return item.kind !== 'block' ? item.key : item.block.key
     },
   })
 
@@ -232,7 +232,7 @@ export function ThreadView(props: {
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
-                  {item.kind === 'tools' ? (
+                  {item.kind !== 'block' ? (
                     <ToolGroup items={item.items} density={toolDensity} />
                   ) : (
                     <Block
@@ -354,6 +354,7 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
 type RenderItem =
   | { kind: 'tools'; key: string; items: ConvoBlock[] }
+  | { kind: 'run_tests'; key: string; items: ConvoBlock[] }
   | { kind: 'block'; block: ConvoBlock }
 
 /** Only exploration tools (read/search/list) that succeeded fold into the
@@ -362,17 +363,26 @@ function isFoldable(b: ConvoBlock): boolean {
   return (b.kind === 'tool' || b.kind === 'result') && !b.isError && isCollapsibleTool(toolNameOf(b))
 }
 
-/** Collapse runs of *collapsible* tool/result blocks into a single grouped
- *  render item; everything else (incl. action tools & errors) stays standalone. */
+/** run_tests tool/result blocks eligible for action grouping (success or failure). */
+function isRunTestsFoldable(b: ConvoBlock): boolean {
+  return (b.kind === 'tool' || b.kind === 'result') && isRunTestsTool(toolNameOf(b))
+}
+
+/** Collapse runs of collapsible tool/result blocks into grouped render items.
+ *  Exploration tools (read/search/list) and run_tests each form their own group
+ *  type; everything else stays standalone. */
 function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
   const out: RenderItem[] = []
   let run: ConvoBlock[] | null = null
+  let runKind: 'tools' | 'run_tests' | null = null
   for (const b of blocks) {
-    if (isFoldable(b)) {
-      if (!run) { run = []; out.push({ kind: 'tools', key: `tg-${b.key}`, items: run }) }
+    const foldKind = isFoldable(b) ? 'tools' as const : isRunTestsFoldable(b) ? 'run_tests' as const : null
+    if (foldKind) {
+      if (!run || runKind !== foldKind) { run = []; runKind = foldKind; out.push({ kind: foldKind, key: `tg-${b.key}`, items: run }) }
       run.push(b)
     } else {
       run = null
+      runKind = null
       out.push({ kind: 'block', block: b })
     }
   }

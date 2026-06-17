@@ -1,4 +1,4 @@
-import { memo, useState, useMemo } from 'react'
+import { memo, useState, useMemo, useEffect } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
 
@@ -18,6 +18,7 @@ const COLLAPSIBLE = new Set([
 
 const SEARCH_TOOLS = new Set(['grep', 'glob', 'semantic_search', 'repo_map', 'repo_graph', 'related_tests', 'inspect_project'])
 const LIST_TOOLS = new Set(['ls'])
+const RUN_TEST_TOOLS = new Set(['run_tests'])
 
 /** Tool name from a `tool · X` / `result · X` role, falling back to the kind. */
 export function toolNameOf(block: ConvoBlock): string {
@@ -27,6 +28,11 @@ export function toolNameOf(block: ConvoBlock): string {
 /** Whether a tool/result block may fold into the compact read+search group. */
 export function isCollapsibleTool(name: string): boolean {
   return COLLAPSIBLE.has(name.toLowerCase())
+}
+
+/** Whether a tool/result block is a run_tests call eligible for action grouping. */
+export function isRunTestsTool(name: string): boolean {
+  return RUN_TEST_TOOLS.has(name.toLowerCase())
 }
 
 function truncateBody(text: string): string {
@@ -66,6 +72,23 @@ function pairEntries(items: ConvoBlock[]): PairedEntry[] {
 }
 
 function buildGroupSummary(entries: PairedEntry[]): string {
+  // run_tests group — test-run summary (separate from explore group)
+  const allRunTests = entries.length > 0 && entries.every(e => isRunTestsTool(e.name))
+  if (allRunTests) {
+    let passed = 0, failed = 0, pending = 0
+    for (const e of entries) {
+      if (!e.result) { pending++; continue }
+      if (e.result.isError) failed++
+      else passed++
+    }
+    const parts: string[] = []
+    if (passed > 0) parts.push(`${passed} passed`)
+    if (failed > 0) parts.push(`${failed} failed`)
+    if (pending > 0) parts.push(`${pending} pending`)
+    return `Ran ${entries.length} test${entries.length > 1 ? 's' : ''} · ${parts.join(', ')}`
+  }
+
+  // explore group — read/search/list summary
   let reads = 0, searches = 0, lists = 0, pending = 0
   for (const e of entries) {
     const name = e.name.toLowerCase()
@@ -83,16 +106,37 @@ function buildGroupSummary(entries: PairedEntry[]): string {
 }
 
 // ── ToolGroup: Cursor 3.0-style compact group with summary header ──
-
 function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; density?: ToolDensity }) {
-  const compact = density === 'compact'
-  const [collapsed, setCollapsed] = useState(density !== 'detailed')
+  // localDensity: per-group override (null = follow global). Cycles:
+  //   null → compact → detailed → null
+  const [localDensity, setLocalDensity] = useState<ToolDensity | null>(null)
+  const effectiveDensity = localDensity ?? density
+  const compact = effectiveDensity === 'compact'
+  const [collapsed, setCollapsed] = useState(effectiveDensity !== 'detailed')
   const entries = useMemo(() => pairEntries(items), [items])
   const summary = useMemo(() => buildGroupSummary(entries), [entries])
   const hasPending = entries.some(e => !e.result)
+  const hasError = entries.some(e => e.result?.isError)
+  const dotClass = hasError ? 'err' : hasPending ? 'run' : 'ok'
+
+  // Sync collapsed when effectiveDensity changes (user clicked the toggle).
+  useEffect(() => {
+    setCollapsed(effectiveDensity !== 'detailed')
+  }, [effectiveDensity])
+
+  const cycleDensity = () => {
+    setLocalDensity(d => d === null ? 'compact' : d === 'compact' ? 'detailed' : null)
+  }
+
+  const toggleLabel = localDensity === null ? '◎' : localDensity === 'compact' ? '⊟' : '☰'
+  const toggleTitle = localDensity === null
+    ? '跟随全局密度 · 点击切换'
+    : localDensity === 'compact'
+      ? '紧凑 · 点击切换'
+      : '详细 · 点击恢复全局'
 
   return (
-    <div className={`tool-group ${density}`}>
+    <div className={`tool-group ${effectiveDensity}`}>
       <button
         className="tool-group-summary"
         onClick={() => !compact && setCollapsed(c => !c)}
@@ -101,9 +145,16 @@ function ToolGroupImpl({ items, density = 'balanced' }: { items: ConvoBlock[]; d
         title={compact ? '密度设为 compact，工具组已永久折叠。在 设置 > 工具密度 中调整。' : undefined}
       >
         {!compact && <span className={`chev ${collapsed ? '' : 'open'}`} aria-hidden>▸</span>}
-        <span className={`tool-dot ${hasPending ? 'run' : 'ok'}`} aria-hidden />
+        <span className={`tool-dot ${dotClass}`} aria-hidden />
         <span className="tool-group-label">{summary}</span>
         <span className="tool-group-count">{entries.length}</span>
+        <span
+          className="tool-density-toggle"
+          onClick={(e) => { e.stopPropagation(); cycleDensity() }}
+          title={toggleTitle}
+          role="button"
+          aria-label={toggleTitle}
+        >{toggleLabel}</span>
       </button>
       {!collapsed && entries.map((e, i) => (
         <PairedRow key={e.tool?.key ?? e.result?.key ?? i} entry={e} />
@@ -117,7 +168,7 @@ export const ToolGroup = memo(ToolGroupImpl, (a, b) =>
 )
 
 function PairedRowImpl({ entry }: { entry: PairedEntry }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(!!entry.result?.isError)
   const name = entry.name
   const text = entry.result?.text ?? entry.tool?.text ?? ''
   const firstLine = text.split('\n', 1)[0] ?? ''
