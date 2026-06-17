@@ -50,12 +50,19 @@ function makeSnapshot(turn = 1): PerceptionTelemetrySnapshot {
 
 describe('createTelemetryWriter', () => {
   let cwd: string
+  let prevDebug: string | undefined
 
   before(() => {
+    // 写盘现已 opt-in（RIVET_DEBUG_TELEMETRY 门控，避免 sensorium.jsonl 无界增长）；
+    // 未设置时返回 NOOP_WRITER，不落盘。本套件验证「启用后」的写入行为，故显式置位。
+    prevDebug = process.env['RIVET_DEBUG_TELEMETRY']
+    process.env['RIVET_DEBUG_TELEMETRY'] = '1'
     cwd = mkdtempSync(join(tmpdir(), 'rivet-telemetry-writer-'))
   })
 
   after(() => {
+    if (prevDebug === undefined) delete process.env['RIVET_DEBUG_TELEMETRY']
+    else process.env['RIVET_DEBUG_TELEMETRY'] = prevDebug
     rmSync(cwd, { recursive: true, force: true })
   })
 

@@ -86,10 +86,17 @@ test('team_orchestrate streams worker progress through onOutput', async () => {
   })
 
   assert.equal(result.isError, false)
-  assert.deepEqual(progress, [
+  // onOutput 现会先流式推一帧 rivet:team-panel:v1 舰队面板（TUI 解码渲染），
+  // 再推进度行；进度契约只校验进度帧本身。
+  const progressLines = progress.filter(c => c.includes('team progress'))
+  assert.deepEqual(progressLines, [
     '✦ team progress: 1/2 workers done\n',
     '✦ team progress: 2/2 workers done\n',
   ])
+  assert.ok(
+    progress.some(c => c.includes('rivet:team-panel:v1')),
+    '应先流式推送一帧舰队面板',
+  )
 })
 
 test('team_orchestrate blocks a planPath outside the project', async () => {

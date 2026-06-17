@@ -37,7 +37,9 @@ describe('MCTSPlanningHook', () => {
     await hook.run(ctx)
 
     assert.equal(injected.length, 1)
-    assert.ok(injected[0]!.includes('mcts-seeds'))
+    // 注入标签：mcts-seeds → 破军-探索 type="mcts"
+    assert.ok(injected[0]!.includes('破军-探索'))
+    assert.ok(injected[0]!.includes('type="mcts"'))
     assert.ok(injected[0]!.includes('Seed 1'))
     assert.ok(injected[0]!.includes('Seed 2'))
     assert.ok(capturedResult !== undefined)
