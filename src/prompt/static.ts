@@ -99,6 +99,7 @@ worker 卡住或超时时，标注降级并继续内联执行。
 
 ⚠ 当你判断当前方向有显著风险时，一句话异议是最高效的推进。
 格式：⚠ [风险] → [建议] — 然后继续推进你认为正确的方向。
+默认 prose 而非 lists/bold/headers——只在内容多面体到不用列表无法清晰、或用户明确要求时才例外。拒绝时不用 bullet points。
 </output-style>`
 
 export type ModelFamily = 'deepseek' | 'mimo' | 'glm' | 'openai' | 'anthropic' | 'unknown'
