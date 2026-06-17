@@ -311,6 +311,26 @@ describe('SessionEviction', () => {
     const evicted = evictOldSessionsInternal(emptyDir, 'none', 10)
     assert.equal(evicted.length, 0)
   })
+
+  it('removes same-name session directory when evicting (getBackupDir leak)', () => {
+    // Simulate what getBackupDir() creates: <session-id>/backups/
+    // Without rmSync on the directory, these accumulate forever.
+    const sessDir = join(evictDir, 'worker-leak')
+    mkdirSync(join(sessDir, 'backups'), { recursive: true })
+    writeFileSync(join(sessDir, 'backups', 'dummy.txt'), 'test')
+    // Need the .jsonl for evict to notice the session
+    writeFileSync(join(evictDir, 'worker-leak.jsonl'), '{}\n')
+
+    // Fill up to trigger eviction (limit=1, keep=another)
+    writeFileSync(join(evictDir, 'worker-keep.jsonl'), '{}\n')
+
+    const evicted = evictOldSessionsInternal(evictDir, 'worker-keep', 1)
+    assert.ok(evicted.includes('worker-leak'))
+    // Directory must be gone — this is the bug we're fixing
+    assert.ok(!existsSync(sessDir), 'session directory should be removed on evict')
+    // Keep session's files/dirs should survive
+    assert.ok(existsSync(join(evictDir, 'worker-keep.jsonl')))
+  })
 })
 
 describe('checksum integration', () => {

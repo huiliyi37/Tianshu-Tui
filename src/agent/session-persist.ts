@@ -1,5 +1,5 @@
 import { appendFile } from 'fs/promises'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, readdirSync, statSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
@@ -600,6 +600,9 @@ export function evictOldSessionsInternal(dir: string, keepSessionId: string, lim
     try { unlinkSync(join(dir, `${id}.meta.json`)) } catch { /* ignore */ }
     try { unlinkSync(join(dir, `${id}.memory.json`)) } catch { /* ignore */ }
     try { unlinkSync(join(dir, `${id}.claims.jsonl`)) } catch { /* ignore */ }
+    // Clean up same-name session directory (backups/, and any stray files).
+    // Without this, getBackupDir() creates <id>/backups/ that evict never removes.
+    try { rmSync(join(dir, id), { recursive: true, force: true }) } catch { /* ignore */ }
   }
 
   return toEvict
