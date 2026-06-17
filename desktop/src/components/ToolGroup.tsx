@@ -1,4 +1,4 @@
-import { memo, useState } from 'react'
+import { memo, useState, useMemo } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 
 const TOOL_BODY_MAX = 10000
@@ -14,6 +14,9 @@ const COLLAPSIBLE = new Set([
   'grep', 'glob', 'semantic_search', 'repo_map', 'repo_graph',
   'related_tests', 'inspect_project', 'ls',
 ])
+
+const SEARCH_TOOLS = new Set(['grep', 'glob', 'semantic_search', 'repo_map', 'repo_graph', 'related_tests', 'inspect_project'])
+const LIST_TOOLS = new Set(['ls'])
 
 /** Tool name from a `tool · X` / `result · X` role, falling back to the kind. */
 export function toolNameOf(block: ConvoBlock): string {
@@ -31,23 +34,109 @@ function truncateBody(text: string): string {
     : text
 }
 
-// Cursor 3.0-style compact tool stream. A run of consecutive collapsible
-// tool/result blocks renders as a tight bordered group; each row is a single
-// line (status dot + name + first-line preview) that expands inline.
+// ── Pairing: merge tool_use + tool_result into single entries ───
+
+interface PairedEntry {
+  tool?: ConvoBlock
+  result?: ConvoBlock
+  name: string
+}
+
+function pairEntries(items: ConvoBlock[]): PairedEntry[] {
+  const entries: PairedEntry[] = []
+  for (const b of items) {
+    const name = toolNameOf(b)
+    if (b.kind === 'tool') {
+      entries.push({ tool: b, name })
+    } else if (b.kind === 'result') {
+      let matched = false
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const e = entries[i]!
+        if (e.tool && !e.result && e.name === name) {
+          e.result = b
+          matched = true
+          break
+        }
+      }
+      if (!matched) entries.push({ result: b, name })
+    }
+  }
+  return entries
+}
+
+function buildGroupSummary(entries: PairedEntry[]): string {
+  let reads = 0, searches = 0, lists = 0, pending = 0
+  for (const e of entries) {
+    const name = e.name.toLowerCase()
+    if (!e.result) { pending++; continue }
+    if (SEARCH_TOOLS.has(name)) searches++
+    else if (LIST_TOOLS.has(name)) lists++
+    else reads++
+  }
+  const parts: string[] = []
+  if (reads > 0) parts.push(`Read ${reads} file${reads > 1 ? 's' : ''}`)
+  if (searches > 0) parts.push(`Searched ${searches} pattern${searches > 1 ? 's' : ''}`)
+  if (lists > 0) parts.push(`Listed ${lists} dir${lists > 1 ? 's' : ''}`)
+  if (pending > 0) parts.push(`${pending} pending`)
+  return parts.length > 0 ? parts.join(', ') : '…'
+}
+
+// ── ToolGroup: Cursor 3.0-style compact group with summary header ──
+
 function ToolGroupImpl({ items }: { items: ConvoBlock[] }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const entries = useMemo(() => pairEntries(items), [items])
+  const summary = useMemo(() => buildGroupSummary(entries), [entries])
+  const hasPending = entries.some(e => !e.result)
+
   return (
     <div className="tool-group">
-      {items.map((b) => <ToolRow key={b.key} block={b} />)}
+      <button
+        className="tool-group-summary"
+        onClick={() => setCollapsed(c => !c)}
+        aria-expanded={!collapsed}
+      >
+        <span className={`chev ${collapsed ? '' : 'open'}`} aria-hidden>▸</span>
+        <span className={`tool-dot ${hasPending ? 'run' : 'ok'}`} aria-hidden />
+        <span className="tool-group-label">{summary}</span>
+        <span className="tool-group-count">{entries.length}</span>
+      </button>
+      {!collapsed && entries.map((e, i) => (
+        <PairedRow key={e.tool?.key ?? e.result?.key ?? i} entry={e} />
+      ))}
     </div>
   )
 }
 
-// groupBlocks rebuilds the `items` array every frame, so reference comparison
-// would always miss. Compare contents instead: the group's ConvoBlocks keep
-// identity during streaming (immutable reducer), so this is O(rows) and small.
 export const ToolGroup = memo(ToolGroupImpl, (a, b) =>
   a.items.length === b.items.length && a.items.every((x, i) => x === b.items[i])
 )
+
+function PairedRowImpl({ entry }: { entry: PairedEntry }) {
+  const [open, setOpen] = useState(false)
+  const name = entry.name
+  const text = entry.result?.text ?? entry.tool?.text ?? ''
+  const firstLine = text.split('\n', 1)[0] ?? ''
+  const preview = firstLine.length > 100 ? `${firstLine.slice(0, 100)}…` : firstLine
+  const status = entry.result?.isError ? 'err' : entry.result ? 'ok' : 'run'
+
+  return (
+    <div className={`tool-row ${entry.result?.isError ? 'err' : ''}`}>
+      <button className="tool-row-head" onClick={() => setOpen(o => !o)}>
+        <span className={`tool-dot ${status}`} aria-hidden />
+        <span className="tool-name">{name}</span>
+        {!open && preview && <span className="tool-preview">{preview}</span>}
+      </button>
+      {open && <pre className="tool-body">{truncateBody(text)}</pre>}
+    </div>
+  )
+}
+
+const PairedRow = memo(PairedRowImpl, (a, b) =>
+  a.entry.tool === b.entry.tool && a.entry.result === b.entry.result
+)
+
+// ── ToolRow: single block row (used by ToolCard for action tools) ──
 
 function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen)

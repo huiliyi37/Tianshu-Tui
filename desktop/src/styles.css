@@ -696,7 +696,16 @@ body {
   border: 1px solid var(--border); border-radius: var(--radius-md);
   overflow: hidden; background: var(--panel);
 }
-.tool-row + .tool-row { border-top: 1px solid var(--border); }
+.tool-group-summary {
+  width: 100%; display: flex; align-items: center; gap: var(--space-2);
+  background: var(--panel-2); color: var(--text); border: none; cursor: pointer;
+  padding: 5px var(--space-3); font-size: var(--text-sm); text-align: left;
+  font-family: var(--font-mono); border-bottom: 1px solid var(--border);
+}
+.tool-group-summary:hover { background: var(--panel-3, var(--panel-2)); }
+.tool-group-label { color: var(--accent); font-weight: var(--weight-medium); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-group-count { color: var(--muted); font-size: var(--text-xs, 11px); flex-shrink: 0; }
+.tool-group .tool-row + .tool-row { border-top: 1px solid var(--border); }
 /* Standalone action-tool card (bash/edit/write/run_tests/errors) — same frame
    as a group of one, sits outside the read/search fold and renders expanded. */
 .tool-card {
