@@ -155,6 +155,8 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
+  sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
 
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
@@ -169,7 +171,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   const hooks: RuntimeHook[] = [
     createPerceptionRuntimeHook(),
     createSignalConsumerRuntimeHook({ advisoryBus: deps.advisoryBus }),
-    ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5 })] : []),
+    ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5, sycophancyTrap: deps.sycophancyTrap })] : []),
     createKickRuntimeHook({ deposit: deps.stigmergyDeposit }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({

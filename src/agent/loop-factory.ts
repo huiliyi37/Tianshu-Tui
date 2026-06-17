@@ -320,6 +320,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       getTurn: () => self.session.getTurnCount(),
     },
     advisoryBus: self.advisoryBus,
+    sycophancyTrap: self.sycophancyTrap,
   }))
 }
 

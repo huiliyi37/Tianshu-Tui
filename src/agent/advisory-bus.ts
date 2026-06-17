@@ -36,6 +36,18 @@ export type AdvisoryCategory =
   | 'cerebellar'
   | 'discipline'
   | 'encouragement'
+  | 'constitutional'
+
+/**
+ * 宪法级优先级 — 构成性规则（不可违抗的行为底线）。
+ *
+ * 高于所有管制性条目（discipline/repair/mistake 等最高 0.65），
+ * 确保宪法 violation 信号不会被习惯化对抗 / 纪律重锚条目挤掉。
+ * 用于信念宪法退化的恢复：当 sycophancy trap 检测到连续投降 +
+ * confidence 递减模式时，courage-hook 通过 advisory bus 投递的
+ * 宪法级 entry 必须始终获得渲染位（不受每轮 3 条上限挤压）。
+ */
+export const CONSTITUTIONAL_PRIORITY = 0.9
 
 /** 每轮最大渲染条数 */
 const MAX_ADVISORIES_PER_TURN = 3
