@@ -63,6 +63,10 @@ export class PromptEngine {
   /** P1: cached dynamic appendix, appended as standalone message at end of result.
    *  Computed once when a new user message arrives, reused across tool-call turns. */
   private cachedAppendix: string = ''
+  /** P1: cached consolidated block from habituation tracker.
+   *  Stable across turns after promotion — placed BEFORE userContent so
+   *  it enters the prefix cache (unlike cachedAppendix, which sits after). */
+  private cachedConsolidated: string = ''
   /**
    * Frozen merged content for historical user messages (preserves prefix stability).
    * Maps user-message content → array of frozen snapshots. Array handles duplicate
@@ -294,10 +298,9 @@ export class PromptEngine {
               const newConsolidated = buildConsolidatedBlock(renderedHabituated)
               if (newConsolidated !== this.consolidatedBlock) {
                 this.consolidatedBlock = newConsolidated
-                // volatileBlock stays at frozenBase — consolidatedBlock goes
-                // into dynamic appendix (injected after message history).
-                // Mutating volatileBlock here would break exact-prefix cache
-                // for all subsequent turns (5-20% hit rate drop per event).
+                // consolidatedBlock is placed BEFORE userContent (adjacent to volatileBlock)
+                // so its stable bytes enter the exact-prefix cache. Mutating volatileBlock
+                // would break the cache for all subsequent turns (5-20% hit rate drop).
               }
 
               const activeCtx = { ...dynamicCtx }
@@ -307,24 +310,32 @@ export class PromptEngine {
 
               const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx, appendixMaxChars) : ''
               const projection = this.actionableTurn ? this.cognitiveProjection : null
-              const fullAppendix = [projection, this.consolidatedBlock, activeAppendix].filter(Boolean).join('\n')
+              this.cachedConsolidated = this.consolidatedBlock
+              const fullAppendix = [projection, activeAppendix].filter(Boolean).join('\n')
               this.cachedAppendix = fullAppendix
             } else {
               if (this.actionableTurn) {
                 const appendix = buildDynamicAppendix(dynamicCtx, appendixMaxChars)
                 const projection = this.actionableTurn ? this.cognitiveProjection : null
+                this.cachedConsolidated = this.consolidatedBlock
                 this.cachedAppendix = projection ? [projection, appendix].filter(Boolean).join('\n') : appendix
               } else {
+                this.cachedConsolidated = ''
                 this.cachedAppendix = ''
               }
             }
           }
           // Trailer mode: merge volatileBlock (FROZEN) into last user message.
-          // Dynamic appendix is appended AFTER user content so the prefix
-          // (volatileBlock + userContent) stays stable across turns.
+          // consolidatedBlock (habituation-tracked stable blocks) is placed
+          // BEFORE userContent so it enters the prefix cache alongside volatileBlock.
+          // Dynamic appendix (per-turn volatile) is appended AFTER userContent.
           // Frozen snapshot captures the full content (including appendix),
           // so historical retrieval returns byte-identical content → cache hit.
-          let merged = this.volatileBlock + '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
+          let merged = this.volatileBlock
+          if (this.cachedConsolidated) {
+            merged += '\n' + this.cachedConsolidated
+          }
+          merged += '\n---\n' + (typeof msg.content === 'string' ? msg.content : '')
           if (this.cachedAppendix) {
             merged += '\n\n' + this.cachedAppendix
           }
@@ -355,7 +366,8 @@ export class PromptEngine {
             this.frozenFallbackRebuilds++
             debugLog('prompt-engine', `FATAL-CACHE: frozen snapshots fully evicted for FIRST user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
-            result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
+            const vb = this.cachedConsolidated ? this.volatileBlock + '\n' + this.cachedConsolidated : this.volatileBlock
+            result.push({ role: 'user', content: vb + '\n---\n' + fc })
           }
         } else {
           // Historical user message: use frozen merged content if available
@@ -370,7 +382,8 @@ export class PromptEngine {
             this.frozenFallbackRebuilds++
             debugLog('prompt-engine', `frozen snapshots fully evicted for historical user message (len=${typeof msg.content === 'string' ? msg.content.length : 0}) — rebuilding with current volatileBlock`)
             const fc = typeof msg.content === 'string' ? msg.content : ''
-            result.push({ role: 'user', content: this.volatileBlock + '\n---\n' + fc })
+            const vb = this.cachedConsolidated ? this.volatileBlock + '\n' + this.cachedConsolidated : this.volatileBlock
+            result.push({ role: 'user', content: vb + '\n---\n' + fc })
           }
         }
       } else {
@@ -788,6 +801,7 @@ export class PromptEngine {
     }
     this.cachedFreshForUser = ''
     this.cachedAppendix = ''
+    this.cachedConsolidated = ''
   }
 
   /**
