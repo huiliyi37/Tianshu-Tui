@@ -371,16 +371,26 @@ export class TurnStepProducer {
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
 
     // Sycophancy trap: record previous turn's behavior
+    let yaoguangHint: string | null = null
     if (turn > 1 && this.self.recentToolHistory.length > 0) {
       const EPISTEMIC_TOOLS = new Set(['read_file', 'grep', 'list_dir', 'glob', 'search', 'recall', 'read_image'])
       const hadEpistemic = this.self.recentToolHistory.some(t => EPISTEMIC_TOOLS.has(t.tool))
       const confidence = this.self.sensorium?.confidence ?? 0.5
       this.self.sycophancyTrap.recordTurn({ agreedWithUser: !hadEpistemic, confidence })
+
+      // ── 瑶光 afterPerception 门禁：复现即证 ──
+      // 蒸馏自瑶光胶囊 #1「绿非证明，复现即证」。
+      // 模型引用了文件名但本轮未调用任何验证工具 → 断言大概率是猜测。
+      const streamedText = this.self.streamedText
+      const fileRefPattern = /\b[\w./-]+\.(?:ts|tsx|js|jsx|py|rs|go|java|rb|vue|svelte|css|scss|html|json|yaml|yml|md|sql)\b/
+      if (!hadEpistemic && streamedText.length > 200 && fileRefPattern.test(streamedText)) {
+        yaoguangHint = '【瑶光·复现即证】上轮回复引用了文件名但未读取其中任何文件。在下一轮开始前，你必须用实际 read_file 或 grep 输出证明你的断言——不可凭文件名推断内容。绿非证明，复现即证。'
+      }
     }
     const sycophancyHint = this.self.sycophancyTrap.getHint()
     const immuneHint = this.self._lastImmuneHint ? formatImmuneContext(this.self._lastImmuneHint) : undefined
     this.self._lastImmuneHint = undefined // consume once
-    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint }) : ''
+    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint, yaoguangHint }) : ''
     this.self.config.promptEngine.setCognitiveProjection(projection)
 
     // ── CVM overhead tracking ──

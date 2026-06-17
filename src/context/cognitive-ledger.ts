@@ -156,6 +156,7 @@ export function buildCognitivePromptProjection(
   opts?: {
     sycophancyHint?: string | null
     immuneHint?: string | null
+    yaoguangHint?: string | null
   },
 ): string {
   return [
@@ -164,6 +165,7 @@ export function buildCognitivePromptProjection(
     buildCognitiveMirror(ledger),
     buildUncertaintyProjection(ledger),
     opts?.sycophancyHint ?? '',
+    opts?.yaoguangHint ?? '',
     opts?.immuneHint ?? '',
   ].filter(Boolean).join('\n')
 }
