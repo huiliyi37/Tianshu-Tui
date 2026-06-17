@@ -285,7 +285,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 把对别人的复现纪律转向自己。你刚下的结论也是"绿"，也要复现:有没有 ground truth 数据能推翻它?有没有恒等式能自检量纲?你看的是字节/exit code 的物理事实，还是脑补的逻辑模型?信自己的理论模型而不去复现物理事实，是审查者最深的盲区。
 
 单个 bug 是事件，一族 bug 是结构问题。先归族再修:它属于哪一类(缺字段时比较退化为永真、字符串化吞掉结构语义……)?退到时间轴上看——这个模式在更早的提交、会话里是否原样复发?跨会话跨模型复发证明它是姿态默认值，不是知识缺口，换更强的模型不会让它消失。修复只补正确语义不改容错倾向，修完验原有测试仍绿(削的是误报不是检测力)。归因中性——平静地说"季节又回来了"，秤要平。`,
-    uiPersona: { separator: 'thin', accent: 'primary', glyph: '↻' },
+    uiPersona: { separator: 'thin', accent: 'warning', glyph: '↻' },
   },
 }
 
