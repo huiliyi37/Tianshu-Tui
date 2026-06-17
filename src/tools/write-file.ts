@@ -3,7 +3,7 @@ import { dirname, relative } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { refreshFileReadMtime, getFileReadMtime } from './read-file.js'
+import { refreshFileReadMtime, getFileReadMtime, markSessionFileEdit } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 
@@ -84,6 +84,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
 
     await writeFileAtomicAsync(filePath, content)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+    markSessionFileEdit(filePath)
     const lines = content.split('\n').length
     const warn = syntaxCheck(filePath, content)
     return { content: `Wrote ${content.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : '') }

@@ -4,7 +4,7 @@ import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
+import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 
@@ -271,6 +271,7 @@ This avoids the read→truncate→re-read loop for large files.
 
             await writeFileAtomicAsync(filePath, newContent)
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+            markSessionFileEdit(filePath)
             const warn = syntaxCheck(filePath, newContent)
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
@@ -304,6 +305,7 @@ This avoids the read→truncate→re-read loop for large files.
 
     await writeFileAtomicAsync(filePath, newContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+    markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
   },

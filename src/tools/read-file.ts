@@ -61,6 +61,28 @@ interface FileReadHistoryEntry {
 const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
 
+/** Session-level file edit tracking: records which files this session has
+ *  successfully written to. Used by staleness detection to disambiguate
+ *  "modified externally" from "you edited this yourself earlier."
+ *  Intentionally NOT cleared on compaction — the agent should always know
+ *  which files it has touched, even after long sessions. */
+const sessionFileEdits = new Set<string>()
+
+/** Mark a file as having been written by this session. Call after any
+ *  successful write (edit_file, hash_edit, write_file, apply_patch). */
+export function markSessionFileEdit(canonicalPath: string): void {
+  sessionFileEdits.add(canonicalPath)
+}
+
+/** Check whether this session has previously written to this file. */
+export function wasFileEditedBySession(canonicalPath: string): boolean {
+  return sessionFileEdits.has(canonicalPath)
+}
+
+/** Test-only: reset session edit tracking between unit tests. */
+export function __resetSessionFileEditsForTests(): void {
+  sessionFileEdits.clear()
+}
 function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined): string {
   return `${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
 }
@@ -80,9 +102,11 @@ function trimFileReadHistory(): void {
 }
 
 /** Test-only: clear dedup state between unit tests. */
+/** Test-only: clear dedup state between unit tests. */
 export function __resetReadHistoryForTests(): void {
   readHistory.clear()
   fileReadHistory.clear()
+  sessionFileEdits.clear()
 }
 
 /** Return the last known mtimeMs for a file from the read history, or null if never read. */

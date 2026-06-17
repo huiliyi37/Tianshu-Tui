@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { hashLine } from './hash-edit.js'
-import { getFileReadMtime, refreshFileReadMtime } from './read-file.js'
+import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
@@ -91,6 +91,7 @@ Bad: using a too-short old_string that matches multiple locations
             const newContent = freshContent.replaceAll(oldString, newString)
             await writeFileAtomicAsync(filePath, newContent)
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+            markSessionFileEdit(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
             const warn = syntaxCheck(filePath, newContent)
@@ -108,6 +109,7 @@ Bad: using a too-short old_string that matches multiple locations
           const recovered = freshContent.replace(oldString, newString)
           await writeFileAtomicAsync(filePath, recovered)
           refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+          markSessionFileEdit(filePath)
           const warn = syntaxCheck(filePath, recovered)
           return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
         }
@@ -129,16 +131,18 @@ Bad: using a too-short old_string that matches multiple locations
           const start = Math.max(0, bestIdx - CONTEXT)
           const end = Math.min(freshLines.length, bestIdx + oldString.split('\n').length + CONTEXT)
           const actualWindow = freshLines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n')
+          const modNote = wasFileEditedBySession(filePath) ? ' — you previously edited this file in the current session' : ' externally'
           return {
-            content: `File ${filePath} was modified externally since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
+            content: `File ${filePath} was modified${modNote} since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
             isError: true,
           }
         }
 
         // No close match — show file head
         const head = freshLines.slice(0, 30).map((l, i) => `${i + 1}: ${l}`).join('\n')
+        const modNote = wasFileEditedBySession(filePath) ? ' — you previously edited this file in the current session' : ' externally'
         return {
-          content: `File ${filePath} was modified externally since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
+          content: `File ${filePath} was modified${modNote} since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
           isError: true,
         }
       } catch {
@@ -173,6 +177,7 @@ Bad: using a too-short old_string that matches multiple locations
       const newContent = content.replaceAll(oldString, newString)
       await writeFileAtomicAsync(filePath, newContent)
       refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+      markSessionFileEdit(filePath)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = syntaxCheck(filePath, newContent)
@@ -193,6 +198,7 @@ Bad: using a too-short old_string that matches multiple locations
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
         await writeFileAtomicAsync(filePath, recovered)
         refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+        markSessionFileEdit(filePath)
         const warn = syntaxCheck(filePath, recovered)
         return { content: `Applied edit to ${filePath} (whitespace-tolerant match: old_string differed only in indentation/whitespace)` + (warn ? '\n\n' + warn : '') }
       }
@@ -211,6 +217,7 @@ Bad: using a too-short old_string that matches multiple locations
     const newContent = content.replace(oldString, newString)
     await writeFileAtomicAsync(filePath, newContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
+    markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)
     return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
