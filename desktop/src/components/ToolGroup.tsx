@@ -162,12 +162,19 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
 const ToolRow = memo(ToolRowImpl, (a, b) => a.block === b.block && a.defaultOpen === b.defaultOpen)
 
 // Standalone action-tool card: rendered OUTSIDE the read/search fold and open by
-// default, so bash / edit / write / run_tests / delegate payloads and errors are
-// visible without a click — matching the TUI's "action tools break the group".
+// default, so bash / edit / write / delegate payloads and errors are visible
+// without a click — matching the TUI's "action tools break the group".
+// Exception: successful run_tests results default to collapsed — the summary
+// line ("✓ N passed") is already complete; expanding just adds noise. This
+// aligns with Cursor's "Collapse Auto-Run Commands" and reduces the visual
+// clutter of repeated targeted test runs stacking up in the thread.
 function ToolCardImpl({ block }: { block: ConvoBlock }) {
+  const name = toolNameOf(block)
+  const isSuccessfulRunTests =
+    block.kind === 'result' && !block.isError && name.toLowerCase() === 'run_tests'
   return (
     <div className="tool-card">
-      <ToolRow block={block} defaultOpen />
+      <ToolRow block={block} defaultOpen={!isSuccessfulRunTests} />
     </div>
   )
 }
