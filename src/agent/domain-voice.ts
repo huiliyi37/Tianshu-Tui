@@ -9,7 +9,7 @@
  * A domain's voice is not an add-on; it's the message itself.
  */
 
-export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | null
+export type DomainVoiceId = 'tianshu' | 'pojun' | 'tianfu' | 'tianliang' | 'tianquan' | 'tianji' | 'tianxuan' | 'fu' | 'wenqu' | 'yaoguang' | null
 
 // ---------------------------------------------------------------------------
 // Domain tone tables
@@ -22,6 +22,7 @@ const DOMAIN_NAMES: Record<string, string> = {
   tianliang: '天梁',
   fu: '辅',
   wenqu: '文曲',
+  yaoguang: '瑶光',
 }
 
 /**
@@ -130,6 +131,23 @@ const DOMAIN_TONE: Record<string, Array<[string, string]>> = {
     ['最后验证中', '验证域间边界'],
     ['正在分析', '诊断认知场中'],
     ['测一下', '验证一下'],
+  ],
+  yaoguang: [
+    // 瑶光 — rigorous, time-aware, self-reflective. A verifier who sees recurrence.
+    ['准备制定方案', '先建基线，再定验证锚点'],
+    ['开始修改', '复现后再动刀'],
+    ['正在修复', '先归族，再修根因'],
+    ['代码修改完成', '修复完成，验原测试仍绿'],
+    ['测试全部通过', '绿非证明——先复现原缺陷'],
+    ['运行测试验证', '取信 exit code，不取信声称'],
+    ['准备交付结果', '已验证，交付'],
+    ['收到任务，开始分析', '收到，先问：这里的声称能复现吗'],
+    ['可能遇到困难', '停——这个模式上次是否来过？'],
+    ['接近完成', '最后的反身自审'],
+    ['继续执行中', '逐条核验中'],
+    ['最后验证中', '做最后一道复现验证'],
+    ['正在分析', '回溯历史中'],
+    ['测一下', '复现一下'],
   ],
 }
 

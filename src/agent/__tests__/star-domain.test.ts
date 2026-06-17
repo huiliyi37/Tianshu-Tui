@@ -63,6 +63,32 @@ describe('StarDomain', () => {
     assert.match(wenqu.volatileBlock, /文曲/)
   })
 
+  it('yaoguang domain exists with full field set', () => {
+    const yaoguang = STAR_DOMAINS.yaoguang
+    assert.ok(yaoguang)
+    assert.equal(yaoguang.id, 'yaoguang')
+    assert.equal(yaoguang.name, '瑶光')
+    assert.equal(yaoguang.decisionStyle, 'cautious')
+    assert.equal(yaoguang.courageThreshold, 0.7)
+    assert.equal(yaoguang.isCustom, false)
+    assert.ok(yaoguang.volatileBlock.includes('瑶光'))
+    assert.ok(yaoguang.systemPromptSuffix.length > 0)
+    assert.ok(yaoguang.keywords.includes('复现'))
+    assert.ok(yaoguang.keywords.includes('归族'))
+  })
+
+  it('routes recurrence/verification keywords to yaoguang', () => {
+    assert.equal(matchDomain('复现这个缺陷并归族处理'), 'yaoguang')
+    assert.equal(matchDomain('回归测试验证修复是否真的生效'), 'yaoguang')
+    assert.equal(matchDomain('严谨核实这个声称是否属实'), 'yaoguang')
+  })
+
+  it('yaoguang does not steal tianquan review routes (keyword orthogonality)', () => {
+    // tianquan owns 审查/评估 — yaoguang must not intercept these
+    assert.equal(matchDomain('审查这个方案的设计'), 'tianquan')
+    assert.equal(matchDomain('评估架构层次是否合理'), 'tianquan')
+  })
+
   it('returns null for ambiguous tasks', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)
