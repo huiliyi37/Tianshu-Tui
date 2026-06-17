@@ -23,6 +23,31 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('</tool-usage>'))
   })
 
+  it('teaches parallel fan-out of independent探索 tools', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // 必须出现"并行/一次扇出"语义的指令，且点名探索工具
+    assert.ok(prompt.includes('并行'), '应含并行指令')
+    assert.ok(
+      prompt.includes('单条消息') || prompt.includes('一次发出') || prompt.includes('一次扇出'),
+      '应教在单条消息里一次发出多个工具',
+    )
+  })
+
+  it('warns不要在并行批中插入写操作 (contiguous-block constraint)', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // 引擎只并行"连续"safe 块；写操作会切断批次 → 必须显式告诫
+    assert.ok(
+      prompt.includes('写操作') || prompt.includes('edit_file') || prompt.includes('write_file'),
+      '应提醒并行批中不要混入写操作',
+    )
+  })
+
+  it('no longer teaches串行 "由粗到细" navigation chain', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // 旧的串行链描述应被移除或改写，避免与并行指令冲突
+    assert.ok(!prompt.includes('由粗到细'), '串行链描述应已移除')
+  })
+
   it('wraps workflow in <workflow> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<workflow>'))
