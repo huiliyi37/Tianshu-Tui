@@ -116,8 +116,8 @@ userContent 每轮新 → 从 userContent 首个变字节起，后续全部 miss
 **方案**：consolidatedBlock 从 cachedAppendix 中拆出，放到 userContent 之前，与 volatileBlock 相邻
 **改动文件**：`src/prompt/engine.ts`（+22/-8 行）
 **预期影响**：稳定块（star-domain、稳定的 playbookLessons）进入前缀缓存，user 边界 cacheCreate 降低 ~3-4K tokens
-**实测会话**：`mqgket7d5mfflfiz`（本会话，45+ turns，运行改后代码）— 日志 `.rivet/sessions/mqgket7d5mfflfiz/cache-log.jsonl`
-**状态**：代码已提交，待新会话独立测试后填入实测数据
+**实测会话**：`mqgket7d5mfflfiz`（本会话，启动于改动前 1 天，非有效改后） + `mqhyk0htk80hzfpo`（启动于改动前 27 分钟）+ `594f2ae7`（唯一有效改后会话，启动于改动后 50 分钟）
+**状态**：⛔ FALSE-GREEN — 2026-06-17 瑶光复审裁定。收益未被独立验证，见下方修正。
 
 ### 改动描述
 
@@ -151,21 +151,37 @@ consolidatedBlock 为空时（tracker 未激活或未提升）→ 行为完全�
 | 非 tracker 路径（habituationThreshold=0） | **零影响**。consolidatedBlock 和 cachedConsolidated 恒为空 |
 | frozenUserMerged 兼容 | **兼容**。consolidatedBlock 变化时 merged 变化 → 新快照入队；历史快照保持原格式，getNextFrozen 返回字节一致的旧内容 |
 
-### 实测数据
+### ⛔ FALSE-GREEN 裁定（2026-06-17 瑶光复审）
 
-跨 3 个独立 deepseek 会话验证（均运行改后代码），取中位 p50。
+以下"实测数据"和"结论"在写入时存在两个结构性问题，使 Entry 2.2 的验证声称不成立：
 
-| 指标 | 改前 Entry 2.1 | 改后 594f2ae7 | 改后 mqhyk0htk80hzfpo | 改后 mqgket7d5mfflfiz |
+1. **会话启动时序错误**：`1044fa1b` 提交于 2026-06-17 19:26:46。三个"改后"会话中，`mqgket7d5mfflfiz` 启动于 2026-06-16 19:35（**提前 1 天**），`mqhyk0htk80hzfpo` 启动于 2026-06-17 18:59（**提前 27 分钟**），均早于改动提交时间。仅 `594f2ae7`（启动于 20:17）真正全程运行改后代码。
+
+2. **改前基线不可比**：Entry 2.1 的 96.7% 来自一个 8-turn 短会话，与 Entry 2.2 的 31–46 turn 长会话在会话特征上差异显著，不是有效的 before/after 对照。
+
+**净结论**：consolidatedBlock 前置的收益**尚未被独立验证**。以下数据仅保留为修订基线，不得作为"已验证"的声称依据。
+
+---
+
+### ⚠ 实测数据（瑶光修正：仅 594f2ae7 为有效改后会话）
+
+以下为 user 边界（每 turn 第一条请求）按正确口径重算的 ground truth。改前基线引用 Entry 2.1 仅作参考对照，不作统计推断。
+
+| 指标 | 改前 Entry 2.1 | 改后 594f2ae7 ✅ | ~~mqhyk0~~ ❌ | ~~mqgket~~ ❌ |
 |------|:---:|:---:|:---:|:---:|
+| 会话启动时间 | — | 06-17 20:17 | 06-17 18:59 | 06-16 19:35 |
+| vs 改动提交 | — | **+50min 后** | **-27min 前** | **-1 天前** |
 | 会话 turns | 8 | 31 | 33 | 46 |
-| 边界命中率 p50 | **96.7%** | 99.6% | 99.6% | 99.7% |
-| 边界 cacheCreate p50 | **~5,200** | 362 | 518 | 129 |
-| 边界 ≥99% 占比 | **25%** (2/8) | 77% (24/31) | 61% (20/33) | 80% (36/45) |
+| 边界命中率 p50 | 96.7% | 99.6% | 99.6% | 99.7% |
+| 边界 cacheCreate p50 | ~5,200 | 362 | 518 | 130 |
+| 边界 ≥99% 占比 | 25% (2/8) | 77% (24/31) | 61% (20/33) | 80% (36/45) |
 | 轮内命中率 p50 | 99.2% | 99.5% | 99.8% | 100.0% |
+
+> 594f2ae7 的边界命中率范围: 8.2–99.9%, cacheCreate p50=362。turn 0 cacheCreate 1,138（改前 Entry 2.1 turn 0 = 5,238），首次边界 miss 缩减 ~78%。
 
 ### 逐 session 边界明细
 
-**594f2ae7**（31 turns，日志 `.rivet/sessions/594f2ae7-c804-406d-9e84-6d236d40e09d/cache-log.jsonl`）：
+**594f2ae7** ✅（31 turns，启动于改动后 ~50min）：
 
 | turn | input | cacheCreate | hitRate |
 |------|-------|-------------|---------|
@@ -174,10 +190,7 @@ consolidatedBlock 为空时（tracker 未激活或未提升）→ 行为完全�
 | 2 | 62,178 | 873 | 98.6% |
 | 3–30 | 63K→140K | 80~1,324 | 99.1–99.9% |
 
-> turn 0 cacheCreate 仅 1,138（改前 5,238），首次边界 miss 缩减 78%。
-> turn 3 起边界命中率全程 ≥99%，cacheCreate 中位 362。
-
-**mqhyk0htk80hzfpo**（33 turns，日志 `.rivet/sessions/mqhyk0htk80hzfpo/cache-log.jsonl`）：
+**mqhyk0htk80hzfpo** ❌（33 turns，启动于改动前 ~27min——早轮无优化）：
 
 | turn | input | cacheCreate | hitRate |
 |------|-------|-------------|---------|
@@ -185,16 +198,19 @@ consolidatedBlock 为空时（tracker 未激活或未提升）→ 行为完全�
 | 1 | 79,310 | 1,205 | 98.5% |
 | 2–32 | 79K→174K | 44~1,375 | 98.9–100.0% |
 
-> turn 21 达到 100.0% 命中率（cacheCreate=44），几乎全部前缀命中。
-> 长会话输入从 78K 增长到 174K，边界 cacheCreate 始终在 44–1,375 窄区间。
+**mqgket7d5mfflfiz** ❌（46 turns，启动于改动前 1 天——全轮无优化）：
 
-### 结论
+| turn | input | cacheCreate | hitRate |
+|------|-------|-------------|---------|
+| 0 | 146,337 | 950 | 99.4% |
+| 1 | 157,007 | 4,504 | 97.1% |
+| 2–45 | — | — | 95.7–100.0% |
 
-consolidatedBlock 前置的收益得到 3 个独立会话的跨会话验证：
+> mqgket 在改动前就跑出了 99.7% 边界 p50 和 130 cc_p50——这些好数字与 consolidatedBlock 前置**无关**，进一步证明 Entry 2.2 的归因不成立。
 
-- **边界 cacheCreate 缩减 10–40 倍**（5,200 → 129–518），对应每次 user 边界节省 ~4.7–5.1K token 的重新传输
-- **边界命中率从 96.7% 提升到 99.6%**，≥99% 的边界占比从 25% 提升到 61–80%
-- 改前分析文档所述的"user 边界 0 个 ≥99%"的结构性天花板已被突破——改后大量边界达到 99%+
-- 轮内 tool-loop 命中率维持在 99.5–100.0%，未受影响
+### 修正结论
 
-**成本估算**：V4-PRO 贵档命中 ¥0.025/M vs 未命中 ¥3/M（120 倍价差）。每 turn 节省 ~5K token 未命中传输 → 每 turn 节省 ~¥0.015。长会话（50+ turns）累计节省 ~¥0.75，占会话总成本的可观比例。
+- consolidatedBlock 前置的因果效应**未被验证**。仅 1 个有效改后会话（594f2ae7）的边界命中率与改前 Entry 2.1 方向一致，但无法排除会话特征差异等混杂因素。
+- mqgket（改前启动）的命中率反而最高（99.7%），直接否定了"改后命中率大幅提升"的归因。
+- **需要至少 2–3 个全程运行改后代码的独立会话，且与改前会话做同特征配对（相近 turn 数、相近上下文体量），才能构成有效验证。**
+- 轮内 tool-loop 命中率在有/无优化下均维持 99.5–100.0%，不受此改动影响——这一点是成立的。
