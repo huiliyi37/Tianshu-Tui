@@ -708,6 +708,12 @@ body {
 .tool-group.compact { opacity: 0.85; }
 .tool-group-label { color: var(--accent); font-weight: var(--weight-medium); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-group-count { color: var(--muted); font-size: var(--text-xs, 11px); flex-shrink: 0; }
+.tool-density-toggle {
+  flex-shrink: 0; cursor: pointer; font-size: var(--text-xs, 11px);
+  color: var(--muted); padding: 1px 4px; border-radius: var(--radius-sm, 3px);
+  line-height: 1; user-select: none;
+}
+.tool-density-toggle:hover { color: var(--text); background: var(--panel-3, var(--panel-2)); }
 .tool-group .tool-row + .tool-row { border-top: 1px solid var(--border); }
 /* Standalone action-tool card (bash/edit/write/run_tests/errors) — same frame
    as a group of one, sits outside the read/search fold and renders expanded. */
