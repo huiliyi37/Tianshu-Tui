@@ -251,14 +251,14 @@ describe('habituation: three-zone consolidation', () => {
     }
 
     const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
-    // P1: consolidated block is in the standalone appendix (last message)
-    const appendix = req.messages[req.messages.length - 1]!
+    // consolidated block is now in the trailer prefix (before ---), not a standalone appendix.
+    const trailer = req.messages[req.messages.length - 1]!
     assert.ok(
-      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
-      'Consolidated block should appear in standalone appendix after threshold',
+      typeof trailer.content === 'string' && trailer.content.includes('<consolidated>'),
+      'Consolidated block should appear in trailer prefix after threshold',
     )
     assert.ok(
-      typeof appendix.content === 'string' && appendix.content.includes('tianshu'),
+      typeof trailer.content === 'string' && trailer.content.includes('tianshu'),
       'Consolidated should contain domain name',
     )
   })
@@ -284,13 +284,16 @@ describe('habituation: three-zone consolidation', () => {
     const frozenBase = (engine as unknown as { frozenBase: string }).frozenBase
     assert.ok(user.startsWith('msg 1'), `user should start with 'msg 1', got '${user.slice(0, 30)}...'`)
     assert.ok(!histVol.includes('<consolidated>'), 'Historical volatile must stay frozen for prefix cache')
-    assert.equal(freshVol, frozenBase, 'Latest trailer must equal frozen base (appendix is standalone)')
-    // P1: consolidated block is in standalone appendix
-    const appendix = req.messages[req.messages.length - 1]!
-    assert.ok(
-      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
-      'Standalone appendix must include consolidated dynamic appendix',
-    )
+    assert.ok(freshVol.startsWith(frozenBase), 'Latest trailer prefix must start with frozen base')
+    assert.ok(freshVol.includes('<consolidated>'), 'Latest trailer prefix must include consolidated block before user content')
+    // consolidated block is now in the trailer prefix (before ---), not the appendix.
+    // Verify it appears between frozenBase and the --- separator.
+    const trailer = req.messages[req.messages.length - 1]!
+    const trailerContent = typeof trailer.content === 'string' ? trailer.content : ''
+    const sepIdx = trailerContent.indexOf('\n---\n')
+    const prefix = sepIdx >= 0 ? trailerContent.slice(0, sepIdx) : ''
+    assert.ok(prefix.includes('<consolidated>'),
+      'Consolidated block must be in trailer prefix, not appendix')
   })
 
   it('dehabituation removes field from consolidated block', () => {
@@ -303,19 +306,19 @@ describe('habituation: three-zone consolidation', () => {
     }
 
     let req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
-    // P1: consolidated block is in standalone appendix (last message)
-    let appendix = req.messages[req.messages.length - 1]!
+    // consolidated block is in the trailer prefix (before ---), not the appendix
+    let trailer = req.messages[req.messages.length - 1]!
     assert.ok(
-      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
+      typeof trailer.content === 'string' && trailer.content.includes('<consolidated>'),
     )
 
     engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
     req = engine.buildOaiRequest([{ role: 'user', content: 'after change' }])
-    appendix = req.messages[req.messages.length - 1]!
+    trailer = req.messages[req.messages.length - 1]!
     // After domain change, consolidated may still be present; check it changed
     assert.ok(
-      typeof appendix.content === 'string',
-      'Standalone appendix should exist',
+      typeof trailer.content === 'string',
+      'Trailer should exist',
     )
   })
 
@@ -336,18 +339,20 @@ describe('habituation: three-zone consolidation', () => {
     ], [{ tool: 'read_file', target: 'x', status: 'success' }])
 
     const histVol = (req.messages[1] as { content: string }).content
+    const frozenBase = (engine as unknown as { frozenBase: string }).frozenBase
 
     const { fresh: freshVol, user } = latestUserTrailer(req.messages)
     assert.ok(user.startsWith('read'), 'user should start with "read"')
 
-    // P1: FRESH equals volatileBlock (FROZEN only), appendix is standalone
-    assert.ok(histVol.startsWith(freshVol),
-      'FROZEN snapshot must start with volatileBlock prefix')
-    const appendix = req.messages[req.messages.length - 1]!
-    assert.ok(
-      typeof appendix.content === 'string' && appendix.content.includes('<consolidated>'),
-      'Standalone appendix must include consolidated dynamic appendix',
-    )
+    // FROZEN (volatileBlock) is byte prefix of both historical & fresh trailer.
+    // freshVol now includes consolidatedBlock between frozenBase and '---'.
+    assert.ok(freshVol.startsWith(frozenBase),
+      'Fresh trailer prefix must start with frozen base')
+    assert.ok(histVol.startsWith(frozenBase),
+      'Historical snapshot must start with frozen base')
+    // consolidated block is in the trailer prefix, not the appendix
+    assert.ok(freshVol.includes('<consolidated>'),
+      'Fresh trailer prefix must include consolidated dynamic appendix')
   })
 
   it('disabling habituation (threshold=0) falls back to v1 behavior', () => {
