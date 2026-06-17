@@ -724,11 +724,23 @@ describe('T7 watermark collapse (P0-2)', () => {
     return msgs
   }
 
-  it('does not collapse below the 50% token gate', () => {
+  it('does not semantically collapse tool-result bodies below the 50% gate (W3 lightweight pass)', () => {
+    // W3 (9514d4fb) extended T7 to 0-50% as a lightweight pass: below the 50%
+    // gate it only folds duplicate grep/read_file and strips reasoning — it must
+    // NOT run full semantic collapse. The watermark bookkeeping advances per
+    // 50K-token step regardless, so the body invariant (not the watermark
+    // counter) is the contract worth asserting here.
     const engine = makeEngine()
-    // 12 turns × 10K chars ≈ 30K tokens — way below 500K gate on 1M window.
-    engine.buildOaiRequest(bigHistory(12, 10_000), undefined, 1_000_000)
-    assert.equal(engine.getCacheEventStats().collapseWatermark, 0, 'watermark untouched below gate')
+    // 12 turns × 10K chars ≈ 30K tokens — way below the 500K (50%) gate on 1M.
+    const req = engine.buildOaiRequest(bigHistory(12, 10_000), undefined, 1_000_000)
+    const toolMsgs = req.messages.filter(m => m.role === 'tool')
+    assert.ok(toolMsgs.length > 0, 'tool results present in request')
+    // Non-duplicate bash results must survive untouched below the gate.
+    for (const m of toolMsgs) {
+      const content = m.content as string
+      assert.doesNotMatch(content, /^\[collapsed /, 'no semantic collapse below 50% gate')
+      assert.ok(content.includes('x'.repeat(100)), 'tool-result body preserved verbatim below gate')
+    }
   })
 
   it('watermark advances only when crossing a 50K token step', () => {
