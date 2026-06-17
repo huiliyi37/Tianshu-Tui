@@ -91,3 +91,46 @@ describe('T7 full-collapse fill-ratio threshold (option A)', () => {
     assert.ok(content.startsWith('[collapsed grep:'), 'must be semantically collapsed above 0.85')
   })
 })
+
+/**
+ * Build messages where an OLD assistant message (turn 1, age >= collapseAge)
+ * carries reasoning_content. The lightweight collapse pass strips reasoning
+ * below the watermark — that strip is a history rewrite that breaks exact-prefix.
+ * Below COLLAPSE_FLOOR_FILL_RATIO the whole T7 block must not run, so the old
+ * reasoning survives byte-identical (no rewrite, no cache break).
+ */
+function buildMessagesWithOldReasoning(targetFillRatio: number, reasoning: string): OaiMessage[] {
+  const msgs: OaiMessage[] = [
+    { role: 'user', content: 'turn 1: explore' },
+    { role: 'assistant', content: 'looked', reasoning_content: reasoning, tool_calls: [{ id: 'grep_c1', type: 'function', function: { name: 'grep', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'grep_c1', content: 'x'.repeat(400) },
+  ]
+  for (let t = 2; t <= 10; t++) {
+    msgs.push({ role: 'user', content: `turn ${t}` })
+    msgs.push({ role: 'assistant', content: `reply ${t}` })
+  }
+  const baseChars = msgs.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : 0), 0) + reasoning.length
+  const fillerChars = Math.max(0, Math.ceil(targetFillRatio * CONTEXT_WINDOW * CHARS_PER_TOKEN - baseChars))
+  msgs.push({ role: 'user', content: `latest. ${'x'.repeat(fillerChars)}` })
+  return msgs
+}
+
+describe('T7 collapse FLOOR — no rewrite below COLLAPSE_FLOOR_FILL_RATIO', () => {
+  const OLD_REASONING = 'OLD_REASONING_MARKER ' + 'deliberation '.repeat(50)
+
+  it('does NOT strip old reasoning at 30% fill (below floor) — prefix stays cacheable', () => {
+    const engine = makeEngine()
+    const messages = buildMessagesWithOldReasoning(0.3, OLD_REASONING)
+    const req = engine.buildOaiRequest(messages, undefined, CONTEXT_WINDOW)
+    const oldAsst = req.messages.find(m => m.role === 'assistant' && typeof (m as { reasoning_content?: string }).reasoning_content === 'string' && (m as { reasoning_content?: string }).reasoning_content!.includes('OLD_REASONING_MARKER'))
+    assert.ok(oldAsst, 'old reasoning must survive below floor — no history rewrite, no cache break')
+  })
+
+  it('DOES strip old reasoning at 60% fill (above floor) — lightweight pass runs', () => {
+    const engine = makeEngine()
+    const messages = buildMessagesWithOldReasoning(0.6, OLD_REASONING)
+    const req = engine.buildOaiRequest(messages, undefined, CONTEXT_WINDOW)
+    const stillHasMarker = req.messages.some(m => typeof (m as { reasoning_content?: string }).reasoning_content === 'string' && (m as { reasoning_content?: string }).reasoning_content!.includes('OLD_REASONING_MARKER'))
+    assert.equal(stillHasMarker, false, 'old reasoning must be stripped above floor (lightweight pass active)')
+  })
+})

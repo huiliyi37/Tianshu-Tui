@@ -33,6 +33,24 @@ export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
  */
 const FULL_COLLAPSE_FILL_RATIO = 0.85
 
+/**
+ * T7 collapse FLOOR: below this window fill-ratio, request-time collapse does
+ * not run at all (neither the watermark advances nor any rewrite happens).
+ *
+ * Rationale (exact-prefix economics): old reasoning_content / tool results that
+ * sit in the cached prefix are CHEAP to keep — they serve from cache-read
+ * (~0.025元/M on V4-PRO). Collapsing them rewrites history, which breaks the
+ * exact-prefix cache from the touched message onward — a one-time cache-MISS
+ * rebuild (~3元/M, 120× the read price). Below the floor there is ample headroom
+ * to the window limit, so keeping cached tokens is strictly cheaper than the
+ * break. Session-overflow is handled separately by trySessionSplit at 86%, which
+ * already rewrites at a cold-start boundary. Observed motivation: a session at
+ * fillRatio ~0.2 took a 169K-token break when the watermark advanced for savings
+ * it had no need for (mqhs/ed32f759 uMsg9). Collapse only earns its break when
+ * the window is genuinely filling. Tunable.
+ */
+const COLLAPSE_FLOOR_FILL_RATIO = 0.5
+
 /** Fast non-crypto hash for content dedup (djb2 on first 2000 chars + length). */
 function simpleHash(s: string): string {
   let h = 5381
@@ -535,7 +553,7 @@ export class PromptEngine {
       // worth more than cache protection); the lightweight pass still runs the
       // whole time. Tunable: lower it to collapse more aggressively, raise it to
       // protect cache longer.
-      if (fillRatio > 0) {
+      if (fillRatio >= COLLAPSE_FLOOR_FILL_RATIO) {
         // History rewrite (compact / session split) invalidates stored indices.
         if (this.collapseWatermark > result.length) {
           this.collapseWatermark = 0
