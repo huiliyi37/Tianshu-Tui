@@ -133,6 +133,16 @@ Its purpose is to help agents find the right documents before modifying sensitiv
   - modifying test infrastructure
   - changing test patterns or conventions
 
+### .rivet/knowledge/sibling-test-coverage.md
+- kind: testing-methodology
+- load_when:
+  - verifying changes after modifying source files
+  - claiming "N/N tests pass" — check N against expected blast radius
+  - cache/invariant/prefix-structure changes
+- guardrail:
+  - modify `X.ts` → run `X*.test.ts` (not just `X.test.ts`)
+  - N matching a single file's test count is a red flag
+
 ### .rivet/knowledge/ui.md
 - kind: ui-reference
 - load_when:
