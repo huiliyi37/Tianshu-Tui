@@ -1,10 +1,10 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
 import { ToolGroup, ToolCard, isCollapsibleTool, isRunTestsTool, toolNameOf } from '../components/ToolGroup'
-import { Markdown } from '../components/Markdown'
+import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
@@ -483,14 +483,65 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
   }
   return (
     <MsgBlock role="天枢">
-      {isStreaming ? <StreamingText source={block.text} /> : <Markdown source={block.text} />}
+      <AssistantText text={block.text} isStreaming={!!isStreaming} />
     </MsgBlock>
   )
 }
 
-// During streaming we render plain text (Codex/Claude Code strategy): skip the
-// per-frame react-markdown + remark-gfm + rehype-highlight re-parse and only do
-// the full Markdown render once the turn completes.
+// Re-parse the streaming source at ~10fps instead of every rAF frame, then snap
+// to the full text the instant streaming stops. Rendering Markdown incrementally
+// (rather than plain text → one big parse on turn_complete) removes the end-of-
+// stream spike: the final frame is just one more cheap incremental parse, not a
+// jump from plain text to a fully highlighted document.
+const STREAM_THROTTLE_MS = 100
+function useThrottledStreamingSource(text: string, isStreaming: boolean): string {
+  const [shown, setShown] = useState(text)
+  const latest = useRef(text)
+  const lastAt = useRef(0)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  latest.current = text
+
+  useEffect(() => {
+    if (!isStreaming) {
+      if (timer.current) { clearTimeout(timer.current); timer.current = null }
+      setShown(text)
+      return
+    }
+    const elapsed = Date.now() - lastAt.current
+    // Mark mid-stream re-parses as low priority so a heavy Markdown/highlight
+    // pass can be interrupted by scrolling or typing in the composer.
+    if (elapsed >= STREAM_THROTTLE_MS) {
+      lastAt.current = Date.now()
+      startTransition(() => setShown(latest.current))
+    } else if (timer.current === null) {
+      timer.current = setTimeout(() => {
+        timer.current = null
+        lastAt.current = Date.now()
+        startTransition(() => setShown(latest.current))
+      }, STREAM_THROTTLE_MS - elapsed)
+    }
+  }, [text, isStreaming])
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+  // Non-streaming always returns the full text immediately so the turn_complete
+  // frame renders the final source without waiting for a throttle tick.
+  return isStreaming ? shown : text
+}
+
+// Above this size, streaming Markdown would re-parse the whole string every
+// throttle window. Fall back to plain text mid-stream and parse once at the end.
+const STREAM_MARKDOWN_MAX = 16000
+function AssistantText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const heavy = isStreaming && text.length > STREAM_MARKDOWN_MAX
+  const throttled = useThrottledStreamingSource(text, isStreaming && !heavy)
+  if (heavy) return <StreamingText source={text} />
+  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} />
+  return <Markdown source={text} />
+}
+
+// Plain-text fallback for the very-long streaming guard (md-streaming keeps the
+// pre-wrap styling until the final Markdown parse on turn completion).
 function StreamingText({ source }: { source: string }) {
   return <div className="md md-streaming">{source}</div>
 }

@@ -38,6 +38,19 @@ const COMPONENTS = {
   a: ExternalLink,
 } as const
 
+// During streaming a fenced code block is often half-open (odd number of ```
+// fences). Left as-is, react-markdown swallows the rest of the message into a
+// code block until the closing fence streams in, causing a visible flash on
+// every delta. Appending a temporary closing fence keeps partial output stable.
+// Pure + exported for unit tests; only applied to the in-flight streaming source.
+export function closeUnterminatedFence(source: string): string {
+  const fences = source.match(/^[ \t]*```/gm)
+  if (fences && fences.length % 2 === 1) {
+    return `${source}${source.endsWith('\n') ? '' : '\n'}\`\`\``
+  }
+  return source
+}
+
 function MarkdownImpl({ source }: { source: string }) {
   return (
     <div className="md">

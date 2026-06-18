@@ -124,13 +124,41 @@ export function eventReducer(state: EventViewState, action: EventAction): EventV
   switch (action.type) {
     case 'reset':
       return initialEventState
-    case 'events':
-      return action.events.reduce((s, e) => applyEvent(s, e), state)
+    case 'events': {
+      // Drop already-folded seqs first (preserves idempotent replay), then merge
+      // consecutive deltas so a 60fps batch does one string concat + one blocks
+      // copy per run instead of one per delta (cuts the O(n^2) streaming cost).
+      const fresh = action.events.filter((e) => e.seq > state.lastSeq)
+      return coalesceDeltas(fresh).reduce((s, e) => applyEvent(s, e), state)
+    }
     case 'event':
       return applyEvent(state, action.event)
     default:
       return state
   }
+}
+
+// Merge runs of consecutive same-type streaming deltas into a single event with
+// concatenated text and the run's max seq. Caller must pre-filter folded seqs.
+function coalesceDeltas(events: SessionEvent[]): SessionEvent[] {
+  const out: SessionEvent[] = []
+  for (const ev of events) {
+    const prev = out[out.length - 1]
+    if (
+      prev && (ev.type === 'text_delta' || ev.type === 'thinking_delta') &&
+      prev.type === ev.type
+    ) {
+      out[out.length - 1] = {
+        ...prev,
+        seq: ev.seq,
+        ts: ev.ts,
+        data: { ...prev.data, text: String(prev.data.text ?? '') + String(ev.data.text ?? '') },
+      }
+    } else {
+      out.push(ev)
+    }
+  }
+  return out
 }
 
 function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {

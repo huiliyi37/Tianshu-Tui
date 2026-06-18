@@ -353,3 +353,43 @@ test('plan_submitted bumps planRev and records latest slug', () => {
   assert.equal(s.planRev, 1)
   assert.equal(s.latestPlanSlug, 'my-plan')
 })
+
+test('events batch coalesces consecutive text_delta into one block (same result as one-by-one)', () => {
+  seq = 0
+  const batch = [
+    ev('text_delta', { text: 'a' }),
+    ev('text_delta', { text: 'b' }),
+    ev('text_delta', { text: 'c' }),
+  ]
+  const s = eventReducer(initialEventState, { type: 'events', events: batch })
+  assert.equal(s.blocks.length, 1)
+  assert.equal(s.blocks[0]!.text, 'abc')
+  assert.equal(s.lastSeq, batch[batch.length - 1]!.seq)
+})
+
+test('events batch coalesces deltas separately around a tool_use boundary', () => {
+  seq = 0
+  const batch = [
+    ev('text_delta', { text: 'x' }),
+    ev('text_delta', { text: 'y' }),
+    ev('tool_use', { name: 'bash', input: { cmd: 'ls' } }),
+    ev('text_delta', { text: 'z' }),
+  ]
+  const s = eventReducer(initialEventState, { type: 'events', events: batch })
+  assert.equal(s.blocks.length, 3)
+  assert.equal(s.blocks[0]!.text, 'xy')
+  assert.equal(s.blocks[1]!.kind, 'tool')
+  assert.equal(s.blocks[2]!.text, 'z')
+})
+
+test('events batch is idempotent: already-folded seqs are dropped before coalescing', () => {
+  seq = 0
+  const e1 = ev('text_delta', { text: 'hel' })
+  const e2 = ev('text_delta', { text: 'lo' })
+  const first = eventReducer(initialEventState, { type: 'events', events: [e1, e2] })
+  // Replay the same batch plus a fresh delta — folded seqs must not duplicate text.
+  const e3 = ev('text_delta', { text: '!' })
+  const second = eventReducer(first, { type: 'events', events: [e1, e2, e3] })
+  assert.equal(second.blocks.length, 1)
+  assert.equal(second.blocks[0]!.text, 'hello!')
+})
