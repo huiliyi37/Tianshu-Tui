@@ -50,7 +50,7 @@ describe('SessionContext → SessionPersist integration', () => {
 
   it('persists user → assistant → tool_result append flow to disk', async () => {
     const session = new SessionContext()
-    const persist = new SessionPersist('integration-test-1')
+    const persist = new SessionPersist('integration-test-1', tempDir)
     const { drain } = wirePersistence(session, persist)
 
     session.addUserMessage('hello')
@@ -80,7 +80,7 @@ describe('SessionContext → SessionPersist integration', () => {
 
   it('preserves order across rapid consecutive tool_results', async () => {
     const session = new SessionContext()
-    const persist = new SessionPersist('integration-test-order')
+    const persist = new SessionPersist('integration-test-order', tempDir)
     const { drain } = wirePersistence(session, persist)
 
     // Fire 50 tool_results back-to-back; serialization queue must keep them in order.
@@ -117,7 +117,7 @@ describe('SessionContext → SessionPersist integration', () => {
 
   it('replaceMessages does a full rewrite, dropping prior appended state', async () => {
     const session = new SessionContext()
-    const persist = new SessionPersist('integration-test-replace')
+    const persist = new SessionPersist('integration-test-replace', tempDir)
     const { drain } = wirePersistence(session, persist)
 
     session.addUserMessage('msg-1')
@@ -142,7 +142,7 @@ describe('SessionContext → SessionPersist integration', () => {
 
   it('appends after replace continue from the rewritten state', async () => {
     const session = new SessionContext()
-    const persist = new SessionPersist('integration-test-replace-then-append')
+    const persist = new SessionPersist('integration-test-replace-then-append', tempDir)
     const { drain } = wirePersistence(session, persist)
 
     session.addUserMessage('msg-1')
@@ -161,7 +161,7 @@ describe('SessionContext → SessionPersist integration', () => {
     // This is the core P0-1 contract: if we never call /exit, prior messages
     // must still be on disk.
     const session = new SessionContext()
-    const persist = new SessionPersist('integration-test-crash')
+    const persist = new SessionPersist('integration-test-crash', tempDir)
     const { drain } = wirePersistence(session, persist)
 
     session.addUserMessage('what is the bug?')
@@ -175,7 +175,7 @@ describe('SessionContext → SessionPersist integration', () => {
     await drain()
 
     // Re-open the session file as if we restarted the process.
-    const reopened = new SessionPersist('integration-test-crash')
+    const reopened = new SessionPersist('integration-test-crash', tempDir)
     const recovered = reopened.loadOai()
     assert.equal(recovered.length, 3)
     assert.equal(recovered[0]!.content, 'what is the bug?')
