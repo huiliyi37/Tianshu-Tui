@@ -56,19 +56,16 @@ describe('ecosystem workflow helpers', () => {
       date: new Date(2026, 4, 19),
     })
 
-    assert.ok(prompt.includes('我正在使用 writing-plans 技能创建实现计划。'))
-    assert.ok(prompt.includes('加载 /skill writing-plans 查看完整方法论。'))
-    assert.ok(prompt.includes('Do not write implementation code yet.'))
-    assert.ok(prompt.includes('Read relevant code deeply before proposing tasks'))
+    assert.ok(prompt.includes('创建实现计划：Add workflow aliases'))
+    assert.ok(prompt.includes('计划模板路由：任务深度'))
     assert.ok(prompt.includes('docs/superpowers/plans/2026-05-19-add-workflow-aliases.md'))
-    assert.ok(prompt.includes('Plan filenames must be short business-semantic names.'))
-    assert.ok(prompt.includes('Do not mechanically use the entire'))
-    assert.ok(prompt.includes('File structure'))
-    assert.ok(prompt.includes('Research endorsement（调研背书）'))
-    assert.ok(prompt.includes('write failing test → run and confirm failure → implement minimum code'))
-    assert.ok(prompt.includes('Forbidden placeholders'))
+    assert.ok(prompt.includes('不要写实现代码'))
+    assert.ok(prompt.includes('文件名用简短业务语义命名'))
+    assert.ok(prompt.includes('TDD 形态：写失败测试 → 确认失败 → 最小实现'))
+    assert.ok(prompt.includes('禁用占位符：'))
     assert.ok(prompt.includes('TODO / TBD / 待定 / 后续实现 / 补充细节'))
-    assert.ok(prompt.includes('Spec coverage'))
+    assert.ok(prompt.includes('完成前自检：'))
+    assert.ok(prompt.includes('规格覆盖'))
     assert.ok(prompt.includes('子代理驱动（推荐）'))
     assert.ok(prompt.includes('内联执行'))
   })
@@ -80,8 +77,8 @@ describe('ecosystem workflow helpers', () => {
 
     assert.equal(plan?.command, '/plan')
     assert.equal(writePlan?.command, '/write-plan')
-    assert.ok(plan?.prompt.includes('add skill loader'))
-    assert.ok(writePlan?.prompt.includes('writing-plans'))
+    assert.ok(plan?.prompt.includes('创建实现计划：add skill loader'))
+    assert.ok(writePlan?.prompt.includes('创建实现计划：add skill loader'))
   })
 
   it('resolves /team into a team-mode workflow prompt', () => {
@@ -140,7 +137,7 @@ describe('ecosystem workflow helpers', () => {
     const resolved = resolveEcosystemWorkflowInput('/write-plan close workflow docs')
 
     assert.equal(resolved?.command, '/write-plan')
-    assert.ok(resolved?.prompt.includes('Create a comprehensive implementation plan for: close workflow docs'))
+    assert.ok(resolved?.prompt.includes('创建实现计划：close workflow docs'))
     assert.ok(!resolved?.prompt.includes('Use the plan_close tool'))
   })
 
