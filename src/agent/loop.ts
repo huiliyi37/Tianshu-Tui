@@ -995,6 +995,7 @@ export class AgentLoop {
       toolFingerprints: this.traceStore.toolFingerprints,
       noToolTurnCount: this.consecutiveNoToolTurns,
       textFingerprints: this.recentTextFingerprints,
+      providerName: this.config.providerName,
     })
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)

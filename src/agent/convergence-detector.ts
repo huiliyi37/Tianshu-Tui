@@ -37,6 +37,9 @@ export interface ConvergenceInput {
    *  Used to detect cross-turn text repetition — the model produces similar
    *  analysis text over multiple turns without making progress. */
   textFingerprints?: ReadonlyArray<string>
+  /** Provider name for provider-specific thresholds (e.g. 'glm' gets tighter cutoffs).
+   *  When absent, uses default DeepSeek-tuned values. */
+  providerName?: string
 }
 
 export interface ConvergenceResult {
@@ -369,6 +372,7 @@ function computeConvergenceScore(
   noToolTurnCount: number,
   turn: number,
   recentToolHistory: ConvergenceInput['recentToolHistory'],
+  providerName?: string,
 ): number {
   const raw =
     weights.editRatio * signals.editRatio +
@@ -395,33 +399,54 @@ function computeConvergenceScore(
   // infinite-loop pattern — the model reads file after file, each target
   // novel, entropy high, but never takes action.
   //
-  // The penalty ramps with turn count: mild at turn 8, severe by turn 15+,
-  // ensuring convergence fires even in explore phase where targetNovelty
-  // and toolEntropy keep the raw score artificially high.
+  // GLM: Preserved Thinking accumulates server-side reasoning state across
+  // turns. Once GLM enters a read-only loop the server retains that trajectory,
+  // making it harder to break out — hence the tighter ramp (4→0.65 vs 8→0.7).
+  // Default ramp is tuned for DeepSeek's stateless reasoning model.
   const productiveTools = new Set([
     'edit_file', 'write_file', 'hash_edit', 'apply_patch',
     'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
   ])
   const window = recentToolHistory.slice(-Math.min(turn, 15))
   const hasProductive = window.some(h => productiveTools.has(h.tool))
-  if (window.length >= 4 && !hasProductive) {
-    // Ramp: turn 8→0.7, turn 12→0.45, turn 16→0.25, turn 20+→0.1
-    if (turn >= 20) penalty = Math.min(penalty, 0.1)
-    else if (turn >= 16) penalty = Math.min(penalty, 0.25)
-    else if (turn >= 12) penalty = Math.min(penalty, 0.45)
-    else if (turn >= 8) penalty = Math.min(penalty, 0.7)
+  const isGlm = providerName === 'glm'
+  if (window.length >= (isGlm ? 2 : 4) && !hasProductive) {
+    if (isGlm) {
+      // GLM ramp: turn 4→0.65, turn 7→0.35, turn 11→0.15, turn 15+→0.05
+      if (turn >= 15) penalty = Math.min(penalty, 0.05)
+      else if (turn >= 11) penalty = Math.min(penalty, 0.15)
+      else if (turn >= 7) penalty = Math.min(penalty, 0.35)
+      else if (turn >= 4) penalty = Math.min(penalty, 0.65)
+    } else {
+      // Default ramp: turn 8→0.7, turn 12→0.45, turn 16→0.25, turn 20+→0.1
+      if (turn >= 20) penalty = Math.min(penalty, 0.1)
+      else if (turn >= 16) penalty = Math.min(penalty, 0.25)
+      else if (turn >= 12) penalty = Math.min(penalty, 0.45)
+      else if (turn >= 8) penalty = Math.min(penalty, 0.7)
+    }
   }
 
   // No-tool-turn penalty: consecutive turns without tool calls signal
   // hesitation or text-only looping — model is "thinking" but not acting.
   // Tool-based signals can't detect this because recentToolHistory doesn't
-  // grow on no-tool turns. Aggressively penalize after 2 consecutive empty turns.
-  if (noToolTurnCount >= 3) {
-    penalty = Math.min(penalty, 0.15) // severe: 3+ turns of doing nothing
-  } else if (noToolTurnCount >= 2) {
-    penalty = Math.min(penalty, 0.35) // moderate: 2 turns of hesitation
-  } else if (noToolTurnCount >= 1) {
-    penalty = Math.min(penalty, 0.7)  // mild: 1 turn — may be recovering
+  // grow on no-tool turns.
+  //
+  // GLM: text-only loops escalate faster because Preserved Thinking
+  // locks in the "I need more information" trajectory server-side.
+  if (isGlm) {
+    if (noToolTurnCount >= 2) {
+      penalty = Math.min(penalty, 0.1)  // severe: 2+ turns with no tools
+    } else if (noToolTurnCount >= 1) {
+      penalty = Math.min(penalty, 0.4)  // moderate: 1 turn may be recovering
+    }
+  } else {
+    if (noToolTurnCount >= 3) {
+      penalty = Math.min(penalty, 0.15) // severe: 3+ turns of doing nothing
+    } else if (noToolTurnCount >= 2) {
+      penalty = Math.min(penalty, 0.35) // moderate: 2 turns of hesitation
+    } else if (noToolTurnCount >= 1) {
+      penalty = Math.min(penalty, 0.7)  // mild: 1 turn — may be recovering
+    }
   }
 
   return Math.min(1.0, Math.max(0.0, raw * penalty))
@@ -529,7 +554,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     textRepetitionPenalty: computeTextRepetitionPenalty(input.textFingerprints ?? []),
   }
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory)
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0
@@ -539,11 +564,14 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // No-tool stagnation: fire earlier than normal thresholds. When the model
   // produces multiple turns with no tool calls, it's clearly stuck — don't
   // wait for nLow/nMid/nHigh turn counts to accumulate.
-  // Hard cap: 5+ consecutive no-tool turns → forced abort (prevents 10+ wasted LLM calls).
-  const NO_TOOL_ABORT_THRESHOLD = 5
-  const noToolStagnation = noToolCount >= 2
+  // Hard cap: 5+ (default) / 3+ (GLM) consecutive no-tool turns → forced abort.
+  const isGlm = input.providerName === 'glm'
+  const NO_TOOL_ABORT_THRESHOLD = isGlm ? 3 : 5
+  const noToolStagnation = noToolCount >= (isGlm ? 1 : 2) // GLM: fire on first no-tool turn
   if (noToolCount >= NO_TOOL_ABORT_THRESHOLD) {
     level = 3 // force abort — model is clearly stuck in a text-only loop
+  } else if (noToolCount >= 2 && isGlm) {
+    level = 3 // GLM: 2 consecutive no-tool turns → hard abort (faster than kick)
   } else if (noToolCount >= 3) {
     level = 2 // kick on 3+ consecutive no-tool turns
   } else if (noToolCount >= 2 && turn >= 4) {
