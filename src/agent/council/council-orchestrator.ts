@@ -88,7 +88,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
   }))
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
   const contributions = input.seats.map(seat => {
-    const result = run.results.find(r => r.workOrderId.includes(`seat-${seat}`))
+    const result = run.results.find(r => r.workOrderId === `council:seat-${seat}`)
     return result ? parseSeatContribution(seat, result) : { authority: seat, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
   })
   const aggregate = aggregateCouncil(input.draft, contributions)

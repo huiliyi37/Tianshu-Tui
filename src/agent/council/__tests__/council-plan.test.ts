@@ -71,7 +71,7 @@ describe('aggregateCouncil — risk×alternative 仅具体 itemId', () => {
     const b = seat({ authority: 'tianxuan', alternatives: [{ proposal: 'p', recommend: true, rationale: 'r', targetItemId: 'T1' }] })
     const agg = aggregateCouncil(draft, [a, b])
     assert.equal(agg.conflicts.length, 1)
-    assert.equal(agg.decisions.find(d => d.kind === 'risk')!.conflictWith, 'tianxuan:alt:T1')
+    assert.equal(agg.decisions.find(d => d.kind === 'risk')!.conflictWith, 'tianxuan:alternative:0')
   })
 })
 

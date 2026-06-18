@@ -63,8 +63,16 @@ describe('runCouncil — 单轮 + 解耦', () => {
 })
 
 describe('parseSeatContribution — 降级兜底', () => {
-  it('artifact 缺失 → 空贡献带 summary', () => {
+  it('artifact 空 content → 空贡献带 summary', () => {
     const c = parseSeatContribution('tianji', workerResult('tianji', ''))
+    assert.equal(c.summary, 'tianji done')
+    assert.deepEqual(c.additions, [])
+  })
+  it('artifact 缺失 → 空贡献带 summary（分支真空覆盖）', () => {
+    const result = workerResult('tianji', '')
+    // 移除 artifacts 条目，触发 if (!artifact) return empty 分支
+    result.artifacts = result.artifacts.filter(a => a.title !== 'seat-contribution')
+    const c = parseSeatContribution('tianji', result)
     assert.equal(c.summary, 'tianji done')
     assert.deepEqual(c.additions, [])
   })

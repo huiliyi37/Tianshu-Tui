@@ -108,10 +108,10 @@ export function aggregateCouncil(
     if (!conflicts.some(ex => sameConflict(ex, c))) conflicts.push(c)
   }
 
-  // 收集所有席位的备选，用于 risk×alternative 相关性检测（仅限具体 itemId）。
-  const allAlternatives: Array<{ source: string; alt: SeatAlternative }> = []
+  // 收集所有席位的备选（含索引 n），用于 risk×alternative 相关性检测（仅限具体 itemId）。
+  const allAlternatives: Array<{ source: string; alt: SeatAlternative; n: number }> = []
   for (const c of contributions) {
-    for (const alt of c.alternatives) allAlternatives.push({ source: c.authority, alt })
+    c.alternatives.forEach((alt, n) => allAlternatives.push({ source: c.authority, alt, n }))
   }
 
   for (const c of contributions) {
@@ -143,7 +143,7 @@ export function aggregateCouncil(
       if (!isBlank(risk.itemId) && risk.severity === 'high') {
         const rival = allAlternatives.find(x => x.alt.recommend && !isBlank(x.alt.targetItemId) && x.alt.targetItemId === risk.itemId)
         if (rival) {
-          conflictWith = `${rival.source}:alt:${risk.itemId}`
+          conflictWith = `${rival.source}:alternative:${rival.n}`
           addConflict({ description: `Risk vs alternative on ${risk.itemId}`, left: risk.claim, right: rival.alt.proposal })
         }
       }

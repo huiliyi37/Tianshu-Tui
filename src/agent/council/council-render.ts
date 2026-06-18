@@ -1,5 +1,10 @@
 import type { CouncilPlan, CouncilDecision } from './council-plan.js'
 
+/** 转义 markdown 表格元字符：管道符和换行。 */
+function esc(cell: string): string {
+  return cell.replace(/\|/g, '\\|').replace(/\n/g, ' ')
+}
+
 function renderDecisionRows(decisions: CouncilDecision[], verdict: CouncilDecision['verdict']): string {
   const rows = decisions.filter(d => d.verdict === verdict)
   if (rows.length === 0) return '_（无）_'
@@ -29,7 +34,7 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
     lines.push('_（无席位间冲突）_', '')
   } else {
     lines.push('| 描述 | 一方 | 另一方 |', '|------|------|--------|')
-    for (const cf of aggregate.conflicts) lines.push(`| ${cf.description} | ${cf.left} | ${cf.right} |`)
+    for (const cf of aggregate.conflicts) lines.push(`| ${esc(cf.description)} | ${esc(cf.left)} | ${esc(cf.right)} |`)
     lines.push('')
   }
 
@@ -38,7 +43,7 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
     lines.push('_（无任务）_', '')
   } else {
     lines.push('| id | 标题 | 说明 |', '|----|------|------|')
-    for (const it of aggregate.mergedItems) lines.push(`| ${it.id} | ${it.title} | ${it.detail} |`)
+    for (const it of aggregate.mergedItems) lines.push(`| ${esc(it.id)} | ${esc(it.title)} | ${esc(it.detail)} |`)
     lines.push('')
   }
 
