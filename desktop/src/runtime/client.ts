@@ -118,6 +118,7 @@ export function createSession(input: {
   title?: string
   prompt?: string
   approvalMode?: ApprovalMode
+  isolatedWorktree?: boolean
 }): Promise<SessionRecord> {
   return apiPost<SessionRecord>('/sessions', input)
 }
@@ -384,4 +385,35 @@ export function pauseSchedule(id: string, enabled: boolean): Promise<{ id: strin
 export async function deleteSchedule(id: string): Promise<void> {
   const res = await rivetFetch(`/schedule/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`DELETE /schedule/${id} -> ${res.status}`)
+}
+
+// ── GitHub PR Integration ───────────────────────────────────────────
+
+export interface PrSummary {
+  number: number
+  title: string
+  state: string
+  url: string
+  headRefName: string
+  author: string
+  createdAt: string
+  updatedAt: string
+  additions: number
+  deletions: number
+  reviewDecision: string
+  isDraft: boolean
+}
+
+export interface PrDetail extends PrSummary {
+  body: string
+  comments: { author: string; body: string; createdAt: string; path?: string; line?: number }[]
+  files: { path: string; additions: number; deletions: number; status: string }[]
+}
+
+export async function listGithubPrs(): Promise<{ prs: PrSummary[]; ghAvailable: boolean }> {
+  return apiGet<{ prs: PrSummary[]; ghAvailable: boolean }>('/github/prs')
+}
+
+export async function getGithubPr(number: number): Promise<PrDetail> {
+  return apiGet<PrDetail>(`/github/prs/${number}`)
 }

@@ -7,8 +7,10 @@ import {
   createSession,
   deleteSchedule,
   getHealth,
+  getGithubPr,
   getPlan,
   listArtifacts,
+  listGithubPrs,
   listPlans,
   listSchedule,
   listSessions,
@@ -32,6 +34,8 @@ export const qk = {
   plans: (id: string | null) => ['plans', id] as const,
   plan: (id: string | null, slug: string | null) => ['plan', id, slug] as const,
   schedule: ['schedule'] as const,
+  githubPrs: ['github', 'prs'] as const,
+  githubPr: (n: number) => ['github', 'pr', n] as const,
 }
 
 export function useHealth() {
@@ -181,5 +185,24 @@ export function useDeleteSchedule() {
   return useMutation({
     mutationFn: (id: string) => deleteSchedule(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.schedule }),
+  })
+}
+
+// ── GitHub PR ───────────────────────────────────────────────────────
+
+export function useGithubPrs() {
+  return useQuery({
+    queryKey: qk.githubPrs,
+    queryFn: listGithubPrs,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useGithubPr(number: number | null) {
+  return useQuery({
+    queryKey: qk.githubPr(number ?? 0),
+    queryFn: () => (number ? getGithubPr(number) : Promise.reject()),
+    enabled: !!number,
   })
 }

@@ -16,6 +16,9 @@
  *   POST   /sessions/:id/interventions/:rid/answer     resolve approval/intent (B2)
  *   GET    /sessions/:id/artifacts                     list (B4)
  *   GET    /sessions/:id/artifacts/:artifactId         read raw (B4)
+ *   GET    /worktrees                                  list git worktrees
+ *   GET    /github/prs                                 list open PRs (via gh CLI)
+ *   GET    /github/prs/:number                         PR detail with comments/files
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -27,6 +30,7 @@ import type { ApprovalMode } from '../agent/loop-types.js'
 import type { PlanDocument } from '../plan/plan-store.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 import { listProjectFiles, rankFiles } from './file-list.js'
+import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
@@ -124,7 +128,7 @@ export function buildSessionRoutes(
 
   const routes: Record<string, RouteHandler> = {
     'POST /sessions': withAuth((body) => {
-      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; approvalMode?: unknown }
+      const data = (body ?? {}) as { cwd?: string; title?: string; prompt?: string; approvalMode?: unknown; isolatedWorktree?: unknown }
       if (data.approvalMode !== undefined && !isApprovalMode(data.approvalMode)) {
         return { status: 400, body: { error: 'Invalid "approvalMode"' } }
       }
@@ -133,6 +137,7 @@ export function buildSessionRoutes(
         title: data.title,
         prompt: data.prompt,
         approvalMode: data.approvalMode as ApprovalMode | undefined,
+        isolatedWorktree: data.isolatedWorktree === true,
       })
       return { status: 201, body: rec }
     }, apiToken),
@@ -486,6 +491,32 @@ export function buildSessionRoutes(
         return { status: 409, body: { error: 'Session is running, has no agent, or index out of range' } }
       }
       return { status: 200, body: { ok: true, ...manager.getSession(params!.id!) } }
+    }, apiToken),
+
+    // Git worktrees — list all worktrees for the repo root (used by the desktop
+    // sidebar to show worktree branch status for sessions).
+    'GET /worktrees': withAuth(() => ({
+      status: 200,
+      body: { worktrees: manager.getWorktrees() },
+    }), apiToken),
+
+    // GitHub PR integration — list open PRs for the repo. Requires `gh` CLI.
+    'GET /github/prs': withAuth(async () => {
+      const cwd = manager.getDefaultCwd()
+      const available = await isGhAvailable(cwd)
+      if (!available) return { status: 200, body: { prs: [], ghAvailable: false } }
+      const prs = await listPrs(cwd)
+      return { status: 200, body: { prs: prs ?? [], ghAvailable: true } }
+    }, apiToken),
+
+    // GitHub PR detail — get a single PR with comments and changed files.
+    'GET /github/prs/:number': withAuth(async (_body, params) => {
+      const cwd = manager.getDefaultCwd()
+      const num = Number(params?.number)
+      if (!num || num <= 0) return { status: 400, body: { error: 'Invalid PR number' } }
+      const pr = await getPrDetail(cwd, num)
+      if (!pr) return { status: 404, body: { error: 'PR not found or gh not available' } }
+      return { status: 200, body: pr }
     }, apiToken),
   }
 

@@ -6,13 +6,14 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { PlanPanel } from './PlanPanel'
+import { GithubPanel } from './GithubPanel'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 
-type ReviewTab = 'review' | 'plan'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github'
 
 // Review panel (P3/Q3) — Codex's third pane. Aggregates the trust-layer surfaces
 // of the active thread: pending approvals/intents handled INLINE (no blocking
@@ -30,8 +31,12 @@ export function ReviewPanel(props: {
   onApproval: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
   onIntent: (decision: 'continue' | 'veto' | 'alternative') => void
   onFeedbackSent?: () => void
+  /** T2 — active task list for the Task tab. */
+  todos?: TodoStateItem[]
+  /** Source files touched by file-editing tools. */
+  sources?: string[]
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent } = props
+  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [] } = props
   const autonomous = isAutonomous(approvalMode)
   const [tab, setTab] = useState<ReviewTab>('review')
 
@@ -85,11 +90,57 @@ export function ReviewPanel(props: {
         <button className={`review-tab ${tab === 'plan' ? 'active' : ''}`} onClick={() => setTab('plan')}>
           方案{planMode === 'planning' && <span className="tab-badge dot" aria-label="规划中" />}
         </button>
+        <button className={`review-tab ${tab === 'task' ? 'active' : ''}`} onClick={() => setTab('task')}>
+          任务{todos.length > 0 && <span className="tab-badge">{todos.filter(t => t.status !== 'completed').length || ''}</span>}
+        </button>
+        <button className={`review-tab ${tab === 'github' ? 'active' : ''}`} onClick={() => setTab('github')}>
+          PR
+        </button>
       </div>
 
-      {tab === 'plan' ? (
+      {tab === 'github' ? (
+        <div className="review-body">
+          <GithubPanel />
+        </div>
+      ) : tab === 'plan' ? (
         <div className="review-body">
           <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />
+        </div>
+      ) : tab === 'task' ? (
+        <div className="review-body">
+          <section className="review-section">
+            <h4>任务清单</h4>
+            {todos.length === 0 && <div className="empty sm">还没有任务</div>}
+            {todos.map((t) => (
+              <div key={t.id} className={`task-item st-${t.status}`}>
+                <span className="task-check">{t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◴' : '○'}</span>
+                <span className="task-text">{t.content}</span>
+              </div>
+            ))}
+          </section>
+
+          <section className="review-section">
+            <h4>涉及文件 · {sources.length}</h4>
+            {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
+            {sources.map((path) => (
+              <div key={path} className="source-item">
+                <span className="source-icon" aria-hidden>📄</span>
+                <span className="source-path">{path}</span>
+              </div>
+            ))}
+          </section>
+
+          <section className="review-section">
+            <h4>工件 · {artifacts.length}</h4>
+            {artifacts.length === 0 && <div className="empty sm">还没有工件</div>}
+            {artifacts.map((a) => (
+              <div key={a.id} className="artifact-card" onClick={() => view(a)}>
+                <div className="kind">{a.kind}</div>
+                <div className="summary">{a.summary || a.target}</div>
+                <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+              </div>
+            ))}
+          </section>
         </div>
       ) : (
       <div className="review-body">

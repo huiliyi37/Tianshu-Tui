@@ -38,6 +38,7 @@ import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
+import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -121,6 +122,10 @@ export interface SessionRecord {
   contextWindow?: number
   /** Archived (closed) sessions are excluded from listSessions() and hidden in the desktop sidebar. */
   archived?: boolean
+  /** Git worktree branch name — set when the session was created with isolated worktree. */
+  worktreeBranch?: string
+  /** Worktree path on disk (for cleanup on archive/close). */
+  worktreePath?: string
 }
 
 /** PlusMenu — a selectable model across all configured providers. */
@@ -221,6 +226,8 @@ export interface CreateSessionInput {
   title?: string
   prompt?: string
   approvalMode?: ApprovalMode
+  /** Create an isolated git worktree for this session (parallel work without conflict). */
+  isolatedWorktree?: boolean
 }
 
 /** Persisted snapshot of a session: a record + its full event log. */
@@ -468,7 +475,21 @@ export class RuntimeSessionManager {
 
   createSession(input: CreateSessionInput = {}): SessionRecord {
     const id = this.idGenerator()
-    const cwd = input.cwd ?? this.defaultCwd
+    let cwd = input.cwd ?? this.defaultCwd
+    let worktreeBranch: string | undefined
+    let worktreePath: string | undefined
+
+    if (input.isolatedWorktree) {
+      try {
+        const wt = createWorktree(cwd, id)
+        worktreeBranch = wt.branch
+        worktreePath = wt.path
+        cwd = wt.path
+      } catch {
+        // Worktree creation failed — fall back to shared cwd silently.
+      }
+    }
+
     const ts = this.now()
     const session: InternalSession = {
       record: {
@@ -483,6 +504,8 @@ export class RuntimeSessionManager {
         approvalMode: input.approvalMode,
         model: this.defaultModelId,
         domain: 'auto',
+        worktreeBranch,
+        worktreePath,
       },
       agent: null,
       approvalMode: input.approvalMode,
@@ -990,6 +1013,10 @@ export class RuntimeSessionManager {
     }
     s.record.archived = true
     s.running = false
+    // Clean up isolated worktree on archive (best-effort).
+    if (s.record.worktreePath) {
+      try { removeWorktree(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch) } catch { /* non-fatal */ }
+    }
     this.touch(s)
     this.append(s, 'status', { status: 'archived' })
     this.persistRecord(s)
@@ -1009,6 +1036,16 @@ export class RuntimeSessionManager {
     this.touch(s)
     this.persistRecord(s)
     return true
+  }
+
+  /** List git worktrees for a given cwd (defaults to the manager's default cwd). */
+  getWorktrees(cwd?: string): WorktreeEntry[] {
+    return listWorktrees(cwd ?? this.defaultCwd)
+  }
+
+  /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
+  getDefaultCwd(): string {
+    return this.defaultCwd
   }
 
   /**

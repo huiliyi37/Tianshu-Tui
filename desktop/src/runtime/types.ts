@@ -37,6 +37,8 @@ export interface SessionRecord {
   contextWindow?: number
   /** Archived (closed) sessions are hidden from the sidebar. */
   archived?: boolean
+  /** Git worktree branch name — set when created with isolated worktree. */
+  worktreeBranch?: string
 }
 
 /** PlusMenu — a selectable model annotated with the session's current flag. */

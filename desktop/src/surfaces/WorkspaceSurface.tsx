@@ -107,6 +107,8 @@ export function WorkspaceSurface() {
         onApproval={handleApproval}
         onIntent={handleIntent}
         onFeedbackSent={() => sessions.refetch()}
+        todos={view.todos}
+        sources={view.sources}
       />
     </div>
   )

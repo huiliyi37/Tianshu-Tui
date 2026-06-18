@@ -7,6 +7,10 @@ import type {
   TodoStateItem,
 } from '../runtime/types'
 
+const FILE_TOOLS = new Set([
+  'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'read_file', 'create_file',
+])
+
 export type ConvoKind =
   | 'user'
   | 'assistant'
@@ -87,6 +91,8 @@ export interface EventViewState {
   lastTotalTokens: number
   /** Previous turn's total tokens. */
   prevTotalTokens: number
+  /** Deduplicated file paths touched by file-editing tools (for Task Sidebar sources). */
+  sources: string[]
 }
 
 export const initialEventState: EventViewState = {
@@ -106,6 +112,7 @@ export const initialEventState: EventViewState = {
   cacheCreationTokens: 0,
   lastTotalTokens: 0,
   prevTotalTokens: 0,
+  sources: [],
 }
 
 export type EventAction =
@@ -172,7 +179,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       }
       return next
     }
-    case 'tool_use':
+    case 'tool_use': {
       next.private_textOpen = false
       next.private_thinkingOpen = false
       next.blocks = [...next.blocks, {
@@ -181,7 +188,16 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         role: `tool · ${String(ev.data.name ?? '')}`,
         text: safeJson(ev.data.input),
       }]
+      const toolName = String(ev.data.name ?? '')
+      if (FILE_TOOLS.has(toolName)) {
+        const input = (ev.data.input ?? {}) as Record<string, unknown>
+        const filePath = String(input.path ?? input.file_path ?? input.target ?? '')
+        if (filePath && !next.sources.includes(filePath)) {
+          next.sources = [...next.sources, filePath]
+        }
+      }
       return next
+    }
     case 'tool_result':
       next.private_textOpen = false
       next.private_thinkingOpen = false

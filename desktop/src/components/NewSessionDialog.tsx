@@ -14,7 +14,7 @@ import { loadDefaultAutonomy } from '../lib/persist'
  */
 export function NewSessionDialog(props: {
   defaultCwd?: string | null
-  onCreate: (input: { cwd?: string; title?: string; prompt?: string; approvalMode?: ApprovalMode }) => void
+  onCreate: (input: { cwd?: string; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean }) => void
   onClose: () => void
 }) {
   const { defaultCwd, onCreate, onClose } = props
@@ -22,6 +22,7 @@ export function NewSessionDialog(props: {
   const [cwd, setCwd] = useState(defaultCwd ?? '')
   const [prompt, setPrompt] = useState('')
   const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
+  const [worktree, setWorktree] = useState(false)
 
   const browse = async () => {
     const picked = await pickFolder()
@@ -51,6 +52,11 @@ export function NewSessionDialog(props: {
         />
         <label className="meta">自治档位</label>
         <AutonomyControl value={level} onChange={setLevel} />
+        <label className="field-check">
+          <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
+          <span>隔离 Worktree</span>
+          <span className="meta" style={{ marginLeft: 8 }}>独立 Git 分支，并行工作互不冲突</span>
+        </label>
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>取消</button>
           <button
@@ -60,6 +66,7 @@ export function NewSessionDialog(props: {
               cwd: cwd.trim() || undefined,
               prompt: prompt.trim() || undefined,
               approvalMode: levelToMode(level),
+              isolatedWorktree: worktree || undefined,
             })}
           >
             创建

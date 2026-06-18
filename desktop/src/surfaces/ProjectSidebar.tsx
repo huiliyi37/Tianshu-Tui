@@ -112,6 +112,7 @@ export function ProjectSidebar() {
               <span className={`status-dot status-${s.status}`} />
               {s.title ?? s.id.slice(0, 8)}
               {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
+              {s.worktreeBranch && <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>⑂ {s.worktreeBranch.replace(/^rivet-hands-/, '').slice(0, 8)}</span>}
             </div>
             <div className="meta">
               {STATUS_GLYPH[s.status] ?? '·'} {s.status}
