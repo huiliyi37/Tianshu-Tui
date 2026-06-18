@@ -26,23 +26,25 @@ describe('project-memory-loader', () => {
     }
   })
 
-  it('injects only Tier 1 high-confidence decisions, rules, and constraints', () => {
+  it('injects only Tier 1 high-confidence decisions, rules, constraints, and failure patterns', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-memory-loader-'))
     try {
       writeMemory(dir, [
         { id: 'decision-1', kind: 'decision', text: 'Use guided retrieval for memory.', confidence: 0.95, createdAt: 2, source: 'test' },
         { id: 'rule-1', kind: 'project_rule', text: 'Run typecheck before delivery.', confidence: 1, createdAt: 3, source: 'test' },
         { id: 'constraint-1', kind: 'user_constraint', text: 'Never expose secrets.', confidence: 0.9, createdAt: 4, source: 'test' },
+        { id: 'fail-1', kind: 'failure_pattern', text: 'hash_edit regression after anchor replacement.', confidence: 0.95, createdAt: 7, source: 'test' },
         { id: 'weak-decision', kind: 'decision', text: 'Low confidence decision.', confidence: 0.89, createdAt: 5, source: 'test' },
         { id: 'file-1', kind: 'file_observation', text: 'Local implementation detail.', confidence: 1, createdAt: 6, source: 'test' },
       ])
 
       const block = loadProjectMemory(dir)
 
-      assert.equal(block.entryCount, 3)
+      assert.equal(block.entryCount, 4)
       assert.match(block.content, /Use guided retrieval/)
       assert.match(block.content, /Run typecheck/)
       assert.match(block.content, /Never expose secrets/)
+      assert.match(block.content, /hash_edit regression/)
       assert.doesNotMatch(block.content, /Low confidence/)
       assert.doesNotMatch(block.content, /Local implementation detail/)
     } finally {

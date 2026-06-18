@@ -4,7 +4,7 @@ import { join } from 'node:path'
 const MAX_RENDER_CHARS = 2_000 // ~500 tokens for Tier 1 injection (conservative)
 
 /** Kinds eligible for Tier 1 prompt injection (high-signal, low-noise). */
-const TIER1_KINDS = new Set(['decision', 'project_rule', 'user_constraint'])
+const TIER1_KINDS = new Set(['decision', 'project_rule', 'user_constraint', 'failure_pattern'])
 /** Minimum confidence for Tier 1 injection. */
 const TIER1_MIN_CONFIDENCE = 0.9
 
