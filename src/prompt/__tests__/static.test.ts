@@ -69,6 +69,16 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('</workflow>'))
   })
 
+  it('includes external-source-verification rule with concrete methods', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    assert.ok(prompt.includes('external-source-verification'), '应有独立的外部方案验证规则')
+    assert.ok(prompt.includes('RED→GREEN'), '应含复现验证方法')
+    assert.ok(prompt.includes('恒等式自检'), '应含数据自检方法')
+    assert.ok(prompt.includes('格式完整不是可信度信号'), '应含核心原则')
+    // workflow 应有触发指针但不重复核验方法细节
+    assert.ok(prompt.includes('external-source-verification 规则'), 'workflow 应指向规则名')
+  })
+
   it('wraps security in <security> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<security>'))
