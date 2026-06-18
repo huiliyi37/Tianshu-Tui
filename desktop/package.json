@@ -11,7 +11,8 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test-force-exit --test 'src/**/__tests__/*.test.ts'"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
