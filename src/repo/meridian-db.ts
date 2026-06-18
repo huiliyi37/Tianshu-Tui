@@ -1,6 +1,8 @@
 import { join } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
+
+
+import { resolveBetterSqlite3 } from './native-resolver.js'
 import type { ParseResult, MeridianSymbol, MeridianEdge, EdgeConfidence } from './meridian-types.js'
 import type { ModuleSummaryEntry, CliEntry } from './meridian-types.js'
 import type { PhysarumEdgeState, PhysarumPredictionObservation } from './physarum-types.js'
@@ -154,8 +156,6 @@ export class MeridianDb {
     if (!this.conn) {
       if (!existsSync(this.stateDir)) mkdirSync(this.stateDir, { recursive: true })
       try {
-        const req = createRequire(import.meta.url)
-        const { resolveBetterSqlite3 } = req('./native-resolver.js')
         const Database = resolveBetterSqlite3(import.meta.url)
         if (!Database) throw new Error('better-sqlite3 not installed')
         const dbPath = join(this.stateDir, 'meridian.db')
