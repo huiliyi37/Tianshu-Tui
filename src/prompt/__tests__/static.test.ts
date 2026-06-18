@@ -79,6 +79,14 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('external-source-verification 规则'), 'workflow 应指向规则名')
   })
 
+  it('includes self-verification rule — 复现即证 standing across all domains', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // 瑶光的"复现即证"必须常驻在 base 护栏,而非仅在瑶光域或按需 advisory。
+    assert.ok(prompt.includes('self-verification'), '应有独立的自我验证规则')
+    assert.ok(prompt.includes('绿非证明'), '应含"绿非证明"核心')
+    assert.ok(prompt.includes('你自己刚下的结论'), '应把验证标准转向自身结论(反身之道)')
+  })
+
   it('wraps security in <security> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<security>'))
