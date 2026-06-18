@@ -34,7 +34,7 @@ export const PLAN_CLOSE_TOOL: Tool = {
 ### Usage
 - Defaults to preview mode and does not write files
 - Set apply=true to update the plan file after approval
-- Only supports Markdown files under docs/superpowers/plans/
+- Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/
 - Marks selected Task blocks complete and upserts execution closure text`,
     input_schema: {
       type: 'object',
@@ -73,8 +73,10 @@ export const PLAN_CLOSE_TOOL: Tool = {
     }
 
     const relativePath = relative(params.cwd, filePath).replaceAll('\\', '/')
-    if (!relativePath.startsWith('docs/superpowers/plans/') || !relativePath.endsWith('.md')) {
-      return { content: `Error: plan_close only supports Markdown files under docs/superpowers/plans/: ${relativePath}`, isError: true }
+    const inSuperpowersPlans = relativePath.startsWith('docs/superpowers/plans/') && relativePath.endsWith('.md')
+    const inRivetPlans = relativePath.startsWith('.rivet/plans/') && relativePath.endsWith('.md')
+    if (!inSuperpowersPlans && !inRivetPlans) {
+      return { content: `Error: plan_close only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/: ${relativePath}`, isError: true }
     }
     try {
       await stat(filePath)
