@@ -208,11 +208,13 @@ CognitiveCapsuleRouter **不是替代** convergence-detector 或 courage-hook，
 - `src/agent/hooks/cognitive-capsule-router.ts` — 路由逻辑 + 规则表
 - 集成到 `createDefaultRuntimeHooks` — 作为新的 preTurn hook
 - 测试：`src/agent/__tests__/cognitive-capsule-router.test.ts`
+- 废弃 `vigorLowEntry()` / `stalenessGateEntry()`，从 `turn-step-producer.ts` 移除手动调用
 
 **范围：**
 - 只做维度读取 → 星域选择 → advisory bus 投递
-- 提醒内容先用硬编码的原则池（每个星域 3 条）
+- 提醒内容先用硬编码的原则池（每个星域 3-5 条）
 - 规则表硬编码在源文件中（后续可迁移到配置）
+- 修复设计文档中 P3 死规则问题：P3 在 P1 之前求值
 
 **不碰：**
 - convergence-detector
@@ -220,16 +222,24 @@ CognitiveCapsuleRouter **不是替代** convergence-detector 或 courage-hook，
 - seed-capsule-store 的加载逻辑
 - frozen volatile base 的渲染
 
-### Phase 2：原则池从胶囊自动提取
+**状态：✅ 已落地** — `890fa698` (2026-06-18)，23 测试通过。
+
+### Phase 2：原则池从胶囊自动提取 + vigor 分流 + 遥测
 
 **交付物：**
-- `seed-capsule-store.ts` 新增 `extractPrinciples(star)` 函数
-- 从胶囊 XML 内容中按行提取原则（以"不""禁止""必须""当"等引导词识别）
-- 回退到硬编码默认池（提取失败时）
+- 四份胶囊文档加入 `<principle key="..." action="...">` 标签（共 16 条原则行）
+- `seed-capsule-store.ts` 新增 `extractPrinciplesFromRaw()` / `extractPrinciples(star)` — 解析 `<principle>` 标签自动提取原则池
+- CCR 接受 `cwd` 参数，首次触发时按星域加载动态原则池并缓存，无标签时 fallback 到硬编码
+- P3 规则 tonic/phasic 分流：`tonic < 0.3` → Q3 天权换方向，`phasic < -0.3` → X3 天璇反证 scout（跨星域选原则）
+- `onTrigger` 遥测回调，记录 `{ rule, star, turn, principleKey, dimValues, dynamicPool }`
+- `RuntimeHookDeps.onCcrTrigger` 可选接入
 
 **效果：**
-- 往 `docs/seed-capsule-*.md` 加新星域胶囊时，自动获得提醒能力
+- 往 `docs/seed-capsule-*.md` 加新星域胶囊 + `<principle>` 标签时，自动获得 CCR 提醒能力
 - 不再需要手动维护原则池
+- 遥测数据为后续阈值调优和有效性分析提供基础
+
+**状态：✅ 已落地** — `bfec5aaf` (2026-06-18)，30 测试通过。
 
 ### Phase 3（远景）：LLM 自诊断 + 生成式提醒
 
