@@ -314,8 +314,16 @@ export class OpenAIClient implements StreamClient {
       // Inject previous reasoning into messages on retry so the model can
       // resume from where it left off instead of restarting from scratch.
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
+      //
+      // GLM exception: GLM's preserved thinking (clear_thinking: false) has its
+      // own incremental protocol — it expects complete prior-turn reasoning, not
+      // partial mid-stream fragments. Injecting partial reasoning_content breaks
+      // the increment and causes GLM to re-reason from scratch (the exact
+      // "推理到一半中断然后从头推一遍" symptom). GLM retains reasoning server-side,
+      // so skipping client-side reinjection is safe.
       let effectiveBody = body
-      if (isThinking && reasoningRef.content) {
+      const isGlm = this.config.providerName === 'glm'
+      if (isThinking && reasoningRef.content && !isGlm) {
         const msgs = [...(body.messages as unknown[]), {
           role: 'assistant',
           content: '',
