@@ -61,37 +61,52 @@ describe('SessionContext.appendSystemReminder', () => {
     assert.equal(mutations[0]!.type, 'replace')
   })
 
-  it('finds last user message even when tool/assistant messages follow', () => {
+  // Regression guard for 5fedd9b6: SR injection during a turn (tool/assistant
+  // messages already follow the last user message) must NOT rewrite that
+  // mid-array user message. DeepSeek's exact-prefix cache keys on the token
+  // sequence, so rewriting any earlier message invalidates the prefix from that
+  // point onward — collapsing every cached tool output after it. SR must be
+  // append-only at the tail.
+  it('does NOT rewrite a mid-array user message — appends SR as a new tail entry', () => {
     const session = new SessionContext()
     session.addUserMessage('task')
     session.addAssistantBlocks([{ type: 'text', text: 'doing' }])
-    session.addToolResults([{ type: 'tool_result', tool_use_id: 'x', content: 'result' }])
+    session.addToolResults([{ type: 'tool_result', tool_use_id: 'x', content: 'BIG TOOL OUTPUT'.repeat(100) }])
     session.addAssistantBlocks([{ type: 'text', text: 'done' }])
 
-    const lenBefore = session.getMessages().length
+    const snapshot = session.getMessages().map(m => JSON.stringify(m))
+
     session.appendSystemReminder('gate hint')
-    const lenAfter = session.getMessages().length
 
-    assert.equal(lenAfter, lenBefore, 'no new message added')
-
-    // SR should be appended to the user message, which is NOT the last message
-    const msgs = session.getMessages()
-    const userMsg = msgs.find(m => m.role === 'user' && typeof m.content === 'string' && m.content.includes('task'))!
-    assert.ok((userMsg.content as string).includes('gate hint'), 'SR appended to the user message')
+    const after = session.getMessages()
+    // Every pre-existing message must be byte-identical (prefix untouched).
+    for (let i = 0; i < snapshot.length; i++) {
+      assert.equal(JSON.stringify(after[i]), snapshot[i],
+        `message at index ${i} must not be rewritten (prefix cache stability)`)
+    }
+    // SR lands as a NEW tail entry, not merged into the mid-array user message.
+    assert.equal(after.length, snapshot.length + 1, 'SR appended as a new tail message')
+    const last = after[after.length - 1]!
+    assert.equal(last.role, 'user')
+    assert.ok((last.content as string).includes('gate hint'), 'SR text in the new tail message')
+    assert.ok((last.content as string).includes('<system-reminder>'), 'SR carries the marker')
   })
 
-  it('handles multimodal (non-string) user messages by skipping them', () => {
+  it('does not rewrite a mid-array string user message when the tail is multimodal', () => {
     const session = new SessionContext()
     session.addUserMessage('text msg')
-    // Simulate a multimodal user message (array content)
+    // Simulate a multimodal user message (array content) as the tail.
     session.getMessages().push({ role: 'user', content: [{ type: 'text', text: 'image msg' }] })
 
-    // Should skip the array-content message and append to the string one
+    const before = session.getMessages().map(m => JSON.stringify(m))
+    // Tail is non-string user → SR must be a new tail entry, leaving the
+    // mid-array string user message untouched (prefix stability).
     session.appendSystemReminder('sr text')
 
     const msgs = session.getMessages()
-    assert.equal(msgs.length, 2, 'no new message')
-    const first = msgs[0]!
-    assert.ok((first.content as string).includes('sr text'), 'appended to the string user message')
+    assert.equal(JSON.stringify(msgs[0]), before[0], 'mid-array string user must not be rewritten')
+    assert.equal(JSON.stringify(msgs[1]), before[1], 'multimodal user must not be rewritten')
+    assert.equal(msgs.length, 3, 'SR appended as a new tail entry')
+    assert.ok((msgs[2]!.content as string).includes('sr text'), 'SR in the new tail message')
   })
 })

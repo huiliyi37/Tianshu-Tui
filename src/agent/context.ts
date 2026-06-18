@@ -122,23 +122,36 @@ export class SessionContext {
   }
 
   /**
-   * Append system-reminder content to the last user message instead of
-   * creating a new message entry. This keeps the message array length stable,
-   * preserving DeepSeek exact-prefix cache when convergence/hook injections
-   * occur mid-task.
+   * Inject a system-reminder as an APPEND-ONLY tail entry — never rewrite a
+   * mid-array message.
+   *
+   * DeepSeek's exact-prefix cache keys on the token sequence, not on message
+   * count. Rewriting any earlier message invalidates the prefix from that point
+   * onward, collapsing every cached tool output after it. The previous version
+   * scanned backwards for "the last user message" and edited it in place; during
+   * a turn that message sits mid-array (assistant + tool outputs already follow
+   * it), so the edit detonated the cache for the rest of the turn — the opposite
+   * of its stated goal (regression 5fedd9b6).
+   *
+   * We only ever touch the tail:
+   *   - tail is a string user message → merge into it (still append-only: the
+   *     tail is the newest position, nothing is cached after it, and merging
+   *     avoids producing two consecutive user messages);
+   *   - otherwise (tail is assistant/tool, or non-string) → push a new SR user
+   *     message at the end. The SR marker keeps PromptEngine from treating it as
+   *     a real user boundary.
    */
   appendSystemReminder(text: string): void {
     const wrapped = wrapSystemReminder(text)
     const msgs = this.state.oaiMessages
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i]!
-      if (m.role === 'user' && typeof m.content === 'string') {
-        const oldTokens = estimateOaiMessageTokens(m)
-        msgs[i] = { ...m, content: m.content + '\n' + sanitizeForJsonTransport(wrapped) }
-        this.state.estimatedTokens += estimateOaiMessageTokens(msgs[i]!) - oldTokens
-        this.onMutation?.({ type: 'replace', messages: msgs.slice() })
-        return
-      }
+    const last = msgs[msgs.length - 1]
+    if (last && last.role === 'user' && typeof last.content === 'string') {
+      const oldTokens = estimateOaiMessageTokens(last)
+      const merged = { ...last, content: last.content + '\n' + sanitizeForJsonTransport(wrapped) }
+      msgs[msgs.length - 1] = merged
+      this.state.estimatedTokens += estimateOaiMessageTokens(merged) - oldTokens
+      this.onMutation?.({ type: 'replace', messages: msgs.slice() })
+      return
     }
     this.addUserMessage(wrapped)
   }
