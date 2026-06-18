@@ -322,6 +322,7 @@ export class TurnStepProducer {
       }
       if (this.self.persist) {
         const prevHandoff = SessionPersist.loadPrevHandoff(
+          this.self.cwd,
           this.self.config.sessionId,
           this.self.sessionDomain?.id,
         )

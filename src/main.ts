@@ -35,7 +35,6 @@ import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
 import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { homedir } from 'os'
 import { execSync } from 'child_process'
 
 // ── CLI args ───────────────────────────────────────────────────
@@ -319,7 +318,7 @@ async function main() {
     },
     // Chronicle
     chronicleEntries: () => {
-      const sessionsDir = join(homedir(), '.rivet', 'sessions')
+      const sessionsDir = join(process.cwd(), '.rivet', 'sessions')
       if (!existsSync(sessionsDir)) return { entries: [] }
       try {
         const files = readdirSync(sessionsDir)
@@ -402,7 +401,7 @@ async function main() {
   }, /* chronicleExec: */ (id: string) => {
     // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
     // 用 SessionPersist.listSessions() 求真实序号（与 /resume 同源），避免 readdir 顺序错位。
-    const n = SessionPersist.listSessions().indexOf(id)
+    const n = SessionPersist.listSessions(process.cwd()).indexOf(id)
     if (n >= 0) {
       tuiApp.setInput(`/resume ${n + 1}`)
     } else {

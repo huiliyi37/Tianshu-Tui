@@ -653,7 +653,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
 
     case '/sessions': {
-      const sessions = SessionPersist.listSessions()
+      const sessions = SessionPersist.listSessions(ctx.agent.cwd)
       if (sessions.length === 0) {
         pushStatic(createLogEntry({ type: 'system', content: 'No saved sessions.' }))
       } else {
@@ -668,7 +668,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     }
 
     case '/resume': {
-      const sessions = SessionPersist.listSessions()
+      const sessions = SessionPersist.listSessions(ctx.agent.cwd)
       const arg = parts[1]
       if (!arg || !/^\d+$/.test(arg)) {
         pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
@@ -682,7 +682,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
       const targetId = sessions[idx]!
-      const p = new SessionPersist(targetId)
+      const p = new SessionPersist(targetId, ctx.agent.cwd)
       const rawMsgs = p.loadOai()
       const preflight = runResumePreflightOai(rawMsgs)
       ctx.session.replaceMessages(preflight.messages)

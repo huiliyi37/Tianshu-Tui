@@ -173,7 +173,7 @@ interface SessionStores {
 }
 
 function buildSessionStores(ctx: ServeContext, cwd: string, sessionId: string): SessionStores {
-  const persist = new SessionPersist(sessionId)
+  const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)

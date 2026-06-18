@@ -267,7 +267,7 @@ export function getOrCreateSessionId(): string {
     currentCwd: cwd,
     load: (id) => {
       try {
-        const persist = new SessionPersist(id)
+        const persist = new SessionPersist(id, cwd)
         const meta = persist.loadMetadata()
         return {
           hasContent: persist.loadOai().length > 0,
@@ -292,9 +292,8 @@ export function getOrCreateSessionId(): string {
 /**
  * Clean up stale worker session directories under <cwd>/.rivet/sessions/.
  * Worker sessions (worker-*) create per-session dirs here (pheromones.json,
- * sensorium.jsonl) that evictOldSessions doesn't see (it only scans ~/.rivet).
- * Removes worker dirs older than STALE_THRESHOLD_MS to avoid deleting dirs
- * that might still be in use by a concurrent worker.
+ * sensorium.jsonl). Removes worker dirs older than STALE_THRESHOLD_MS to
+ * avoid deleting dirs that might still be in use by a concurrent worker.
  */
 export const WORKER_DIR_STALE_THRESHOLD_MS = 3_600_000 // 1 hour
 
@@ -839,7 +838,7 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
       ctx.persist.compactOai(ctx.session.getMessages())
       if (ctx.fileHistory) {
         persistFileHistory(
-          join(homedir(), '.rivet', 'sessions', ctx.sessionId, 'file-history.json'),
+          join(ctx.cwd, '.rivet', 'sessions', ctx.sessionId, 'file-history.json'),
           ctx.fileHistory.getAllSnapshots(),
         )
       }
@@ -988,7 +987,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   const { registry: sessionRegistry, sessionId, heartbeatInterval } = await createSessionInfrastructure()
 
   // 5. Session persist + claim store
-  const persist = new SessionPersist(sessionId)
+  const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore, cwd)
   for (const rule of loadProjectRules(cwd)) {
@@ -1015,11 +1014,11 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   }
 
   // Evict old sessions
-  evictOldSessions(sessionId)
+  evictOldSessions(sessionId, cwd)
 
   // Clean up stale worker session directories under cwd/.rivet/sessions/.
   // Worker sessions create <cwd>/.rivet/sessions/worker-xxx/ (pheromones,
-  // sensorium) that evictOldSessions doesn't see (it only scans ~/.rivet).
+  // sensorium).
   cleanupStaleWorkerSessionDirs(cwd)
 
   // Clean up orphaned files

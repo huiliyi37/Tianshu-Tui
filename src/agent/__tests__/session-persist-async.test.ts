@@ -5,7 +5,7 @@ import { SessionPersist } from '../session-persist.js'
 describe('SessionPersist load round-trip (S10)', () => {
   it('loadOai returns messages previously written via appendOaiWithChecksum', async () => {
     const sessionId = `roundtrip-test-${Date.now()}`
-    const p = new SessionPersist(sessionId)
+    const p = new SessionPersist(sessionId, process.cwd())
     await p.appendOaiWithChecksum({ role: 'user', content: 'hello' } as any)
     const loaded = p.loadOai()
     assert.equal(loaded.length, 1)
@@ -14,7 +14,7 @@ describe('SessionPersist load round-trip (S10)', () => {
   })
 
   it('loadOai returns [] for a session with no prior messages', () => {
-    const p = new SessionPersist(`empty-test-${Date.now()}`)
+    const p = new SessionPersist(`empty-test-${Date.now()}`, process.cwd())
     assert.deepEqual(p.loadOai(), [])
   })
 })

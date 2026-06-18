@@ -19,7 +19,7 @@ describe('handoff persist', () => {
   })
 
   it('writeHandoff writes handoff markdown file', () => {
-    const persist = new SessionPersist('current-session')
+    const persist = new SessionPersist('current-session', tempDir)
     persist.writeHandoff('hello handoff')
 
     const handoffPath = join(tempDir, 'current-session.handoff.md')
@@ -60,7 +60,7 @@ describe('handoff persist', () => {
     }))
     writeFileSync(join(tempDir, 'prev-diff-domain.handoff.md'), 'other domain handoff')
 
-    const result = SessionPersist.loadPrevHandoff('current-session', 'tianliang')
+    const result = SessionPersist.loadPrevHandoff(tempDir, 'current-session', 'tianliang')
     assert.equal(result, 'same domain handoff')
   })
 
@@ -91,7 +91,7 @@ describe('handoff persist', () => {
     }))
     writeFileSync(join(tempDir, 'prev-older.handoff.md'), 'older handoff')
 
-    const result = SessionPersist.loadPrevHandoff('current-session')
+    const result = SessionPersist.loadPrevHandoff(tempDir, 'current-session')
     assert.equal(result, 'newer handoff')
   })
 })

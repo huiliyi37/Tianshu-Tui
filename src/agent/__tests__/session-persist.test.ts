@@ -20,7 +20,7 @@ describe('SessionPersist', () => {
   })
 
   it('creates a claim store for the session', () => {
-    const persist = new SessionPersist('test-session-001')
+    const persist = new SessionPersist('test-session-001', tempDir)
     const store = persist.createClaimStore()
     assert.ok(store)
     assert.equal(typeof store.propose, 'function')
@@ -28,25 +28,25 @@ describe('SessionPersist', () => {
   })
 
   it('buildMemoryBlock returns string for fresh session', () => {
-    const persist = new SessionPersist('test-session-002')
+    const persist = new SessionPersist('test-session-002', tempDir)
     const block = persist.buildMemoryBlock()
     assert.equal(typeof block, 'string')
   })
 
   it('getSessionMemoryState returns undefined for fresh session', () => {
-    const persist = new SessionPersist('test-session-003')
+    const persist = new SessionPersist('test-session-003', tempDir)
     const state = persist.getSessionMemoryState()
     assert.equal(state, undefined)
   })
 
   it('injectDurableClaims does not throw on fresh store', () => {
-    const persist = new SessionPersist('test-session-004')
+    const persist = new SessionPersist('test-session-004', tempDir)
     const store = persist.createClaimStore()
     assert.doesNotThrow(() => persist.injectDurableClaims(store))
   })
 
   it('getBackupDir returns a path containing the session id', () => {
-    const persist = new SessionPersist('test-session-005')
+    const persist = new SessionPersist('test-session-005', tempDir)
     const dir = persist.getBackupDir()
     assert.equal(typeof dir, 'string')
     assert.ok(dir.includes('test-session-005'))
@@ -74,7 +74,7 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('initMetadata creates metadata file with defaults', () => {
-    const persist = new SessionPersist('meta-init-001')
+    const persist = new SessionPersist('meta-init-001', tempDir)
     persist.initMetadata({ model: 'deepseek-v4' })
 
     const meta = persist.loadMetadata()
@@ -91,7 +91,7 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('initMetadata is idempotent — does not overwrite existing', () => {
-    const persist = new SessionPersist('meta-idempotent')
+    const persist = new SessionPersist('meta-idempotent', tempDir)
     persist.initMetadata({ model: 'model-v1' })
     persist.updateMetadata({ turnCount: 5 })
     // Second init should be a no-op
@@ -103,7 +103,7 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('updateMetadata merges partial fields', () => {
-    const persist = new SessionPersist('meta-patch')
+    const persist = new SessionPersist('meta-patch', tempDir)
     persist.initMetadata({ model: 'deepseek-v4' })
     persist.updateMetadata({ turnCount: 3, toolCallCount: 10 })
     persist.updateMetadata({ turnCount: 4, title: 'Fix the bug' })
@@ -116,7 +116,7 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('updateMetadata merges tokenUsage without losing existing fields', () => {
-    const persist = new SessionPersist('meta-tokens')
+    const persist = new SessionPersist('meta-tokens', tempDir)
     persist.initMetadata()
     persist.updateMetadata({ tokenUsage: { prompt: 100, completion: 50, total: 150 } })
     persist.updateMetadata({ tokenUsage: { prompt: 200, completion: 60, total: 260 } })
@@ -128,7 +128,7 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('updateMetadata preserves createdAt', () => {
-    const persist = new SessionPersist('meta-created')
+    const persist = new SessionPersist('meta-created', tempDir)
     persist.initMetadata()
     const originalCreatedAt = persist.loadMetadata()!.createdAt
 
@@ -146,7 +146,7 @@ describe('SessionPersist — metadata (P1)', () => {
     let clock = 1_000
     const now = mock.method(Date, 'now', () => clock)
     try {
-      const persist = new SessionPersist('meta-updatedat')
+      const persist = new SessionPersist('meta-updatedat', tempDir)
       persist.initMetadata()
       const created = persist.loadMetadata()!
       assert.equal(created.createdAt, 1_000)
@@ -164,23 +164,23 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 
   it('loadMetadata returns undefined when no metadata file exists', () => {
-    const persist = new SessionPersist('meta-noexist')
+    const persist = new SessionPersist('meta-noexist', tempDir)
     assert.equal(persist.loadMetadata(), undefined)
   })
 
   it('listSessionsWithMetadata returns sorted results', async () => {
     // Create sessions with .jsonl files (required by listSessions) + metadata
-    const p1 = new SessionPersist('meta-list-1')
+    const p1 = new SessionPersist('meta-list-1', tempDir)
     await p1.appendOaiWithChecksum({ role: 'user', content: 'hello' })
     p1.initMetadata()
     p1.updateMetadata({ title: 'older session' })
 
-    const p2 = new SessionPersist('meta-list-2')
+    const p2 = new SessionPersist('meta-list-2', tempDir)
     await p2.appendOaiWithChecksum({ role: 'user', content: 'hello2' })
     p2.initMetadata()
     p2.updateMetadata({ title: 'newer session', turnCount: 1 })
 
-    const sessions = SessionPersist.listSessionsWithMetadata()
+    const sessions = SessionPersist.listSessionsWithMetadata(tempDir)
     const ourSessions = sessions.filter(s => s.id.startsWith('meta-list-'))
     assert.equal(ourSessions.length, 2)
     // Most recent first
@@ -202,7 +202,7 @@ describe('SessionPersist — persisted messages', () => {
   })
 
   it('persists truncated oversized messages as loadable JSON', async () => {
-    const persist = new SessionPersist('test-session-large-message')
+    const persist = new SessionPersist('test-session-large-message', tempDir)
     await persist.appendWithChecksum({ role: 'user', content: 'x'.repeat(MAX_SESSION_MESSAGE_JSON_CHARS * 2) } as any)
 
     const messages = persist.load()
@@ -211,7 +211,7 @@ describe('SessionPersist — persisted messages', () => {
   })
 
   it('appends and loads OpenAI-native messages with checksum', async () => {
-    const persist = new SessionPersist('test-session-oai')
+    const persist = new SessionPersist('test-session-oai', tempDir)
     const messages: OaiMessage[] = [
       { role: 'user', content: 'Read a file' },
       {
@@ -237,7 +237,7 @@ describe('SessionPersist — persisted messages', () => {
   })
 
   it('migrates legacy session messages to OAI on loadOai', async () => {
-    const persist = new SessionPersist('test-session-oai-legacy')
+    const persist = new SessionPersist('test-session-oai-legacy', tempDir)
     await persist.appendWithChecksum({ role: 'user', content: 'Start' } as any)
     await persist.appendWithChecksum({
       role: 'assistant',
@@ -347,7 +347,7 @@ describe('checksum integration', () => {
   })
 
   it('appends and loads messages with checksum', async () => {
-    const persist = new SessionPersist('test-checksum')
+    const persist = new SessionPersist('test-checksum', tempDir)
     const message = {
       role: 'user' as const,
       content: [{ type: 'text' as const, text: 'hello' }],
@@ -361,7 +361,7 @@ describe('checksum integration', () => {
   })
 
   it('loads legacy format without checksum', async () => {
-    const persist = new SessionPersist('test-legacy')
+    const persist = new SessionPersist('test-legacy', tempDir)
     const message = {
       role: 'user' as const,
       content: [{ type: 'text' as const, text: 'hello' }],
@@ -378,7 +378,7 @@ describe('checksum integration', () => {
   })
 
   it('skips invalid checksum lines', async () => {
-    const persist = new SessionPersist('test-invalid-checksum')
+    const persist = new SessionPersist('test-invalid-checksum', tempDir)
     const message = {
       role: 'user' as const,
       content: [{ type: 'text' as const, text: 'hello' }],
@@ -398,7 +398,7 @@ describe('checksum integration', () => {
   })
 
   it('appendModelSwitch writes a checksummed event that is skipped on replay', async () => {
-    const persist = new SessionPersist('test-model-switch')
+    const persist = new SessionPersist('test-model-switch', tempDir)
     // 真实消息 + 中间夹一条切换事件
     await persist.appendOaiWithChecksum({ role: 'user', content: 'before switch' })
     persist.appendModelSwitch({ from: 'claude-opus-4-8', to: 'deepseek-v4-pro', provider: 'deepseek' })
@@ -418,4 +418,3 @@ describe('checksum integration', () => {
     assert.match(raw, /"from":"claude-opus-4-8"/)
   })
 })
-

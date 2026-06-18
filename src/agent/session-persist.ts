@@ -2,7 +2,6 @@ import { appendFile } from 'fs/promises'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join, resolve } from 'path'
-import { homedir } from 'os'
 import type { ContentBlock, Message } from '../api/types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
 import { stableStringify } from '../api/stable-json.js'
@@ -59,8 +58,8 @@ import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
 import { appendChecksum, verifyAndExtract, verifyLines } from './checksum.js'
 
-function getSessionDir(): string {
-  return process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions')
+function getSessionDir(cwd: string): string {
+  return process.env.RIVET_SESSION_DIR ?? join(cwd, '.rivet', 'sessions')
 }
 
 function ensureDir(dir: string): void {
@@ -139,22 +138,24 @@ export class SessionPersist {
   private filePath: string
   private metadataPath: string
   private sessionId: string
+  private cwd: string
 
   /** Public getter for testing file-path-dependent integrations. */
   getFilePath(): string {
     return this.filePath
   }
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, cwd: string) {
     assertValidSessionId(sessionId)
-    ensureDir(getSessionDir())
+    this.cwd = cwd
+    ensureDir(getSessionDir(cwd))
     this.sessionId = sessionId
-    this.filePath = join(getSessionDir(), `${sessionId}.jsonl`)
-    this.metadataPath = join(getSessionDir(), `${sessionId}.meta.json`)
+    this.filePath = join(getSessionDir(cwd), `${sessionId}.jsonl`)
+    this.metadataPath = join(getSessionDir(cwd), `${sessionId}.meta.json`)
   }
 
   getBackupDir(): string {
-    const dir = join(getSessionDir(), this.sessionId, 'backups')
+    const dir = join(getSessionDir(this.cwd), this.sessionId, 'backups')
     ensureDir(dir)
     return dir
   }
@@ -390,11 +391,11 @@ export class SessionPersist {
   }
 
   loadMemory(): SessionMemoryState {
-    return loadSessionMemory(getSessionDir(), this.sessionId)
+    return loadSessionMemory(getSessionDir(this.cwd), this.sessionId)
   }
 
   appendMemory(input: { text: string; source: SessionMemoryEntry['source']; createdAt: number }): SessionMemoryState {
-    return appendSessionMemory(getSessionDir(), this.sessionId, input)
+    return appendSessionMemory(getSessionDir(this.cwd), this.sessionId, input)
   }
 
   buildMemoryBlock(): string {
@@ -406,7 +407,7 @@ export class SessionPersist {
     if (memory.entries.length === 0) return undefined
     const block = buildSessionMemoryBlock(memory)
     return {
-      path: join(getSessionDir(), `${this.sessionId}.memory.json`),
+      path: join(getSessionDir(this.cwd), `${this.sessionId}.memory.json`),
       lastSummarizedRoundIndex: -1,
       lastUpdatedAt: memory.entries[memory.entries.length - 1]?.createdAt ?? Date.now(),
       digest: block.length > 200 ? block.slice(0, 197) + '...' : block,
@@ -417,18 +418,18 @@ export class SessionPersist {
 
   /** Create a claim store for the current session. */
   createClaimStore(): ContextClaimStore {
-    return new ContextClaimStore(getSessionDir(), this.sessionId)
+    return new ContextClaimStore(getSessionDir(this.cwd), this.sessionId)
   }
 
   /** Load durable claims from the most recent previous session. */
   loadPreviousDurableClaims(): ContextClaim[] {
-    const sessions = SessionPersist.listSessions()
+    const sessions = SessionPersist.listSessions(this.cwd)
     const previous = sessions
       .filter(s => s !== this.sessionId)
       .sort()
       .pop()
     if (!previous) return []
-    return ContextClaimStore.loadDurableClaims(getSessionDir(), previous)
+    return ContextClaimStore.loadDurableClaims(getSessionDir(this.cwd), previous)
   }
 
   /** Inject durable claims from previous session into a claim store with confidence decay.
@@ -473,7 +474,7 @@ export class SessionPersist {
 
   /** Write structured handoff text for this session. */
   writeHandoff(text: string): void {
-    const handoffPath = join(getSessionDir(), `${this.sessionId}.handoff.md`)
+    const handoffPath = join(getSessionDir(this.cwd), `${this.sessionId}.handoff.md`)
     writeFileAtomicSync(handoffPath, text)
   }
 
@@ -482,8 +483,8 @@ export class SessionPersist {
    * Routes by domain if both sessions have a domain tag; otherwise falls back
    * to the most recently updated session. Returns null if none found.
    */
-  static loadPrevHandoff(currentSessionId: string, currentDomain?: string): string | null {
-    const sessions = SessionPersist.listSessionsWithMetadata()
+  static loadPrevHandoff(cwd: string, currentSessionId: string, currentDomain?: string): string | null {
+    const sessions = SessionPersist.listSessionsWithMetadata(cwd)
       .filter(s => s.id !== currentSessionId)
     if (sessions.length === 0) return null
 
@@ -498,7 +499,7 @@ export class SessionPersist {
     const prev = candidates[0]
     if (!prev) return null
 
-    const handoffPath = join(getSessionDir(), `${prev.id}.handoff.md`)
+    const handoffPath = join(getSessionDir(cwd), `${prev.id}.handoff.md`)
     if (!existsSync(handoffPath)) return null
     try {
       return readFileSync(handoffPath, 'utf-8')
@@ -508,10 +509,11 @@ export class SessionPersist {
   }
 
   /** List all session files */
-  static listSessions(): string[] {
-    ensureDir(getSessionDir())
+  static listSessions(cwd: string): string[] {
+    const dir = getSessionDir(cwd)
+    ensureDir(dir)
     try {
-      return readdirSync(getSessionDir())
+      return readdirSync(dir)
         .filter((f: string) => f.endsWith('.jsonl'))
         .map((f: string) => f.replace('.jsonl', ''))
     } catch {
@@ -523,26 +525,28 @@ export class SessionPersist {
    * Cache for listSessionsWithMetadata — avoids re-reading hundreds of session
    * meta files on every user boundary when cross-session handoff is requested.
    * TTL: 60s. Invalidated on write (saveMetadata / saveHandoff).
+   * Keyed by cwd since sessions are per-project.
    */
-  private static _listCache: { ts: number; data: Array<SessionMetadata & { id: string }> } | null = null
+  private static _listCache: Map<string, { ts: number; data: Array<SessionMetadata & { id: string }> }> = new Map()
   private static readonly LIST_CACHE_TTL_MS = 60_000
 
   static invalidateListCache(): void {
-    SessionPersist._listCache = null
+    SessionPersist._listCache.clear()
   }
 
   /** List sessions with metadata, sorted by updatedAt descending (most recent first) */
-  static listSessionsWithMetadata(): Array<SessionMetadata & { id: string }> {
+  static listSessionsWithMetadata(cwd: string): Array<SessionMetadata & { id: string }> {
     const now = Date.now()
-    if (SessionPersist._listCache && (now - SessionPersist._listCache.ts) < SessionPersist.LIST_CACHE_TTL_MS) {
-      return SessionPersist._listCache.data
+    const cached = SessionPersist._listCache.get(cwd)
+    if (cached && (now - cached.ts) < SessionPersist.LIST_CACHE_TTL_MS) {
+      return cached.data
     }
 
-    const ids = SessionPersist.listSessions()
+    const ids = SessionPersist.listSessions(cwd)
     const results: Array<SessionMetadata & { id: string }> = []
     for (const id of ids) {
       try {
-        const p = new SessionPersist(id)
+        const p = new SessionPersist(id, cwd)
         const meta = p.loadMetadata()
         results.push({
           id,
@@ -557,15 +561,15 @@ export class SessionPersist {
       }
     }
     results.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
-    SessionPersist._listCache = { ts: now, data: results }
+    SessionPersist._listCache.set(cwd, { ts: now, data: results })
     return results
   }
 }
 
 const MAX_SESSIONS = 50
 
-export function evictOldSessions(keepSessionId: string): string[] {
-  return evictOldSessionsInternal(getSessionDir(), keepSessionId, MAX_SESSIONS)
+export function evictOldSessions(keepSessionId: string, cwd: string): string[] {
+  return evictOldSessionsInternal(getSessionDir(cwd), keepSessionId, MAX_SESSIONS)
 }
 
 export function evictOldSessionsInternal(dir: string, keepSessionId: string, limit: number): string[] {

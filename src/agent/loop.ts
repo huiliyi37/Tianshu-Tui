@@ -424,7 +424,7 @@ export class AgentLoop {
     
     // 初始化 SessionPersist 用于 fuzzy checkpoint
     if (this.config.sessionId) {
-      this.persist = new SessionPersist(this.config.sessionId)
+      this.persist = new SessionPersist(this.config.sessionId, this.cwd)
 
       // P1: Initialize session metadata with model info
       this.persist.initMetadata({

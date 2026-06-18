@@ -237,7 +237,7 @@ test('marks claims with matching file evidence as stale', () => {
 })
 
 test('SessionPersist creates a claim store for the current session id', () => {
-  const persist = new SessionPersist('session-claims-test')
+  const persist = new SessionPersist('session-claims-test', process.cwd())
   const store = persist.createClaimStore()
 
   assert.match(store.path, /session-claims-test\.claims\.jsonl$/)
