@@ -83,6 +83,21 @@ export interface WorkerActivityEvent {
   detail?: string
 }
 
+/**
+ * Derive a stable WorkOrder id from a parentTurnId that carries a known
+ * scheduling prefix:
+ *  - `team:` — planner/task ids, so WorkOrderQueue can resolve dependency refs;
+ *  - `council:` —议事会席位 id，让 runCouncil 能用 result.workOrderId 把每席
+ *    结果绑回对应席位（=== `council:seat-${seat}`）。
+ * Returns undefined for ad-hoc turns — caller falls back to `wo_<uuid>`.
+ * 取末两段（slice(-2)）以容忍 `prefix:team:T1` / `prefix:council:seat-x` 形态。
+ */
+export function deriveStableWorkOrderId(parentTurnId: string): string | undefined {
+  return /\b(team|council):/.test(parentTurnId)
+    ? parentTurnId.split(':').slice(-2).join(':')
+    : undefined
+}
+
 export interface DelegationRequest {
   parentTurnId: string
   objective: string
@@ -743,12 +758,7 @@ export class DelegationCoordinator {
       }
 
       const isWrite = classifyProfile(request.profile) === 'hands'
-      // Derive stable WorkOrder ID from parentTurnId when it follows the
-      // pattern "prefix:team:T1" — this lets WorkOrderQueue resolve
-      // dependencies that reference stable team task IDs.
-      const stableId = /\bteam:/.test(request.parentTurnId)
-        ? request.parentTurnId.split(':').slice(-2).join(':')
-        : undefined
+      const stableId = deriveStableWorkOrderId(request.parentTurnId)
       const order = isWrite
         ? createWriteWorkOrder({
             id: stableId,
@@ -1312,9 +1322,7 @@ export class DelegationCoordinator {
     const orders: WorkOrder[] = []
     for (const r of runnables) {
       const isWrite = classifyProfile(r.profile) === 'hands'
-      const stableId = /\bteam:/.test(r.parentTurnId)
-        ? r.parentTurnId.split(':').slice(-2).join(':')
-        : undefined
+      const stableId = deriveStableWorkOrderId(r.parentTurnId)
       const order = isWrite
         ? createWriteWorkOrder({
             id: stableId,

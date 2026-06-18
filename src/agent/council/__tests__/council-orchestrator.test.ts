@@ -3,10 +3,14 @@ import assert from 'node:assert/strict'
 import { runCouncil, buildSeatObjective, parseSeatContribution } from '../council-orchestrator.js'
 import type { CouncilDeps, CouncilInput } from '../council-orchestrator.js'
 import type { WorkerResult } from '../../work-order.js'
+import { deriveStableWorkOrderId } from '../../coordinator.js'
 
+// 用真实 id 推导生成 workOrderId（而非手设 `council:seat-${seat}`），让测试反映
+// coordinator 实际产出的 id。若 coordinator 不再稳定化 council:，这里退化为
+// 不可绑定 id，下方「席位结果按真实 workOrderId 绑定」回归会变红 —— 防虚假绿灯。
 function workerResult(seat: string, contribJson: string): WorkerResult {
   return {
-    workOrderId: `council:seat-${seat}`,
+    workOrderId: deriveStableWorkOrderId(`council:seat-${seat}`) ?? 'wo_unstable',
     status: 'passed',
     summary: `${seat} done`,
     findings: [],
@@ -52,6 +56,17 @@ describe('runCouncil — 单轮 + 解耦', () => {
     const plan = await runCouncil(input, deps)
     assert.equal(plan.contributions.length, 2)
     assert.equal(plan.contributions[1]!.authority, 'tianfu')
+  })
+
+  it('席位结果按真实 workOrderId 绑定（coordinator 稳定化 council: — 防虚假绿灯）', async () => {
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => ({ results: reqs.map(r => workerResult(r.authority, JSON.stringify({ authority: r.authority, summary: `${r.authority}-real`, additions: [], risks: [], challenges: [], alternatives: [] }))) }),
+      now: () => 1,
+    }
+    const plan = await runCouncil(input, deps)
+    // 绑定成功 → 解析到席位真实 summary；绑定失败会退化为空字符串。
+    assert.equal(plan.contributions[0]!.summary, 'tianquan-real')
+    assert.equal(plan.contributions[1]!.summary, 'tianfu-real')
   })
 
   it('md 内 convenedAt 与返回 meta.convenedAt 一致（钉死双取时钟坑）', async () => {
