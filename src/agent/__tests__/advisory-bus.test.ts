@@ -155,3 +155,79 @@ describe('anti-habituation: staleness gate & vigor-low', () => {
     assert.ok(rendered.includes('vigor-low-refresh'))
   })
 })
+
+describe('priority tier (constitutional/operational/informational)', () => {
+  it('constitutional entries bypass Top-3 cap — 4 operational + 1 constitutional → 4 rendered', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'op-a', priority: 0.9, tier: 'operational', category: 'repair', content: 'OP-A' })
+    bus.submit({ key: 'op-b', priority: 0.8, tier: 'operational', category: 'immune', content: 'OP-B' })
+    bus.submit({ key: 'op-c', priority: 0.7, tier: 'operational', category: 'mistake', content: 'OP-C' })
+    bus.submit({ key: 'op-d', priority: 0.6, tier: 'operational', category: 'dedup', content: 'OP-D' })
+    bus.submit({ key: 'const', priority: 0.9, tier: 'constitutional', category: 'constitutional', content: 'CONST' })
+    const result = bus.render()
+    // Constitutional always renders
+    assert.match(result, /CONST/)
+    // Operational Top-3: OP-A(0.9), OP-B(0.8), OP-C(0.7) render; OP-D(0.6) dropped
+    assert.match(result, /OP-A/)
+    assert.match(result, /OP-B/)
+    assert.match(result, /OP-C/)
+    assert.ok(!result.includes('OP-D'), 'OP-D (0.6) should be dropped — operational capped at 3')
+    const entryCount = (result.match(/<entry /g) || []).length
+    assert.equal(entryCount, 4, '1 constitutional + 3 operational = 4 entries')
+  })
+
+  it('constitutional entries are not subject to category cap', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'c1', priority: 0.9, tier: 'constitutional', category: 'constitutional', content: 'C1' })
+    bus.submit({ key: 'c2', priority: 0.8, tier: 'constitutional', category: 'constitutional', content: 'C2' })
+    bus.submit({ key: 'c3', priority: 0.7, tier: 'constitutional', category: 'constitutional', content: 'C3' })
+    const result = bus.render()
+    assert.match(result, /C1/)
+    assert.match(result, /C2/)
+    assert.match(result, /C3/)
+    const entryCount = (result.match(/<entry /g) || []).length
+    assert.equal(entryCount, 3, 'all 3 constitutional entries render despite same category')
+  })
+
+  it('operational prioritised over informational for Top-3 slots', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'info-1', priority: 0.9, tier: 'informational', category: 'encouragement', content: 'INFO-HI' })
+    bus.submit({ key: 'info-2', priority: 0.8, tier: 'informational', category: 'encouragement', content: 'INFO-MID' })
+    bus.submit({ key: 'op-1', priority: 0.5, tier: 'operational', category: 'repair', content: 'OP-LOW' })
+    bus.submit({ key: 'op-2', priority: 0.4, tier: 'operational', category: 'immune', content: 'OP-VLOW' })
+    bus.submit({ key: 'op-3', priority: 0.3, tier: 'operational', category: 'mistake', content: 'OP-VVLOW' })
+    const result = bus.render()
+    // All 3 operational should render despite lower numeric priority
+    assert.match(result, /OP-LOW/)
+    assert.match(result, /OP-VLOW/)
+    assert.match(result, /OP-VVLOW/)
+    // INFO entries should NOT render — all 3 slots taken by operational
+    assert.ok(!result.includes('INFO-HI'), 'INFO-HI should be dropped — operational takes priority')
+    assert.ok(!result.includes('INFO-MID'), 'INFO-MID should be dropped — operational takes priority')
+  })
+
+  it('informational fills remaining slots after operational', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'op-1', priority: 0.6, tier: 'operational', category: 'repair', content: 'OP' })
+    bus.submit({ key: 'info-1', priority: 0.5, tier: 'informational', category: 'encouragement', content: 'INFO1' })
+    bus.submit({ key: 'info-2', priority: 0.4, tier: 'informational', category: 'encouragement', content: 'INFO2' })
+    const result = bus.render()
+    assert.match(result, /OP/)
+    assert.match(result, /INFO1/)
+    assert.match(result, /INFO2/)
+    const entryCount = (result.match(/<entry /g) || []).length
+    assert.equal(entryCount, 3, '1 operational + 2 informational fill 3 slots')
+  })
+
+  it('mixed tiers render constitutional first, then by priority', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'op', priority: 0.9, tier: 'operational', category: 'repair', content: 'OP' })
+    bus.submit({ key: 'const', priority: 0.5, tier: 'constitutional', category: 'constitutional', content: 'CONST' })
+    bus.submit({ key: 'info', priority: 0.8, tier: 'informational', category: 'encouragement', content: 'INFO' })
+    const result = bus.render()
+    // Constitutional always first despite lower numeric priority
+    const constPos = result.indexOf('CONST')
+    const opPos = result.indexOf('OP')
+    assert.ok(constPos < opPos, 'constitutional should render before operational')
+  })
+})

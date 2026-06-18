@@ -250,17 +250,8 @@ export class AdvisoryBus {
 
     // Combine: constitutional always first, then by priority
     const sorted: AdvisoryEntry[] = [...constDeduped.values()]
-    for (const e of taken) {
-      let inserted = false
-      for (let i = 0; i < sorted.length; i++) {
-        if (e.priority > (sorted[i]?.priority ?? 0)) {
-          sorted.splice(i, 0, e)
-          inserted = true
-          break
-        }
-      }
-      if (!inserted) sorted.push(e)
-    }
+    taken.sort((a, b) => b.priority - a.priority)
+    sorted.push(...taken)
 
     if (sorted.length === 0) {
       this.entries = []
