@@ -223,32 +223,6 @@ describe('CognitiveCapsuleRouter', () => {
     })
   })
 
-  describe('P2: 天璇 — low freshness', () => {
-    it('fires when freshness < 0.25 and turn > 4', () => {
-      const h = createHarness()
-      h.run(makeSnapshot({
-        turn: 6,
-        sensorium: makeSensorium({ freshness: 0.15 }),
-      }))
-      assert.equal(h.submitted.length, 1)
-      assert.ok(h.submitted[0]!.content.startsWith('【天璇】'))
-      assert.equal(h.submitted[0]!.priority, 0.60)
-    })
-  })
-
-  describe('P4: 天权 — high complexity', () => {
-    it('fires when complexity > 0.7 and turn > 3', () => {
-      const h = createHarness({ filesModified: new Set(['a', 'b', 'c', 'd']) })
-      h.run(makeSnapshot({
-        turn: 5,
-        sensorium: makeSensorium({ complexity: 0.85 }),
-      }))
-      assert.equal(h.submitted.length, 1)
-      assert.ok(h.submitted[0]!.content.startsWith('【天权】'))
-      assert.match(h.submitted[0]!.key, /ccr-天权-P4/)
-    })
-  })
-
   describe('P5: 瑶光 — large diff unverified', () => {
     it('fires when files_modified > 5 and verif_cov < 0.5', () => {
       const files = new Set(['a', 'b', 'c', 'd', 'e', 'f'])
@@ -263,62 +237,57 @@ describe('CognitiveCapsuleRouter', () => {
     })
   })
 
-  describe('P6: 天府 — low stability', () => {
-    it('fires when stability < 0.2 and turn > 3', () => {
-      const h = createHarness()
-      h.run(makeSnapshot({
-        turn: 5,
-        sensorium: makeSensorium({ stability: 0.1 }),
-      }))
-      assert.equal(h.submitted.length, 1)
-      assert.ok(h.submitted[0]!.content.startsWith('【天府】'))
-    })
-  })
-
   describe('cooldown', () => {
     it('does not fire same star within cooldown window', () => {
-      const h = createHarness()
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
       const snapshot = makeSnapshot({
         turn: 5,
-        sensorium: makeSensorium({ freshness: 0.15 }),
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       })
       h.run(snapshot)
       assert.equal(h.submitted.length, 1, 'first trigger')
+      assert.match(h.submitted[0]!.key, /P1/)
 
       h.run(makeSnapshot({
         turn: 6,
-        sensorium: makeSensorium({ freshness: 0.15 }),
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       }))
       assert.equal(h.submitted.length, 1, 'blocked by cooldown')
     })
 
     it('fires again after cooldown expires', () => {
-      const h = createHarness()
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
       h.run(makeSnapshot({
         turn: 5,
-        sensorium: makeSensorium({ freshness: 0.15 }),
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       }))
       assert.equal(h.submitted.length, 1)
 
       h.run(makeSnapshot({
-        turn: 10, // 5 turns later, cooldown=4 for 天璇
-        sensorium: makeSensorium({ freshness: 0.15 }),
+        turn: 11, // 6 turns later, cooldown=5 for 瑶光
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       }))
       assert.equal(h.submitted.length, 2)
     })
 
     it('allows escalation override when value degrades to 50%', () => {
-      const h = createHarness()
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
       h.run(makeSnapshot({
         turn: 5,
-        sensorium: makeSensorium({ freshness: 0.2 }),
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       }))
       assert.equal(h.submitted.length, 1)
 
-      // Turn 7, within cooldown (4), but freshness degraded from 0.2 to 0.05 (<0.1)
+      // Turn 7, within cooldown (5), but confidence degraded from 0.2 to 0.05 (<0.1)
       h.run(makeSnapshot({
         turn: 7,
-        sensorium: makeSensorium({ freshness: 0.05 }),
+        sensorium: makeSensorium({ confidence: 0.05 }),
+        vigor: makeVigor({ vigor: 0.8 }),
       }))
       assert.equal(h.submitted.length, 2, 'escalation override')
     })
@@ -356,15 +325,13 @@ describe('CognitiveCapsuleRouter', () => {
       const h = createHarness({ filesModified: files })
       h.run(makeSnapshot({
         turn: 6,
-        sensorium: makeSensorium({
-          confidence: 0.1,
-          freshness: 0.1,
-          stability: 0.1,
-          complexity: 0.9,
-        }),
+        sensorium: makeSensorium({ confidence: 0.1 }),
         vigor: makeVigor({ vigor: 0.1 }),
       }))
+      // P3 matches (dual-deficit: confidence<0.3, vigor<0.3, turn>3)
+      // P1 also matches but P3 is higher priority (first match wins)
       assert.equal(h.submitted.length, 1, 'exactly one advisory per turn')
+      assert.match(h.submitted[0]!.key, /ccr-天权-P3/)
     })
   })
 

@@ -88,12 +88,9 @@ interface RouteState {
   turn: number
   verificationCoverage: number
   filesModified: number
-  freshness: number
   vigor: number
   vigorTonic: number
   vigorPhasic: number
-  complexity: number
-  stability: number
   lastTool: string
   lastToolTarget: string
 }
@@ -102,6 +99,9 @@ interface RouteState {
  * Rule evaluation order matters: first match wins.
  * P3 before P1 — dual-deficit (verif + vigor both low → 天权 "switch direction")
  * precedes single-deficit (verif low only → 瑶光 "go verify").
+ *
+ * Removed (2026-06-18): P2 (freshness→天璇, causal chain too weak),
+ * P4 (complexity→天权, no causal link), P6 (stability→天府, overlaps kick-hook).
  */
 const RULES: RouteRule[] = [
   {
@@ -123,21 +123,6 @@ const RULES: RouteRule[] = [
     suppressOnTestIntent: true,
   },
   {
-    id: 'P2',
-    star: '天璇',
-    match: s => s.freshness < 0.25 && s.turn > 4,
-    busPriority: 0.60,
-    promptTemplate: '【天璇】第 {turn} 轮，连续在同一路径上。去一个不相关的目录 glob 一下，或者上/下一层抽象找捷径。',
-  },
-  {
-    id: 'P4',
-    star: '天权',
-    match: s => s.complexity > 0.7 && s.turn > 3,
-    busPriority: 0.55,
-    poolKeyFilter: new Set(['Q1', 'Q2']),
-    promptTemplate: '【天权】复杂度高（改了 {files_modified} 文件）。先 grep 调用方和受影响文件，画出变更边界再动手。',
-  },
-  {
     id: 'P5',
     star: '瑶光',
     match: s => s.filesModified > 5 && s.verificationCoverage < 0.5,
@@ -145,13 +130,6 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Y3', 'Y6']),
     promptTemplate: '【瑶光】大面积改动（{files_modified} 文件，验证覆盖 {verification_coverage}）。只交付已验证的部分，未验证的留到下轮。',
     suppressOnTestIntent: true,
-  },
-  {
-    id: 'P6',
-    star: '天府',
-    match: s => s.stability < 0.2 && s.turn > 3,
-    busPriority: 0.50,
-    promptTemplate: '【天府】第 {turn} 轮稳定性低。如果同一方向第三次撞墙，换维度而非硬推。改动前确认调用方。',
   },
 ]
 
@@ -302,12 +280,9 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
       turn,
       verificationCoverage: sensorium.confidence ?? 1.0,
       filesModified: evidence.filesModified.size,
-      freshness: sensorium.freshness ?? 1.0,
       vigor: vigor?.vigor ?? 1.0,
       vigorTonic: vigor?.tonic ?? 1.0,
       vigorPhasic: vigor?.phasic ?? 0.0,
-      complexity: sensorium.complexity ?? 0.0,
-      stability: sensorium.stability ?? 1.0,
       lastTool: last.tool,
       lastToolTarget: last.target,
     }
@@ -334,10 +309,7 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
         if (!rule.match(state)) continue
         if (rule.suppressOnTestIntent && isTestIntent(state.lastTool, state.lastToolTarget)) continue
 
-        const cooldownTurns = rule.star === '天权' ? (rule.id === 'P4' ? 6 : 4)
-          : rule.star === '天璇' ? 4
-          : rule.star === '天府' ? 5
-          : 5
+        const cooldownTurns = rule.star === '天权' ? 4 : 5
         const cd = getCooldown(rule.star)
         const turnsElapsed = turn - cd.lastTriggeredTurn
 
@@ -386,12 +358,9 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
           principleKey: principle.key,
           dimValues: {
             verificationCoverage: state.verificationCoverage,
-            freshness: state.freshness,
             vigor: state.vigor,
             vigorTonic: state.vigorTonic,
             vigorPhasic: state.vigorPhasic,
-            complexity: state.complexity,
-            stability: state.stability,
           },
           dynamicPool,
         })
@@ -406,13 +375,8 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
 }
 
 function getDominantDimValue(rule: RouteRule, state: RouteState): number {
-  switch (rule.id) {
-    case 'P1': case 'P3': case 'P5': return state.verificationCoverage
-    case 'P2': return state.freshness
-    case 'P4': return state.complexity
-    case 'P6': return state.stability
-    default: return 0
-  }
+  // P1, P3, P5 all use verificationCoverage as the primary signal
+  return state.verificationCoverage
 }
 
 // ─── Exports for testing ─────────────────────────────────────────
