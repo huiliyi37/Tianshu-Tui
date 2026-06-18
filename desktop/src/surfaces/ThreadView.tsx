@@ -536,7 +536,9 @@ function AssistantText({ text, isStreaming }: { text: string; isStreaming: boole
   const heavy = isStreaming && text.length > STREAM_MARKDOWN_MAX
   const throttled = useThrottledStreamingSource(text, isStreaming && !heavy)
   if (heavy) return <StreamingText source={text} />
-  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} />
+  // Streaming: render structure only (highlight=false); the async highlight pass
+  // runs once on completion so mid-stream deltas stay cheap.
+  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} highlight={false} />
   return <Markdown source={text} />
 }
 
