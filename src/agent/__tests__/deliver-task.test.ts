@@ -1,10 +1,10 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { createDeliverTaskTool, detectSymptomPatch } from '../deliver-task.js'
+import { createDeliverTaskTool, detectSymptomPatch, resetPostCommitReviewCooldown } from '../deliver-task.js'
 import { createTaskLedger } from '../task-ledger.js'
 import { createOwnershipLedger } from '../ownership-ledger.js'
 import type { ChangeSet } from '../review-discipline.js'
@@ -85,6 +85,8 @@ function toolDescription(): string {
 }
 
 describe('deliver-task — semantic task delivery tool', () => {
+  beforeEach(() => { resetPostCommitReviewCooldown() })
+
   it('reports GREEN delivery readiness when verified', async () => {
     const { tool, params } = makeContext({
       taskId: 't1',
@@ -325,7 +327,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.equal(result.isError ?? false, false)
     assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: true })
     assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'fix: scoped delivery' }])
-    assert.match(result.content, /ReviewRouter verified \(L2\)/)
+    assert.match(result.content, /审查通过 \(L2\)/)
   })
 
   it('commit succeeds when ReviewRouter rejects — review is advisory post-commit', async () => {
@@ -348,9 +350,9 @@ describe('deliver-task — semantic task delivery tool', () => {
     // Post-commit advisory: the commit has landed even if review found issues.
     assert.equal(result.isError ?? false, false)
     assert.equal(committed, true)
-    assert.match(result.content, /ReviewRouter flagged issues \(L2\)/)
+    assert.match(result.content, /审查门发现问题 \(L2\)/)
     assert.match(result.content, /still broken/)
-    assert.match(result.content, /commit has landed/)
+    assert.match(result.content, /提交已落地/)
   })
 
   it('renders auto-review infra failure as INCONCLUSIVE, never as verified (B-fix)', async () => {
@@ -379,10 +381,10 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     assert.equal(result.isError ?? false, false, 'inconclusive auto review must fail open')
     assert.equal(committed, true, 'delivery proceeds despite infra failure')
-    assert.match(result.content, /ReviewRouter INCONCLUSIVE/)
+    assert.match(result.content, /审查未决 \(auto\)/)
     assert.match(result.content, /DID NOT run/)
-    assert.match(result.content, /UNREVIEWED/)
-    assert.doesNotMatch(result.content, /ReviewRouter verified/, 'the word verified must not describe a review that never ran')
+    assert.match(result.content, /未经审查/)
+    assert.doesNotMatch(result.content, /审查通过/, 'the word verified must not describe a review that never ran')
     assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
     const health = getReviewHealth()
     assert.equal(health.infraFailureCount, 1)
@@ -410,9 +412,9 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     assert.equal(result.isError ?? false, false, 'auto review crash must fail open')
     assert.equal(committed, true)
-    assert.match(result.content, /ReviewRouter INCONCLUSIVE/)
+    assert.match(result.content, /审查未决 \(auto\)/)
     assert.match(result.content, /DID NOT run/)
-    assert.doesNotMatch(result.content, /ReviewRouter verified/)
+    assert.doesNotMatch(result.content, /审查通过/)
     assert.ok(result.content.length > 0, 'sentinel: content must never be empty')
     const health = getReviewHealth()
     assert.equal(health.infraFailureCount, 1)
@@ -458,7 +460,7 @@ describe('deliver-task — semantic task delivery tool', () => {
 
     assert.equal(result.isError ?? false, false)
     assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: false })
-    assert.match(result.content, /ReviewRouter verified \(L2\)/)
+    assert.match(result.content, /审查通过 \(L2\)/)
     assert.match(result.content, /Scoped commit created/)
   })
 
@@ -481,7 +483,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     // Post-commit: unwired review is advisory, not a blocker.
     assert.equal(result.isError ?? false, false)
     assert.equal(committed, true)
-    assert.match(result.content, /Post-commit review skipped.*review dependencies are unavailable/)
+    assert.match(result.content, /提交后审查跳过.*审查依赖不可用/)
     assert.match(result.content, /Scoped commit created/)
   })
 
@@ -504,7 +506,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     // Post-commit: force no longer needed for unwired review, but commit still succeeds.
     assert.equal(result.isError ?? false, false)
     assert.equal(committed, true)
-    assert.match(result.content, /Post-commit review skipped.*review dependencies are unavailable/)
+    assert.match(result.content, /提交后审查跳过.*审查依赖不可用/)
     assert.match(result.content, /Scoped commit created/)
   })
 
@@ -717,7 +719,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
     const result = await tool.execute(params)
 
-    assert.match(result.content, /Review principle checklist:/)
+    assert.match(result.content, /审查原则清单：/)
     assert.match(result.content, /Do not declare a streamed response duplicate/)
     assert.match(result.content, /Delivery Gate: GREEN/)
   })
@@ -744,7 +746,7 @@ Do not declare a streamed response duplicate in the middle of the stream.
 
     const result = await tool.execute(params)
 
-    assert.doesNotMatch(result.content, /Review principle checklist:/)
+    assert.doesNotMatch(result.content, /审查原则清单：/)
     assert.match(result.content, /Delivery Gate: GREEN/)
   })
 

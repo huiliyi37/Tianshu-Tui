@@ -77,6 +77,11 @@ export interface B1Context {
 const POST_COMMIT_REVIEW_COOLDOWN_MS = 30_000
 let lastPostCommitReviewAt = 0
 
+/** Test-only: reset the module-level cooldown so it does not leak across cases. */
+export function resetPostCommitReviewCooldown(): void {
+  lastPostCommitReviewAt = 0
+}
+
 function parseNulFileList(output: string): string[] {
   return output.split('\0').filter(Boolean)
 }
@@ -591,83 +596,83 @@ When the task implements a complex spec or cross-module integration, include the
           if (now - lastPostCommitReviewAt < POST_COMMIT_REVIEW_COOLDOWN_MS) {
             lines.push('', '⏭ 提交后审查合并：上一轮审查仍在冷却窗口内，本轮合并入上一轮。')
           } else {
-          const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
-          if (!route || !ctx.reviewDeps) {
-            // Advisory: review deps unavailable is a caveat, not a blocker.
-            lines.push('', '⚠️ 提交后审查跳过：审查依赖不可用（ReviewRouter 未接入）。')
-          } else {
-            const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
-            const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
-            const reviewAbort = new AbortController()
-            if (params.abortSignal) {
-              if (params.abortSignal.aborted) {
-                lines.push('', '⚠️ 提交后审查跳过：工具已取消。')
-              } else {
-                params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
-              }
-            }
-            if (!params.abortSignal?.aborted) {
-              // 进度可见：通过 onOutput streaming 回调推送中间状态，
-              // 用户在审查运行期间看到进度而非黑盒等待。
-              const budgetSec = Math.round(REVIEW_TIMEOUT_MS / 1000)
-              params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)...\n`)
-              lastPostCommitReviewAt = Date.now()
-              let outcome: ReviewOutcome
-              let reviewTimer: NodeJS.Timeout | undefined
-              try {
-                const timeoutPromise = new Promise<never>((_, reject) => {
-                  reviewTimer = setTimeout(() => {
-                    reviewAbort.abort()
-                    reject(new Error('Review workflow timed out'))
-                  }, REVIEW_TIMEOUT_MS)
-                })
-                outcome = await Promise.race([
-                  route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode, depthLayer: ctx.getDepthLayer?.() }),
-                  timeoutPromise,
-                ])
-              } catch (err) {
-                const reason = err instanceof Error ? err.message : String(err)
-                // Review is best-effort post-commit: a timeout/crash never blocks
-                // delivery — the commit already landed. Report honestly.
-                outcome = {
-                  tier: reviewMode === 'auto' ? 'auto' : (explicitReviewLevel ?? 'L2'),
-                  verdict: 'inconclusive',
-                  rounds: 0,
-                  evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
-                  infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
-                }
-              } finally {
-                if (reviewTimer) clearTimeout(reviewTimer)
-              }
-              // Review infra health observability (/status): auto runs only.
-              if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
-                if (outcome.verdict === 'inconclusive') {
-                  recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
+            const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
+            if (!route || !ctx.reviewDeps) {
+              // Advisory: review deps unavailable is a caveat, not a blocker.
+              lines.push('', '⚠️ 提交后审查跳过：审查依赖不可用（ReviewRouter 未接入）。')
+            } else {
+              const reviewMode: ReviewMode = change.forceLevel ? 'manual' : 'auto'
+              const REVIEW_TIMEOUT_MS = reviewWorkflowBudgetMs(reviewMode, change.forceLevel)
+              const reviewAbort = new AbortController()
+              if (params.abortSignal) {
+                if (params.abortSignal.aborted) {
+                  lines.push('', '⚠️ 提交后审查跳过：工具已取消。')
                 } else {
-                  recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
+                  params.abortSignal.addEventListener('abort', () => reviewAbort.abort(), { once: true })
                 }
               }
-              if (outcome.verdict === 'rejected' || outcome.escalated) {
-                // Advisory: the commit has already landed. Surface the finding
-                // as a strong warning + follow-up recommendation, not a block.
-                lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
-                if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
-                lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
-              } else if (outcome.verdict === 'verified') {
-                if (outcome.infraFailures && outcome.infraFailures.length > 0) {
-                  lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)
-                  lines.push(`   ${outcome.evidence ?? '已通过审查基础设施注意事项验证'}`)
-                } else {
-                  lines.push('', `✅ 审查通过 (${outcome.tier})：${outcome.evidence ?? '已验证'}`)
+              if (!params.abortSignal?.aborted) {
+                // 进度可见：通过 onOutput streaming 回调推送中间状态，
+                // 用户在审查运行期间看到进度而非黑盒等待。
+                const budgetSec = Math.round(REVIEW_TIMEOUT_MS / 1000)
+                params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)...\n`)
+                lastPostCommitReviewAt = Date.now()
+                let outcome: ReviewOutcome
+                let reviewTimer: NodeJS.Timeout | undefined
+                try {
+                  const timeoutPromise = new Promise<never>((_, reject) => {
+                    reviewTimer = setTimeout(() => {
+                      reviewAbort.abort()
+                      reject(new Error('Review workflow timed out'))
+                    }, REVIEW_TIMEOUT_MS)
+                  })
+                  outcome = await Promise.race([
+                    route(change, ctx.reviewDeps, { abortSignal: reviewAbort.signal, mode: reviewMode, depthLayer: ctx.getDepthLayer?.() }),
+                    timeoutPromise,
+                  ])
+                } catch (err) {
+                  const reason = err instanceof Error ? err.message : String(err)
+                  // Review is best-effort post-commit: a timeout/crash never blocks
+                  // delivery — the commit already landed. Report honestly.
+                  outcome = {
+                    tier: reviewMode === 'auto' ? 'auto' : (explicitReviewLevel ?? 'L2'),
+                    verdict: 'inconclusive',
+                    rounds: 0,
+                    evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,
+                    infraFailures: [{ kind: reason.includes('timed out') ? 'timeout' : 'crash', claim: reason }],
+                  }
+                } finally {
+                  if (reviewTimer) clearTimeout(reviewTimer)
                 }
-              } else if (outcome.verdict === 'inconclusive') {
-                lines.push('', `⚠️ 审查未决 (${outcome.tier})：${outcome.evidence ?? '提交后审查未运行（基础设施故障）'}`)
-                lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
-              } else if (outcome.verdict === 'nudge') {
-                lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
+                // Review infra health observability (/status): auto runs only.
+                if (reviewMode === 'auto' && outcome.rounds !== undefined && outcome.verdict !== 'nudge') {
+                  if (outcome.verdict === 'inconclusive') {
+                    recordAutoReviewRun({ ran: false, failureKinds: (outcome.infraFailures ?? []).map(f => f.kind) })
+                  } else {
+                    recordAutoReviewRun({ ran: true, ...(outcome.recoveredByRetry ? { recoveredByRetry: true } : {}) })
+                  }
+                }
+                if (outcome.verdict === 'rejected' || outcome.escalated) {
+                  // Advisory: the commit has already landed. Surface the finding
+                  // as a strong warning + follow-up recommendation, not a block.
+                  lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
+                  if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
+                  lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
+                } else if (outcome.verdict === 'verified') {
+                  if (outcome.infraFailures && outcome.infraFailures.length > 0) {
+                    lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)
+                    lines.push(`   ${outcome.evidence ?? '已通过审查基础设施注意事项验证'}`)
+                  } else {
+                    lines.push('', `✅ 审查通过 (${outcome.tier})：${outcome.evidence ?? '已验证'}`)
+                  }
+                } else if (outcome.verdict === 'inconclusive') {
+                  lines.push('', `⚠️ 审查未决 (${outcome.tier})：${outcome.evidence ?? '提交后审查未运行（基础设施故障）'}`)
+                  lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
+                } else if (outcome.verdict === 'nudge') {
+                  lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
+                }
               }
-            }
-            }
+              }
           }
         }
       }
