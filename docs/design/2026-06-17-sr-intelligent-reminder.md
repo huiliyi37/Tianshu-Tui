@@ -27,22 +27,27 @@
 
 ### 2.1 Cognitive Mirror 已经每轮在算
 
-`<cognitive-mirror>` 标签每轮注入以下维度值：
+`<cognitive-mirror>` 标签每轮注入以下维度值。标注 **R** 的为路由专用维度（系统据此做路由决策，不注入模型 context），其余为模型可见维度：
 
 ```
-verification_coverage  — 验证覆盖率（高=已验证，低=没验证）
-files_modified         — 已修改文件数
-complexity             — 任务复杂度
-momentum               — 动量（高=持续推进，低=停滞）
-stability              — 稳定性（高=模式固定，低=动荡）
-freshness              — 新鲜度（高=新信息多，低=重复路径）
-pressure               — 压力（高=任务过大）
-exploration            — 探索广度（高=发散，低=收敛）
-vigor                  — 执行能量（高=在干活，低=疲惫/犹豫）
-season                 — 会话阶段（genesis/growth/climax/closure）
+verification_coverage  — 验证覆盖率          — 模型可见。可行动："还没验证"
+files_modified         — 已修改文件数        — 模型可见。可行动："改了 N 个文件"
+complexity             — 任务复杂度          — 模型可见。可行动："这很复杂，慢一点"
+momentum               — 动量                — 路由专用 R。系统检测停滞，路由到行动提醒
+stability              — 稳定性              — 路由专用 R。系统检测动荡，路由到天府守护
+freshness              — 新鲜度              — 路由专用 R。系统检测重复路径，路由到天璇
+pressure               — 压力（上下文充满度）— 模型可见。可行动："上下文快满了"
+exploration            — 探索广度            — 路由专用 R。系统检测发散/收敛，路由到天璇/天权
+vigor                  — 执行能量            — 路由专用 R。系统检测犹豫，路由到行动提醒
+season                 — 会话阶段            — 模型可见。genesis/closure 是有效行为上下文
+curiosity              — 好奇心（>0.3 时显示）— 模型可见
+regulation-cost        — 认知调节开销       — 模型可见（>0 时显示）
+reasoning              — 推理深度            — 模型可见
+escalation             — 升级标志（仅 true 时）— 模型可见
+caution                — 谨慎度（>0.7 时显示）— 模型可见
 ```
 
-这些维度恰好对应不同星域的核心能力。
+5 个 R 维度每轮省约 150 字符（~40 token），详见 §3.0 和补充文档。
 
 ### 2.2 Advisory Bus 已有完善的注入通道
 
@@ -63,6 +68,29 @@ season                 — 会话阶段（genesis/growth/climax/closure）
 | 辅 | 认知场调校、提示词蒸馏 | （Phase 3 远景——LLM 自诊断后触发） |
 
 ## 3. 方案：Cognitive Capsule Router（认知胶囊路由）
+
+### 3.0 前置优化：认知镜面分层 —— 路由维度 vs 模型可见维度
+
+当前 `<cognitive-mirror>` 把所有 15 个维度都注入模型 context。但仔细审视后发现，其中一部分维度的信息价值在于**驱动路由决策**，而非**让模型自我诊断**。
+
+**模型需要看的**（可自行据此调整行为）：
+- `verification_coverage`、`files_modified` — "我没验证 × 个文件"是可行动的自我意识
+- `complexity` — "当前复杂度高"让模型自觉收敛
+- `pressure` — "上下文快满了"让模型主动压缩
+- `season` — genesis/closure 是行为校准的有效上下文
+- `reasoning` — 当前推理模式的自知
+
+**路由专用、模型不需要看的**（系统应据此行动，而非告知模型一个数字）：
+- `vigor` — 告诉模型"你的活力是 0.30"不会让它更活跃；路由到行动提醒才会
+- `exploration`、`freshness` — 模型知道自己在重复路径；它需要的是"换方向"的提醒，而非一个数字
+- `momentum` — "动量 0.12"不可行动；"同一文件 5 轮没动了"才是
+- `stability` — "稳定性 0.15"可能制造焦虑；路由到天府（守护边界的提醒）是静默保护
+
+**省下的不只是 token**：约 150 字符（~40 token）每轮。但真正的收益是清晰度——模型只看到可行动的维度，不会被"vigor=0.30 是什么意思"分散注意力。
+
+**实现方式**：`buildCognitiveMirror()` 新增一个可选参数 `mode`，传入 `'model'` 时只渲染模型可见维度，传入 `'router'` 时渲染路由专用维度。router 通过内部调用获取路由维度，不注入 model context。
+
+详见补充文档：`docs/design/2026-06-18-sr-router-supplement.md`。
 
 ### 3.1 核心思路
 
@@ -163,10 +191,14 @@ CognitiveCapsuleRouter **不是替代** convergence-detector 或 courage-hook，
   正常 ─── 轻微偏离 ─── 明显跑偏 ─── 严重卡死
            ↑                ↑            ↑
     CognitiveCapsuleRouter  courage-hook  convergence-detector
-    (温和提醒)              (宪法级纠正)   (强制 kick)
+    (温和提醒, 0.4-0.6)     (宪法级, 0.9)  (强制 kick, injectUserMessage)
 ```
 
-现有的 convergence-detector 和 courage-hook 保持不变。CognitiveCapsuleRouter 以较低优先级（0.4-0.6）投递到 advisory bus，不与宪法级条目（0.9）竞争。
+**互斥门控**：CCR 在 preTurn 评估规则前，检查 convergence-detector 当前 level。level >= 2 时 CCR 本轮静默——避免温和提醒和强制 kick 同轮到达模型产生信号矛盾。实现参照 `signal-consumer-hook.ts` 的 kick 互斥模式。详见 §8.9 和增补文档 §6。
+
+**替代关系**：CCR 上线后，`advisory-bus.ts` 中的 `vigorLowEntry()` 和 `stalenessGateEntry()` 被 CCR 规则 P3/P2 替代并标记 deprecated。详见 §8.8 和增补文档 §5。
+
+**bus 预算**：advisory bus 为 `cognitive_route` category 预留至少一个渲染名额，确保 CCR 条目不被其他高优先级条目挤出 3 条上限。详见 §8.7。
 
 ## 4. 分阶段路线
 
@@ -250,3 +282,132 @@ CognitiveCapsuleRouter **不是替代** convergence-detector 或 courage-hook，
 - `src/context/cognitive-ledger.ts` — 认知账本与 cognitive-mirror
 - `src/agent/seed-capsule-store.ts` — 胶囊加载与渲染
 - `src/agent/star-domain.ts` — 星域定义与匹配
+
+## 8. 审查修订（2026-06-18）
+
+### 8.1 缺失维度：`files_modified` 未被任何规则使用
+
+cognitive-mirror 有 `files_modified` 字段，但规则表里一条都没用到。最常见的"跑偏"模式是改了很多文件却不验证：
+
+```
+files_modified > 5 ∧ verification_coverage < 0.5 → 瑶光
+```
+
+这个双条件不是"组合条件难调试"的范畴——它是同一个根因（修改缺乏验证）的两个侧面。规则表目前限定"每个维度单独判断"，但应为这种*同一根源的多侧面信号*开一个例外：允许同一星域最多一个双条件规则。
+
+### 8.2 季节（season）应作为阈值修正因子
+
+`season` 不是连续值，不适合单独作为选择条件。更合理的用法是把 season 当阈值修正因子：
+
+```
+stability < 0.25 → 天府（默认阈值）
+stability < 0.35 ∧ season=genesis → 天府（开局动荡是正常的，放宽）
+stability < 0.20 ∧ season=closure → 天府（临近交付该收紧）
+```
+
+同一个维度在不同季节的"异常水位"不同，比给每个 season 写独立规则更简洁。
+
+### 8.3 冷却窗口应支持"恶化升级覆盖"
+
+冷却窗口 `cooldownTurns` 防止同一星域重复提醒，但如果 agent 状态在冷却期内严重恶化，应允许打破冷却：
+
+```
+if currentValue < lastTriggeredValue × 0.5 → override cooldown
+```
+
+"恶化到上次触发时的一半以下"是简单有效的升级信号，不需要复杂的 state machine。
+
+### 8.4 原则池提取方案需轻量标记层
+
+Phase 2 用正则引导词（"不""禁止""必须""当"）提取原则行，但胶囊是自由散文——"绿非证明，复现即证"不含任何引导词，却是瑶光最核心的原则。
+
+建议在胶囊文档中加轻量标记：
+
+```markdown
+<principle key="复现即证">复现才算验证——绿非证明，RED→GREEN 才采信</principle>
+```
+
+`extractPrinciples()` 只解析 `<principle>` 标签，无标签则 fallback 到硬编码默认池。不需要改胶囊渲染逻辑。向后兼容 Phase 1 的硬编码方案。
+
+### 8.5 遥测应记录提醒触发的行为变化
+
+触发提醒后 agent 是否改变行为？最简方案：对比触发前后两轮的 `exploration` / `vigor` 变化。如果提醒"果断行动"（破军）但 vigor 没涨，提醒无效。积累数据后按星域分析有效性，停用无效的、强化有效的。
+
+### 8.6 边界明确：不与 convergence-detector 争地盘
+
+convergence-detector 看"动作层面"的重复（同一工具、同一输出），CognitiveCapsuleRouter 看"认知层面"的偏差（验证心态、探索广度、节奏感）。二者互补而非替代。Phase 1 路由信号应明确排除 convergence-detector 已覆盖的维度（如 `textRepetitionPenalty`、`toolEntropy`），避免两个系统对同一状态给出矛盾判断。在 §3.5 节明确此边界。
+
+### 8.7 Advisory Bus 预算碰撞：3 条名额下的挤占风险
+
+advisory bus 硬上限 `MAX_ADVISORIES_PER_TURN = 3`。当前已有竞争者：
+
+| 已有投递者 | priority | 触发场景 |
+|---|---|---|
+| dead-end 信号 | 0.65 | 信号素死路检测 |
+| `vigorLowEntry()` | 0.65 | vigor 低迷 |
+| `stalenessGateEntry()` | 0.60 | 20+ 轮无异议 |
+| `disciplineReanchorEntry()` | 0.55 | 每 15 次工具调用 |
+| dedup-guard | 随条目 | 重复输出检测 |
+| immune projection | 随条目 | 自体免疫投射 |
+
+CCR 条目定位 priority 0.4-0.6，在活跃 turn 里可能被上述高优先级条目挤出 3 条名额。
+
+**决策**：为 `cognitive_route` 这个 category 在 bus 中预留至少一个名额。实现方式：`render()` 在 Top-3 选取前，先保证每个"保留 category"有一条入选，再用剩余名额填其他条目。改动局限在 `AdvisoryBus.render()` 内部，不影响外部调用方。
+
+### 8.8 替代声明：CCR 上线后废弃的已有条目
+
+`advisory-bus.ts` 中的以下条目与 CCR 规则语义重叠，CCR Phase 1 上线后应**替代而非叠加**：
+
+| 已有条目 | 对应 CCR 规则 | 处置 |
+|---|---|---|
+| `vigorLowEntry()` (L113) | P3: vigor < 0.25 → 天权 | 标记 `@deprecated`，调用方迁移到 CCR |
+| `stalenessGateEntry()` (L99) | P2: freshness < 0.25 → 天璇 | 标记 `@deprecated`，调用方迁移到 CCR |
+
+同时，`loop.ts` 中手动检查 `turnsSinceLastObjection` 投递 staleness-gate 的逻辑一并清除。不替代会导致同一轮出现两条语义相近的提醒——恰好违反"每轮最多一条星域提醒"的核心约束。
+
+### 8.9 Convergence-detector 互斥门控
+
+§3.5 画了状态光谱图（CCR < courage-hook < convergence-detector），但代码里需要一个**显式的互斥检查**，而不能只靠 priority 排序——因为 convergence-detector level 2/3 走 `injectUserMessage` 直接注入，完全绕过 advisory bus。
+
+同一轮如果 convergence-detector 已经 level >= 2（在 kick），CCR 的温和提醒同时到达模型会造成信号矛盾：一个说"换个角度"，一个说"立即中止当前探索"。
+
+**决策**：CCR 通过 `wasConvergenceTriggered()` 检查互斥。这是 `RuntimeHookDeps` 已有的接口（L74），kick-hook 已经用它做互斥（kick-hook.ts L26）。`loop-factory.ts` 实现为 `self.latestConvergenceResult?.shouldKick ?? false`——这是 convergence level >= 2 的 ground truth，比 `shouldKick(sensorium)` 近似更准确。详见增补文档 §7.1。
+
+### 8.10 行动提示应为带上下文变量的模板
+
+现有 advisory bus 中有效的提醒都带具体数据（"你已执行 N+ 轮未提出异议"）。CCR 规则表 P1/P5 的行动提示已经用了 `{files_modified}` 模板变量，但其他规则的提示仍是纯静态字符串。
+
+**决策**：所有行动提示统一为模板格式，路由器在投递时填充当前 turn 的上下文值。可用变量：
+
+```
+{files_modified}  — 已修改文件数
+{turn}            — 当前轮次
+{turns_since_verify} — 距上次验证的轮数（从 evidence 推算）
+{last_tool}       — 最近一次工具名
+```
+
+纯抽象格言只在 frozen 前缀的胶囊原文中保留，动态注入必须带数据。
+
+### 8.11 意图感知：测试前置时延迟瑶光提醒
+
+瑶光规则（P1/P5）的触发条件是 verification_coverage 低。但在 edit → test 的正常工作流中，edit 完成后的那个 turn verification_coverage 天然低——模型可能正准备跑测试。此时触发"你没验证"的提醒会分散注意力。
+
+**决策**：CCR 对瑶光规则加一个"意图信号"检查——如果 `recentToolHistory` 最后一条是测试相关工具（`run_tests`、target 含 `test`），或上一轮的最后工具是 `edit_file`/`write_file`（刚完成编辑，大概率下一步测试），则瑶光规则延迟一轮。实现为规则上的可选 `suppressWhen` 谓词。
+
+### 8.12 恶化升级覆盖（§8.3）需要二级冷却
+
+§8.3 的 `currentValue < lastTriggeredValue × 0.5` 升级覆盖机制在指标振荡时（降 → 恢复 → 降 → 恢复）会反复触发，冷却形同虚设。
+
+**决策**：升级覆盖本身有 2 轮最小间隔。实现：记录 `lastEscalationOverrideTurn`，两次覆盖之间至少间隔 2 轮。
+
+### 8.13 P1/P5 共享冷却的对称性
+
+§1.2 增补文档说 P1 和 P5 "共享冷却"。明确为**双向对称**：P1 触发后 P5 也进冷却，P5 触发后 P1 也进冷却。实现为按星域（而非按规则 ID）追踪冷却——同一星域的所有规则共享一个冷却计时器。
+
+### 8.14 Vigor 不单独成规则——降级为确认信号
+
+Vigor 是滞后指标（回合结束更新，下轮 preTurn 才读到），单用它做路由条件有 4 类误判：刚完成任务（自然低谷）、探索阶段正常波动、真正受挫（该提醒）、盲目自信（漏触发）。单看 vigor 一个数字无法区分。
+
+**决策**：vigor 不再单独成规则。改为修饰条件——只在客观指标（verification_coverage、freshness）已触发时，vigor 作为二级确认，区分提醒的力度和措辞。VigorState 的 `tonic`（长期基线）和 `phasic`（即时反馈）两个子字段用于选择对应星域的原则池条目（tonic 低 → 天权 Q3 换方向，phasic 低 → 天璇 X3 反证 scout）。
+
+详见增补文档 §8：`docs/design/2026-06-18-sr-router-supplement.md`。
