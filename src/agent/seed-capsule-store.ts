@@ -255,6 +255,46 @@ export function renderCapsuleBlock(l1: SeedCapsuleL1): string {
   return l1.block
 }
 
+// ─── Phase 2: Principle Extraction ─────────────────────────────
+
+export interface ExtractedPrinciple {
+  key: string
+  maxim: string
+  actionPrompt: string
+}
+
+const PRINCIPLE_RE = /<principle\s+key="([^"]+)"\s+action="([^"]+)">([^<]+)<\/principle>/g
+
+/**
+ * 从胶囊 raw 文本中提取 <principle> 标记的原则条目。
+ * 标签格式：<principle key="Y1" action="动作提示">格言</principle>
+ * 返回空数组当无标签时（调用方应 fallback 到硬编码池）。
+ */
+export function extractPrinciplesFromRaw(raw: string): ExtractedPrinciple[] {
+  const results: ExtractedPrinciple[] = []
+  let m: RegExpExecArray | null
+  const re = new RegExp(PRINCIPLE_RE.source, PRINCIPLE_RE.flags)
+  while ((m = re.exec(raw)) !== null) {
+    results.push({
+      key: m[1]!,
+      actionPrompt: m[2]!,
+      maxim: m[3]!.trim(),
+    })
+  }
+  return results
+}
+
+/**
+ * 按星名从胶囊文档中提取原则池。
+ * 返回 null 当胶囊不存在或无 <principle> 标签时。
+ */
+export function extractPrinciples(cwd: string, star: string): ExtractedPrinciple[] | null {
+  const capsule = getCapsuleByStar(cwd, star)
+  if (!capsule) return null
+  const principles = extractPrinciplesFromRaw(capsule.raw)
+  return principles.length > 0 ? principles : null
+}
+
 /** 清除缓存（主要用于测试） */
 export function clearCapsuleCache(): void {
   capsuleCacheByCwd.clear()

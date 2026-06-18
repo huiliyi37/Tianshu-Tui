@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCcrHook, _RULES_FOR_TESTING, _fillTemplate, _isTestIntent } from '../hooks/cognitive-capsule-router.js'
+import { createCcrHook, _RULES_FOR_TESTING, _fillTemplate, _isTestIntent, type CcrTriggerEvent } from '../hooks/cognitive-capsule-router.js'
+import { extractPrinciplesFromRaw } from '../seed-capsule-store.js'
 import type { AdvisoryEntry } from '../advisory-bus.js'
 import type { EvidenceState } from '../evidence.js'
 import type { RuntimeHookContext, RuntimeHookSnapshot } from '../runtime-hooks.js'
@@ -60,13 +61,24 @@ interface TestHarness {
   submitted: AdvisoryEntry[]
   convergenceTriggered: boolean
   evidence: EvidenceState
+  triggerEvents: CcrTriggerEvent[]
   run: (snapshot: RuntimeHookSnapshot) => void
 }
 
-function createHarness(evidenceOverrides: Partial<EvidenceState> = {}): TestHarness {
+interface HarnessOptions {
+  evidenceOverrides?: Partial<EvidenceState>
+  cwd?: string
+}
+
+function createHarness(evidenceOrOpts?: Partial<EvidenceState> | HarnessOptions): TestHarness {
+  const opts: HarnessOptions = evidenceOrOpts && ('evidenceOverrides' in evidenceOrOpts || 'cwd' in evidenceOrOpts)
+    ? evidenceOrOpts as HarnessOptions
+    : { evidenceOverrides: evidenceOrOpts as Partial<EvidenceState> | undefined }
+
   const submitted: AdvisoryEntry[] = []
+  const triggerEvents: CcrTriggerEvent[] = []
   let convergenceTriggered = false
-  const evidence = makeEvidence(evidenceOverrides)
+  const evidence = makeEvidence(opts.evidenceOverrides ?? {})
 
   const hook = createCcrHook({
     advisoryBus: {
@@ -74,10 +86,13 @@ function createHarness(evidenceOverrides: Partial<EvidenceState> = {}): TestHarn
     },
     wasConvergenceTriggered: () => convergenceTriggered,
     getEvidenceState: () => evidence,
+    cwd: opts.cwd,
+    onTrigger: (event) => { triggerEvents.push(event) },
   })
 
   return {
     submitted,
+    triggerEvents,
     get convergenceTriggered() { return convergenceTriggered },
     set convergenceTriggered(v: boolean) { convergenceTriggered = v },
     evidence,
@@ -371,6 +386,103 @@ describe('CognitiveCapsuleRouter', () => {
       }))
       assert.equal(h.submitted.length, 1)
       assert.ok(h.submitted[0]!.content.includes('3 个文件'))
+    })
+  })
+
+  // ─── Phase 2 Tests ─────────────────────────────────────────────
+
+  describe('extractPrinciplesFromRaw', () => {
+    it('extracts principles with key and action', () => {
+      const raw = `
+Some preamble text.
+<principle key="Y1" action="do the thing">Maxim one</principle>
+More text.
+<principle key="Y2" action="another thing">Maxim two</principle>
+`
+      const result = extractPrinciplesFromRaw(raw)
+      assert.equal(result.length, 2)
+      assert.equal(result[0]!.key, 'Y1')
+      assert.equal(result[0]!.actionPrompt, 'do the thing')
+      assert.equal(result[0]!.maxim, 'Maxim one')
+      assert.equal(result[1]!.key, 'Y2')
+    })
+
+    it('returns empty array when no tags present', () => {
+      const result = extractPrinciplesFromRaw('Just plain text, no tags.')
+      assert.equal(result.length, 0)
+    })
+  })
+
+  describe('dynamic principle pool (with cwd)', () => {
+    it('loads principles from capsule docs when cwd is set', () => {
+      const cwd = process.cwd()
+      const h = createHarness({ evidenceOverrides: { filesModified: new Set(['a.ts']) }, cwd })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.equal(h.triggerEvents.length, 1)
+      assert.equal(h.triggerEvents[0]!.dynamicPool, true, 'should use dynamic pool from capsule docs')
+    })
+
+    it('falls back to hardcoded pool when cwd has no capsule docs', () => {
+      const h = createHarness({ evidenceOverrides: { filesModified: new Set(['a.ts']) }, cwd: '/nonexistent/path' })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.equal(h.triggerEvents.length, 1)
+      assert.equal(h.triggerEvents[0]!.dynamicPool, false, 'should fall back to hardcoded pool')
+    })
+  })
+
+  describe('telemetry callback', () => {
+    it('fires onTrigger with correct event shape', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts', 'b.ts']) })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      assert.equal(h.triggerEvents.length, 1)
+      const event = h.triggerEvents[0]!
+      assert.equal(event.rule, 'P1')
+      assert.equal(event.star, '瑶光')
+      assert.equal(event.turn, 5)
+      assert.ok('verificationCoverage' in event.dimValues)
+      assert.ok('vigor' in event.dimValues)
+      assert.ok('vigorTonic' in event.dimValues)
+      assert.ok('vigorPhasic' in event.dimValues)
+    })
+  })
+
+  describe('P3 vigor tonic/phasic split', () => {
+    it('selects Q3 when tonic is low', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts', 'b.ts']) })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.15 }),
+        vigor: makeVigor({ vigor: 0.2, tonic: 0.2, phasic: 0.0 }),
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.match(h.submitted[0]!.key, /ccr-天权-P3/)
+      assert.equal(h.triggerEvents[0]!.principleKey, 'Q3')
+    })
+
+    it('selects X3 when phasic is very negative', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts', 'b.ts']) })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.15 }),
+        vigor: makeVigor({ vigor: 0.2, tonic: 0.5, phasic: -0.4 }),
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.match(h.submitted[0]!.key, /ccr-天权-P3/)
+      assert.equal(h.triggerEvents[0]!.principleKey, 'X3')
     })
   })
 })

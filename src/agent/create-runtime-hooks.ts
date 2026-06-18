@@ -27,7 +27,7 @@ import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatche
 import { createMemoryLearningPostTurnHook, type MemoryLearningHookDeps } from './hooks/memory-learning-hook.js'
 import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-hooks-bridge.js'
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
-import { createCcrHook } from './hooks/cognitive-capsule-router.js'
+import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -158,6 +158,8 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** CCR telemetry callback — invoked on each capsule router trigger for offline analysis. */
+  onCcrTrigger?: (event: CcrTriggerEvent) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
 
@@ -333,6 +335,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       advisoryBus: deps.advisoryBus,
       wasConvergenceTriggered: deps.wasConvergenceTriggered ?? (() => false),
       getEvidenceState: deps.getEvidenceState,
+      cwd: deps.cwd,
+      onTrigger: deps.onCcrTrigger,
     }))
   }
 
