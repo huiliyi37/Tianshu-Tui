@@ -182,8 +182,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   const hooks: RuntimeHook[] = [
     createPerceptionRuntimeHook(),
     createSignalConsumerRuntimeHook({ advisoryBus: deps.advisoryBus }),
-    ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5, sycophancyTrap: deps.sycophancyTrap })] : []),
-    createKickRuntimeHook({ deposit: deps.stigmergyDeposit, wasConvergenceTriggered: deps.wasConvergenceTriggered }),
+    ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5, sycophancyTrap: deps.sycophancyTrap, advisoryBus: deps.advisoryBus })] : []),
+    createKickRuntimeHook({ deposit: deps.stigmergyDeposit, wasConvergenceTriggered: deps.wasConvergenceTriggered, advisoryBus: deps.advisoryBus }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({
       getThetaState: deps.getThetaState,

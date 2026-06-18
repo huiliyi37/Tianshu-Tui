@@ -1,5 +1,7 @@
 import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
 import type { ToolHistoryEntry } from '../../prompt/volatile.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
+import { CONSTITUTIONAL_PRIORITY } from '../advisory-bus.js'
 
 /**
  * 信念宪法迁移 — 从提示注入恢复到宪法级义务语义。
@@ -28,6 +30,8 @@ export interface CourageHookConfig {
   sycophancyTrap?: {
     shouldInjectChallenge(): boolean
   }
+  /** A1: unified advisory bus — courage messages route through Bus instead of injectUserMessage. */
+  advisoryBus?: AdvisoryBus
 }
 
 const DEFAULT_COOLDOWN_TURNS = 5
@@ -94,7 +98,17 @@ export function createCourageHook(config: CourageHookConfig = {}): PreTurnRuntim
       if (!constitutional && !shouldTriggerCourage(ctx.snapshot.recentToolHistory, courageThreshold)) return
 
       lastTriggeredTurn = turn
-      ctx.effects.injectUserMessage(constitutional ? CONSTITUTIONAL_HINT : RISK_HINT)
+      if (config.advisoryBus) {
+        config.advisoryBus.submit({
+          key: 'courage',
+          priority: constitutional ? CONSTITUTIONAL_PRIORITY : 0.5,
+          tier: constitutional ? 'constitutional' : 'operational',
+          category: 'constitutional',
+          content: constitutional ? CONSTITUTIONAL_HINT : RISK_HINT,
+        })
+      } else {
+        ctx.effects.injectUserMessage(constitutional ? CONSTITUTIONAL_HINT : RISK_HINT)
+      }
     },
   }
 }

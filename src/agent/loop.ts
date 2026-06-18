@@ -1015,7 +1015,13 @@ export class AgentLoop {
         methods: [convergenceCheck.injectedMessage.slice(0, 200)],
         severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
       })
-      this.session.appendSystemReminder(convergenceCheck.injectedMessage)
+      this.advisoryBus.submit({
+        key: 'convergence',
+        priority: 0.65,
+        tier: 'operational',
+        category: 'discipline',
+        content: convergenceCheck.injectedMessage,
+      })
 
       // When convergence is detected AND doom loop is blocked, the agent is
       // likely in a post-completion verification loop. Append gate hint
@@ -1026,7 +1032,13 @@ export class AgentLoop {
           const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
           if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
         } catch { /* gate evaluation must never break convergence handling */ }
-        this.session.appendSystemReminder(gateHint)
+        this.advisoryBus.submit({
+          key: 'convergence-gate',
+          priority: 0.6,
+          tier: 'operational',
+          category: 'discipline',
+          content: gateHint,
+        })
       }
     }
 

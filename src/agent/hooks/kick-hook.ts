@@ -1,6 +1,7 @@
 import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
 import { buildKickActions, shouldEscalateFromKick, shouldKick } from '../dissipative-kick.js'
 import type { PheromoneDeposit } from '../../context/stigmergy.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
 
 export interface KickRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
@@ -8,6 +9,8 @@ export interface KickRuntimeHookDeps {
   cooldownTurns?: number
   /** When true, convergence already injected this turn — skip to avoid duplicate "you're stuck" messages. */
   wasConvergenceTriggered?: () => boolean
+  /** A1: unified advisory bus — kick messages route through Bus instead of injectUserMessage. */
+  advisoryBus?: AdvisoryBus
 }
 
 export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntimeHook {
@@ -47,7 +50,17 @@ export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntime
         : kickActions.injectedMessage
 
       if (fullMessage) {
-        ctx.effects.injectUserMessage(fullMessage)
+        if (deps.advisoryBus) {
+          deps.advisoryBus.submit({
+            key: 'dissipative-kick',
+            priority: 0.55,
+            tier: 'operational',
+            category: 'discipline',
+            content: fullMessage,
+          })
+        } else {
+          ctx.effects.injectUserMessage(fullMessage)
+        }
       }
 
       const escalate = shouldEscalateFromKick(sensorium)

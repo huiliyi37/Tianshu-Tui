@@ -9,10 +9,12 @@
  *   5. stigmergy dead-end（signal-consumer-hook.ts — 死路信号）
  *
  * 约束：
- *   - 每轮最多渲染 3 条（按优先级倒序取 Top-3）
+ *   - constitutional tier 条目永不被截断
+ *   - non-constitutional 条目每轮最多 3 条（operational 优先，informational 填空）
  *   - 同 key 去重（同一劝导不在同轮重复出现）
- *   - 经由 GWT salience 机制走 dynamic appendix 单一出口
  */
+
+export type AdvisoryTier = 'constitutional' | 'operational' | 'informational'
 
 export interface AdvisoryEntry {
   /** 去重键 — 同 key 在同轮只保留优先级最高的一条 */
@@ -23,6 +25,8 @@ export interface AdvisoryEntry {
   category: AdvisoryCategory
   /** 渲染内容 — 单行纯文本，不包含 XML 标签 */
   content: string
+  /** 优先级层 — constitutional 永不被截断，operational 参与 Top-N，informational 填空 */
+  tier?: AdvisoryTier
   /** TTL（轮次），默认为 1（仅本轮） */
   ttl?: number
 }
@@ -49,7 +53,7 @@ export type AdvisoryCategory =
  */
 export const CONSTITUTIONAL_PRIORITY = 0.9
 
-/** 每轮最大渲染条数 */
+/** 每轮最大渲染条数（non-constitutional 上限） */
 const MAX_ADVISORIES_PER_TURN = 3
 /** 每个 category 最多保留条数，防止单一信号源垄断 advisory 预算 */
 const MAX_PER_CATEGORY = 2
@@ -181,34 +185,46 @@ export class AdvisoryBus {
 
   /**
    * 渲染本轮劝导为 `<星域-advisory>` XML 块。
-   * 去重 → Top-3 排序 → 减 TTL → 返回字符串（无条目时返回空串）。
-   * 调用后清空本轮 entries，alive 条目进入下轮。
+   *
+   * 分层规则：
+   *   constitutional tier — 永不被截断，仅按 key 去重
+   *   operational tier — 参与 Top-3 竞争（先于 informational）
+   *   informational tier — 填充剩余槽位
    *
    * @param activeStarDomain — active star domain name (e.g. '天枢'). When set,
-   *   advisory entries whose content starts with the same star name are suppressed
-   *   to avoid duplicating the domain presence signal already in the frozen base.
+   *   advisory entries whose content starts with the same star name are suppressed.
    */
   render(activeStarDomain?: string): string {
-    // 合并 alive（上轮未过期） + 本轮新投递
     let all = [...this.alive, ...this.entries]
 
-    // Star-domain dedup: suppress entries whose 【星名】 tag matches the active domain
+    // Star-domain dedup
     if (activeStarDomain) {
       const tag = `【${activeStarDomain}】`
       all = all.filter(e => !e.content.startsWith(tag))
     }
 
-    // 去重：同 key 只保留优先级最高的一条
+    // Separate by tier — constitutional bypasses all caps
+    const constitutional = all.filter(e => e.tier === 'constitutional')
+    const nonConstitutional = all.filter(e => e.tier !== 'constitutional')
+
+    // Constitutional: key dedup only, no category cap, no count limit
+    const constDeduped = new Map<string, AdvisoryEntry>()
+    for (const entry of constitutional) {
+      const existing = constDeduped.get(entry.key)
+      if (!existing || entry.priority > existing.priority) {
+        constDeduped.set(entry.key, entry)
+      }
+    }
+
+    // Non-constitutional: key dedup + category cap
     const deduped = new Map<string, AdvisoryEntry>()
-    for (const entry of all) {
+    for (const entry of nonConstitutional) {
       const existing = deduped.get(entry.key)
       if (!existing || entry.priority > existing.priority) {
         deduped.set(entry.key, entry)
       }
     }
 
-    // Category-level cap: at most MAX_PER_CATEGORY entries from the same
-    // category to prevent a single signal source from monopolizing the budget.
     const catCounts = new Map<AdvisoryCategory, number>()
     const catFiltered: AdvisoryEntry[] = []
     for (const entry of [...deduped.values()].sort((a, b) => b.priority - a.priority)) {
@@ -219,9 +235,33 @@ export class AdvisoryBus {
       }
     }
 
-    const sorted = catFiltered.slice(0, MAX_ADVISORIES_PER_TURN)
+    // Operational first, then informational fills remaining
+    const operational = catFiltered.filter(e => e.tier !== 'informational')
+    const informational = catFiltered.filter(e => e.tier === 'informational')
+    const taken: AdvisoryEntry[] = []
+    for (const e of operational) {
+      if (taken.length >= MAX_ADVISORIES_PER_TURN) break
+      taken.push(e)
+    }
+    for (const e of informational) {
+      if (taken.length >= MAX_ADVISORIES_PER_TURN) break
+      taken.push(e)
+    }
 
-    // 渲染
+    // Combine: constitutional always first, then by priority
+    const sorted: AdvisoryEntry[] = [...constDeduped.values()]
+    for (const e of taken) {
+      let inserted = false
+      for (let i = 0; i < sorted.length; i++) {
+        if (e.priority > (sorted[i]?.priority ?? 0)) {
+          sorted.splice(i, 0, e)
+          inserted = true
+          break
+        }
+      }
+      if (!inserted) sorted.push(e)
+    }
+
     if (sorted.length === 0) {
       this.entries = []
       this.alive = []
@@ -237,7 +277,6 @@ export class AdvisoryBus {
       .filter(e => (e.ttl ?? 1) > 1)
       .map(e => ({ ...e, ttl: (e.ttl ?? 1) - 1 }))
 
-    // 清空本轮 entries
     this.entries = []
 
     return `<星域-advisory>\n${lines.join('\n')}\n</星域-advisory>`
