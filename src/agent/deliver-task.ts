@@ -69,6 +69,14 @@ export interface B1Context {
   getCurrentSnapshotRef?: () => string | undefined
 }
 
+// ── Post-commit review batching ──
+// When multiple deliver_task commits fire in quick succession (e.g. splitting
+// a large changeset into area-scoped commits), each would trigger a separate
+// review worker — wasteful when one review can cover the whole session's work.
+// Cooldown: after a review launches, skip subsequent launches within this window.
+const POST_COMMIT_REVIEW_COOLDOWN_MS = 30_000
+let lastPostCommitReviewAt = 0
+
 function parseNulFileList(output: string): string[] {
   return output.split('\0').filter(Boolean)
 }
@@ -578,6 +586,11 @@ When the task implements a complex spec or cross-module integration, include the
           ...(explicitReviewLevel ? { forceLevel: explicitReviewLevel } : {}),
         }
         if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
+          // Batch: skip if a review was already launched within the cooldown window.
+          const now = Date.now()
+          if (now - lastPostCommitReviewAt < POST_COMMIT_REVIEW_COOLDOWN_MS) {
+            lines.push('', '⏭ 提交后审查合并：上一轮审查仍在冷却窗口内，本轮合并入上一轮。')
+          } else {
           const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
           if (!route || !ctx.reviewDeps) {
             // Advisory: review deps unavailable is a caveat, not a blocker.
@@ -598,6 +611,7 @@ When the task implements a complex spec or cross-module integration, include the
               // 用户在审查运行期间看到进度而非黑盒等待。
               const budgetSec = Math.round(REVIEW_TIMEOUT_MS / 1000)
               params.onOutput?.(`\n⏳ 提交后审查启动中 (${reviewMode}${change.forceLevel ? ' ' + change.forceLevel : ''}, ≤${budgetSec}s)...\n`)
+              lastPostCommitReviewAt = Date.now()
               let outcome: ReviewOutcome
               let reviewTimer: NodeJS.Timeout | undefined
               try {
@@ -652,6 +666,7 @@ When the task implements a complex spec or cross-module integration, include the
               } else if (outcome.verdict === 'nudge') {
                 lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
               }
+            }
             }
           }
         }
