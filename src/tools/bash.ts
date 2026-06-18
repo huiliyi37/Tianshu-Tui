@@ -90,6 +90,36 @@ function rtkRewrite(command: string, toolUseId?: string): string {
   return result
 }
 
+// ── bash-level file read tracking ──
+// Detects when the model repeatedly reads the same file via cat/grep/head/tail/wc,
+// which burns context tokens without adding information. Mirrors read_file's dedup.
+const bashFileReads = new Map<string, { command: string; toolUseId: string; at: number }>()
+const BASH_READ_PATTERNS = [
+  /(?:^|[;&|]\s*)cat\s+['"]?([^'"\s;|&]+)['"]?/g,
+  /(?:^|[;&|]\s*)grep\s+.*\s+['"]?([^'"\s;|&]+)['"]?\s*$/gm,
+  /(?:^|[;&|]\s*)head\s+.*\s+['"]?([^'"\s;|&]+)['"]?/g,
+  /(?:^|[;&|]\s*)tail\s+.*\s+['"]?([^'"\s;|&]+)['"]?/g,
+]
+function checkBashReread(command: string, toolUseId: string): string | null {
+  for (const pattern of BASH_READ_PATTERNS) {
+    pattern.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(command)) !== null) {
+      const filePath = match[1]!
+      if (filePath.startsWith('/tmp/') || filePath.startsWith('/dev/') || filePath === '-') continue
+      const key = `${command.slice(0, 40)}:${filePath}`
+      const prior = bashFileReads.get(key)
+      if (prior && prior.toolUseId !== toolUseId) {
+        bashFileReads.set(key, { command: command.slice(0, 80), toolUseId, at: Date.now() })
+        return `── bash-reread ──\n⚠ 该文件已被 bash 读取过: ${prior.command}。重复读取浪费上下文。如需多次查询，先 cat > /tmp 一次，后续操作在 /tmp 上进行。\n── bash-reread ──`
+      }
+      bashFileReads.set(key, { command: command.slice(0, 80), toolUseId, at: Date.now() })
+    }
+  }
+  return null
+}
+setInterval(() => { for (const [k, v] of bashFileReads) { if (Date.now() - v.at > 600_000) bashFileReads.delete(k) } }, 300_000).unref()
+
 export const BASH_TOOL: Tool = {
   definition: {
     name: 'bash',
@@ -153,10 +183,8 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
-        // 非零退出码 ≠ 失败：grep/diff/test 等用退出码表达"有差异/无匹配/有失败用例"，
-        // build/lint 工具也常以非零码报告非致命问题。只把"无法执行/被信号杀死"判为真 error，
-        // 避免环境性非零码被无条件打成 error 并被下游放大成 error 风暴（天枢退化的根因）。
         const isError = isExecFailure(exitCode)
+        const rereadWarn = checkBashReread(rawCommand, params.toolUseId)
 
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
@@ -174,8 +202,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           if (!wrapInArtifact) {
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
+            const baseContent = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
             return {
-              content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath }),
+              content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
               uiContent: buildUiOutput(raw, meta),
               rawPath,
               isError,
@@ -200,8 +229,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           const modelOutput = successFold
             ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
             : buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
+          const baseContent = `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`
           return {
-            content: `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`,
+            content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
             uiContent: buildUiOutput(raw, meta),
             rawPath: artifact?.rawPath,
             isError,
@@ -209,8 +239,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         }
 
         const rawPath = await persistRawOutput(params.toolUseId, raw)
+        const baseContent = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
         return {
-          content: buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath }),
+          content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           isError,

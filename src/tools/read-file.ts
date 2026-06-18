@@ -467,6 +467,21 @@ Bad:  re-reading the same file you already read this session  → look at your p
       }
     } catch { /* fall through to real read; e.g. invalid path → let readFilePayload error normally */ }
 
+    // ── 重复读取检测 ──
+    // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
+    let repeatWarning: string | null = null
+    try {
+      if (canonical && currentMtimeMs !== null) {
+        const priorSame = readHistory.get(dedupKey!)
+        const fullPrior = fileReadHistory.get(canonical)
+        if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
+          repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
+          repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+        }
+      }
+    } catch { /* best-effort */ }
+
     try {
       payload = await readFilePayload(params.cwd, {
         filePath,
@@ -530,7 +545,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
         recordDedup()
         recordFileDedup()
         return {
-          content: payload.modelContent,
+          content: repeatWarning ? repeatWarning + '\n' + payload.modelContent : payload.modelContent,
           uiContent: payload.uiContent,
           rawPath,
         }
@@ -555,8 +570,9 @@ Bad:  re-reading the same file you already read this session  → look at your p
       // Convention: [artifact:X] is always the LAST token in the content string.
       // prune.ts and stale-round.ts regex `/\[artifact:([A-Za-z0-9_-]+)]\s*$/`
       // depend on this position; any suffix (instructions, summary) goes BEFORE it.
+      const baseContent = payload.modelContent + summaryBlock + `\n[artifact:${artifactId}]`
       return {
-        content: payload.modelContent + summaryBlock + `\n[artifact:${artifactId}]`,
+        content: repeatWarning ? repeatWarning + '\n' + baseContent : baseContent,
         rawContent: payload.modelContent,
         uiContent: payload.uiContent,
         rawPath,
@@ -567,7 +583,7 @@ Bad:  re-reading the same file you already read this session  → look at your p
     recordDedup()
     recordFileDedup()
     return {
-      content: payload.modelContent,
+      content: repeatWarning ? repeatWarning + '\n' + payload.modelContent : payload.modelContent,
       uiContent: payload.uiContent,
       rawPath,
     }
