@@ -223,6 +223,11 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     thetaCheckDisabled: true,
   }, session, config.cwd)
 
+  // Record the selected model into the worker session JSONL so the actual
+  // model used is auditable without opening the .meta.json sidecar.
+  const workerModel = config.promptEngine.getModel()
+  agent.persist?.appendModelSwitch({ to: workerModel })
+
   // Create mailbox sender for structured inter-agent communication.
   // Workers report progress, findings, and escalations through this channel;
   // the coordinator drains the mailbox after the wave completes.
