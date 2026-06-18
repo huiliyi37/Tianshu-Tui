@@ -145,3 +145,42 @@ describe('v3: phaseHint alpha modulation', () => {
     assert.ok(tracker.getHabituated().has('domain'), '8 turns → ~0.83 > 0.8')
   })
 })
+
+describe('immediatePromote', () => {
+  it('promotes a new field on first call', () => {
+    const tracker = new FieldHabituationTracker({ promotionThreshold: 0.8 })
+    const promoted = tracker.immediatePromote('domain', 'tianshu')
+    assert.equal(promoted, true)
+    assert.ok(tracker.getHabituated().has('domain'))
+    assert.equal(tracker.getHabituatedContent().get('domain'), 'tianshu')
+  })
+
+  it('returns false when field already habituated with same content', () => {
+    const tracker = new FieldHabituationTracker({ promotionThreshold: 0.8 })
+    tracker.immediatePromote('domain', 'tianshu')
+    const again = tracker.immediatePromote('domain', 'tianshu')
+    assert.equal(again, false)
+  })
+
+  it('re-promotes when content changes', () => {
+    const tracker = new FieldHabituationTracker({ promotionThreshold: 0.8 })
+    tracker.immediatePromote('domain', 'tianshu')
+    const changed = tracker.immediatePromote('domain', 'tianxuan')
+    assert.equal(changed, true)
+    assert.equal(tracker.getHabituatedContent().get('domain'), 'tianxuan')
+  })
+
+  it('survives subsequent recordTurn with same content', () => {
+    const tracker = new FieldHabituationTracker({ promotionThreshold: 0.8 })
+    tracker.immediatePromote('domain', 'tianshu')
+    tracker.recordTurn({ domain: 'tianshu' })
+    assert.ok(tracker.getHabituated().has('domain'), 'still habituated after recordTurn')
+  })
+
+  it('demotes when recordTurn sees different content', () => {
+    const tracker = new FieldHabituationTracker({ promotionThreshold: 0.8 })
+    tracker.immediatePromote('domain', 'tianshu')
+    tracker.recordTurn({ domain: 'different' })
+    assert.ok(!tracker.getHabituated().has('domain'), 'content change resets habituation')
+  })
+})

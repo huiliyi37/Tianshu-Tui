@@ -156,4 +156,33 @@ export class FieldHabituationTracker {
     }
     return result
   }
+
+  /**
+   * Immediately promote a field to habituated state, bypassing the
+   * confidence accumulation period. Use for fields known to be session
+   * constants on exact-prefix-cache models (e.g. star-domain on DeepSeek).
+   * If the field hasn't been recorded yet, creates it with the given content.
+   * Returns true if the field was promoted (false if already habituated).
+   */
+  immediatePromote(name: string, content: string): boolean {
+    const hash = sha256short(content)
+    const existing = this.fields.get(name)
+    if (existing) {
+      if (existing.habituated && existing.hash === hash) return false
+      existing.hash = hash
+      existing.content = content
+      existing.confidence = 1.0
+      existing.stableCount = this.legacyThreshold ?? 999
+      existing.habituated = true
+      return true
+    }
+    this.fields.set(name, {
+      hash,
+      content,
+      stableCount: this.legacyThreshold ?? 999,
+      confidence: 1.0,
+      habituated: true,
+    })
+    return true
+  }
 }

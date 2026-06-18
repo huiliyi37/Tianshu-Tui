@@ -66,6 +66,9 @@ export interface PromptEngineConfig {
   volatileCtx: VolatileContext
   habituationThreshold?: number
   attentionProfile?: { effectiveAttentionRatio: number; toolDensityThreshold: number; collapseAgeTurns: number }
+  /** Prefix cache mode — 'deepseek-native' enables immediate promotion of
+   *  session-constant fields (star-domain) to skip habituation warm-up. */
+  prefixCache?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
 }
 
 export class PromptEngine {
@@ -301,6 +304,13 @@ export class PromptEngine {
                 fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
               }
               this.tracker.recordTurn(fieldValues, this.phaseHint)
+
+              // Exact-prefix cache fast path: star-domain is a session constant
+              // on DeepSeek — skip habituation warm-up and promote immediately
+              // so it enters consolidatedBlock (before userContent) from turn 1.
+              if (this.config.prefixCache === 'deepseek-native' && fieldValues['activeDomain']) {
+                this.tracker.immediatePromote('activeDomain', fieldValues['activeDomain'])
+              }
 
               const habituatedContent = this.tracker.getHabituatedContent()
               const renderedHabituated = new Map<string, string>()

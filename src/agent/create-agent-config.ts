@@ -108,6 +108,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
       sessionMemoryBlock: input.sessionMemoryBlock,
    }),
     habituationThreshold: input.habituationThreshold ?? 5,
+    prefixCache: capabilities.prefixCacheStrategy,
  })
 
   return {

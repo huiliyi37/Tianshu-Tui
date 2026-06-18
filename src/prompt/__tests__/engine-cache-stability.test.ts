@@ -400,6 +400,58 @@ describe('habituation: three-zone consolidation', () => {
   })
 })
 
+describe('deepseek-native fast promotion: star-domain enters consolidated on turn 1', () => {
+  it('star-domain promoted to consolidated on first user message', () => {
+    const engine = new PromptEngine({
+      model: 'deepseek-v4-pro',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+      prefixCache: 'deepseek-native',
+    })
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    const trailer = req.messages[req.messages.length - 1]!
+    const content = typeof trailer.content === 'string' ? trailer.content : ''
+    const beforeSep = content.split('\n---\n')[0]!
+    assert.ok(beforeSep.includes('<consolidated>'), 'consolidated block must exist on turn 1')
+    assert.ok(beforeSep.includes('tianshu'), 'consolidated block must contain star-domain')
+  })
+
+  it('non-deepseek model does NOT fast-promote on turn 1', () => {
+    const engine = new PromptEngine({
+      model: 'glm-5.2',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+      prefixCache: 'none',
+    })
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    const trailer = req.messages[req.messages.length - 1]!
+    const content = typeof trailer.content === 'string' ? trailer.content : ''
+    const beforeSep = content.split('\n---\n')[0]!
+    assert.ok(!beforeSep.includes('<consolidated>'), 'no consolidated on turn 1 for non-deepseek')
+  })
+
+  it('star-domain removed from appendix after fast promotion', () => {
+    const engine = new PromptEngine({
+      model: 'deepseek-v4-pro',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+      prefixCache: 'deepseek-native',
+    })
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'test' }])
+    const trailer = req.messages[req.messages.length - 1]!
+    const content = typeof trailer.content === 'string' ? trailer.content : ''
+    const afterSep = content.split('\n---\n').slice(1).join('\n---\n')
+    const domainInAppendix = afterSep.includes('<star-domain')
+    assert.ok(!domainInAppendix, 'star-domain must NOT appear in appendix (after ---) when fast-promoted')
+  })
+})
+
 describe('agent loop mode: volatile block cached across tool-call turns', () => {
   function createEngine() {
     return new PromptEngine({
