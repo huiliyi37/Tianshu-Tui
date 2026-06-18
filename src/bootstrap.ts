@@ -37,6 +37,9 @@ import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
 import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
+import { createCouncilConveneTool } from './tools/council-convene.js'
+import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
+import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
 import { createTaskLedger } from './agent/task-ledger.js'
@@ -405,6 +408,17 @@ export function createInteractiveToolRegistry(
       store: refs.meridianIndexer?.getDb(),
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
+  }))
+
+  // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
+  reg.register(createCouncilConveneTool({
+    delegateBatch: async (requests, policy, abortSignal, onProgress) => {
+      if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
+      return refs.coordinator.delegateBatch(requests, policy, abortSignal, onProgress)
+    },
+    getSessionId: () => refs.sessionId ?? undefined,
+    recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
+    recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
   }))
 
   // recall_capsule

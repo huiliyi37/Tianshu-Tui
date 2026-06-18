@@ -20,8 +20,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 16 built-in profiles (9 core + 6 flash-army + designer)', () => {
-    assert.equal(registry.list().length, 16)
+  it('has 17 built-in profiles (9 core + 6 flash-army + designer + council_expert)', () => {
+    assert.equal(registry.list().length, 17)
   })
 
   it('maps code_scout as readonly', () => {
@@ -80,12 +80,12 @@ describe('ProfileRegistry', () => {
     const ro = registry.listReadOnlyProfiles()
     // adversarial_verifier is readonly_plus_test, not 'readonly' — excluded from readonly list.
     // designer + format_checker are readonly and included.
-    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'designer', 'doc_scout', 'format_checker', 'reviewer', 'troubleshooter'])
+    assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'format_checker', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 16 names', () => {
+  it('getProfileNames returns all 17 names', () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', () => {

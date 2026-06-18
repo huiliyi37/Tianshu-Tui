@@ -1,13 +1,19 @@
 import { extractJsonCandidates, type WorkerResult } from '../work-order.js'
 import { aggregateCouncil, type CouncilDraft, type CouncilPlan, type SeatContribution } from './council-plan.js'
 import { renderCouncilPlan } from './council-render.js'
+import {
+  routeCouncilSeat,
+  buildCouncilRoutingShadow,
+  type CouncilSeat,
+  type CouncilRoutingShadowEvent,
+} from './council-routing.js'
 
 /** 结构型扇出依赖 —— 仅声明 runCouncil 用到的批量委派能力，保持与 coordinator 解耦。 */
 export interface CouncilFanoutRequest {
   parentTurnId: string
   objective: string
   kind: 'plan'
-  profile: 'reviewer'
+  profile: 'council_expert'
   scope: Record<string, never>
   authority: string
 }
@@ -19,18 +25,23 @@ export interface CouncilDeps {
   ) => Promise<{ results: WorkerResult[] }>
   /** 注入时钟，保持 aggregate 纯净、编排可测。 */
   now: () => number
+  /** 旁路记录席位路由 shadow —— 默认缺省。绝不影响真实派发。 */
+  recordRoutingShadow?: (event: CouncilRoutingShadowEvent) => void
+  /** shadow 归属会话 id（仅 recordRoutingShadow 在用）。 */
+  sessionId?: string
 }
 
 export interface CouncilInput {
   draft: CouncilDraft
-  seats: string[]
+  seats: CouncilSeat[]
   abortSignal?: AbortSignal
 }
 
 /** 席位 objective —— 领域职责简述 + schema 指令（仿 buildPlannerObjective）。 */
-export function buildSeatObjective(seat: string, draft: CouncilDraft): string {
+export function buildSeatObjective(seat: CouncilSeat, draft: CouncilDraft): string {
   return [
-    `你是 ${seat} 席位专家。从你的领域视角单轮会诊以下计划草案，只出意见，不执行。`,
+    `你是 ${seat.authority} 席位专家。从你的领域视角单轮会诊以下计划草案，只出意见，不执行。`,
+    ...(seat.charter ? [`席位章程：${seat.charter}`] : []),
     '',
     `Objective: ${draft.objective}`,
     `Draft items: ${JSON.stringify(draft.items)}`,
@@ -38,7 +49,7 @@ export function buildSeatObjective(seat: string, draft: CouncilDraft): string {
     'Return a JSON WorkerResult whose `artifacts` contains ONE entry:',
     '{ "kind": "note", "title": "seat-contribution", "content": "<a JSON string of your SeatContribution>" }',
     'SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.',
-    `Set authority to "${seat}".`,
+    `Set authority to "${seat.authority}".`,
   ].join('\n')
 }
 
@@ -78,22 +89,34 @@ function objectiveHash(s: string): string {
 
 /** 单轮会诊：恰一次 delegateBatch 扇出席位 → 裁决 → 渲染。绝不派 worker 执行 / 分波。 */
 export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promise<CouncilPlan> {
+  const convenedAt = deps.now() // 全程只取一次时钟，喂 shadow / meta / md，杜绝双取不一致。
+  const hash = objectiveHash(input.draft.objective)
+  const authorities = input.seats.map(s => s.authority)
+
   const requests: CouncilFanoutRequest[] = input.seats.map(seat => ({
-    parentTurnId: `council:seat-${seat}`,
+    parentTurnId: `council:seat-${seat.authority}`,
     objective: buildSeatObjective(seat, input.draft),
     kind: 'plan',
-    profile: 'reviewer',
+    profile: 'council_expert',
     scope: {},
-    authority: seat,
+    authority: seat.authority,
   }))
+
+  // 旁路：席位路由 shadow（推荐 vs 实际 tier）。默认缺省；提供时也绝不改派发结果。
+  if (deps.recordRoutingShadow) {
+    const sessionId = deps.sessionId ?? 'unknown'
+    for (const seat of input.seats) {
+      const route = routeCouncilSeat(seat, { objective: input.draft.objective })
+      deps.recordRoutingShadow(buildCouncilRoutingShadow({ sessionId, objectiveHash: hash, route, timestamp: convenedAt }))
+    }
+  }
+
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
   const contributions = input.seats.map(seat => {
-    const result = run.results.find(r => r.workOrderId === `council:seat-${seat}`)
-    return result ? parseSeatContribution(seat, result) : { authority: seat, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
+    const result = run.results.find(r => r.workOrderId === `council:seat-${seat.authority}`)
+    return result ? parseSeatContribution(seat.authority, result) : { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
   })
   const aggregate = aggregateCouncil(input.draft, contributions)
-  const convenedAt = deps.now() // 只取一次，避免 md/meta 不一致
-  const hash = objectiveHash(input.draft.objective)
-  const finalPlanMarkdown = renderCouncilPlan({ objective: input.draft.objective, seats: input.seats, contributions, aggregate, finalPlanMarkdown: '', meta: { round: 1, convenedAt, objectiveHash: hash } })
-  return { objective: input.draft.objective, seats: input.seats, contributions, aggregate, finalPlanMarkdown, meta: { round: 1, convenedAt, objectiveHash: hash } }
+  const finalPlanMarkdown = renderCouncilPlan({ objective: input.draft.objective, seats: authorities, contributions, aggregate, finalPlanMarkdown: '', meta: { round: 1, convenedAt, objectiveHash: hash } })
+  return { objective: input.draft.objective, seats: authorities, contributions, aggregate, finalPlanMarkdown, meta: { round: 1, convenedAt, objectiveHash: hash } }
 }

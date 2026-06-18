@@ -24,7 +24,7 @@ function workerResult(seat: string, contribJson: string): WorkerResult {
 
 const input: CouncilInput = {
   draft: { objective: 'split loop.ts', items: [{ id: 'T1', title: 't', detail: 'd' }] },
-  seats: ['tianquan', 'tianfu'],
+  seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
 }
 
 describe('runCouncil — 单轮 + 解耦', () => {
@@ -38,10 +38,10 @@ describe('runCouncil — 单轮 + 解耦', () => {
     assert.equal(calls, 1)
   })
 
-  it('扇出请求均为 plan/reviewer/对应 authority（不携带执行语义）', async () => {
+  it('扇出请求均为 plan/council_expert/对应 authority（不携带执行语义）', async () => {
     const seen: string[] = []
     const deps: CouncilDeps = {
-      delegateBatch: async (reqs) => { for (const r of reqs) { assert.equal(r.kind, 'plan'); assert.equal(r.profile, 'reviewer'); seen.push(r.authority) } ; return { results: reqs.map(r => workerResult(r.authority, '{}')) } },
+      delegateBatch: async (reqs) => { for (const r of reqs) { assert.equal(r.kind, 'plan'); assert.equal(r.profile, 'council_expert'); seen.push(r.authority) } ; return { results: reqs.map(r => workerResult(r.authority, '{}')) } },
       now: () => 1,
     }
     await runCouncil(input, deps)
@@ -75,6 +75,27 @@ describe('runCouncil — 单轮 + 解耦', () => {
     const plan = await runCouncil(input, deps)
     assert.match(plan.finalPlanMarkdown, new RegExp(`convenedAt=${plan.meta.convenedAt}`))
   })
+
+  it('recordRoutingShadow 旁路：每席记一次，不改 contributions/seats', async () => {
+    const shadows: string[] = []
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => ({ results: reqs.map(r => workerResult(r.authority, JSON.stringify({ authority: r.authority, summary: `${r.authority}-x`, additions: [], risks: [], challenges: [], alternatives: [] }))) }),
+      now: () => 7,
+      sessionId: 'sess-1',
+      recordRoutingShadow: ev => shadows.push(`${ev.seat}:${ev.finalTier}`),
+    }
+    const plan = await runCouncil(input, deps)
+    assert.deepEqual(shadows, ['tianquan:cheap', 'tianfu:balanced'])
+    // 旁路不改派发结果。
+    assert.deepEqual(plan.seats, ['tianquan', 'tianfu'])
+    assert.equal(plan.contributions[1]!.summary, 'tianfu-x')
+  })
+
+  it('缺省 recordRoutingShadow 时不报错（shadow 默认关）', async () => {
+    const deps: CouncilDeps = { delegateBatch: async (reqs) => ({ results: reqs.map(r => workerResult(r.authority, '{}')) }), now: () => 1 }
+    const plan = await runCouncil(input, deps)
+    assert.equal(plan.seats.length, 2)
+  })
 })
 
 describe('parseSeatContribution — 降级兜底', () => {
@@ -99,7 +120,7 @@ describe('parseSeatContribution — 降级兜底', () => {
 
 describe('buildSeatObjective', () => {
   it('含席位名 + schema 指令 + objective', () => {
-    const o = buildSeatObjective('tianquan', input.draft)
+    const o = buildSeatObjective({ authority: 'tianquan' }, input.draft)
     assert.match(o, /tianquan/); assert.match(o, /seat-contribution/); assert.match(o, /split loop.ts/)
   })
 })

@@ -84,6 +84,29 @@ Do NOT modify any files.`,
     builtIn: true,
   },
   {
+    // 议事会席位专家 —— 单轮会诊出意见，不执行。
+    // 关键：故意 NOT 设 tierLock。reviewer 的 tierLock:'cheap' 会让
+    // recommendModelTier 直接 short-circuit 成 cheap，天权/天府高风险席永远
+    // 升不到 strong；council_expert 让 authority→tier 升级路径正常生效。
+    name: 'council_expert',
+    role: 'readonly',
+    allowedTools: [...READ_ONLY_TOOLS],
+    expertisePrompt: `You are a star-domain council seat expert. From your domain's perspective, review a single plan draft in ONE round and return only opinions — never execute.
+
+### Mandate
+- Read the draft objective and items, then critique from YOUR domain charter only.
+- Surface additions, risks (with severity + mitigation), challenges (open questions), and alternatives.
+- Do NOT modify files. Do NOT dispatch sub-work. This is a single advisory round.
+
+### Output
+Return a JSON WorkerResult whose \`artifacts\` contains exactly ONE entry:
+{ "kind": "note", "title": "seat-contribution", "content": "<JSON string of your SeatContribution>" }
+SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.`,
+    defaultKind: 'plan',
+    defaultTimeoutMs: 600_000, // 10min — 单轮会诊需充分读上下文
+    builtIn: true,
+  },
+  {
     name: 'verifier',
     role: 'hands',
     allowedTools: [...WRITE_TOOLS],
