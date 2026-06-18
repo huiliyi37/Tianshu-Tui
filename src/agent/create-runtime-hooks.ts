@@ -28,6 +28,7 @@ import { createMemoryLearningPostTurnHook, type MemoryLearningHookDeps } from '.
 import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-hooks-bridge.js'
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
+import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -338,6 +339,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       cwd: deps.cwd,
       onTrigger: deps.onCcrTrigger,
     }))
+  }
+
+  // Self-Verify: postTurn hook — when a turn uses only read-class tools
+  // with no ground-truth verification, inject a reminder for the next turn
+  // to self-verify before building on the conclusions.
+  if (deps.advisoryBus) {
+    hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {
