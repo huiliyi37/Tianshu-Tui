@@ -1,5 +1,4 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
-import { wrapSystemReminder } from '../prompt/system-reminder.js'
 import { SessionContext } from './context.js'
 import { SessionPersist } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
@@ -349,16 +348,16 @@ export class AgentLoop {
       telemetryWriter: this.telemetryWriter,
       getRuntimeSnapshot: extra => this.buildRuntimeSnapshot(extra),
       getProviderDegradationRatio: () => this.config.providerHealth?.getDegradationRatio() ?? 0,
-      // Hook injections are pseudo-user messages: wrap as <system-reminder>
-      // so PromptEngine doesn't treat them as user boundaries (cache break).
-      addUserMessage: message => { this.session.addUserMessage(wrapSystemReminder(message)) },
+      // Hook injections are pseudo-user messages: append as SR to the last
+      // user message (not a new message entry) to preserve prefix cache.
+      addUserMessage: message => { this.session.appendSystemReminder(message) },
       requestThetaCheck: reason => { this.requestThetaCheck(reason) },
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
     })
     this.intent = new TurnIntentController({
       depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
-      addUserMessage: message => { this.session.addUserMessage(wrapSystemReminder(message)) },
+      addUserMessage: message => { this.session.appendSystemReminder(message) },
     })
     this.contextInjection = new ContextInjectionController({
       session: this.session,
@@ -1015,7 +1014,7 @@ export class AgentLoop {
         methods: [convergenceCheck.injectedMessage.slice(0, 200)],
         severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
       })
-      this.session.addUserMessage(wrapSystemReminder(convergenceCheck.injectedMessage))
+      this.session.appendSystemReminder(convergenceCheck.injectedMessage)
 
       // When convergence is detected AND doom loop is blocked, the agent is
       // likely in a post-completion verification loop. Signal completion
@@ -1028,7 +1027,7 @@ export class AgentLoop {
           const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
           if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
         } catch { /* gate evaluation must never break convergence handling */ }
-        this.session.addUserMessage(wrapSystemReminder(gateHint))
+        this.session.appendSystemReminder(gateHint)
       }
     }
 

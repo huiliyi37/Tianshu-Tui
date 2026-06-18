@@ -12,7 +12,7 @@ import { recordToolNamedFingerprint } from './trace-store.js'
 import { join } from 'node:path'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
-import { isSystemReminder, wrapSystemReminder } from '../prompt/system-reminder.js'
+import { isSystemReminder } from '../prompt/system-reminder.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
@@ -333,7 +333,7 @@ export function createPlanTraceCoordinator(self: AgentLoop): PlanTraceCoordinato
     getLatestConvergenceResult: () => self.latestConvergenceResult,
     getConsecutiveNoToolTurns: () => self.consecutiveNoToolTurns,
     getTraceStore: () => self.traceStore,
-    addSystemReminder: content => { self.session.addUserMessage(wrapSystemReminder(content)) },
+    addSystemReminder: content => { self.session.appendSystemReminder(content) },
     setPlanTraceAppendix: appendix => { self.config.promptEngine.setPlanTraceAppendix(appendix) },
   })
 }
@@ -390,6 +390,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Session ===
     removeLastMessage: () => { self.session.removeLastMessage() },
     addUserMessage: (content) => { self.session.addUserMessage(content) },
+    appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
     addAssistantBlocks: (blocks) => { self.session.addAssistantBlocks(blocks) },
     addUsage: (usage) => { self.session.addUsage(usage) },
     getEstimatedTokens: () => self.session.getEstimatedTokens(),

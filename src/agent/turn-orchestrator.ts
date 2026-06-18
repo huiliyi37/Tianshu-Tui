@@ -19,7 +19,6 @@ import { rejectOnAbort } from './turn-boundary-abort.js'
 import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
-import { wrapSystemReminder } from '../prompt/system-reminder.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types re-exported for deps interface ──
@@ -116,6 +115,7 @@ export interface TurnOrchestratorDeps {
   // === Session ===
   removeLastMessage: () => void
   addUserMessage: (content: string) => void
+  appendSystemReminder: (content: string) => void
   addAssistantBlocks: (blocks: import('../api/types.js').ContentBlock[]) => void
   addUsage: (usage: { output_tokens: number }) => void
   getEstimatedTokens: () => number
@@ -692,7 +692,7 @@ export class TurnOrchestrator {
         this.deps.setLastThinkingContent(thinkingResult.nextState.lastThinkingContent)
         this.deps.setThinkingOnlyRetries(thinkingResult.nextState.thinkingOnlyRetries)
         if (thinkingResult.shouldRetry) {
-          this.deps.addUserMessage(wrapSystemReminder(thinkingResult.retryMessage))
+          this.deps.appendSystemReminder(thinkingResult.retryMessage)
           // Archive any partial streamed text before retrying (same rationale as TTSR above)
           callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), false)
           continue

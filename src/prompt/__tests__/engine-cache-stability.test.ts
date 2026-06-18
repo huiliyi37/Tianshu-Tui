@@ -699,3 +699,75 @@ describe('sessionState injection — cache safety + path coverage', () => {
       'Historical retrieval must return identical bytes (frozen snapshot)')
   })
 })
+
+describe('SR append: convergence/hook injection cache stability', () => {
+  function makeEngine() {
+    return new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test/project', gitStatus: 'Current branch: main', rivetMd: '# Test' },
+    })
+  }
+
+  it('SR append to last user message: array length stable across turns', () => {
+    const engine = makeEngine()
+    const messages: OaiMessage[] = [
+      { role: 'user', content: '继续' },
+    ]
+
+    // Turn 1: normal request
+    const req1 = engine.buildOaiRequest([...messages])
+    const len1 = req1.messages.length
+
+    // Simulate appendSystemReminder: SR text appended to last user message content
+    const srText = '<system-reminder>\nconvergence kick\n</system-reminder>'
+    messages[0] = { ...messages[0]!, content: (messages[0]!.content as string) + '\n' + srText }
+
+    // Turn 2: same message array length, but content now includes SR
+    const req2 = engine.buildOaiRequest([...messages])
+    const len2 = req2.messages.length
+
+    // Key invariant: message array length must not change
+    assert.equal(len2, len1, 'SR append must not increase request message count')
+
+    // The last user message must contain the SR text
+    const lastUser = req2.messages.filter(m => m.role === 'user').at(-1)!
+    assert.ok(
+      typeof lastUser.content === 'string' && lastUser.content.includes('convergence kick'),
+      'SR text must be visible in the request',
+    )
+  })
+
+  it('SR append vs old addUserMessage: message count difference', () => {
+    // Old behavior: SR as separate messages (4 injections)
+    const engine1 = makeEngine()
+    const oldMessages: OaiMessage[] = [
+      { role: 'user', content: '继续' },
+      { role: 'assistant', content: 'doing work...' },
+      { role: 'user', content: '<system-reminder>\nkick 1\n</system-reminder>' },
+      { role: 'user', content: '<system-reminder>\nkick 2\n</system-reminder>' },
+      { role: 'user', content: '<system-reminder>\ngate hint\n</system-reminder>' },
+      { role: 'user', content: '<system-reminder>\nkick 3\n</system-reminder>' },
+      { role: 'user', content: '继续' },
+    ]
+    const oldReq = engine1.buildOaiRequest(oldMessages)
+    const oldUserCount = oldReq.messages.filter(m => m.role === 'user').length
+
+    // New behavior: SR appended to last user message
+    const engine2 = makeEngine()
+    const newMessages: OaiMessage[] = [
+      { role: 'user', content: '继续' },
+      { role: 'assistant', content: 'doing work...' },
+      { role: 'user', content: '继续' },
+    ]
+    const newReq = engine2.buildOaiRequest(newMessages)
+    const newUserCount = newReq.messages.filter(m => m.role === 'user').length
+
+    // New approach has fewer user messages (SRs don't add entries)
+    assert.ok(
+      newUserCount < oldUserCount,
+      `New approach (${newUserCount} user msgs) must have fewer than old (${oldUserCount})`,
+    )
+  })
+})

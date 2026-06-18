@@ -4,6 +4,7 @@ import type { CompactEvent, ContextLedger } from '../context/types.js'
 import { estimateOaiMessageTokens, estimateOaiTokens } from '../compact/micro.js'
 import { stableStringify } from '../api/stable-json.js'
 import { sanitizeForJsonTransport } from '../utils/sanitize.js'
+import { wrapSystemReminder } from '../prompt/system-reminder.js'
 
 import { INLINE_TOOL_RESULT_MAX_CHARS } from '../compact/constants.js'
 import { ToolArgPostProcessorRegistry } from './tool-arg-post-processor.js'
@@ -118,6 +119,28 @@ export class SessionContext {
     this.state.estimatedTokens += estimateOaiMessageTokens(msg)
     this.state.turnCount++
     this.onMutation?.({ type: 'append', message: msg })
+  }
+
+  /**
+   * Append system-reminder content to the last user message instead of
+   * creating a new message entry. This keeps the message array length stable,
+   * preserving DeepSeek exact-prefix cache when convergence/hook injections
+   * occur mid-task.
+   */
+  appendSystemReminder(text: string): void {
+    const wrapped = wrapSystemReminder(text)
+    const msgs = this.state.oaiMessages
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]!
+      if (m.role === 'user' && typeof m.content === 'string') {
+        const oldTokens = estimateOaiMessageTokens(m)
+        msgs[i] = { ...m, content: m.content + '\n' + sanitizeForJsonTransport(wrapped) }
+        this.state.estimatedTokens += estimateOaiMessageTokens(msgs[i]!) - oldTokens
+        this.onMutation?.({ type: 'replace', messages: msgs.slice() })
+        return
+      }
+    }
+    this.addUserMessage(wrapped)
   }
 
   /**
