@@ -19,7 +19,7 @@ describe('renderStarmapConstellation', () => {
   it('renders all 7 star names', () => {
     const lines = renderStarmapConstellation('tianshu-planning')
     const joined = lines.join('\n')
-    for (const star of ['观局', '寻迹', '拆解', '定标', '铸形', '试锋', '归航']) {
+    for (const star of ['观局', '寻迹', '拆解', '立约', '铸形', '试锋', '归航']) {
       assert.ok(joined.includes(star), `Missing star: ${star}`)
     }
   })

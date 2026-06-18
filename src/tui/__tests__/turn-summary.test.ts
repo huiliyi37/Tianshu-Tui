@@ -14,7 +14,7 @@ describe('formatTurnSummary', () => {
       segments: [seg('tianshu-planning'), seg('yuheng-implementing'), seg('kaiyang-testing')],
       filesRead: 5, filesModified: 3, verifiedCount: 1, elapsedMs: 134_000,
     })
-    assert.match(out, /⭐.*→.*🔨.*→.*⚔️/)
+    assert.match(out, /◐.*→.*✦.*→.*❧/)
     assert.match(out, /读5 改3/)
     assert.match(out, /✓1/)
     // Turn number and elapsed are intentionally NOT in this marker — the live
