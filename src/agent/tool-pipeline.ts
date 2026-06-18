@@ -35,6 +35,7 @@ import { batchPrewarm } from './prewarm-file.js'
 
 import { compactThresholds, pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from '../tools/artifact-threshold.js'
+import { extractTrailingArtifactId } from './tool-result-tiering.js'
 import { truncateToolResult } from './tool-result-truncate.js'
 import { getStarSignature } from './star-signature.js'
 import type { ImmuneHook } from './immune-hook.js'
@@ -249,23 +250,17 @@ const ARTIFACT_ERROR_THRESHOLD = 1600 // chars — error results need more inlin
  */
 const FIDELITY_EXEMPT_TOOLS: ReadonlySet<string> = new Set(['skill'])
 
-/** Tools whose output is the agent's "eyes" — intercept only at very high thresholds. */
-const READ_TOOLS: ReadonlySet<string> = new Set([
-  'read_file', 'grep', 'glob', 'find_files', 'search', 'repo_map', 'inspect_project',
-  // read_section is the model's escape hatch from artifact references. Its output
-  // is content the model explicitly asked for (artifactId + section), already
-  // capped by computeModelReadCap inside the tool. Wrapping it again here turned
-  // every recovery attempt into [artifact:NEW_ID] -> read_section(NEW_ID) -> ...
-  // an infinite nesting loop the model could only escape by requesting tiny
-  // L1-L10 slices. (Diagnosed by tianshu v4 pro post-mortem 2026-05-25.)
-  'read_section',
+/** Tools that perform their own L0 artifact wrapping (inside the tool impl) and
+ *  emit a trailing [artifact:id] marker. L1 must NOT re-wrap their output:
+ *  - read_file / read_section: content the model explicitly requested; re-wrap
+ *    turns every recovery into [artifact:NEW_ID] -> read_section(NEW_ID) -> ...
+ *    an infinite nesting loop (tianshu v4 pro post-mortem 2026-05-25).
+ *  - grep / bash: L0 wraps at its own threshold with a trailing marker; the old
+ *    startsWith('[artifact:') check missed the trailing marker and re-saved the
+ *    already-truncated string (L0->L1 double-save bug). */
+const L0_WRAPPED_TOOLS: ReadonlySet<string> = new Set([
+  'read_file', 'read_section', 'grep', 'bash',
 ])
-
-/** Heuristic: is this bash command read-only (cat, grep, find, git log/diff/status, ls, etc.)? */
-function isBashReadOnly(input: Record<string, unknown>): boolean {
-  const cmd = typeof input.command === 'string' ? input.command.trimStart() : ''
-  return /^(cat|head|tail|grep|rg|find|ls|tree|wc|git\s+(log|diff|status|show|blame|rev-parse|branch)|echo|printf|type|which|file)\b/.test(cmd)
-}
 
 function isDietNoInfoReadResult(content: string): boolean {
   return content.includes('[diet:redundant]') || content.includes('[diet:useless]')
@@ -320,9 +315,13 @@ async function artifactIntercept(
   contextWindow?: number,
 ): Promise<string> {
   if (!artifactStore) return content
-  // Read-class tools bypass artifact intercept entirely — rely on per-message budget + hard truncation.
-  const isReadTool = READ_TOOLS.has(toolName) || (toolName === 'bash' && isBashReadOnly(toolInput))
-  if (isReadTool) return content
+
+  // Tools with their own L0 wrapping must not be re-intercepted here.
+  if (L0_WRAPPED_TOOLS.has(toolName)) return content
+  // Belt-and-suspenders: never re-wrap content that already ends in an artifact
+  // ref (covers any future L0-wrapping tool not yet listed above). Uses the
+  // shared trailing-marker convention, not startsWith — the marker is at the END.
+  if (extractTrailingArtifactId(content)) return content
 
   let threshold = thresholdOverride ?? (isError ? ARTIFACT_ERROR_THRESHOLD : ARTIFACT_INTERCEPT_THRESHOLD)
 
@@ -354,8 +353,6 @@ async function artifactIntercept(
     debugLog(`[artifact-intercept-skip] tool=${toolName} len=${content.length} threshold=${threshold} isError=${isError}`)
     return content
  }
-  if (content.startsWith('[artifact:')) return content // already an artifact ref
-
   // Determine target label for the artifact
   const target = typeof toolInput.file_path === 'string'
     ? toolInput.file_path

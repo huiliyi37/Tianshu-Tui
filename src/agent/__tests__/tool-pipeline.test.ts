@@ -1033,7 +1033,7 @@ describe('executeToolUse', () => {
 // 验证 delegate_batch worker 内部 pipeline 的 artifactIntercept 行为：
 // 1. 大输出非 read 工具 → 被拦截并持久化到磁盘
 // 2. 返回内容变为 [artifact:ID] 摘要引用
-// 3. read-class 工具（read_file, grep 等）不被拦截
+// 3. read_file/read_section 不被拦截（模型的眼睛）；grep/glob/bash 等搜索工具在 3x 阈值下可拦截
 // 4. 两个独立 ArtifactStore 实例互不干扰（worker 隔离）
 
 describe('artifactIntercept in tool pipeline', () => {
@@ -1144,6 +1144,43 @@ describe('artifactIntercept in tool pipeline', () => {
       assert.ok(existsSync(art.rawPath), `artifact raw file should exist at ${art.rawPath}`)
       const diskContent = readFileSync(art.rawPath, 'utf-8')
       assert.equal(diskContent, largeOutput, 'disk content should match original output')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('does NOT re-wrap grep output already carrying a trailing artifact ref (L0→L1 double-save)', async () => {
+    setup()
+    try {
+      // Simulate an L0-wrapped grep result: large inline body + trailing [artifact:] marker.
+      // 40000 chars exceeds the budget-scaled READ threshold (2500*3*3=22500 when
+      // remainingBudgetFraction=1), so the current startsWith check would re-save.
+      const l0Wrapped =
+        'G'.repeat(40000) +
+        '\n\nmatches summary\nUse read_section(artifactId="preexisting-l0", section="L1-L200") to expand.\n[artifact:preexisting-l0]'
+      const deps = makeDepsWithStore({
+        config: {
+          ...makeDepsWithStore().config,
+          toolRegistry: {
+            execute: async () => ({ content: l0Wrapped, isError: false }),
+            get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+            needsApproval: () => false,
+          },
+        } as any,
+      })
+
+      const result = await executeToolUse(
+        { id: 'tu-grep-double', name: 'grep', input: { pattern: 'x' } },
+        deps, noopCallbacks as any, 1, false,
+      )
+
+      const content = (result.toolResult as any).content as string
+      // L1 must NOT create a new artifact for an already-wrapped result.
+      assert.equal(store.list().length, 0,
+        'L1 must not double-save a grep result that already carries a trailing artifact ref')
+      // The original L0 artifact ref must survive untouched.
+      assert.ok(content.includes('[artifact:preexisting-l0]'),
+        'original L0 artifact ref must survive')
     } finally {
       cleanup()
     }
@@ -1267,7 +1304,7 @@ describe('artifactIntercept in tool pipeline', () => {
       })
 
       const result = await executeToolUse(
-        { id: 'tu-error-artifact', name: 'bash', input: { command: 'npm test' } },
+        { id: 'tu-error-artifact', name: 'run_tests', input: { command: 'npm test' } },
         deps, noopCallbacks as any, 1, false,
       )
 
@@ -1384,7 +1421,7 @@ describe('artifactIntercept in tool pipeline', () => {
       const largeOutput1 = 'Worker1 findings: '.repeat(600) // ~10800 chars (>7500 effective threshold)
       const largeOutput2 = 'Worker2 review: '.repeat(600) // ~9600 chars
 
-      // Worker 1: bash tool with large output
+      // Worker 1: inspect_project tool with large output (no L0 wrap → L1 intercepts)
       const deps1 = makeDepsWithStore({
         artifactStore: store1,
         config: {
@@ -1416,7 +1453,7 @@ describe('artifactIntercept in tool pipeline', () => {
 
       // Execute both workers
       const result1 = await executeToolUse(
-        { id: 'tu-w1', name: 'bash', input: { command: 'npm test' } },
+        { id: 'tu-w1', name: 'inspect_project', input: {} },
         deps1, noopCallbacks as any, 1, false,
       )
       const result2 = await executeToolUse(
