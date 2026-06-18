@@ -192,13 +192,6 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.ok(!projection.includes('<cognitive-mirror'))
   })
 
-  it('excludes regulation-cost (routing-only)', () => {
-    const sensorium = makeSensorium()
-    const ledger = makeLedger({ sensorium, regulationPressure: 0.35 })
-    const mirror = buildCognitiveMirror(ledger)
-    assert.ok(!mirror.includes('regulation-cost'), 'regulation-cost is routing-only')
-  })
-
   it('coexists with task contract and verification gap when all present', () => {
     // This test verifies that the mirror co-exists with other projections.
     // The contract rendering is tested in task-contract.test.ts.

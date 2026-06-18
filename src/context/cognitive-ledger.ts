@@ -21,8 +21,6 @@ export interface CognitiveLedgerInput {
   seasonIntensity?: number
   /** CVM trap: latest tool risk level for uncertainty framing */
   riskLevel?: RiskLevel
-  /** Meta-regulation: current regulation pressure (0-1) */
-  regulationPressure?: number
 }
 
 export interface CognitiveLedger {
@@ -36,7 +34,6 @@ export interface CognitiveLedger {
   season?: CognitiveSeason | null
   seasonIntensity?: number
   riskLevel?: RiskLevel
-  regulationPressure?: number
 }
 
 export interface CognitivePhaseSnapshot {
@@ -60,7 +57,6 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     season: input.season ?? null,
     seasonIntensity: input.seasonIntensity,
     riskLevel: input.riskLevel,
-    regulationPressure: input.regulationPressure,
   }
 }
 
@@ -90,11 +86,10 @@ export function buildVerificationGapProjection(ledger: CognitiveLedger): string 
  *   strategy   — current reasoning effort + exploration breadth
  *   vigor      — phasic (acute arousal) + tonic (sustained) activation
  *
- * Routing-only dimensions (consumed by hooks/CCR, NOT shown to model):
- *   freshness  — CCR P2 routes on this; model never acted on it directly
- *   momentum   — shouldKick reads this from sensorium; prompt visibility was noise
- *   pressure   — signal-consumer reads this; compaction is automatic
- *   regulation-cost — experimental, no evidence of model behavioral response
+ * Routing-only dimensions (consumed by hooks from sensorium, NOT shown to model):
+ *   freshness  — affordance scoring, EFE, star-event routing, CCR P2
+ *   momentum   — shouldKick, prediction-error, retrospect
+ *   pressure   — signal-consumer, model-policy-selection, reward-loop
  *
  * The mirror is CONCISE — it must not consume the cognitive oxygen
  * it's meant to protect (see Task 12: CVM overhead).
@@ -108,9 +103,7 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 
   if (s.complexity !== undefined) parts.push(`complexity="${formatDim(s.complexity)}"`)
-  // momentum — routing-only: consumed by shouldKick from sensorium directly
-  // freshness — routing-only: consumed by CCR P2 from sensorium directly
-  // pressure — routing-only: consumed by signal-consumer from sensorium directly
+  // momentum, freshness, pressure — routing-only: consumed by hooks from sensorium directly
   if (s.stability !== undefined) parts.push(`stability="${formatDim(s.stability)}"`)
 
   if (ledger.strategy) {
@@ -134,8 +127,6 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
       : ledger.season
     parts.push(`season="${seasonVal}"`)
   }
-
-  // regulation-cost — routing-only: experimental, no evidence of model behavioral response
 
   return `<cognitive-mirror ${parts.join(' ')} />`
 }

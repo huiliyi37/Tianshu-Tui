@@ -371,7 +371,6 @@ export class TurnStepProducer {
       vigor: pressureResult.shouldThrottleCvm ? null : this.self.vigorState,
       season: pressureResult.shouldThrottleCvm ? null : this.self.currentSeason,
       seasonIntensity: pressureResult.shouldThrottleCvm ? undefined : (this.self.currentSeasonIntensity ?? undefined),
-      regulationPressure: pressureResult.cvmOverheadRatio > 0 ? pressureResult.cvmOverheadRatio : undefined,
       riskLevel: this.self.latestRisk.level,
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
