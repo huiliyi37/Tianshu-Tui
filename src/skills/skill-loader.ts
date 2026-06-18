@@ -115,6 +115,9 @@ export class SkillRegistry {
     if (!existsSync(dir)) return { loaded, errors }
 
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      // Skip `_`-prefixed entries (e.g. `_drafts/`): auto-distilled skill drafts
+      // are review-only and must never enter the discovery block / frozen prefix.
+      if (entry.name.startsWith('_')) continue
       try {
         if (entry.isFile() && entry.name.endsWith('.md')) {
           const skillFile = join(dir, entry.name)

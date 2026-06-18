@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import { loadConstellation } from '../../constellation/store.js'
+import { distillSkillDraft, persistSkillDraft, listSkillDrafts } from '../../agent/skill-distill.js'
 import type { LogEntry } from '../log-state.js'
 
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
@@ -554,5 +555,79 @@ describe('handleSlashCommand', () => {
         rmSync(cwd, { recursive: true, force: true })
       }
     })
+  })
+})
+
+describe('/skill review|approve|reject — auto-distill drafts', () => {
+  function seedDraft(cwd: string): string {
+    const draft = distillSkillDraft({
+      sessionId: 'feed1234-session',
+      objective: 'parse jsonl session log',
+      decisions: [],
+      trajectory: [
+        { turn: 1, tool: 'read_file', target: 'src/log.ts', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' },
+        { turn: 1, tool: 'edit_file', target: 'src/log.ts', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' },
+        { turn: 1, tool: 'run_tests', target: 'src/__tests__/log.test.ts', durationMs: 1, status: 'success', inputSummary: '', resultSummary: '' },
+      ],
+      verifications: [{ command: 'npm test', status: 'passed', scope: 'full', exitCode: 0, passed: 3, failed: 0, skipped: 0, durationMs: 5 }],
+      filesModified: ['src/log.ts'],
+      existingSkills: [],
+    })!
+    persistSkillDraft(cwd, draft)
+    return draft.slug
+  }
+
+  it('/skill review lists pending drafts', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'skill-review-'))
+    try {
+      const slug = seedDraft(cwd)
+      const entries: string[] = []
+      const handled = await handleSlashCommand(makeCtx({
+        parts: ['/skill', 'review'],
+        agent: { ...makeCtx().agent, cwd } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes(slug), `应列出草稿: ${entries[0]}`)
+      assert.ok(entries[0]!.includes('approve'))
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('/skill approve promotes a draft and removes it from drafts', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'skill-approve-'))
+    try {
+      const slug = seedDraft(cwd)
+      const entries: string[] = []
+      const handled = await handleSlashCommand(makeCtx({
+        parts: ['/skill', 'approve', slug],
+        agent: { ...makeCtx().agent, cwd } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('已入库'), `应报告入库: ${entries[0]}`)
+      assert.equal(listSkillDrafts(cwd).length, 0)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+
+  it('/skill reject deletes a draft', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'skill-reject-'))
+    try {
+      const slug = seedDraft(cwd)
+      const entries: string[] = []
+      const handled = await handleSlashCommand(makeCtx({
+        parts: ['/skill', 'reject', slug],
+        agent: { ...makeCtx().agent, cwd } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('已丢弃'), `应报告丢弃: ${entries[0]}`)
+      assert.equal(listSkillDrafts(cwd).length, 0)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
   })
 })

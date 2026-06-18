@@ -97,10 +97,31 @@ describe('createDefaultRuntimeHooks', () => {
       dream: { cwd: '/tmp/project', sessionId: 'session-1', getDecisions: () => [], getTrajectory: () => [] },
     })
 
-    assert.deepEqual(hooks.slice(-2).map(h => [h.name, h.phase]), [
+    assert.deepEqual(hooks.slice(-3).map(h => [h.name, h.phase]), [
       ['dream-distill', 'postSession'],
+      ['skill-distill', 'postSession'],
       ['telemetry-flush', 'postSession'],
     ])
+  })
+
+  it('registers skill-distill alongside dream, and skips it when disabled', () => {
+    const base = {
+      stigmergyDeposit: async () => {},
+      stigmergyQuery: async () => [],
+      getEvidenceState: () => ({ filesRead: new Set<string>(), filesModified: new Set<string>(), verifications: [], deliveryStatus: 'unverified' as const, impactedFiles: new Set<string>(), impactedTests: new Set<string>() }),
+      setLoadedPheromones: () => {},
+      getThetaState: () => ({ interval: 7, lastCheckTurn: 0, toolCallCount: 0, lastThetaAt: 0, phase: 0, cycleCount: 0 }),
+      setThetaState: () => {},
+      getPredictionAccumulator: () => ({ history: [] }),
+      dream: { cwd: '/tmp/project', sessionId: 'session-1', getDecisions: () => [], getTrajectory: () => [] },
+    }
+
+    const withDistill = createDefaultRuntimeHooks(base)
+    assert.ok(withDistill.some(h => h.name === 'skill-distill'), 'skill-distill registered by default with dream deps')
+
+    const disabled = createDefaultRuntimeHooks({ ...base, skillDistillDisabled: true })
+    assert.ok(!disabled.some(h => h.name === 'skill-distill'), 'skill-distill suppressed when disabled')
+    assert.ok(disabled.some(h => h.name === 'dream-distill'), 'dream still registered when only skill-distill disabled')
   })
 
   it('does not register songline hook unless explicitly enabled', () => {

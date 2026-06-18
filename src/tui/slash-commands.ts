@@ -29,6 +29,7 @@ import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/cod
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
 import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
+import { listSkillDrafts, approveSkillDraft, rejectSkillDraft } from '../agent/skill-distill.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
   loadConstellation,
@@ -68,7 +69,7 @@ const HELP_TEXT = `Available commands:
 /mcp — Show MCP server status
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
-/skill [list|<name>] — List or load Claude skills
+/skill [list|<name>|review|approve <name>|reject <name>] — List/load skills; review auto-distilled drafts
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
@@ -1188,6 +1189,50 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         source === 'global-claude' ? '🌐' : '📁'
       const allSkills = skillRegistry.list()
 
+      // ── Auto-distilled draft review (human-in-loop) ──
+      if (sub === 'review' || sub === 'drafts') {
+        const drafts = listSkillDrafts(ctx.agent.cwd)
+        if (drafts.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: '没有待审核的 skill 草稿。\n会话结束时,验证通过的可复用流程会自动蒸馏到 .rivet/skills/_drafts/。' }))
+        } else {
+          const lines = drafts.map(d => `  📝 ${d.name} — ${(d.description || '(no description)').slice(0, 120)}`)
+          pushStatic(createLogEntry({ type: 'system', content: `待审核 skill 草稿 (${drafts.length}):\n${lines.join('\n')}\n\n/skill approve <name> 入库  ·  /skill reject <name> 丢弃` }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'approve') {
+        const name = parts[2]
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /skill approve <name>(用 /skill review 查看草稿)' }))
+          setIsStreaming(false)
+          return true
+        }
+        const res = approveSkillDraft(ctx.agent.cwd, name)
+        if (res.ok && res.skill) {
+          skillRegistry.register(res.skill)
+          pushStatic(createLogEntry({ type: 'system', content: `✅ 已入库 skill: ${res.skill.name}\n已注册到本会话发现层,可用 /skill ${res.skill.name} 加载或由模型自动发现。` }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: `❌ 入库失败: ${res.error ?? 'unknown error'}` }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'reject') {
+        const name = parts[2]
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /skill reject <name>(用 /skill review 查看草稿)' }))
+          setIsStreaming(false)
+          return true
+        }
+        const ok = rejectSkillDraft(ctx.agent.cwd, name)
+        pushStatic(createLogEntry({ type: 'system', content: ok ? `🗑 已丢弃草稿: ${name}` : `草稿 "${name}" 不存在` }))
+        setIsStreaming(false)
+        return true
+      }
+
       if (!sub || sub === 'list' || sub === 'ls') {
         if (allSkills.length === 0) {
           pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nCopy a skill in with:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
@@ -1199,7 +1244,9 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
               const desc = (s.description || '(no description)').replace(/\s+/g, ' ').slice(0, 120)
               return `  ${sourceTag(s.source)} ${s.name} (${size}) — ${desc}`
             })
-          pushStatic(createLogEntry({ type: 'system', content: `Skills (${allSkills.length}):\n${lines.join('\n')}\n\nUse /skill <name> to load a skill's full instructions into the conversation.` }))
+          const draftCount = listSkillDrafts(ctx.agent.cwd).length
+          const draftHint = draftCount > 0 ? `\n📝 ${draftCount} 个自动蒸馏草稿待审核 — /skill review` : ''
+          pushStatic(createLogEntry({ type: 'system', content: `Skills (${allSkills.length}):\n${lines.join('\n')}\n\nUse /skill <name> to load a skill's full instructions into the conversation.${draftHint}` }))
         }
         setIsStreaming(false)
         return true

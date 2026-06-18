@@ -12,6 +12,7 @@ import type { DelegationCoordinator } from './coordinator.js'
 import { createTelemetryFlushHook } from './hooks/telemetry-flush-hook.js'
 import { createPhysarumShadowTelemetryHook } from './hooks/physarum-shadow-telemetry-hook.js'
 import { createDreamHook } from './hooks/dream-hook.js'
+import { createSkillDistillHook } from './hooks/skill-distill-hook.js'
 import { createCourageHook } from './hooks/courage-hook.js'
 import { createRadioHook, type RadioHookDeps } from './hooks/radio-hook.js'
 import { createConsistencyCheckHook } from './hooks/consistency-check-hook.js'
@@ -70,6 +71,10 @@ export interface RuntimeHookDeps {
     getFailureJournal?: () => import('./failure-journal.js').FailureJournal
   }
   playbookStore?: PlaybookStore
+  /** Live registry skills (name+triggers) for skill-distill dedup. */
+  getRegisteredSkills?: () => Array<{ name: string; triggers: RegExp[] }>
+  /** Disable session-end skill draft distillation. Default: enabled when dream deps exist. */
+  skillDistillDisabled?: boolean
   buildRetrospectInput?: () => RetrospectInput
   getDoomLoopLevel?: () => DoomLoopLevel
   /** Whether convergence detection injected a kick this turn — used for kick-hook mutual exclusion. */
@@ -264,6 +269,20 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       getFailureJournal: deps.dream.getFailureJournal,
       getPlaybookStore: deps.playbookStore ? () => deps.playbookStore : undefined,
     }))
+
+    // Skill-distill: same postSession source as dream — verified, repeatable
+    // procedures are distilled into review-only SKILL.md drafts.
+    if (!deps.skillDistillDisabled) {
+      hooks.push(createSkillDistillHook({
+        cwd: deps.dream.cwd,
+        sessionId: deps.dream.sessionId,
+        getEvidenceState: deps.getEvidenceState,
+        getDecisions: deps.dream.getDecisions,
+        getTrajectory: deps.dream.getTrajectory,
+        getRegisteredSkills: deps.getRegisteredSkills,
+        getObjective: deps.getObjective,
+      }))
+    }
   }
 
   if (deps.telemetryWriter && deps.getPhysarumShadowStats) {

@@ -22,6 +22,7 @@ import { AntiAnchoringController } from './anti-anchoring-controller.js'
 import { ModelRoutingShadowController } from './model-routing-shadow-controller.js'
 import { PrewarmController } from './prewarm-controller.js'
 import { TurnStepProducer } from './turn-step-producer.js'
+import { skillRegistry } from '../skills/skill-loader.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
 // P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
@@ -278,6 +279,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         getTrajectory: () => self.trajectory.getEntries(),
         getFailureJournal: () => self.failureJournal,
       },
+      getRegisteredSkills: () => skillRegistry.list().map(s => ({ name: s.name, triggers: s.triggers })),
     } : {}),
     meridianIndexer: self.config.meridianIndexer,
     physarumFileAccess: {

@@ -119,6 +119,8 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/evidence', description: 'Show last turn evidence' },
     { name: '/context', description: 'Show context ledger' },
     { name: '/memory', description: 'Show session memory' },
+    { name: '/skill list', description: 'List available skills' },
+    { name: '/skill review', description: 'Review auto-distilled skill drafts' },
     { name: '/mission', description: '天契 — 当前任务契约', category: 'command' },
     { name: '/mcp', description: 'Show MCP server status' },
     { name: '/cockpit', description: 'Toggle cockpit panel' },
