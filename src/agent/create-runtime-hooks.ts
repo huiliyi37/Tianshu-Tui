@@ -27,6 +27,7 @@ import { createDispatcherHook, type DispatcherHookDeps } from './hooks/dispatche
 import { createMemoryLearningPostTurnHook, type MemoryLearningHookDeps } from './hooks/memory-learning-hook.js'
 import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-hooks-bridge.js'
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
+import { createCcrHook } from './hooks/cognitive-capsule-router.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -323,6 +324,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       setPrevStreamedText: deps.setPrevStreamedText,
       threshold: deps.dedupGuardThreshold,
       advisoryBus: deps.advisoryBus,
+    }))
+  }
+
+  // CCR: Cognitive Capsule Router — star-domain advisory routing
+  if (deps.advisoryBus && isStarSoulEnabled()) {
+    hooks.push(createCcrHook({
+      advisoryBus: deps.advisoryBus,
+      wasConvergenceTriggered: deps.wasConvergenceTriggered ?? (() => false),
+      getEvidenceState: deps.getEvidenceState,
     }))
   }
 

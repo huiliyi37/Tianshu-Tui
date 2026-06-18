@@ -91,11 +91,13 @@ export function disciplineReanchorEntry(): AdvisoryEntry {
 
 /**
  * 新鲜度衰减门 — 当 session 较长且近期无主动异议时触发。
- * 由 loop.ts 在每个 user turn 边界检查并投递。
+ * @deprecated Replaced by CognitiveCapsuleRouter rule P2 (freshness < 0.25).
+ * Kept for backward compatibility; callers should migrate to CCR.
  */
 export const STALENESS_GATE_TURN_THRESHOLD = 20
 export const STALENESS_GATE_QUIET_WINDOW = 10
 
+/** @deprecated Use CCR rule P2 instead. */
 export function stalenessGateEntry(turnsSinceLastObjection: number): AdvisoryEntry {
   return {
     key: 'staleness-gate',
@@ -108,7 +110,8 @@ export function stalenessGateEntry(turnsSinceLastObjection: number): AdvisoryEnt
 
 /**
  * Vigor 低迷唤醒 — 当执行能量（tonic）过低时注入具体化行动指引。
- * 替代 frozen <sober> 锚点的行为层面功能。
+ * @deprecated Replaced by CognitiveCapsuleRouter rule P3 (verif_cov < 0.3 ∧ vigor < 0.3).
+ * Kept for backward compatibility; callers should migrate to CCR.
  */
 export function vigorLowEntry(): AdvisoryEntry {
   return {

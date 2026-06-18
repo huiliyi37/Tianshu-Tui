@@ -21,7 +21,7 @@ import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
 import { formatEventsForAppendix, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
-import { STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, stalenessGateEntry, vigorLowEntry } from './advisory-bus.js'
+// staleness/vigor-low advisory entries migrated to CCR hook (cognitive-capsule-router.ts)
 import { classifySeason } from './cognitive-season.js'
 import { renderToolContext, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
 import { selectPolicy } from './policy-selection.js'
@@ -277,15 +277,8 @@ export class TurnStepProducer {
     // Pass 5: adaptive repair hint injection
     this.self.contextInjection.refreshRepairHint()
 
-    // Anti-habituation: staleness gate — fire when session is long and no objections raised
-    this.self.turnsSinceLastObjection++
-    if (turn >= STALENESS_GATE_TURN_THRESHOLD && this.self.turnsSinceLastObjection >= STALENESS_GATE_QUIET_WINDOW) {
-      this.self.advisoryBus.submit(stalenessGateEntry(this.self.turnsSinceLastObjection))
-    }
-    // Anti-habituation: vigor-low refresh — wake up when execution energy is depleted
-    if (this.self.vigorState.tonic < 0.3) {
-      this.self.advisoryBus.submit(vigorLowEntry())
-    }
+    // Anti-habituation: staleness / vigor-low advisories are now routed by
+    // CognitiveCapsuleRouter (preTurn hook) via advisory bus. Manual injection removed.
 
     // A1: flush advisory bus into prompt engine (unified corrective guidance)
     // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
