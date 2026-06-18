@@ -4,7 +4,7 @@ import { createSelfVerifyHook } from '../self-verify-hook.js'
 import type { AdvisoryEntry } from '../../advisory-bus.js'
 import type { RuntimeHookContext } from '../../runtime-hooks.js'
 
-function makeCtx(tools: Array<{ tool: string; status: string; target: string }>): RuntimeHookContext {
+function makeCtx(tools: Array<{ tool: string; status: 'success' | 'failed' | 'running'; target: string }>): RuntimeHookContext {
   return {
     snapshot: {
       cwd: '/test',
@@ -53,7 +53,7 @@ describe('SelfVerifyHook', () => {
     assert.equal(submitted.length, 0)
   })
 
-  it('does NOT fire when bash was used (can be typecheck/test)', () => {
+  it('does NOT fire when bash actually verifies (tsc/test/lint/build)', () => {
     const submitted: AdvisoryEntry[] = []
     const hook = createSelfVerifyHook({
       advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
@@ -63,6 +63,19 @@ describe('SelfVerifyHook', () => {
       { tool: 'bash', status: 'success', target: 'tsc --noEmit' },
     ]))
     assert.equal(submitted.length, 0)
+  })
+
+  it('FIRES when bash is a non-verifying read (cat doc) — the core 看文档不验证 case', () => {
+    const submitted: AdvisoryEntry[] = []
+    const hook = createSelfVerifyHook({
+      advisoryBus: { submit(e: AdvisoryEntry) { submitted.push(e) } },
+    })
+    hook.run(makeCtx([
+      { tool: 'read_file', status: 'success', target: 'src/a.ts' },
+      { tool: 'bash', status: 'success', target: 'cat docs/design.md' },
+    ]))
+    assert.equal(submitted.length, 1)
+    assert.match(submitted[0]!.content, /没有独立验证/)
   })
 
   it('does NOT fire when no tools were used', () => {
