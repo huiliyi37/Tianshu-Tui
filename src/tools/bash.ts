@@ -7,7 +7,6 @@ import { getShellCommand } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
-import { pruneThresholds } from '../compact/constants.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 
@@ -107,7 +106,7 @@ function checkBashReread(command: string, toolUseId: string): string | null {
     while ((match = pattern.exec(command)) !== null) {
       const filePath = match[1]!
       if (filePath.startsWith('/tmp/') || filePath.startsWith('/dev/') || filePath === '-') continue
-      const key = `${command.slice(0, 40)}:${filePath}`
+      const key = filePath
       const prior = bashFileReads.get(key)
       if (prior && prior.toolUseId !== toolUseId) {
         bashFileReads.set(key, { command: command.slice(0, 80), toolUseId, at: Date.now() })
