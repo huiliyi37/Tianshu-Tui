@@ -68,11 +68,10 @@ describe('session-recovery: decideStartupSession (R1 fresh-by-default)', () => {
     assert.equal(d.sessionId, 'sess-1')
   })
 
-  it('crash recovery: active session with no clean exit in same cwd is silently resumed', () => {
+  it('no longer silently resumes active sessions — default is always fresh', () => {
     const d = decideStartupSession(input())
-    assert.equal(d.resumed, true)
-    assert.equal(d.sessionId, 'sess-1')
-    assert.match(d.reason, /crash recovery/)
+    assert.equal(d.resumed, false)
+    assert.equal(d.sessionId, null)
   })
 
   it('never resumes a session belonging to another cwd (even with --continue)', () => {
@@ -98,7 +97,7 @@ describe('session-recovery: decideStartupSession (R1 fresh-by-default)', () => {
     assert.equal(d.sessionId, null)
   })
 
-  it('RIVET_NO_AUTO_RESUME suppresses crash recovery but explicit resume still works', () => {
+  it('RIVET_NO_AUTO_RESUME still allows explicit --continue to work', () => {
     const suppressed = decideStartupSession(input({ disableAutoResume: true }))
     assert.equal(suppressed.resumed, false)
 
@@ -112,10 +111,10 @@ describe('session-recovery: decideStartupSession (R1 fresh-by-default)', () => {
     assert.equal(d.resumed, false)
   })
 
-  it('crash recovery tolerates legacy sessions without a cwd field (no cross-cwd info)', () => {
+  it('legacy sessions without cwd field: not auto-resumed', () => {
     const d = decideStartupSession(input({
       load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cleanExit: false }),
     }))
-    assert.equal(d.resumed, true)
+    assert.equal(d.resumed, false)
   })
 })

@@ -1,20 +1,11 @@
 /**
- * Startup session decision: fresh by default, explicit resume on demand.
+ * Startup session decision: always fresh, no implicit resume.
  *
- * Historically a restart within 24h silently auto-resumed the last session,
- * replaying its full message history. Because the pointer was global (not
- * per-cwd) and ignored whether the previous process exited cleanly, an
- * unrelated task's hundreds of messages bled into what the user expected to be
- * a fresh session — polluting context and eroding code-inspection discipline.
- *
- * New contract (mirrors Claude Code `--continue/--resume` and opencode):
+ * New contract:
  *   - Default startup mints a FRESH session.
  *   - `--continue`/`--resume`/`RIVET_RESUME=1` explicitly returns to the last
  *     session for the current cwd (regardless of lifecycle/age).
- *   - The ONLY implicit resume is crash recovery: an `active` session that never
- *     got to mark a clean exit, in the same cwd and within the freshness window.
- *     This preserves the long-running autonomous-task pickup that motivated the
- *     original auto-resume.
+ *   - No implicit resume — not even crash recovery.
  *
  * The decision is pure and injected (no fs/DB here) so it is unit-testable.
  * Resuming returns the previous session id so the existing startup path
@@ -85,7 +76,7 @@ export function decideStartupSession(input: StartupDecisionInput): StartupDecisi
     return { sessionId: input.lastSessionId, resumed: true, reason: 'explicit resume (--continue)' }
   }
 
-  // Default is a fresh session. The only implicit resume below is crash recovery.
+  // Default is a fresh session — no implicit resume of any kind.
   if (input.disableAutoResume) return { ...fresh, reason: 'auto-resume disabled (RIVET_NO_AUTO_RESUME=1)' }
   if (info.status === 'completed' || info.status === 'archived') {
     return { ...fresh, reason: `previous session ${info.status}` }
@@ -93,9 +84,6 @@ export function decideStartupSession(input: StartupDecisionInput): StartupDecisi
   if (info.cleanExit) return { ...fresh, reason: 'previous session exited cleanly' }
   if (typeof info.updatedAt === 'number' && input.now - info.updatedAt > input.freshnessMs) {
     return { ...fresh, reason: 'previous session too old to auto-resume' }
-  }
-  if (info.status === 'active') {
-    return { sessionId: input.lastSessionId, resumed: true, reason: 'crash recovery (interrupted session)' }
   }
   return { ...fresh, reason: 'default new session' }
 }
