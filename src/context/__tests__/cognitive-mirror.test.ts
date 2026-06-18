@@ -59,7 +59,7 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.equal(buildCognitiveMirror(ledger), '')
   })
 
-  it('generates cognitive-mirror tag with sensorium dimensions', () => {
+  it('generates cognitive-mirror tag with visible sensorium dimensions', () => {
     const sensorium = makeSensorium({ confidence: 0.3, complexity: 0.7, freshness: 0.6 })
     const ledger = makeLedger({ sensorium })
     const mirror = buildCognitiveMirror(ledger)
@@ -68,11 +68,10 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.ok(mirror.endsWith(' />'))
     assert.ok(mirror.includes('verification_coverage="0.30"'))
     assert.ok(mirror.includes('complexity="0.70"'))
-    assert.ok(mirror.includes('freshness="0.60"'))
     assert.ok(mirror.includes('files_modified="0"'))
   })
 
-  it('includes all sensorium dimensions and files_modified', () => {
+  it('includes visible dimensions and excludes routing-only ones', () => {
     const sensorium = makeSensorium({
       confidence: 0.5,
       complexity: 0.3,
@@ -87,10 +86,11 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.ok(mirror.includes('verification_coverage'))
     assert.ok(mirror.includes('files_modified'))
     assert.ok(mirror.includes('complexity'))
-    assert.ok(mirror.includes('momentum'))
     assert.ok(mirror.includes('stability'))
-    assert.ok(mirror.includes('freshness'))
-    assert.ok(mirror.includes('pressure'))
+    // routing-only: consumed by hooks/CCR from sensorium, not shown to model
+    assert.ok(!mirror.includes('momentum'), 'momentum is routing-only')
+    assert.ok(!mirror.includes('freshness'), 'freshness is routing-only')
+    assert.ok(!mirror.includes('pressure'), 'pressure is routing-only')
   })
 
   it('includes strategy profile when available', () => {
@@ -190,6 +190,13 @@ describe('cognitive mirror — 认知镜面', () => {
     const projection = buildCognitivePromptProjection(ledger)
 
     assert.ok(!projection.includes('<cognitive-mirror'))
+  })
+
+  it('excludes regulation-cost (routing-only)', () => {
+    const sensorium = makeSensorium()
+    const ledger = makeLedger({ sensorium, regulationPressure: 0.35 })
+    const mirror = buildCognitiveMirror(ledger)
+    assert.ok(!mirror.includes('regulation-cost'), 'regulation-cost is routing-only')
   })
 
   it('coexists with task contract and verification gap when all present', () => {

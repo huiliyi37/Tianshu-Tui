@@ -82,16 +82,19 @@ export function buildVerificationGapProjection(ledger: CognitiveLedger): string 
  * before generating each turn. This is paravirtualization — the model
  * knows it's in the CVM and can actively adjust behavior.
  *
- * Six sensorium dimensions + strategy + vigor:
- *   verification_coverage — how many modified files have been verified? (not general confidence)
- *   complexity — how diverse is the recent tool pattern?
- *   momentum   — are we accelerating or coasting?
- *   stability  — is the session healthy or approaching doom loop?
- *   freshness  — how familiar is the current file context?
- *   pressure   — is the context window filling up?
+ * Visible dimensions (model reads these to adjust behavior):
+ *   verification_coverage — how many modified files have been verified?
  *   files_modified — raw count so model can interpret vacuous coverage
+ *   complexity — how diverse is the recent tool pattern?
+ *   stability  — is the session healthy or approaching doom loop?
  *   strategy   — current reasoning effort + exploration breadth
  *   vigor      — phasic (acute arousal) + tonic (sustained) activation
+ *
+ * Routing-only dimensions (consumed by hooks/CCR, NOT shown to model):
+ *   freshness  — CCR P2 routes on this; model never acted on it directly
+ *   momentum   — shouldKick reads this from sensorium; prompt visibility was noise
+ *   pressure   — signal-consumer reads this; compaction is automatic
+ *   regulation-cost — experimental, no evidence of model behavioral response
  *
  * The mirror is CONCISE — it must not consume the cognitive oxygen
  * it's meant to protect (see Task 12: CVM overhead).
@@ -102,18 +105,14 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
 
   const parts: string[] = [`verification_coverage="${formatDim(s.confidence)}"`]
 
-  // Show how many files have been modified so the model can interpret
-  // verification_coverage correctly. When files_modified=0,
-  // verification_coverage=1.00 is vacuously true (0/0 = all verified).
   parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 
   if (s.complexity !== undefined) parts.push(`complexity="${formatDim(s.complexity)}"`)
-  if (s.momentum !== undefined) parts.push(`momentum="${formatDim(s.momentum)}"`)
+  // momentum — routing-only: consumed by shouldKick from sensorium directly
+  // freshness — routing-only: consumed by CCR P2 from sensorium directly
+  // pressure — routing-only: consumed by signal-consumer from sensorium directly
   if (s.stability !== undefined) parts.push(`stability="${formatDim(s.stability)}"`)
-  if (s.freshness !== undefined) parts.push(`freshness="${formatDim(s.freshness)}"`)
-  if (s.pressure !== undefined) parts.push(`pressure="${formatDim(s.pressure)}"`)
 
-  // Strategy profile: most actionable dimension
   if (ledger.strategy) {
     const st = ledger.strategy
     if (st.reasoningEffort && st.reasoningEffort !== 'medium') parts.push(`reasoning="${st.reasoningEffort}"`)
@@ -122,14 +121,12 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     if (st.shouldEscalate) parts.push(`escalation="true"`)
   }
 
-  // Vigor: integrated activation level (tonic + phasic + curiosity blend)
   if (ledger.vigor) {
     const v = ledger.vigor
     parts.push(`vigor="${formatDim(v.vigor)}"`)
     if (v.curiosity > 0.3) parts.push(`curiosity="${formatDim(v.curiosity)}"`)
   }
 
-  // Season: 道德经四章螺旋 — session lifecycle phase + intensity
   if (ledger.season) {
     const intensity = ledger.seasonIntensity
     const seasonVal = intensity !== undefined && intensity < 1.0
@@ -138,10 +135,7 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
     parts.push(`season="${seasonVal}"`)
   }
 
-  // Regulation cost: let model see its own regulation overhead
-  if (ledger.regulationPressure !== undefined && ledger.regulationPressure > 0) {
-    parts.push(`regulation-cost="${formatDim(ledger.regulationPressure)}"`)
-  }
+  // regulation-cost — routing-only: experimental, no evidence of model behavioral response
 
   return `<cognitive-mirror ${parts.join(' ')} />`
 }
