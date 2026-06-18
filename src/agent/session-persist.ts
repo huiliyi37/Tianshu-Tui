@@ -564,6 +564,74 @@ export class SessionPersist {
     SessionPersist._listCache.set(cwd, { ts: now, data: results })
     return results
   }
+
+  /**
+   * Main user-facing sessions only: excludes worker sub-sessions (`worker-*`)
+   * and non-transcript artifacts whose id carries a dotted suffix
+   * (`<id>.claims`, `<id>.memory`, `<id>.snapshot`). Sorted by updatedAt desc.
+   */
+  static listMainSessions(cwd: string): Array<SessionMetadata & { id: string }> {
+    return SessionPersist.listSessionsWithMetadata(cwd)
+      .filter(s => !s.id.startsWith('worker-') && !s.id.includes('.'))
+  }
+
+  /**
+   * Resolve a user-supplied session reference (full id or short prefix) to a
+   * single full session id. Exact match wins; otherwise prefix-match across
+   * main sessions. Returns the resolved id, an ambiguous candidate list, or
+   * null when nothing matches. The id = log id = resume id are the same value.
+   */
+  static resolveSessionId(
+    cwd: string,
+    ref: string,
+  ): { id: string } | { ambiguous: string[] } | null {
+    const ref0 = ref.trim()
+    if (!ref0) return null
+    const sessions = SessionPersist.listMainSessions(cwd)
+    const exact = sessions.find(s => s.id === ref0)
+    if (exact) return { id: exact.id }
+    const matches = sessions.filter(s => s.id.startsWith(ref0))
+    if (matches.length === 1) return { id: matches[0]!.id }
+    if (matches.length > 1) return { ambiguous: matches.map(s => s.id) }
+    return null
+  }
+
+  /**
+   * Render the session list for CLI `--list` and TUI `/sessions`. One row per
+   * main session, numbered to match `listMainSessions` ordering so the index is
+   * stable and aligned with prefix-based resume.
+   */
+  static formatSessionList(cwd: string, currentId?: string): string {
+    const sessions = SessionPersist.listMainSessions(cwd)
+    if (sessions.length === 0) return '没有历史会话。'
+    return sessions.map((s, i) => {
+      const marker = s.id === currentId ? '  ← 当前' : ''
+      const when = formatRelativeTime(s.updatedAt ?? 0)
+      const turns = s.turnCount ?? 0
+      const model = s.model ?? '?'
+      const domain = s.domain ? ` ${s.domain}` : ''
+      const title = (s.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 50)
+      return `${String(i + 1).padStart(2)}. ${s.id.slice(0, 8)}  ${when}  ${turns}轮  ${model}${domain}  ${title}${marker}`
+    }).join('\n')
+  }
+}
+
+/** Compact relative time for session lists, e.g. "刚刚" / "5分钟前" / "3天前". */
+function formatRelativeTime(ts: number): string {
+  if (!ts) return '未知'
+  const diff = Date.now() - ts
+  if (diff < 0) return '刚刚'
+  const sec = Math.floor(diff / 1000)
+  if (sec < 60) return '刚刚'
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day}天前`
+  const mon = Math.floor(day / 30)
+  if (mon < 12) return `${mon}个月前`
+  return `${Math.floor(mon / 12)}年前`
 }
 
 const MAX_SESSIONS = 50

@@ -37,6 +37,12 @@ export interface StartupDecisionInput {
   forceNew: boolean
   /** User explicitly asked to return to the last session (--continue/--resume / RIVET_RESUME=1). */
   resume: boolean
+  /**
+   * User asked to resume a SPECIFIC session by full id (already resolved from a
+   * short prefix by the caller). Takes precedence over `resume`/lastSessionId.
+   * RIVET_RESUME_ID=<full-id>.
+   */
+  resumeSessionId?: string
   /** Disable silent crash-recovery resume (RIVET_NO_AUTO_RESUME=1). Explicit resume still honored. */
   disableAutoResume: boolean
   /** Current working directory — used to reject cross-cwd resume. */
@@ -60,6 +66,20 @@ export function decideStartupSession(input: StartupDecisionInput): StartupDecisi
   const fresh = { sessionId: null as string | null, resumed: false }
 
   if (input.forceNew) return { ...fresh, reason: 'forced-new (RIVET_NEW_SESSION=1)' }
+
+  // Explicit specific-session resume (--resume <id>): highest priority. The id
+  // is already resolved to a full id by the caller; validate it exists and is
+  // not cross-cwd before honoring.
+  if (input.resumeSessionId) {
+    const info = input.load(input.resumeSessionId)
+    if (!info) return { ...fresh, reason: 'requested session unreadable' }
+    if (!info.hasContent) return { ...fresh, reason: 'requested session has no replayable content' }
+    if (input.currentCwd && info.cwd && info.cwd !== input.currentCwd) {
+      return { ...fresh, reason: 'requested session belongs to another cwd' }
+    }
+    return { sessionId: input.resumeSessionId, resumed: true, reason: 'explicit resume (--resume <id>)' }
+  }
+
   if (!input.lastSessionId) return { ...fresh, reason: 'no previous session' }
 
   const info = input.load(input.lastSessionId)

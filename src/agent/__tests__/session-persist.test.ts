@@ -188,6 +188,79 @@ describe('SessionPersist — metadata (P1)', () => {
   })
 })
 
+describe('SessionPersist — resolveSessionId / formatSessionList / listMainSessions', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'rivet-resolve-test-'))
+    process.env.RIVET_SESSION_DIR = tempDir
+    SessionPersist.invalidateListCache()
+  })
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true })
+    delete process.env.RIVET_SESSION_DIR
+    SessionPersist.invalidateListCache()
+  })
+
+  async function seed(id: string, title: string): Promise<void> {
+    const p = new SessionPersist(id, tempDir)
+    await p.appendOaiWithChecksum({ role: 'user', content: title })
+    p.initMetadata({ model: 'deepseek-v4' })
+    p.updateMetadata({ title })
+    SessionPersist.invalidateListCache()
+  }
+
+  it('exact id match wins', async () => {
+    await seed('aaaa1111-0000', 'one')
+    await seed('aaaa2222-0000', 'two')
+    assert.deepEqual(SessionPersist.resolveSessionId(tempDir, 'aaaa1111-0000'), { id: 'aaaa1111-0000' })
+  })
+
+  it('unique prefix resolves to the full id', async () => {
+    await seed('abcd1234-0000', 'one')
+    await seed('wxyz9999-0000', 'two')
+    assert.deepEqual(SessionPersist.resolveSessionId(tempDir, 'abcd'), { id: 'abcd1234-0000' })
+  })
+
+  it('ambiguous prefix returns candidate list', async () => {
+    await seed('dup11111-0000', 'one')
+    await seed('dup22222-0000', 'two')
+    const r = SessionPersist.resolveSessionId(tempDir, 'dup')
+    assert.ok(r && 'ambiguous' in r)
+    assert.equal((r as { ambiguous: string[] }).ambiguous.length, 2)
+  })
+
+  it('no match returns null (incl. empty ref)', async () => {
+    await seed('aaaa1111-0000', 'one')
+    assert.equal(SessionPersist.resolveSessionId(tempDir, 'zzzz'), null)
+    assert.equal(SessionPersist.resolveSessionId(tempDir, ''), null)
+    assert.equal(SessionPersist.resolveSessionId(tempDir, '   '), null)
+  })
+
+  it('excludes worker sub-sessions from listing and resolution', async () => {
+    await seed('main1111-0000', 'main')
+    await seed('worker-abcdef01', 'worker child')
+    const ids = SessionPersist.listMainSessions(tempDir).map(s => s.id)
+    assert.ok(ids.includes('main1111-0000'))
+    assert.ok(!ids.some(id => id.startsWith('worker-')))
+    assert.equal(SessionPersist.resolveSessionId(tempDir, 'worker-'), null)
+  })
+
+  it('formatSessionList renders rows and marks the current session', async () => {
+    await seed('cur00000-0000', 'current one')
+    const out = SessionPersist.formatSessionList(tempDir, 'cur00000-0000')
+    assert.match(out, /cur00000/)
+    assert.match(out, /当前/)
+    assert.match(out, /current one/)
+  })
+
+  it('formatSessionList handles an empty session dir', () => {
+    const out = SessionPersist.formatSessionList(tempDir)
+    assert.match(out, /没有历史会话/)
+  })
+})
+
 describe('SessionPersist — persisted messages', () => {
   let tempDir: string
 

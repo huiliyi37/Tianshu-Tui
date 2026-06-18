@@ -118,3 +118,67 @@ describe('session-recovery: decideStartupSession (R1 fresh-by-default)', () => {
     assert.equal(d.resumed, false)
   })
 })
+
+describe('session-recovery: decideStartupSession resumeSessionId (--resume <id>)', () => {
+  it('resumes the requested session id, ignoring lastSessionId', () => {
+    const d = decideStartupSession(input({
+      lastSessionId: 'sess-1',
+      resumeSessionId: 'target-99',
+      load: (id) => id === 'target-99'
+        ? { hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD, cleanExit: true }
+        : null,
+    }))
+    assert.equal(d.resumed, true)
+    assert.equal(d.sessionId, 'target-99')
+    assert.match(d.reason, /--resume <id>/)
+  })
+
+  it('takes precedence over the bare resume flag', () => {
+    const d = decideStartupSession(input({
+      resume: true,
+      resumeSessionId: 'target-99',
+      load: (id) => id === 'target-99'
+        ? { hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD }
+        : { hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD },
+    }))
+    assert.equal(d.sessionId, 'target-99')
+  })
+
+  it('mints fresh when the requested session is unreadable', () => {
+    const d = decideStartupSession(input({
+      resumeSessionId: 'missing',
+      load: () => null,
+    }))
+    assert.equal(d.resumed, false)
+    assert.match(d.reason, /requested session unreadable/)
+  })
+
+  it('mints fresh when the requested session has no replayable content', () => {
+    const d = decideStartupSession(input({
+      resumeSessionId: 'empty',
+      load: () => ({ hasContent: false, status: 'active', cwd: CWD }),
+    }))
+    assert.equal(d.resumed, false)
+    assert.match(d.reason, /no replayable content/)
+  })
+
+  it('rejects a requested session belonging to another cwd', () => {
+    const d = decideStartupSession(input({
+      currentCwd: '/proj/b',
+      resumeSessionId: 'target-99',
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: '/proj/a' }),
+    }))
+    assert.equal(d.resumed, false)
+    assert.match(d.reason, /another cwd/)
+  })
+
+  it('forceNew still wins over resumeSessionId', () => {
+    const d = decideStartupSession(input({
+      forceNew: true,
+      resumeSessionId: 'target-99',
+      load: () => ({ hasContent: true, status: 'active', updatedAt: Date.now(), cwd: CWD }),
+    }))
+    assert.equal(d.resumed, false)
+    assert.equal(d.sessionId, null)
+  })
+})

@@ -33,7 +33,6 @@ import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
-import { readdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { execSync } from 'child_process'
 
@@ -45,12 +44,18 @@ const requestedModel = modelArgIdx >= 0 ? args[modelArgIdx + 1] : undefined
 const providerArgIdx = args.indexOf('--provider')
 const requestedProvider = providerArgIdx >= 0 ? args[providerArgIdx + 1] : undefined
 
-// R1: default startup is a fresh session; `--continue`/`--resume` returns to the
-// last session for this cwd. Signal via env so getOrCreateSessionId picks it up
-// regardless of call order during bootstrap.
-if (args.includes('--continue') || args.includes('--resume')) {
-  process.env.RIVET_RESUME = '1'
-}
+// R1: default startup is a fresh session. Session selection flags:
+//   --continue / --resume        → resume the most recent session for this cwd
+//   --resume <id|prefix>         → resume a specific session (short prefix ok)
+//   --new                        → force a brand-new session
+//   --list / `rivet sessions`    → print the session list and exit
+// Resolution + env signalling happens in main() before bootstrap so that
+// getOrCreateSessionId picks it up regardless of call order.
+const resumeArgIdx = args.indexOf('--resume')
+const resumeArgValue = resumeArgIdx >= 0 ? args[resumeArgIdx + 1] : undefined
+const requestedResumeId = resumeArgValue && !resumeArgValue.startsWith('-') ? resumeArgValue : undefined
+const wantResume = resumeArgIdx >= 0 || args.includes('--continue')
+const wantNewSession = args.includes('--new')
 
 // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -108,6 +113,35 @@ async function main() {
     const { serveCommand } = await import('./server/serve.js')
     serveCommand(args.slice(1))
     return
+  }
+
+  // rivet sessions / rivet --list — print the session list and exit
+  if (args[0] === 'sessions' || args.includes('--list')) {
+    process.stdout.write(SessionPersist.formatSessionList(process.cwd()) + '\n')
+    return
+  }
+
+  // ── Session selection → env signalling for getOrCreateSessionId ──
+  // Resolve BEFORE the TTY gate so ambiguous/not-found errors are clear even in
+  // a pipe; the env is still set before bootstrap reads it via getOrCreateSessionId.
+  if (wantNewSession) {
+    process.env.RIVET_NEW_SESSION = '1'
+  } else if (requestedResumeId) {
+    const resolved = SessionPersist.resolveSessionId(process.cwd(), requestedResumeId)
+    if (!resolved) {
+      process.stderr.write(`未找到匹配会话: "${requestedResumeId}"。用 rivet --list 查看会话列表。\n`)
+      process.exit(1)
+    }
+    if ('ambiguous' in resolved) {
+      process.stderr.write(
+        `会话前缀 "${requestedResumeId}" 匹配到多个会话,请用更长前缀:\n` +
+        resolved.ambiguous.map(id => `  ${id.slice(0, 12)}`).join('\n') + '\n',
+      )
+      process.exit(1)
+    }
+    process.env.RIVET_RESUME_ID = resolved.id
+  } else if (wantResume) {
+    process.env.RIVET_RESUME = '1'
   }
 
   // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
@@ -318,20 +352,19 @@ async function main() {
     },
     // Chronicle
     chronicleEntries: () => {
-      const sessionsDir = join(process.cwd(), '.rivet', 'sessions')
-      if (!existsSync(sessionsDir)) return { entries: [] }
       try {
-        const files = readdirSync(sessionsDir)
-          .filter(f => f.endsWith('.jsonl') && !f.startsWith('worker-') && !f.endsWith('.claims.jsonl'))
-          .slice(0, 20)
-        const entries = files.map((f, i) => {
-          const id = f.replace('.jsonl', '')
+        // listMainSessions 已读 meta 并按 updatedAt 排序,与 /resume 序号同源。
+        const sessions = SessionPersist.listMainSessions(process.cwd()).slice(0, 20)
+        const entries = sessions.map((s, i) => {
+          const title = (s.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 60)
+          const turns = s.turnCount ?? 0
+          const model = s.model ?? '?'
           return {
             index: i + 1,
-            time: '',
-            summary: `Session ${id.slice(0, 8)}`,
-            current: id === ctx!.sessionId,
-            id,
+            time: s.updatedAt ? new Date(s.updatedAt).toLocaleString() : '',
+            summary: `${s.id.slice(0, 8)}  ${turns}轮 ${model}${title ? '  ' + title : ''}`,
+            current: s.id === ctx!.sessionId,
+            id: s.id,
           }
         })
         return { entries }
@@ -400,13 +433,8 @@ async function main() {
     tuiApp.setInput(content)
   }, /* chronicleExec: */ (id: string) => {
     // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
-    // 用 SessionPersist.listSessions() 求真实序号（与 /resume 同源），避免 readdir 顺序错位。
-    const n = SessionPersist.listSessions(process.cwd()).indexOf(id)
-    if (n >= 0) {
-      tuiApp.setInput(`/resume ${n + 1}`)
-    } else {
-      tuiApp.commitStatic(`Session ${id.slice(0, 8)} not resumable.`)
-    }
+    // 用完整 id 前 8 位作前缀(id = resume id 绑死),避免序号随排序漂移。
+    tuiApp.setInput(`/resume ${id.slice(0, 8)}`)
   }, /* domainPickerExec: */ (key: string) => {
     // Domain Picker Enter 回调：应用选中星域，引擎照常注入方法论，scrollback 仅写单行确认。
     if (key === 'auto') {

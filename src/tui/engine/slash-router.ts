@@ -12,7 +12,7 @@
  */
 
 import { handleSlashCommand, resolveAppPromptInput, type SlashHandlerContext } from '../slash-commands.js'
-import { switchAgentRuntime } from '../../bootstrap.js'
+import { switchAgentRuntime, switchAgentSession } from '../../bootstrap.js'
 import type { TuiApp } from './app.js'
 import type { BootstrapContext } from '../../bootstrap.js'
 import { createCoordinatorReviewDeps } from '../../agent/review-coordinator-deps.js'
@@ -89,6 +89,16 @@ export class SlashRouter {
           this.app.setModelInfo(res.modelName, res.contextWindow)
         }
         return { ok: res.ok, error: res.error }
+      },
+      onSessionSwitch: (targetId: string) => {
+        // 运行时会话身份切换:先中止旧 run(避免旧回调写脏屏),再原地重建 ctx.agent。
+        try { this.ctx.agent.abort() } catch { /* idle agent abort 无害 */ }
+        const res = switchAgentSession(this.ctx, targetId)
+        if (res.ok) {
+          // GlanceBar/会话标识刷新 — sessionId 已切,模型不变。
+          this.app.setStreamingState(false)
+        }
+        return res
       },
       allProviders: this.buildAllProviders(),
       currentProvider: this.ctx.provider.name,

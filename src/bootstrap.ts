@@ -27,6 +27,7 @@ import { createAgentConfig, createMainAgentConfigInput } from './agent/create-ag
 import { SessionContext } from './agent/context.js'
 import { SessionPersist, evictOldSessions } from './agent/session-persist.js'
 import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
+import { runResumePreflightOai } from './context/resume-preflight.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
@@ -210,7 +211,7 @@ export function captureGitBaseline(cwd: string): BaselineSnapshot {
 let _cachedSessionId: string | null = null
 let _sessionWasResumed = false
 
-/** True when the active session id was auto-resumed from a prior (interrupted) run. */
+/** True when the active session id was explicitly resumed (--continue / --resume [id]). */
 export function wasSessionResumed(): boolean {
   return _sessionWasResumed
 }
@@ -226,15 +227,17 @@ function lastSessionPointerFile(cwd: string): string {
 }
 
 /**
- * Resolve the session id for this run. Default is a FRESH session. We only
- * return to the previous session when the user explicitly asks
- * (`--continue`/`--resume`/`RIVET_RESUME=1`) or when the last run for this cwd
- * crashed mid-flight (active + no clean-exit marker, recent). See
- * `decideStartupSession` for the full contract. Resuming reuses the existing
- * startup path (`persist.loadOai()` + `replaceMessages()`) to rehydrate.
+ * Resolve the session id for this run. Default is a FRESH session — there is NO
+ * implicit/crash auto-resume. We only return to a previous session when the
+ * user explicitly asks:
+ *   - RIVET_RESUME_ID=<full-id>  → resume that specific session (highest prio)
+ *   - RIVET_RESUME=1             → resume the most recent session for this cwd
+ * See `decideStartupSession` for the full contract. Resuming reuses the existing
+ * startup path (`persist.loadOai()` + `replaceMessages()`) to rehydrate — the
+ * resumed id becomes this run's session id = log id = pointer id.
  *
- * Escape hatches: RIVET_NEW_SESSION=1 forces fresh; RIVET_RESUME=1 forces
- * resume; RIVET_NO_AUTO_RESUME=1 suppresses even crash recovery.
+ * Escape hatches: RIVET_NEW_SESSION=1 forces fresh; RIVET_NO_AUTO_RESUME=1 is a
+ * no-op for default startup (kept for back-compat) since fresh is already default.
  */
 export function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
@@ -263,6 +266,7 @@ export function getOrCreateSessionId(): string {
     freshnessMs: RESUME_FRESHNESS_MS,
     forceNew: process.env.RIVET_NEW_SESSION === '1',
     resume: process.env.RIVET_RESUME === '1',
+    resumeSessionId: process.env.RIVET_RESUME_ID || undefined,
     disableAutoResume: process.env.RIVET_NO_AUTO_RESUME === '1',
     currentCwd: cwd,
     load: (id) => {
@@ -805,12 +809,12 @@ export async function createSessionInfrastructure(): Promise<{
   const registry = await SessionRegistry.create(stateDir)
 
   // Reap dead sessions' registry rows/claims so they don't block fresh claims.
-  // The actual context recovery happens in getOrCreateSessionId(), which
-  // auto-resumes the last interrupted session id (its jsonl is rehydrated by
-  // the startup path) — so here we only need to clean up the registry.
+  // Default startup is fresh — we do NOT auto-resume crashed sessions; this only
+  // releases their locks. Recover a crashed session explicitly with
+  // `rivet --continue` (most recent) or `rivet --resume <id>`.
   const crashedSessions = registry.detectCrashedSessions()
   if (crashedSessions.length > 0) {
-    console.error(`🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理其锁定（上下文将自动续接）`)
+    console.error(`🔄 检测到 ${crashedSessions.length} 个异常退出的会话，已清理其锁定（用 rivet --continue 或 --resume <id> 恢复）`)
   }
 
   const sessionId = getOrCreateSessionId()
@@ -832,8 +836,8 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
     isShuttingDown = true
 
     try {
-      // Mark a clean exit so the next startup mints a fresh session instead of
-      // silently resuming this one (only crashes auto-resume now — R1).
+      // Mark a clean exit. Next startup mints a fresh session by default;
+      // returning here requires explicit --continue / --resume <id> (R1).
       try { ctx.persist.updateMetadata({ cleanExit: true }) } catch { /* best-effort */ }
       ctx.persist.compactOai(ctx.session.getMessages())
       if (ctx.fileHistory) {
@@ -944,6 +948,100 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
   return { ok: false, error: `Model "${modelId}" not found in any provider.` }
 }
 
+export interface SwitchSessionResult {
+  ok: boolean
+  error?: string
+  /** 成功时:载入的消息条数 / 是否做了 orphan 修复 / preflight 是否 apiSafe */
+  messageCount?: number
+  repaired?: boolean
+  safe?: boolean
+}
+
+/**
+ * 运行时会话身份切换（TUI /resume <id>）。与 switchAgentRuntime 同构:通过
+ * createAgentRuntime 整体重建 AgentLoop —— 构造函数内部按 targetId 重建所有
+ * sessionId-bound 子系统(persist / telemetryWriter / stigmergyStore /
+ * artifactStore / sessionStateManager 与持久化监听),从此 会话id = 日志id =
+ * pointer id = registry id 名副其实,彻底修掉"看着是旧会话、其实写进原 id"的身份分裂。
+ *
+ * targetId 必须是已解析的完整 id(调用方用 SessionPersist.resolveSessionId 解析短前缀)。
+ * resume 全量 replay 目标历史(显式代价、会重建前缀缓存),不跨会话吃当前上下文。
+ */
+export function switchAgentSession(ctx: BootstrapContext, targetId: string): SwitchSessionResult {
+  if (targetId === ctx.sessionId) {
+    return { ok: false, error: '已经在该会话中。' }
+  }
+
+  let targetPersist: SessionPersist
+  try {
+    targetPersist = new SessionPersist(targetId, ctx.cwd)
+  } catch (err) {
+    return { ok: false, error: `无法打开会话 ${targetId.slice(0, 8)}: ${(err as Error).message}` }
+  }
+
+  // 跨 cwd 守卫:别让别的项目会话渗进当前 cwd。
+  const meta = targetPersist.loadMetadata()
+  if (meta?.cwd && meta.cwd !== ctx.cwd) {
+    return { ok: false, error: '该会话属于其他工作目录,拒绝载入。' }
+  }
+
+  const rawMsgs = targetPersist.loadOai()
+  const preflight = runResumePreflightOai(rawMsgs)
+
+  // 仅换会话身份,保留当前模型。
+  let currentModelId: string | undefined
+  try { currentModelId = ctx.agent.config.promptEngine.getModel() } catch { /* idle/未初始化 */ }
+
+  // flush 旧会话的 volatile store(信息素),避免切换丢数据。
+  try { ctx.agent.stigmergyStore.flushSync() } catch { /* best-effort */ }
+
+  const oldId = ctx.sessionId
+
+  // 整体重建 AgentLoop —— 构造函数内部按 targetId 重建子系统并重挂持久化监听。
+  const { agent } = createAgentRuntime({
+    provider: ctx.provider,
+    apiKey: ctx.apiKey,
+    auth: ctx.auth,
+    config: ctx.config,
+    sessionId: targetId,
+    cwd: ctx.cwd,
+    toolRegistry: ctx.toolRegistry,
+    persist: targetPersist,
+    claimStore: ctx.claimStore,
+    fileHistory: ctx.fileHistory,
+    refs: ctx.refs,
+    domainKnowledgeStore: ctx.domainKnowledgeStore,
+    modelId: currentModelId,
+    session: ctx.session,
+  })
+
+  // 原地更新 ctx —— 持有 ctx 引用的闭包(onSubmit/onAbort/handlerCtx)即时一致。
+  ctx.agent = agent
+  ctx.persist = targetPersist
+  ctx.sessionId = targetId
+  ctx.refs.sessionId = targetId
+  ctx.refs.promptEngine = agent.config.promptEngine
+
+  // 载入历史 —— 新 AgentLoop 的持久化监听会把 replace 镜像回 targetPersist。
+  ctx.session.replaceMessages(preflight.messages)
+
+  // pointer + registry + 缓存 sessionId 一并切到 targetId,使下次 --continue 命中它。
+  try { writeFileSync(lastSessionPointerFile(ctx.cwd), targetId) } catch { /* ignore */ }
+  _cachedSessionId = targetId
+  _sessionWasResumed = true
+  try {
+    ctx.refs.sessionRegistry?.unregister(oldId)
+    ctx.refs.sessionRegistry?.register(targetId, ctx.cwd)
+  } catch { /* registry best-effort */ }
+
+  return {
+    ok: true,
+    messageCount: preflight.messages.length,
+    repaired: preflight.repaired,
+    safe: preflight.safe,
+  }
+}
+
 // ── Aggregate Bootstrap ────────────────────────────────────────
 
 export interface BootstrapOptions {
@@ -1003,13 +1101,13 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const session = new SessionContext()
 
-  // Load prior messages. When the session id was auto-resumed from an
-  // interrupted run, this rehydrates the in-flight task automatically.
+  // Load prior messages. When the session id was explicitly resumed
+  // (--continue / --resume <id>), this rehydrates that session's history.
   const existingMessages = persist.loadOai()
   if (existingMessages.length > 0) {
     session.replaceMessages(existingMessages)
     if (wasSessionResumed()) {
-      console.error(`🔄 已恢复上一会话 (${sessionId.slice(0, 8)}): ${existingMessages.length} 条消息。默认启动为全新会话；继续上一会话用 --continue。`)
+      console.error(`🔄 已恢复会话 ${sessionId.slice(0, 8)}: ${existingMessages.length} 条消息(将重建前缀缓存)。默认启动为全新会话；指定会话用 rivet --resume <id>,查看列表用 rivet --list。`)
     }
   }
 

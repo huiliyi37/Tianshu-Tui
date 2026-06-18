@@ -105,6 +105,13 @@ export interface SlashHandlerContext {
   allProviders: Record<string, { models: Array<{ id: string; alias: string }> }>
   currentProvider: string
   currentSessionId: string
+  /**
+   * Runtime session identity switch for /resume <id>. Rebuilds the agent runtime
+   * against the target session so subsequent messages/logs write to the SAME id.
+   * Returns the loaded message count or an error. Undefined → /resume falls back
+   * to the legacy in-memory-only restore (no identity switch).
+   */
+  onSessionSwitch?: (targetId: string) => { ok: boolean; error?: string; messageCount?: number; repaired?: boolean; safe?: boolean }
   cost: number
   cacheHitRate: number
   autoSafeRef: MutableRefLike<boolean>
@@ -653,46 +660,77 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
 
     case '/sessions': {
-      const sessions = SessionPersist.listSessions(ctx.agent.cwd)
-      if (sessions.length === 0) {
-        pushStatic(createLogEntry({ type: 'system', content: 'No saved sessions.' }))
-      } else {
-        const list = sessions.map((id, i) => {
-          const marker = id === ctx.currentSessionId ? ' ← current' : ''
-          return `${i + 1}. ${id.slice(0, 8)}...${marker}`
-        }).join('\n')
-        pushStatic(createLogEntry({ type: 'system', content: `Saved sessions:\n${list}\n\n/resume <number> to restore` }))
-      }
+      const list = SessionPersist.formatSessionList(ctx.agent.cwd, ctx.currentSessionId)
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `会话列表(按最近更新排序):\n${list}\n\n/resume <id前缀 或 序号> 切换会话`,
+      }))
       setIsStreaming(false)
       return true
     }
 
     case '/resume': {
-      const sessions = SessionPersist.listSessions(ctx.agent.cwd)
       const arg = parts[1]
-      if (!arg || !/^\d+$/.test(arg)) {
-        pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
+      if (!arg) {
+        pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
         setIsStreaming(false)
         return true
       }
-      const idx = parseInt(arg, 10) - 1
-      if (isNaN(idx) || idx < 0 || idx >= sessions.length) {
-        pushStatic(createLogEntry({ type: 'system', content: `Invalid session number. Use /sessions to see available sessions.` }))
+
+      // 序号(兼容旧习惯)或 id 前缀 → 解析为完整 id。
+      const ordered = SessionPersist.listMainSessions(ctx.agent.cwd)
+      let targetId: string | null = null
+      if (/^\d+$/.test(arg)) {
+        const idx = parseInt(arg, 10) - 1
+        if (idx < 0 || idx >= ordered.length) {
+          pushStatic(createLogEntry({ type: 'system', content: `序号超出范围(共 ${ordered.length} 个会话)。用 /sessions 查看。` }))
+          setIsStreaming(false)
+          return true
+        }
+        targetId = ordered[idx]!.id
+      } else {
+        const resolved = SessionPersist.resolveSessionId(ctx.agent.cwd, arg)
+        if (!resolved) {
+          pushStatic(createLogEntry({ type: 'system', content: `未找到匹配会话: "${arg}"。用 /sessions 查看会话列表。` }))
+          setIsStreaming(false)
+          return true
+        }
+        if ('ambiguous' in resolved) {
+          const cands = resolved.ambiguous.map(id => `  ${id.slice(0, 12)}`).join('\n')
+          pushStatic(createLogEntry({ type: 'system', content: `前缀 "${arg}" 匹配多个会话,请用更长前缀:\n${cands}` }))
+          setIsStreaming(false)
+          return true
+        }
+        targetId = resolved.id
+      }
+
+      if (targetId === ctx.currentSessionId) {
+        pushStatic(createLogEntry({ type: 'system', content: `已经在会话 ${targetId.slice(0, 8)} 中。` }))
         setIsStreaming(false)
         return true
       }
-      const targetId = sessions[idx]!
+
+      // 真正的身份切换(Phase 4):会话id = 日志id = pointer id 一致。
+      if (ctx.onSessionSwitch) {
+        const res = ctx.onSessionSwitch(targetId)
+        if (!res.ok) {
+          pushStatic(createLogEntry({ type: 'system', content: `切换失败: ${res.error ?? '未知错误'}` }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `🔄 已切换到会话 ${targetId.slice(0, 8)}: 载入 ${res.messageCount ?? 0} 条消息(将重建前缀缓存)${res.repaired ? ' · 已修复孤儿工具调用' : ''}。`,
+          }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      // Fallback:无切换回调时退化为仅内存恢复(身份不切,旧行为)。
       const p = new SessionPersist(targetId, ctx.agent.cwd)
-      const rawMsgs = p.loadOai()
-      const preflight = runResumePreflightOai(rawMsgs)
+      const preflight = runResumePreflightOai(p.loadOai())
       ctx.session.replaceMessages(preflight.messages)
-      if (preflight.repaired) {
-        p.compactOai(preflight.messages)
-      }
-      pushStatic(createLogEntry({ type: 'system', content: `Restored session ${targetId.slice(0, 8)}... (${preflight.messages.length} messages, apiSafe=${preflight.safe})` }))
-      if (preflight.repaired) {
-        pushStatic(createLogEntry({ type: 'system', content: `Resume preflight: repaired ${preflight.syntheticResultsInserted} orphan tool call(s).` }))
-      }
+      if (preflight.repaired) p.compactOai(preflight.messages)
+      pushStatic(createLogEntry({ type: 'system', content: `已恢复会话 ${targetId.slice(0, 8)} (${preflight.messages.length} 条消息, apiSafe=${preflight.safe})` }))
       setIsStreaming(false)
       return true
     }
