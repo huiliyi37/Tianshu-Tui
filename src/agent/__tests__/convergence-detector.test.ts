@@ -148,7 +148,12 @@ describe('evaluateConvergence', () => {
     assert.ok(result.score <= 0.45, `expected score <= 0.45, got ${result.score.toFixed(2)}`)
     assert.ok(result.level >= 1, `expected level >= 1, got ${result.level} (score=${result.score.toFixed(2)})`)
     if (result.level >= 2 && result.injectedMessage) {
-      assert.ok(result.injectedMessage.includes('工具使用模式高度重复'), 'should mention tool repetition')
+      // Message can be either the productiveStagnation variant ("读取/搜索操作")
+      // or the standard tool-repetition message ("工具使用模式高度重复")
+      assert.ok(
+        result.injectedMessage.includes('工具使用模式高度重复') || result.injectedMessage.includes('读取'),
+        `expected stagnation-related message, got: ${result.injectedMessage.slice(0, 120)}`,
+      )
     }
   })
 
@@ -684,6 +689,135 @@ describe('evaluateConvergence', () => {
         noToolTurnCount: 0,
       }))
       assert.equal(result.level, 0, 'score-based detection should early-exit at turn < nLow')
+    })
+  })
+
+  // ── Productive-ratio stagnation: alternating read-analyze pattern ──
+
+  describe('productive-ratio stagnation (alternating read-analyze)', () => {
+    // The core problem: agent calls read_file each turn (so consecutiveNoToolTurns
+    // resets to 0), but never calls edit/test/commit. The "hasProductive" boolean
+    // check is all-or-nothing, and on 1M window the turn gate (nLow=12) blocks
+    // all score-based detection for the first 12 turns.
+    //
+    // New signal: productiveRatio = productive tools / total tools in last K calls.
+    // When productiveRatio === 0 and window >= K, treat as stagnation that
+    // bypasses the turn gate (same as noToolStagnation).
+
+    it('detects alternating read-analyze pattern as stagnation before nLow (200K)', () => {
+      // Pattern: read_file with different targets each time (high novelty)
+      // but zero productive tools in 6 calls. Turn 5 < nLow=8.
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+        { tool: 'read_file', target: 'f.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 5, // < nLow=8
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0, // all turns had tools, so this is 0
+      }))
+      // Before fix: level=0 (early-exit gate blocks score-based, noTool=0)
+      // After fix: level >= 1 (productive stagnation bypasses gate)
+      assert.ok(result.level >= 1,
+        `expected level >= 1 for read-only stagnation at turn 5, got ${result.level} (score=${result.score.toFixed(2)})`)
+    })
+
+    it('detects alternating pattern on 1M window before nLow=12 (GLM scenario)', () => {
+      // 1M window: nLow=12, signalWindow=10
+      // 8 read-only tool calls at turn 6 — should be detected as stagnation
+      const history = makeHistory([
+        { tool: 'read_file', target: `file${0}.ts` },
+        { tool: 'read_file', target: `file${1}.ts` },
+        { tool: 'grep', target: 'pattern0' },
+        { tool: 'read_file', target: `file${2}.ts` },
+        { tool: 'read_file', target: `file${3}.ts` },
+        { tool: 'grep', target: 'pattern1' },
+        { tool: 'read_file', target: `file${4}.ts` },
+        { tool: 'read_file', target: `file${5}.ts` },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, // well below nLow=12 for 1M
+        phaseClass: 'explore',
+        contextWindow: 1_000_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        providerName: 'glm',
+      }))
+      // Before fix: level=0 (turn < nLow=12, noTool=0)
+      // After fix: level >= 1 (productive stagnation bypasses gate)
+      assert.ok(result.level >= 1,
+        `expected level >= 1 for GLM read-only stagnation at turn 6 on 1M, got ${result.level} (score=${result.score.toFixed(2)})`)
+    })
+
+    it('does NOT trigger when productive tools are present in window', () => {
+      // Same window size but with one edit_file — productiveRatio > 0
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 5,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+      }))
+      // With one productive tool, this is normal exploration — should be level 0
+      assert.equal(result.level, 0,
+        `expected level 0 when productive tools present, got ${result.level}`)
+    })
+
+    it('stagnation message mentions read-only pattern', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+        { tool: 'read_file', target: 'f.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+      }))
+      if (result.level >= 2 && result.injectedMessage) {
+        // Message should mention that all recent operations are read-only
+        assert.ok(
+          result.injectedMessage.includes('读取') || result.injectedMessage.includes('read') || result.injectedMessage.includes('编辑'),
+          `expected read-only stagnation hint, got: ${result.injectedMessage.slice(0, 150)}`,
+        )
+      }
+    })
+
+    it('does not false-positive on short windows (fewer than K tools)', () => {
+      // Only 2 read tools — not enough data for productiveRatio stagnation
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 3,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+      }))
+      // Too few tools — should not trigger stagnation
+      assert.equal(result.level, 0,
+        `expected level 0 for short window, got ${result.level}`)
     })
   })
 })
