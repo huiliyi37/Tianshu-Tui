@@ -367,6 +367,8 @@ function computeConvergenceScore(
   weights: PhaseWeights,
   phaseClass: PhaseClass,
   noToolTurnCount: number,
+  turn: number,
+  recentToolHistory: ConvergenceInput['recentToolHistory'],
 ): number {
   const raw =
     weights.editRatio * signals.editRatio +
@@ -385,6 +387,29 @@ function computeConvergenceScore(
   if (editExpectedPhases.includes(phaseClass) && signals.editRatio < 0.1) {
     // Severity scales with how far below expectation we are
     penalty = 0.5
+  }
+
+  // Read-only stagnation penalty: when ALL recent tools are read-class with
+  // zero productive output (no edits/tests/commits), the model is in a
+  // "keep exploring without converging" loop. This is the most common
+  // infinite-loop pattern — the model reads file after file, each target
+  // novel, entropy high, but never takes action.
+  //
+  // The penalty ramps with turn count: mild at turn 8, severe by turn 15+,
+  // ensuring convergence fires even in explore phase where targetNovelty
+  // and toolEntropy keep the raw score artificially high.
+  const productiveTools = new Set([
+    'edit_file', 'write_file', 'hash_edit', 'apply_patch',
+    'run_tests', 'bash', 'deliver_task', 'plan_submit', 'plan_close',
+  ])
+  const window = recentToolHistory.slice(-Math.min(turn, 15))
+  const hasProductive = window.some(h => productiveTools.has(h.tool))
+  if (window.length >= 4 && !hasProductive) {
+    // Ramp: turn 8→0.7, turn 12→0.45, turn 16→0.25, turn 20+→0.1
+    if (turn >= 20) penalty = Math.min(penalty, 0.1)
+    else if (turn >= 16) penalty = Math.min(penalty, 0.25)
+    else if (turn >= 12) penalty = Math.min(penalty, 0.45)
+    else if (turn >= 8) penalty = Math.min(penalty, 0.7)
   }
 
   // No-tool-turn penalty: consecutive turns without tool calls signal
@@ -464,6 +489,9 @@ function buildInjectedMessage(
   if (signals.tokenEfficiency < 0.2 && phaseClass !== 'explore') {
     lines.push('- 纯读取无产出，建议立即采取编辑或测试行动验证当前假设')
   }
+  if (signals.tokenEfficiency === 0.0 && phaseClass === 'explore') {
+    lines.push('- 已连续读取多个文件但未做任何编辑/测试/提交 — 信息已足够，请输出结论或采取行动')
+  }
   if (signals.textRepetitionPenalty < 0.3) {
     lines.push('- 连续多轮输出高度相似的文本内容，模型可能陷入"重复输出"循环')
   }
@@ -501,7 +529,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     textRepetitionPenalty: computeTextRepetitionPenalty(input.textFingerprints ?? []),
   }
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0)
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0
