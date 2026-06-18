@@ -82,14 +82,11 @@ export function createDedupGuardHook(deps: DedupGuardHookDeps): PostTurnRuntimeH
           category: 'dedup',
           content: `【天璇】重复输出检测 (${Math.round(overlap * 100)}%)："${summary}${head.length > 150 ? '…' : ''}" — 你在同一个视角里循环了。换个角度，或 recall 天璇胶囊（docs/seed-capsule-tianxuan.md）。`,
         })
-        return
       }
 
-      ctx.effects.injectUserMessage(
-        `<天璇-感知 type="dedup">你在上一轮已经给出了以下内容（相似度 ${Math.round(overlap * 100)}%），不要重复：\n` +
-        `"${summary}${head.length > 150 ? '…' : ''}"\n` +
-        `换个角度推进。天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角的方法论。</天璇-感知>`,
-      )
+      // Without advisory bus, silently skip — SR injection for dedup is not worth
+      // the noise overhead (convergence detector already catches repetition via
+      // textRepetitionPenalty signal).
     },
   }
 }

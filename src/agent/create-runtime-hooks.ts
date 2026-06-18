@@ -70,6 +70,8 @@ export interface RuntimeHookDeps {
   playbookStore?: PlaybookStore
   buildRetrospectInput?: () => RetrospectInput
   getDoomLoopLevel?: () => DoomLoopLevel
+  /** Whether convergence detection injected a kick this turn — used for kick-hook mutual exclusion. */
+  wasConvergenceTriggered?: () => boolean
   /** SessionRegistry for cross-session fingerprint storage (playbook-reflect). */
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current working directory — used for project-scoped fingerprint partitioning. */
@@ -172,7 +174,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
     createPerceptionRuntimeHook(),
     createSignalConsumerRuntimeHook({ advisoryBus: deps.advisoryBus }),
     ...(isStarSoulEnabled() ? [createCourageHook({ cooldownTurns: 5, courageThreshold: 0.5, sycophancyTrap: deps.sycophancyTrap })] : []),
-    createKickRuntimeHook({ deposit: deps.stigmergyDeposit }),
+    createKickRuntimeHook({ deposit: deps.stigmergyDeposit, wasConvergenceTriggered: deps.wasConvergenceTriggered }),
     createVigorAfterPerceptionHook(),
     createThetaRuntimeHook({
       getThetaState: deps.getThetaState,

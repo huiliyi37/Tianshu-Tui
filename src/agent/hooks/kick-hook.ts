@@ -6,6 +6,8 @@ export interface KickRuntimeHookDeps {
   deposit: (deposit: PheromoneDeposit) => Promise<void>
   /** Number of turns to wait before allowing another kick. Default 3. */
   cooldownTurns?: number
+  /** When true, convergence already injected this turn — skip to avoid duplicate "you're stuck" messages. */
+  wasConvergenceTriggered?: () => boolean
 }
 
 export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntimeHook {
@@ -18,6 +20,10 @@ export function createKickRuntimeHook(deps: KickRuntimeHookDeps): PreTurnRuntime
     async run(ctx) {
       const sensorium = ctx.snapshot.sensorium
       if (!sensorium || !shouldKick(sensorium)) return
+
+      // Mutual exclusion: if convergence already injected this turn, skip
+      // to avoid duplicate "you're stuck" messages.
+      if (deps.wasConvergenceTriggered?.()) return
 
       // Cooldown: skip if we kicked within the last N turns
       const currentTurn = ctx.snapshot.turn

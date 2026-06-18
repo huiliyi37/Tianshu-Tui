@@ -1017,10 +1017,8 @@ export class AgentLoop {
       this.session.appendSystemReminder(convergenceCheck.injectedMessage)
 
       // When convergence is detected AND doom loop is blocked, the agent is
-      // likely in a post-completion verification loop. Signal completion
-      // instead of letting the model continue alternating between tools.
-      // Track 3 合一：能拿到权威门禁（v2）时按真实 GREEN/YELLOW/RED 给指引，
-      // 不再让模型自己猜门禁状态。
+      // likely in a post-completion verification loop. Append gate hint
+      // to the same SR (already injected above) instead of creating a second SR.
       if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
         let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
         try {

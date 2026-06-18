@@ -229,6 +229,7 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       }
     },
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
+    wasConvergenceTriggered: () => self.latestConvergenceResult?.shouldKick ?? false,
     telemetryWriter: self.telemetryWriter,
     getPhysarumShadowStats: () => self.getPhysarumShadowStats(),
     getDomainId: () => self.sessionDomain?.id ?? null,
