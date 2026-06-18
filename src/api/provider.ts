@@ -87,7 +87,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     supportsCacheControl: false,
     stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,
-    effortFormat: 'none',
+    effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
   },
   minimax: {
