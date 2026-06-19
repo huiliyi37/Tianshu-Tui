@@ -29,7 +29,6 @@ import { createAuthProvider } from '../auth/registry.js'
 import type { AuthProvider } from '../auth/types.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { FileHistory } from '../agent/file-history.js'
-import { PlaybookStore } from '../agent/playbook-store.js'
 import { loadProjectRules } from '../context/rules-loader.js'
 import { createDefaultToolRegistry } from '../tools/default-registry.js'
 import { AgentLoop } from '../agent/loop.js'
@@ -168,7 +167,6 @@ interface SessionStores {
   persist: SessionPersist
   claimStore: ReturnType<SessionPersist['createClaimStore']>
   fileHistory: FileHistory
-  playbookStore: PlaybookStore
   toolRegistry: ReturnType<typeof createDefaultToolRegistry>
   session: SessionContext
   taskLedger: ReturnType<typeof createTaskLedger>
@@ -178,6 +176,10 @@ interface SessionStores {
    *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
   refs: RuntimeRefs
 }
+
+// playbookStore 由 createAgentRuntime 内部自管（bootstrap.ts:726
+// `playbookStore: new PlaybookStore(cwd)`），sidecar 不再代为构造——
+// 历史 Wave A 短暂保留的 stores.playbookStore 是死字段，Wave C 后无消费者，已删。
 
 function buildSessionStores(
   ctx: ServeContext,
@@ -190,7 +192,6 @@ function buildSessionStores(
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
-  const playbookStore = new PlaybookStore(cwd)
   const session = new SessionContext()
 
   // sidecar 工具装配——复用 bootstrap 的 createInteractiveToolRegistry，与 TUI 端
@@ -235,7 +236,7 @@ function buildSessionStores(
     baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
     taskLedger,
   })
-  return { persist, claimStore, fileHistory, playbookStore, toolRegistry, session, taskLedger, ownershipLedger, refs }
+  return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs }
 }
 
 /**
@@ -373,11 +374,19 @@ function buildManagedAgent(
     // PlusMenu — skills (per-session discovery filter on the live agent).
     setDisabledSkills: (names) => agent.setDisabledSkills(names),
     // PlusMenu — model hot-switch (rebuild on the same SessionContext).
+    // Wave C-followup P0: createAgentRuntime 在 refs 上原地装新 coordinator/
+    // providerHealth/runtimeFactory，但旧 coordinator 的 stallSweep 定时器与
+    // 在途 worker AbortController 仍持有句柄。sidecar 长驻进程 + 频繁
+    // switchModel 会累积泄漏。先 capture old，装新后调 shutdown 释放。
     switchModel: (modelId) => {
       const next = resolveModelSpec(ctx, modelId)
       if (!next) return null
+      const oldCoordinator = stores.refs.coordinator
       spec = next
       agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+      if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
+        try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
+      }
       return spec.model.id
     },
     // Context usage display (desktop header progress bar).

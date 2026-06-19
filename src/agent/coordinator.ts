@@ -397,6 +397,31 @@ export class DelegationCoordinator {
     }
   }
 
+  /**
+   * 释放进程级资源：用于丢弃 coordinator 时（典型场景是 sidecar
+   * switchModel 重建装配栈）。调用后实例不得复用。
+   *
+   * 副作用：
+   * - clearInterval(stallSweep)——`.unref()` 已防止其阻塞进程退出，但
+   *   sidecar 长驻进程频繁 switchModel 会累积泄漏的 timer。
+   * - abort 所有在途 orderControllers——worker 的 processNext 走 catch
+   *   → workerFailureResult 路径，消费者收到 degraded run。
+   * - 清空 orderControllers / activityUpstream / backgroundRuns / backgroundPromises
+   *   引用，便于 GC 立刻回收（不主动 reject promise，让 worker 自然结算）。
+   *
+   * 不清理 mailbox / circuitBreaker / collaboration——它们不持有 timer/进程级资源。
+   */
+  shutdown(): void {
+    this.stopStallSweep()
+    for (const controller of this.orderControllers.values()) {
+      try { controller.abort() } catch { /* ignore */ }
+    }
+    this.orderControllers.clear()
+    this.activityUpstream.clear()
+    this.backgroundRuns.clear()
+    this.backgroundPromises.clear()
+  }
+
   // ── B2: background (async) work orders ──
 
   private readonly backgroundRuns = new Map<string, BackgroundRunHandle>()

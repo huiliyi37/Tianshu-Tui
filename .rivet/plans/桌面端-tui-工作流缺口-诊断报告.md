@@ -1,11 +1,12 @@
 # 桌面端 TUI 工作流缺口 — 诊断报告
 
-> 状态：ACTIVE — 2026-06-19 诊断快照 + 三轮修复
+> 状态：ACTIVE — 2026-06-19 诊断快照 + 三轮修复 + 审查后修复
 > 性质：审计文档 + 实施进度（§1-§7 为修复前历史快照，§8-§9 为本轮落地与遗留）
 > 战略原则：「两边一样，但不是一定要一致——需要什么拿什么」
 > 关联：同构于 `review-delivery-workflow-audit.md`，但范围扩大到全部 slash 工作流
 > **更新 1（2026-06-19 14:30）** — Wave A（13 工具注册）+ Wave E（slash 翻译层）已落地。
 > **更新 2（2026-06-19 15:00）** — Wave C（DelegationCoordinator 装配）已落地，所有占位工具激活；agent 工具能力与 TUI 完全等价。详情见 §8.5。
+> **更新 3（2026-06-19 15:20）** — 代码审查发现 P0/P1 已修：coordinator.shutdown() 防泄漏 + SessionStores.playbookStore 死字段清理。详情见 §8.7。P2/P3 列入遗留 Wave。
 
 ---
 
@@ -341,6 +342,40 @@ flowchart LR
 - 524 tests 全绿：server 269 + coordinator/team/council 157 + agent core (deliver-task/review-router/bootstrap/delegate) 98
 - 0 回归（2 个 baseline failure 仍与本轮无关）
 
+### 8.7 代码审查后修复（Wave C-followup, 2026-06-19 15:20）
+
+Wave C 落地后做了一轮代码审查（见原始审查报告归档），发现并修复两个问题：
+
+#### P0 — switchModel 下 DelegationCoordinator 泄漏（已修）
+
+**问题**：`createAgentRuntime` 每次调用都 `new DelegationCoordinator` 写入 `refs.coordinator`。sidecar `switchModel` 重建 agent 时旧 coordinator 被覆盖但无人清理——它的 stallSweep `setInterval` 还在跑（`.unref()` 防止阻塞退出但仍占资源），在途 worker 的 `orderControllers` AbortController 仍持有句柄。**长驻 sidecar + 频繁 switchModel 放大此泄漏**。
+
+**修复**：
+1. [src/agent/coordinator.ts](src/agent/coordinator.ts) 新增 public `shutdown()` 方法：clearInterval(stallSweep) + abort 所有 orderControllers + 清空 maps（orderControllers / activityUpstream / backgroundRuns / backgroundPromises）。mailbox/circuitBreaker/collaboration 不持有 timer/进程资源，无需清理。
+2. [src/server/serve.ts](src/server/serve.ts) `buildManagedAgent.switchModel` 在 capture `oldCoordinator = stores.refs.coordinator`，装新后调 `oldCoordinator.shutdown()`（同一身份判等防御，避免装配失败时误清新 coordinator）。
+
+**TUI 同源问题**：bootstrap 的 `switchAgentRuntime` 有相同模式，但 TUI 是单 session 进程、switch 频率极低，影响有限。本轮先修 sidecar 路径；TUI 路径同步修需 bootstrap.ts 修改，待 Wave K 评估（见 §9.5）。
+
+#### P1 — SessionStores.playbookStore 死字段（已修）
+
+**问题**：Wave A 时 sidecar `buildSessionStores` 创建 `playbookStore` 放入 SessionStores，但 Wave C 切到 `createAgentRuntime` 后该字段无消费者——`createAgentRuntime` 内部 `new PlaybookStore(cwd)` 自管（[src/bootstrap.ts](src/bootstrap.ts):726）。sidecar 那份是浪费内存 + 误导维护者。
+
+**修复**：
+1. SessionStores 接口删除 `playbookStore` 字段
+2. buildSessionStores 不再 `new PlaybookStore(cwd)`
+3. 移除 `import { PlaybookStore }`（serve.ts 不再直接引用）
+4. 在 SessionStores 接口下方加注释，说明 createAgentRuntime 内部自管 + Wave 历史成因
+
+#### P0+P1 验证
+
+- `tsc --noEmit` pass
+- coordinator 55 + server 269 全绿；0 回归
+
+#### 未在本次修的审查项
+
+- **P2 ProviderHealthTracker switchModel 重置** — 跨 TUI/sidecar 重构，列入 Wave J（§9.5）扩充说明
+- **P3 sameCwdRunningSessions 硬编码** — 早在 Wave F（§9.1）列出，本次审查再次确认严重性（多 session 冲突检测失效），不改变优先级
+
 ---
 
 ## 9. 遗留与后续 Wave
@@ -389,27 +424,47 @@ flowchart LR
 
 其余如 `/help` / `/sessions` / `/cockpit` / `/scroll` 都可以等用户真正反馈缺失再补。
 
-### 9.5 Wave J — 装配开销优化（低优先级，按需）
+### 9.5 Wave J — 装配开销优化 + 状态保持（中优先级，按需）
 
-Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，包括：
+Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，**switchModel 也会重建整个堆栈**，包括：
 - 新 `DelegationCoordinator` + `ProviderHealthTracker` + `DomainKnowledgeStore`
 - 新 `runtimeFactory` 闭包（含 PromptEngine + createProviderClient）
 - bandit gates 重新 evaluate
 - modelCards 重新派生
 
-对单用户少 session（≤3）的桌面端基本无感知。但同 cwd 启 10+ session 或同进程长期运行多次 switchModel 时可能积累。优化方向：
-- 把 sidecar 级共享对象（ProviderHealthTracker / DomainKnowledgeStore / banditGates evaluation）抽到 `serve.runServe` 顶层缓存
-- 让 createAgentRuntime 接受可选 `sharedHealthTracker` / `sharedDomainStore` 等
-- 或更激进：把 coordinator 也提到进程级，所有 session 共享一个（但要解决 sessionRegistry / sessionId binding）
+#### 9.5.1 装配开销
 
-不要在没有真实瓶颈证据前做这件事。
+对单用户少 session（≤3）的桌面端基本无感知。但同 cwd 启 10+ session 或同进程长期运行多次 switchModel 时可能积累。
+
+#### 9.5.2 ProviderHealthTracker 状态丢失（审查 P2）
+
+**问题**：`new ProviderHealthTracker()` 每次都从零开始（[src/bootstrap.ts](src/bootstrap.ts):661 区域）。switchModel 后之前积累的 provider 健康统计全丢，coordinator 的冷层路由跳过逻辑失去依据——worker 可能被路由到已知不健康的 provider。
+
+**TUI 同源**：同样问题，但 TUI 单 session 进程、switch 频率极低，影响有限。sidecar 长驻 + 多 session + 频繁 switchModel 放大此问题。
+
+#### 9.5.3 其他状态丢失候选
+
+- `DomainKnowledgeStore`：基于 cwd 磁盘存储，内存实例每次重新加载——若有大型 knowledge 文件，重复 I/O 开销
+- `bandit gates` evaluation：promotionStore 一次决定 gated/shadow，但每次 switchModel 重新 evaluate（一次性开销）
+- `modelCards` 派生：纯函数，重复执行无害
+
+#### 9.5.4 优化方向
+
+- 把 sidecar 级共享对象（`ProviderHealthTracker` / `DomainKnowledgeStore` / `banditGates evaluation`）抽到 `serve.runServe` 顶层缓存
+- 让 `createAgentRuntime` 接受可选 `sharedHealthTracker` / `sharedDomainStore` 入参（默认行为不变，TUI 零影响）
+- 或更激进：把 `coordinator` 也提到进程级，所有 session 共享一个（但要解决 `sessionRegistry`/`sessionId` binding）
+
+不要在没有真实瓶颈/路由错误证据前做这件事——但 P2 的 ProviderHealthTracker 重置是已知正确性问题，**优先级从原"低"上调到"中"**。
 
 ### 9.6 风险与监控
 
 - ~~**Wave A 注册了占位工具，模型可能在 sidecar 上尝试调用 coordinator 依赖工具**~~ — **Wave C 已解决**：coordinator 已装配，所有占位工具激活，不再抛 `DelegationCoordinator not initialized`。
+- ~~**switchModel 下 DelegationCoordinator 泄漏**~~ — **Wave C-followup P0 已解决**：coordinator.shutdown() + switchModel capture old → swap → shutdown。详情见 §8.7。
+- ~~**`new PlaybookStore(cwd)` 重复构造**~~ — **Wave C-followup P1 已解决**：SessionStores 接口移除 playbookStore，createAgentRuntime 内部自管。详情见 §8.7。
 - **`POST /prompt` 4xx 响应**——桌面前端需要处理新增的 400 状态码（`Unknown slash command`），目前只是返回 JSON 错误。若 desktop client 没有 4xx 错误展示，slash typo 用户感知会是"提交失败"而非具体错误——desktop 端 UI 可以追加 4xx body 的 toast 提示。
-- **sidecar 多 session 下 worker 子进程开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 时会重复构造（与 bootstrap 单 session 行为一致，但 sidecar 场景未优化）。监控指标：sidecar RSS / fd 数。如果撞到瓶颈，参考 §9.5 Wave J。
-- **`new PlaybookStore(cwd)` 重复构造**——createAgentRuntime 内部 `new PlaybookStore(cwd)`（[src/bootstrap.ts](src/bootstrap.ts):726），而 sidecar buildSessionStores 也构造了 `stores.playbookStore`——后者现在不再被 assembleAgentLoop 使用，是死字段。后续可清理（SessionStores 接口移除 playbookStore，或在 createAgentRuntime 加可选 deps 复用既有实例）。
+- **sidecar 多 session 下装配开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 重复构造。监控指标：sidecar RSS / fd 数 / boot-to-ready 延迟。撞到瓶颈走 Wave J（§9.5）。
+- **ProviderHealthTracker switchModel 重置（审查 P2）**——已并入 Wave J（§9.5.2）。冷层路由失据导致 worker 误路由的概率随 switchModel 频率上升；监控指标：worker 失败率 vs switchModel 计数。
+- **TUI switchAgentRuntime 同样有 coordinator 泄漏**（P0 同源）—— Wave C-followup 只修了 sidecar，TUI 路径要修需动 bootstrap.ts；TUI 单 session 影响有限，但若做长会话切换密集场景测试也可能撞到。建议作为 Wave K（"TUI 路径同步 P0 修复"）独立处理。
 
 ### 9.7 文档维护
 
