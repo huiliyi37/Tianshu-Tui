@@ -109,6 +109,15 @@ export interface RuntimeRefs {
   banditState: import('./server/routes.js').BanditStatusEntry[] | null
   /** Prompt engine ref for depth-layer queries at deliver-task time. */
   promptEngine: import('./prompt/engine.js').PromptEngine | null
+  /**
+   * Wave F: 当前 cwd 下其他活跃 session 数（不含自己）。给
+   * verificationSnapshotManager 做多 session worktree 冲突检测。
+   *
+   * TUI 单 session 路径不设置，createInteractiveToolRegistry 回退到 `() => 0`
+   * 保持原行为。sidecar 多 session 路径通过 SharedRuntime → manager.sameCwdRunningCount
+   * 接入真实计数，让 VSW snapshot 决策（in-place vs worktree）真实可用。
+   */
+  getSameCwdRunningSessions?: () => number
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -463,8 +472,10 @@ export function createInteractiveToolRegistry(
     isGitRepo: b1Baseline.getHead().length > 0,
     preExistingDirtyCount: b1Baseline.getExternalDirtyCount(),
     preExistingUntrackedCount: b1Baseline.getExternalUntrackedCount(),
-    // CLI bootstrap is single-session; the server path supplies real concurrency.
-    sameCwdRunningSessions: () => 0,
+    // Wave F: refs.getSameCwdRunningSessions 由 sidecar 通过 SharedRuntime →
+    // RuntimeSessionManager.sameCwdRunningCount 注入；TUI 不设置则回退 () => 0
+    // 保持原"CLI bootstrap is single-session"行为。
+    sameCwdRunningSessions: refs.getSameCwdRunningSessions ?? (() => 0),
     forceSnapshot: process.env.RIVET_VSW === '1',
   })
   refs.verificationSnapshotManager = b1SnapshotManager

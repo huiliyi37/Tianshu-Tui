@@ -10,6 +10,7 @@
 > **更新 4（2026-06-19 15:30）** — Wave K 已落地：TUI switchAgentRuntime/switchAgentSession + createShutdownHandler 同步 P0 修复，coordinator 泄漏在双侧（sidecar + TUI）一致闭环。详情见 §8.8。
 > **更新 5（2026-06-19 15:40）** — Wave L 已落地：sidecar runServe.close 通过 ManagedAgent.shutdown + RuntimeSessionManager.shutdownAll 对称 TUI createShutdownHandler，双侧 coordinator 生命周期管理完全一致。详情见 §8.9。
 > **更新 6（2026-06-19 15:50）** — Wave J 核心落地：ProviderHealthTracker 跨 session 共享（P2 解决）+ DomainKnowledgeStore cwd-keyed 缓存（重复 load 解决）。详情见 §8.10；剩余优化候选（bandit gates 缓存等）保留在 §9.5.4。
+> **更新 7（2026-06-19 16:00）** — Wave F 落地：sameCwdRunningSessions 硬编码 () => 0 接通真实 manager.sameCwdRunningCount，verificationSnapshotManager 的多 session 冲突检测真正生效。详情见 §8.11。**所有 P0-P3 审查项 + 原 §9 中所有非 deferred Wave 全部完成。**
 
 ---
 
@@ -441,6 +442,33 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 - bootstrap 19 + coordinator 50 + session-manager 28 + session-routes 31 + server 8 + session-rehydrate 9 + provider-health 24 + domain-knowledge 14 = 183 tests 全绿（实际跑共 200 含些重叠）
 - 0 回归
 
+### 8.11 Wave F — sameCwdRunningSessions 真实计数接入（2026-06-19 16:00，时间上晚于 §8.10）
+
+**问题（审查 P3）**：`createInteractiveToolRegistry` 装配 `verificationSnapshotManager` 时硬编码 `sameCwdRunningSessions: () => 0`（[src/bootstrap.ts](src/bootstrap.ts):465 区域）——TUI 单 session 假设。sidecar 多 session 下同 cwd 的并发 session 互相不可见，VSW snapshot 的多 session 冲突检测（决定 in-place vs worktree）失效——多个 session 可能同时改同 cwd 而互不让步。`session-manager.ts:465` 已有 `sameCwdRunningCount(cwd, excludeSessionId)` API 但没接上。
+
+**改动**：
+
+1. [src/bootstrap.ts](src/bootstrap.ts) `RuntimeRefs` 接口加可选 `getSameCwdRunningSessions?: () => number`——文档明确"sidecar 通过 SharedRuntime → manager.sameCwdRunningCount 接入，TUI 不设置回退 0"。
+2. [src/bootstrap.ts](src/bootstrap.ts) `createInteractiveToolRegistry` 内部装配处改为 `sameCwdRunningSessions: refs.getSameCwdRunningSessions ?? (() => 0)`——TUI 路径行为零变化。
+3. [src/server/serve.ts](src/server/serve.ts) `SharedRuntime` 接口加 `sameCwdRunningCount: ((cwd, excludeSessionId?) => number) | null`（late-bound——sessions 创建后回写）。
+4. [src/server/serve.ts](src/server/serve.ts) `buildSessionStores` 加 `shared?: SharedRuntime` 参数；构造 refs 时 `getSameCwdRunningSessions: shared ? () => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0 : undefined`。
+5. [src/server/serve.ts](src/server/serve.ts) `buildAgentLoop` / `buildManagedAgent` 透传 shared 给 buildSessionStores。
+6. [src/server/serve.ts](src/server/serve.ts) `runServe` 在 `sessions = new RuntimeSessionManager(...)` 之后立即回写 `sharedRuntime.sameCwdRunningCount = (cwd, exId) => sessions.sameCwdRunningCount(cwd, exId)`。
+
+**关键设计 — late binding**：
+
+`SharedRuntime` 创建（L516）→ `sessions` 创建（L532）→ late-bind（L544）。窗口期（sessions 未就绪前的 SharedRuntime）任何 getSameCwdRunningSessions 调用会回退 0，与硬编码原行为一致；sessions 就绪后所有 session 的 verificationSnapshotManager 自动读到真实计数（因为 refs.getSameCwdRunningSessions 是闭包 `() => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0`——读取时取最新值）。
+
+**为什么不直接传 manager 引用**：避免 SharedRuntime 类型循环依赖（session-manager.ts 已 import serve.ts 的 buildManagedAgent 间接路径）。用函数签名 `(cwd, excludeId?) => number` 更解耦。
+
+**TUI 路径影响**：零。TUI 不传 shared，refs.getSameCwdRunningSessions 为 undefined，bootstrap 回退 `() => 0`——与原"CLI bootstrap is single-session"行为字节级一致。
+
+**Wave F 验证**：
+
+- `tsc --noEmit` pass
+- bootstrap 19 + session-manager 28 + session-routes 31 + server 8 + session-rehydrate 9 + coordinator 50 + verification-snapshot 27 = 172 tests 全绿
+- 0 回归
+
 ---
 
 ### 8.9 Wave L — sidecar 进程退出对齐 TUI shutdown（2026-06-19 15:40）
@@ -473,17 +501,11 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 
 ## 9. 遗留与后续 Wave
 
-### 9.1 Wave F — sidecar 多 session 元数据校正（中优先级）
+### 9.1 ~~Wave F — sidecar 多 session 元数据校正~~ — 已解决（见 §8.11）
 
-`createInteractiveToolRegistry` 内部装配 `verificationSnapshotManager` 时硬编码 `sameCwdRunningSessions: () => 0`（[src/bootstrap.ts](src/bootstrap.ts):465）——这是 TUI 单 session 假设。sidecar 多 session 下应该用 `manager.sameCwdRunningCount(cwd, excludeSessionId)`（[src/server/session-manager.ts](src/server/session-manager.ts):465 已有此 API）。
+通过方案 B 落地：RuntimeRefs 加 `getSameCwdRunningSessions?: () => number` 字段，sidecar 通过 SharedRuntime late-bound 接入 `manager.sameCwdRunningCount`，TUI 路径不传保持原行为。详情见 §8.11。
 
-**影响**：错估只影响 VSW worktree 隔离决策——目前 default off，影响面有限。但补齐后多 session 并发开发更稳。
-
-**做法选项**：
-- A：给 `createInteractiveToolRegistry` 加一个可选的 `sameCwdRunningSessions` 入参，sidecar 传入真实 getter
-- B：在 refs 新增字段，bootstrap 内部读取
-
-倾向 A——更显式。
+> 原方案分析里曾倾向方案 A（给 createInteractiveToolRegistry 加可选入参），最终选 B（refs 字段）的理由：现有 refs 已经在透传 sessionId/sessionRegistry/coordinator/promptEngine 等运行时引用，加一个 getter 字段保持单一注入点；方案 A 会让 createInteractiveToolRegistry 签名又多一个可选参数。
 
 ### 9.2 Wave G — MeridianIndexer / MCP / LSP 装配（中优先级）
 

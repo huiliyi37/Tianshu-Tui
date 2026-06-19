@@ -98,12 +98,18 @@ export interface BuiltAgent {
  *   （registerProvider 幂等，重复注册不重置）
  * - domainStores: cwd-keyed 缓存，同 cwd 多 session 复用同一个磁盘绑定的
  *   DomainKnowledgeStore（避免重复 load + 跨 session lessons 可见）
+ * - sameCwdRunningCount: late-bound (Wave F)——RuntimeSessionManager 创建后
+ *   回写。给 verificationSnapshotManager 做多 session worktree 冲突检测；
+ *   修复硬编码 () => 0 假设（TUI 单 session 路径不受影响，sidecar 走真实计数）。
  *
  * 未来候选：bandit gates evaluation 结果缓存（避免 switchModel 重算）。
  */
 export interface SharedRuntime {
   providerHealth: ProviderHealthTracker
   domainStores: Map<string, DomainKnowledgeStore>
+  /** late-bound: 在 sessions = new RuntimeSessionManager(...) 之后由 runServe
+   *  回写。值为 null 时退化为 0（sessions 尚未初始化的窗口期）。 */
+  sameCwdRunningCount: ((cwd: string, excludeSessionId?: string) => number) | null
 }
 
 /** sidecar 内部：按 cwd 取/建 DomainKnowledgeStore，多 session 共享同一实例。 */
@@ -214,6 +220,7 @@ function buildSessionStores(
   cwd: string,
   sessionId: string,
   registry?: SessionRegistry,
+  shared?: SharedRuntime,
 ): SessionStores {
   const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
@@ -223,11 +230,9 @@ function buildSessionStores(
   const session = new SessionContext()
 
   // sidecar 工具装配——复用 bootstrap 的 createInteractiveToolRegistry，与 TUI 端
-  // 共享一套装配链。多 agent 能力（coordinator/meridianIndexer/mcpManager/lspManager）
-  // 在 sidecar 中暂未装配：相关工具（delegate_task / delegate_batch / team_orchestrate /
-  // council_convene / plan_task / deliver_task 审查段）被注册但调用时会抛
-  // 'DelegationCoordinator not initialized'——比"工具不存在"对模型友好得多。
-  // 后续 Wave 可在此处补 coordinator 装配（参考 bootstrap.ts createAgentRuntime）。
+  // 共享一套装配链。Wave C 后所有工具（含 coordinator 依赖工具）均通过
+  // refs 闭包后绑定 coordinator，assembleAgentLoop 通过 createAgentRuntime
+  // 装配 coordinator 后回写 refs.coordinator，工具被激活。
   const refs: RuntimeRefs = {
     coordinator: null,
     fileHistory,
@@ -243,6 +248,11 @@ function buildSessionStores(
     lspManager: null,
     banditState: null,
     promptEngine: null,
+    // Wave F: 通过 SharedRuntime → RuntimeSessionManager.sameCwdRunningCount
+    // 注入真实计数；shared 缺失或 manager 未就绪退化为 0（保持 TUI 兼容行为）。
+    getSameCwdRunningSessions: shared
+      ? () => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0
+      : undefined,
   }
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
 
@@ -348,7 +358,7 @@ export function buildAgentLoop(
   approvalMode?: ApprovalMode,
   shared?: SharedRuntime,
 ): BuiltAgent {
-  const stores = buildSessionStores(ctx, cwd, sessionId, registry)
+  const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
   const spec: ResolvedModelSpec = {
     provider: ctx.provider,
     apiKey: ctx.apiKey,
@@ -379,7 +389,7 @@ function buildManagedAgent(
   approvalMode: ApprovalMode | undefined,
   shared?: SharedRuntime,
 ): import('./session-manager.js').ManagedAgent {
-  const stores = buildSessionStores(ctx, cwd, sessionId, registry)
+  const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
   let spec: ResolvedModelSpec = {
     provider: ctx.provider,
     apiKey: ctx.apiKey,
@@ -506,9 +516,13 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // Wave J: sidecar 级 SharedRuntime——providerHealth 跨 session 共享让
   // health 统计累积；domainStores 按 cwd 缓存避免重复磁盘 load + 跨 session
   // lessons 可见。runServe 进程级单例，传给每个 buildManagedAgent。
+  // Wave F: sameCwdRunningCount 是 late-bound——sessions 创建后才能引用，
+  // 先置 null，sessions 就绪后回写。getSameCwdRunningSessions getter 对
+  // sessions 未就绪的窗口期会回退 0（安全）。
   const sharedRuntime: SharedRuntime = {
     providerHealth: new ProviderHealthTracker(),
     domainStores: new Map(),
+    sameCwdRunningCount: null,
   }
 
   // Multi-session manager (M0.5): each session is an independent AgentLoop,
@@ -526,6 +540,12 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     listModels: () => listAllModels(ctx),
     defaultModelId: ctx.model.id,
   })
+
+  // Wave F: sessions 现已就绪——把真实 sameCwdRunningCount 回写到 SharedRuntime。
+  // 之后任何 buildManagedAgent → buildSessionStores 创建的 refs.getSameCwdRunningSessions
+  // 都会读到这条真实值；verificationSnapshotManager 的多 session 冲突检测真正生效。
+  sharedRuntime.sameCwdRunningCount = (cwd, excludeSessionId) =>
+    sessions.sameCwdRunningCount(cwd, excludeSessionId)
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.
   const activeAgents = new Set<AgentLoop>()
