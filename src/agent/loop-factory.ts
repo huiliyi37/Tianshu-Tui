@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
+import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
@@ -81,6 +82,13 @@ return new TurnStreamController({
           const appxLen = self.config.promptEngine.getCachedAppendixLength?.()
           if (projLen !== undefined && projLen > 0) entry.projChars = projLen
           if (appxLen !== undefined && appxLen > 0) entry.appendixChars = appxLen
+
+          // Read-ref telemetry (Part B): bytes saved by [read-ref] shortcuts.
+          const refStats = getReadRefStats()
+          if (refStats.count > 0) {
+            entry.readRefSavedBytes = refStats.savedBytes
+            entry.readRefCount = refStats.count
+          }
 
           // History rewrite detection: message count shrank since last turn
           // (compact / replace / session split) — the classic mid-round breaker.
