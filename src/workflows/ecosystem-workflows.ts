@@ -323,7 +323,7 @@ export function parseTeamWorkflowArgs(args: string): TeamWorkflowPromptOptions |
   return { mode: 'standard', objective: trimmed }
 }
 
-export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-3]'
+export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-2]'
 
 export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOptions | null {
   let objective = args.trim()
@@ -337,7 +337,7 @@ export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOpt
     const tok = afterRounds.split(/[\s,]+/).find(s => s.length > 0)
     const n = tok ? Number.parseInt(tok, 10) : NaN
     objective = objective.slice(0, roundsIdx).trim()
-    if (Number.isInteger(n) && n >= 1 && n <= 3) rounds = n
+    if (Number.isInteger(n) && n >= 1 && n <= 2) rounds = n
   }
 
   // Parse --seats flag: /council review the plan --seats tianquan,tianfu,tianji

@@ -207,26 +207,24 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(!resolved?.prompt.includes('rounds:'))
   })
 
-  it('--rounds 0 or 5 (out of range) degrades to default', () => {
-    const r0 = resolveEcosystemWorkflowInput('/council review --rounds 0')
-    assert.ok(r0?.prompt.includes('单轮会诊'))
-    assert.ok(!r0?.prompt.includes('rounds:'))
-
-    const r5 = resolveEcosystemWorkflowInput('/council review --rounds 5')
-    assert.ok(r5?.prompt.includes('单轮会诊'))
-    assert.ok(!r5?.prompt.includes('rounds:'))
+  it('--rounds 0 / 3 / 5 (out of range, 上限 2) degrades to default', () => {
+    for (const bad of ['0', '3', '5']) {
+      const r = resolveEcosystemWorkflowInput(`/council review --rounds ${bad}`)
+      assert.ok(r?.prompt.includes('单轮会诊'), `--rounds ${bad} 应降级单轮`)
+      assert.ok(!r?.prompt.includes('rounds:'), `--rounds ${bad} 不应注入 rounds 参数`)
+    }
   })
 
   it('--seats and --rounds combine in any order', () => {
-    const a = resolveEcosystemWorkflowInput('/council audit --seats tianquan,tianfu --rounds 3')
+    const a = resolveEcosystemWorkflowInput('/council audit --seats tianquan,tianfu --rounds 2')
     assert.ok(a?.prompt.includes('audit'))
     assert.ok(a?.prompt.includes('tianquan'))
-    assert.ok(a?.prompt.includes('rounds: 3'))
+    assert.ok(a?.prompt.includes('rounds: 2'))
 
-    const b = resolveEcosystemWorkflowInput('/council audit --rounds 3 --seats tianquan,tianfu')
+    const b = resolveEcosystemWorkflowInput('/council audit --rounds 2 --seats tianquan,tianfu')
     assert.ok(b?.prompt.includes('audit'))
     assert.ok(b?.prompt.includes('tianquan'))
-    assert.ok(b?.prompt.includes('rounds: 3'))
+    assert.ok(b?.prompt.includes('rounds: 2'))
   })
 
   it('default (no --rounds) still says 单轮会诊 and has no rounds param', () => {

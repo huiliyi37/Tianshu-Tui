@@ -44,7 +44,7 @@ const inputSchema = z.object({
   objective: z.string().min(1),
   draftItems: z.array(planItemSchema).optional(),
   seats: z.array(seatSchema).optional(),
-  rounds: z.number().int().min(1).max(3).optional(),
+  rounds: z.number().int().min(1).max(2).optional(),
 })
 
 export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator): Tool {
@@ -84,7 +84,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
               required: ['authority'],
             },
           },
-          rounds: { type: 'number', description: 'Max debate rounds (1-3, default 1 = single round). Pass 2+ to enable a rebuttal round; round 2 only fires when round 1 surfaces conflicts.' },
+          rounds: { type: 'number', description: 'Max debate rounds (1-2, default 1 = single round). Pass 2 to enable a rebuttal round; round 2 only fires when round 1 surfaces conflicts.' },
         },
         required: ['objective'],
       },
