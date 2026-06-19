@@ -639,7 +639,11 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
-    parts.push(truncateBlock(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`, 8_000, 'project-instructions'))
+    // When codebase-index is present it already contains the module directory table
+    // (seeded from AGENTS.md via loadProjectModuleMap). Strip the redundant table
+    // from project-instructions to avoid ~600-800 chars of duplication.
+    const stripped = ctx.projectIndexBlock ? stripFirstMarkdownTable(md) : md
+    parts.push(truncateBlock(`<project-instructions>\n${escapeXml(stripped)}\n</project-instructions>`, 8_000, 'project-instructions'))
   }
 
   // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
@@ -762,4 +766,41 @@ function truncateBlock(block: string, maxChars: number, kind: string): string {
     return `<${tag}>\n${trimmed}\n<!-- truncated: ${block.length} → ${maxChars} chars -->\n</${tag}>`
   }
   return block.slice(0, maxChars) + `\n<!-- ${kind} truncated: ${block.length} → ${maxChars} chars -->`
+}
+
+/**
+ * Strip the first markdown table from text (the AGENTS.md directory table).
+ * A markdown table is a contiguous block of lines starting with `|`.
+ * Preserves surrounding content including headers/prose.
+ */
+export function stripFirstMarkdownTable(text: string): string {
+  const lines = text.split('\n')
+  let tableStart = -1
+  let tableEnd = -1
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i]!.trimStart()
+    if (trimmed.startsWith('|')) {
+      if (tableStart === -1) tableStart = i
+      tableEnd = i
+    } else if (tableStart !== -1) {
+      break
+    }
+  }
+
+  if (tableStart === -1) return text
+
+  // Also remove the preceding header line if it looks like "> 顶层目录索引..."
+  // and trailing blank line after table
+  let removeStart = tableStart
+  if (removeStart > 0 && lines[removeStart - 1]!.startsWith('>')) {
+    removeStart--
+  }
+  let removeEnd = tableEnd
+  if (removeEnd + 1 < lines.length && lines[removeEnd + 1]!.trim() === '') {
+    removeEnd++
+  }
+
+  const result = [...lines.slice(0, removeStart), ...lines.slice(removeEnd + 1)]
+  return result.join('\n')
 }

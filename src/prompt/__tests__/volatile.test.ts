@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, type VolatileContext, type SalientBlock } from '../volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -740,5 +740,33 @@ describe('GWT salience and Top-K selection', () => {
       assert.match(out, /<task-depth/)
       assert.doesNotMatch(out, /<available-skills/)
     })
+  })
+})
+
+describe('stripFirstMarkdownTable', () => {
+  it('removes the first table and preserves surrounding content', () => {
+    const input = [
+      '# Title',
+      '',
+      '> Top-level index.',
+      '| dir | desc |',
+      '|------|------|',
+      '| `src/agent/` | core |',
+      '| `src/tools/` | tools |',
+      '',
+      '## Next Section',
+      'Some text.',
+    ].join('\n')
+    const result = stripFirstMarkdownTable(input)
+    assert.ok(!result.includes('src/agent/'))
+    assert.ok(!result.includes('Top-level index'))
+    assert.ok(result.includes('# Title'))
+    assert.ok(result.includes('## Next Section'))
+    assert.ok(result.includes('Some text.'))
+  })
+
+  it('returns text unchanged when no table is present', () => {
+    const input = '# Just a heading\nSome text.\n'
+    assert.equal(stripFirstMarkdownTable(input), input)
   })
 })
