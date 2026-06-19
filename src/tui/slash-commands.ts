@@ -51,7 +51,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
-/theme [cobalt|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
+/theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
 /undo [<number>|preview <number>] — Undo file changes with preview

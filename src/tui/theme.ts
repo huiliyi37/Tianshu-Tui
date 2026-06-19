@@ -18,7 +18,7 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity' | 'cobalt'
+export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity' | 'cobalt' | 'gemini'
 
 interface ColorSet {
   primary: string
@@ -361,6 +361,35 @@ const COBALT_FALLBACK: ColorSet = {
   pulseAlert: 'red',
 }
 
+// Gemini theme — Indigo, Purple & Mint Teal inspired by Gemini aesthetics
+const GEMINI_TRUECOLOR: ColorSet = {
+  primary: '#818cf8',      // Gemini Indigo — Cold Indigo Blue accent
+  secondary: '#c084fc',    // Nebula Violet — Radiant Violet
+  success: '#34d399',      // Aurora Mint — Cold Teal-Green
+  warning: '#fbbf24',      // Stellar Amber — Bright Golden Amber
+  error: '#f43f5e',        // Cosmic Rose — Vibrant desaturated Rose-Red
+  dim: '#5e617d',          // Nebula Gray — Elevated dividers/shortcuts
+  pulseQuiet: '#2a2b3d',   // Space Dark — Quiet pulse container
+  pulseActive: '#818cf8',  // Active Pulse
+  pulseAlert: '#f43f5e',   // Alert Pulse
+  toolShell: '#7dd3fc',    // Sky Azure — bash/grep/glob
+  toolEdit: '#c084fc',     // Nebula Violet — edit_file/write_file
+  toolTest: '#34d399',     // Aurora Mint — run_tests
+  toolDelegate: '#fbbf24', // Stellar Amber — delegate
+}
+
+const GEMINI_FALLBACK: ColorSet = {
+  primary: 'blueBright',
+  secondary: 'magentaBright',
+  success: 'cyanBright',
+  warning: 'yellowBright',
+  error: 'redBright',
+  dim: 'gray',
+  pulseQuiet: 'gray',
+  pulseActive: 'blueBright',
+  pulseAlert: 'redBright',
+}
+
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
@@ -457,6 +486,13 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     // muted = 元信息灰 (--tui-label)
     truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#bdc3ca', muted: '#8c939a' }),
     fallback: buildTheme(COBALT_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
+  },
+  gemini: {
+    // userColor = 亮靛白 ▌ 标记
+    // assistantColor = 柔中性灰正文
+    // muted = 星云灰
+    truecolor: buildTheme(GEMINI_TRUECOLOR, { userColor: '#e0e7ff', assistantColor: '#c4c9d2', muted: '#9497a6' }),
+    fallback: buildTheme(GEMINI_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
   },
 }
 
