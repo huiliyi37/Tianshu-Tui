@@ -232,6 +232,24 @@ describe('runCouncilDebate — 多轮层（默认 1=单轮 opt-in）', () => {
     assert.equal(plan.aggregate.conflicts[0]!.status, 'resolved')
     assert.equal(plan.aggregate.conflicts[0]!.resolution, '认同方向')
   })
+
+  it('round2 全 hold → 冲突仍 persisted（无 resolution）', async () => {
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => {
+        if (reqs[0]!.parentTurnId.endsWith('-r2')) {
+          return { results: reqs.map(r => {
+            const key = stableConflictKey('X', 'Y')
+            return r2Result(r.authority, JSON.stringify({ authority: r.authority, summary: 's', rebuttals: [{ conflictKey: key, stance: 'hold', argument: '坚持己见' }] }))
+          }) }
+        }
+        return { results: [r1c('tianquan', 'X'), r1c('tianfu', 'Y')] }
+      },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate({ ...conflictInput, maxRounds: 2 }, deps)
+    assert.equal(plan.aggregate.conflicts[0]!.status, 'persisted')
+    assert.ok(!plan.aggregate.conflicts[0]!.resolution)
+  })
 })
 
 describe('deriveStableWorkOrderId — round2 -r2 后缀稳定化', () => {

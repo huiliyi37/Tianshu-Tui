@@ -20,9 +20,25 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
   lines.push(`> 席位: ${plan.seats.join(' · ')} · ${plan.meta.round} 轮会诊 · convenedAt=${plan.meta.convenedAt}`, '')
 
   lines.push('## 席位贡献', '')
-  for (const c of contributions) {
+  // 仅渲染首轮全稿；第二轮席位只表态反驳，单列于「第二轮反驳」段，不在此重复出现。
+  for (const c of contributions.filter(c => (c.round ?? 1) === 1)) {
     const modelSuffix = c.modelUsed ? ` _(模型: ${c.modelUsed})_` : ''
     lines.push(`### ${c.authority}${modelSuffix}`, c.summary || '_（无摘要）_', '')
+  }
+
+  // 第二轮反驳过程 —— 展示各席对首轮冲突的让步/坚持/折中立场，落地「辩论」灵魂。
+  const rebuttalContribs = contributions.filter(c => c.round === 2 && (c.rebuttals?.length ?? 0) > 0)
+  if (rebuttalContribs.length > 0) {
+    const keyToDesc = new Map(aggregate.conflicts.map(cf => [cf.key, cf.description]))
+    lines.push('## 第二轮反驳', '')
+    for (const c of rebuttalContribs) {
+      for (const r of c.rebuttals ?? []) {
+        const stanceZh = r.stance === 'concede' ? '让步' : r.stance === 'hold' ? '坚持' : '折中'
+        const desc = keyToDesc.get(r.conflictKey) ?? r.conflictKey
+        lines.push(`- **${esc(c.authority)}** 对「${esc(desc)}」: ${stanceZh} — ${esc(r.argument)}`)
+      }
+    }
+    lines.push('')
   }
 
   lines.push('## 裁决记录', '')
