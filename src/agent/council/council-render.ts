@@ -17,7 +17,7 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
   const lines: string[] = []
 
   lines.push(`# 议事会计划 — ${objective}`, '')
-  lines.push(`> 席位: ${plan.seats.join(' · ')} · 单轮会诊 · convenedAt=${plan.meta.convenedAt}`, '')
+  lines.push(`> 席位: ${plan.seats.join(' · ')} · ${plan.meta.round} 轮会诊 · convenedAt=${plan.meta.convenedAt}`, '')
 
   lines.push('## 席位贡献', '')
   for (const c of contributions) {
@@ -34,8 +34,11 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
   if (aggregate.conflicts.length === 0) {
     lines.push('_（无席位间冲突）_', '')
   } else {
-    lines.push('| 描述 | 一方 | 另一方 |', '|------|------|--------|')
-    for (const cf of aggregate.conflicts) lines.push(`| ${esc(cf.description)} | ${esc(cf.left)} | ${esc(cf.right)} |`)
+    lines.push('| 描述 | 一方 | 另一方 | 状态 | 化解 |', '|------|------|--------|------|------|')
+    for (const cf of aggregate.conflicts) {
+      const statusZh = cf.status === 'resolved' ? '已化解' : cf.status === 'persisted' ? '仍分歧' : '待议'
+      lines.push(`| ${esc(cf.description)} | ${esc(cf.left)} | ${esc(cf.right)} | ${statusZh} | ${esc(cf.resolution ?? '')} |`)
+    }
     lines.push('')
   }
 
@@ -61,7 +64,7 @@ export function summarizeCouncilPlan(plan: CouncilPlan): string {
   const rejected = d.filter(x => x.verdict === 'rejected').length
   const deferred = d.filter(x => x.verdict === 'deferred').length
   return [
-    `议事会 · ${plan.seats.length} 席单轮 · ${plan.objective}`,
+    `议事会 · ${plan.seats.length} 席 ${plan.meta.round} 轮 · ${plan.objective}`,
     `裁决: 接受 ${accepted} · 拒绝 ${rejected} · 暂缓 ${deferred} · 冲突 ${plan.aggregate.conflicts.length}`,
     `最终任务 ${plan.aggregate.mergedItems.length} 项`,
   ].join('\n')

@@ -43,6 +43,26 @@ describe('renderCouncilPlan', () => {
   it('确定性：两次渲染字节相等', () => {
     assert.equal(renderCouncilPlan(makePlan()), renderCouncilPlan(makePlan()))
   })
+  it('单轮渲染「1 轮会诊」', () => {
+    assert.match(renderCouncilPlan(makePlan()), /1 轮会诊/)
+  })
+})
+
+describe('renderCouncilPlan — 多轮', () => {
+  it('meta.round=2 渲染「2 轮会诊」且冲突表含化解状态', () => {
+    const plan: CouncilPlan = {
+      objective: 'o', seats: ['s1', 's2'], contributions: [],
+      aggregate: {
+        decisions: [], mergedItems: [],
+        conflicts: [{ description: 'd', left: 'L', right: 'R', key: 'k', status: 'resolved', resolution: '让步收敛' }],
+      },
+      finalPlanMarkdown: '', meta: { round: 2, convenedAt: 1, objectiveHash: 'h' },
+    }
+    const md = renderCouncilPlan(plan)
+    assert.match(md, /2 轮会诊/)
+    assert.match(md, /已化解/)
+    assert.match(md, /让步收敛/)
+  })
 })
 
 describe('summarizeCouncilPlan', () => {
@@ -50,7 +70,7 @@ describe('summarizeCouncilPlan', () => {
     const summary = summarizeCouncilPlan(makePlan())
     const linesCount = summary.split('\n').length
     assert.ok(linesCount <= 4, `摘要 ${linesCount} 行超过工具卡 4 行预览阈值`)
-    assert.match(summary, /2 席单轮/)
+    assert.match(summary, /2 席 1 轮/)
     assert.match(summary, /mission X/)
     assert.match(summary, /接受 \d+ · 拒绝 \d+ · 暂缓 \d+/)
     assert.match(summary, /最终任务 \d+ 项/)
