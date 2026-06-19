@@ -106,6 +106,10 @@ describe('GREP_TOOL', () => {
       assert.equal(result.isError, true, JSON.stringify(input))
       assert.match(result.content, /pattern is required/i)
     }
+
+    const result = await GREP_TOOL.execute(makeParams({ path: 'src', context_lines: 2 }))
+    assert.equal(result.isError, true)
+    assert.match(result.content, /input keys: context_lines, path/i)
   })
 
   it('enforces max_results globally', async () => {

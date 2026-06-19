@@ -69,7 +69,14 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
   async execute(params: ToolCallParams): Promise<ToolResult> {
     const pattern = parseGrepPattern(params.input)
     if (pattern === null) {
-      return { content: 'Error: pattern is required (non-empty string)', isError: true }
+      const keys = Object.keys(params.input).sort()
+      const keySummary = keys.length > 0 ? keys.join(', ') : '(none)'
+      const patternType = typeof params.input.pattern
+      return {
+        content: `Error: pattern is required (non-empty string). Received input keys: ${keySummary}. pattern type: ${patternType}.` +
+          (keys.length === 0 ? ' Input is empty — arguments may have failed to parse during streaming.' : ''),
+        isError: true,
+      }
     }
     const searchPath = (params.input.path as string) ?? '.'
     const glob = params.input.glob as string | undefined
