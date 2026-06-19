@@ -627,6 +627,16 @@ export class PromptEngine {
   getToolCount(): number {
     return this.config.staticCtx.tools.length
   }
+
+  /** Current cognitive projection length in chars (for cache-log observability). */
+  getCognitiveProjectionLength(): number {
+    return this.cognitiveProjection?.length ?? 0
+  }
+
+  /** Current cached appendix length in chars (for cache-log observability). */
+  getCachedAppendixLength(): number {
+    return this.cachedAppendix?.length ?? 0
+  }
   updateSessionMemory(block: string): void {
     this.sessionMemoryOverride = block
     this.rebuildFrozenBase()

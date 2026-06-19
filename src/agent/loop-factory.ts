@@ -76,6 +76,12 @@ return new TurnStreamController({
           entry.userMsgs = userMsgCount
           if (injectedCount > 0) entry.injected = injectedCount
 
+          // Prompt anatomy: projection and appendix byte sizes for delta cost analysis.
+          const projLen = self.config.promptEngine.getCognitiveProjectionLength?.()
+          const appxLen = self.config.promptEngine.getCachedAppendixLength?.()
+          if (projLen !== undefined && projLen > 0) entry.projChars = projLen
+          if (appxLen !== undefined && appxLen > 0) entry.appendixChars = appxLen
+
           // History rewrite detection: message count shrank since last turn
           // (compact / replace / session split) — the classic mid-round breaker.
           if (prevMsgCount > 0 && messages.length < prevMsgCount) entry.historyRewritten = true
