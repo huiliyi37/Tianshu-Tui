@@ -851,10 +851,27 @@ export class TuiApp {
    * - 其它 overlay（starmap/chronicle）：仅 q 关闭（无内部导航）
    * Esc/Ctrl+C 不在此消费，留给全局兜底统一关闭。
    */
-  private handleOverlayKey(key: { name: string; char: string; ctrl?: boolean; meta?: boolean }): boolean {
+  private handleOverlayKey(key: { name: string; char: string; ctrl?: boolean; meta?: boolean; shift?: boolean }): boolean {
     const id = this.overlay.activeId()
     const c = key.char.toLowerCase()
     const isSearch = id === 'command-palette' || id === 'history-search'
+
+    // Tab switcher between domain-picker, model-picker, and theme-picker
+    const tabs = ['domain-picker', 'model-picker', 'theme-picker']
+    if (id && tabs.includes(id)) {
+      if (key.name === 'right' || (key.name === 'tab' && !key.shift)) {
+        const curIdx = tabs.indexOf(id)
+        const nextId = tabs[(curIdx + 1) % tabs.length]!
+        this.activateOverlay(nextId)
+        return true
+      }
+      if (key.name === 'left' || (key.name === 'tab' && key.shift)) {
+        const curIdx = tabs.indexOf(id)
+        const nextId = tabs[(curIdx - 1 + tabs.length) % tabs.length]!
+        this.activateOverlay(nextId)
+        return true
+      }
+    }
 
     // q 关闭非搜索型 overlay；搜索型（palette/history）里 q 是普通查询字符，仅 Esc 关闭。
     if (c === 'q' && !isSearch) {

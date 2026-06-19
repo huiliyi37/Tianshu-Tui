@@ -18,6 +18,20 @@ import { formatElapsed } from '../tool-elapsed.js'
 
 // ── Shared Layout Helpers ─────────────────────────────────────
 
+function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
+  const tabDomain = activeTab === 'domain' ? color(' 🎛  Domain ', theme.primary, { bold: true }) : color('    Domain ', theme.dim)
+  const tabModel = activeTab === 'model' ? color(' 🤖 Model ', theme.primary, { bold: true }) : color('    Model ', theme.dim)
+  const tabTheme = activeTab === 'theme' ? color(' 🎨 Theme ', theme.primary, { bold: true }) : color('    Theme ', theme.dim)
+  
+  const separator = color(' │ ', theme.dim)
+  const tabs = `${tabDomain}${separator}${tabModel}${separator}${tabTheme}`
+  const tabsPlain = ' 🎛  Domain  │     Model  │     Theme'
+  const remaining = Math.max(0, width - 2 - stringWidth(tabsPlain))
+  const left = Math.floor(remaining / 2)
+  const right = remaining - left
+  return color('│', theme.dim) + ' '.repeat(left) + tabs + ' '.repeat(right) + color('│', theme.dim)
+}
+
 function formatBorder(width: number, theme: RivetTheme): string {
   return color('┌' + '─'.repeat(width - 2) + '┐', theme.dim)
 }
@@ -399,6 +413,11 @@ export interface DomainPickerEntry {
   essence: string
   /** 是否为当前生效项 */
   current: boolean
+  uiPersona?: {
+    separator: 'thin' | 'thick' | 'dots'
+    accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim'
+    glyph: string
+  }
 }
 
 export interface DomainPickerData {
@@ -441,7 +460,7 @@ function wrapToWidth(text: string, width: number, maxLines: number): string[] {
 export function renderDomainPicker(data: DomainPickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('Domain · /domain', width, theme))
+  lines.push(renderTabBar('domain', width, theme))
 
   const innerWidth = width - 4 // padLine 占 2，左右各留 1 空隙
   const contentRows = Math.max(3, height - 4) // border + title + footer + bottom
@@ -449,17 +468,26 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
   const listRows = Math.max(1, contentRows - previewRows - 1)
 
   const sel = data.selectedIndex
+  const current = data.entries[sel]
+  const currentAccentKey = current?.uiPersona?.accent ?? 'primary'
+  const currentAccent = (theme as any)[currentAccentKey] ?? theme.primary
+
   const visible = data.entries.slice(0, listRows)
   for (let i = 0; i < visible.length; i++) {
     const e = visible[i]!
     const selected = i === sel
-    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
-    const mark = e.current ? color('●', theme.primary) : ' '
-    const name = selected ? color(e.name, theme.primary, { bold: true }) : color(e.name, theme.secondary)
+    const eAccentKey = e.uiPersona?.accent ?? 'primary'
+    const eAccent = (theme as any)[eAccentKey] ?? theme.primary
+    const eGlyph = e.uiPersona?.glyph ?? '●'
+
+    const cursor = selected ? color('▶', currentAccent, { bold: true }) : ' '
+    const mark = e.current ? color(eGlyph, eAccent, { bold: true }) : selected ? color(eGlyph, currentAccent) : color(eGlyph, theme.dim)
+    const name = selected ? color(e.name, currentAccent, { bold: true }) : color(e.name, theme.secondary)
     const motto = e.motto ? `  ${e.motto}` : ''
     const head = `${cursor} ${mark} ${name}${color(motto, theme.dim)}`
+    
     // meta 接在 motto 之后（dim），按内宽截断（用 plain 长度估算，避免 SGR 计入）
-    const plainHead = `  ${e.current ? '●' : ' '} ${e.name}${motto}`
+    const plainHead = `  ${eGlyph} ${e.name}${motto}`
     const metaRoom = Math.max(0, innerWidth - stringWidth(plainHead) - 2)
     const metaText = e.meta && metaRoom > 6 ? `  ${e.meta}`.slice(0, metaRoom) : ''
     lines.push(padLine(`${head}${color(metaText, theme.dim)}`, width, theme))
@@ -468,15 +496,34 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
     lines.push(padLine('', width, theme))
   }
 
-  // 分隔线 + 选中项 essence 预览（左缩进 1 列，与列表行的游标内缩对齐）
-  lines.push(padLine(` ${color('─'.repeat(Math.max(0, innerWidth - 1)), theme.dim)}`, width, theme))
-  const current = data.entries[sel]
-  const essenceLines = current ? wrapToWidth(current.essence || current.motto || '', innerWidth - 1, previewRows) : []
-  for (let i = 0; i < previewRows; i++) {
-    lines.push(padLine(essenceLines[i] ? ` ${color(essenceLines[i]!, theme.muted)}` : '', width, theme))
+  // 分隔线自适应强调色与样式
+  const sepChar = current?.uiPersona?.separator === 'dots' 
+    ? '·' 
+    : current?.uiPersona?.separator === 'thick' 
+      ? '━' 
+      : '─'
+  lines.push(padLine(` ${color(sepChar.repeat(Math.max(0, innerWidth - 1)), currentAccent)}`, width, theme))
+
+  // 选中项 essence 预览
+  const previewLines: string[] = []
+  if (current) {
+    const glyph = current.uiPersona?.glyph ?? '●'
+    previewLines.push(color(`  ${glyph}  ${current.motto}`, currentAccent, { bold: true }))
+    
+    const plainEssence = current.essence || ''
+    const wrappedEssence = wrapToWidth(plainEssence, innerWidth - 1, previewRows - 1)
+    for (const d of wrappedEssence) {
+      if (previewLines.length < previewRows) {
+        previewLines.push(` ${color(d, theme.muted)}`)
+      }
+    }
   }
 
-  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  for (let i = 0; i < previewRows; i++) {
+    lines.push(padLine(previewLines[i] ?? '', width, theme))
+  }
+
+  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -539,7 +586,7 @@ export function renderTasks(data: TasksData, width: number, height: number, them
 export function renderModelPicker(data: ModelPickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('Model · /model', width, theme))
+  lines.push(renderTabBar('model', width, theme))
 
   const innerWidth = width - 4
   const contentRows = Math.max(3, height - 4)
@@ -593,7 +640,7 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -603,7 +650,7 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
 export function renderThemePicker(data: ThemePickerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('Theme · /theme', width, theme))
+  lines.push(renderTabBar('theme', width, theme))
 
   const innerWidth = width - 4
   const contentRows = Math.max(3, height - 4)
@@ -652,7 +699,7 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
