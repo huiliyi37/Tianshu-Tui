@@ -577,6 +577,12 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
+  /** Attach a GoalTracker to the current run. The tracker is consumed by
+   *  TurnOrchestrator.execute() which reads this.turnOrchestrator.goalTracker. */
+  setGoalTracker(tracker: import('./goal-tracker.js').GoalTracker | null): void {
+    this.turnOrchestrator.setGoalTracker(tracker)
+  }
+
   /** Sync plan-mode state into config so tool-pipeline reads it */
   syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState
