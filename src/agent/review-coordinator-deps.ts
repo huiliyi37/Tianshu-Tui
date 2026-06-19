@@ -44,6 +44,7 @@ function dataflowVerifierBlock(): string {
     '2. Check condition matrices for combined gates such as source × severity × apply; nested constraints must not be flattened into independent ifs.',
     '3. Demand counterexample coverage: which existing or new test would fail if the implementation only handled the happy path, forgot a call contract, declared a type without consuming it, or used truthy/falsy sentinels such as !waveId.',
     '4. A green test suite is not enough unless it can make the wrong/first-pass implementation red on the relevant spec path.',
+    '5. False-green / fixture-contract audit (虚假绿灯 — council modelUsed class): for every field a TEST mock/fixture assigns on a dependency\'s OUTPUT, verify real production code of that dependency actually produces that shape (grep the write site, not just the type decl). For every field production code renders/consumes, trace its production write site AND whether that write\'s runtime condition can ever fire (a write line guarded by `raw.x ?` where the source never carries x is still dead). A fixture fabricating a shape the real system never produces — or two sides each mocking the boundary without one contract test asserting the real producer\'s output — is a false green. Report HIGH.',
   ].join('\n')
 }
 
@@ -258,7 +259,7 @@ const INSPECTORS: Array<{ name: string; objective: string; stances: InspectorSta
   },
   {
     name: 'Silence',
-    objective: 'Review swallowed errors, empty catch blocks, missing diagnostics, and false green verification claims. Treat "tests pass / already fixed" assertions as the highest-priority review target: demand the command + observed output.',
+    objective: 'Review swallowed errors, empty catch blocks, missing diagnostics, and false green verification claims. Treat "tests pass / already fixed" assertions as the highest-priority review target: demand the command + observed output. Also flag fixture-fabricated false greens (虚假绿灯): a test asserting a field/shape that NO production code ever writes a real value to — only the fixture does — so the feature is green-but-dead.',
     stances: [],
   },
   {
