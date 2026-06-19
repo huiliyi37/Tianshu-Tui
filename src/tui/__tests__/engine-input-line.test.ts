@@ -58,6 +58,21 @@ describe('InputLine multi-line (W4b)', () => {
     assert.deepEqual(input.displayLines(), ['〉 █Type here'])
   })
 
+  it('displayLines with maxLines keeps the cursor line visible', () => {
+    const value = Array.from({ length: 12 }, (_, i) => `line${i}`).join('\n')
+    const cursor = value.split('\n').slice(0, 6).join('\n').length + 1 // start of line6
+    const input = new InputLine({ value })
+    input.setValue(value, cursor)
+
+    const lines = input.displayLines({ maxLines: 5 })
+
+    assert.equal(lines.length, 5)
+    assert.ok(lines.some(line => line.includes('lines above')))
+    assert.ok(lines.some(line => line.includes('lines below')))
+    assert.ok(lines.some(line => line.includes('〉 █line6')), 'cursor line must stay visible')
+    assert.ok(!lines.some(line => line.includes('line11')), 'viewport should not blindly show only the tail')
+  })
+
   it('placeholder accessor exposes option', () => {
     const input = new InputLine({ placeholder: 'p' })
     assert.equal(input.placeholder, 'p')

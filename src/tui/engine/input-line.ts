@@ -38,6 +38,11 @@ export interface InputLineOptions {
   maxLength?: number
 }
 
+export interface InputLineDisplayOptions {
+  /** Maximum display rows to return. When exceeded, keep the cursor line visible. */
+  maxLines?: number
+}
+
 export type VimMode = 'normal' | 'insert'
 
 /** Grapheme 分段器（Node 22+）。用于按用户感知字符（CJK/emoji/ZWJ 簇）步进光标。 */
@@ -50,6 +55,35 @@ function graphemeBoundaries(value: string): number[] {
     bounds.push(seg.index + seg.segment.length)
   }
   return bounds
+}
+
+function viewportAroundCursor(lines: string[], cursorLine: number, maxLines?: number): string[] {
+  if (maxLines === undefined || lines.length <= maxLines) return lines
+  const max = Math.max(1, Math.floor(maxLines))
+  const cursor = Math.min(Math.max(cursorLine, 0), lines.length - 1)
+  if (max === 1) return [lines[cursor]!]
+  if (max === 2) {
+    return cursor < lines.length - 1
+      ? [lines[cursor]!, `… ${lines.length - cursor - 1} lines below`]
+      : [`… ${cursor} lines above`, lines[cursor]!]
+  }
+
+  const hasAbove = cursor > 0
+  const hasBelow = cursor < lines.length - 1
+  const contentSlots = Math.max(1, max - (hasAbove ? 1 : 0) - (hasBelow ? 1 : 0))
+  const minStart = hasAbove ? 1 : 0
+  const maxStart = hasBelow
+    ? Math.max(minStart, lines.length - 1 - contentSlots)
+    : Math.max(minStart, lines.length - contentSlots)
+  const centeredStart = cursor - Math.floor(contentSlots / 2)
+  const start = Math.min(Math.max(centeredStart, minStart), maxStart)
+  const visible = lines.slice(start, start + contentSlots)
+
+  return [
+    ...(hasAbove ? [`… ${start} lines above`] : []),
+    ...visible,
+    ...(hasBelow ? [`… ${lines.length - (start + contentSlots)} lines below`] : []),
+  ]
 }
 
 export class InputLine {
@@ -100,7 +134,7 @@ export class InputLine {
    * - 光标行以 `〉 ` 前缀标识（高亮行），其余行缩进对齐
    * - 光标位置以 `█` 标记
    */
-  displayLines(): string[] {
+  displayLines(options: InputLineDisplayOptions = {}): string[] {
     if (!this._value) {
       return [`〉 █${this._placeholder}`]
     }
@@ -108,12 +142,13 @@ export class InputLine {
     const cursorLine = before.split('\n').length - 1
     const cursorCol = before.length - (before.lastIndexOf('\n') + 1)
 
-    return this._value.split('\n').map((line, i) => {
+    const lines = this._value.split('\n').map((line, i) => {
       const isCursorLine = i === cursorLine
       const prefix = isCursorLine ? '〉 ' : '  '
       if (!isCursorLine) return `${prefix}${line}`
       return `${prefix}${line.slice(0, cursorCol)}█${line.slice(cursorCol)}`
     })
+    return viewportAroundCursor(lines, cursorLine, options.maxLines)
   }
 
   /** 设置值（外部更新用） */
