@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
-import { runCouncil, type CouncilDeps } from '../agent/council/council-orchestrator.js'
+import { runCouncil, runCouncilDebate, type CouncilDeps } from '../agent/council/council-orchestrator.js'
 import { summarizeCouncilPlan } from '../agent/council/council-render.js'
 import { DEFAULT_COUNCIL_SEATS, type CouncilSeat, type CouncilRoutingShadowEvent } from '../agent/council/council-routing.js'
 import { isCouncilEnabled } from '../agent/council/council-gate.js'
@@ -44,6 +44,7 @@ const inputSchema = z.object({
   objective: z.string().min(1),
   draftItems: z.array(planItemSchema).optional(),
   seats: z.array(seatSchema).optional(),
+  rounds: z.number().int().min(1).max(3).optional(),
 })
 
 export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator): Tool {
@@ -51,7 +52,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
     definition: {
       name: 'council_convene',
       description:
-        'Convene a single-round star-domain council to review a plan draft. Fans out to seat experts (one advisory round, no execution), deterministically adjudicates their input, and returns an auditable Markdown plan. Decoupled from team_orchestrate — this NEVER dispatches execution work. Disabled when COUNCIL=0.',
+        'Convene a star-domain council to review a plan draft. Default is a single advisory round; pass rounds:2+ to enable a rebuttal/debate round (round 2 only fires when round 1 surfaces conflicts). Fans out to seat experts (advisory only, no execution), deterministically adjudicates, and returns an auditable Markdown plan. Decoupled from team_orchestrate — NEVER dispatches execution work. Disabled when COUNCIL=0.',
       input_schema: {
         type: 'object',
         properties: {
@@ -83,6 +84,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
               required: ['authority'],
             },
           },
+          rounds: { type: 'number', description: 'Max debate rounds (1-3, default 1 = single round). Pass 2+ to enable a rebuttal round; round 2 only fires when round 1 surfaces conflicts.' },
         },
         required: ['objective'],
       },
@@ -94,7 +96,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       }
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { objective, draftItems, seats } = parsed.data
+      const { objective, draftItems, seats, rounds } = parsed.data
 
       const items: PlanItem[] = draftItems ?? []
       const councilSeats: CouncilSeat[] = (seats && seats.length > 0 ? seats : [...DEFAULT_COUNCIL_SEATS]).map(s => ({
@@ -121,7 +123,9 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
 
       let plan
       try {
-        plan = await runCouncil({ draft: { objective, items }, seats: councilSeats, ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}) }, deps)
+        // 分两层入口：默认走单轮 runCouncil；显式 rounds≥2 才走多轮层 runCouncilDebate。
+        const runner = (rounds && rounds >= 2) ? runCouncilDebate : runCouncil
+        plan = await runner({ draft: { objective, items }, seats: councilSeats, ...(rounds ? { maxRounds: rounds } : {}), ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}) }, deps)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `council_convene failed: ${msg}`, isError: true }

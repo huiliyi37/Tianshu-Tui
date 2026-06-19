@@ -131,4 +131,57 @@ describe('council_convene 工具', () => {
     assert.equal(res.isError, false)
     assert.match(res.content, /议事会计划/)
   })
+
+  it('rounds=2 + 冲突 → 触发 round2（2 次 delegateBatch）', async () => {
+    const calls = { requests: [] as DelegationRequest[][] }
+    let batchCalls = 0
+    const coordinator: CouncilConveneCoordinator = {
+      delegateBatch: async (requests): Promise<CoordinatorRun> => {
+        calls.requests.push(requests)
+        batchCalls++
+        const results = requests.map(req => {
+          if (req.parentTurnId.endsWith('-r2')) {
+            return {
+              ...workerResultFor(req),
+              artifacts: [{ kind: 'note' as const, title: 'seat-contribution', content: JSON.stringify({ authority: req.authority, summary: 'r2', rebuttals: [] }) }],
+            }
+          }
+          // round1：两席对同 id 给出不同 detail → 产生冲突
+          const detail = req.authority === 'tianquan' ? 'X' : 'Y'
+          return {
+            ...workerResultFor(req),
+            artifacts: [{ kind: 'note' as const, title: 'seat-contribution', content: JSON.stringify({ authority: req.authority, summary: `${req.authority}-s`, additions: [{ id: 'NEW', title: 't', detail }], risks: [], challenges: [], alternatives: [] }) }],
+          }
+        })
+        return {
+          status: 'completed',
+          results,
+          packet: '',
+          workerModels: results.map(r => ({ workOrderId: r.workOrderId, model: 'test-model' })),
+        }
+      },
+      getSessionId: () => 'sess-1',
+    }
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({
+      objective: 'split loop.ts',
+      seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
+      rounds: 2,
+    }))
+    assert.equal(res.isError, false)
+    assert.equal(batchCalls, 2, 'rounds=2 + 冲突 → 两次扇出')
+    // round2 请求带 -r2 后缀
+    const r2Reqs = calls.requests[1]!
+    assert.ok(r2Reqs.every(r => r.parentTurnId.endsWith('-r2')), 'round2 parentTurnId 带 -r2')
+  })
+
+  it('rounds 透传：默认（不传）→ 单轮（1 次 delegateBatch）', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    await tool.execute(paramsWith({
+      objective: 'split loop.ts',
+      seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
+    }))
+    assert.equal(calls.requests.length, 1, '默认单轮')
+  })
 })

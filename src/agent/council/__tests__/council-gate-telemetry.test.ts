@@ -78,14 +78,21 @@ describe('council telemetry — append-only', () => {
     assert.equal(store.rows.size, 1, '无 timestamp 的 key 会退化为覆盖 —— 正是真实 key 要规避的')
   })
 
-  it('事件体统计正确：accepted/rejected/conflict/mergedItem', () => {
+  it('事件体统计正确：accepted/rejected/conflict/mergedItem/roundsRun', () => {
     const e = buildCouncilSessionEvent({ sessionId: 's1', plan: fakePlan('split', 'h1', 10), timestamp: 100 })
     assert.equal(e.decisionCount, 2)
     assert.equal(e.acceptedCount, 1)
     assert.equal(e.rejectedCount, 1)
     assert.equal(e.conflictCount, 1)
     assert.equal(e.mergedItemCount, 1)
+    assert.equal(e.roundsRun, 1)
     assert.match(councilSessionKey(e), /^council_session:s1:h1:100$/)
+  })
+
+  it('roundsRun 反映多轮 plan.meta.round', () => {
+    const multi: CouncilPlan = { ...fakePlan('split', 'h1', 10), meta: { round: 2, convenedAt: 10, objectiveHash: 'h1' } }
+    const e = buildCouncilSessionEvent({ sessionId: 's1', plan: multi, timestamp: 100 })
+    assert.equal(e.roundsRun, 2)
   })
 
   it('store 抛错被吞，不影响调用方；undefined store 安全', () => {

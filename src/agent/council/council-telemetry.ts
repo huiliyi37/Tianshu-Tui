@@ -14,6 +14,7 @@ export interface CouncilSessionEvent {
   objective: string
   objectiveHash: string
   seats: string[]
+  roundsRun: number
   decisionCount: number
   acceptedCount: number
   rejectedCount: number
@@ -44,6 +45,7 @@ export function buildCouncilSessionEvent(input: {
     objective: plan.objective,
     objectiveHash: plan.meta.objectiveHash,
     seats: plan.seats,
+    roundsRun: plan.meta.round,
     decisionCount: decisions.length,
     acceptedCount: decisions.filter(d => d.verdict === 'accepted').length,
     rejectedCount: decisions.filter(d => d.verdict === 'rejected').length,
