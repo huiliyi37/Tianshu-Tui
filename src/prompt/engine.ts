@@ -69,6 +69,8 @@ export interface PromptEngineConfig {
   /** Prefix cache mode — 'deepseek-native' enables immediate promotion of
    *  session-constant fields (star-domain) to skip habituation warm-up. */
   prefixCache?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
+  /** Enable append-only delta context-update (only emit changed sub-blocks). */
+  appendixDelta?: boolean
 }
 
 export class PromptEngine {
@@ -160,6 +162,12 @@ export class PromptEngine {
   /** Hash of last message array to distinguish exact same call from true duplicate. */
   private lastMessageHash: string = ''
   private userMessagesSinceGitRefresh = 0
+  /** Append-only delta: last emitted context-update sub-blocks (name→content). */
+  private lastEmittedAppendixParts: Map<string, string> = new Map()
+  /** Monotonic context-update sequence number (model orders updates by seq). */
+  private appendixSeq = 0
+  /** Whether a full baseline context-update was sent since last reset. */
+  private appendixBaselineSent = false
 
   constructor(config: PromptEngineConfig) {
     this.config = config
@@ -830,6 +838,9 @@ export class PromptEngine {
     this.cachedFreshForUser = ''
     this.cachedAppendix = ''
     this.cachedConsolidated = ''
+    // Delta baseline reset: force next context-update to be a full baseline.
+    this.lastEmittedAppendixParts = new Map()
+    this.appendixBaselineSent = false
   }
 
   /**

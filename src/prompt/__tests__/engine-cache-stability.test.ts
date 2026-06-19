@@ -804,3 +804,61 @@ describe('SR append: convergence/hook injection cache stability', () => {
     )
   })
 })
+
+describe('appendixDelta config + cross-turn state (task 2/7)', () => {
+  it('appendixDelta defaults to undefined (no behavior change)', () => {
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts' },
+    })
+    // Without appendixDelta, trailer should be plain <context-update> (no seq)
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    const appendix = req.messages[req.messages.length - 1]!
+    assert.ok(
+      typeof appendix.content === 'string' && appendix.content.includes('<context-update>'),
+      'should have <context-update> wrapper',
+    )
+    assert.ok(
+      !(typeof appendix.content === 'string' && /seq=/.test(appendix.content)),
+      'should NOT have seq attribute (delta disabled)',
+    )
+  })
+
+  it('appendixDelta: true — config is accepted, engine constructs without error', () => {
+    // Full seq/baseline behavior verified in task 3 tests — here we just confirm
+    // the engine accepts the flag and doesn't throw on construction.
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts' },
+      appendixDelta: true,
+    })
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    assert.ok(req.messages.length > 0, 'engine should produce messages')
+  })
+
+  it('invalidateFreshCache resets delta baseline (verified via re-baseline in task 3)', () => {
+    // Task 2 scope: verify the engine doesn't crash when toggling actionableTurn
+    // with appendixDelta enabled. The actual baseline reset verification is in
+    // task 3 where delta rendering is implemented.
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts' },
+      appendixDelta: true,
+    })
+    engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    engine.setActionableTurn(false)
+    engine.setActionableTurn(true)
+    const req = engine.buildOaiRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second' },
+    ])
+    assert.ok(req.messages.length > 0, 'engine should still produce messages after reset')
+  })
+})
