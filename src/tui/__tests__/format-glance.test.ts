@@ -34,11 +34,11 @@ describe('formatGlanceBar', () => {
     assert.ok(stripAnsi(result).includes('2m5s'))
   })
 
-  it('shows cache only when anomalous (< 50%)', () => {
+  it('cache hit rate always shown, colored by health (< 50% warning, ≥ 50% dim)', () => {
     const low = formatGlanceBar({ width: 80, cacheHitRate: 0.3 }, theme)
     assert.ok(stripAnsi(low).includes('30%'), 'cache < 50% should show')
     const high = formatGlanceBar({ width: 80, cacheHitRate: 0.75 }, theme)
-    assert.ok(!stripAnsi(high).includes('75%'), 'cache >= 50% should be hidden')
+    assert.ok(stripAnsi(high).includes('75%'), 'cache >= 50% should also show (persistent display)')
   })
 
   it('tokens 常驻：即便 < 75% 也显示（G7 token/cost 常显）', () => {

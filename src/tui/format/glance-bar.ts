@@ -83,9 +83,10 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   if (input.modelName) {
     parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
   }
-  if (input.cacheHitRate !== undefined && input.cacheHitRate < 0.5) {
+  if (input.cacheHitRate !== undefined) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)
-    parts.push(color(`⚡${cachePct}%`, theme.warning))
+    const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.dim
+    parts.push(color(`⚡${cachePct}%`, cacheColor))
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0

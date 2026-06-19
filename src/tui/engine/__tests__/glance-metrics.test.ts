@@ -45,12 +45,12 @@ function makeApp() {
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
 const tick = (ms = 10) => new Promise(r => setTimeout(r, ms))
 
-test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（CC 对标 f9001b16：ctx% 并入 ◧token，cache 仅 <50% 浮出）', () => {
+test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（cache 命中率常驻展示，按健康度着色）', () => {
   const { app, out } = makeApp()
   app.setMetricsProvider(() => ({
     estimatedTokens: 50_000,
     maxTokens: 200_000,
-    cacheHitRate: 0.3, // < 0.5 → ⚡ 浮出（健康态会被门控隐藏）
+    cacheHitRate: 0.3,
     cost: 1.23,
     inputTokens: 50_000,
     outputTokens: 1_000,
@@ -60,10 +60,10 @@ test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（CC 对标 f9001b16：
   const plain = stripAnsi(out.chunks.join(''))
   assert.ok(plain.includes('◧50k/200k'), `Xk/Yk: ${plain}`)
   assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
-  assert.ok(plain.includes('⚡30%'), `cache(<50% 才浮出): ${plain}`)
+  assert.ok(plain.includes('⚡30%'), `cache 常驻展示: ${plain}`)
 })
 
-test('cache 健康态（≥50%）门控隐藏 ⚡，避免正常态噪声', () => {
+test('cache 健康态（≥50%）常驻展示为 dim 色，不再门控隐藏', () => {
   const { app, out } = makeApp()
   app.setMetricsProvider(() => ({
     estimatedTokens: 50_000,
@@ -75,7 +75,7 @@ test('cache 健康态（≥50%）门控隐藏 ⚡，避免正常态噪声', () =
   }))
   app.setModelInfo('test', 200_000)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(!plain.includes('⚡'), `健康态不应渲染 ⚡: ${plain}`)
+  assert.ok(plain.includes('⚡60%'), `健康态也应常驻展示命中率: ${plain}`)
   assert.ok(plain.includes('◧50k/200k'), `token 仍常驻: ${plain}`)
 })
 
