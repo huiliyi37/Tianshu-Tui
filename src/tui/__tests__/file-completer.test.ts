@@ -10,10 +10,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
+import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
 
 describe('extractAtToken', () => {
   it('returns the partial token after the last @', () => {
@@ -54,18 +54,18 @@ describe('applyCompletion', () => {
 describe('getCompletions', () => {
   it('returns [] in a non-git directory without throwing (容错)', () => {
     // 非 git 目录：git 命令会以非零退出码失败——getCompletions 必须静默吞掉。
-    const dir = mkdtempSync(join(tmpdir(), 'rivet-nogit-'))
+    const dir = makeTestDir('rivet-nogit-')
     try {
       const out = getCompletions('any', dir, 8)
       assert.deepEqual(out, [])
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      cleanupTestDir(dir)
     }
   })
 
   it('returns matches from a real git repo', () => {
     // 用真 git init 的临时仓库验证排序：startsWith 优先于 substring。
-    const dir = mkdtempSync(join(tmpdir(), 'rivet-git-'))
+    const dir = makeTestDir('rivet-git-')
     try {
       writeFileSync(join(dir, 'src.ts'), '// src')
       writeFileSync(join(dir, 'src-test.ts'), '// src test')
@@ -80,15 +80,15 @@ describe('getCompletions', () => {
       assert.equal(out.indexOf('src.ts') < out.indexOf('src-test.ts'), true, 'prefix match must come first')
       assert.ok(!out.includes('other.ts'), `non-match leaked: ${out}`)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      cleanupTestDir(dir)
     }
   })
 
   it('completes within 1s even when git hangs (timeout bound)', () => {
     // 用 PATH 注入一个永远 sleep 的「git」——验证 500ms 超时确实生效。
     // 旧实现 3000ms → 用户按 Tab 后等 3s 才知道「没匹配」，体验极差。
-    const dir = mkdtempSync(join(tmpdir(), 'rivet-timeout-'))
-    const stubDir = mkdtempSync(join(tmpdir(), 'rivet-stub-'))
+    const dir = makeTestDir('rivet-timeout-')
+    const stubDir = makeTestDir('rivet-stub-')
     const stubGit = join(stubDir, 'git')
     writeFileSync(stubGit, '#!/bin/sh\nexec sleep 30\n', { mode: 0o755 })
     try {
@@ -99,8 +99,8 @@ describe('getCompletions', () => {
       // 500ms 超时 + 一些 Node 启动 / spawn 开销，留 1.5s 安全边际
       assert.ok(elapsed < 1500, `getCompletions took ${elapsed}ms — timeout broken`)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
-      rmSync(stubDir, { recursive: true, force: true })
+      cleanupTestDir(dir)
+      cleanupTestDir(stubDir)
     }
   })
 })

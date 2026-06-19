@@ -1,12 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import { loadConstellation } from '../../constellation/store.js'
 import { distillSkillDraft, persistSkillDraft, listSkillDrafts } from '../../agent/skill-distill.js'
 import type { LogEntry } from '../log-state.js'
+import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
 
 function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext {
   return {
@@ -530,7 +529,7 @@ describe('handleSlashCommand', () => {
 
   describe('/leave', () => {
     it('seals an agent-chosen mark into the starmap', async () => {
-      const cwd = mkdtempSync(join(tmpdir(), 'leave-'))
+      const cwd = makeTestDir('leave-')
       try {
         const entries: string[] = []
         const handled = await handleSlashCommand(makeCtx({
@@ -552,12 +551,12 @@ describe('handleSlashCommand', () => {
         assert.equal(c!.milestones[0]!.summary, 'wired the starmap')
         assert.equal(c!.milestones[0]!.domain, 'yaoguang')
       } finally {
-        rmSync(cwd, { recursive: true, force: true })
+        cleanupTestDir(cwd)
       }
     })
 
     it('requires a summary', async () => {
-      const cwd = mkdtempSync(join(tmpdir(), 'leave-'))
+      const cwd = makeTestDir('leave-')
       try {
         const entries: string[] = []
         const handled = await handleSlashCommand(makeCtx({
@@ -569,7 +568,7 @@ describe('handleSlashCommand', () => {
         assert.ok(entries[0]!.includes('Usage'))
         assert.equal(loadConstellation(cwd), null)
       } finally {
-        rmSync(cwd, { recursive: true, force: true })
+        cleanupTestDir(cwd)
       }
     })
   })
@@ -595,7 +594,7 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
   }
 
   it('/skill review lists pending drafts', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'skill-review-'))
+    const cwd = makeTestDir('skill-review-')
     try {
       const slug = seedDraft(cwd)
       const entries: string[] = []
@@ -608,12 +607,12 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
       assert.ok(entries[0]!.includes(slug), `应列出草稿: ${entries[0]}`)
       assert.ok(entries[0]!.includes('approve'))
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
+      cleanupTestDir(cwd)
     }
   })
 
   it('/skill approve promotes a draft and removes it from drafts', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'skill-approve-'))
+    const cwd = makeTestDir('skill-approve-')
     try {
       const slug = seedDraft(cwd)
       const entries: string[] = []
@@ -626,12 +625,12 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
       assert.ok(entries[0]!.includes('已入库'), `应报告入库: ${entries[0]}`)
       assert.equal(listSkillDrafts(cwd).length, 0)
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
+      cleanupTestDir(cwd)
     }
   })
 
   it('/skill reject deletes a draft', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'skill-reject-'))
+    const cwd = makeTestDir('skill-reject-')
     try {
       const slug = seedDraft(cwd)
       const entries: string[] = []
@@ -644,7 +643,7 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
       assert.ok(entries[0]!.includes('已丢弃'), `应报告丢弃: ${entries[0]}`)
       assert.equal(listSkillDrafts(cwd).length, 0)
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
+      cleanupTestDir(cwd)
     }
   })
 })
