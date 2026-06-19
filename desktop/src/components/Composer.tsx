@@ -254,10 +254,35 @@ export function Composer(props: {
     }
   }
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    if (e.dataTransfer.files.length > 0) void addFiles(e.dataTransfer.files)
+    if (e.dataTransfer.files.length === 0) return
+    const files = Array.from(e.dataTransfer.files)
+    const imageFiles = files.filter(f => isImageMime(f.type) || isImageFileName(f.name))
+    const textFiles = files.filter(f => !isImageMime(f.type) && !isImageFileName(f.name))
+
+    if (imageFiles.length > 0) void addFiles(imageFiles)
+
+    if (textFiles.length > 0) {
+      const contents: string[] = []
+      for (const f of textFiles) {
+        if (f.size > 512 * 1024) {
+          contents.push(`@file:${f.name} (文件过大，已跳过)`)
+          continue
+        }
+        try {
+          const text = await f.text()
+          contents.push(`@file:${f.name}\n\`\`\`\n${text}\n\`\`\``)
+        } catch {
+          contents.push(`@file:${f.name} (读取失败)`)
+        }
+      }
+      if (contents.length > 0) {
+        const insert = contents.join('\n\n')
+        onChange(value ? `${value}\n${insert}` : insert)
+      }
+    }
   }
 
   const canSend = value.trim() || images.length > 0
