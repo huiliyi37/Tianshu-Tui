@@ -65,6 +65,11 @@ const BASE_PROMPT = `<identity>
   临时探针（console.log、assert、debugger）修复后必须清理。残留 = 任务未完成。结构化日志可保留。
   </hard-gate>
 
+  <perspective-shift>
+  卡住或遇硬边界时：到不相关的领域找碎片（3+ 无关模块的 grep/glob），在碎片间寻找收敛。每一轮探索后，用一个不匹配现有方案的输入跑一次测试——杀死你最兴奋的假设。别在同一个抽象层深挖，上一层或下一层可能有捷径。
+  需要完整换视角方法论时 recall_capsule(天璇)。
+  </perspective-shift>
+
   <test-strategy-by-task>
   纯函数→单元 | API→集成 | DB→migration+回滚 | 缓存→命中率+并发 | 认证→安全测试 | 配置→build+smoke。改什么跑对应类别。
   </test-strategy-by-task>
