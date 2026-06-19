@@ -7,10 +7,11 @@ import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { ImportGraph } from './import-graph.js'
+import { mkdir, appendFile } from 'node:fs/promises'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
 import { grantPath } from '../tools/path-grants.js'
-import { dirname, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath } from 'node:path'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
@@ -93,12 +94,20 @@ function shouldEmitToolInputTrace(
     !afterRepairKeys?.includes('pattern')
 }
 
-function emitToolInputTrace(message: string): void {
+async function emitToolInputTrace(input: { cwd: string; sessionId?: string; message: string }): Promise<void> {
   if (debugEnabled()) {
-    debugLog(message)
+    debugLog(input.message)
     return
   }
-  console.warn(message)
+  try {
+    const sessionDir = input.sessionId
+      ? join(input.cwd, '.rivet', 'sessions', input.sessionId)
+      : join(input.cwd, '.rivet', 'sessions', 'unknown')
+    await mkdir(sessionDir, { recursive: true })
+    await appendFile(join(sessionDir, 'tool-input-trace.jsonl'), `${input.message}\n`, 'utf8')
+  } catch {
+    // Diagnostics must never affect tool execution or pollute model-visible output.
+  }
 }
 
 /**
@@ -863,12 +872,14 @@ export async function executeToolUse(
    })
 
     if (shouldSampleToolInput && shouldEmitToolInputTrace(tu.name, beforeHookKeys, afterHookKeys, afterRepairKeys)) {
-      emitToolInputTrace(
-        `[tool-input-trace] id=${tu.id} name=${tu.name} isError=${harnessResult.isError}` +
+      await emitToolInputTrace({
+        cwd: deps.cwd,
+        sessionId: deps.sessionId,
+        message: `[tool-input-trace] id=${tu.id} name=${tu.name} isError=${harnessResult.isError}` +
         ` beforeHook=${JSON.stringify(beforeHookKeys ?? [])}` +
         ` afterHook=${JSON.stringify(afterHookKeys ?? [])}` +
         ` afterRepair=${JSON.stringify(afterRepairKeys ?? [])}`,
-      )
+      })
     }
 
     // PostToolUse hook

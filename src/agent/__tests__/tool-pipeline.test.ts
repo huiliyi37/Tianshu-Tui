@@ -586,6 +586,7 @@ describe('executeToolUse', () => {
     const oldDebug = process.env.RIVET_DEBUG
     const oldToolInputDebug = process.env.RIVET_DEBUG_TOOL_INPUT
     const oldWarn = console.warn
+    const traceDir = mkdtempSync(join(tmpdir(), 'tool-input-trace-'))
     const warnings: string[] = []
     delete process.env.RIVET_DEBUG
     delete process.env.RIVET_DEBUG_TOOL_INPUT
@@ -615,6 +616,7 @@ describe('executeToolUse', () => {
             telemetry: [{ pass: 'test', fixType: 'dropPattern', toolName: 'grep', timestamp: 1 }],
           }),
         } as any,
+        cwd: traceDir,
       })
 
       await executeToolUse(
@@ -629,7 +631,10 @@ describe('executeToolUse', () => {
       else process.env.RIVET_DEBUG_TOOL_INPUT = oldToolInputDebug
     }
 
-    const trace = warnings.join('\n')
+    assert.deepEqual(warnings, [], 'natural grep trace must not write directly to terminal stderr')
+    const tracePath = join(traceDir, '.rivet', 'sessions', 'test-session', 'tool-input-trace.jsonl')
+    assert.equal(existsSync(tracePath), true)
+    const trace = readFileSync(tracePath, 'utf8')
     assert.match(trace, /\[tool-input-trace\]/)
     assert.match(trace, /id=tu-grep-trace/)
     assert.match(trace, /name=grep/)
@@ -637,6 +642,7 @@ describe('executeToolUse', () => {
     assert.match(trace, /beforeHook=\["context_lines","path","pattern"\]/)
     assert.match(trace, /afterHook=\["context_lines","path","pattern"\]/)
     assert.match(trace, /afterRepair=\["context_lines","path"\]/)
+    rmSync(traceDir, { recursive: true, force: true })
   })
 
   it('calls onToolResult callback', async () => {
