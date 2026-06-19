@@ -181,6 +181,7 @@ describe('resolveAppPromptInput', () => {
     const resolved = resolveAppPromptInput('/council', '/cwd')
     assert.ok(resolved !== null)
     assert.ok(resolved!.includes('Council usage:'))
+    assert.ok(resolved!.includes('--rounds'))
   })
 })
 

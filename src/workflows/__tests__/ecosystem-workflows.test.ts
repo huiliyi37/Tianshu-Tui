@@ -186,6 +186,54 @@ describe('ecosystem workflow helpers', () => {
 
     assert.equal(resolved?.command, '/council')
     assert.ok(resolved?.prompt.includes('Council usage:'))
+    assert.ok(resolved?.prompt.includes('--rounds'))
+  })
+
+  it('parses --rounds flag and injects rounds into prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council review the plan --rounds 2')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('review the plan'))
+    assert.ok(resolved?.prompt.includes('rounds: 2'))
+    assert.ok(resolved?.prompt.includes('多轮辩论'))
+  })
+
+  it('--rounds with no valid value degrades to default (no rounds injected)', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council review --rounds abc')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('review'))
+    assert.ok(resolved?.prompt.includes('单轮会诊'))
+    assert.ok(!resolved?.prompt.includes('rounds:'))
+  })
+
+  it('--rounds 0 or 5 (out of range) degrades to default', () => {
+    const r0 = resolveEcosystemWorkflowInput('/council review --rounds 0')
+    assert.ok(r0?.prompt.includes('单轮会诊'))
+    assert.ok(!r0?.prompt.includes('rounds:'))
+
+    const r5 = resolveEcosystemWorkflowInput('/council review --rounds 5')
+    assert.ok(r5?.prompt.includes('单轮会诊'))
+    assert.ok(!r5?.prompt.includes('rounds:'))
+  })
+
+  it('--seats and --rounds combine in any order', () => {
+    const a = resolveEcosystemWorkflowInput('/council audit --seats tianquan,tianfu --rounds 3')
+    assert.ok(a?.prompt.includes('audit'))
+    assert.ok(a?.prompt.includes('tianquan'))
+    assert.ok(a?.prompt.includes('rounds: 3'))
+
+    const b = resolveEcosystemWorkflowInput('/council audit --rounds 3 --seats tianquan,tianfu')
+    assert.ok(b?.prompt.includes('audit'))
+    assert.ok(b?.prompt.includes('tianquan'))
+    assert.ok(b?.prompt.includes('rounds: 3'))
+  })
+
+  it('default (no --rounds) still says 单轮会诊 and has no rounds param', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council just review')
+
+    assert.ok(resolved?.prompt.includes('单轮会诊'))
+    assert.ok(!resolved?.prompt.includes('rounds:'))
   })
 
   it('resolves /plan close into a plan_close tool prompt', () => {

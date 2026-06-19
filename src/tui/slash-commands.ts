@@ -75,7 +75,7 @@ const HELP_TEXT = `Available commands:
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
-/council <task> [--seats id1,id2,...] — Convene a single-round star-domain council to review a plan
+/council <task> [--seats id1,id2,...] [--rounds 1-3] — Convene a star-domain council (single round; --rounds 2+ enables debate)
 /review — Manually trigger L2 review (single adversarial verifier) on current changes via deliver_task
 /review max — Manually trigger L3 review (Review Squadron, 5 inspectors) on current changes via deliver_task
 (auto: every non-trivial deliver_task commit runs a single Wiring inspector — short budget, never blocks on infra failure)
@@ -354,7 +354,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/council': {
       if (!parts.slice(1).join(' ').trim()) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题> [--seats id1,id2,...]' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-3]' }))
         setIsStreaming(false)
         return true
       }

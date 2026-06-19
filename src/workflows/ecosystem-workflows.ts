@@ -32,6 +32,7 @@ export interface TeamWorkflowPromptOptions {
 export interface CouncilWorkflowPromptOptions {
   objective: string
   seats?: string[]
+  rounds?: number
 }
 
 const WRITING_PLAN_COMMANDS = new Set(['/plan', '/write-plan'])
@@ -322,11 +323,22 @@ export function parseTeamWorkflowArgs(args: string): TeamWorkflowPromptOptions |
   return { mode: 'standard', objective: trimmed }
 }
 
-export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题> [--seats id1,id2,...]'
+export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-3]'
 
 export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOptions | null {
   let objective = args.trim()
   if (!objective) return null
+
+  // Parse --rounds flag first (before --seats truncates the objective).
+  let rounds: number | undefined
+  const roundsIdx = objective.search(/\s+--rounds\b/)
+  if (roundsIdx >= 0) {
+    const afterRounds = objective.slice(roundsIdx).replace(/^\s+--rounds\s*/, '')
+    const tok = afterRounds.split(/[\s,]+/).find(s => s.length > 0)
+    const n = tok ? Number.parseInt(tok, 10) : NaN
+    objective = objective.slice(0, roundsIdx).trim()
+    if (Number.isInteger(n) && n >= 1 && n <= 3) rounds = n
+  }
 
   // Parse --seats flag: /council review the plan --seats tianquan,tianfu,tianji
   let seats: string[] | undefined
@@ -341,7 +353,7 @@ export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOpt
     if (seatTokens.length > 0) seats = seatTokens
   }
 
-  return objective ? { objective, ...(seats?.length ? { seats } : {}) } : null
+  return objective ? { objective, ...(seats?.length ? { seats } : {}), ...(rounds ? { rounds } : {}) } : null
 }
 
 export function buildCouncilWorkflowPrompt(options: CouncilWorkflowPromptOptions): string {
@@ -356,6 +368,10 @@ export function buildCouncilWorkflowPrompt(options: CouncilWorkflowPromptOptions
   const seatsParam = hasCustomSeats
     ? `, seats: [${options.seats!.map(s => `{ authority: "${s}" }`).join(', ')}]`
     : ''
+  const roundsParam = options.rounds ? `, rounds: ${options.rounds}` : ''
+  const roundDesc = options.rounds && options.rounds >= 2
+    ? `这是多轮辩论(至多 ${options.rounds} 轮,仅在首轮出现冲突时才进第二轮反驳收敛)`
+    : '这是单轮会诊'
 
   return `我正在使用 /council 发起星域议事会——多星域单轮对抗评审,只出计划不执行。
 
@@ -364,8 +380,8 @@ ${objective}
 
 执行契约:
 - 用户已显式发起议事会;不要再问是否使用,直接调用 council_convene 工具。
-- 调用 council_convene 工具,参数 { objective: "${objective}"${seatsParam} };${seatsNote}。
-- 这是单轮会诊:扇出席位 → 确定性裁决 → 产出议事记录。绝不触发 team_orchestrate 或任何执行链。
+- 调用 council_convene 工具,参数 { objective: "${objective}"${seatsParam}${roundsParam} };${seatsNote}。
+- ${roundDesc}:扇出席位 → 确定性裁决 → 产出议事记录。绝不触发 team_orchestrate 或任何执行链。
 - council_convene 返回的议事记录(席位贡献 / 裁决记录 / 冲突 / 最终任务表)直接原样呈现给用户,不要二次概括或改写。
 - 议事会只负责出计划。产出议事记录后,主动询问用户是否用 /team 执行最终任务表中的任务(例如:"议事会评审完成。最终任务表有 N 项。需要 /team 执行吗?")。`
 }
