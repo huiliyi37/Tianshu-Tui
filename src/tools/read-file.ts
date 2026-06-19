@@ -380,22 +380,8 @@ export const READ_FILE_TOOL: Tool = {
 - Use offset and limit ONLY when you specifically need a known sub-range (e.g. a function at line 800-900); never as a workaround for "the file might be too long"
 - This tool reads text files only (UTF-8). Binary files (images, PDFs, executables) will be rejected
 - Do NOT re-read a file that you already read in the current session unless you have edited it since — your earlier tool_result is still in context
-
-### Large file strategy
-- Files > ~2000 lines (80KB+): returned as PARTIAL view (first page only with navigation hints)
-  → use grep to locate, then read_file(offset=..., limit=...) for specific ranges
-- For editing large files: use grep to find the target line → hash_edit with anchors (no full read needed)
-  → grep → get line number + hash from hash_edit anchors → hash_edit(anchors=["L580:a1b2c3d4"], new_string="...")
-- NEVER re-read a file just because the first read was partial — use offset/limit instead
-- Medium files (500-2000 lines): returned in full with editing hints
-
-### Examples
-Good: read_file(file_path="/abs/path/src/app.ts")  → returns the whole file
-Good: read_file(file_path="/abs/path/src/app.ts", offset=100, limit=50)  → only when you know you want lines 100-150
-Good: read_file(file_paths=["/abs/a.ts", "/abs/b.ts"])  → read multiple files in one call (saves turns)
-Bad:  read_file(file_path="src/app.ts")  → relative path
-Bad:  splitting a file into 6 temp files via write_file and reading them back  → wasteful, just call read_file once
-Bad:  re-reading the same file you already read this session  → look at your previous tool_result instead`,
+- Files > ~2000 lines: returned as PARTIAL view (first page + navigation hints). Use grep to locate, then read_file(offset, limit) for specific ranges. For editing: grep → hash_edit with anchors
+- read_file(file_paths=[...]) reads up to 5 files in one call — use instead of repeated single calls`,
     input_schema: {
       type: 'object',
       properties: {

@@ -155,10 +155,7 @@ export function createDeliverTaskTool(getB1Context: (params?: ToolCallParams) =>
 - force: set to true to override the cohesion gate when committing many files across multiple areas. Use sparingly.
 
 ### Complex spec delivery checklist
-When the task implements a complex spec or cross-module integration, include these entries in the checklist parameter before commit:
-- fact-flow graph verified: every spec field/constraint has producer → intermediate structure → consumer/write target → assertion
-- condition matrix verified: combined gates (source × severity × apply, etc.) are covered per cell
-- counterexample tests verified: at least one test would fail for checklist-only/happy-path implementations, missing call contracts, type-without-consumer, or truthy/falsy sentinel mistakes.`,
+For complex specs or cross-module integration, include checklist entries: fact-flow graph verified, condition matrix verified, counterexample tests verified.`,
       input_schema: {
         type: 'object',
         properties: {

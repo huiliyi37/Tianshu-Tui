@@ -118,7 +118,7 @@ export function createDelegateBatchTool(
                 objective: { type: 'string' },
                 kind: { type: 'string', enum: [...workOrderKindSchema.options] },
                 profile: { type: 'string', enum: profileRegistry.getProfileNames() },
-                authority: { type: 'string', enum: starDomainRegistry.getDomainIds(), description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng).' },
+                authority: { type: 'string', description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng).' },
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
               },

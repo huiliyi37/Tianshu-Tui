@@ -60,7 +60,7 @@ export function createDelegateTaskTool(
           objective: { type: 'string', description: 'Specific objective for the worker.' },
           kind: { type: 'string', enum: ['code_search', 'doc_research', 'plan', 'review', 'verify', 'patch_proposal'], description: 'Worker task type. Default: code_search.' },
           profile: { type: 'string', enum: profileRegistry.getProfileNames(), description: 'Worker profile. Default: code_scout.' },
-          authority: { type: 'string', enum: starDomainRegistry.getDomainIds(), description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng). Injects that expert\'s perspective + methodology and restricts tools to its whitelist.' },
+          authority: { type: 'string', description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng). Injects that expert\'s perspective + methodology and restricts tools to its whitelist.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to focus on.' },
           symbols: { type: 'array', items: { type: 'string' }, description: 'Optional symbols to focus on.' },
         },
