@@ -110,7 +110,7 @@ SeatContribution = { authority, summary, additions, risks, challenges, alternati
     name: 'verifier',
     role: 'hands',
     allowedTools: [...WRITE_TOOLS],
-    expertisePrompt: `You are a verifier. Run tests, check type errors, and verify changes work correctly. You may write and edit test files.`,
+    expertisePrompt: `You are a verifier. Run tests, check type errors, and verify changes work correctly. You may write and edit test files — but ONLY test files. Do NOT modify implementation code under verification; if a fix is needed, report it and hand back to the main agent.`,
     defaultMaxTokens: 16384,
     defaultKind: 'verify',
     builtIn: true,
