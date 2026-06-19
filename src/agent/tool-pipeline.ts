@@ -28,7 +28,7 @@ import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isBashCommandAllowlisted, learnBashPrefix } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
-import { debugLog } from '../utils/debug.js'
+import { debugEnabled, debugLog } from '../utils/debug.js'
 import { suggestStrategyShift, type TrajectorySummary } from './strategy-shift.js'
 import { PrewarmCache } from './prewarm.js'
 import { batchPrewarm } from './prewarm-file.js'
@@ -70,6 +70,35 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 ])
 function isMutatingTool(name: string): boolean {
   return MUTATING_TOOLS.has(name)
+}
+
+function sortedInputKeys(input: Record<string, unknown>): string[] {
+  return Object.keys(input).sort()
+}
+
+function toolInputTraceDebugEnabled(): boolean {
+  return process.env.RIVET_DEBUG_TOOL_INPUT === '1'
+}
+
+function shouldEmitToolInputTrace(
+  toolName: string,
+  beforeHookKeys: string[] | undefined,
+  afterHookKeys: string[] | undefined,
+  afterRepairKeys: string[] | undefined,
+): boolean {
+  if (toolInputTraceDebugEnabled()) return true
+  if (toolName !== 'grep') return false
+  return !beforeHookKeys?.includes('pattern') ||
+    !afterHookKeys?.includes('pattern') ||
+    !afterRepairKeys?.includes('pattern')
+}
+
+function emitToolInputTrace(message: string): void {
+  if (debugEnabled()) {
+    debugLog(message)
+    return
+  }
+  console.warn(message)
 }
 
 /**
@@ -510,6 +539,9 @@ export async function executeToolUse(
      }
    }
 
+    const shouldSampleToolInput = toolInputTraceDebugEnabled() || tu.name === 'grep'
+    const beforeHookKeys = shouldSampleToolInput ? sortedInputKeys(tu.input) : undefined
+
     // PreToolUse hook
     const preHookResult = deps.config.hooks?.firePreToolUse({ toolName: tu.name, input: tu.input as Record<string, unknown> }) ?? {}
     if (preHookResult.block) {
@@ -521,6 +553,7 @@ export async function executeToolUse(
       tu.input = preHookResult.input
       params.input = preHookResult.input
    }
+    const afterHookKeys = shouldSampleToolInput ? sortedInputKeys(tu.input) : undefined
 
     // Multi-pass tool input repair
     const toolDef = deps.config.toolRegistry.get(tu.name)
@@ -549,6 +582,7 @@ export async function executeToolUse(
        }
      }
    }
+    const afterRepairKeys = shouldSampleToolInput ? sortedInputKeys(tu.input) : undefined
 
     // Reliability mode gate — Phase 2 degraded/minimal executor.
     const reliabilityDecision = deps.getReliabilityDecision?.() ?? null
@@ -827,6 +861,15 @@ export async function executeToolUse(
       classify: (content) => classifyFailure(content).class,
       isConcurrencySafe: toolDef?.isConcurrencySafe() ?? false,
    })
+
+    if (shouldSampleToolInput && shouldEmitToolInputTrace(tu.name, beforeHookKeys, afterHookKeys, afterRepairKeys)) {
+      emitToolInputTrace(
+        `[tool-input-trace] id=${tu.id} name=${tu.name} isError=${harnessResult.isError}` +
+        ` beforeHook=${JSON.stringify(beforeHookKeys ?? [])}` +
+        ` afterHook=${JSON.stringify(afterHookKeys ?? [])}` +
+        ` afterRepair=${JSON.stringify(afterRepairKeys ?? [])}`,
+      )
+    }
 
     // PostToolUse hook
     const postHookResult = deps.config.hooks?.firePostToolUse({

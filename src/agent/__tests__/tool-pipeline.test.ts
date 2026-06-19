@@ -582,6 +582,63 @@ describe('executeToolUse', () => {
     assert.equal(result.checkpointCreated, false)
   })
 
+  it('traces grep input keys when pattern disappears during repair', async () => {
+    const oldDebug = process.env.RIVET_DEBUG
+    const oldToolInputDebug = process.env.RIVET_DEBUG_TOOL_INPUT
+    const oldWarn = console.warn
+    const warnings: string[] = []
+    delete process.env.RIVET_DEBUG
+    delete process.env.RIVET_DEBUG_TOOL_INPUT
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) }
+    try {
+      const deps = makeDeps({
+        config: {
+          ...makeDeps().config,
+          toolRegistry: {
+            execute: async () => ({ content: 'Error: pattern is required (non-empty string)', isError: true }),
+            get: () => ({
+              definition: {
+                input_schema: {
+                  type: 'object',
+                  properties: { pattern: { type: 'string' }, path: { type: 'string' }, context_lines: { type: 'integer' } },
+                  required: ['pattern'],
+                },
+              },
+              isConcurrencySafe: () => false,
+            }),
+            needsApproval: () => false,
+          },
+        } as any,
+        repairPipeline: {
+          run: () => ({
+            output: { path: 'src/bootstrap.ts', context_lines: 10 },
+            telemetry: [{ pass: 'test', fixType: 'dropPattern', toolName: 'grep', timestamp: 1 }],
+          }),
+        } as any,
+      })
+
+      await executeToolUse(
+        { id: 'tu-grep-trace', name: 'grep', input: { pattern: 'switchAgentRuntime', path: 'src/bootstrap.ts', context_lines: 10 } },
+        deps, noopCallbacks as any, 1, false,
+      )
+    } finally {
+      console.warn = oldWarn
+      if (oldDebug === undefined) delete process.env.RIVET_DEBUG
+      else process.env.RIVET_DEBUG = oldDebug
+      if (oldToolInputDebug === undefined) delete process.env.RIVET_DEBUG_TOOL_INPUT
+      else process.env.RIVET_DEBUG_TOOL_INPUT = oldToolInputDebug
+    }
+
+    const trace = warnings.join('\n')
+    assert.match(trace, /\[tool-input-trace\]/)
+    assert.match(trace, /id=tu-grep-trace/)
+    assert.match(trace, /name=grep/)
+    assert.match(trace, /isError=true/)
+    assert.match(trace, /beforeHook=\["context_lines","path","pattern"\]/)
+    assert.match(trace, /afterHook=\["context_lines","path","pattern"\]/)
+    assert.match(trace, /afterRepair=\["context_lines","path"\]/)
+  })
+
   it('calls onToolResult callback', async () => {
     const deps = makeDeps()
     let called = false
