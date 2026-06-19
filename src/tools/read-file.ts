@@ -60,6 +60,10 @@ interface FileReadHistoryEntry {
 const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
 
+/** When enabled, repeated reads of unchanged files return a compact reference
+ *  instead of re-emitting the full content. Controlled by RIVET_READ_REF=1. */
+const RIVET_READ_REF = process.env['RIVET_READ_REF'] === '1'
+
 /** Session-level file edit tracking: records which files this session has
  *  successfully written to. Used by staleness detection to disambiguate
  *  "modified externally" from "you edited this yourself earlier."
@@ -98,6 +102,25 @@ function trimFileReadHistory(): void {
   const sorted = [...fileReadHistory.entries()].sort((a, b) => a[1].recordedAt - b[1].recordedAt)
   const drop = Math.ceil(fileReadHistory.size * 0.2)
   for (let i = 0; i < drop; i++) fileReadHistory.delete(sorted[i]![0])
+}
+
+/**
+ * Returns true when a prior read of the same file (same offset/limit, or a full-file
+ * read that subsumes this request) was recorded with a matching mtime — meaning the
+ * file has NOT been modified since it was last read.
+ */
+export function isUnchangedRepeatRead(
+  canonical: string,
+  currentMtimeMs: number,
+  dedupKey: string,
+  offset: number,
+  limit: number | undefined,
+): boolean {
+  const priorSame = readHistory.get(dedupKey)
+  if (priorSame && priorSame.mtimeMs === currentMtimeMs) return true
+  const fullPrior = fileReadHistory.get(canonical)
+  if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) return true
+  return false
 }
 
 /** Test-only: clear dedup state between unit tests. */
@@ -454,18 +477,20 @@ export const READ_FILE_TOOL: Tool = {
 
     // ── 重复读取检测 ──
     // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
+    const unchangedRepeat = (canonical && currentMtimeMs !== null && dedupKey)
+      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit)
+      : false
+
     let repeatWarning: string | null = null
-    try {
-      if (canonical && currentMtimeMs !== null) {
-        const priorSame = readHistory.get(dedupKey!)
-        const fullPrior = fileReadHistory.get(canonical)
-        if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
-          repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
-        } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
-          repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
-        }
+    if (unchangedRepeat) {
+      const priorSame = readHistory.get(dedupKey!)
+      const fullPrior = fileReadHistory.get(canonical!)
+      if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
+      } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
+        repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
       }
-    } catch { /* best-effort */ }
+    }
 
     try {
       payload = await readFilePayload(params.cwd, {
