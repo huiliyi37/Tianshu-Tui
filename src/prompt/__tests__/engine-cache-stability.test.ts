@@ -943,3 +943,72 @@ describe('appendixDelta rendering (task 3/7: delta computation)', () => {
     assert.ok(!app.includes('mode="delta"'), 'after reset should be full baseline')
   })
 })
+
+describe('frozen snapshot byte-identity under delta (task 5/7)', () => {
+  it('historical user message trailer is byte-identical to when it was last', () => {
+    // Construct: user1 → assistant1 → user2 (new boundary)
+    // Assert: user1 as historical === user1 when it was last (byte-identical)
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: {
+        cwd: '/test',
+        gitStatus: 'M src/foo.ts',
+        rivetMd: '# Test',
+        workingSet: ['src/foo.ts'],
+      },
+      appendixDelta: true,
+    })
+
+    // First message — user1 is last, captures its frozen merged
+    const req1 = engine.buildOaiRequest([
+      { role: 'user', content: 'first message' },
+    ])
+    // Extract user1's full merged content (from the result messages)
+    const user1Merged1 = (req1.messages[1] as { content: string }).content
+
+    // Second message — user1 becomes historical, user2 is last
+    const req2 = engine.buildOaiRequest([
+      { role: 'user', content: 'first message' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second message' },
+    ])
+
+    // user1 is now historical — find it (it's before the assistant message)
+    const histMsg = req2.messages.find(m =>
+      typeof m.content === 'string' && m.content.includes('first message')
+    )
+    assert.ok(histMsg, 'historical user1 message must exist in req2')
+    const user1Merged2 = (histMsg as { content: string }).content
+
+    // THE critical assertion: byte-identical
+    assert.equal(
+      user1Merged1, user1Merged2,
+      'user1 frozen merged must be byte-identical when retrieved as historical (delta must not rewrite history)',
+    )
+  })
+
+  it('frozenFallbackRebuilds does not increase due to delta', () => {
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts' },
+      appendixDelta: true,
+    })
+
+    engine.buildOaiRequest([{ role: 'user', content: 'msg1' }])
+    const stats1 = engine.getCacheEventStats()
+
+    engine.buildOaiRequest([
+      { role: 'user', content: 'msg1' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'msg2' },
+    ])
+    const stats2 = engine.getCacheEventStats()
+
+    assert.equal(stats2.frozenFallbackRebuilds, stats1.frozenFallbackRebuilds,
+      'delta should not cause additional frozen fallback rebuilds')
+  })
+})
