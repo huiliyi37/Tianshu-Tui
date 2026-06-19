@@ -203,29 +203,77 @@ describe('formatDiff', () => {
 })
 
 describe('formatThinking', () => {
-  it('returns empty when not streaming', () => {
-    const lines = formatThinking({ text: 'thinking', elapsedMs: 5000, isStreaming: false }, theme)
+  it('returns empty when no text', () => {
+    const lines = formatThinking({ text: '', elapsedMs: 5000 }, theme)
     assert.deepEqual(lines, [])
   })
 
-  it('shows status line when streaming', () => {
-    const lines = formatThinking({ text: 'thinking…', elapsedMs: 5000, isStreaming: true }, theme)
+  it('shows status line by default (header defaults to true)', () => {
+    const lines = formatThinking({ text: 'thinking…', elapsedMs: 5000 }, theme)
     assert.ok(lines[0]!.includes('凝思中…'))
     assert.ok(lines[0]!.includes('5s'))
+  })
+
+  it('hides status line when header: false', () => {
+    const lines = formatThinking({ text: 'thinking…', elapsedMs: 5000, header: false }, theme)
+    assert.equal(lines.length, 0) // expanded defaults to false, no content
   })
 
   it('shows expanded content when expanded', () => {
     const lines = formatThinking({
       text: 'line1\nline2\nline3',
       elapsedMs: 5000,
-      isStreaming: true,
       expanded: true,
     }, theme)
     assert.ok(lines.some(l => stripAnsi(l).includes('line1')))
   })
 
   it('shows long think message after 3 minutes', () => {
-    const lines = formatThinking({ text: '…', elapsedMs: 200_000, isStreaming: true }, theme)
+    const lines = formatThinking({ text: '…', elapsedMs: 200_000 }, theme)
     assert.ok(stripAnsi(lines[0]!).includes('Ctrl+C'))
+  })
+
+  it('produces output for committed thinking (no isStreaming gate)', () => {
+    // 核心回归：isStreaming 不存在了，只要有 text + expanded 就应该输出
+    const lines = formatThinking({
+      text: 'committed thinking text',
+      elapsedMs: 10000,
+      expanded: true,
+    }, theme)
+    assert.ok(lines.length > 0, 'committed thinking produces output')
+    assert.ok(stripAnsi(lines[0]!).includes('凝思中…'), 'has status header')
+  })
+
+  it('shows truncation hint when text exceeds maxLines', () => {
+    const long = Array.from({ length: 20 }, (_, i) => `think line ${i}`).join('\n')
+    const lines = formatThinking({
+      text: long,
+      elapsedMs: 5000,
+      expanded: true,
+      maxLines: 5,
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('+15 more lines')), `truncation hint missing: ${plain.join('|')}`)
+    assert.ok(plain.some(l => l.includes('think line 15')), 'tail of last 5 visible')
+    assert.ok(!plain.some(l => l.includes('think line 3')), 'line 3 hidden (not in last 5 of 20)')
+    // Status line still counts
+    assert.ok(plain[0]!.includes('凝思中…'))
+  })
+
+  it('header + expanded produce full block for scrollback', () => {
+    const lines = formatThinking({
+      text: 'reasoning\nanalysis\nconclusion',
+      elapsedMs: 5000,
+      expanded: true,
+      maxLines: 60,
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain[0]!.includes('凝思中…'), 'has header')
+    assert.ok(plain[0]!.includes('3 lines'), 'line count in header')
+    assert.ok(plain.some(l => l.includes('reasoning')))
+    assert.ok(plain.some(l => l.includes('analysis')))
+    assert.ok(plain.some(l => l.includes('conclusion')))
+    // No truncation for small content
+    assert.ok(!plain.some(l => l.includes('more lines')))
   })
 })

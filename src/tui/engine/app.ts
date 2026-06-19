@@ -375,7 +375,7 @@ export class TuiApp {
       thinkingText: '',
       isStreaming: false,
       isThinking: false,
-      thinkingExpanded: false,
+      thinkingExpanded: true,
       phase: 'idle',
       turnStartMs: Date.now(),
       thinkStartMs: 0,
@@ -1799,13 +1799,13 @@ export class TuiApp {
       lines.push({ text: spinnerLine })
     }
 
-    // 1b. Thinking 展开内容（状态行已由 spinner 承担，仅展开时显示正文）
-    if (this.state.isThinking && this.state.thinkingText && this.state.thinkingExpanded) {
+    // 1b. Thinking 展开内容（状态行已由 spinner 承担）
+    if (this.state.isThinking && this.state.thinkingText) {
       const thinkingLines = formatThinking({
         text: this.state.thinkingText,
         elapsedMs: Date.now() - this.state.thinkStartMs,
-        isStreaming: this.state.isStreaming,
-        expanded: true,
+        header: false,
+        expanded: this.state.thinkingExpanded,
       }, this.theme)
       for (const line of thinkingLines) {
         lines.push({ text: line })
@@ -2105,8 +2105,8 @@ export class TuiApp {
     const formatted = formatThinking({
       text: this.state.thinkingText,
       elapsedMs: Date.now() - this.state.thinkStartMs,
-      isStreaming: false,
       expanded: true,
+      maxLines: 60,
     }, this.theme)
     this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
   }

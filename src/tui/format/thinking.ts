@@ -13,39 +13,49 @@ export interface FormatThinkingInput {
   text: string
   /** 已用时间（毫秒） */
   elapsedMs: number
-  /** 是否正在流式输出 */
-  isStreaming: boolean
-  /** 是否已展开 */
+  /** 包含头部状态行（凝思中…）。默认 true。流式渲染时 spinner 已显示状态，可设 false。 */
+  header?: boolean
+  /** 展开正文内容。默认 false。 */
   expanded?: boolean
+  /** 正文最大行数。默认 8。commit 时可加大。 */
+  maxLines?: number
 }
 
-const MAX_VISIBLE_LINES = 8
+const DEFAULT_MAX_LINES = 8
 
 /**
  * 格式化 thinking 指示器为 ANSI 行数组。
  *
- * 折叠状态：一行（状态标签 + thinking 行数）
- * 展开状态：最后 8 行 thinking 内容
- * 静止状态（!isStreaming）：空
+ * header（默认 true）：输出 `◐ 凝思中… (N lines)` 状态行。
+ *   流式渲染时 spinner 已显示状态 → 设 false。
+ * expanded：输出正文最后 maxLines 行。
+ * maxLines（默认 8）：正文截断行数。超限追加 `… +M more lines`。
  */
 export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): string[] {
-  if (!input.isStreaming) return []
+  if (!input.text) return []
 
   const lines: string[] = []
-  const statusLabel = getThinkingStatus(input.elapsedMs)
-
-  // ── Status line ─────────────────────────────────────────────
   const textLines = input.text.split('\n').filter(l => l.trim().length > 0)
-  const lineInfo = textLines.length > 0 ? ` (${textLines.length} lines)` : ''
-  const useAscii = chalk.level < 3
-  const glyph = useAscii ? '~' : '◐'
-  lines.push(color(`${glyph} ${statusLabel}${lineInfo}`, theme.dim))
 
-  // ── Expanded content ────────────────────────────────────────
+  // ── Header line ─────────────────────────────────────────────
+  if (input.header !== false) {
+    const statusLabel = getThinkingStatus(input.elapsedMs)
+    const lineInfo = textLines.length > 0 ? ` (${textLines.length} lines)` : ''
+    const useAscii = chalk.level < 3
+    const glyph = useAscii ? '~' : '◐'
+    lines.push(color(`${glyph} ${statusLabel}${lineInfo}`, theme.dim))
+  }
+
+  // ── Content lines ───────────────────────────────────────────
   if (input.expanded && textLines.length > 0) {
-    const visible = textLines.slice(-MAX_VISIBLE_LINES)
+    const max = input.maxLines ?? DEFAULT_MAX_LINES
+    const visible = textLines.slice(-max)
     for (const line of visible) {
       lines.push(color(`  ${line}`, theme.dim))
+    }
+    if (textLines.length > max) {
+      const hidden = textLines.length - max
+      lines.push(color(`  … +${hidden} more lines`, theme.dim))
     }
   }
 
