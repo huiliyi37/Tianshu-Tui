@@ -209,6 +209,18 @@ export class SlashRouter {
       return true
     }
 
+    // ── 裸 /model（无参）→ 打开模型选择器面板 ──
+    if (command === '/model' && parts.length === 1) {
+      this.app.activateOverlay('model-picker')
+      return true
+    }
+
+    // ── 裸 /theme（无参）→ 打开主题选择器面板 ──
+    if (command === '/theme' && parts.length === 1) {
+      this.app.activateOverlay('theme-picker')
+      return true
+    }
+
     // ── /vim — 切换 vim 键位（InputLine 状态，shared handler 无 app 句柄，故在此特判）──
     if (command === '/vim') {
       const next = this.app.toggleVim()

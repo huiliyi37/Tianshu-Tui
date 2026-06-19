@@ -14,7 +14,7 @@
 import { installEpermFilter } from './platform/eperm-filter.js'
 installEpermFilter()
 
-import { bootstrapInteractiveSession, createShutdownHandler } from './bootstrap.js'
+import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
@@ -26,7 +26,7 @@ import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { killAllSync } from './tools/process-tracker.js'
-import { getTheme } from './tui/theme.js'
+import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
 import { resolveAppPromptInput } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
@@ -412,6 +412,44 @@ async function main() {
       entries: buildDomainPickerEntries(ctx!.agent.getSessionDomain()),
       selectedIndex: 0,
     }),
+    modelPickerData: () => {
+      const activeModelId = ctx?.agent.config.promptEngine.getModel()
+      const models = ctx?.provider.models ?? []
+      return {
+        entries: models.map(m => ({
+          id: m.id,
+          alias: m.alias ?? m.id,
+          current: m.id === activeModelId,
+          contextWindow: m.contextWindow,
+        })),
+        selectedIndex: 0,
+      }
+    },
+    themePickerData: () => {
+      const currentTheme = getActiveThemeName()
+      const validThemes = Object.keys(THEMES) as ThemeName[]
+      const themeDescriptions: Record<string, string> = {
+        cobalt: '钴蓝·冷调中性 (默认风格)。oklch 调和，明度梯度清晰，视觉极度舒适。',
+        gemini: 'Gemini 风格。结合星云微光渐变 (冷靛蓝与星云紫) 与极光薄荷，极具科技美感。',
+        antigravity: 'Codex 风格。天青色冷调 Accent，亮灰结构文本，现代而克制。',
+        slate: '冷静板岩灰。单一冷静 Teal 主色，无彩色结构，低眩光长久不累。',
+        ziwei: '帝星紫微。朱砂红标记点缀帝星紫，富含中国星图古典美学韵味。',
+        tianshu: '玄夜墨色。95% 墨灰，配以星金主色与朱砂用户印，沉稳低调。',
+        midnight: 'GitHub 暗黑风格。极简中性灰度，高度清晰。',
+        pastel: '温和粉彩。二次元风格启发，高对比、低饱和度多色卡。',
+        cyberpunk: '赛博朋克。霓虹极高对比，酷炫亮眼。',
+        observatory: '五色星辰。传统五行配色体系，天玑星君玄灰底色。',
+        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。'
+      }
+      return {
+        entries: validThemes.map(t => ({
+          name: t,
+          current: t === currentTheme,
+          description: themeDescriptions[t] ?? 'Custom color theme'
+        })),
+        selectedIndex: 0,
+      }
+    },
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
@@ -474,6 +512,20 @@ async function main() {
         tuiApp.commitStatic(`Domain → ${d.name} (${d.decisionStyle})`)
       }
     }
+  }, /* modelPickerExec: */ (modelId: string) => {
+    // Model Picker Enter 回调：执行模型切换。
+    try { ctx!.agent.abort() } catch {}
+    const res = switchAgentRuntime(ctx!, modelId)
+    if (res.ok && res.modelName) {
+      tuiApp.setModelInfo(res.modelName, res.contextWindow)
+      tuiApp.commitStatic(`Model switched to: ${res.modelName}`)
+    } else {
+      tuiApp.commitStatic(`⚠️ Model switch failed: ${res.error ?? 'unknown error'}`)
+    }
+  }, /* themePickerExec: */ (themeName: string) => {
+    // Theme Picker Enter 回调：切换主题。
+    setTheme(themeName as ThemeName)
+    tuiApp.commitStatic(`Theme switched to: ${themeName}`)
   })
 
   // ── SlashRouter ──────────────────────────────────────────────

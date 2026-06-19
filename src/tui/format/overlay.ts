@@ -13,7 +13,7 @@
 
 import stringWidth from 'string-width'
 import { ANSI, color } from '../engine/ansi.js'
-import type { RivetTheme } from '../theme.js'
+import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
 
 // ── Shared Layout Helpers ─────────────────────────────────────
@@ -357,6 +357,33 @@ function tasksProgressBar(done: number, total: number, width = 8): string {
   return '█'.repeat(filled) + '░'.repeat(width - filled)
 }
 
+// ── Model Picker ───────────────────────────────────────────────
+
+export interface ModelPickerEntry {
+  id: string
+  alias: string
+  current: boolean
+  contextWindow?: number
+}
+
+export interface ModelPickerData {
+  entries: ModelPickerEntry[]
+  selectedIndex: number
+}
+
+// ── Theme Picker ───────────────────────────────────────────────
+
+export interface ThemePickerEntry {
+  name: string
+  current: boolean
+  description: string
+}
+
+export interface ThemePickerData {
+  entries: ThemePickerEntry[]
+  selectedIndex: number
+}
+
 // ── Domain Picker ──────────────────────────────────────────────
 
 export interface DomainPickerEntry {
@@ -504,5 +531,128 @@ export function renderTasks(data: TasksData, width: number, height: number, them
   lines.push(formatFooter(`${summary}  ·  q quit`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
+  return lines
+}
+
+// ── Model Picker ───────────────────────────────────────────────
+
+export function renderModelPicker(data: ModelPickerData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar('Model · /model', width, theme))
+
+  const innerWidth = width - 4
+  const contentRows = Math.max(3, height - 4)
+  const previewRows = Math.min(4, Math.max(2, contentRows - data.entries.length - 1))
+  const listRows = Math.max(1, contentRows - previewRows - 1)
+
+  const sel = data.selectedIndex
+  const visible = data.entries.slice(0, listRows)
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i]!
+    const selected = i === sel
+    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const mark = e.current ? color('●', theme.primary) : ' '
+    const aliasColor = selected ? color(e.alias, theme.primary, { bold: true }) : color(e.alias, theme.secondary)
+    const idText = ` [${e.id}]`
+    const tokensText = e.contextWindow ? `  ${(e.contextWindow / 1000).toFixed(0)}k ctx` : ''
+    const head = `${cursor} ${mark} ${aliasColor}${color(idText, theme.dim)}`
+    
+    const plainHead = `  ${e.current ? '●' : ' '} ${e.alias}${idText}`
+    const metaRoom = Math.max(0, innerWidth - stringWidth(plainHead) - 2)
+    const metaText = tokensText && metaRoom > 6 ? tokensText.slice(0, metaRoom) : ''
+    lines.push(padLine(`${head}${color(metaText, theme.dim)}`, width, theme))
+  }
+  for (let i = visible.length; i < listRows; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  // Divider
+  lines.push(padLine(` ${color('─'.repeat(Math.max(0, innerWidth - 1)), theme.dim)}`, width, theme))
+  const current = data.entries[sel]
+  const previewLines: string[] = []
+  if (current) {
+    const modelDesc = current.id.includes('pro') || current.id.includes('reasoning') || current.id.includes('o1') || current.id.includes('5.5')
+      ? '性能旗舰：支持长考与高级推理，完美攻克超复杂重构与深层 Debug 任务。'
+      : '极速先锋：响应灵敏、前缀缓存友好度极高，适合日常代码编写与文件级小修补。'
+    const ctxText = current.contextWindow 
+      ? `上下文配额: ${current.contextWindow.toLocaleString()} tokens` 
+      : '上下文配额: 128k tokens'
+    const features = `标识: ${current.id}  ·  别名: ${current.alias}`
+    const wrappedDesc = wrapToWidth(modelDesc, innerWidth - 1, previewRows - 2)
+    previewLines.push(color(`  ${ctxText}`, theme.primary))
+    previewLines.push(color(`  ${features}`, theme.dim))
+    for (const d of wrappedDesc) {
+      if (previewLines.length < previewRows) {
+        previewLines.push(` ${color(d, theme.muted)}`)
+      }
+    }
+  }
+  
+  for (let i = 0; i < previewRows; i++) {
+    lines.push(padLine(previewLines[i] ?? '', width, theme))
+  }
+
+  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
+// ── Theme Picker ───────────────────────────────────────────────
+
+export function renderThemePicker(data: ThemePickerData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar('Theme · /theme', width, theme))
+
+  const innerWidth = width - 4
+  const contentRows = Math.max(3, height - 4)
+  const previewRows = Math.min(6, Math.max(4, contentRows - data.entries.length - 1))
+  const listRows = Math.max(1, contentRows - previewRows - 1)
+
+  const sel = data.selectedIndex
+  const visible = data.entries.slice(0, listRows)
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i]!
+    const selected = i === sel
+    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const mark = e.current ? color('●', theme.primary) : ' '
+    const nameColor = selected ? color(e.name, theme.primary, { bold: true }) : color(e.name, theme.secondary)
+    lines.push(padLine(`${cursor} ${mark} ${nameColor}`, width, theme))
+  }
+  for (let i = visible.length; i < listRows; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  // Divider
+  lines.push(padLine(` ${color('─'.repeat(Math.max(0, innerWidth - 1)), theme.dim)}`, width, theme))
+  const current = data.entries[sel]
+  const previewLines: string[] = []
+  if (current) {
+    // 1. Description
+    const wrappedDesc = wrapToWidth(current.description, innerWidth - 1, 2)
+    for (const d of wrappedDesc) {
+      previewLines.push(` ${color(d, theme.muted)}`)
+    }
+    
+    // 2. Swatch Preview!
+    const targetThemeInfo = THEMES[current.name as ThemeName]
+    if (targetThemeInfo) {
+      const tc = targetThemeInfo.truecolor
+      const primarySwatch = color('● Accent', tc.primary)
+      const secondarySwatch = color('● Secondary', tc.secondary)
+      const successSwatch = color('✓ Success', tc.success)
+      const errorSwatch = color('✗ Error', tc.error)
+      const swatchLine = `  ${primarySwatch}  ${secondarySwatch}  ${successSwatch}  ${errorSwatch}`
+      previewLines.push(swatchLine)
+    }
+  }
+  
+  for (let i = 0; i < previewRows; i++) {
+    lines.push(padLine(previewLines[i] ?? '', width, theme))
+  }
+
+  lines.push(formatFooter('↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
   return lines
 }

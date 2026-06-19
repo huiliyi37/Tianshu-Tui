@@ -440,7 +440,9 @@ export function createInteractiveToolRegistry(
   }))
 
   // B1 deliver_task
-  const b1TaskLedger = createTaskLedger({ taskId: getOrCreateSessionId() })
+  // sidecar 多 session 路径必须用 refs.sessionId（每个 session 独立装配），
+  // 全局 getOrCreateSessionId 仅作 TUI 单 session 路径的兼容 fallback。
+  const b1TaskLedger = createTaskLedger({ taskId: refs.sessionId ?? getOrCreateSessionId() })
   refs.taskLedger = b1TaskLedger
   const b1Baseline = createWorktreeBaseline(captureGitBaseline(cwd))
   const b1Ownership = createOwnershipLedger({

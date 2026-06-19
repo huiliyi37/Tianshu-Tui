@@ -52,8 +52,8 @@ import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type Slash
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -782,7 +782,21 @@ export class TuiApp {
         // 光标初始定位到当前生效星域，便于确认/切换。
         const entries = this.overlayController.getData()?.domainPickerData?.().entries ?? []
         const curIdx = entries.findIndex(e => e.current)
-        if (curIdx > 0) this.overlayController.nav().domainPickerIndex = curIdx
+        if (curIdx >= 0) this.overlayController.nav().domainPickerIndex = curIdx
+        return this.overlay.activate(id)
+      }
+      case 'model-picker': {
+        this.overlayController.resetNav()
+        const entries = this.overlayController.getData()?.modelPickerData?.().entries ?? []
+        const curIdx = entries.findIndex(e => e.current)
+        if (curIdx >= 0) this.overlayController.nav().modelPickerIndex = curIdx
+        return this.overlay.activate(id)
+      }
+      case 'theme-picker': {
+        this.overlayController.resetNav()
+        const entries = this.overlayController.getData()?.themePickerData?.().entries ?? []
+        const curIdx = entries.findIndex(e => e.current)
+        if (curIdx >= 0) this.overlayController.nav().themePickerIndex = curIdx
         return this.overlay.activate(id)
       }
       default:
@@ -983,6 +997,46 @@ export class TuiApp {
         const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
         this.deactivateOverlay()
         if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
+        return true
+      }
+      return false
+    }
+
+    if (id === 'model-picker') {
+      const count = this.overlayController.getData()?.modelPickerData?.().entries.length ?? 0
+      const cur = this.overlayController.nav().modelPickerIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayController.nav().modelPickerIndex = (cur + 1) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayController.nav().modelPickerIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
+        this.deactivateOverlay()
+        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
+        return true
+      }
+      return false
+    }
+
+    if (id === 'theme-picker') {
+      const count = this.overlayController.getData()?.themePickerData?.().entries.length ?? 0
+      const cur = this.overlayController.nav().themePickerIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayController.nav().themePickerIndex = (cur + 1) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayController.nav().themePickerIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
+        this.deactivateOverlay()
+        if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
         return true
       }
       return false
@@ -2126,12 +2180,16 @@ export class TuiApp {
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
     domainPickerData?: () => DomainPickerData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void): void {
+    modelPickerData?: () => ModelPickerData
+    themePickerData?: () => ThemePickerData
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
     this.overlayController.setChronicleExec(chronicleExec)
     this.overlayController.setDomainPickerExec(domainPickerExec)
+    this.overlayController.setModelPickerExec(modelPickerExec)
+    this.overlayController.setThemePickerExec(themePickerExec)
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -2202,6 +2260,22 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.domainPickerData?.() ?? { entries: [], selectedIndex: 0 }
         return renderDomainPicker({ ...data, selectedIndex: this.overlayController.nav().domainPickerIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Model Picker — 裸 /model 打开模型选择器；selectedIndex 由 overlayNav 注入
+    this.overlay.register('model-picker', {
+      render: (_w, _h) => {
+        const data = overlayData?.modelPickerData?.() ?? { entries: [], selectedIndex: 0 }
+        return renderModelPicker({ ...data, selectedIndex: this.overlayController.nav().modelPickerIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Theme Picker — 裸 /theme 打开主题选择器；selectedIndex 由 overlayNav 注入
+    this.overlay.register('theme-picker', {
+      render: (_w, _h) => {
+        const data = overlayData?.themePickerData?.() ?? { entries: [], selectedIndex: 0 }
+        return renderThemePicker({ ...data, selectedIndex: this.overlayController.nav().themePickerIndex }, this.columns, this.rows, this.theme)
       },
     })
   }
