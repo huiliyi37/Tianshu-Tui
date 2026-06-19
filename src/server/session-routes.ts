@@ -31,6 +31,7 @@ import type { PlanDocument } from '../plan/plan-store.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 import { listProjectFiles, rankFiles } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
+import { resolveAppPromptInput } from '../tui/slash-commands.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
@@ -322,7 +323,30 @@ export function buildSessionRoutes(
         }
         images = data.images as string[]
       }
-      const ok = manager.run(params!.id!, data.prompt, images)
+
+      // Slash 翻译层（对齐 TUI 端 resolveAppPromptInput 行为）。
+      // 桌面 PlusMenu 命令是写死人话经 onSend 发送；自由文本输入若以 "/" 起头，
+      // 这里负责把 /plan /team /council /review /write-plan /plan-close 等
+      // ecosystem 命令翻译成结构化 prompt，自定义命令也走 .rivet/commands/。
+      // 未识别 slash → 4xx 友好提示（与 TUI rejectSubmit 行为对齐，避免凭空丢失消息）。
+      let prompt = data.prompt
+      const trimmed = prompt.trim()
+      if (trimmed.startsWith('/')) {
+        const record = manager.getSession(params!.id!)
+        if (record) {
+          const resolved = resolveAppPromptInput(trimmed, record.cwd)
+          if (resolved === null) {
+            const first = trimmed.split(/\s+/)[0]
+            return {
+              status: 400,
+              body: { error: `Unknown slash command: "${first}". Type a normal message or use the command menu (+).` },
+            }
+          }
+          prompt = resolved
+        }
+      }
+
+      const ok = manager.run(params!.id!, prompt, images)
       if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),

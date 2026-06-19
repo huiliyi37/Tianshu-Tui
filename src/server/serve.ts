@@ -40,7 +40,9 @@ import { SessionRegistry } from '../agent/session-registry.js'
 import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
-import { captureGitBaseline } from '../bootstrap.js'
+import { captureGitBaseline, createInteractiveToolRegistry, type RuntimeRefs } from '../bootstrap.js'
+import { createRecallTool } from '../tools/recall.js'
+import { createRememberTool } from '../tools/remember.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
 
 export interface ServeContext {
@@ -173,20 +175,59 @@ interface SessionStores {
   ownershipLedger: ReturnType<typeof createOwnershipLedger>
 }
 
-function buildSessionStores(ctx: ServeContext, cwd: string, sessionId: string): SessionStores {
+function buildSessionStores(
+  ctx: ServeContext,
+  cwd: string,
+  sessionId: string,
+  registry?: SessionRegistry,
+): SessionStores {
   const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const playbookStore = new PlaybookStore(cwd)
-  const toolRegistry = createDefaultToolRegistry([], {
-    desktopTools: ctx.config.agent.desktopTools,
-    browserTool: process.env.RIVET_BROWSER_ENABLED === '1',
-  })
   const session = new SessionContext()
-  const taskLedger = createTaskLedger({ taskId: sessionId })
-  const ownershipLedger = createOwnershipLedger({
+
+  // sidecar 工具装配——复用 bootstrap 的 createInteractiveToolRegistry，与 TUI 端
+  // 共享一套装配链。多 agent 能力（coordinator/meridianIndexer/mcpManager/lspManager）
+  // 在 sidecar 中暂未装配：相关工具（delegate_task / delegate_batch / team_orchestrate /
+  // council_convene / plan_task / deliver_task 审查段）被注册但调用时会抛
+  // 'DelegationCoordinator not initialized'——比"工具不存在"对模型友好得多。
+  // 后续 Wave 可在此处补 coordinator 装配（参考 bootstrap.ts createAgentRuntime）。
+  const refs: RuntimeRefs = {
+    coordinator: null,
+    fileHistory,
+    claimStore,
+    sessionId,
+    sessionRegistry: registry ?? null,
+    taskLedger: null,
+    ownershipLedger: null,
+    verificationSnapshotManager: null,
+    deliveryGate: null,
+    meridianIndexer: null,
+    mcpManager: null,
+    lspManager: null,
+    banditState: null,
+    promptEngine: null,
+  }
+  const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
+
+  // recall / remember：bootstrap 在 createInteractiveToolRegistry 外装的两个工具，
+  // 这里复用 sidecar 已有的 claimStore + session 完成对齐。
+  toolRegistry.register(createRecallTool(claimStore, {
+    sessionId,
+    getTurn: () => session.getTurnCount(),
+  }))
+  toolRegistry.register(createRememberTool(claimStore, {
+    sessionId,
+    getTurn: () => session.getTurnCount(),
+  }))
+
+  // taskLedger / ownershipLedger 由 createInteractiveToolRegistry 的 B1 装配段
+  // 原地填入 refs；fallback 仅用于装配失败时不破坏 assembleAgentLoop 的 deps。
+  const taskLedger = refs.taskLedger ?? createTaskLedger({ taskId: sessionId })
+  const ownershipLedger = refs.ownershipLedger ?? createOwnershipLedger({
     baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
     taskLedger,
   })
@@ -259,7 +300,7 @@ export function buildAgentLoop(
   registry?: SessionRegistry,
   approvalMode?: ApprovalMode,
 ): BuiltAgent {
-  const stores = buildSessionStores(ctx, cwd, sessionId)
+  const stores = buildSessionStores(ctx, cwd, sessionId, registry)
   const spec: ResolvedModelSpec = {
     provider: ctx.provider,
     apiKey: ctx.apiKey,
@@ -289,7 +330,7 @@ function buildManagedAgent(
   registry: SessionRegistry | undefined,
   approvalMode: ApprovalMode | undefined,
 ): import('./session-manager.js').ManagedAgent {
-  const stores = buildSessionStores(ctx, cwd, sessionId)
+  const stores = buildSessionStores(ctx, cwd, sessionId, registry)
   let spec: ResolvedModelSpec = {
     provider: ctx.provider,
     apiKey: ctx.apiKey,
