@@ -61,10 +61,10 @@ const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
 
 /** When enabled, repeated reads of unchanged files return a compact reference
- *  instead of re-emitting the full content. Controlled by RIVET_READ_REF=1.
+ *  instead of re-emitting the full content. Default-on (opt-out with RIVET_READ_REF=0).
  *  Checked at call time (not module load) so tests can toggle dynamically. */
 function isReadRefEnabled(): boolean {
-  return process.env['RIVET_READ_REF'] === '1'
+  return process.env['RIVET_READ_REF'] !== '0'
 }
 
 /** Minimum modelContent bytes for read-ref to apply. Smaller repeats stay
