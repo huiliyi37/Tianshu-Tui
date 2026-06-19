@@ -583,6 +583,11 @@ export class AgentLoop {
     this.turnOrchestrator.setGoalTracker(tracker)
   }
 
+  /** Check if goal tracker is active (for doom-loop threshold selection). */
+  isGoalActive(): boolean {
+    return this.turnOrchestrator.goalTracker?.isActive() ?? false
+  }
+
   /** Sync plan-mode state into config so tool-pipeline reads it */
   syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState
