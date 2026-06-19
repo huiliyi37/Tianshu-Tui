@@ -51,15 +51,15 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('复盘总结洞察'), 'tianxuan')
   })
 
-  it('routes design/frontend keywords to wenqu', () => {
-    assert.equal(matchDomain('设计登录界面的视觉样式'), 'wenqu')
-    assert.equal(matchDomain('调整前端组件的配色与布局'), 'wenqu')
+  it('routes aesthetic/clean-code keywords to wenqu', () => {
+    assert.equal(matchDomain('让代码的逻辑结构呈现完美对称与优雅美感'), 'wenqu')
+    assert.equal(matchDomain('重构重塑这个模块的命名模式与体验肌理'), 'wenqu')
   })
 
-  it('wenqu carries design methodology (anchor in existing context, 3+ variations)', () => {
+  it('wenqu carries design methodology (minimalist structural aesthetics & medium honesty)', () => {
     const wenqu = STAR_DOMAINS.wenqu
-    assert.match(wenqu.systemPromptSuffix, /既有/)
-    assert.match(wenqu.systemPromptSuffix, /3\+/)
+    assert.match(wenqu.systemPromptSuffix, /克制/)
+    assert.match(wenqu.systemPromptSuffix, /诚实/)
     assert.match(wenqu.volatileBlock, /文曲/)
   })
 
