@@ -116,6 +116,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
    }),
     habituationThreshold: input.habituationThreshold ?? 5,
     prefixCache: capabilities.prefixCacheStrategy,
+    appendixDelta: process.env['RIVET_APPENDIX_DELTA'] === '1',
  })
 
   return {
