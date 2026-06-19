@@ -128,8 +128,10 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   const rightSep = '  '
 
   // Truncate right cluster if left + right exceeds terminal width
+  // Use a 2-column safety margin (input.width - 2) to prevent any auto-wrapping
+  // caused by terminal-specific wide symbol rendering (e.g. ✹, ✷).
   const leftLen = stripAnsiLen(left)
-  const maxRight = input.width - 1 - leftLen - 4  // 4 = min gap
+  const maxRight = input.width - 2 - leftLen - 4  // 4 = min gap
   let right = ''
   let accumulated = 0
   for (const item of rightItems) {
@@ -143,7 +145,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
     }
   }
 
-  const gap = Math.max(4, input.width - 1 - leftLen - stripAnsiLen(right))
+  const gap = Math.max(4, input.width - 2 - leftLen - stripAnsiLen(right))
 
   return `${left}${' '.repeat(gap)}${right}`
 }
