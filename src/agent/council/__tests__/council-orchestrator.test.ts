@@ -233,3 +233,57 @@ describe('runCouncilDebate — 多轮层（默认 1=单轮 opt-in）', () => {
     assert.equal(plan.aggregate.conflicts[0]!.resolution, '认同方向')
   })
 })
+
+describe('deriveStableWorkOrderId — round2 -r2 后缀稳定化', () => {
+  it('council:seat-x-r2 稳定化保留 -r2 后缀（非仅 round1 key）', () => {
+    const id = deriveStableWorkOrderId('council:seat-tianquan-r2')
+    assert.equal(id, 'council:seat-tianquan-r2')
+  })
+  it('round1 与 round2 同席位产生不同稳定 id（防碰撞）', () => {
+    const r1 = deriveStableWorkOrderId('council:seat-tianquan')
+    const r2 = deriveStableWorkOrderId('council:seat-tianquan-r2')
+    assert.equal(r1, 'council:seat-tianquan')
+    assert.equal(r2, 'council:seat-tianquan-r2')
+    assert.notEqual(r1, r2)
+  })
+})
+
+describe('parseSeatContribution — rebuttals 结构验证', () => {
+  it('正常 rebuttals 数组透传', () => {
+    const key = 'abc123'
+    const result = workerResult('tianquan', JSON.stringify({
+      authority: 'tianquan', summary: 's',
+      additions: [], risks: [], challenges: [], alternatives: [],
+      rebuttals: [{ conflictKey: key, stance: 'concede', argument: '让步' }],
+    }))
+    const c = parseSeatContribution('tianquan', result)
+    assert.equal(c.rebuttals?.length, 1)
+    assert.equal(c.rebuttals![0]!.conflictKey, key)
+    assert.equal(c.rebuttals![0]!.stance, 'concede')
+  })
+  it('畸形 rebuttals 元素被过滤（缺 conflictKey/stance/argument）', () => {
+    const result = workerResult('tianquan', JSON.stringify({
+      authority: 'tianquan', summary: 's',
+      additions: [], risks: [], challenges: [], alternatives: [],
+      rebuttals: [
+        { conflictKey: 'k1', stance: 'concede', argument: 'ok' },
+        'just a string',
+        null,
+        { conflictKey: 'k2' },
+        { stance: 'hold' },
+      ],
+    }))
+    const c = parseSeatContribution('tianquan', result)
+    assert.equal(c.rebuttals?.length, 1, '只有第一条结构完整的保留')
+    assert.equal(c.rebuttals![0]!.conflictKey, 'k1')
+  })
+  it('非数组 rebuttals 被忽略', () => {
+    const result = workerResult('tianquan', JSON.stringify({
+      authority: 'tianquan', summary: 's',
+      additions: [], risks: [], challenges: [], alternatives: [],
+      rebuttals: 'not-an-array',
+    }))
+    const c = parseSeatContribution('tianquan', result)
+    assert.equal(c.rebuttals, undefined)
+  })
+})
