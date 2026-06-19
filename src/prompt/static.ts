@@ -124,7 +124,7 @@ export type ModelFamily = 'deepseek' | 'mimo' | 'glm' | 'openai' | 'anthropic' |
 const MODEL_CALIBRATIONS: Partial<Record<ModelFamily, string>> = {
   deepseek: '<calibration>改代码前 grep 验证消费方不被破坏。</calibration>',
   mimo: '<calibration>你擅长全景探索，但需收敛：每次探索设定明确目标，达到目标后停止扩展。探索结果用一句话结论收束，再决定下一步。</calibration>',
-  glm: '<calibration>你擅长排除法定位问题。给结论时直接给最终答案，排除过程留在思考中。完成后检查是否有遗留路径未覆盖。</calibration>',
+  glm: '<calibration>你擅长排除法定位问题，但不要把"穷尽查证"理解为无限工具调用。同一工具同一错误连续 2 次时，停止变体重试，改用不同证据路径；不同路径也被阻断时，报告阻断点和已知证据。每轮最多围绕一个假设查 3 个关键证据，证据足够时收束结论，不要为覆盖所有可能性继续扩展。</calibration>',
 }
 
 export interface StaticPromptContext {
