@@ -354,7 +354,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/council': {
       if (!parts.slice(1).join(' ').trim()) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题>' }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题> [--seats id1,id2,...]' }))
         setIsStreaming(false)
         return true
       }

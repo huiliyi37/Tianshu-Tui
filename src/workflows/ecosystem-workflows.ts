@@ -1,4 +1,5 @@
 import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+import { DEFAULT_COUNCIL_SEATS } from '../tools/council-convene.js'
 
 const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
@@ -345,9 +346,12 @@ export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOpt
 export function buildCouncilWorkflowPrompt(options: CouncilWorkflowPromptOptions): string {
   const objective = options.objective.trim()
   const hasCustomSeats = options.seats && options.seats.length > 0
+  const defaultSeatsDesc = DEFAULT_COUNCIL_SEATS
+    .map(s => `${s.authority} ${(s.charter ?? '').split('：')[0] || '顾问'}`)
+    .join(' · ')
   const seatsNote = hasCustomSeats
     ? `席位用自定义配置: ${options.seats!.join(' · ')}`
-    : '席位用默认配置(天权 方案权衡 · 天府 风险守护 · 天璇 跨域反证),无需自行指定 seats'
+    : `席位用默认配置(${defaultSeatsDesc}),无需自行指定 seats`
   const seatsParam = hasCustomSeats
     ? `, seats: [${options.seats!.map(s => `{ authority: "${s}" }`).join(', ')}]`
     : ''

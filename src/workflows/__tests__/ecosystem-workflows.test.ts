@@ -147,11 +147,25 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(!resolved?.prompt.includes('无需自行指定 seats'))
   })
 
-  it('seats without --seats flag still uses default config', () => {
+  it('seats without --seats flag still uses default config from DEFAULT_COUNCIL_SEATS', () => {
     const resolved = resolveEcosystemWorkflowInput('/council just review')
 
     assert.ok(resolved?.prompt.includes('just review'))
-    assert.ok(resolved?.prompt.includes('默认配置(天权'))
+    // 默认席位从 DEFAULT_COUNCIL_SEATS 常量派生，含 authority id。
+    assert.ok(resolved?.prompt.includes('tianquan'))
+    assert.ok(resolved?.prompt.includes('tianfu'))
+    assert.ok(resolved?.prompt.includes('tianxuan'))
+    assert.ok(resolved?.prompt.includes('无需自行指定 seats'))
+  })
+
+  it('parses --seats with space-separated values', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council audit --seats tianfu tianxuan')
+
+    assert.ok(resolved?.prompt.includes('audit'))
+    assert.ok(resolved?.prompt.includes('tianfu'))
+    assert.ok(resolved?.prompt.includes('tianxuan'))
+    assert.ok(!resolved?.prompt.includes('tianquan'))
+    assert.ok(!resolved?.prompt.includes('无需自行指定 seats'))
   })
 
   it('returns usage prompt for empty /council args', () => {
