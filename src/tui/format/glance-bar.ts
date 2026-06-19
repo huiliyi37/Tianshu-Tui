@@ -68,26 +68,17 @@ export interface GlanceBarInput {
   turnCount?: number
 }
 
-/**
- * 格式化 GlanceBar 为单行 ANSI 字符串。
- *
- * Zone 布局：domain ┃ model cache tokens ┃ … elapsed
- * 运行态相位已收敛到顶部 spinner 状态行（CC 对标），GlanceBar 不再重复显示。
- */
-export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): string {
+export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
   const narrow = input.narrow ?? input.width < 60
-
-  // Zone 1: Domain identity — muted (NOT primary/gold). 95% 墨灰.
-  // CC 对标：去掉重符号默认 glyph（❂），仅在显式提供 glyph 时渲染；克制单标记。
   const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
   const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
   const glyphPart = domainGlyph ? `${color(domainGlyph, theme.muted)} ` : ''
-  const zone1 = `${glyphPart}${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
+  return `${glyphPart}${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
+}
 
-  // Zone 3: Model + metrics — model + tokens(常驻) + cost + elapsed。
-  // tokens/cost 常驻（对标 Claude Code /context 的常显占用），窄终端降级隐藏 tokens；
-  // cache 仍仅在异常(< 50%)时浮出，避免正常态噪声。
+export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): string {
+  const narrow = input.narrow ?? input.width < 60
   const parts: string[] = []
   if (input.modelName) {
     parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
@@ -98,7 +89,6 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
-  // tokens 常驻：阈值色保留 — <75% dim（安静）、≥75% warning、≥90% error。
   if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
     const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.dim
     parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
@@ -108,40 +98,49 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   }
   const zone3 = parts.join('  ')
 
-  // Zone 4: Elapsed
   let zone4 = ''
   if (input.elapsedMs !== undefined) {
     zone4 = formatElapsed(input.elapsedMs)
   }
-  zone4 = color(zone4, theme.dim)
+  const elapsedPart = color(zone4, theme.dim)
 
-  // ── Assembly — 双 cluster 左右分布 ──────────────────────
-  // 左 cluster: identity    右 cluster: metrics + elapsed
-  // 中间用空格撑满终端宽度，呼吸感拉满
+  return [zone3, elapsedPart].filter(Boolean).join('  ')
+}
 
-  const left = zone1
+/**
+ * 格式化 GlanceBar 为单行 ANSI 字符串。
+ *
+ * Zone 布局：domain ┃ model cache tokens ┃ … elapsed
+ * 运行态相位已收敛到顶部 spinner 状态行（CC 对标），GlanceBar 不再重复显示。
+ */
+export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): string {
+  const left = formatGlanceLeft(input, theme)
+  const rightFull = formatGlanceRight(input, theme)
 
-  // Build right cluster items for progressive truncation
-  const rightItems: string[] = []
-  if (zone3) rightItems.push(zone3)
-  if (zone4) rightItems.push(zone4)
-  const rightSep = '  '
-
-  // Truncate right cluster if left + right exceeds terminal width
-  // Use a 2-column safety margin (input.width - 2) to prevent any auto-wrapping
-  // caused by terminal-specific wide symbol rendering (e.g. ✹, ✷).
   const leftLen = stripAnsiLen(left)
   const maxRight = input.width - 2 - leftLen - 4  // 4 = min gap
-  let right = ''
-  let accumulated = 0
-  for (const item of rightItems) {
-    const itemLen = stripAnsiLen(item)
-    const addLen = accumulated > 0 ? rightSep.length + itemLen : itemLen
-    if (accumulated + addLen <= maxRight) {
-      right = accumulated > 0 ? right + rightSep + item : item
-      accumulated += addLen
-    } else {
-      break
+  const rightLen = stripAnsiLen(rightFull)
+
+  let right = rightFull
+  if (rightLen > maxRight) {
+    // If it exceeds, we can fallback to progressive truncation
+    const narrow = input.narrow ?? input.width < 60
+    const parts: string[] = []
+    if (input.modelName) {
+      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+    }
+    const rightSep = '  '
+    let accumulated = 0
+    right = ''
+    for (const item of parts) {
+      const itemLen = stripAnsiLen(item)
+      const addLen = accumulated > 0 ? rightSep.length + itemLen : itemLen
+      if (accumulated + addLen <= maxRight) {
+        right = accumulated > 0 ? right + rightSep + item : item
+        accumulated += addLen
+      } else {
+        break
+      }
     }
   }
 
@@ -150,7 +149,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
   return `${left}${' '.repeat(gap)}${right}`
 }
 
-function stripAnsiLen(s: string): number {
+export function stripAnsiLen(s: string): number {
   // 必须用 display width（非 .length）：CJK(天枢)/全角符号每字符占 2 列但 .length 计 1。
   // 用 .length 会让 padding/截断欠估 → 状态行被撑到 ≥ 终端宽度 → 末列自动换行 →
   // LiveEngine 行数计算与终端实际换行错位 → clear() 欠擦 → chrome 残留进 scrollback(重复渲染)。

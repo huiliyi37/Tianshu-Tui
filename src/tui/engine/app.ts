@@ -35,7 +35,8 @@ import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../form
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
+import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
@@ -1953,7 +1954,7 @@ export class TuiApp {
       for (const taskLine of taskLines) lines.push({ text: taskLine })
     }
 
-    // 4. GlanceBar（context% / cache / cost / git branch）
+    // 4. GlanceBar（context% / cache / cost / git branch） metrics 计算
     // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
     // 运行态相位已收敛到顶部 spinner 状态行，GlanceBar 不再重复显示 phase。
     const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
@@ -1973,23 +1974,6 @@ export class TuiApp {
       glanceContextRatio = this.metricsGlanceController.lastContextRatio
       glanceCost = this.estimateSessionCost()
     }
-    const glanceBar = formatGlanceBar({
-      width: this.columns,
-      domainGlyph: this.state.domainGlyph,
-      domainName: this.state.domainName,
-      branch: this.metricsGlanceController.gitBranch,
-      modelName: this.state.modelName,
-      cacheHitRate: glanceCacheHitRate,
-      contextRatio: glanceContextRatio,
-      estimatedTokens: glanceEstimatedTokens,
-      maxTokens: glanceMaxTokens,
-      cost: glanceCost,
-      elapsedMs: Date.now() - this.state.turnStartMs,
-      turnCount: this.state.turnNumber,
-    }, this.theme)
-    for (const glanceLine of glanceBar.split('\n')) {
-      lines.push({ text: glanceLine })
-    }
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.inputController.ctrlCPendingSince > 0) {
@@ -2004,11 +1988,64 @@ export class TuiApp {
         : isStreaming ? this.theme.dim
         : resolveStarDomainAccent(this.state.domainName, this.theme)
 
+      // 1. 获取当前生效星域的 Persona
+      const activeDomainId = this.state.domainName ? Object.keys(STAR_DOMAINS).find(k => (STAR_DOMAINS as any)[k].name === this.state.domainName) : null
+      const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
+      const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
+
+      // 2. 根据 separator 确定线框字符
+      const chars = ({
+        thin:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' },
+        thick: { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃', m: '┳' },
+        dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
+      } as any)[uiSep] ?? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' }
+
       const innerWidth = Math.max(20, this.columns - 6)
-      const topBorder = color(`╭${'─'.repeat(innerWidth + 2)}╮`, borderColor)
-      const botBorder = color(`╰${'─'.repeat(innerWidth + 2)}╯`, borderColor)
-      const leftBar = color('│ ', borderColor)
-      const rightBar = color(' │', borderColor)
+      const leftBar = color(chars.v + ' ', borderColor)
+      const rightBar = color(' ' + chars.v, borderColor)
+      const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
+
+      // 3. 构建高保真左右指标 Segment
+      const leftStr = formatGlanceLeft({
+        width: this.columns,
+        domainGlyph: this.state.domainGlyph,
+        domainName: this.state.domainName,
+        branch: this.metricsGlanceController.gitBranch,
+      }, this.theme)
+
+      const rightStr = formatGlanceRight({
+        width: this.columns,
+        modelName: this.state.modelName,
+        cacheHitRate: glanceCacheHitRate,
+        estimatedTokens: glanceEstimatedTokens,
+        maxTokens: glanceMaxTokens,
+        cost: glanceCost,
+        elapsedMs: Date.now() - this.state.turnStartMs,
+        turnCount: this.state.turnNumber,
+      }, this.theme)
+
+      const plainLeft = stripAnsiLen(leftStr)
+      const plainRight = stripAnsiLen(rightStr)
+
+      // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
+      let topBorder = ''
+      if (innerWidth < plainLeft + plainRight + 10) {
+        topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
+      } else {
+        const lineRem = innerWidth - plainLeft - plainRight - 4 // 4 = label border paddings
+        const leftFill = Math.max(2, Math.floor(lineRem * 0.4))
+        const rightFill = Math.max(2, lineRem - leftFill)
+        
+        topBorder = color(chars.tl, borderColor) + 
+                    color(chars.h.repeat(2), borderColor) + 
+                    leftStr + 
+                    color(chars.h.repeat(leftFill), borderColor) + 
+                    color(chars.m, borderColor) + 
+                    color(chars.h.repeat(rightFill), borderColor) + 
+                    rightStr + 
+                    color(chars.h.repeat(2), borderColor) + 
+                    color(chars.tr, borderColor)
+      }
 
       const MAX_INPUT_DISPLAY_LINES = 8
       const inputLines = this.inputLine.value
