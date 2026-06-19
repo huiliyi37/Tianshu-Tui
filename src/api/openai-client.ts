@@ -135,6 +135,9 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 // minutes before first token. Use generous timeouts to avoid false-positive errors.
 const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
+// GLM-5.2 reasoning_effort=max: 服务端完整推理阶段可能 5min+ 不发 token，
+// 300s read timeout 会误杀。单独给到 600s（10min 硬顶兜底 runaway）。
+const GLM_READ_TIMEOUT_MS = 600_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
 // Thinking-stall timeout 现由 config.thinkingStallTimeoutMs 控制（默认禁用，见
@@ -535,7 +538,9 @@ export class OpenAIClient implements StreamClient {
       const isSlowProvider = SLOW_THINKING_PROVIDERS.has(this.config.providerName ?? '')
       const firstByteMs = isSlowProvider ? SLOW_FIRST_BYTE_TIMEOUT_MS
         : isReasoning ? REASONING_FIRST_BYTE_TIMEOUT_MS : FIRST_BYTE_TIMEOUT_MS
-      const readMs = isSlowProvider ? SLOW_READ_TIMEOUT_MS
+      const isGlm = this.config.providerName === 'glm'
+      const readMs = isGlm && isReasoning ? GLM_READ_TIMEOUT_MS
+        : isSlowProvider ? SLOW_READ_TIMEOUT_MS
         : isReasoning ? REASONING_READ_TIMEOUT_MS : READ_TIMEOUT_MS
       // Thinking-stall detection: once thinking tokens have arrived but no text
       // content yet, use a (configurable) shorter timeout to catch stalled thinking
