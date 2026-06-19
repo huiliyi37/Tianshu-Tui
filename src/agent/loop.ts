@@ -182,7 +182,6 @@ export class AgentLoop {
   prevStreamedText: string | null = null
   pressureMonitor: PressureMonitor
   sycophancyTrap: SycophancyTrap = createSycophancyTrap()
-  private sycophancyWasActive = false
   turnBudget: TurnBudget = createTurnBudget(0)
   sensorium: Sensorium | null = null
   strategy: StrategyProfile | null = null
