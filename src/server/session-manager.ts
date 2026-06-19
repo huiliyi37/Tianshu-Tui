@@ -951,6 +951,10 @@ export class RuntimeSessionManager {
       .map((s) => ({ ...s.record }))
   }
 
+  listAllSessions(): SessionRecord[] {
+    return [...this.sessions.values()].map((s) => ({ ...s.record }))
+  }
+
   getSession(id: string): SessionRecord | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined

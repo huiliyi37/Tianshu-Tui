@@ -5,6 +5,7 @@ import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, type ToolDensity } from '../lib/persist'
+import { ProviderSettings } from '../components/ProviderSettings'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -78,6 +79,11 @@ export function SettingsSurface() {
           ))}
         </div>
         <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。</div>
+      </section>
+
+      <section className="settings-group">
+        <h4>模型 Provider</h4>
+        <ProviderSettings />
       </section>
 
       <section className="settings-group">

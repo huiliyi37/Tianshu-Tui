@@ -51,6 +51,18 @@ describe('getProviderCacheDefaults', () => {
     assert.equal(p.cacheGranularity, 128)
     assert.equal(p.ttlSeconds, 600)
   })
+
+  it('returns mimo-api profile with exact-prefix caching', () => {
+    const p = getProviderCacheDefaults('mimo-api')
+    assert.equal(p.cacheType, 'exact-prefix')
+    assert.equal(p.persistent, true)
+  })
+
+  it('returns kimi profile with no caching', () => {
+    const p = getProviderCacheDefaults('kimi')
+    assert.equal(p.cacheType, 'none')
+    assert.equal(p.persistent, false)
+  })
 })
 
 describe('getProviderProfile', () => {

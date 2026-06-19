@@ -9,6 +9,8 @@ import {
   addProviderEntry,
   type ProviderEntry,
 } from '../provider-registry.js'
+import { WELL_KNOWN_DEFAULTS } from '../provider.js'
+import { getProviderCacheDefaults } from '../provider-profile.js'
 
 // ─── Schema Tests ────────────────────────────────────────────
 
@@ -58,12 +60,14 @@ test('getProviderEntry returns undefined for unknown provider', () => {
 
 test('listProviders returns all entries', () => {
   const providers = listProviders()
-  assert.ok(providers.length >= 8)
+  assert.ok(providers.length >= 10)
   const keys = providers.map(p => p.key)
   assert.ok(keys.includes('deepseek'))
   assert.ok(keys.includes('openai'))
   assert.ok(keys.includes('kimi'))
   assert.ok(keys.includes('codex'))
+  assert.ok(keys.includes('mimo-api'))
+  assert.ok(keys.includes('claude'))
 })
 
 test('isKnownProvider returns true for known providers', () => {
@@ -101,6 +105,66 @@ test('codex has OAuth-compatible registry metadata', () => {
   assert.equal(entry.key, 'codex')
   assert.equal(entry.capabilities.thinkingFormat, 'openai')
   assert.equal(entry.cacheProfile.cacheType, 'partial-prefix')
+})
+
+test('mimo-api has exact-prefix cache and thinking support', () => {
+  const entry = PROVIDER_REGISTRY['mimo-api']
+  assert.ok(entry)
+  assert.equal(entry.key, 'mimo-api')
+  assert.equal(entry.label, 'MiMo API')
+  assert.ok(entry.capabilities.supportsThinking)
+  assert.equal(entry.capabilities.prefixCacheStrategy, 'deepseek-native')
+  assert.equal(entry.cacheProfile.cacheType, 'exact-prefix')
+  assert.ok(entry.cacheProfile.persistent)
+})
+
+test('claude has anthropic-compatible thinking', () => {
+  const entry = PROVIDER_REGISTRY['claude']
+  assert.ok(entry)
+  assert.equal(entry.key, 'claude')
+  assert.equal(entry.capabilities.thinkingFormat, 'anthropic')
+  assert.equal(entry.capabilities.effortFormat, 'reasoning_effort')
+})
+
+// ─── Cross-Table Consistency Guard ──────────────────────────
+
+test('every WELL_KNOWN provider exists in REGISTRY', () => {
+  for (const key of Object.keys(WELL_KNOWN_DEFAULTS)) {
+    assert.ok(
+      isKnownProvider(key),
+      `provider "${key}" in WELL_KNOWN_DEFAULTS but missing from PROVIDER_REGISTRY`,
+    )
+  }
+})
+
+test('every REGISTRY provider has a cache profile in PROFILES', () => {
+  for (const key of Object.keys(PROVIDER_REGISTRY)) {
+    const cache = getProviderCacheDefaults(key)
+    const entry = PROVIDER_REGISTRY[key]!
+    assert.equal(
+      cache.cacheType, entry.cacheProfile.cacheType,
+      `provider "${key}": PROFILES.cacheType (${cache.cacheType}) differs from REGISTRY (${entry.cacheProfile.cacheType})`,
+    )
+  }
+})
+
+test('every REGISTRY provider has capabilities matching WELL_KNOWN', () => {
+  for (const [key, entry] of Object.entries(PROVIDER_REGISTRY)) {
+    const caps = WELL_KNOWN_DEFAULTS[key]
+    if (!caps) continue
+    assert.equal(
+      caps.supportsThinking, entry.capabilities.supportsThinking,
+      `provider "${key}": supportsThinking mismatch`,
+    )
+    assert.equal(
+      caps.thinkingFormat, entry.capabilities.thinkingFormat,
+      `provider "${key}": thinkingFormat mismatch`,
+    )
+    assert.equal(
+      caps.prefixCacheStrategy, entry.capabilities.prefixCacheStrategy,
+      `provider "${key}": prefixCacheStrategy mismatch`,
+    )
+  }
 })
 
 test('all entries have non-empty notes or explicit empty array', () => {

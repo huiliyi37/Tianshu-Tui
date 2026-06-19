@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PlanModeState } from '../runtime/types'
 import type { ComposerCommand } from '../lib/composer-commands'
 import {
+  abortSession,
   listModels, switchModel,
   listDomains, setDomain,
   listSkills, setSkillEnabled,
@@ -26,6 +27,8 @@ export function PlusMenu(props: {
   sessionId: string
   /** Bumped on model/domain/skills SSE so an open panel re-fetches. */
   menuRev?: number
+  /** Whether the session is currently running (model switch needs abort first). */
+  sessionRunning?: boolean
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
   onPickImage: () => void
@@ -35,7 +38,7 @@ export function PlusMenu(props: {
   onClose: () => void
 }) {
   const {
-    sessionId, menuRev, planMode, onSetPlanMode,
+    sessionId, menuRev, sessionRunning, planMode, onSetPlanMode,
     onPickImage, imageDisabled, commands, onRunCommand, onClose,
   } = props
   const planning = planMode === 'planning'
@@ -69,7 +72,13 @@ export function PlusMenu(props: {
           desc: m.contextWindow ? `${m.provider} · ${Math.round(m.contextWindow / 1000)}K` : m.provider,
           active: m.current,
         }))}
-        apply={async (id, row) => { await switchModel(id, row.key) }}
+        apply={async (id, row) => {
+          if (sessionRunning) {
+            await abortSession(id)
+            await new Promise(r => setTimeout(r, 300))
+          }
+          await switchModel(id, row.key)
+        }}
       />
     )
   }

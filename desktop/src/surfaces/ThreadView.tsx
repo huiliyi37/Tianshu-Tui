@@ -125,7 +125,7 @@ export function ThreadView(props: {
     return view.lastTotalTokens - view.prevTotalTokens
   }, [view.lastTotalTokens, view.prevTotalTokens])
 
-  // D3 — composer slash commands: only desktop-actionable items (no agent slashes).
+  // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
     { name: '/supervise', desc: '监督档 · 每步确认', run: () => onSetApprovalMode(levelToMode('supervised')) },
@@ -150,6 +150,66 @@ export function ThreadView(props: {
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },
     },
+    {
+      name: '/plan',
+      desc: '创建实施方案',
+      run: () => onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.'),
+    },
+    {
+      name: '/team',
+      desc: '团队模式 · 多 agent 协作',
+      run: () => onSend('Run team-mode workflow through team_orchestrate for the task I will describe next.'),
+    },
+    {
+      name: '/interview',
+      desc: '深度访谈 · 先问后做',
+      run: () => onSend('Run a deep technical interview before implementing. Ask me 3-5 clarifying questions about requirements, constraints, and edge cases.'),
+    },
+    {
+      name: '/compact',
+      desc: '压缩上下文',
+      run: () => onSend('Context is getting long. Please compact the conversation: summarize tool outputs, collapse resolved discussions, and trim stale context while preserving key decisions and active work state.'),
+    },
+    {
+      name: '/memory',
+      desc: '查看会话记忆',
+      run: () => onSend('Show the current session memory overview: session entries, project pheromones, and project knowledge files.'),
+    },
+    {
+      name: '/context',
+      desc: '上下文状态',
+      run: () => onSend('Show context ledger status: token usage, compaction state, cache hit rate, and pinned anchors.'),
+    },
+    {
+      name: '/verify',
+      desc: '验证状态',
+      run: () => onSend('Show verification status for all modified files in this session: which are verified, which are pending, and the last verification result.'),
+    },
+    {
+      name: '/mission',
+      desc: '当前任务契约',
+      run: () => onSend('Show the current task contract: objective, scope, acceptance criteria, and delivery status.'),
+    },
+    {
+      name: '/debug cache',
+      desc: '缓存诊断',
+      run: () => onSend('Show cache debug info: hit rate, read/write tokens, estimated context size, and cost.'),
+    },
+    {
+      name: '/constellation',
+      desc: '项目星图 · 架构蓝图',
+      run: () => onSend('Show the project constellation: architecture overview, milestones, and recent activity.'),
+    },
+    {
+      name: '/dream',
+      desc: '记忆蒸馏状态',
+      run: () => onSend('Show dream / memory distillation status: how many curated memories exist, when the last distillation ran.'),
+    },
+    {
+      name: '/sensorium',
+      desc: '认知自感知',
+      run: () => onSend('Show the cognitive sensorium state: task status, verification gaps, delivery readiness, and active signals.'),
+    },
   ], [onSetApprovalMode, onSend])
 
   return (
@@ -168,6 +228,11 @@ export function ThreadView(props: {
           onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
         />
         <div className="thread-status">
+          {session.model && (
+            <span className="model-chip" title={`当前模型: ${session.model}`}>
+              {session.model.replace(/^(deepseek-|glm-|mimo-)/, '').slice(0, 16)}
+            </span>
+          )}
           <span className={`mode-chip ${view.planMode === 'planning' ? 'plan' : 'agent'}`}>
             {view.planMode === 'planning' ? 'Plan' : 'Agent'}
           </span>

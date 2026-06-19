@@ -36,6 +36,11 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
     cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 0,
     attentionProfile: { effectiveAttentionRatio: 0.9, toolDensityThreshold: 0.65, collapseAgeTurns: 6 },
   },
+  'mimo-api': {
+    cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 0,
+    attentionProfile: { effectiveAttentionRatio: 0.9, toolDensityThreshold: 0.65, collapseAgeTurns: 6 },
+  },
+  kimi: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   'opencode-go': { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
   claude: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },
 }

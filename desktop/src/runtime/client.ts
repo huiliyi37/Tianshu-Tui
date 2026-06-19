@@ -133,6 +133,11 @@ export async function listSessions(): Promise<SessionRecord[]> {
   return sessions
 }
 
+export async function listAllSessions(): Promise<SessionRecord[]> {
+  const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions?includeArchived=true')
+  return sessions
+}
+
 export function getSession(id: string): Promise<SessionRecord> {
   return apiGet<SessionRecord>(`/sessions/${id}`)
 }
@@ -416,4 +421,55 @@ export async function listGithubPrs(): Promise<{ prs: PrSummary[]; ghAvailable: 
 
 export async function getGithubPr(number: number): Promise<PrDetail> {
   return apiGet<PrDetail>(`/github/prs/${number}`)
+}
+
+// ── Config: Provider Management ─────────────────────────────────────
+
+export interface ProviderListItem {
+  name: string
+  label: string
+  baseUrl: string
+  isDefault: boolean
+  keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
+  models: { id: string; alias?: string }[]
+  isPreset: boolean
+}
+
+export interface UnconfiguredPreset {
+  key: string
+  label: string
+  defaultModelId: string
+}
+
+export async function listConfigProviders(): Promise<{
+  providers: ProviderListItem[]
+  unconfigured: UnconfiguredPreset[]
+}> {
+  return apiGet('/config/providers')
+}
+
+export function setupConfigProvider(input: {
+  providerName: string
+  apiKey?: string
+  apiKeyEnv?: string
+  baseUrl?: string
+  makeDefault?: boolean
+}): Promise<{ ok: boolean; providerName: string }> {
+  return apiPost('/config/providers', input)
+}
+
+export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
+  return rivetFetch(`/config/providers/${name}`, { method: 'DELETE' })
+    .then(r => r.json() as Promise<{ ok: boolean }>)
+}
+
+export function setProviderKey(
+  name: string,
+  key: { apiKey?: string; apiKeyEnv?: string },
+): Promise<{ ok: boolean; keyStatus: ProviderListItem['keyStatus'] }> {
+  return apiPost(`/config/providers/${name}/key`, key)
+}
+
+export function setProviderAsDefault(name: string): Promise<{ ok: boolean }> {
+  return apiPost(`/config/providers/${name}/default`, {})
 }

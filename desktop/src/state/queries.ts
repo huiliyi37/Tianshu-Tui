@@ -10,6 +10,7 @@ import {
   getGithubPr,
   getPlan,
   listArtifacts,
+  listConfigProviders,
   listGithubPrs,
   listPlans,
   listSchedule,
@@ -36,6 +37,7 @@ export const qk = {
   schedule: ['schedule'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
+  configProviders: ['config', 'providers'] as const,
 }
 
 export function useHealth() {
@@ -204,5 +206,15 @@ export function useGithubPr(number: number | null) {
     queryKey: qk.githubPr(number ?? 0),
     queryFn: () => (number ? getGithubPr(number) : Promise.reject()),
     enabled: !!number,
+  })
+}
+
+// ── Config: Providers ───────────────────────────────────────────────
+
+export function useConfigProviders() {
+  return useQuery({
+    queryKey: qk.configProviders,
+    queryFn: listConfigProviders,
+    staleTime: 10_000,
   })
 }

@@ -265,10 +265,13 @@ export function buildSessionRoutes(
       return { status: 200, body: { id: params!.id!, name: data.name.trim(), enabled: data.enabled } }
     }, apiToken),
 
-    'GET /sessions': withAuth(() => ({
-      status: 200,
-      body: { sessions: manager.listSessions() },
-    }), apiToken),
+    'GET /sessions': withAuth((_body, params) => {
+      const includeArchived = params?.includeArchived === 'true'
+      const sessions = includeArchived
+        ? manager.listAllSessions()
+        : manager.listSessions()
+      return { status: 200, body: { sessions } }
+    }, apiToken),
 
     // Archive (soft-close) a session. Aborts if running, marks archived, hides
     // from listSessions. Data survives on disk for potential recovery.

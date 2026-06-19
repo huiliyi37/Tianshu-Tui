@@ -103,6 +103,10 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
     'No thinking effort control',
     'No cache support',
   ]),
+  'mimo-api': buildEntry('mimo-api', 'MiMo API', WELL_KNOWN_DEFAULTS['mimo-api']!, [
+    'Pay-as-you-go MiMo API endpoint',
+    'Exact-prefix cache like DeepSeek',
+  ]),
   'opencode-go': buildEntry('opencode-go', 'OpenCode Go', WELL_KNOWN_DEFAULTS['opencode-go']!, [
     'OpenAI-compatible thinking format',
     'No thinking effort control',
@@ -115,6 +119,10 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
   codex: buildEntry('codex', 'Codex', WELL_KNOWN_DEFAULTS['codex']!, [
     'Uses Codex Responses API with OAuth authentication',
     'Partial-prefix cache profile is provided by provider-profile.ts',
+  ]),
+  claude: buildEntry('claude', 'Claude (Anthropic)', WELL_KNOWN_DEFAULTS['claude']!, [
+    'Anthropic-compatible thinking format',
+    'Reasoning effort via reasoning_effort parameter',
   ]),
 }
 

@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import { useCloseSession, useSessions } from '../state/queries'
+import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
+import { listAllSessions } from '../runtime/client'
+import type { SessionRecord } from '../runtime/types'
 
 const STATUS_GLYPH: Record<string, string> = {
   running: '◴',
@@ -19,8 +21,22 @@ export function ProjectSidebar() {
   const dispatch = useUiDispatch()
   const sessions = useSessions()
   const closeSession = useCloseSession()
+  const unarchive = useUnarchiveSession()
   const [known, setKnown] = useState<string[]>(() => loadKnownProjects())
   const [filter, setFilter] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
+
+  const loadArchived = async () => {
+    const next = !showArchived
+    setShowArchived(next)
+    if (next) {
+      try {
+        const all = await listAllSessions()
+        setArchivedSessions(all.filter(s => s.archived))
+      } catch { setArchivedSessions([]) }
+    }
+  }
 
   const projects = useMemo(
     () => deriveProjects(sessions.data ?? [], known),
@@ -137,6 +153,37 @@ export function ProjectSidebar() {
           </button>
         </div>
       ))}
+
+      <button className="btn-show-archived" onClick={loadArchived}>
+        {showArchived ? '隐藏归档' : '显示归档会话'}
+      </button>
+
+      {showArchived && archivedSessions.length > 0 && (
+        <div className="archived-section">
+          {archivedSessions.map(s => (
+            <div key={s.id} className="thread-card archived">
+              <div className="thread-card-main">
+                <div className="title">
+                  <span className="status-dot status-archived" />
+                  {s.title ?? s.id.slice(0, 8)}
+                </div>
+                <div className="meta">归档 · {s.status}</div>
+              </div>
+              <button
+                className="btn-sm"
+                title="恢复"
+                onClick={() => {
+                  unarchive.mutate(s.id)
+                  setArchivedSessions(prev => prev.filter(a => a.id !== s.id))
+                }}
+              >恢复</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {showArchived && archivedSessions.length === 0 && (
+        <div className="empty sm">没有归档的会话</div>
+      )}
     </div>
   )
 }

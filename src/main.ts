@@ -211,6 +211,7 @@ async function main() {
           model: { id: model.id, maxTokens: model.maxTokens, contextWindow: model.contextWindow, reasoningEffort: model.reasoningEffort },
           cwd: process.cwd(),
           provider: prov,
+          allProviders: cfg.provider.providers,
           config: cfg,
           sessionId,
           toolDefinitions: toolRegistry.getDefinitions(),
@@ -237,13 +238,33 @@ async function main() {
   // ── Bootstrap agent runtime ──────────────────────────────────
   process.stderr.write('[T9] Initializing agent runtime...\n')
 
-  ctx = await bootstrapInteractiveSession({
-    cwd: process.cwd(),
-    args,
-    modelId: requestedModel,
-    providerName: requestedProvider,
-    asyncExtras: true,
-  })
+  try {
+    ctx = await bootstrapInteractiveSession({
+      cwd: process.cwd(),
+      args,
+      modelId: requestedModel,
+      providerName: requestedProvider,
+      asyncExtras: true,
+    })
+  } catch (bootErr) {
+    const msg = (bootErr as Error).message ?? ''
+    if (msg.includes('No API key') || msg.includes('not configured')) {
+      process.stderr.write(`\n[T9] ${msg}\n\n`)
+      process.stderr.write('Running first-time setup wizard...\n\n')
+      const { runProviderConfigWizard } = await import('./config/provider-wizard.js')
+      await runProviderConfigWizard()
+      process.stderr.write('\nRestarting with new configuration...\n\n')
+      ctx = await bootstrapInteractiveSession({
+        cwd: process.cwd(),
+        args,
+        modelId: requestedModel,
+        providerName: requestedProvider,
+        asyncExtras: true,
+      })
+    } else {
+      throw bootErr
+    }
+  }
 
   const theme = getTheme()
 

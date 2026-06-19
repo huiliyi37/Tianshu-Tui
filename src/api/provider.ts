@@ -108,6 +108,15 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
   },
+  'mimo-api': {
+    supportsThinking: true,
+    thinkingFormat: 'openai',
+    supportsCacheControl: false,
+    stripParams: ['top_k', 'metadata', 'service_tier', 'cache_control'],
+    hasToolJsonInContentBug: false,
+    effortFormat: 'none',
+    prefixCacheStrategy: 'deepseek-native',
+  },
   'opencode-go': {
     supportsThinking: true,
     thinkingFormat: 'openai',

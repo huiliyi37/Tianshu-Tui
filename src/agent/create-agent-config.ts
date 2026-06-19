@@ -1,8 +1,9 @@
-import { createProviderClient } from '../api/factory.js'
+import { createProviderClient, resolveApiKey } from '../api/factory.js'
 import { resolveCapabilities } from '../api/provider.js'
 import { PromptEngine } from '../prompt/engine.js'
 import { detectModelFamily } from '../prompt/static.js'
 import { createVolatileSnapshot } from '../prompt/volatile-snapshot.js'
+import { FallbackStreamClient } from '../api/fallback-client.js'
 import type { AgentConfig } from './loop-types.js'
 import type { CompactionConfig } from '../compact/constants.js'
 import type { ToolDefinition } from '../api/types.js'
@@ -28,6 +29,8 @@ export interface AgentConfigInput {
   sessionId: string
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
+  /** All configured providers — needed for resolving fallback chain. */
+  allProviders?: Record<string, ProviderConfig>
   sessionMemoryBlock?: string
   approvalMode?: 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
   songlineEnabled?: boolean
@@ -50,6 +53,7 @@ export interface MainAgentConfigInputParams {
   sessionId: string
   toolDefinitions: ToolDefinition[]
   provider: ProviderConfig
+  allProviders?: Record<string, ProviderConfig>
   sessionMemoryBlock?: string
   auth?: AuthProvider
   habituationThreshold?: number
@@ -65,6 +69,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     sessionId: params.sessionId,
     toolDefinitions: params.toolDefinitions,
     provider: params.provider,
+    allProviders: params.allProviders,
     sessionMemoryBlock: params.sessionMemoryBlock,
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions',
     songlineEnabled: params.config.agent.songlineEnabled,
@@ -89,7 +94,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     ? 64000
     : Math.min(16000, Math.floor(model.contextWindow * 0.02))
 
-  const client = createProviderClient(provider, capabilities, {
+  const primaryClient = createProviderClient(provider, capabilities, {
     apiKey,
     model: model.id,
     reasoningEffort: model.reasoningEffort,
@@ -97,7 +102,9 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     thinkingBudget,
     auth: input.auth,
     sessionId: input.sessionId,
- })
+  })
+
+  const client = buildFallbackChain(primaryClient, provider, model, input)
 
   const promptEngine = new PromptEngine({
     model: model.id,
@@ -118,7 +125,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     compact: input.compact,
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
     providerName: provider.name,
-    primaryClient: client,
+    primaryClient: primaryClient,
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
@@ -133,4 +140,37 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     turnLevelThinking: provider.name === 'glm',
     permissions: input.permissions,
  }
+}
+
+function buildFallbackChain(
+  primary: import('../api/stream-client.js').StreamClient,
+  provider: ProviderConfig,
+  model: ModelSpec,
+  input: AgentConfigInput,
+): import('../api/stream-client.js').StreamClient {
+  const fallbackNames = provider.fallback
+  if (!fallbackNames?.length || !input.allProviders) return primary
+
+  const entries = fallbackNames
+    .filter(name => name !== provider.name && input.allProviders![name])
+    .map(name => ({
+      name,
+      create: () => {
+        const fp = input.allProviders![name]!
+        const fCaps = resolveCapabilities(fp.name, fp.capabilities)
+        let fApiKey: string
+        try { fApiKey = resolveApiKey(fp) } catch { return primary }
+        const fModel = fp.models.find(m => m.id === model.id) ?? fp.models[0]!
+        return createProviderClient(fp, fCaps, {
+          apiKey: fApiKey,
+          model: fModel.id,
+          maxTokens: fModel.maxTokens,
+          reasoningEffort: model.reasoningEffort,
+          sessionId: input.sessionId,
+        })
+      },
+    }))
+
+  if (entries.length === 0) return primary
+  return new FallbackStreamClient(primary, provider.name, entries)
 }

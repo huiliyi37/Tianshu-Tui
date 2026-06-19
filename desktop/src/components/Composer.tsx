@@ -357,6 +357,7 @@ export function Composer(props: {
             <PlusMenu
               sessionId={sessionId}
               menuRev={menuRev}
+              sessionRunning={busy}
               planMode={planMode}
               onSetPlanMode={onSetPlanMode}
               onPickImage={() => fileInputRef.current?.click()}

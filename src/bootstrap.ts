@@ -535,6 +535,7 @@ export function createAgentRuntime(deps: {
     },
     cwd,
     provider,
+    allProviders: config.provider.providers,
     config,
     sessionId,
     toolDefinitions: toolRegistry.getDefinitions(),

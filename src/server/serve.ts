@@ -16,6 +16,7 @@ import { FileSessionPersistence } from './session-persistence.js'
 import { buildSessionRoutes } from './session-routes.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
+import { buildConfigRoutes } from './config-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { CronLock } from './cron-lock.js'
@@ -216,6 +217,7 @@ function assembleAgentLoop(
     },
     cwd,
     provider: spec.provider,
+    allProviders: ctx.config.provider.providers,
     config: ctx.config,
     sessionId,
     toolDefinitions: stores.toolRegistry.getDefinitions(),
@@ -450,6 +452,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // Multi-session routes (M0.5 → M3): /sessions/*. R3 rollback routes consult
   // the live registry to build an OwnershipGuard, so thread it in via getter.
   Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry))
+
+  // Config routes: provider + API key management for the desktop settings UI.
+  Object.assign(routes, buildConfigRoutes(apiToken))
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
   const version = process.env.npm_package_version ?? '2.9.0'
