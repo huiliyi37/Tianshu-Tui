@@ -9,7 +9,7 @@ import { EvidenceTracker } from './evidence.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
-import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels } from './trace-store.js'
+import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels, getDoomLoopThresholds } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
 import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
@@ -688,10 +688,12 @@ export class AgentLoop {
   getContextLayerReport() { return this.config.promptEngine.getContextLayerReport() }
 
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' {
-    // 精确指纹（同 hash 重复）+ bash 命令类指纹（sed/head/tee 变体归并）取最严级别。
+    // Goal-active mode uses relaxed thresholds to avoid false doom-loop triggers
+    // during long autonomous tasks where repeated tool types are legitimate.
+    const thresholds = getDoomLoopThresholds(this.turnOrchestrator.goalTracker?.isActive() ?? false)
     return combineDoomLoopLevels(
-      getDoomLoopLevel(this.traceStore.toolFingerprints),
-      getClassDoomLoopLevel(this.traceStore.bashClassFingerprints ?? []),
+      getDoomLoopLevel(this.traceStore.toolFingerprints, thresholds.exact),
+      getClassDoomLoopLevel(this.traceStore.bashClassFingerprints ?? [], thresholds.class),
     )
   }
 

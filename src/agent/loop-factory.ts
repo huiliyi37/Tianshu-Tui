@@ -168,6 +168,7 @@ return new ToolExecutionController({
       getVigorState: () => self.vigorState,
       setVigorState: v => { self.vigorState = v },
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
+      isGoalActive: () => self.turnOrchestrator.goalTracker?.isActive() ?? false,
       getPhaseHint: () => self.config.promptEngine.getPhaseHint(),
       getSessionTurnCount: () => self.session.getTurnCount(),
       getSessionId: () => self.config.sessionId,

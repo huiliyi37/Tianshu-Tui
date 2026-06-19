@@ -95,6 +95,8 @@ export interface ToolExecutionDeps {
   onPlanSteps?: (descriptions: string[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Whether goal mode is active — relaxes doom-loop thresholds when true. */
+  isGoalActive?: () => boolean
 }
 
 export interface ToolExecBatchInput {
@@ -185,10 +187,11 @@ export class ToolExecutionController {
           evidence: this.deps.evidence,
           traceStore,
           repairHintTracker: this.deps.repairHintTracker,
-          repairPipeline: this.deps.repairPipeline,
-          importGraph,
           lastConflictCheckCount,
           trajectory: this.deps.trajectory,
+          getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
+          isGoalActive: this.deps.isGoalActive?.() ?? false,
+          latestRisk,
           getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
           latestRisk,
           sessionTurnCount: this.deps.getSessionTurnCount(),
@@ -255,8 +258,8 @@ export class ToolExecutionController {
           repairPipeline: this.deps.repairPipeline,
           importGraph,
           lastConflictCheckCount,
-          trajectory: this.deps.trajectory,
           getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
+          isGoalActive: this.deps.isGoalActive?.() ?? false,
           latestRisk,
           sessionTurnCount: this.deps.getSessionTurnCount(),
           sessionId: this.deps.getSessionId(),

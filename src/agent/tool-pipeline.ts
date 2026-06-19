@@ -21,7 +21,7 @@ import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { shouldRunDiagnostics } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
-import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints } from './trace-store.js'
+import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
@@ -198,6 +198,8 @@ export interface ToolPipelineDeps {
   lastConflictCheckCount: number
   trajectory: { getEntries(): { tool: string; target: string; status: string; errorClass?: string }[] }
   getDoomLoopLevel(): import('./trace-store.js').DoomLoopLevel
+  /** Whether goal mode is active — relaxes doom-loop thresholds when true. */
+  isGoalActive?: boolean
   latestRisk: import('./approval-risk.js').RiskAssessment
   sessionTurnCount: number
   sessionId: string | undefined
@@ -618,8 +620,10 @@ export async function executeToolUse(
       // different tools/inputs through is what refreshes the window out of
       // 'blocked'; blocking everything deadlocks the turn (blocked calls are
       // never recorded, so the window never changes — see offendingFingerprints).
-      const exactOffenders = offendingFingerprints(traceStore.toolFingerprints, 8, 6, 3)
-      const classOffenders = offendingFingerprints(traceStore.bashClassFingerprints ?? [], 10, 8, 6)
+      const goalActive = deps.isGoalActive ?? false
+      const thresholds = getDoomLoopThresholds(goalActive)
+      const exactOffenders = offendingFingerprints(traceStore.toolFingerprints, thresholds.exact.window, thresholds.exact.blockFreq, thresholds.exact.blockConsec)
+      const classOffenders = offendingFingerprints(traceStore.bashClassFingerprints ?? [], thresholds.class.window, thresholds.class.blockFreq, thresholds.class.blockConsec)
       const curExactFp = fingerprintToolCall(tu.name, tu.input, 'error')
       const curClassFp = fingerprintToolClass(tu.name, tu.input, 'error')
       const isOffendingCall = exactOffenders.has(curExactFp) || (curClassFp != null && classOffenders.has(curClassFp))

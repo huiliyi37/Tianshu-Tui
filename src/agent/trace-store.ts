@@ -185,20 +185,41 @@ export function getToolStormLevel(toolNames: string[]): ToolStormLevel {
   return 'none'
 }
 
+/** Threshold presets for doom-loop detection, selectable by goal mode. */
+export interface DoomLoopThresholds {
+  exact: { window: number; blockConsec: number; blockFreq: number; warnConsec: number; warnFreq: number }
+  class: { window: number; blockConsec: number; blockFreq: number; warnConsec: number }
+}
+
+/** Normal mode: slightly relaxed from the original (warn at 3rd call, block at 5th). */
+export const NORMAL_DOOM_THRESHOLDS: DoomLoopThresholds = {
+  exact: { window: 8, blockConsec: 4, blockFreq: 7, warnConsec: 2, warnFreq: 5 },
+  class: { window: 10, blockConsec: 7, blockFreq: 9, warnConsec: 5 },
+}
+
+/** Goal mode: significantly relaxed for long autonomous tasks. */
+export const GOAL_DOOM_THRESHOLDS: DoomLoopThresholds = {
+  exact: { window: 10, blockConsec: 6, blockFreq: 8, warnConsec: 3, warnFreq: 6 },
+  class: { window: 12, blockConsec: 10, blockFreq: 10, warnConsec: 7 },
+}
+
+export function getDoomLoopThresholds(goalActive: boolean): DoomLoopThresholds {
+  return goalActive ? GOAL_DOOM_THRESHOLDS : NORMAL_DOOM_THRESHOLDS
+}
+
 /**
  * Detects doom loops using a dual-strategy approach:
  * 1. Consecutive repeats: tight-loop pattern where the same tool is called back-to-back.
- *    Threshold: 3 consecutive (4th identical call) → blocked, 1 consecutive → warn.
  * 2. Sliding-window frequency: oscillation pattern (A→B→A→B→A) where a tool
  *    dominates the recent window even if not consecutive.
- *    Threshold: 6/8 → blocked, 4/8 → warn.
  *
- * This is less sensitive than the old global-count approach which flagged
- * normal iteration (typecheck→edit→typecheck→edit→typecheck) as blocked at 3 occurrences.
+ * Thresholds are parameterized via DoomLoopThresholds to allow goal-mode relaxation.
  */
-export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
-  const WINDOW = 8
-  const recent = fingerprints.slice(-WINDOW)
+export function getDoomLoopLevel(
+  fingerprints: string[],
+  t: DoomLoopThresholds['exact'] = NORMAL_DOOM_THRESHOLDS.exact,
+): DoomLoopLevel {
+  const recent = fingerprints.slice(-t.window)
 
   // Strategy 1: consecutive repeats
   let maxConsecutive = 0
@@ -217,10 +238,8 @@ export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
   for (const fp of recent) counts.set(fp, (counts.get(fp) ?? 0) + 1)
   const maxCount = Math.max(0, ...counts.values())
 
-  // Blocked: 3+ consecutive identical (4th same call) OR 6+ out of 8 window
-  if (maxConsecutive >= 3 || maxCount >= 6) return 'blocked'
-  // Warn: 1+ consecutive identical (2nd same call) OR 4+ out of 8 window
-  if (maxConsecutive >= 1 || maxCount >= 4) return 'warn'
+  if (maxConsecutive >= t.blockConsec || maxCount >= t.blockFreq) return 'blocked'
+  if (maxConsecutive >= t.warnConsec || maxCount >= t.warnFreq) return 'warn'
   return 'none'
 }
 
@@ -233,9 +252,11 @@ export function getDoomLoopLevel(fingerprints: string[]): DoomLoopLevel {
  *
  * 会话 43443098 的 28 次 git status 变体在第 5 次就会进入 warn、第 7 次 blocked。
  */
-export function getClassDoomLoopLevel(classFingerprints: string[]): DoomLoopLevel {
-  const WINDOW = 10
-  const recent = classFingerprints.slice(-WINDOW)
+export function getClassDoomLoopLevel(
+  classFingerprints: string[],
+  t: DoomLoopThresholds['class'] = NORMAL_DOOM_THRESHOLDS.class,
+): DoomLoopLevel {
+  const recent = classFingerprints.slice(-t.window)
 
   let maxConsecutive = 0
   let currentConsecutive = 0
@@ -252,8 +273,8 @@ export function getClassDoomLoopLevel(classFingerprints: string[]): DoomLoopLeve
   for (const fp of recent) counts.set(fp, (counts.get(fp) ?? 0) + 1)
   const maxCount = Math.max(0, ...counts.values())
 
-  if (maxConsecutive >= 6 || maxCount >= 8) return 'blocked'
-  if (maxConsecutive >= 4) return 'warn'
+  if (maxConsecutive >= t.blockConsec || maxCount >= t.blockFreq) return 'blocked'
+  if (maxConsecutive >= t.warnConsec) return 'warn'
   return 'none'
 }
 
