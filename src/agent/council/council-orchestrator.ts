@@ -1,5 +1,5 @@
 import { extractJsonCandidates, type WorkerResult } from '../work-order.js'
-import { aggregateCouncil, resolveConflictsWithRebuttals, type CouncilDraft, type CouncilPlan, type SeatContribution } from './council-plan.js'
+import { aggregateCouncil, resolveConflictsWithRebuttals, type CouncilDraft, type CouncilPlan, type SeatContribution, type SeatRebuttal } from './council-plan.js'
 import { renderCouncilPlan } from './council-render.js'
 import {
   routeCouncilSeat,
@@ -103,7 +103,12 @@ export function parseSeatContribution(seat: string, result: WorkerResult): SeatC
           challenges: Array.isArray(raw.challenges) ? raw.challenges : [],
           alternatives: Array.isArray(raw.alternatives) ? raw.alternatives : [],
           ...(raw.modelUsed ? { modelUsed: raw.modelUsed } : {}),
-          ...(Array.isArray(raw.rebuttals) ? { rebuttals: raw.rebuttals } : {}),
+          ...(Array.isArray(raw.rebuttals) ? { rebuttals: raw.rebuttals.filter((r): r is SeatRebuttal =>
+            r !== null && typeof r === 'object'
+            && typeof r.conflictKey === 'string'
+            && typeof r.stance === 'string'
+            && typeof r.argument === 'string'
+          ) } : {}),
         }
       } catch {
         // 下一个候选 —— 模型输出可能夹杂散文/畸形示例
