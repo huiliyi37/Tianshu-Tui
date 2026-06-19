@@ -136,6 +136,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
               workOrderId: ev.workOrderId,
               parentToolId: params.toolUseId,
               profile: ev.profile,
+              authority: ev.authority,
               status: 'running',
               progressLine: activityProgressLine(ev),
             })

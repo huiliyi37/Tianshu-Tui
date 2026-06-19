@@ -22,6 +22,8 @@ export interface FleetWorkerView {
   /** 派生该 worker 的委派工具调用 id（委派树父节点）。 */
   parentToolId: string
   profile: string
+  /** 星域 id（星名来源），从 DelegationActivity.authority 透传。 */
+  authority?: string
   /** 原始委派状态。 */
   status: DelegationActivity['status']
   /** WorkerPanel 兼容状态（glyph / auto-collapse 用）。 */
@@ -45,6 +47,7 @@ interface FleetRecord {
   workerId: string
   parentToolId: string
   profile: string
+  authority?: string
   status: DelegationActivity['status']
   terminal: boolean
   activity?: string
@@ -82,6 +85,7 @@ export class FleetRegistry {
       existing.terminal = terminal
       existing.updatedAt = now
       if (activity.profile) existing.profile = activity.profile
+      if (activity.authority) existing.authority = activity.authority
       if (activity.progressLine) existing.activity = activity.progressLine
       return
     }
@@ -89,6 +93,7 @@ export class FleetRegistry {
       workerId: activity.workOrderId,
       parentToolId: activity.parentToolId,
       profile: activity.profile ?? 'worker',
+      authority: activity.authority,
       status: activity.status,
       terminal,
       activity: activity.progressLine,
@@ -103,6 +108,7 @@ export class FleetRegistry {
       shortLabel: shortOrderLabel(r.workerId),
       parentToolId: r.parentToolId,
       profile: r.profile,
+      authority: r.authority,
       status: r.status,
       panelStatus: panelStatusOf(r.status),
       terminal: r.terminal,

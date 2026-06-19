@@ -8,6 +8,8 @@
  * 不依赖 profile-registry（避免 TUI 层引入 agent 层依赖循环）。
  */
 
+import { starDomainRegistry } from '../../agent/star-domain-registry.js'
+
 /** profile → (职能名, 可选领域后缀) */
 const PROFILE_LABELS: Record<string, { role: string; scope?: string }> = {
   // 侦察系（只读探查）
@@ -41,4 +43,15 @@ export function profileLabel(profile: string): string {
   const entry = PROFILE_LABELS[profile]
   if (!entry) return 'worker'
   return entry.scope ? `${entry.role}·${entry.scope}` : entry.role
+}
+
+/**
+ * 从星域 id 查询星名（如 'pojun' → '破军'）。
+ * 未知或 undefined authority 返回 undefined（调用方回退到纯 profile 标签）。
+ * 从 star-domain-registry 查询，支持内置 + 用户自定义域。
+ */
+export function authorityStarName(authority: string | undefined): string | undefined {
+  if (!authority) return undefined
+  const domain = starDomainRegistry.get(authority)
+  return domain?.name
 }

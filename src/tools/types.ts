@@ -14,6 +14,8 @@ export interface DelegationActivity {
   /** The delegation tool call that spawned this worker (delegation tree parent). */
   parentToolId: string
   profile?: string
+  /** 星域 id（星名来源），从 WorkerActivityEvent.authority 透传。 */
+  authority?: string
   status: 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
   /** Latest worker activity line (running) or terminal summary. */
   progressLine?: string

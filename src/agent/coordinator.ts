@@ -78,6 +78,8 @@ export interface EFERoutingConfig {
 export interface WorkerActivityEvent {
   workOrderId: string
   profile: string
+  /** 星域 id（星名来源），由 coordinator 从 order.authority 透传。 */
+  authority?: string
   kind: 'text' | 'thinking' | 'tool_use' | 'tool_result'
   /** Tool name for tool events; text delta for text/thinking. */
   detail?: string
@@ -937,7 +939,7 @@ export class DelegationCoordinator {
       this.liveness.tick(order.id)
       upstreamActivity?.(kind, detail)
       try {
-        requestUpstream?.({ workOrderId: order.id, profile: order.profile, kind, detail })
+        requestUpstream?.({ workOrderId: order.id, profile: order.profile, authority: order.authority, kind, detail })
       } catch { /* UI upstream must never break dispatch */ }
     }
 

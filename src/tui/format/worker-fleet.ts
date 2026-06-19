@@ -15,7 +15,7 @@ import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import type { FleetWorkerView } from '../fleet-registry.js'
 import { formatElapsed } from '../worker-panel-model.js'
-import { profileLabel } from './profile-labels.js'
+import { profileLabel, authorityStarName } from './profile-labels.js'
 
 export interface WorkerFleetSummary {
   done: number
@@ -51,7 +51,9 @@ function assignLabels(workers: FleetWorkerView[]): string[] {
   }
   // 第二遍：分配标签
   return workers.map(w => {
-    const label = profileLabel(w.profile)
+    const profile = profileLabel(w.profile)
+    const star = authorityStarName(w.authority)
+    const label = star ? `${star} · ${profile}` : profile
     const count = profileCount.get(w.profile) ?? 1
     if (count <= 1) return label
     const seq = (profileSeen.get(w.profile) ?? 0) + 1

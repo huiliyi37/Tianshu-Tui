@@ -162,6 +162,8 @@ export function createDelegateBatchTool(
       // T9 P3: one shared streamer — events from all workers interleave with labels.
       // T4: also fan out structured per-worker updates for the subagent panel.
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
+      // Build authority lookup: workOrderId prefix → authority, for terminal callbacks.
+      const taskAuthorityMap = new Map<number, string | undefined>()
       const streamActivity = (textStreamer || params.onWorkerActivity)
         ? (ev: WorkerActivityEvent) => {
             textStreamer?.(ev)
@@ -169,12 +171,15 @@ export function createDelegateBatchTool(
               workOrderId: ev.workOrderId,
               parentToolId: params.toolUseId,
               profile: ev.profile,
+              authority: ev.authority,
               status: 'running',
               progressLine: activityProgressLine(ev),
             })
           }
         : undefined
-      const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => ({
+      const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => {
+        taskAuthorityMap.set(i, t.authority)
+        return {
         parentTurnId: `${params.toolUseId}:${i}`,
         objective: t.objective,
         kind: t.kind ?? 'code_search',
@@ -185,7 +190,8 @@ export function createDelegateBatchTool(
         delegationDepth: params.delegationDepth ?? 0,
         sessionTurn: params.sessionTurnCount,
         onActivity: streamActivity,
-      }))
+        }
+      })
 
       // Progressive task cap: trim to the allowed slice on early turns
       const cap = progressiveTaskCap(params.sessionTurnCount)

@@ -105,6 +105,7 @@ export function createDelegateTaskTool(
               workOrderId: ev.workOrderId,
               parentToolId: params.toolUseId,
               profile: ev.profile,
+              authority: ev.authority,
               status: 'running',
               progressLine: activityProgressLine(ev),
             })
@@ -133,6 +134,7 @@ export function createDelegateTaskTool(
           params.onWorkerActivity({
             workOrderId: r.workOrderId,
             parentToolId: params.toolUseId,
+            authority: parsed.data.authority,
             status: r.status,
             progressLine: r.summary.slice(0, 80),
           })

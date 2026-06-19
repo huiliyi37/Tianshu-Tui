@@ -87,6 +87,26 @@ describe('buildWorkerFleetLines', () => {
     )
     assert.ok(lines[0]!.includes('1/2 完成'))
   })
+
+  it('有 authority 时显示星名前缀', () => {
+    const lines = buildWorkerFleetLines(
+      [worker({ authority: 'pojun' })],
+      undefined,
+      80,
+    )
+    assert.ok(lines[1]!.includes('破军'), '应有星名「破军」')
+    assert.ok(lines[1]!.includes('侦察'), '应有职能名')
+  })
+
+  it('无 authority 时不显示星名（向后兼容）', () => {
+    const lines = buildWorkerFleetLines(
+      [worker({ authority: undefined })],
+      undefined,
+      80,
+    )
+    assert.ok(!lines[1]!.includes('破军'), '不应有星名')
+    assert.ok(lines[1]!.includes('侦察'), '应有职能名')
+  })
 })
 
 describe('formatWorkerFleet', () => {
