@@ -7,31 +7,30 @@ export function shortOrderLabel(workOrderId: string): string {
 }
 
 /**
- * T4 — one concise progress line for a worker activity event, for the structured
- * subagent panel (no label prefix — the panel renders the worker identity).
+ * One concise progress line for a worker activity event, for the structured
+ * subagent fleet panel. Uses semantic Chinese labels instead of raw delta counts.
  */
 export function activityProgressLine(event: WorkerActivityEvent): string {
-  if (event.kind === 'tool_use') return `⚙ ${event.detail ? event.detail.slice(0, 60) : '工具调用'}`
-  if (event.kind === 'tool_result') return `✓ ${event.detail ? event.detail.slice(0, 50) : '工具完成'}`
-  if (event.kind === 'thinking') return '✶ 推理中…'
-  return '✎ 输出中…'
+  if (event.kind === 'tool_use') return `⚙ ${event.detail ? event.detail.slice(0, 60) : '调用工具'}`
+  if (event.kind === 'tool_result') return `✓ ${event.detail ? event.detail.slice(0, 50) : '完成'}`
+  if (event.kind === 'thinking') return '思考中'
+  return '写作中'
 }
 
 /**
  * T9 P3 实时上行: convert raw worker activity events into a bounded stream of
  * progress lines for the live tool card.
  *
- * B3 improvements:
- * - tool_use and tool_result are always emitted (one line each)
- * - text heartbeat threshold reduced from 400 → 150 deltas for finer-grained feedback
- * - tool_result no longer silently dropped
+ * V2 改进：
+ * - text 心跳不再输出 deltas 计数行（用户不需要 token 吞吐量）
+ * - 首次 text 只输出一次「写作中」，之后静默
+ * - tool_use / tool_result 始终输出（一行一条）
  */
 export function createActivityStreamer(
   emit: (line: string) => void,
-  opts?: { textEvery?: number },
+  _opts?: { textEvery?: number },
 ): (event: WorkerActivityEvent) => void {
-  const textEvery = opts?.textEvery ?? 150
-  const textCounts = new Map<string, number>()
+  const textSeen = new Set<string>()
 
   return (event: WorkerActivityEvent) => {
     const label = `${shortOrderLabel(event.workOrderId)}·${event.profile}`
@@ -42,16 +41,14 @@ export function createActivityStreamer(
     }
     if (event.kind === 'tool_result') {
       const resultHint = event.detail ? ` (${event.detail.slice(0, 40)})` : ''
-      emit(`  ↳ [${label}] ✓ done${resultHint}\n`)
+      emit(`  ↳ [${label}] ✓ 完成${resultHint}\n`)
       return
     }
-    // text / thinking deltas: collapse into sparse heartbeat lines.
-    const n = (textCounts.get(event.workOrderId) ?? 0) + 1
-    textCounts.set(event.workOrderId, n)
-    if (n === 1) {
-      emit(`  ↳ [${label}] ✎ 输出中…\n`)
-    } else if (n % textEvery === 0) {
-      emit(`  ↳ [${label}] ✎ …${n} deltas\n`)
+    // text / thinking: 首次输出状态行，之后静默——避免 deltas 计数刷屏
+    if (!textSeen.has(event.workOrderId)) {
+      textSeen.add(event.workOrderId)
+      const glyph = event.kind === 'thinking' ? '思考中' : '写作中'
+      emit(`  ↳ [${label}] ✎ ${glyph}\n`)
     }
   }
 }
