@@ -5,7 +5,7 @@ import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import type { ToolDefinition } from '../api/types.js'
-import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildConsolidatedBlock, renderTaskDepthAdvisory, renderPlanMethodologyAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
+import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendixParts, buildConsolidatedBlock, renderTaskDepthAdvisory, renderPlanMethodologyAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
 import { analyzeVolatilePayload, LARGE_VOLATILE_PAYLOAD_CHARS, type VolatilePayloadReport } from '../context/payload-diagnostic.js'
 import type { TaskState } from '../agent/task-state.js'
 import type { ContextClaim } from '../context/claims.js'
@@ -344,14 +344,14 @@ export class PromptEngine {
               if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
-              const activeAppendix = this.actionableTurn ? buildDynamicAppendix(activeCtx, appendixMaxChars) : ''
+              const activeAppendix = this.actionableTurn ? this.buildAppendixBody(activeCtx, appendixMaxChars) : ''
               const projection = this.actionableTurn ? this.cognitiveProjection : null
               this.cachedConsolidated = this.consolidatedBlock
               const fullAppendix = [projection, activeAppendix].filter(Boolean).join('\n')
               this.cachedAppendix = fullAppendix
             } else {
               if (this.actionableTurn) {
-                const appendix = buildDynamicAppendix(dynamicCtx, appendixMaxChars)
+                const appendix = this.buildAppendixBody(dynamicCtx, appendixMaxChars)
                 const projection = this.actionableTurn ? this.cognitiveProjection : null
                 this.cachedConsolidated = this.consolidatedBlock
                 this.cachedAppendix = projection ? [projection, appendix].filter(Boolean).join('\n') : appendix
@@ -841,6 +841,39 @@ export class PromptEngine {
     // Delta baseline reset: force next context-update to be a full baseline.
     this.lastEmittedAppendixParts = new Map()
     this.appendixBaselineSent = false
+  }
+
+  /**
+   * Build the <context-update> body — full when delta off or baseline not yet
+   * sent, otherwise only changed sub-blocks. Mutates lastEmittedAppendixParts.
+   *
+   * Delta logic: compare current parts against last emitted. On new user
+   * boundary, emit full baseline (seq=1). Subsequent boundaries emit only
+   * changed sub-blocks (mode="delta"), or self-closing tag if nothing changed.
+   * Tool-call turns reuse cachedAppendix (never calling this method).
+   */
+  private buildAppendixBody(ctx: VolatileContext, maxChars?: number): string {
+    const parts = buildDynamicAppendixParts(ctx, maxChars)
+    if (!this.config.appendixDelta) {
+      if (parts.length === 0) return ''
+      return `<context-update>\n${parts.map(p => p.content).join('\n\n')}\n</context-update>`
+    }
+    this.appendixSeq++
+    const current = new Map<string, string>()
+    const changed: string[] = []
+    for (const p of parts) {
+      current.set(p.name, p.content)
+      if (this.lastEmittedAppendixParts.get(p.name) !== p.content) changed.push(p.content)
+    }
+    const sendFull = !this.appendixBaselineSent
+    this.lastEmittedAppendixParts = current
+    this.appendixBaselineSent = true
+    if (sendFull) {
+      if (parts.length === 0) return ''
+      return `<context-update seq="${this.appendixSeq}">\n${parts.map(p => p.content).join('\n\n')}\n</context-update>`
+    }
+    if (changed.length === 0) return `<context-update seq="${this.appendixSeq}"/>`
+    return `<context-update seq="${this.appendixSeq}" mode="delta">\n${changed.join('\n\n')}\n</context-update>`
   }
 
   /**

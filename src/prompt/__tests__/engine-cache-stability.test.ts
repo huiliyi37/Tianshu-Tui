@@ -862,3 +862,84 @@ describe('appendixDelta config + cross-turn state (task 2/7)', () => {
     assert.ok(req.messages.length > 0, 'engine should still produce messages after reset')
   })
 })
+
+describe('appendixDelta rendering (task 3/7: delta computation)', () => {
+  function makeEngine(appendixDelta?: boolean) {
+    return new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: {
+        cwd: '/test',
+        gitStatus: 'M src/foo.ts',
+        rivetMd: '# Test',
+        workingSet: ['src/foo.ts'],
+      },
+      appendixDelta,
+    })
+  }
+
+  /** Extract the last standalone appendix message from a request. */
+  function getAppendix(req: ReturnType<PromptEngine['buildOaiRequest']>): string {
+    const last = req.messages[req.messages.length - 1]!
+    return typeof last.content === 'string' ? last.content : ''
+  }
+
+  it('delta OFF: trailer has plain <context-update> (no seq)', () => {
+    const engine = makeEngine(false)
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    const app = getAppendix(req)
+    assert.match(app, /<context-update>/)
+    assert.doesNotMatch(app, /seq=/)
+  })
+
+  it('delta ON: first message emits full baseline with seq="1"', () => {
+    const engine = makeEngine(true)
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'hello' }])
+    const app = getAppendix(req)
+    assert.match(app, /<context-update seq="1">/)
+    assert.ok(!app.includes('mode="delta"'), 'baseline should not have mode="delta"')
+    assert.match(app, /<git-status>/, 'baseline should contain git-status block')
+  })
+
+  it('delta ON: second user message with no changes emits self-closing tag', () => {
+    const engine = makeEngine(true)
+    // First user message: baseline
+    engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    // Second user message: same volatileCtx, no changes → nothing changed
+    const req = engine.buildOaiRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second' },
+    ])
+    const app = getAppendix(req)
+    // seq should increment; with no changes, self-closing
+    assert.match(app, /<context-update seq="2"\/>/)
+  })
+
+  it('delta ON: tool-call turn reuses cached appendix (seq does not increment)', () => {
+    const engine = makeEngine(true)
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    const app1 = getAppendix(req1)
+    // Same user message, same array length → cachedAppendix reuse (no rebuild)
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    const app2 = getAppendix(req2)
+    assert.equal(app1, app2, 'tool-call turn should reuse cached appendix')
+  })
+
+  it('delta ON: after invalidateFreshCache, re-emits full baseline', () => {
+    const engine = makeEngine(true)
+    engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    engine.setActionableTurn(false)
+    engine.setActionableTurn(true)
+    const req = engine.buildOaiRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second' },
+    ])
+    const app = getAppendix(req)
+    // After reset: full baseline (no mode="delta")
+    assert.match(app, /<context-update seq="\d+">/)
+    assert.ok(!app.includes('mode="delta"'), 'after reset should be full baseline')
+  })
+})
