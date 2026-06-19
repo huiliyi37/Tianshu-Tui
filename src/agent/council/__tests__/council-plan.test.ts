@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { aggregateCouncil } from '../council-plan.js'
-import type { CouncilDraft, SeatContribution } from '../council-plan.js'
+import { aggregateCouncil, stableConflictKey, resolveConflictsWithRebuttals } from '../council-plan.js'
+import type { CouncilDraft, SeatContribution, CouncilConflict } from '../council-plan.js'
 
 const draft: CouncilDraft = {
   objective: 'refactor the loop',
@@ -93,5 +93,54 @@ describe('aggregateCouncil — 确定性', () => {
   it('同输入两次调用结果深相等（无 Date/随机）', () => {
     const c = seat({ authority: 's', additions: [{ id: 'A', title: 't', detail: 'd' }], risks: [{ claim: 'r', severity: 'low', mitigation: 'm' }] })
     assert.deepEqual(aggregateCouncil(draft, [c]), aggregateCouncil(draft, [c]))
+  })
+})
+
+describe('stableConflictKey — 无序对一致', () => {
+  it('(A,B) 与 (B,A) 同 key', () => {
+    assert.equal(stableConflictKey('A', 'B'), stableConflictKey('B', 'A'))
+  })
+  it('不同对不同 key', () => {
+    assert.notEqual(stableConflictKey('A', 'B'), stableConflictKey('A', 'C'))
+  })
+})
+
+describe('aggregateCouncil — 冲突带 key 与 open 状态', () => {
+  it('冲突填充确定性 key 且初始 status=open', () => {
+    const a = seat({ authority: 's1', additions: [{ id: 'NEW', title: 'a', detail: 'X' }] })
+    const b = seat({ authority: 's2', additions: [{ id: 'NEW', title: 'b', detail: 'Y' }] })
+    const agg = aggregateCouncil(draft, [a, b])
+    assert.equal(agg.conflicts.length, 1)
+    assert.equal(agg.conflicts[0]!.status, 'open')
+    assert.ok(agg.conflicts[0]!.key.length > 0)
+  })
+})
+
+describe('resolveConflictsWithRebuttals — 多轮收敛', () => {
+  const k = stableConflictKey('L', 'R')
+  const open = (): CouncilConflict[] => [{ description: 'd', left: 'L', right: 'R', key: k, status: 'open' }]
+  it('concede → resolved 带 resolution', () => {
+    const out = resolveConflictsWithRebuttals(open(), [{ conflictKey: k, stance: 'concede', argument: '让步给护栏' }])
+    assert.equal(out[0]!.status, 'resolved')
+    assert.equal(out[0]!.resolution, '让步给护栏')
+  })
+  it('revise 也算化解', () => {
+    const out = resolveConflictsWithRebuttals(open(), [{ conflictKey: k, stance: 'revise', argument: '折中' }])
+    assert.equal(out[0]!.status, 'resolved')
+  })
+  it('全 hold → persisted 无 resolution', () => {
+    const out = resolveConflictsWithRebuttals(open(), [{ conflictKey: k, stance: 'hold', argument: '坚持' }])
+    assert.equal(out[0]!.status, 'persisted')
+    assert.equal(out[0]!.resolution, undefined)
+  })
+  it('无匹配表态 → persisted', () => {
+    const out = resolveConflictsWithRebuttals(open(), [{ conflictKey: 'other', stance: 'concede', argument: 'x' }])
+    assert.equal(out[0]!.status, 'persisted')
+  })
+  it('已 resolved 的冲突原样返回（幂等）', () => {
+    const prior: CouncilConflict[] = [{ description: 'd', left: 'L', right: 'R', key: k, status: 'resolved', resolution: 'prev' }]
+    const out = resolveConflictsWithRebuttals(prior, [{ conflictKey: k, stance: 'hold', argument: 'x' }])
+    assert.equal(out[0]!.status, 'resolved')
+    assert.equal(out[0]!.resolution, 'prev')
   })
 })

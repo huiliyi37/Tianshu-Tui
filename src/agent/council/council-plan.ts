@@ -3,6 +3,14 @@
 
 export type SeatVerdict = 'accepted' | 'rejected' | 'deferred'
 export type RiskSeverity = 'low' | 'medium' | 'high'
+export type RebuttalStance = 'concede' | 'hold' | 'revise'
+
+/** 第二轮席位针对某条冲突的表态。conflictKey 引用 CouncilConflict.key。 */
+export interface SeatRebuttal {
+  conflictKey: string
+  stance: RebuttalStance
+  argument: string
+}
 
 /** 计划项 —— 议事会在草案条目层面运作，不耦合 team 的 TeamTask。 */
 export interface PlanItem {
@@ -41,6 +49,10 @@ export interface SeatContribution {
   alternatives: SeatAlternative[]
   /** 实际生效模型（遥测/shadow 用，本轮可缺）。 */
   modelUsed?: string
+  /** 产出该贡献的轮次（缺省视为 1）。多轮层填充。 */
+  round?: number
+  /** 第二轮反驳表态（仅 round2 贡献填充）。多轮层消费。 */
+  rebuttals?: SeatRebuttal[]
 }
 
 export interface CouncilDecision {
@@ -59,6 +71,12 @@ export interface CouncilConflict {
   description: string
   left: string
   right: string
+  /** 无序对稳定 key —— round2 席位针对它表态。round1 即填充。 */
+  key: string
+  /** 多轮收敛状态。round1 恒 'open'；round2 收敛后 resolved/persisted。 */
+  status: 'open' | 'resolved' | 'persisted'
+  /** resolved 时的化解依据（来自让步/折中席位的 argument）。 */
+  resolution?: string
 }
 
 export interface CouncilAggregate {
@@ -73,12 +91,25 @@ export interface CouncilPlan {
   contributions: SeatContribution[]
   aggregate: CouncilAggregate
   finalPlanMarkdown: string
-  meta: { round: 1; convenedAt: number; objectiveHash: string }
+  meta: { round: number; convenedAt: number; objectiveHash: string }
 }
 
 /** 空白/缺字段 id —— 用它做包含匹配会退化为永真，必须显式拦截。 */
 function isBlank(id: string | undefined): boolean {
   return !id || id.trim().length === 0
+}
+
+/** 内核自洽的确定性 hash（不依赖 orchestrator 的 objectiveHash）。 */
+function hashStr(s: string): string {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(16)
+}
+
+/** 无序对稳定 key：(left,right) 与 (right,left) 同 key。 */
+export function stableConflictKey(left: string, right: string): string {
+  const [a, b] = [left, right].slice().sort()
+  return hashStr(`${a}\u0000${b}`)
 }
 
 /** 无序集合相等：[a,b] 与 [b,a] 视为同一冲突，避免重复登记。 */
@@ -104,8 +135,9 @@ export function aggregateCouncil(
   const conflicts: CouncilConflict[] = []
   const mergedItems: PlanItem[] = draft.items.map(i => ({ ...i }))
 
-  const addConflict = (c: CouncilConflict): void => {
-    if (!conflicts.some(ex => sameConflict(ex, c))) conflicts.push(c)
+  const addConflict = (c: { description: string; left: string; right: string }): void => {
+    const full: CouncilConflict = { ...c, key: stableConflictKey(c.left, c.right), status: 'open' }
+    if (!conflicts.some(ex => sameConflict(ex, full))) conflicts.push(full)
   }
 
   // 收集所有席位的备选（含索引 n），用于 risk×alternative 相关性检测（仅限具体 itemId）。
@@ -162,4 +194,23 @@ export function aggregateCouncil(
   }
 
   return { decisions, mergedItems, conflicts }
+}
+
+/**
+ * 第二轮收敛：依据各席 rebuttals 把 open 冲突判为 resolved / persisted。纯函数。
+ * 规则：按传入顺序找第一条 conflictKey 匹配且 stance∈{concede,revise} 的表态 →
+ * resolved(附 resolution)；否则 persisted。已非 open 的冲突原样返回（幂等）。
+ */
+export function resolveConflictsWithRebuttals(
+  conflicts: CouncilConflict[],
+  rebuttals: SeatRebuttal[],
+): CouncilConflict[] {
+  return conflicts.map(cf => {
+    if (cf.status !== 'open') return cf
+    const softening = rebuttals.find(
+      r => r.conflictKey === cf.key && (r.stance === 'concede' || r.stance === 'revise'),
+    )
+    if (softening) return { ...cf, status: 'resolved' as const, resolution: softening.argument }
+    return { ...cf, status: 'persisted' as const }
+  })
 }

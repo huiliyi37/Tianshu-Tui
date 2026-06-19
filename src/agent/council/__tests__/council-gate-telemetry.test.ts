@@ -45,7 +45,7 @@ function fakePlan(objective: string, hash: string, convenedAt: number): CouncilP
         { id: 'a:alternative:0', source: 'a', kind: 'alternative', title: 't', rationale: 'r', verdict: 'rejected' },
       ],
       mergedItems: [{ id: 'T1', title: 't', detail: 'd' }],
-      conflicts: [{ description: 'c', left: 'l', right: 'r' }],
+      conflicts: [{ description: 'c', left: 'l', right: 'r', key: 'k', status: 'open' as const }],
     },
     finalPlanMarkdown: '',
     meta: { round: 1, convenedAt, objectiveHash: hash },
