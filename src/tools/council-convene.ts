@@ -7,6 +7,8 @@ import { DEFAULT_COUNCIL_SEATS, type CouncilSeat, type CouncilRoutingShadowEvent
 import { isCouncilEnabled } from '../agent/council/council-gate.js'
 import { buildCouncilSessionEvent, type CouncilSessionEvent } from '../agent/council/council-telemetry.js'
 import type { PlanItem } from '../agent/council/council-plan.js'
+import { councilPlanToUnifiedPlan } from '../agent/council/council-to-plan.js'
+import { serializeUnifiedPlan } from '../agent/unified-plan.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 
 /** Coordinator surface the council tool needs — only `delegateBatch` drives the
@@ -31,6 +33,7 @@ const planItemSchema = z.object({
   id: z.string().min(1),
   title: z.string(),
   detail: z.string(),
+  files: z.array(z.string()).optional(),
 })
 
 const seatSchema = z.object({
@@ -66,6 +69,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
                 id: { type: 'string' },
                 title: { type: 'string' },
                 detail: { type: 'string' },
+                files: { type: 'array', items: { type: 'string' }, description: 'Files this item touches (for team wave grouping).' },
               },
               required: ['id', 'title', 'detail'],
             },
@@ -145,8 +149,15 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       }
 
       // content: 全文议事记录 markdown(进 model 上下文,供其原样 echo 给用户)。
+      // 末尾内嵌机器可读 planJson —— 供模型在用户确认执行时原样提取为
+      // team_orchestrate 的 planJson(W-C7 评审→执行闭环)。仅在有任务时附加;
+      // council 自身绝不触发执行,转交由模型在用户确认后完成。
       // uiContent: 紧凑裁决摘要 —— 工具卡默认仅展示前 4 行,避免裸 markdown 被截成无意义片段。
-      return { content: plan.finalPlanMarkdown, uiContent: summarizeCouncilPlan(plan), isError: false }
+      const parts = [plan.finalPlanMarkdown]
+      if (plan.aggregate.mergedItems.length > 0) {
+        parts.push('', '```council-plan-json', serializeUnifiedPlan(councilPlanToUnifiedPlan(plan)), '```')
+      }
+      return { content: parts.join('\n'), uiContent: summarizeCouncilPlan(plan), isError: false }
     },
     requiresApproval: () => false,
     isConcurrencySafe: () => false,

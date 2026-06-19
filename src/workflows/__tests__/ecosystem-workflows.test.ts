@@ -119,9 +119,11 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(resolved?.prompt.includes('只出计划不执行'))
     // 解耦:议事会 prompt 不得诱导 model 走 team 执行链(议事会本身不执行)。
     assert.ok(resolved?.prompt.includes('绝不触发 team_orchestrate'))
-    // 完成后引导:主动建议用户用 /team 执行产物。
-    assert.ok(resolved?.prompt.includes('/team'))
-    assert.ok(resolved?.prompt.includes('主动询问用户是否用 /team 执行'))
+    // W-C7 完成后引导:planJson model-handoff —— 询问执行,确认后 content 内嵌的
+    // council-plan-json 原样作为 team_orchestrate 的 planJson 交接(不经 /team 重解析)。
+    assert.ok(resolved?.prompt.includes('council-plan-json'))
+    assert.ok(resolved?.prompt.includes('planJson 参数'))
+    assert.ok(resolved?.prompt.includes('主动询问用户是否执行'))
   })
 
   it('parses --seats flag and injects custom seats into prompt', () => {

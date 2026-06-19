@@ -383,7 +383,9 @@ ${objective}
 - 调用 council_convene 工具,参数 { objective: "${objective}"${seatsParam}${roundsParam} };${seatsNote}。
 - ${roundDesc}:扇出席位 → 确定性裁决 → 产出议事记录。绝不触发 team_orchestrate 或任何执行链。
 - council_convene 返回的议事记录(席位贡献 / 裁决记录 / 冲突 / 最终任务表)直接原样呈现给用户,不要二次概括或改写。
-- 议事会只负责出计划。产出议事记录后,主动询问用户是否用 /team 执行最终任务表中的任务(例如:"议事会评审完成。最终任务表有 N 项。需要 /team 执行吗?")。`
+- 返回的 content 末尾会内嵌一个 \`\`\`council-plan-json 代码块——由议事结论确定性生成的可执行 UnifiedPlan(含每项任务的 files 文件提示)。这是评审→执行的交接载体,不要展示给用户也不要改写其中任何字段。
+- 议事会只负责出计划。产出议事记录后,主动询问用户是否执行(例如:"议事会评审完成。最终任务表有 N 项。需要执行吗?")。
+- 用户确认执行后,提取 content 中 council-plan-json 块里的 JSON,原样作为 team_orchestrate 的 planJson 参数发起执行(模型交接,team 直接按 files 分波,无需重新解析)。用户不确认就此打住——议事会绝不自行触发 team_orchestrate。`
 }
 
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {

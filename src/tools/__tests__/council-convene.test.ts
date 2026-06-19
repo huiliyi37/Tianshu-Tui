@@ -4,7 +4,13 @@ import { createCouncilConveneTool, DEFAULT_COUNCIL_SEATS, type CouncilConveneCoo
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
 import { deriveStableWorkOrderId } from '../../agent/coordinator.js'
 import type { WorkerResult } from '../../agent/work-order.js'
+import { validateUnifiedPlan, type UnifiedPlan } from '../../agent/unified-plan.js'
 import type { ToolCallParams } from '../types.js'
+
+function extractPlanJson(content: string): UnifiedPlan | undefined {
+  const m = content.match(/```council-plan-json\n([\s\S]*?)\n```/)
+  return m ? (JSON.parse(m[1]!) as UnifiedPlan) : undefined
+}
 
 function workerResultFor(req: DelegationRequest): WorkerResult {
   const contrib = JSON.stringify({ authority: req.authority, summary: `${req.authority}-said`, additions: [], risks: [], challenges: [], alternatives: [] })
@@ -183,5 +189,53 @@ describe('council_convene 工具', () => {
       seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
     }))
     assert.equal(calls.requests.length, 1, '默认单轮')
+  })
+
+  it('W-C7：有任务 → content 内嵌可执行 council-plan-json 块且通过 validateUnifiedPlan', async () => {
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({
+      objective: 'split loop.ts',
+      draftItems: [{ id: 'T1', title: 'Split', detail: 'do it' }],
+    }))
+    const planJson = extractPlanJson(res.content)
+    assert.ok(planJson, 'content 应内嵌 council-plan-json 块')
+    const v = validateUnifiedPlan(planJson)
+    assert.equal(v.valid, true, JSON.stringify(v))
+    // uiContent 紧凑摘要不应被 planJson 污染
+    assert.doesNotMatch(res.uiContent!, /council-plan-json/)
+  })
+
+  it('W-C7：席位 addition 的 files 透传进 planJson 任务节点', async () => {
+    const coordinator: CouncilConveneCoordinator = {
+      delegateBatch: async (requests): Promise<CoordinatorRun> => {
+        const results = requests.map(req => ({
+          ...workerResultFor(req),
+          artifacts: [{ kind: 'note' as const, title: 'seat-contribution', content: JSON.stringify({
+            authority: req.authority, summary: 's',
+            additions: req.authority === 'tianquan' ? [{ id: 'A1', title: 'a', detail: 'd', files: ['src/loop.ts', 'src/api.ts'] }] : [],
+            risks: [], challenges: [], alternatives: [],
+          }) }],
+        }))
+        return { status: 'completed', results, packet: '', workerModels: results.map(r => ({ workOrderId: r.workOrderId, model: 'm' })) }
+      },
+      getSessionId: () => 'sess-1',
+    }
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({
+      objective: 'x',
+      seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
+    }))
+    const planJson = extractPlanJson(res.content)!
+    const a1 = planJson.tasks.find(t => t.id === 'A1')
+    assert.ok(a1, 'addition A1 应进入 planJson')
+    assert.deepEqual(a1!.files, ['src/loop.ts', 'src/api.ts'])
+  })
+
+  it('W-C7：无任务（空 mergedItems）→ content 不附加 planJson 块', async () => {
+    const { coordinator } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({ objective: 'x', seats: [{ authority: 'tianquan' }] }))
+    assert.equal(extractPlanJson(res.content), undefined, '无任务时不应内嵌 planJson')
   })
 })
