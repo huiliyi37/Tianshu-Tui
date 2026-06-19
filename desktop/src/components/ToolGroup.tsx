@@ -1,6 +1,7 @@
 import { memo, useState, useMemo, useEffect } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
+import { FilePath } from './FilePath'
 
 const TOOL_BODY_MAX = 10000
 
@@ -39,6 +40,14 @@ function truncateBody(text: string): string {
   return text.length > TOOL_BODY_MAX
     ? `${text.slice(0, TOOL_BODY_MAX)}\n…(已截断 ${text.length - TOOL_BODY_MAX} 字)`
     : text
+}
+
+const FILE_PATH_RE = /^\/[\w./-]+/
+
+function PreviewText({ text }: { text: string }) {
+  const match = text.match(FILE_PATH_RE)
+  if (match) return <FilePath path={match[0]} className="tool-preview" />
+  return <span className="tool-preview">{text}</span>
 }
 
 // ── Pairing: merge tool_use + tool_result into single entries ───
@@ -180,7 +189,7 @@ function PairedRowImpl({ entry }: { entry: PairedEntry }) {
       <button className="tool-row-head" onClick={() => setOpen(o => !o)}>
         <span className={`tool-dot ${status}`} aria-hidden />
         <span className="tool-name">{name}</span>
-        {!open && preview && <span className="tool-preview">{preview}</span>}
+        {!open && preview && <PreviewText text={preview} />}
       </button>
       {open && <pre className="tool-body">{truncateBody(text)}</pre>}
     </div>
@@ -207,7 +216,7 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
         <span className={`tool-dot ${status}`} aria-hidden />
         <span className={`chev ${open ? 'open' : ''}`} aria-hidden>▸</span>
         <span className="tool-name">{isResult ? `↳ ${name}` : name}</span>
-        {!open && preview && <span className="tool-preview">{preview}</span>}
+        {!open && preview && <PreviewText text={preview} />}
       </button>
       {open && <pre className="tool-body">{truncateBody(block.text)}</pre>}
     </div>

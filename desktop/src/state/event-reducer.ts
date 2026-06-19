@@ -210,11 +210,12 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     case 'tool_use': {
       next.private_textOpen = false
       next.private_thinkingOpen = false
+      const toolInput = ev.data.input as Record<string, unknown> | undefined
       next.blocks = [...next.blocks, {
         key: `tu-${ev.seq}`,
         kind: 'tool',
         role: `tool · ${String(ev.data.name ?? '')}`,
-        text: safeJson(ev.data.input),
+        text: humanizeToolInput(String(ev.data.name ?? ''), toolInput),
       }]
       const toolName = String(ev.data.name ?? '')
       if (FILE_TOOLS.has(toolName)) {
@@ -434,6 +435,37 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     default:
       return next
+  }
+}
+
+function humanizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
+  if (!input) return '{}'
+  const path = String(input.path ?? input.file_path ?? input.target ?? '')
+  switch (toolName) {
+    case 'write_file':
+    case 'create_file': {
+      const content = String(input.content ?? '')
+      const lines = content.split('\n').length
+      return `${path}\n${lines} 行 · ${content.length} 字符`
+    }
+    case 'edit_file':
+    case 'hash_edit': {
+      const old = String(input.old_string ?? input.old ?? '')
+      const nw = String(input.new_string ?? input.new ?? '')
+      return `${path}\n-${old.split('\n').length} 行 → +${nw.split('\n').length} 行`
+    }
+    case 'apply_patch':
+      return `${path}\n${String(input.patch ?? input.diff ?? '').split('\n').length} 行 diff`
+    case 'bash':
+    case 'shell': {
+      const cmd = String(input.command ?? input.cmd ?? '')
+      return cmd.length > 300 ? `${cmd.slice(0, 300)}…` : cmd
+    }
+    case 'read_file':
+    case 'read':
+      return path || safeJson(input)
+    default:
+      return safeJson(input)
   }
 }
 
