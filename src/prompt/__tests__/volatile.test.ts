@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildDynamicAppendixParts, appendixBlockName, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
 
 function ledger(): ContextLedger {
   return {
@@ -714,6 +714,61 @@ describe('GWT salience and Top-K selection', () => {
       const advisory = renderPlanMethodologyAdvisory('lightweight')
       assert.ok(advisory)
       assert.match(advisory!, /至少画一张架构或数据流图/)
+    })
+  })
+
+  describe('buildDynamicAppendixParts (task 1: structured parts for delta)', () => {
+    it('returns named parts with appendixBlockName', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        gitStatus: 'M src/main.ts',
+        activeDomain: { name: '天枢', motto: '证据先行', volatileBlock: '内容' },
+        decisions: ['decision 1'],
+      }
+      const parts = buildDynamicAppendixParts(ctx)
+      assert.ok(parts.length > 0, 'should produce parts')
+      const names = parts.map(p => p.name)
+      assert.ok(names.includes('star-domain'), `expected star-domain in ${names}`)
+      assert.ok(names.includes('git-status'), `expected git-status in ${names}`)
+      assert.ok(names.includes('progress'), `expected progress in ${names}`)
+    })
+
+    it('appendixBlockName extracts leading XML tag', () => {
+      assert.equal(appendixBlockName('<git-status>\nfoo\n</git-status>'), 'git-status')
+      assert.equal(appendixBlockName('<star-domain name="x">y</star-domain>'), 'star-domain')
+      assert.equal(appendixBlockName('no-xml-here'), 'anon:11')
+    })
+
+    it('returns empty array for empty context', () => {
+      const parts = buildDynamicAppendixParts({ cwd: '/repo' })
+      assert.equal(parts.length, 0)
+    })
+
+    it('parts content matches buildDynamicAppendix body (wrapper consistency)', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        gitStatus: 'M src/main.ts',
+        activeDomain: { name: '天枢', motto: '证据先行', volatileBlock: '内容' },
+      }
+      const parts = buildDynamicAppendixParts(ctx)
+      const wrapped = buildDynamicAppendix(ctx)
+      // The wrapper should be: <context-update>\n + parts joined by \n\n + \n</context-update>
+      const expected = `<context-update>\n${parts.map(p => p.content).join('\n\n')}\n</context-update>`
+      assert.equal(wrapped, expected)
+    })
+
+    it('order of parts matches wrapper order', () => {
+      const ctx: VolatileContext = {
+        cwd: '/repo',
+        gitStatus: 'M src/main.ts',
+        activeDomain: { name: '天枢', motto: '证据先行', volatileBlock: '内容' },
+        decisions: ['d1'],
+      }
+      const parts = buildDynamicAppendixParts(ctx)
+      const wrapped = buildDynamicAppendix(ctx)
+      const inner = wrapped.replace(/^<context-update>\n/, '').replace(/\n<\/context-update>$/, '')
+      const innerParts = inner.split('\n\n')
+      assert.deepEqual(parts.map(p => p.content), innerParts)
     })
   })
 

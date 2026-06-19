@@ -288,8 +288,18 @@ export function buildConsolidatedBlock(habituatedContent: Map<string, string>): 
   return `<consolidated>\n${parts.join('\n\n')}\n</consolidated>`
 }
 
+/** A selected context-update sub-block with its identifying tag name. */
+export interface AppendixPart { name: string; content: string }
+
+/** Extract the leading XML tag name from a sub-block, for cross-turn diffing. */
+export function appendixBlockName(content: string): string {
+  const m = /^<([A-Za-z][\w-]*)/.exec(content)
+  return m ? m[1]! : `anon:${content.length}`
+}
+
 /**
- * Render ONLY the per-turn dynamic fields into a separate `<context-update>` XML block.
+ * Build the per-turn context-update sub-blocks, post GWT Top-K selection.
+ * Returns named parts (in cache-stable order) so callers can diff across turns.
  *
  * When maxChars is provided, applies Global Workspace Theory (GWT) Top-K selection:
  * each sub-block gets a salience score, blocks are sorted by score descending,
@@ -299,7 +309,7 @@ export function buildConsolidatedBlock(habituatedContent: Map<string, string>): 
  * Without maxChars (backward compatible), all blocks are included in their
  * cache-stable order.
  */
-export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): string {
+export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: number): AppendixPart[] {
   const parts: string[] = []
 
   // ── P1b: cache-friendly ordering — stable sections first, volatile last ──
@@ -460,7 +470,7 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
     parts.push(renderPlanModeBlock())
   }
 
-  if (parts.length === 0) return ''
+  if (parts.length === 0) return []
 
   // ── GWT Top-K selection (when budget is set) ────────────────────
   if (maxChars !== undefined && maxChars > 0) {
@@ -469,10 +479,17 @@ export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): s
       salience: assignSalience(content),
     }))
     const selected = selectTopKBlocks(scored, maxChars)
-    return `<context-update>\n${selected.join('\n\n')}\n</context-update>`
+    return selected.map(content => ({ name: appendixBlockName(content), content }))
   }
 
-  return `<context-update>\n${parts.join('\n\n')}\n</context-update>`
+  return parts.map(content => ({ name: appendixBlockName(content), content }))
+}
+
+/** Backward-compatible wrapper: full <context-update> block (no seq). */
+export function buildDynamicAppendix(ctx: VolatileContext, maxChars?: number): string {
+  const parts = buildDynamicAppendixParts(ctx, maxChars)
+  if (parts.length === 0) return ''
+  return `<context-update>\n${parts.map(p => p.content).join('\n\n')}\n</context-update>`
 }
 
 // ── Global Workspace Theory: salience scoring ──────────────────────
