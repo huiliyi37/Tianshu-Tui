@@ -25,11 +25,10 @@ describe('buildSystemPrompt', () => {
 
   it('teaches parallel fan-out of independent探索 tools', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // 必须出现"并行/一次扇出"语义的指令，且点名探索工具
     assert.ok(prompt.includes('并行'), '应含并行指令')
     assert.ok(
-      prompt.includes('单条消息') || prompt.includes('一次发出') || prompt.includes('一次扇出'),
-      '应教在单条消息里一次发出多个工具',
+      prompt.includes('一条消息') || prompt.includes('单条消息') || prompt.includes('一次发出'),
+      '应教在一条消息里一起发多个工具',
     )
   })
 
@@ -50,16 +49,14 @@ describe('buildSystemPrompt', () => {
 
   it('scopes fan-out to read-only tools — serial tools sent one at a time', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // 修复跨会话复发缺陷：模型把扇出过度泛化到 bash/git/run_tests 等串行工具。
-    // prompt 必须显式限定扇出范围 + 点名串行工具单个发，否则 batch 无并行收益且切断连续块。
-    assert.ok(prompt.includes('扇出范围'), '应有"扇出范围"段限定只读工具')
+    assert.ok(prompt.includes('只读工具可一批发'), '应限定只读工具可批发')
     assert.ok(
       prompt.includes('run_tests') && prompt.includes('git'),
       '应点名 run_tests/git 等串行工具（防过度泛化）',
     )
     assert.ok(
-      prompt.includes('单个发') || prompt.includes('逐个'),
-      '应要求串行工具单个发/逐个执行',
+      prompt.includes('逐个串行'),
+      '应要求串行工具逐个执行',
     )
   })
 
@@ -162,7 +159,7 @@ describe('buildSystemPrompt', () => {
     const deepseek = buildSystemPrompt({ tools: [], modelFamily: 'deepseek' })
     assert.ok(deepseek.includes('<calibration>'))
     assert.ok(!deepseek.includes('family='))
-    assert.ok(deepseek.includes('跨模块边界'))
+    assert.ok(deepseek.includes('grep 验证消费方'))
 
     const mimo = buildSystemPrompt({ tools: [], modelFamily: 'mimo' })
     assert.ok(mimo.includes('<calibration>'))

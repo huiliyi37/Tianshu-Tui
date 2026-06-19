@@ -639,7 +639,7 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
 
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
-    parts.push(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`)
+    parts.push(truncateBlock(`<project-instructions>\n${escapeXml(md)}\n</project-instructions>`, 8_000, 'project-instructions'))
   }
 
   // Project memory — auto-loaded from .rivet/knowledge/memory.jsonl.
