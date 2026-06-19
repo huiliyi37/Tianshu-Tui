@@ -35,7 +35,7 @@ import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet,
 import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import { recordAutoReviewRun } from './review-health.js'
-import { detectWroteButNeverRead, formatWroteButNeverRead } from './wiring-nudge.js'
+import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 
 export interface B1Context {
@@ -63,6 +63,8 @@ export interface B1Context {
   getDepthLayer?: () => import('../context/task-contract.js').TaskDepthLayer | undefined
   /** Test hook for the wrote-but-never-read static check. */
   detectWroteButNeverRead?: typeof detectWroteButNeverRead
+  /** Test hook for the read-but-never-produced (虚假绿灯) static check. */
+  detectReadButNeverProduced?: typeof detectReadButNeverProduced
   /** VSW: current active snapshotRef. When provided, the gate drops verifications
    *  whose snapshotRef is stale (owned diff changed since they ran). Absent →
    *  no supersession (unchanged default). */
@@ -521,6 +523,16 @@ When the task implements a complex spec or cross-module integration, include the
         try {
           const deadSymbols = (ctx.detectWroteButNeverRead ?? detectWroteButNeverRead)(params.cwd, filesToCommit)
           lines.push(...formatWroteButNeverRead(deadSymbols))
+        } catch {
+          // best-effort: never let the nudge break delivery
+        }
+
+        // 虚假绿灯对偶检查：字段被生产代码读取，却只有测试 fixture 赋值、生产无写入点
+        // = fixture 伪造了真实系统不产出的形状。YELLOW，非阻断。仅抓子型A（生产零写入）；
+        // 子型B（写入点存在但运行时永空）是 review 门的职责。
+        try {
+          const falseGreen = (ctx.detectReadButNeverProduced ?? detectReadButNeverProduced)(params.cwd, filesToCommit)
+          lines.push(...formatReadButNeverProduced(falseGreen))
         } catch {
           // best-effort: never let the nudge break delivery
         }
