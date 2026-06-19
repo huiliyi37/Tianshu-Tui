@@ -1,7 +1,9 @@
-import { stat } from 'node:fs/promises'
+import { stat, readFile } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { ArtifactCorruptionError } from '../artifact/store.js'
 import { computeModelReadCap } from './model-read-cap.js'
+import { validatePath } from './path-validate.js'
+import { getFileReadMtime } from './read-file.js'
 
 /** Maximum raw artifact file size to read into memory (2MB).
  *  Larger files cause memory pressure and stall on repeated read_section
@@ -77,18 +79,18 @@ function extractSection(rawContent: string, sectionId: string): string {
 export const READ_SECTION_TOOL: Tool = {
   definition: {
     name: 'read_section',
-    description: `Read a specific section from a previously saved artifact.
+    description: `Read a specific section from a previously saved artifact or a live file on disk.
 
 ### Usage
 - Use this to load details from artifact output that was summarized in the message history
-- Requires artifactId from a prior tool_result that used artifact storage
+- Or use with file_path to recover content from a file that was read earlier in the session (e.g. after a read-ref reference)
+- Requires artifactId or file_path — at least one must be provided
 - Supports line ranges (L100-L200) and character ranges (c0-c5000)
-- Use when the model needs to drill into specific parts of large output
 
 ### Examples
 Good: read_section(artifactId="abc123", section="L1-L500")
 Good: read_section(artifactId="abc123", section="c0-c50000")
-Good: read_section(artifactId="abc123", section="L100-L200")`,
+Good: read_section(file_path="src/tools/bash.ts", section="L100-L200")`,
     input_schema: {
       type: 'object',
       properties: {
@@ -96,24 +98,98 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
           type: 'string',
           description: 'The artifact ID from a prior tool_result',
         },
+        file_path: {
+          type: 'string',
+          description: 'Path to a live file on disk. Use when recovering content after a read-ref reference. Path is validated against the project directory.',
+        },
         section: {
           type: 'string',
           description: 'Section to read: "L100-L200" for lines 100-200, "c0-c5000" for char range',
         },
       },
-      required: ['artifactId', 'section'],
+      required: ['section'],
     },
   },
 
   async execute(params: ToolCallParams): Promise<ToolResult> {
-    const { artifactId, section } = params.input as {
-      artifactId: string
+    const { artifactId, file_path, section } = params.input as {
+      artifactId?: string
+      file_path?: string
       section: string
     }
 
-    if (!artifactId || !section) {
+    if (!section) {
       return {
-        content: 'Error: artifactId and section are required',
+        content: 'Error: section is required',
+        isError: true,
+      }
+    }
+
+    const lineRange = parseLineRange(section)
+    const charRange = parseCharRange(section)
+    if (!lineRange && !charRange) {
+      return {
+        content: `Error: Invalid section format: ${section}. Use "L100-L200" for line range or "c0-c5000" for char range.`,
+        isError: true,
+      }
+    }
+
+    // ── file_path branch: read from live file (B3) ──
+    if (file_path && !artifactId) {
+      try {
+        const canonical = validatePath(params.cwd, file_path)
+
+        // Staleness check: warn if file mtime differs from last read_file
+        const lastMtime = getFileReadMtime(canonical)
+        let stalenessNote = ''
+        if (lastMtime !== null) {
+          try {
+            const currentMtime = (await stat(canonical)).mtimeMs
+            if (currentMtime !== lastMtime) {
+              stalenessNote = `\n⚠ 文件自上次 read_file 后已变更（mtime 不匹配）。以下内容为当前磁盘版本，可能与上文不一致。\n`
+            }
+          } catch { /* file may not exist — handled below */ }
+        }
+
+        // Guard against multi-MB files
+        let _rawSize = 0
+        try { _rawSize = (await stat(canonical)).size } catch { /* handled below */ }
+        if (_rawSize > MAX_RAW_BYTES) {
+          return {
+            content: `Error: File ${canonical} is too large (${(_rawSize / 1024 / 1024).toFixed(1)}MB > ${MAX_RAW_BYTES / 1024 / 1024}MB limit). Use grep or bash with head/tail to inspect the file directly.`,
+            isError: true,
+          }
+        }
+
+        const rawContent = await readFile(canonical, 'utf-8')
+        const sectionContent = extractSection(rawContent, section)
+
+        const cap = computeModelReadCap({
+          contextWindow: params.contextWindow,
+          providerProfile: params.providerProfile,
+        })
+        const maxChars = Math.max(cap.maxChars, LEGACY_MAX_SECTION_CHARS)
+        const truncated = sectionContent.length > maxChars
+          ? sectionContent.slice(0, maxChars) + `\n... [truncated at ${maxChars} chars]`
+          : sectionContent
+
+        return {
+          content: stalenessNote ? stalenessNote + truncated : truncated,
+          rawPath: canonical,
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          content: `Error reading file: ${message}`,
+          isError: true,
+        }
+      }
+    }
+
+    // ── artifactId branch: existing behavior ──
+    if (!artifactId) {
+      return {
+        content: 'Error: artifactId or file_path is required',
         isError: true,
       }
     }
@@ -130,15 +206,6 @@ Good: read_section(artifactId="abc123", section="L100-L200")`,
     if (!artifact) {
       return {
         content: `Error: Artifact ${artifactId} not found — it may have been pruned or never created. Use the original tool (bash/read_file/grep) to regenerate the output.`,
-        isError: true,
-      }
-    }
-
-    const lineRange = parseLineRange(section)
-    const charRange = parseCharRange(section)
-    if (!lineRange && !charRange) {
-      return {
-        content: `Error: Invalid section format: ${section}. Use "L100-L200" for line range or "c0-c5000" for char range.`,
         isError: true,
       }
     }

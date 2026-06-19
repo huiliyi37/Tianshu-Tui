@@ -1,10 +1,11 @@
-import { describe, it } from 'node:test'
+import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { READ_SECTION_TOOL } from '../read-section.js'
 import { ArtifactStore } from '../../artifact/store.js'
+import { __setFileReadMtimeForTests, __resetReadHistoryForTests } from '../read-file.js'
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'read-section-test-'))
@@ -214,5 +215,108 @@ describe('read_section tool', () => {
     } finally {
       cleanup(tempDir)
     }
+  })
+})
+
+describe('read_section file_path branch (任务 B3)', () => {
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'read-section-file-'))
+  })
+
+  afterEach(() => {
+    if (tempDir) cleanup(tempDir)
+  })
+
+  function makeFile(name: string, content: string): string {
+    const path = join(tempDir, name)
+    const parent = join(path, '..')
+    if (!existsSync(parent)) mkdirSync(parent, { recursive: true })
+    writeFileSync(path, content, 'utf-8')
+    return name
+  }
+
+  it('reads line range from live file via file_path', async () => {
+    const file = makeFile('src/test.ts', 'line 1\nline 2\nline 3\nline 4\nline 5')
+
+    const result = await READ_SECTION_TOOL.execute({
+      input: { file_path: file, section: 'L2-L4' },
+      toolUseId: 'b3-1',
+      cwd: tempDir,
+    })
+
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('line 2'))
+    assert.ok(result.content.includes('line 3'))
+    assert.ok(result.content.includes('line 4'))
+    assert.ok(!result.content.includes('line 1'))
+    assert.ok(!result.content.includes('line 5'))
+  })
+
+  it('reads char range from live file via file_path', async () => {
+    makeFile('src/chars.ts', 'Hello, World! This is a test.')
+
+    const result = await READ_SECTION_TOOL.execute({
+      input: { file_path: 'src/chars.ts', section: 'c7-c12' },
+      toolUseId: 'b3-2',
+      cwd: tempDir,
+    })
+
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('World'))
+  })
+
+  it('returns error when neither artifactId nor file_path provided', async () => {
+    const result = await READ_SECTION_TOOL.execute({
+      input: { section: 'L1-L10' },
+      toolUseId: 'b3-3',
+      cwd: tempDir,
+    })
+
+    assert.ok(result.isError)
+    assert.match(result.content, /artifactId or file_path is required/i)
+  })
+
+  it('returns error when file does not exist', async () => {
+    const result = await READ_SECTION_TOOL.execute({
+      input: { file_path: 'nonexistent.ts', section: 'L1-L10' },
+      toolUseId: 'b3-4',
+      cwd: tempDir,
+    })
+
+    assert.ok(result.isError)
+    assert.match(result.content, /Error reading file/i)
+  })
+
+  it('handles out-of-range line numbers from live file', async () => {
+    makeFile('src/short.ts', 'line 1\nline 2')
+
+    const result = await READ_SECTION_TOOL.execute({
+      input: { file_path: 'src/short.ts', section: 'L100-L200' },
+      toolUseId: 'b3-5',
+      cwd: tempDir,
+    })
+
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('out of range'))
+  })
+
+  it('includes staleness warning when mtime differs from last read_file', async () => {
+    __resetReadHistoryForTests()
+    const file = makeFile('src/stale.ts', 'version 1\n')
+
+    // Inject stale mtime (different from actual file mtime)
+    __setFileReadMtimeForTests(join(tempDir, file), 1)
+
+    const result = await READ_SECTION_TOOL.execute({
+      input: { file_path: file, section: 'L1-L1' },
+      toolUseId: 'b3-6',
+      cwd: tempDir,
+    })
+
+    assert.ok(!result.isError)
+    assert.ok(result.content.includes('version 1'), 'must return content')
+    assert.match(result.content, /已变更/i, 'must include staleness warning')
   })
 })
