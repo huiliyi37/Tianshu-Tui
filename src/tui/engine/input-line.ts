@@ -41,12 +41,85 @@ export interface InputLineOptions {
 export interface InputLineDisplayOptions {
   /** Maximum display rows to return. When exceeded, keep the cursor line visible. */
   maxLines?: number
+  /** Maximum display columns per line. When the cursor line exceeds this width,
+   *  a horizontal viewport centered on the cursor is shown instead of truncating
+   *  from the start (which hides the text the user is actively typing at the end). */
+  maxWidth?: number
 }
 
 export type VimMode = 'normal' | 'insert'
 
 /** Grapheme 分段器（Node 22+）。用于按用户感知字符（CJK/emoji/ZWJ 簇）步进光标。 */
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+import stringWidth from 'string-width'
+
+/**
+ * 水平视窗：当光标行的内容部分超过可用宽度时，以光标位置为中心截取可见窗口。
+ * 前缀（`〉 ` 或 `  `）始终保留，截断只发生在内容部分。
+ *
+ * @param prefix 固定前缀（如 `〉 `），始终完整保留
+ * @param beforeCursor 光标前的内容文本
+ * @param afterCursor 光标后含 `█` 的文本（`█${rest}`）
+ * @param maxCols 该行的最大显示列数（含前缀）
+ */
+function hscrollCursorLine(
+  prefix: string,
+  beforeCursor: string,
+  afterCursor: string,
+  maxCols: number,
+): string {
+  const prefixWidth = stringWidth(prefix)
+  const beforeW = stringWidth(beforeCursor)
+  const afterW = stringWidth(afterCursor) // includes █
+  const contentW = beforeW + afterW
+  const available = maxCols - prefixWidth
+  if (contentW <= available) return prefix + beforeCursor + afterCursor
+
+  const max = Math.max(3, available)
+  const reserveLeft = 1 // `…` marker
+  const reserveRight = 1
+  const usable = max - reserveLeft - reserveRight
+  if (usable < 1) return prefix + beforeCursor.slice(-max) // extreme fallback
+
+  // 以光标为中心分配左右预算
+  let leftBudget = Math.floor(usable / 2)
+  let rightBudget = usable - leftBudget
+
+  if (beforeW < leftBudget) {
+    rightBudget += leftBudget - beforeW
+    leftBudget = beforeW
+  }
+  if (afterW < rightBudget) {
+    leftBudget += rightBudget - afterW
+    rightBudget = afterW
+  }
+
+  // 从光标向左收集字符
+  const leftChars: string[] = []
+  let leftW = 0
+  for (const ch of [...beforeCursor].reverse()) {
+    const cw = stringWidth(ch)
+    if (leftW + cw > leftBudget) break
+    leftChars.unshift(ch)
+    leftW += cw
+  }
+
+  // 从光标向右收集字符（afterCursor 含 █ + rest）
+  const rightChars: string[] = []
+  let rightW = 0
+  for (const ch of afterCursor) {
+    const cw = stringWidth(ch)
+    if (rightW + cw > rightBudget + reserveRight) break
+    rightChars.push(ch)
+    rightW += cw
+  }
+
+  const leftEllipsis = leftW < beforeW ? '…' : ''
+  const rightEllipsis = rightW < afterW ? '…' : ''
+
+  return prefix + leftEllipsis + leftChars.join('') + rightChars.join('') + rightEllipsis
+}
 
 /** 返回字符串中所有 grapheme 边界的 code-unit 偏移（含 0 与末尾）。 */
 function graphemeBoundaries(value: string): number[] {
@@ -133,6 +206,8 @@ export class InputLine {
    * - 空值时显示 placeholder（首行）
    * - 光标行以 `〉 ` 前缀标识（高亮行），其余行缩进对齐
    * - 光标位置以 `█` 标记
+   * - 当 maxWidth 给出时，对光标行做水平视窗：内容超宽时以光标为中心截取，
+   *   保证光标位置（正在输入的字符）始终可见，而非从行首截断导致行尾不可见。
    */
   displayLines(options: InputLineDisplayOptions = {}): string[] {
     if (!this._value) {
@@ -146,7 +221,10 @@ export class InputLine {
       const isCursorLine = i === cursorLine
       const prefix = isCursorLine ? '〉 ' : '  '
       if (!isCursorLine) return `${prefix}${line}`
-      return `${prefix}${line.slice(0, cursorCol)}█${line.slice(cursorCol)}`
+      const beforeCursor = line.slice(0, cursorCol)
+      const afterCursor = `█${line.slice(cursorCol)}`
+      if (options.maxWidth === undefined) return `${prefix}${beforeCursor}${afterCursor}`
+      return hscrollCursorLine(prefix, beforeCursor, afterCursor, options.maxWidth)
     })
     return viewportAroundCursor(lines, cursorLine, options.maxLines)
   }

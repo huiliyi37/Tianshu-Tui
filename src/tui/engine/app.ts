@@ -2050,10 +2050,11 @@ export class TuiApp {
       const MAX_INPUT_DISPLAY_LINES = 12
       const arrowColor = this.theme.success
       const inputLines = this.inputLine.value
-        ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES })
+        ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES, maxWidth: innerWidth })
         : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
 
-      /** 着色输入行：光标行前缀 〉 涂 success 绿，其余保持原样 */
+      /** 着色输入行：光标行前缀 〉 涂 success 绿，其余保持原样。
+       *  光标行已在 displayLines 内做了水平视窗截断，不再二次 truncateToWidth。 */
       const colorizeInputLine = (raw: string): string => {
         if (raw.startsWith('〉 ')) return color('〉', arrowColor) + ' ' + raw.slice(2)
         return raw

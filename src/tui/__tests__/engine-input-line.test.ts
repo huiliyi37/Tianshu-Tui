@@ -77,6 +77,47 @@ describe('InputLine multi-line (W4b)', () => {
     const input = new InputLine({ placeholder: 'p' })
     assert.equal(input.placeholder, 'p')
   })
+
+  it('displayLines with maxWidth keeps cursor visible on long lines (cursor at end)', () => {
+    // 100 chars, cursor at end — line is way wider than maxWidth=20
+    const value = 'a'.repeat(100)
+    const input = new InputLine({ value })
+    const lines = input.displayLines({ maxWidth: 20 })
+    assert.equal(lines.length, 1)
+    const line = lines[0]!
+    // █ (cursor marker) must be visible, not truncated off
+    assert.ok(line.includes('█'), 'cursor █ must be visible when line exceeds maxWidth')
+    // Right-side ellipsis indicates there's more content after cursor (cursor at end → no right ellipsis)
+    // Left-side ellipsis indicates truncated content before cursor
+    assert.ok(line.includes('…'), 'must show ellipsis for truncated content')
+  })
+
+  it('displayLines with maxWidth centers cursor when typing in the middle', () => {
+    const value = 'a'.repeat(100)
+    const input = new InputLine({ value })
+    input.setValue(value, 50) // cursor at middle
+    const lines = input.displayLines({ maxWidth: 20 })
+    const line = lines[0]!
+    assert.ok(line.includes('█'), 'cursor must be visible')
+    assert.ok(line.includes('…'), 'must show truncation indicator')
+    // Both sides truncated when cursor is centered (prefix 〉 is always present)
+    assert.ok(line.slice(2).startsWith('…'), 'left side truncated when cursor is centered')
+    assert.ok(line.endsWith('…'), 'right side truncated when cursor is centered')
+  })
+
+  it('displayLines with maxWidth shows tail content when cursor at end (the regression case)', () => {
+    // The bug: typing at the end of a long line → truncateToWidth from start
+    // hid the last characters the user was actively typing.
+    // Fix: hscrollCursorLine centers on cursor so tail is visible.
+    const value = 'AAAAAAAAAA' + 'BBBBBBBBBB' + 'CCCCCCCCCC' // 30 chars
+    const input = new InputLine({ value })
+    const lines = input.displayLines({ maxWidth: 15 })
+    const line = lines[0]!
+    assert.ok(line.includes('█'), 'cursor must be visible')
+    assert.ok(line.includes('C'), 'tail content near cursor must be visible')
+    // Should NOT show the very start 'A's — they're scrolled off
+    assert.ok(!line.includes('AAAAAAAAAA'), 'head content should be scrolled off when cursor at end')
+  })
 })
 
 describe('InputLine', () => {
