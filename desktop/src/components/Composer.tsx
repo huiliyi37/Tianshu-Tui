@@ -15,6 +15,15 @@ import { compressImage } from '../lib/image-compress'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 220
+
+export function computeComposerTextareaStyle(scrollHeight: number, maxHeight = COMPOSER_TEXTAREA_MAX_HEIGHT): { height: string; overflowY: 'hidden' | 'auto' } {
+  const height = Math.min(Math.max(0, scrollHeight), maxHeight)
+  return {
+    height: `${height}px`,
+    overflowY: scrollHeight > maxHeight ? 'auto' : 'hidden',
+  }
+}
 
 // Accept any raster image/* (canvas transcodes BMP/etc into a provider-safe
 // PNG/JPEG on send). SVG is excluded: it is vector, useless for vision, and
@@ -71,6 +80,15 @@ export function Composer(props: {
       taRef.current.setSelectionRange(c, c)
       pendingCaret.current = null
     }
+  }, [value])
+
+  useLayoutEffect(() => {
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const next = computeComposerTextareaStyle(el.scrollHeight)
+    el.style.height = next.height
+    el.style.overflowY = next.overflowY
   }, [value])
 
   useEffect(() => () => clearTimeout(debounce.current), [])

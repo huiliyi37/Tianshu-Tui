@@ -8,6 +8,68 @@ import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel } from './abort-reader.js'
+import { debugEnabled, debugLog } from '../utils/debug.js'
+
+/**
+ * Parse accumulated tool_call arguments into an input object.
+ *
+ * Returns:
+ *  - `{}` when the buffer holds no arguments (a genuine no-arg tool call).
+ *  - the parsed object on success.
+ *  - a salvaged object when the buffer is two concatenated JSON objects
+ *    (`{...}{...}`), which happens when a provider reuses a single
+ *    `tool_calls[].index` for distinct calls — we recover the first object.
+ *  - `null` when the buffer is non-empty but not yet (or not) valid JSON,
+ *    signalling the caller to defer until more chunks arrive.
+ *
+ * The `null` signal is what stops a premature `finish_reason` flush from
+ * emitting an empty-input tool_use block (GLM-5.2 streams trailing argument
+ * deltas AFTER finish_reason; flushing eagerly fed `{}` to the tool, which then
+ * failed with a misleading "X is required").
+ */
+function tryParseToolArguments(raw: string): Record<string, unknown> | null {
+  if (raw.trim().length === 0) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+  } catch {
+    // Salvage a single leading JSON object from a concatenated buffer.
+    const salvaged = salvageFirstJsonObject(raw)
+    return salvaged
+  }
+}
+
+/** Extract and parse the first balanced top-level `{...}` from a string. */
+function salvageFirstJsonObject(raw: string): Record<string, unknown> | null {
+  const start = raw.indexOf('{')
+  if (start === -1) return null
+  let depth = 0
+  let inStr = false
+  let escaped = false
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i]!
+    if (inStr) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inStr = false
+      continue
+    }
+    if (ch === '"') inStr = true
+    else if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) {
+        try {
+          const obj = JSON.parse(raw.slice(start, i + 1))
+          return obj && typeof obj === 'object' ? obj as Record<string, unknown> : null
+        } catch {
+          return null
+        }
+      }
+    }
+  }
+  return null
+}
 
 export interface OpenAIClientConfig {
   baseUrl: string
@@ -540,6 +602,10 @@ export class OpenAIClient implements StreamClient {
           if (payload === '[DONE]') { streamDone = true; break }
           sawDataEvent = true
 
+          if (process.env.RIVET_DEBUG_RAW_SSE === '1') {
+            console.error(`[raw-sse] ${payload.slice(0, 600)}`)
+          }
+
           try {
             const parsed = JSON.parse(payload)
             this.processDelta(parsed, callbacks)
@@ -581,7 +647,7 @@ export class OpenAIClient implements StreamClient {
         }
       }
 
-      this.flushToolCalls(callbacks)
+      this.flushToolCalls(callbacks, { final: true })
       // 网#1: DeepSeek tool-JSON-in-content fallback
       let textConsumedAsToolJson = false
       if (this.toolCallBuffer.size === 0 && this._textAccum && this.config.capabilities?.hasToolJsonInContentBug) {
@@ -738,23 +804,70 @@ export class OpenAIClient implements StreamClient {
     }
   }
 
-  private flushToolCalls(callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock' | 'onStopReason'>>): void {
-    for (const [, buf] of this.toolCallBuffer) {
-      if (!buf.id || !buf.function.name) continue
-      let input: Record<string, unknown> = {}
-      try {
-        input = JSON.parse(buf.function.arguments)
-      } catch {
-        input = {}
+  /**
+   * Emit buffered tool_use blocks.
+   *
+   * Called twice per stream: once when `finish_reason` arrives (non-final) and
+   * once at end-of-stream (`final: true`). On the non-final flush, entries whose
+   * arguments are not yet valid JSON are LEFT in the buffer so trailing argument
+   * deltas (GLM-5.2 sends them after finish_reason) can complete them before the
+   * final flush. Only emitted entries are removed — the buffer is never cleared
+   * wholesale, so a deferred entry survives to the final flush.
+   */
+  private flushToolCalls(
+    callbacks: Partial<Pick<StreamCallbacks, 'onContentBlock' | 'onStopReason'>>,
+    opts: { final?: boolean } = {},
+  ): void {
+    const final = opts.final ?? false
+    for (const [idx, buf] of this.toolCallBuffer) {
+      if (!buf.id || !buf.function.name) {
+        // Header (id/name) not yet seen. Can never complete on the final flush.
+        if (final) this.toolCallBuffer.delete(idx)
+        continue
       }
-      callbacks.onContentBlock?.({
-        type: 'tool_use',
-        id: buf.id,
-        name: buf.function.name,
-        input,
-      })
+      const parsed = tryParseToolArguments(buf.function.arguments)
+      if (parsed === null) {
+        // Non-empty but unparseable arguments. Defer to a later flush so
+        // post-finish_reason argument deltas can complete the JSON.
+        if (!final) {
+          this.maybeTraceToolStream('defer', idx, buf)
+          continue
+        }
+        // Final flush and still unparseable — surface it loudly instead of
+        // silently feeding {} into the tool (the misleading "X is required").
+        this.warnToolArgParseFailure(buf)
+        callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: {} })
+        this.toolCallBuffer.delete(idx)
+        continue
+      }
+      this.maybeTraceToolStream(final ? 'emit-final' : 'emit', idx, buf)
+      callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: parsed })
+      this.toolCallBuffer.delete(idx)
     }
-    this.toolCallBuffer.clear()
+  }
+
+  /** Gated stream-level tool-call diagnostics (RIVET_DEBUG_TOOL_STREAM=1). */
+  private maybeTraceToolStream(
+    phase: string,
+    idx: number,
+    buf: { id?: string; function: { name?: string; arguments: string } },
+  ): void {
+    if (process.env.RIVET_DEBUG_TOOL_STREAM !== '1') return
+    debugLog(
+      `[tool-stream] phase=${phase} idx=${idx} id=${buf.id ?? '?'} name=${buf.function.name ?? '?'}` +
+      ` argsLen=${buf.function.arguments.length} args=${JSON.stringify(buf.function.arguments.slice(0, 200))}`,
+    )
+  }
+
+  /** Always-on warning when a tool call's arguments never became valid JSON. */
+  private warnToolArgParseFailure(
+    buf: { id?: string; function: { name?: string; arguments: string } },
+  ): void {
+    const msg =
+      `[tool-arg-parse-failure] id=${buf.id ?? '?'} name=${buf.function.name ?? '?'}` +
+      ` argsLen=${buf.function.arguments.length} args=${JSON.stringify(buf.function.arguments.slice(0, 300))}`
+    if (debugEnabled()) debugLog(msg)
+    else console.warn(msg)
   }
 
   /**

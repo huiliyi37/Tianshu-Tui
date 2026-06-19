@@ -804,7 +804,8 @@ body {
 .composer textarea {
   background: var(--panel-2); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px; padding: 10px;
-  resize: none; font-family: inherit; font-size: 14px; min-height: 44px;
+  resize: none; font-family: inherit; font-size: 14px; line-height: 1.45;
+  min-height: 44px; max-height: min(32vh, 220px); overflow-y: hidden;
 }
 .composer-images { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .composer-thumb { position: relative; width: 64px; height: 64px; }
