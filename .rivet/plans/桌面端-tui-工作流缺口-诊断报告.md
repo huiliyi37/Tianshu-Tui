@@ -9,6 +9,7 @@
 > **更新 3（2026-06-19 15:20）** — 代码审查发现 P0/P1 已修：coordinator.shutdown() 防泄漏 + SessionStores.playbookStore 死字段清理。详情见 §8.7。P2/P3 列入遗留 Wave。
 > **更新 4（2026-06-19 15:30）** — Wave K 已落地：TUI switchAgentRuntime/switchAgentSession + createShutdownHandler 同步 P0 修复，coordinator 泄漏在双侧（sidecar + TUI）一致闭环。详情见 §8.8。
 > **更新 5（2026-06-19 15:40）** — Wave L 已落地：sidecar runServe.close 通过 ManagedAgent.shutdown + RuntimeSessionManager.shutdownAll 对称 TUI createShutdownHandler，双侧 coordinator 生命周期管理完全一致。详情见 §8.9。
+> **更新 6（2026-06-19 15:50）** — Wave J 核心落地：ProviderHealthTracker 跨 session 共享（P2 解决）+ DomainKnowledgeStore cwd-keyed 缓存（重复 load 解决）。详情见 §8.10；剩余优化候选（bandit gates 缓存等）保留在 §9.5.4。
 
 ---
 
@@ -404,6 +405,44 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 - bootstrap 1 + coordinator 5 = 6 个 test 文件、57 tests 全绿
 - cron-lock 两个并发测试在大批量并跑时偶发 flake——单独跑全过，与本 Wave 无关（已通过 stash 后 baseline 复现的 flake 模式确认）
 
+### 8.10 Wave J 核心 — 跨 session 状态共享（2026-06-19 15:50，时间上晚于 §8.9 Wave L）
+
+**问题（审查 P2）**：`createAgentRuntime` 每次都 `new ProviderHealthTracker()` 从零开始；`DomainKnowledgeStore` 每个 session 一份重新加载磁盘。sidecar 多 session + switchModel 频繁场景下：
+- provider 健康统计（成功率/延迟）反复清零 → coordinator 冷层路由失据 → worker 可能被路由到已知不健康的 provider
+- knowledge 文件重复 I/O；跨 session lessons 不可见
+
+**改动**：
+
+1. [src/bootstrap.ts](src/bootstrap.ts) `createAgentRuntime` 接口新增可选入参 `sharedProviderHealth?: ProviderHealthTracker`。内部 `const providerHealth = deps.sharedProviderHealth ?? new ProviderHealthTracker()`——`registerProvider` 幂等（[src/agent/provider-health.ts](src/agent/provider-health.ts):56 `if (this.providers.has(...)) return`），共享实例多次注册安全。**TUI 路径不传，行为完全不变**。
+2. [src/server/serve.ts](src/server/serve.ts) 新增 `SharedRuntime` 接口 + `getOrCreateDomainStore` helper：
+   ```ts
+   interface SharedRuntime {
+     providerHealth: ProviderHealthTracker          // 进程级单例
+     domainStores: Map<string, DomainKnowledgeStore> // cwd-keyed 缓存
+   }
+   ```
+3. [src/server/serve.ts](src/server/serve.ts) `runServe` 顶层 `const sharedRuntime: SharedRuntime = { providerHealth: new ProviderHealthTracker(), domainStores: new Map() }`。
+4. `buildAgentLoop` / `buildManagedAgent` / `assembleAgentLoop` 链式加可选 `shared?: SharedRuntime` 入参；assembleAgentLoop 内部：
+   - `domainKnowledgeStore = shared ? getOrCreateDomainStore(shared, cwd) : new DomainKnowledgeStore(...)`
+   - `sharedProviderHealth: shared?.providerHealth` 传给 createAgentRuntime
+5. `buildManagedAgent.switchModel` 透传 shared——保证模型切换后仍复用同一份 providerHealth + domainStore。
+6. legacy `/prompt` 端点的 `createAgent` 也透传 shared，避免与 `/sessions/:id/prompt` 路径间健康统计不一致。
+
+**关键设计**：
+- `ProviderHealthTracker` 是**进程级单例**——所有 session、所有 cwd 共享。原因：provider 健康（API 端点是否响应、平均延迟）是网络层事实，与具体 session/cwd 无关。
+- `DomainKnowledgeStore` 是 **cwd-keyed**——不同 cwd 的 knowledge 必须隔离，相同 cwd 多 session 共享同一磁盘存储实例（避免重复 load + 跨 session lessons 可见）。
+- 未做：bandit gates evaluation 缓存（promotionStore 决策每次重算，但纯函数 + 一次性开销，影响微）。留在 §9.5.4。
+
+**TUI 路径影响**：零。TUI `bootstrapInteractiveSession` 调 `createAgentRuntime` 时**不传** `sharedProviderHealth`，仍走 `new ProviderHealthTracker()` 老路径（单 session 进程影响有限）。如果未来 TUI 也要保持状态，可让 bootstrapInteractiveSession 自己缓存一份——一行改动，本 Wave 不做。
+
+**Wave J 验证**：
+
+- `tsc --noEmit` pass
+- bootstrap 19 + coordinator 50 + session-manager 28 + session-routes 31 + server 8 + session-rehydrate 9 + provider-health 24 + domain-knowledge 14 = 183 tests 全绿（实际跑共 200 含些重叠）
+- 0 回归
+
+---
+
 ### 8.9 Wave L — sidecar 进程退出对齐 TUI shutdown（2026-06-19 15:40）
 
 **问题**：Wave K 在 TUI `createShutdownHandler` 加了显式 `coordinator?.shutdown()`，但 sidecar `runServe.close` 只走 `sessions.abortAll()` → 链式 `agent.abort()`，没有显式 coordinator.shutdown——双侧不对称。审查报告 §9.6 标 Wave L 候选。
@@ -478,37 +517,37 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 
 其余如 `/help` / `/sessions` / `/cockpit` / `/scroll` 都可以等用户真正反馈缺失再补。
 
-### 9.5 Wave J — 装配开销优化 + 状态保持（中优先级，按需）
+### 9.5 Wave J 剩余 — 状态共享后续优化（低优先级，按需）
 
-Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，**switchModel 也会重建整个堆栈**，包括：
-- 新 `DelegationCoordinator` + `ProviderHealthTracker` + `DomainKnowledgeStore`
-- 新 `runtimeFactory` 闭包（含 PromptEngine + createProviderClient）
-- bandit gates 重新 evaluate
-- modelCards 重新派生
+Wave J 核心（§8.10）已落地：`ProviderHealthTracker` 跨 session 共享（P2 解决）+ `DomainKnowledgeStore` cwd-keyed 缓存（重复 load 解决）。剩下：
 
-#### 9.5.1 装配开销
+#### 9.5.1 装配开销（剩余）
 
-对单用户少 session（≤3）的桌面端基本无感知。但同 cwd 启 10+ session 或同进程长期运行多次 switchModel 时可能积累。
+`createAgentRuntime` 每次仍重新构造 `DelegationCoordinator` + `runtimeFactory` 闭包 + `modelCards` 派生 + bandit gates evaluation。
+- coordinator/runtimeFactory：必须 per-session（依赖 sessionId/apiKey/auth/persist binding），不可共享
+- modelCards：纯函数派生，重复执行无害
+- bandit gates evaluation：每次 switchModel 重算 promotionStore 决策——一次性开销，可缓存但收益有限
 
-#### 9.5.2 ProviderHealthTracker 状态丢失（审查 P2）
+#### 9.5.2 ~~ProviderHealthTracker 状态丢失（审查 P2）~~ — Wave J 已解决
 
-**问题**：`new ProviderHealthTracker()` 每次都从零开始（[src/bootstrap.ts](src/bootstrap.ts):661 区域）。switchModel 后之前积累的 provider 健康统计全丢，coordinator 的冷层路由跳过逻辑失去依据——worker 可能被路由到已知不健康的 provider。
+详见 §8.10：sidecar 顶层 `SharedRuntime.providerHealth` 跨 session/switchModel 持久。TUI 路径保持原行为（单 session 进程影响有限）。
 
-**TUI 同源**：同样问题，但 TUI 单 session 进程、switch 频率极低，影响有限。sidecar 长驻 + 多 session + 频繁 switchModel 放大此问题。
+#### 9.5.3 ~~DomainKnowledgeStore 重复 load~~ — Wave J 已解决
 
-#### 9.5.3 其他状态丢失候选
+详见 §8.10：sidecar 顶层 `SharedRuntime.domainStores: Map<cwd, store>` 按 cwd 缓存。
 
-- `DomainKnowledgeStore`：基于 cwd 磁盘存储，内存实例每次重新加载——若有大型 knowledge 文件，重复 I/O 开销
-- `bandit gates` evaluation：promotionStore 一次决定 gated/shadow，但每次 switchModel 重新 evaluate（一次性开销）
-- `modelCards` 派生：纯函数，重复执行无害
+#### 9.5.4 未做：bandit gates evaluation 缓存
 
-#### 9.5.4 优化方向
+`resolveBanditPromotion` 每次 switchModel 都基于 promotionStore 重算 gate 决策（modelTier/modelRouting/effort 三个 gate）。理论上首次 evaluate 结果可缓存到 sidecar SharedRuntime，避免 switchModel 时重复磁盘读 promotionStore。但 promotionStore 本身可能变化（cron 任务更新），缓存需要 invalidation 策略——复杂度高，收益低。**不做**，除非性能 profile 显示瓶颈。
 
-- 把 sidecar 级共享对象（`ProviderHealthTracker` / `DomainKnowledgeStore` / `banditGates evaluation`）抽到 `serve.runServe` 顶层缓存
-- 让 `createAgentRuntime` 接受可选 `sharedHealthTracker` / `sharedDomainStore` 入参（默认行为不变，TUI 零影响）
-- 或更激进：把 `coordinator` 也提到进程级，所有 session 共享一个（但要解决 `sessionRegistry`/`sessionId` binding）
+#### 9.5.5 未做：coordinator 进程级单例
 
-不要在没有真实瓶颈/路由错误证据前做这件事——但 P2 的 ProviderHealthTracker 重置是已知正确性问题，**优先级从原"低"上调到"中"**。
+更激进的优化：把 coordinator 也提到进程级，所有 session 共享一个。但需要解决：
+- sessionRegistry/sessionId binding（coordinator 内部用 sessionId 给 worker 命名）
+- worker pool maxWorkers 配额（per-session 配额 vs 进程级配额）
+- 跨 session worker 状态隔离（活动 worker 不能被其他 session 误中止）
+
+**不做**，除非 sidecar 多 session worker pool 资源浪费明显。
 
 ### 9.6 风险与监控
 
@@ -517,7 +556,7 @@ Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，**swi
 - ~~**`new PlaybookStore(cwd)` 重复构造**~~ — **Wave C-followup P1 已解决**：SessionStores 接口移除 playbookStore，createAgentRuntime 内部自管。详情见 §8.7。
 - **`POST /prompt` 4xx 响应**——桌面前端需要处理新增的 400 状态码（`Unknown slash command`），目前只是返回 JSON 错误。若 desktop client 没有 4xx 错误展示，slash typo 用户感知会是"提交失败"而非具体错误——desktop 端 UI 可以追加 4xx body 的 toast 提示。
 - **sidecar 多 session 下装配开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 重复构造。监控指标：sidecar RSS / fd 数 / boot-to-ready 延迟。撞到瓶颈走 Wave J（§9.5）。
-- **ProviderHealthTracker switchModel 重置（审查 P2）**——已并入 Wave J（§9.5.2）。冷层路由失据导致 worker 误路由的概率随 switchModel 频率上升；监控指标：worker 失败率 vs switchModel 计数。
+- ~~**ProviderHealthTracker switchModel 重置（审查 P2）**~~ — **Wave J 已解决**（§8.10）：sidecar SharedRuntime.providerHealth 进程级单例，跨 session/switchModel 持久。TUI 路径未改（单 session 影响有限），如未来需对齐可让 bootstrapInteractiveSession 自缓存一份。
 - ~~**TUI switchAgentRuntime 同样有 coordinator 泄漏**（P0 同源）~~ — **Wave K 已解决**（§8.8）：TUI `switchAgentRuntime` / `switchAgentSession` + `createShutdownHandler` 三处同步加 `coordinator.shutdown()`。
 - ~~**sidecar `runServe.close` 未显式调 coordinator.shutdown**~~ — **Wave L 已解决**（§8.9）：`ManagedAgent.shutdown` + `RuntimeSessionManager.shutdownAll` + `runServe.close` 调 shutdownAll，双侧 coordinator 生命周期管理完全一致。
 

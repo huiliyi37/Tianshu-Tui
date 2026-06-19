@@ -42,6 +42,7 @@ import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, 
 import { createRecallTool } from '../tools/recall.js'
 import { createRememberTool } from '../tools/remember.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
+import { ProviderHealthTracker } from '../agent/provider-health.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
 
 export interface ServeContext {
@@ -85,6 +86,33 @@ export function resolveServeContext(loader: () => Config = loadConfig): ServeCon
 export interface BuiltAgent {
   agent: AgentLoop
   sessionId: string
+}
+
+/**
+ * Wave J: sidecar 级共享运行时状态——跨 session + switchModel 保持，避免
+ * createAgentRuntime per-call new 导致状态丢失。`runServe` 顶层创建一份，
+ * 透传给每个 buildManagedAgent / assembleAgentLoop。
+ *
+ * 当前共享对象：
+ * - providerHealth: 进程级单例，所有 session 共享 provider 健康统计
+ *   （registerProvider 幂等，重复注册不重置）
+ * - domainStores: cwd-keyed 缓存，同 cwd 多 session 复用同一个磁盘绑定的
+ *   DomainKnowledgeStore（避免重复 load + 跨 session lessons 可见）
+ *
+ * 未来候选：bandit gates evaluation 结果缓存（避免 switchModel 重算）。
+ */
+export interface SharedRuntime {
+  providerHealth: ProviderHealthTracker
+  domainStores: Map<string, DomainKnowledgeStore>
+}
+
+/** sidecar 内部：按 cwd 取/建 DomainKnowledgeStore，多 session 共享同一实例。 */
+function getOrCreateDomainStore(shared: SharedRuntime, cwd: string): DomainKnowledgeStore {
+  const existing = shared.domainStores.get(cwd)
+  if (existing) return existing
+  const store = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
+  shared.domainStores.set(cwd, store)
+  return store
 }
 
 /**
@@ -258,10 +286,14 @@ function assembleAgentLoop(
   spec: ResolvedModelSpec,
   approvalMode: ApprovalMode | undefined,
   registry?: SessionRegistry,
+  shared?: SharedRuntime,
 ): AgentLoop {
-  // sidecar 每个 session 一份 DomainKnowledgeStore（与 bootstrap 单 session 行为
-  // 一致；同 cwd 多 session 共享磁盘存储，内存实例独立）。
-  const domainKnowledgeStore = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
+  // Wave J: domainKnowledgeStore 优先从 sidecar SharedRuntime.domainStores
+  // 按 cwd 取；fallback 是 per-call new（与 bootstrap 单 session 行为一致——
+  // 用于 buildAgentLoop legacy /prompt 路径未传 shared 的情况）。
+  const domainKnowledgeStore = shared
+    ? getOrCreateDomainStore(shared, cwd)
+    : new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
 
   // sessionRegistry 透传：bootstrap.createAgentRuntime 通过 refs.sessionRegistry
   // 间接接到 AgentLoop，所以在调装配前先回写 refs（buildSessionStores 已经接收
@@ -283,6 +315,9 @@ function assembleAgentLoop(
     domainKnowledgeStore,
     modelId: spec.model.id,
     session: stores.session,
+    // Wave J: 跨 session 复用 ProviderHealthTracker，让 switchModel 不丢
+    // provider 健康累积；coordinator 冷层路由有正确依据。
+    sharedProviderHealth: shared?.providerHealth,
   })
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
@@ -311,6 +346,7 @@ export function buildAgentLoop(
   sessionId: string = randomUUID(),
   registry?: SessionRegistry,
   approvalMode?: ApprovalMode,
+  shared?: SharedRuntime,
 ): BuiltAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry)
   const spec: ResolvedModelSpec = {
@@ -324,7 +360,7 @@ export function buildAgentLoop(
       reasoningEffort: ctx.model.reasoningEffort,
     },
   }
-  const agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+  const agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return { agent, sessionId }
 }
 
@@ -341,6 +377,7 @@ function buildManagedAgent(
   sessionId: string,
   registry: SessionRegistry | undefined,
   approvalMode: ApprovalMode | undefined,
+  shared?: SharedRuntime,
 ): import('./session-manager.js').ManagedAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry)
   let spec: ResolvedModelSpec = {
@@ -354,7 +391,7 @@ function buildManagedAgent(
       reasoningEffort: ctx.model.reasoningEffort,
     },
   }
-  let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+  let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return {
     run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
     abort: () => agent.abort(),
@@ -378,12 +415,14 @@ function buildManagedAgent(
     // providerHealth/runtimeFactory，但旧 coordinator 的 stallSweep 定时器与
     // 在途 worker AbortController 仍持有句柄。sidecar 长驻进程 + 频繁
     // switchModel 会累积泄漏。先 capture old，装新后调 shutdown 释放。
+    // Wave J: 透传 shared 让 switchModel 后仍复用 providerHealth/domainStore，
+    // 健康数据不丢、knowledge 不重 load。
     switchModel: (modelId) => {
       const next = resolveModelSpec(ctx, modelId)
       if (!next) return null
       const oldCoordinator = stores.refs.coordinator
       spec = next
-      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry)
+      agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
       if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
         try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
       }
@@ -464,13 +503,21 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
           join(homedir(), '.rivet', 'desktop', 'sessions'),
       )
 
+  // Wave J: sidecar 级 SharedRuntime——providerHealth 跨 session 共享让
+  // health 统计累积；domainStores 按 cwd 缓存避免重复磁盘 load + 跨 session
+  // lessons 可见。runServe 进程级单例，传给每个 buildManagedAgent。
+  const sharedRuntime: SharedRuntime = {
+    providerHealth: new ProviderHealthTracker(),
+    domainStores: new Map(),
+  }
+
   // Multi-session manager (M0.5): each session is an independent AgentLoop,
   // adapted to the manager's ManagedAgent surface (run/abort + artifacts). The
   // manager's session id is threaded into buildAgentLoop so the agent's stores
   // align with the session.
   const sessions = new RuntimeSessionManager({
     createAgent: (cwd, sessionId, approvalMode) =>
-      buildManagedAgent(ctx, cwd ?? process.cwd(), sessionId ?? randomUUID(), sessionRegistry, approvalMode),
+      buildManagedAgent(ctx, cwd ?? process.cwd(), sessionId ?? randomUUID(), sessionRegistry, approvalMode, sharedRuntime),
     defaultCwd: process.cwd(),
     persistence,
     // R1 — late-bound getter: registry resolves async after server start.
@@ -494,7 +541,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   const routes = createRoutes(state, {
     createAgent: () => {
-      const { agent, sessionId } = buildAgentLoop(ctx, process.cwd())
+      // Wave J: legacy /prompt 路径同样复用 sharedRuntime——避免与
+      // /sessions/:id/prompt 路径间健康统计不一致。
+      const { agent, sessionId } = buildAgentLoop(ctx, process.cwd(), undefined, undefined, undefined, sharedRuntime)
       activeAgents.add(agent)
       activeAgent = agent
       state.running = true

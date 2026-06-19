@@ -516,6 +516,13 @@ export function createAgentRuntime(deps: {
   domainKnowledgeStore: DomainKnowledgeStore
   modelId?: string
   session: SessionContext
+  /**
+   * Wave J: 可选共享 ProviderHealthTracker。sidecar 多 session + switchModel
+   * 频繁场景下，per-call new 会丢失累积的 provider 健康统计（成功率/延迟），
+   * coordinator 的冷层路由跳过逻辑失据。传入共享实例后，registerProvider
+   * 幂等不会重置已有状态。TUI 单 session 路径不传，保持原行为。
+   */
+  sharedProviderHealth?: ProviderHealthTracker
 }): { agent: AgentLoop } {
   const {
     provider, apiKey, auth, config, sessionId, cwd,
@@ -580,7 +587,10 @@ export function createAgentRuntime(deps: {
 
   // Physarum provider health: shared between main loop (sensorium stability)
   // and coordinator (cold-tier routing skip). Stream outcomes feed weights.
-  const providerHealth = new ProviderHealthTracker()
+  // Wave J: sidecar 可传 sharedProviderHealth 让 health 数据跨 session +
+  // switchModel 持久（registerProvider 幂等不重置已有状态）；TUI 不传则保持
+  // per-call new 的原行为（单 session 进程影响有限）。
+  const providerHealth = deps.sharedProviderHealth ?? new ProviderHealthTracker()
   providerHealth.registerProvider(provider.name)
   if (workerRouting?.providers) {
     for (const name of Object.keys(workerRouting.providers)) providerHealth.registerProvider(name)
