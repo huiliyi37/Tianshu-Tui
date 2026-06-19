@@ -244,7 +244,7 @@ describe('formatThinking', () => {
     assert.ok(stripAnsi(lines[0]!).includes('凝思中…'), 'has status header')
   })
 
-  it('shows truncation hint when text exceeds maxLines', () => {
+  it('shows truncation hint above the tail when text exceeds maxLines', () => {
     const long = Array.from({ length: 20 }, (_, i) => `think line ${i}`).join('\n')
     const lines = formatThinking({
       text: long,
@@ -253,11 +253,31 @@ describe('formatThinking', () => {
       maxLines: 5,
     }, theme)
     const plain = lines.map(stripAnsi)
-    assert.ok(plain.some(l => l.includes('+15 more lines')), `truncation hint missing: ${plain.join('|')}`)
+    const hintIdx = plain.findIndex(l => l.includes('上方省略 15 行'))
+    assert.ok(hintIdx >= 0, `truncation hint missing: ${plain.join('|')}`)
     assert.ok(plain.some(l => l.includes('think line 15')), 'tail of last 5 visible')
     assert.ok(!plain.some(l => l.includes('think line 3')), 'line 3 hidden (not in last 5 of 20)')
-    // Status line still counts
+    // Hint sits ABOVE the visible tail (hidden lines preceded), not below it.
+    const tailIdx = plain.findIndex(l => l.includes('think line 15'))
+    assert.ok(hintIdx < tailIdx, 'truncation hint must appear above the tail')
+    // Status line still first
     assert.ok(plain[0]!.includes('凝思中…'))
+  })
+
+  it('done: header uses past-tense 已推理 for committed scrollback', () => {
+    const lines = formatThinking({
+      text: 'reasoning\nanalysis\nconclusion',
+      elapsedMs: 8000,
+      done: true,
+      expanded: false,
+    }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.equal(plain.length, 1, 'collapsed commit is a single summary line')
+    assert.ok(plain[0]!.includes('已推理'), 'past-tense header')
+    assert.ok(plain[0]!.includes('8s'), 'elapsed in summary')
+    assert.ok(plain[0]!.includes('3 行'), 'line count in summary')
+    assert.ok(!plain[0]!.includes('凝思中'), 'no present-tense wording on a finished block')
+    assert.ok(!plain.some(l => l.includes('reasoning')), 'body not written when expanded:false')
   })
 
   it('header + expanded produce full block for scrollback', () => {

@@ -14,7 +14,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ReadStream, WriteStream } from 'node:tty'
 import { TuiApp } from '../app.js'
-import { MockOut, MockIn } from './_harness.js'
+import { MockOut, MockIn, stripAnsi } from './_harness.js'
 
 function makeApp() {
   const out = new MockOut(120, 24)
@@ -28,6 +28,7 @@ function makeApp() {
 }
 
 const tick = () => new Promise(r => setTimeout(r, 10))
+const microtask = () => Promise.resolve().then(() => {})
 
 interface AppState {
   state: { phase: string; isStreaming: boolean; isThinking: boolean }
@@ -90,6 +91,34 @@ test('abort → idle 复位 + streaming 残留清除', async () => {
   const s = (app as unknown as AppState).state
   assert.equal(s.phase, 'idle', 'abort 后 phase 应回 idle')
   assert.equal(s.isStreaming, false, 'abort 后 isStreaming 应回 false')
+})
+
+test('thinking delta 默认显示推理正文（无需 Ctrl+T 展开）', async () => {
+  // 回归守卫：thinkingExpanded 默认 true + 渲染门槛不再要求展开。
+  // 若有人把默认改回折叠（如 bug 9755c29a 之前），此测试拦截。
+  const { app, out } = makeApp()
+  out.clear()
+  app.callbacks.onThinkingDelta('推理甲行\n推理乙行')
+  await microtask()
+  await tick()
+  const rendered = stripAnsi(out.chunks.join(''))
+  assert.ok(rendered.includes('推理甲行'), `默认应渲染推理正文，实际: ${rendered.slice(0, 200)}`)
+})
+
+test('thinking → tool use 时 commit 折叠为「已推理」摘要', async () => {
+  // collapse-on-commit：流式期显示全文，提交到 scrollback 只留一行过去式摘要。
+  const { app, out } = makeApp()
+  const body = Array.from({ length: 12 }, (_, i) => `推理行${i}`).join('\n')
+  app.callbacks.onThinkingDelta(body)
+  await microtask()
+  await tick()
+  out.clear()
+  app.callbacks.onToolUse('t1', 'grep', { pattern: 'x' })
+  await microtask()
+  await tick()
+  const committed = stripAnsi(out.chunks.join(''))
+  assert.ok(committed.includes('已推理'), `commit 应含「已推理」摘要，实际: ${committed.slice(0, 200)}`)
+  assert.ok(!committed.includes('推理行5'), 'collapse-on-commit：正文行不写入 scrollback')
 })
 
 test('两轮 turn 间 streaming 状态不泄露', async () => {

@@ -2100,14 +2100,22 @@ export class TuiApp {
     }
   }
 
-  /** 将 thinking 文本 commit 到 scrollback（保留内部状态） */
+  /**
+   * 将 thinking 文本 commit 到 scrollback（保留内部状态）。
+   *
+   * collapse-on-commit：流式期已完整显示推理，turn 结束只在 scrollback 留一行
+   * 过去式摘要「✶ 已推理 · Ns · N 行」，避免啰嗦推理逐轮堆满历史。终端 scrollback
+   * 是只读追加的，无法像桌面端那样回溯折叠已打印的行，故在 commit 时即收敛为摘要。
+   */
   private commitThinkingToScrollback(): void {
+    if (!this.state.thinkingText) return
     const formatted = formatThinking({
       text: this.state.thinkingText,
       elapsedMs: Date.now() - this.state.thinkStartMs,
-      expanded: true,
-      maxLines: 60,
+      done: true,
+      expanded: false,
     }, this.theme)
+    if (formatted.length === 0) return
     this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
   }
 
