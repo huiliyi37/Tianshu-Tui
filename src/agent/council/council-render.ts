@@ -49,3 +49,19 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
 
   return lines.join('\n')
 }
+
+/**
+ * 紧凑议事摘要 —— 给 TUI 工具卡 uiContent 用（卡片默认仅展示前 4 行，全文
+ * markdown 仍走 content 供 model 原样 echo）。纯函数、确定性。
+ */
+export function summarizeCouncilPlan(plan: CouncilPlan): string {
+  const d = plan.aggregate.decisions
+  const accepted = d.filter(x => x.verdict === 'accepted').length
+  const rejected = d.filter(x => x.verdict === 'rejected').length
+  const deferred = d.filter(x => x.verdict === 'deferred').length
+  return [
+    `议事会 · ${plan.seats.length} 席单轮 · ${plan.objective}`,
+    `裁决: 接受 ${accepted} · 拒绝 ${rejected} · 暂缓 ${deferred} · 冲突 ${plan.aggregate.conflicts.length}`,
+    `最终任务 ${plan.aggregate.mergedItems.length} 项`,
+  ].join('\n')
+}

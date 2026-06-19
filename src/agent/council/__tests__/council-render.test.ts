@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { renderCouncilPlan } from '../council-render.js'
+import { renderCouncilPlan, summarizeCouncilPlan } from '../council-render.js'
 import { aggregateCouncil } from '../council-plan.js'
 import type { CouncilPlan, CouncilDraft, SeatContribution } from '../council-plan.js'
 
@@ -35,5 +35,20 @@ describe('renderCouncilPlan', () => {
   })
   it('确定性：两次渲染字节相等', () => {
     assert.equal(renderCouncilPlan(makePlan()), renderCouncilPlan(makePlan()))
+  })
+})
+
+describe('summarizeCouncilPlan', () => {
+  it('紧凑摘要含席位数/objective/裁决计数/任务数,且 ≤4 行(工具卡阈值)', () => {
+    const summary = summarizeCouncilPlan(makePlan())
+    const linesCount = summary.split('\n').length
+    assert.ok(linesCount <= 4, `摘要 ${linesCount} 行超过工具卡 4 行预览阈值`)
+    assert.match(summary, /2 席单轮/)
+    assert.match(summary, /mission X/)
+    assert.match(summary, /接受 \d+ · 拒绝 \d+ · 暂缓 \d+/)
+    assert.match(summary, /最终任务 \d+ 项/)
+  })
+  it('确定性：两次摘要字节相等', () => {
+    assert.equal(summarizeCouncilPlan(makePlan()), summarizeCouncilPlan(makePlan()))
   })
 })

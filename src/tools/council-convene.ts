@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { runCouncil, type CouncilDeps } from '../agent/council/council-orchestrator.js'
+import { summarizeCouncilPlan } from '../agent/council/council-render.js'
 import type { CouncilSeat, CouncilRoutingShadowEvent } from '../agent/council/council-routing.js'
 import { isCouncilEnabled } from '../agent/council/council-gate.js'
 import { buildCouncilSessionEvent, type CouncilSessionEvent } from '../agent/council/council-telemetry.js'
@@ -137,7 +138,9 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
         }
       }
 
-      return { content: plan.finalPlanMarkdown, isError: false }
+      // content: 全文议事记录 markdown(进 model 上下文,供其原样 echo 给用户)。
+      // uiContent: 紧凑裁决摘要 —— 工具卡默认仅展示前 4 行,避免裸 markdown 被截成无意义片段。
+      return { content: plan.finalPlanMarkdown, uiContent: summarizeCouncilPlan(plan), isError: false }
     },
     requiresApproval: () => false,
     isConcurrencySafe: () => false,

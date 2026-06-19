@@ -166,6 +166,22 @@ describe('resolveAppPromptInput', () => {
     assert.ok(resolved.includes('multi-perspective planning'))
     assert.ok(resolved.includes('risk audit'))
   })
+
+  it('resolves /council into a council_convene workflow prompt', async () => {
+    const resolved = resolveAppPromptInput('/council 拆分 loop.ts 是否遗漏回滚', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('星域议事会'))
+    assert.ok(resolved.includes('council_convene'))
+    assert.ok(resolved.includes('拆分 loop.ts 是否遗漏回滚'))
+    assert.ok(resolved.includes('绝不触发 team_orchestrate'))
+  })
+
+  it('returns council usage prompt for empty /council args', async () => {
+    const resolved = resolveAppPromptInput('/council', '/cwd')
+    assert.ok(resolved !== null)
+    assert.ok(resolved!.includes('Council usage:'))
+  })
 })
 
 describe('handleSlashCommand', () => {

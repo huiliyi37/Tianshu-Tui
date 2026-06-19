@@ -133,6 +133,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/interview', description: 'Deep interview to clarify requirements' },
     { name: '/team', description: 'Run team-mode workflow skeleton' },
     { name: '/team max', description: 'Run team-mode planning-first workflow' },
+    { name: '/council', description: 'Convene a single-round star-domain council (multi-perspective plan review)' },
     { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
     { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
     { name: '/plan-mode', description: 'Enter plan authoring mode (write operations blocked)' },

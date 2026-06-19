@@ -28,9 +28,14 @@ export interface TeamWorkflowPromptOptions {
   objective: string
 }
 
+export interface CouncilWorkflowPromptOptions {
+  objective: string
+}
+
 const WRITING_PLAN_COMMANDS = new Set(['/plan', '/write-plan'])
 const PLAN_CLOSE_COMMANDS = new Set(['/plan-close'])
 const TEAM_COMMANDS = new Set(['/team'])
+const COUNCIL_COMMANDS = new Set(['/council'])
 
 export function isWritingPlanCommand(command: string): boolean {
   return WRITING_PLAN_COMMANDS.has(command.toLowerCase())
@@ -315,6 +320,28 @@ export function parseTeamWorkflowArgs(args: string): TeamWorkflowPromptOptions |
   return { mode: 'standard', objective: trimmed }
 }
 
+export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题>'
+
+export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOptions | null {
+  const objective = args.trim()
+  return objective ? { objective } : null
+}
+
+export function buildCouncilWorkflowPrompt(options: CouncilWorkflowPromptOptions): string {
+  const objective = options.objective.trim()
+  return `我正在使用 /council 发起星域议事会——多星域单轮对抗评审,只出计划不执行。
+
+评审主题:
+${objective}
+
+执行契约:
+- 用户已显式发起议事会;不要再问是否使用,直接调用 council_convene 工具。
+- 调用 council_convene 工具,参数 { objective: "${objective}" };席位用默认配置(天权 方案权衡 · 天府 风险守护 · 天璇 跨域反证),无需自行指定 seats。
+- 这是单轮会诊:扇出席位 → 确定性裁决 → 产出议事记录。绝不触发 team_orchestrate 或任何执行链。
+- council_convene 返回的议事记录(席位贡献 / 裁决记录 / 冲突 / 最终任务表)直接原样呈现给用户,不要二次概括或改写。
+- 议事会只负责出计划。是否推进执行由用户后续决定(可再用 /team 执行产出的计划)。`
+}
+
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {
   const parsed = parseSlashInput(input)
   if (!parsed) return null
@@ -322,6 +349,11 @@ export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Dat
   if (TEAM_COMMANDS.has(parsed.command)) {
     const team = parseTeamWorkflowArgs(parsed.args)
     return { command: parsed.command, prompt: team ? buildTeamWorkflowPrompt(team) : TEAM_USAGE }
+  }
+
+  if (COUNCIL_COMMANDS.has(parsed.command)) {
+    const council = parseCouncilWorkflowArgs(parsed.args)
+    return { command: parsed.command, prompt: council ? buildCouncilWorkflowPrompt(council) : COUNCIL_USAGE }
   }
 
   if (PLAN_CLOSE_COMMANDS.has(parsed.command)) {

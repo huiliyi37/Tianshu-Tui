@@ -75,6 +75,7 @@ const HELP_TEXT = `Available commands:
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
+/council <task> — Convene a single-round star-domain council to review a plan
 /review — Manually trigger L2 review (single adversarial verifier) on current changes via deliver_task
 /review max — Manually trigger L3 review (Review Squadron, 5 inspectors) on current changes via deliver_task
 (auto: every non-trivial deliver_task commit runs a single Wiring inspector — short budget, never blocks on infra failure)
@@ -345,6 +346,15 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     case '/team': {
       if (!parts.slice(1).join(' ').trim()) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /team <task|docs/superpowers/plans/file.md>\n       /team max <task>' }))
+        setIsStreaming(false)
+        return true
+      }
+      return false
+    }
+
+    case '/council': {
+      if (!parts.slice(1).join(' ').trim()) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题>' }))
         setIsStreaming(false)
         return true
       }

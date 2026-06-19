@@ -76,6 +76,11 @@ describe('council_convene 工具', () => {
       assert.equal(r.profile, 'council_expert')
     }
     assert.match(res.content, /议事会计划/)
+    // uiContent: 工具卡紧凑摘要（≤4 行），全文 markdown 仍在 content。
+    assert.ok(res.uiContent, 'council_convene 应返回 uiContent 紧凑摘要')
+    assert.ok(res.uiContent!.split('\n').length <= 4)
+    assert.match(res.uiContent!, /议事会 · \d+ 席单轮/)
+    assert.notEqual(res.uiContent, res.content)
   })
 
   it('解耦：扇出请求绝不携带写/执行语义（kind 全 plan，无 patch/verify）', async () => {

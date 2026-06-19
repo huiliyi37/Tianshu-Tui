@@ -109,6 +109,25 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(resolved?.prompt.includes('Team usage:'))
   })
 
+  it('resolves /council into a council_convene workflow prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council 拆分 loop.ts 的方案是否遗漏回滚')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('星域议事会'))
+    assert.ok(resolved?.prompt.includes('council_convene'))
+    assert.ok(resolved?.prompt.includes('拆分 loop.ts 的方案是否遗漏回滚'))
+    assert.ok(resolved?.prompt.includes('只出计划不执行'))
+    // 解耦:议事会 prompt 不得诱导 model 走 team 执行链。
+    assert.ok(resolved?.prompt.includes('绝不触发 team_orchestrate'))
+  })
+
+  it('returns usage prompt for empty /council args', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('Council usage:'))
+  })
+
   it('resolves /plan close into a plan_close tool prompt', () => {
     const resolved = resolveEcosystemWorkflowInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7 --verified npx tsc --noEmit --delivery YELLOW --note external files present')
 
