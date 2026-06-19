@@ -270,7 +270,7 @@ export class TuiApp {
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
-    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: 20 })
+    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: 28 })
     this.overlay = new OverlayEngine({
       stdout: options.stdout,
       getSize: () => ({ cols: this.columns, rows: this.rows }),
@@ -2047,22 +2047,29 @@ export class TuiApp {
                     color(chars.tr, borderColor)
       }
 
-      const MAX_INPUT_DISPLAY_LINES = 8
+      const MAX_INPUT_DISPLAY_LINES = 12
+      const arrowColor = this.theme.success
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES })
-        : [`〉 █${color(this.inputLine.placeholder, this.theme.dim)}`]
+        : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
+
+      /** 着色输入行：光标行前缀 〉 涂 success 绿，其余保持原样 */
+      const colorizeInputLine = (raw: string): string => {
+        if (raw.startsWith('〉 ')) return color('〉', arrowColor) + ' ' + raw.slice(2)
+        return raw
+      }
 
       lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        const firstLine = truncateToWidth(`-- NORMAL -- ${inputLines[0] ?? ''}`, innerWidth)
+        const firstLine = truncateToWidth(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth)
         lines.push({ text: `${leftBar}${firstLine}${' '.repeat(Math.max(0, innerWidth - stringWidth(firstLine)))}${rightBar}` })
         for (const extra of inputLines.slice(1)) {
-          const t = truncateToWidth(extra, innerWidth)
+          const t = truncateToWidth(colorizeInputLine(extra), innerWidth)
           lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
         }
       } else {
         for (const inputDisplayLine of inputLines) {
-          const t = truncateToWidth(inputDisplayLine, innerWidth)
+          const t = truncateToWidth(colorizeInputLine(inputDisplayLine), innerWidth)
           lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
         }
       }

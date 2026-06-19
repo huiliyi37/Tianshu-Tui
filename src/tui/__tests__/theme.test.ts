@@ -19,7 +19,7 @@ describe('getTheme', () => {
     const theme = getTheme(3)
     assert.equal(theme.userColor, '#e6ecf2')      // 冷调亮白 ▌ mark
     assert.equal(theme.assistantColor, '#bdc3ca') // 冷中性灰正文
-    assert.equal(theme.muted, '#8c939a')          // 元信息灰
+    assert.equal(theme.muted, '#9ca5b3')          // 元信息灰 (提亮，深色背景不疲劳)
     assert.equal(theme.pulseActive, '#61aef4')    // 钴蓝 active pulse
   })
 

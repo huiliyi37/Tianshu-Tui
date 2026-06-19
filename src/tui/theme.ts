@@ -339,7 +339,7 @@ const COBALT_TRUECOLOR: ColorSet = {
   success: '#58cbb4',   // 青绿 — 测试通过/完成 (--tui-ok, teal-green 偏冷)
   warning: '#e0c071',   // 冷琥珀 — 注意/委派 (--tui-warn)
   error: '#ed7665',     // 珊瑚砖红 — 错误/高风险 (--tui-err, 去糖果感)
-  dim: '#6f757c',       // 冷板岩灰 — 分隔/快捷键 (--tui-dim, 安静可见)
+  dim: '#8590a0',       // 冷板岩灰 — 分隔/快捷键 (提亮 ~6:1，深色背景不疲劳)
   pulseQuiet: '#30363d', // 冷边框灰 — quiet pulse (--tui-border)
   pulseActive: '#61aef4', // 钴蓝 — active pulse (= primary)
   pulseAlert: '#ed7665',  // 珊瑚 — alert pulse (= error)
@@ -484,7 +484,7 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     // userColor = 冷调亮白 ▌ 标记 (--tui-bright)，不抢 accent 钴蓝
     // assistantColor = 冷中性灰正文 (--tui-fg)，降眩光不疲劳
     // muted = 元信息灰 (--tui-label)
-    truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#bdc3ca', muted: '#8c939a' }),
+    truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#bdc3ca', muted: '#9ca5b3' }),
     fallback: buildTheme(COBALT_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
   },
   gemini: {
