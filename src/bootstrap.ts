@@ -872,6 +872,11 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
       try { ctx.refs.lspManager?.dispose() } catch { /* best-effort */ }
       try { ctx.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
       void ctx.refs.mcpManager?.shutdown?.()
+      // Wave K (P0): clear stallSweep interval + abort in-flight workers.
+      // 进程退出时 OS 会回收，但显式 shutdown 让语义清晰、并对齐 sidecar 的
+      // switchModel 路径。同时让 unit test 退出更干净（unref 的 timer 不必依赖
+      // process 真退出来释放）。
+      try { ctx.refs.coordinator?.shutdown() } catch { /* best-effort */ }
       if (process.stdin.isTTY && process.stdin.setRawMode) {
         process.stdin.setRawMode(false)
       }
@@ -930,6 +935,13 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
       }
     }
 
+    // Wave K (P0 同源修复): createAgentRuntime 内部会 new DelegationCoordinator
+    // 写入 refs.coordinator，旧 coordinator 被覆盖但其 stallSweep 定时器与在途
+    // worker AbortController 仍在持有句柄。TUI 单 session 进程 + switch 频率低，
+    // 影响有限——但与 sidecar 同源 (serve.ts 已修)，一并对齐避免长会话切换密集
+    // 场景累积泄漏。
+    const oldCoordinator = ctx.refs.coordinator
+
     const { agent } = createAgentRuntime({
       provider,
       apiKey,
@@ -952,6 +964,11 @@ export function switchAgentRuntime(ctx: BootstrapContext, modelId: string): Swit
     ctx.provider = provider
     ctx.apiKey = apiKey
     ctx.auth = auth
+
+    // 同一身份判等防御：若装配未实际替换 coordinator（理论不该发生），不动旧的。
+    if (oldCoordinator && oldCoordinator !== ctx.refs.coordinator) {
+      try { oldCoordinator.shutdown() } catch { /* best-effort: shutdown is fail-open */ }
+    }
 
     // 持久化切换：metadata.model/provider 反映当前模型（会话恢复/列表显示用），
     // 并在 JSONL 落一条审计事件（每次切换可溯源）。best-effort，不阻塞切换。
@@ -1013,6 +1030,10 @@ export function switchAgentSession(ctx: BootstrapContext, targetId: string): Swi
   try { ctx.agent.stigmergyStore.flushSync() } catch { /* best-effort */ }
 
   const oldId = ctx.sessionId
+  // Wave K (P0 同源修复): 与 switchAgentRuntime 同源——createAgentRuntime 会
+  // new DelegationCoordinator 写入 refs.coordinator，需在装新后关闭旧的避免
+  // stallSweep 定时器 + 在途 worker 句柄泄漏。
+  const oldCoordinator = ctx.refs.coordinator
 
   // 整体重建 AgentLoop —— 构造函数内部按 targetId 重建子系统并重挂持久化监听。
   const { agent } = createAgentRuntime({
@@ -1038,6 +1059,11 @@ export function switchAgentSession(ctx: BootstrapContext, targetId: string): Swi
   ctx.sessionId = targetId
   ctx.refs.sessionId = targetId
   ctx.refs.promptEngine = agent.config.promptEngine
+
+  // 同一身份判等防御：装配实际替换 coordinator 才关旧的。
+  if (oldCoordinator && oldCoordinator !== ctx.refs.coordinator) {
+    try { oldCoordinator.shutdown() } catch { /* best-effort */ }
+  }
 
   // 载入历史 —— 新 AgentLoop 的持久化监听会把 replace 镜像回 targetPersist。
   ctx.session.replaceMessages(preflight.messages)

@@ -1,12 +1,13 @@
 # 桌面端 TUI 工作流缺口 — 诊断报告
 
-> 状态：ACTIVE — 2026-06-19 诊断快照 + 三轮修复 + 审查后修复
+> 状态：ACTIVE — 2026-06-19 诊断快照 + 四轮修复 + 审查后修复
 > 性质：审计文档 + 实施进度（§1-§7 为修复前历史快照，§8-§9 为本轮落地与遗留）
 > 战略原则：「两边一样，但不是一定要一致——需要什么拿什么」
 > 关联：同构于 `review-delivery-workflow-audit.md`，但范围扩大到全部 slash 工作流
 > **更新 1（2026-06-19 14:30）** — Wave A（13 工具注册）+ Wave E（slash 翻译层）已落地。
 > **更新 2（2026-06-19 15:00）** — Wave C（DelegationCoordinator 装配）已落地，所有占位工具激活；agent 工具能力与 TUI 完全等价。详情见 §8.5。
 > **更新 3（2026-06-19 15:20）** — 代码审查发现 P0/P1 已修：coordinator.shutdown() 防泄漏 + SessionStores.playbookStore 死字段清理。详情见 §8.7。P2/P3 列入遗留 Wave。
+> **更新 4（2026-06-19 15:30）** — Wave K 已落地：TUI switchAgentRuntime/switchAgentSession + createShutdownHandler 同步 P0 修复，coordinator 泄漏在双侧（sidecar + TUI）一致闭环。详情见 §8.8。
 
 ---
 
@@ -376,6 +377,32 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 - **P2 ProviderHealthTracker switchModel 重置** — 跨 TUI/sidecar 重构，列入 Wave J（§9.5）扩充说明
 - **P3 sameCwdRunningSessions 硬编码** — 早在 Wave F（§9.1）列出，本次审查再次确认严重性（多 session 冲突检测失效），不改变优先级
 
+### 8.8 Wave K — TUI 路径同步 P0 修复（2026-06-19 15:30）
+
+**问题**：Wave C-followup 只修了 sidecar `switchModel` 的 coordinator 泄漏。审查报告 §9.6 同时指出 TUI bootstrap 的 `switchAgentRuntime` / `switchAgentSession` 路径有同源问题——TUI 单 session 频率低，长会话 + 频繁模型切换场景仍可能积累。本 Wave 一致修复。
+
+**改动**：
+
+1. [src/bootstrap.ts](src/bootstrap.ts) `switchAgentRuntime` (~L933) — 在调 `createAgentRuntime` 前 capture `oldCoordinator = ctx.refs.coordinator`，装新后调 `oldCoordinator.shutdown()`（同一身份判等防御，避免装配未实际替换时误清）。
+2. [src/bootstrap.ts](src/bootstrap.ts) `switchAgentSession` (~L1018) — 同模式：会话身份切换也整体重建 AgentLoop（含 coordinator），需同步关旧。
+3. [src/bootstrap.ts](src/bootstrap.ts) `createShutdownHandler` (~L879) — 在 `lspManager.dispose()` / `mcpManager.shutdown()` 之后追加 `ctx.refs.coordinator?.shutdown()`。进程退出时 OS 会回收，但显式 shutdown 让语义清晰，并对齐 sidecar；同时让 unit test 退出更干净（不依赖 process 真退出来释放 unref 的 timer）。
+
+**双侧一致性**：
+
+| 路径 | 触发点 | coordinator 旧→新切换 | 已修 |
+|------|--------|----------------------|:-:|
+| sidecar | `buildManagedAgent.switchModel` | capture old → assembleAgentLoop → old.shutdown | Wave C-followup (§8.7) |
+| TUI | `switchAgentRuntime` (模型切换) | capture old → createAgentRuntime → old.shutdown | Wave K |
+| TUI | `switchAgentSession` (会话恢复) | capture old → createAgentRuntime → old.shutdown | Wave K |
+| TUI | `createShutdownHandler` (进程退出) | 直接 coordinator.shutdown | Wave K |
+| sidecar | 进程退出 | （未做，sidecar runServe.close 走 sessions.abortAll，agent.abort 链式触发；coordinator.shutdown 不显式调）| 留 §9.6 监控 |
+
+**Wave K 验证**：
+
+- `tsc --noEmit` pass
+- bootstrap 1 + coordinator 5 = 6 个 test 文件、57 tests 全绿
+- cron-lock 两个并发测试在大批量并跑时偶发 flake——单独跑全过，与本 Wave 无关（已通过 stash 后 baseline 复现的 flake 模式确认）
+
 ---
 
 ## 9. 遗留与后续 Wave
@@ -464,7 +491,8 @@ Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，**swi
 - **`POST /prompt` 4xx 响应**——桌面前端需要处理新增的 400 状态码（`Unknown slash command`），目前只是返回 JSON 错误。若 desktop client 没有 4xx 错误展示，slash typo 用户感知会是"提交失败"而非具体错误——desktop 端 UI 可以追加 4xx body 的 toast 提示。
 - **sidecar 多 session 下装配开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 重复构造。监控指标：sidecar RSS / fd 数 / boot-to-ready 延迟。撞到瓶颈走 Wave J（§9.5）。
 - **ProviderHealthTracker switchModel 重置（审查 P2）**——已并入 Wave J（§9.5.2）。冷层路由失据导致 worker 误路由的概率随 switchModel 频率上升；监控指标：worker 失败率 vs switchModel 计数。
-- **TUI switchAgentRuntime 同样有 coordinator 泄漏**（P0 同源）—— Wave C-followup 只修了 sidecar，TUI 路径要修需动 bootstrap.ts；TUI 单 session 影响有限，但若做长会话切换密集场景测试也可能撞到。建议作为 Wave K（"TUI 路径同步 P0 修复"）独立处理。
+- ~~**TUI switchAgentRuntime 同样有 coordinator 泄漏**（P0 同源）~~ — **Wave K 已解决**（§8.8）：TUI `switchAgentRuntime` / `switchAgentSession` + `createShutdownHandler` 三处同步加 `coordinator.shutdown()`。
+- **sidecar `runServe.close` 未显式调 coordinator.shutdown**——sidecar 进程退出时走 `sessions.abortAll()` → `agent.abort()` 链式触发，但没有显式 coordinator.shutdown。短时影响有限（进程退出 OS 回收），但与 TUI 端 `createShutdownHandler` 已显式 shutdown 不对称。建议作为 Wave L（"sidecar 进程退出路径对齐 TUI shutdown"）轻量补齐。
 
 ### 9.7 文档维护
 
