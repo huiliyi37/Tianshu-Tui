@@ -6,7 +6,7 @@ import type { CouncilPlan, CouncilDraft, SeatContribution } from '../council-pla
 
 const draft: CouncilDraft = { objective: 'mission X', items: [{ id: 'T1', title: 'Task1', detail: 'd1' }] }
 const contributions: SeatContribution[] = [
-  { authority: 'tianquan', summary: '权衡完成', additions: [{ id: 'A1', title: 'addA', detail: 'detailA' }], risks: [], challenges: ['前提成立吗?'], alternatives: [{ proposal: '事件溯源', recommend: false, rationale: '成本过高' }] },
+  { authority: 'tianquan', summary: '权衡完成', additions: [{ id: 'A1', title: 'addA', detail: 'detailA' }], risks: [], challenges: ['前提成立吗?'], alternatives: [{ proposal: '事件溯源', recommend: false, rationale: '成本过高' }], modelUsed: 'deepseek-v4' },
   { authority: 'tianfu', summary: '风险审完', additions: [], risks: [{ claim: '缺回滚', severity: 'high', mitigation: '加 rollback', itemId: 'T1' }], challenges: [], alternatives: [] },
 ]
 function makePlan(): CouncilPlan {
@@ -32,6 +32,13 @@ describe('renderCouncilPlan', () => {
     const md = renderCouncilPlan(makePlan())
     assert.match(md, /\| A1 \| addA \| detailA \|/)
     assert.match(md, /\| T1 \| Task1 \| d1 \|/)
+  })
+  it('渲染模型信息（modelUsed）', () => {
+    const md = renderCouncilPlan(makePlan())
+    // 天权有 modelUsed → 含模型标注
+    assert.match(md, /模型: deepseek-v4/)
+    // 天府无 modelUsed → 不含
+    assert.ok(!md.includes('模型: undefined'))
   })
   it('确定性：两次渲染字节相等', () => {
     assert.equal(renderCouncilPlan(makePlan()), renderCouncilPlan(makePlan()))

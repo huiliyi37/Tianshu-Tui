@@ -21,7 +21,8 @@ export function renderCouncilPlan(plan: CouncilPlan): string {
 
   lines.push('## 席位贡献', '')
   for (const c of contributions) {
-    lines.push(`### ${c.authority}`, c.summary || '_（无摘要）_', '')
+    const modelSuffix = c.modelUsed ? ` _(模型: ${c.modelUsed})_` : ''
+    lines.push(`### ${c.authority}${modelSuffix}`, c.summary || '_（无摘要）_', '')
   }
 
   lines.push('## 裁决记录', '')

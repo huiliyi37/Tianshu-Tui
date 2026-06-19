@@ -105,13 +105,17 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       }))
 
       const deps: CouncilDeps = {
-        delegateBatch: async (requests, policy, signal) => {
-          const run = await coordinator.delegateBatch(requests as unknown as DelegationRequest[], policy, signal)
+        delegateBatch: async (requests, policy, signal, onProgress) => {
+          const run = await coordinator.delegateBatch(requests as unknown as DelegationRequest[], policy, signal, onProgress)
           return { results: run.results }
         },
         now: () => Date.now(),
         ...(coordinator.getSessionId ? { sessionId: coordinator.getSessionId() } : {}),
         ...(coordinator.recordRoutingShadow ? { recordRoutingShadow: coordinator.recordRoutingShadow } : {}),
+        // 实时进度：每席完成时通过工具流式输出推送到 UI。
+        onSeatProgress: params.onOutput
+          ? (seat, _status) => { params.onOutput?.(`♟ ${seat} 完成\n`) }
+          : undefined,
       }
 
       let plan

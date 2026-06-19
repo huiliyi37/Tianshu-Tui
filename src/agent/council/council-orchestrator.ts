@@ -22,6 +22,7 @@ export interface CouncilDeps {
     requests: CouncilFanoutRequest[],
     policy: 'all_required',
     signal?: AbortSignal,
+    onProgress?: (completed: number, total: number) => void,
   ) => Promise<{ results: WorkerResult[] }>
   /** 注入时钟，保持 aggregate 纯净、编排可测。 */
   now: () => number
@@ -29,6 +30,8 @@ export interface CouncilDeps {
   recordRoutingShadow?: (event: CouncilRoutingShadowEvent) => void
   /** shadow 归属会话 id（仅 recordRoutingShadow 在用）。 */
   sessionId?: string
+  /** 席位完成进度回调 —— 每席解析完成后触发一次。用于 UI 实时反馈。 */
+  onSeatProgress?: (seat: string, status: 'running' | 'done') => void
 }
 
 export interface CouncilInput {
@@ -111,7 +114,19 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
     }
   }
 
-  const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal)
+  const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal,
+    deps.onSeatProgress
+      ? (completed, total) => {
+          // Per-seat progress: delegateBatch fires onProgress once per finished
+          // worker. Fire onSeatProgress for each seat in order as they complete.
+          // Using completed-1 as index into seats (fanout starts all at once,
+          // completion order approximates seat arrival order).
+          const idx = completed - 1
+          if (idx >= 0 && idx < input.seats.length) {
+            deps.onSeatProgress?.(input.seats[idx]!.authority, 'done')
+          }
+        }
+      : undefined)
   const contributions = input.seats.map(seat => {
     const result = run.results.find(r => r.workOrderId === `council:seat-${seat.authority}`)
     return result ? parseSeatContribution(seat.authority, result) : { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
