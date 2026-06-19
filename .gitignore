@@ -50,3 +50,4 @@ docs/sessions/
 .tmp-iso-*
 .tmp-abort-*
 .tmp-test-fixture
+.test-tmp/
