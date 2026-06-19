@@ -886,6 +886,17 @@ export class PromptEngine {
   }
 
   /**
+   * Force the next context-update to be a full baseline. Call after history
+   * rewrite/compaction drops messages carrying prior context-update blocks —
+   * the model needs a fresh full snapshot because delta's "absent = unchanged"
+   * semantics rely on the history still being present.
+   */
+  resetAppendixBaseline(): void {
+    this.lastEmittedAppendixParts = new Map()
+    this.appendixBaselineSent = false
+  }
+
+  /**
    * Cache-event counters for cache-log breadcrumbs (P2-6).
    * Cumulative since engine creation — callers diff across turns.
    */

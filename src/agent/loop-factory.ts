@@ -358,7 +358,10 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     getPhaseHint: () => self.config.promptEngine.getPhaseHint(),
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getMessages: () => self.session.getMessages(),
-    replaceMessages: msgs => { self.session.replaceMessages(msgs) },
+    replaceMessages: msgs => {
+      self.session.replaceMessages(msgs)
+      self.config.promptEngine.resetAppendixBaseline()
+    },
     dietMessages: msgs => self.p3.dietMessages(msgs as any) as any,
     trySessionSplit: () => self.compaction.trySessionSplit(),
     maybeCompact: opts => self.compaction.maybeCompact(opts),

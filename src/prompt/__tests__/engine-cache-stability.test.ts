@@ -1012,3 +1012,44 @@ describe('frozen snapshot byte-identity under delta (task 5/7)', () => {
       'delta should not cause additional frozen fallback rebuilds')
   })
 })
+
+describe('resetAppendixBaseline after history rewrite (task 6/7)', () => {
+  it('resetAppendixBaseline forces next emit to be a full baseline', () => {
+    const engine = new PromptEngine({
+      model: 'test-model',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test', gitStatus: 'M src/foo.ts', rivetMd: '# Test' },
+      appendixDelta: true,
+    })
+
+    // Turn 1: baseline (seq=1)
+    engine.setDecisions(['decision one'])
+    engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+
+    // Turn 2: should be delta or self-closing (seq=2)
+    engine.buildOaiRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second' },
+    ])
+
+    // After reset: turn 3 should be a full baseline (seq=3, no mode="delta")
+    engine.resetAppendixBaseline()
+    const req3 = engine.buildOaiRequest([
+      { role: 'user', content: 'first' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'second' },
+      { role: 'assistant', content: 'ok2' },
+      { role: 'user', content: 'third' },
+    ])
+    // Find the message with context-update seq= (skip system prompt which has
+    // a static 'context-update-protocol' rule mentioning <context-update>)
+    const lastUser = req3.messages.filter(m => m.role === 'user').at(-1)!
+    const content3 = typeof lastUser.content === 'string' ? lastUser.content : ''
+    assert.match(content3, /<context-update seq="\d+">/, 'after reset, last user trailer should have full baseline with seq')
+    assert.ok(!content3.includes('mode="delta"'), 'after reset should NOT have mode="delta"')
+    assert.ok(content3.includes('decision one'), 'baseline should contain the decision content')
+  })
+})
+
