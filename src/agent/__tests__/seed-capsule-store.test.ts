@@ -7,6 +7,7 @@ import {
   loadAllCapsules,
   renderAllCapsulesBlock,
   renderCapsuleIndexBlock,
+  renderResidentCapsuleBlock,
   getCapsuleByStar,
   listCapsuleStars,
   clearCapsuleCache,
@@ -233,6 +234,23 @@ describe('renderAllCapsulesBlock', () => {
     assert.ok(block!.includes('天府方法'))
     // 天璇 comes first (earlier sealed date)
     assert.ok(block!.indexOf('天璇') < block!.indexOf('天府'))
+    cleanup()
+  })
+
+  it('renders bounded verification guardrail instead of unbounded exhaustive checking', () => {
+    const docsDir = join(tmpDir, 'docs')
+    mkdirSync(docsDir)
+    writeFileSync(join(docsDir, 'seed-capsule-tianxuan.md'), [
+      '<seed-capsule star="天璇" sealed="2026-05-21">',
+      '  天璇方法',
+      '</seed-capsule>',
+    ].join('\n'))
+
+    const block = renderResidentCapsuleBlock(tmpDir)
+    assert.ok(block)
+    assert.ok(block!.includes('必须先走查证阶梯，而不是凭感觉回答'))
+    assert.ok(block!.includes('同一工具同一错误重复 2 次必须停止变体重试'))
+    assert.ok(!block!.includes('先穷尽所有可用查证手段'))
     cleanup()
   })
 
