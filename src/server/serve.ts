@@ -31,7 +31,6 @@ import { SessionPersist } from '../agent/session-persist.js'
 import { FileHistory } from '../agent/file-history.js'
 import { PlaybookStore } from '../agent/playbook-store.js'
 import { loadProjectRules } from '../context/rules-loader.js'
-import { createAgentConfig, createMainAgentConfigInput } from '../agent/create-agent-config.js'
 import { createDefaultToolRegistry } from '../tools/default-registry.js'
 import { AgentLoop } from '../agent/loop.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
@@ -40,9 +39,10 @@ import { SessionRegistry } from '../agent/session-registry.js'
 import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
-import { captureGitBaseline, createInteractiveToolRegistry, type RuntimeRefs } from '../bootstrap.js'
+import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
 import { createRecallTool } from '../tools/recall.js'
 import { createRememberTool } from '../tools/remember.js'
+import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
 
 export interface ServeContext {
@@ -173,6 +173,10 @@ interface SessionStores {
   session: SessionContext
   taskLedger: ReturnType<typeof createTaskLedger>
   ownershipLedger: ReturnType<typeof createOwnershipLedger>
+  /** RuntimeRefs 在 createInteractiveToolRegistry 中被工具体内闭包持有；
+   *  Wave C: assembleAgentLoop 通过 createAgentRuntime 装配 coordinator 后
+   *  回写 refs.coordinator，让 5 个 coordinator 依赖工具激活。 */
+  refs: RuntimeRefs
 }
 
 function buildSessionStores(
@@ -231,13 +235,19 @@ function buildSessionStores(
     baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
     taskLedger,
   })
-  return { persist, claimStore, fileHistory, playbookStore, toolRegistry, session, taskLedger, ownershipLedger }
+  return { persist, claimStore, fileHistory, playbookStore, toolRegistry, session, taskLedger, ownershipLedger, refs }
 }
 
 /**
  * Assemble an AgentLoop from prebuilt session stores + a resolved model spec.
  * Reusing `stores.session` across calls is what lets switchModel hot-swap the
  * model while keeping the conversation history intact.
+ *
+ * Wave C: 通过 bootstrap.createAgentRuntime 装配——它会构造 DelegationCoordinator
+ * 并填到 stores.refs.coordinator，激活之前注册占位的 5 个 coordinator 依赖工具
+ * （delegate_task / delegate_batch / team_orchestrate / council_convene /
+ * plan_task）以及 deliver_task 的审查 worker spawn 路径。与 TUI bootstrap 路径
+ * 共享同一份装配逻辑，行为完全等价。
  */
 function assembleAgentLoop(
   ctx: ServeContext,
@@ -248,36 +258,37 @@ function assembleAgentLoop(
   approvalMode: ApprovalMode | undefined,
   registry?: SessionRegistry,
 ): AgentLoop {
-  const agentCfg = createAgentConfig(createMainAgentConfigInput({
-    apiKey: spec.apiKey,
-    model: {
-      id: spec.model.id,
-      maxTokens: spec.model.maxTokens,
-      contextWindow: spec.model.contextWindow,
-      reasoningEffort: spec.model.reasoningEffort,
-    },
-    cwd,
+  // sidecar 每个 session 一份 DomainKnowledgeStore（与 bootstrap 单 session 行为
+  // 一致；同 cwd 多 session 共享磁盘存储，内存实例独立）。
+  const domainKnowledgeStore = new DomainKnowledgeStore(join(cwd, '.rivet', 'knowledge'))
+
+  // sessionRegistry 透传：bootstrap.createAgentRuntime 通过 refs.sessionRegistry
+  // 间接接到 AgentLoop，所以在调装配前先回写 refs（buildSessionStores 已经接收
+  // 过 registry，但 switchModel 重建路径需要在每次调用都确保 refs 同步）。
+  if (registry) stores.refs.sessionRegistry = registry
+
+  const { agent } = createAgentRuntime({
     provider: spec.provider,
-    allProviders: ctx.config.provider.providers,
+    apiKey: spec.apiKey,
+    auth: spec.auth,
     config: ctx.config,
     sessionId,
-    toolDefinitions: stores.toolRegistry.getDefinitions(),
-    sessionMemoryBlock: stores.persist.buildMemoryBlock(),
-    auth: spec.auth,
-  }))
-  if (approvalMode) agentCfg.approvalMode = approvalMode
-  return new AgentLoop({
-    ...agentCfg,
+    cwd,
     toolRegistry: stores.toolRegistry,
-    maxTurns: ctx.config.agent.maxTurns,
-    contextClaimStore: stores.claimStore,
-    getSessionMemoryState: () => stores.persist.getSessionMemoryState(),
+    persist: stores.persist,
+    claimStore: stores.claimStore,
     fileHistory: stores.fileHistory,
-    playbookStore: stores.playbookStore,
-    sessionRegistry: registry,
-    taskLedger: stores.taskLedger,
-    ownershipLedger: stores.ownershipLedger,
-  }, stores.session, cwd)
+    refs: stores.refs,
+    domainKnowledgeStore,
+    modelId: spec.model.id,
+    session: stores.session,
+  })
+
+  // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
+  // （setApprovalMode 直接 mutate config.approvalMode，与构造时设等价）。
+  if (approvalMode) agent.setApprovalMode(approvalMode)
+
+  return agent
 }
 
 /**

@@ -1,10 +1,11 @@
 # 桌面端 TUI 工作流缺口 — 诊断报告
 
-> 状态：ACTIVE — 2026-06-19 诊断快照 + 首轮修复
+> 状态：ACTIVE — 2026-06-19 诊断快照 + 三轮修复
 > 性质：审计文档 + 实施进度（§1-§7 为修复前历史快照，§8-§9 为本轮落地与遗留）
 > 战略原则：「两边一样，但不是一定要一致——需要什么拿什么」
 > 关联：同构于 `review-delivery-workflow-audit.md`，但范围扩大到全部 slash 工作流
-> **本轮更新（2026-06-19 14:30）**：Wave A（13 工具注册）+ Wave E（slash 翻译层）已落地。详情见 §8；未做事项见 §9。
+> **更新 1（2026-06-19 14:30）** — Wave A（13 工具注册）+ Wave E（slash 翻译层）已落地。
+> **更新 2（2026-06-19 15:00）** — Wave C（DelegationCoordinator 装配）已落地，所有占位工具激活；agent 工具能力与 TUI 完全等价。详情见 §8.5。
 
 ---
 
@@ -301,46 +302,50 @@ flowchart LR
 - 476 个相关测试全绿（server 269 + tui slash/ecosystem 76 + agent core 95 + e2e 36）
 - 0 回归（2 个 baseline failure 与本轮改动无关：`undo.test.ts:54` / `delegate-task.test.ts:96`）
 
-### 8.4 桌面端用户感知变化
+### 8.4 桌面端用户感知变化（首轮 Wave A+E 后）
 
-| 操作 | 修复前 | 修复后 |
+| 操作 | 修复前 | Wave A+E 后 |
 |------|--------|--------|
 | 点 `/review max` | agent 回"我没有 deliver_task 工具" | 调 deliver_task → 跑 ledger → commit；审查段抛 coordinator not init（infra failure，不阻塞 commit） |
 | 输入 `/team 任务` | 模型把 `/team` 当奇怪文本 | 路由翻译为 `team_orchestrate` 工具调用 prompt → 调用时抛 coordinator not init（缺口明确标识） |
 | 输入 `/plan 设计 X` | 模型收到字面 `/plan ...` | 自动翻译为 writing-plans workflow prompt（与 TUI 完全等价） |
 | 输入 `/xxx`（不认识） | 字面发给 agent | 4xx 友好错误 `Unknown slash command: "/xxx"` |
 
+### 8.5 Wave C — DelegationCoordinator 装配（已落地）
+
+**改动**：[src/server/serve.ts](src/server/serve.ts) `assembleAgentLoop` 从手写 `new AgentLoop({...})` 改为直接调用 [src/bootstrap.ts](src/bootstrap.ts) 的 `createAgentRuntime`，与 TUI 共享同一份装配链。零代码重复（方案 F：复用 vs 复制中选了复用）。
+
+**链路**：
+1. `buildSessionStores` 把 `refs: RuntimeRefs` 加入 SessionStores 返回值
+2. `assembleAgentLoop` 调用 `createAgentRuntime({ provider, apiKey, auth, config, sessionId, cwd, toolRegistry, persist, claimStore, fileHistory, refs, domainKnowledgeStore, modelId, session })`
+3. `createAgentRuntime` 内部装配 modelCards / workerRouting / providerHealth / runtimeFactory / bandit gates / DelegationCoordinator，**填到 refs.coordinator**
+4. Wave A 已注册的 5 个 coordinator 依赖工具（delegate_task / delegate_batch / team_orchestrate / council_convene / plan_task）通过闭包读到 `refs.coordinator`，**激活**
+5. `deliver_task` 的 reviewDeps 同理激活——L2/L3 审查 worker 能真正 spawn
+6. `approvalMode` 在 agent 构造后调 `agent.setApprovalMode(mode)`（与初始化时设等价：内部 `this.config.approvalMode = mode`）
+7. `domainKnowledgeStore` 每个 session 独立 new（与 bootstrap 单 session 行为一致；同 cwd 共享磁盘 `.rivet/knowledge/`）
+
+**清理**：移除 sidecar 不再使用的 `createAgentConfig` / `createMainAgentConfigInput` import（这些逻辑现在由 `createAgentRuntime` 内部承担）。
+
+**用户感知变化**：
+
+| 操作 | Wave A+E 后 | Wave C 后 |
+|------|--------|--------|
+| `/review max` | commit 完成，审查段抛 coordinator not init | **完整 L3 Review Squadron 5 inspectors spawn 跑通**（与 TUI 行为完全等价） |
+| `/team xxx` | 翻译后 agent 调 team_orchestrate，抛 coordinator not init | **多 agent wave 编排正常执行** |
+| `/council xxx` | 翻译后 agent 调 council_convene，抛 coordinator not init | **多星议事会完整跑通**（含两轮辩论、冲突收敛） |
+| `delegate_task` / `delegate_batch` / `plan_task` 自然语言触发 | 抛错 | **正常委派子代理执行** |
+
+### 8.6 Wave C 验证
+
+- `tsc --noEmit` pass
+- 524 tests 全绿：server 269 + coordinator/team/council 157 + agent core (deliver-task/review-router/bootstrap/delegate) 98
+- 0 回归（2 个 baseline failure 仍与本轮无关）
+
 ---
 
 ## 9. 遗留与后续 Wave
 
-### 9.1 Wave C — DelegationCoordinator 在 sidecar 装配（高优先级）
-
-**为什么是高优先级**：5 个工具 + deliver_task 审查段都依赖它。Wave A 已注册工具占位，Wave C 是让它们真正能跑的最后一步。
-
-**工程量**：~150 行装配代码，参考 [src/bootstrap.ts](src/bootstrap.ts) `createAgentRuntime` (L502-714)。需要在 sidecar 构造：
-
-- `modelCards: ModelCapabilityCard[]` — 从 ctx.provider.models 派生
-- `workerRouting` — 从 ctx.config.workers
-- `providerHealth: ProviderHealthTracker` + 注册所有 provider
-- `runtimeFactory: WorkerRuntimeFactory` — worker spawn 工厂，需要 PromptEngine 实例
-- `domainKnowledgeStore: DomainKnowledgeStore`
-- Bandit gates（modelTier / modelRouting / effort）
-- 最后 `new DelegationCoordinator({ baseToolRegistry, modelCards, ... })`
-- 把 coordinator 塞回 `refs.coordinator`，让 createInteractiveToolRegistry 已经注册的工具能调到
-
-**注意点**：
-1. **late binding**：refs 在 createInteractiveToolRegistry 调用时只读，但闭包是后绑定（工具体内 `if (!refs.coordinator) throw`），所以装配 coordinator 后回写 `refs.coordinator` 就能让工具激活。
-2. **EFE routing**：依赖 `agentForSignals.getPolicySignals()`——需要 agent 实例，bootstrap 用 late-bound `let agentForSignals: AgentLoop | undefined` 解决。sidecar 同样处理。
-3. **PromptEngine**：worker runtimeFactory 需要它构造 worker prompt——sidecar 自己 assembleAgentLoop 也构造 PromptEngine，可以传给 refs.promptEngine。
-4. **复用 vs 复制**：最理想是把 bootstrap 的 `createAgentRuntime` 重构为接受 sidecar/CLI 共享的入参，sidecar 直接调；次优是 sidecar 写一份精简版（无 fpAuth / no telemetry）。倾向于前者——但要小心改 TUI 行为。
-
-**预期效果**：
-- `/team` / `/council` / `delegate_task` / `delegate_batch` / `plan_task` 完全可用
-- `deliver_task` 的 L2/L3 审查 worker 能真正 spawn
-- 桌面端 agent 在工具能力上与 TUI 完全等价
-
-### 9.2 Wave F — sidecar 多 session 元数据校正（中优先级）
+### 9.1 Wave F — sidecar 多 session 元数据校正（中优先级）
 
 `createInteractiveToolRegistry` 内部装配 `verificationSnapshotManager` 时硬编码 `sameCwdRunningSessions: () => 0`（[src/bootstrap.ts](src/bootstrap.ts):465）——这是 TUI 单 session 假设。sidecar 多 session 下应该用 `manager.sameCwdRunningCount(cwd, excludeSessionId)`（[src/server/session-manager.ts](src/server/session-manager.ts):465 已有此 API）。
 
@@ -352,7 +357,7 @@ flowchart LR
 
 倾向 A——更显式。
 
-### 9.3 Wave G — MeridianIndexer / MCP / LSP 装配（中优先级）
+### 9.2 Wave G — MeridianIndexer / MCP / LSP 装配（中优先级）
 
 这三个都是 **进程级独立子系统**，sidecar 自己装配会带来：
 - meridianIndexer：消耗内存（含 SQLite + tree-sitter）+ 启动延迟；好处是 `repo_graph` / `semantic_search` 高效，且 council/team 遥测有持久化 store
@@ -361,7 +366,7 @@ flowchart LR
 
 **决策点**：sidecar 是否应该成为"完整 IDE 伴侣"（拉起所有子系统）还是保持"轻量进程"（只跑 agent loop）？这是产品方向决策，不仅是工程问题。建议先用真实需求驱动——若用户在桌面端真的撞到 `repo_graph 无 indexer` 或 `MCP 不可用`，再启动这个 Wave。
 
-### 9.4 Wave H — SlashHandlerContext 独立回调能力（低优先级）
+### 9.3 Wave H — SlashHandlerContext 独立回调能力（低优先级）
 
 §2.D 列的 6 类 callback 能力（runReview / enterPlanMode / getDebugInfo / compactOai / getContextLedger / ChangeSet 构造）目前桌面端无对应入口。但：
 
@@ -372,7 +377,7 @@ flowchart LR
 
 **结论**：这 6 类大部分有桌面 UI 替代，无需 1:1 对应。低优先级。
 
-### 9.5 Wave I — Slash 命令 PlusMenu 补全（按需）
+### 9.4 Wave I — Slash 命令 PlusMenu 补全（按需）
 
 §2.B 列的 22+ slash 命令缺口，多数有桌面 UI 替代（B2 类）或可通过 Wave E 翻译层降级（B1 类）。真正需要 PlusMenu 入口的：
 
@@ -384,14 +389,31 @@ flowchart LR
 
 其余如 `/help` / `/sessions` / `/cockpit` / `/scroll` 都可以等用户真正反馈缺失再补。
 
+### 9.5 Wave J — 装配开销优化（低优先级，按需）
+
+Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，包括：
+- 新 `DelegationCoordinator` + `ProviderHealthTracker` + `DomainKnowledgeStore`
+- 新 `runtimeFactory` 闭包（含 PromptEngine + createProviderClient）
+- bandit gates 重新 evaluate
+- modelCards 重新派生
+
+对单用户少 session（≤3）的桌面端基本无感知。但同 cwd 启 10+ session 或同进程长期运行多次 switchModel 时可能积累。优化方向：
+- 把 sidecar 级共享对象（ProviderHealthTracker / DomainKnowledgeStore / banditGates evaluation）抽到 `serve.runServe` 顶层缓存
+- 让 createAgentRuntime 接受可选 `sharedHealthTracker` / `sharedDomainStore` 等
+- 或更激进：把 coordinator 也提到进程级，所有 session 共享一个（但要解决 sessionRegistry / sessionId binding）
+
+不要在没有真实瓶颈证据前做这件事。
+
 ### 9.6 风险与监控
 
-- **Wave A 注册了占位工具，模型可能在 sidecar 上尝试调用 coordinator 依赖工具**——错误信息是 `DelegationCoordinator not initialized`，比之前"工具不存在"对模型推理更友好，但仍是失败。建议在 Wave C 完成前，桌面端文档/onboarding 标注哪些功能"暂未启用"。
+- ~~**Wave A 注册了占位工具，模型可能在 sidecar 上尝试调用 coordinator 依赖工具**~~ — **Wave C 已解决**：coordinator 已装配，所有占位工具激活，不再抛 `DelegationCoordinator not initialized`。
 - **`POST /prompt` 4xx 响应**——桌面前端需要处理新增的 400 状态码（`Unknown slash command`），目前只是返回 JSON 错误。若 desktop client 没有 4xx 错误展示，slash typo 用户感知会是"提交失败"而非具体错误——desktop 端 UI 可以追加 4xx body 的 toast 提示。
+- **sidecar 多 session 下 worker 子进程开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 时会重复构造（与 bootstrap 单 session 行为一致，但 sidecar 场景未优化）。监控指标：sidecar RSS / fd 数。如果撞到瓶颈，参考 §9.5 Wave J。
+- **`new PlaybookStore(cwd)` 重复构造**——createAgentRuntime 内部 `new PlaybookStore(cwd)`（[src/bootstrap.ts](src/bootstrap.ts):726），而 sidecar buildSessionStores 也构造了 `stores.playbookStore`——后者现在不再被 assembleAgentLoop 使用，是死字段。后续可清理（SessionStores 接口移除 playbookStore，或在 createAgentRuntime 加可选 deps 复用既有实例）。
 
 ### 9.7 文档维护
 
-本文档目前是"诊断快照（§1-§7）+ 进度更新（§8-§9）"的复合结构。下一次实质修复（如 Wave C 落地）后应：
-- 把 §8.1 的工具状态表更新为完整可用列
-- 把 §3 影响分级表里已修的项标 ✅
-- 把 §9 已完成的 Wave 移到 §8
+本文档目前是"诊断快照（§1-§7）+ 进度更新（§8-§9）"的复合结构。每次实质修复后应：
+- 在 §8 新增子节记录本轮（保持时间倒序：最新在底）
+- 在 §9 移除已完成 Wave 并重新编号
+- §3 影响分级表里已修的项标 ✅（暂未做——按需补）
