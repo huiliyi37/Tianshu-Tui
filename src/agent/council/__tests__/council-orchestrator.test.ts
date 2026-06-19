@@ -69,6 +69,22 @@ describe('runCouncil — 单轮 + 解耦', () => {
     assert.equal(plan.contributions[1]!.summary, 'tianfu-real')
   })
 
+  it('workerModels 回填 modelUsed → contribution（非 worker 自报）', async () => {
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => ({
+        results: reqs.map(r => workerResult(r.authority, JSON.stringify({ authority: r.authority, summary: `${r.authority}-x`, additions: [], risks: [], challenges: [], alternatives: [] }))),
+        workerModels: [
+          { workOrderId: deriveStableWorkOrderId('council:seat-tianquan') ?? '', model: 'deepseek-v4' },
+          { workOrderId: deriveStableWorkOrderId('council:seat-tianfu') ?? '', model: 'glm-5.2' },
+        ],
+      }),
+      now: () => 1,
+    }
+    const plan = await runCouncil(input, deps)
+    assert.equal(plan.contributions[0]!.modelUsed, 'deepseek-v4')
+    assert.equal(plan.contributions[1]!.modelUsed, 'glm-5.2')
+  })
+
   it('md 内 convenedAt 与返回 meta.convenedAt 一致（钉死双取时钟坑）', async () => {
     let t = 100
     const deps: CouncilDeps = { delegateBatch: async (reqs) => ({ results: reqs.map(r => workerResult(r.authority, '{}')) }), now: () => t++ }

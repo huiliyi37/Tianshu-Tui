@@ -107,14 +107,15 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       const deps: CouncilDeps = {
         delegateBatch: async (requests, policy, signal, onProgress) => {
           const run = await coordinator.delegateBatch(requests as unknown as DelegationRequest[], policy, signal, onProgress)
-          return { results: run.results }
+          return { results: run.results, workerModels: run.workerModels }
         },
         now: () => Date.now(),
         ...(coordinator.getSessionId ? { sessionId: coordinator.getSessionId() } : {}),
         ...(coordinator.recordRoutingShadow ? { recordRoutingShadow: coordinator.recordRoutingShadow } : {}),
         // 实时进度：每席完成时通过工具流式输出推送到 UI。
+        // seat 参数在并行场景下为 "N/total" 计数而非具体席位名（见 council-orchestrator 注释）。
         onSeatProgress: params.onOutput
-          ? (seat, _status) => { params.onOutput?.(`♟ ${seat} 完成\n`) }
+          ? (seat, _status) => { params.onOutput?.(`♟ ${seat} 席完成\n`) }
           : undefined,
       }
 

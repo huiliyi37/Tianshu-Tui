@@ -23,14 +23,16 @@ export interface CouncilDeps {
     policy: 'all_required',
     signal?: AbortSignal,
     onProgress?: (completed: number, total: number) => void,
-  ) => Promise<{ results: WorkerResult[] }>
+  ) => Promise<{ results: WorkerResult[]; workerModels?: Array<{ workOrderId: string; model: string }> }>
   /** 注入时钟，保持 aggregate 纯净、编排可测。 */
   now: () => number
   /** 旁路记录席位路由 shadow —— 默认缺省。绝不影响真实派发。 */
   recordRoutingShadow?: (event: CouncilRoutingShadowEvent) => void
   /** shadow 归属会话 id（仅 recordRoutingShadow 在用）。 */
   sessionId?: string
-  /** 席位完成进度回调 —— 每席解析完成后触发一次。用于 UI 实时反馈。 */
+  /** 席位完成进度回调 —— 每席完成时触发。用于 UI 实时反馈。
+   *  seat 参数在异步并行场景下仅为近似值（onProgress 只回调 completed 计数，
+   *  不含具体 workOrderId），建议 consumer 仅使用计数语义。 */
   onSeatProgress?: (seat: string, status: 'running' | 'done') => void
 }
 
@@ -117,19 +119,22 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
   const run = await deps.delegateBatch(requests, 'all_required', input.abortSignal,
     deps.onSeatProgress
       ? (completed, total) => {
-          // Per-seat progress: delegateBatch fires onProgress once per finished
-          // worker. Fire onSeatProgress for each seat in order as they complete.
-          // Using completed-1 as index into seats (fanout starts all at once,
-          // completion order approximates seat arrival order).
-          const idx = completed - 1
-          if (idx >= 0 && idx < input.seats.length) {
-            deps.onSeatProgress?.(input.seats[idx]!.authority, 'done')
-          }
+          // onProgress 只回调 completed 计数，不含 workOrderId——并行扇出场景下
+          // 完成顺序 ≠ 席位数组顺序。只传计数，不传具体席位名避免张冠李戴。
+          deps.onSeatProgress?.(`${completed}/${total}`, 'done')
         }
       : undefined)
   const contributions = input.seats.map(seat => {
     const result = run.results.find(r => r.workOrderId === `council:seat-${seat.authority}`)
-    return result ? parseSeatContribution(seat.authority, result) : { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
+    if (!result) return { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [] }
+    const contrib = parseSeatContribution(seat.authority, result)
+    // 真实 model 回填：从 coordinator 的 workerModels 匹配 workOrderId，
+    // 而非信任 worker 自报（buildSeatObjective schema 未包含 modelUsed）。
+    if (run.workerModels && !contrib.modelUsed) {
+      const m = run.workerModels.find(wm => wm.workOrderId === result.workOrderId)
+      if (m) contrib.modelUsed = m.model
+    }
+    return contrib
   })
   const aggregate = aggregateCouncil(input.draft, contributions)
   const finalPlanMarkdown = renderCouncilPlan({ objective: input.draft.objective, seats: authorities, contributions, aggregate, finalPlanMarkdown: '', meta: { round: 1, convenedAt, objectiveHash: hash } })

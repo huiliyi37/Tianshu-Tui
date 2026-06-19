@@ -29,7 +29,14 @@ function makeCoordinator(extra?: Partial<CouncilConveneCoordinator>): {
   const coordinator: CouncilConveneCoordinator = {
     delegateBatch: async (requests): Promise<CoordinatorRun> => {
       calls.requests.push(requests)
-      return { status: 'completed', results: requests.map(workerResultFor), packet: '' }
+      const results = requests.map(workerResultFor)
+      return {
+        status: 'completed',
+        results,
+        packet: '',
+        // workerModels 回填真实模型信息 → runCouncil 注入 contribution.modelUsed
+        workerModels: results.map(r => ({ workOrderId: r.workOrderId, model: 'test-model' })),
+      }
     },
     getSessionId: () => 'sess-1',
     ...extra,
