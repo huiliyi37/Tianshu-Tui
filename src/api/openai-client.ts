@@ -9,6 +9,8 @@ import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
 import { wireAbortToReaderCancel } from './abort-reader.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 /**
  * Parse accumulated tool_call arguments into an input object.
@@ -173,6 +175,8 @@ export function decideStreamHardCap(input: {
 export class OpenAIClient implements StreamClient {
   private toolCallBuffer = new Map<number, { id?: string; type?: string; function: { name?: string; arguments: string } }>()
   private toolCallHintFired = new Set<number>()
+  /** Resolved raw-SSE dump path (undefined = unresolved, null = disabled/failed). */
+  private rawSsePath: string | null | undefined = undefined
   private pendingStopReason: string | null = null
   /** Messages from the current stream request — used for usage calibration. */
   private lastRequestMessages: OaiChatRequest['messages'] = []
@@ -602,9 +606,7 @@ export class OpenAIClient implements StreamClient {
           if (payload === '[DONE]') { streamDone = true; break }
           sawDataEvent = true
 
-          if (process.env.RIVET_DEBUG_RAW_SSE === '1') {
-            console.error(`[raw-sse] ${payload.slice(0, 600)}`)
-          }
+          if (process.env.RIVET_DEBUG_RAW_SSE) this.dumpRawSse(payload)
 
           try {
             const parsed = JSON.parse(payload)
@@ -844,6 +846,31 @@ export class OpenAIClient implements StreamClient {
       callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: parsed })
       this.toolCallBuffer.delete(idx)
     }
+  }
+
+  /**
+   * Append one raw SSE `data:` payload to disk for offline analysis.
+   * Gated by RIVET_DEBUG_RAW_SSE: `1` → `<cwd>/.rivet/raw-sse[-<sessionId>].jsonl`,
+   * any other value is treated as an explicit target file path.
+   */
+  private dumpRawSse(payload: string): void {
+    const env = process.env.RIVET_DEBUG_RAW_SSE
+    if (!env) return
+    if (this.rawSsePath === undefined) {
+      const target = env === '1'
+        ? join(process.cwd(), '.rivet', `raw-sse${this.config.sessionId ? `-${this.config.sessionId}` : ''}.jsonl`)
+        : env
+      try {
+        mkdirSync(dirname(target), { recursive: true })
+        this.rawSsePath = target
+      } catch {
+        this.rawSsePath = null
+      }
+    }
+    if (!this.rawSsePath) return
+    try {
+      appendFileSync(this.rawSsePath, `${JSON.stringify({ t: Date.now(), model: this.config.model, payload })}\n`)
+    } catch { /* best-effort diagnostics */ }
   }
 
   /** Gated stream-level tool-call diagnostics (RIVET_DEBUG_TOOL_STREAM=1). */
