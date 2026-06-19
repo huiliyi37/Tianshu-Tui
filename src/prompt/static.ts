@@ -55,6 +55,10 @@ const BASE_PROMPT = `<identity>
   git 操作（status/log/diff/add/commit）一律用结构化 git 工具，不用 bash 跑 git 命令再解析文本输出。
   </rule>
 
+  <rule name="context-update-protocol">
+  上下文里可能出现多个 <context-update> 块（带 seq 递增）。它们是累积的：后出现的同名子块（如 <git-status>、<progress>）覆盖先前同名块的值；某子块未在最新 update 中出现，表示它自上次起未变化——沿用最近一次出现的值。带 seq 的自闭合 <context-update/> 表示本轮无变化。
+  </rule>
+
 </rules>
 
 <tool-usage>

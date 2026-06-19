@@ -17,6 +17,13 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('evidence-scope'))
   })
 
+  it('includes context-update-protocol rule for delta semantics', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    assert.ok(prompt.includes('context-update-protocol'), 'should contain the rule name')
+    assert.ok(prompt.includes('累积的'), 'should describe cumulative semantics')
+    assert.ok(prompt.includes('未变化'), 'should explain absent = unchanged')
+  })
+
   it('wraps tool usage in <tool-usage> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('<tool-usage>'))
