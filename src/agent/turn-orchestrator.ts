@@ -20,6 +20,7 @@ import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
 import { debugLog } from '../utils/debug.js'
+import type { GoalTracker } from './goal-tracker.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -238,6 +239,12 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
 const MAX_RULE_RETRIES = 2
 
 export class TurnOrchestrator {
+  goalTracker: GoalTracker | null = null
+
+  setGoalTracker(tracker: GoalTracker | null): void {
+    this.goalTracker = tracker
+  }
+
   constructor(private deps: TurnOrchestratorDeps) {}
 
   /**
@@ -701,7 +708,51 @@ export class TurnOrchestrator {
         // No tool calls this turn — increment the counter for convergence detection
         this.deps.setConsecutiveNoToolTurns(this.deps.getConsecutiveNoToolTurns() + 1)
 
+        // ── Goal continuation check ──
+        // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
+        const tracker = this.goalTracker
+        let shouldContinueGoal = false
+        if (tracker?.isActive()) {
+          const goalResult = tracker.check(
+            this.deps.getStreamedText(),
+            this.deps.getEstimatedTokens(),
+            signal?.aborted === true,
+          )
+          if (goalResult.shouldContinue) {
+            shouldContinueGoal = true
+            tracker.advanceIteration()
+          } else {
+            // Any terminal reason: deactivate the tracker so subsequent turns
+            // aren't checked. Emit a closing message for achievement.
+            if (goalResult.reason === 'achieved') {
+              this.deps.appendSystemReminder(
+                `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。`
+              )
+            }
+            tracker.deactivate()
+          }
+        }
+
         this.deps.flushMeridianTurn()
+        if (shouldContinueGoal) {
+          // Non-final completion: archive this turn's output and inject continuation.
+          await rejectOnAbort(
+            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+            signal!,
+            'goal-continue-complete',
+          )
+          const iter = tracker!.getIteration()
+          const maxIter = tracker!.getMaxIterations()
+          this.deps.appendSystemReminder(
+            `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
+            `目标: ${tracker!.getGoal()}\n` +
+            `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
+            `完成后输出 "GOAL ACHIEVED" 声明完成。`
+          )
+          continue  // re-enter the for loop for the next iteration
+        }
+
+        // Final completion: goal inactive / achieved / budget exhausted / context limit.
         await rejectOnAbort(
           this.deps.completeTurn({
             turn,
