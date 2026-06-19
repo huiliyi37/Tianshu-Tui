@@ -392,6 +392,11 @@ function buildManagedAgent(
     // Context usage display (desktop header progress bar).
     getEstimatedTokens: () => agent.session.getEstimatedTokens(),
     getContextWindow: () => spec.model.contextWindow,
+    // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
+    // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。
+    shutdown: () => {
+      try { stores.refs.coordinator?.shutdown() } catch { /* best-effort */ }
+    },
   }
 }
 
@@ -570,6 +575,10 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     close: () => {
       for (const agent of activeAgents) agent.abort()
       sessions.abortAll()
+      // Wave L: 与 TUI createShutdownHandler 对称——abort 中止 turn 后，对所有
+      // session 显式 shutdown 释放 coordinator stallSweep + 在途 worker 句柄。
+      // 进程退出 OS 会回收，但显式 shutdown 语义清晰、对齐双侧路径。
+      sessions.shutdownAll()
       void wiring?.stop()
       wiring?.dispose()
       scheduler?.stop()

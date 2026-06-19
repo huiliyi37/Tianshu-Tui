@@ -8,6 +8,7 @@
 > **更新 2（2026-06-19 15:00）** — Wave C（DelegationCoordinator 装配）已落地，所有占位工具激活；agent 工具能力与 TUI 完全等价。详情见 §8.5。
 > **更新 3（2026-06-19 15:20）** — 代码审查发现 P0/P1 已修：coordinator.shutdown() 防泄漏 + SessionStores.playbookStore 死字段清理。详情见 §8.7。P2/P3 列入遗留 Wave。
 > **更新 4（2026-06-19 15:30）** — Wave K 已落地：TUI switchAgentRuntime/switchAgentSession + createShutdownHandler 同步 P0 修复，coordinator 泄漏在双侧（sidecar + TUI）一致闭环。详情见 §8.8。
+> **更新 5（2026-06-19 15:40）** — Wave L 已落地：sidecar runServe.close 通过 ManagedAgent.shutdown + RuntimeSessionManager.shutdownAll 对称 TUI createShutdownHandler，双侧 coordinator 生命周期管理完全一致。详情见 §8.9。
 
 ---
 
@@ -395,13 +396,39 @@ Wave C 落地后做了一轮代码审查（见原始审查报告归档），发�
 | TUI | `switchAgentRuntime` (模型切换) | capture old → createAgentRuntime → old.shutdown | Wave K |
 | TUI | `switchAgentSession` (会话恢复) | capture old → createAgentRuntime → old.shutdown | Wave K |
 | TUI | `createShutdownHandler` (进程退出) | 直接 coordinator.shutdown | Wave K |
-| sidecar | 进程退出 | （未做，sidecar runServe.close 走 sessions.abortAll，agent.abort 链式触发；coordinator.shutdown 不显式调）| 留 §9.6 监控 |
+| sidecar | 进程退出 (`runServe.close`) | `sessions.shutdownAll()` → 遍历调 `agent.shutdown()` → `coordinator.shutdown()` | Wave L (§8.9) |
 
 **Wave K 验证**：
 
 - `tsc --noEmit` pass
 - bootstrap 1 + coordinator 5 = 6 个 test 文件、57 tests 全绿
 - cron-lock 两个并发测试在大批量并跑时偶发 flake——单独跑全过，与本 Wave 无关（已通过 stash 后 baseline 复现的 flake 模式确认）
+
+### 8.9 Wave L — sidecar 进程退出对齐 TUI shutdown（2026-06-19 15:40）
+
+**问题**：Wave K 在 TUI `createShutdownHandler` 加了显式 `coordinator?.shutdown()`，但 sidecar `runServe.close` 只走 `sessions.abortAll()` → 链式 `agent.abort()`，没有显式 coordinator.shutdown——双侧不对称。审查报告 §9.6 标 Wave L 候选。
+
+**改动**：
+
+1. [src/server/session-manager.ts](src/server/session-manager.ts) `ManagedAgent` 接口加 optional `shutdown?(): void`——与 abort() 严格分离（abort 中止当前 turn 但保留 agent 可继续运行，shutdown 是终结性操作）。
+2. [src/server/session-manager.ts](src/server/session-manager.ts) `RuntimeSessionManager` 加 `shutdownAll()` 方法——遍历所有 session 调 `agent?.shutdown?.()`（agent 在 rehydrated/idle session 上为 null，需短路保护；best-effort 隔离 catch）。
+3. [src/server/serve.ts](src/server/serve.ts) `buildManagedAgent` 返回值实现 `shutdown: () => stores.refs.coordinator?.shutdown()`。
+4. [src/server/serve.ts](src/server/serve.ts) `runServe.close` 在 `sessions.abortAll()` 之后追加 `sessions.shutdownAll()`。
+
+**为什么 abort/shutdown 分离不能合并**：
+
+`abortAll()` 有两个调用点（[serve.ts:486 `/abort` 端点 + serve.ts:572 close]）：
+- `/abort` 端点：用户中止当前 turn，session 仍要保留可运行；**绝不能** shutdown coordinator
+- `close`：进程退出，**必须** shutdown 释放所有 timer/handle
+
+合并语义就破坏 `/abort` 端点的契约。Wave L 保持 abortAll 行为不变，加独立 shutdownAll。
+
+**双侧最终一致性**：见 §8.8 表（已更新 sidecar 进程退出行为为"`sessions.shutdownAll()` → 遍历调 `agent.shutdown()` → `coordinator.shutdown()`"）。
+
+**Wave L 验证**：
+
+- `tsc --noEmit` pass（修过一次 `s.agent?.shutdown?.()` 短路保护——agent 在 rehydrated session 上为 null）
+- session-manager 28 + session-routes 31 + server 8 + session-rehydrate 9 + coordinator 50 + bootstrap 19 = 145 tests 全绿
 
 ---
 
@@ -492,7 +519,7 @@ Wave C 后每个 sidecar session 重新执行完整 `createAgentRuntime`，**swi
 - **sidecar 多 session 下装配开销**——Wave C 后每个 session 装配一份 DelegationCoordinator + ProviderHealthTracker + DomainKnowledgeStore + runtimeFactory。同 cwd 多 session 重复构造。监控指标：sidecar RSS / fd 数 / boot-to-ready 延迟。撞到瓶颈走 Wave J（§9.5）。
 - **ProviderHealthTracker switchModel 重置（审查 P2）**——已并入 Wave J（§9.5.2）。冷层路由失据导致 worker 误路由的概率随 switchModel 频率上升；监控指标：worker 失败率 vs switchModel 计数。
 - ~~**TUI switchAgentRuntime 同样有 coordinator 泄漏**（P0 同源）~~ — **Wave K 已解决**（§8.8）：TUI `switchAgentRuntime` / `switchAgentSession` + `createShutdownHandler` 三处同步加 `coordinator.shutdown()`。
-- **sidecar `runServe.close` 未显式调 coordinator.shutdown**——sidecar 进程退出时走 `sessions.abortAll()` → `agent.abort()` 链式触发，但没有显式 coordinator.shutdown。短时影响有限（进程退出 OS 回收），但与 TUI 端 `createShutdownHandler` 已显式 shutdown 不对称。建议作为 Wave L（"sidecar 进程退出路径对齐 TUI shutdown"）轻量补齐。
+- ~~**sidecar `runServe.close` 未显式调 coordinator.shutdown**~~ — **Wave L 已解决**（§8.9）：`ManagedAgent.shutdown` + `RuntimeSessionManager.shutdownAll` + `runServe.close` 调 shutdownAll，双侧 coordinator 生命周期管理完全一致。
 
 ### 9.7 文档维护
 

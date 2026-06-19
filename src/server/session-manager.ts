@@ -207,6 +207,13 @@ export interface ManagedAgent {
   getEstimatedTokens?(): number
   /** Model context window size (max tokens). */
   getContextWindow?(): number
+  /**
+   * Wave L: 进程退出时释放 session 级资源（典型场景：sidecar runServe.close
+   * → shutdownAll）。具体实现负责调 coordinator.shutdown 等清 timer/in-flight
+   * worker。与 abort() 严格分离——abort 中止当前 turn 但保留 agent 可继续运行，
+   * shutdown 是终结性操作。Optional 以兼容 lightweight test doubles。
+   */
+  shutdown?(): void
 }
 
 /**
@@ -998,6 +1005,20 @@ export class RuntimeSessionManager {
 
   abortAll(): void {
     for (const id of this.sessions.keys()) this.abort(id)
+  }
+
+  /**
+   * Wave L: 进程退出路径（runServe.close）触发——为每个 session 调
+   * agent.shutdown() 释放 coordinator/timer/in-flight worker 句柄。与
+   * abortAll() 分离：abortAll 仅中止当前 turn，shutdownAll 是终结性操作。
+   * best-effort：任一 session shutdown 抛错不影响其他。
+   */
+  shutdownAll(): void {
+    for (const s of this.sessions.values()) {
+      // agent 在 rehydrated/idle session 上为 null（懒构造）；只对已建过 agent
+      // 的 session 调 shutdown，节省 best-effort try 的无谓 catch。
+      try { s.agent?.shutdown?.() } catch { /* best-effort */ }
+    }
   }
 
   /**
