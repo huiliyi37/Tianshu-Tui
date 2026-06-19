@@ -50,7 +50,7 @@ export class GoalTracker {
       return { shouldContinue: false, reason: 'no_goal', iteration: this._iteration }
     }
 
-    if (/GOAL ACHIEVED/i.test(streamedText)) {
+    if (/GOAL ACHIEVED|目标已?完成|任务已?完成/i.test(streamedText)) {
       return { shouldContinue: false, reason: 'achieved', iteration: this._iteration }
     }
 

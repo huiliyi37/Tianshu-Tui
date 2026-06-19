@@ -39,6 +39,27 @@ describe('GoalTracker', () => {
     assert.equal(result.reason, 'achieved')
   })
 
+  it('check returns achieved for Chinese 目标完成', () => {
+    const t = new GoalTracker(makeConfig())
+    const result = t.check('所有 bug 已修复，目标完成。', 1000, false)
+    assert.equal(result.shouldContinue, false)
+    assert.equal(result.reason, 'achieved')
+  })
+
+  it('check returns achieved for Chinese 任务已完成', () => {
+    const t = new GoalTracker(makeConfig())
+    const result = t.check('代码已提交，任务已完成。', 1000, false)
+    assert.equal(result.shouldContinue, false)
+    assert.equal(result.reason, 'achieved')
+  })
+
+  it('check returns achieved for Chinese 目标已完成', () => {
+    const t = new GoalTracker(makeConfig())
+    const result = t.check('测试全部通过，目标已完成。', 1000, false)
+    assert.equal(result.shouldContinue, false)
+    assert.equal(result.reason, 'achieved')
+  })
+
   it('check returns achieved for case-insensitive goal achieved', () => {
     const t = new GoalTracker(makeConfig())
     const result = t.check('goal ACHieVed successfully', 1000, false)
