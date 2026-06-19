@@ -3,7 +3,7 @@ import type { AggregationPolicy } from '../agent/work-order.js'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { runCouncil, type CouncilDeps } from '../agent/council/council-orchestrator.js'
 import { summarizeCouncilPlan } from '../agent/council/council-render.js'
-import type { CouncilSeat, CouncilRoutingShadowEvent } from '../agent/council/council-routing.js'
+import { DEFAULT_COUNCIL_SEATS, type CouncilSeat, type CouncilRoutingShadowEvent } from '../agent/council/council-routing.js'
 import { isCouncilEnabled } from '../agent/council/council-gate.js'
 import { buildCouncilSessionEvent, type CouncilSessionEvent } from '../agent/council/council-telemetry.js'
 import type { PlanItem } from '../agent/council/council-plan.js'
@@ -23,12 +23,9 @@ export interface CouncilConveneCoordinator {
   recordCouncilSession?: (event: CouncilSessionEvent) => void
 }
 
-/** 缺省席位 —— 天权领航 · 天府护栏 · 天璇探索。调用方可经 seats 覆盖。 */
-export const DEFAULT_COUNCIL_SEATS: readonly CouncilSeat[] = [
-  { authority: 'tianquan', charter: '领航：把握方向与优先级' },
-  { authority: 'tianfu', charter: '护栏：风险、边界与安全', tierHint: 'strong', noDowngrade: true },
-  { authority: 'tianxuan', charter: '探索：方案空间与替代路径' },
-]
+// DEFAULT_COUNCIL_SEATS 下沉至 council-routing.ts（CouncilSeat 定义所在），此处
+// re-export 保持既有 `import { DEFAULT_COUNCIL_SEATS } from '../council-convene.js'` 调用面。
+export { DEFAULT_COUNCIL_SEATS } from '../agent/council/council-routing.js'
 
 const planItemSchema = z.object({
   id: z.string().min(1),

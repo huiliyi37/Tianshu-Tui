@@ -168,6 +168,19 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(!resolved?.prompt.includes('无需自行指定 seats'))
   })
 
+  it('--seats with no value degrades to default seats and strips noise from objective', () => {
+    // `--seats` 后只有逗号/空白、无实际席位 → 不注入空 authority，降级默认席。
+    const resolved = resolveEcosystemWorkflowInput('/council audit the rollback --seats ,,')
+
+    assert.equal(resolved?.command, '/council')
+    // objective 干净：剥离 --seats 段，不残留噪音。
+    assert.ok(resolved?.prompt.includes('audit the rollback'))
+    assert.ok(!resolved?.prompt.includes('--seats'))
+    // 降级默认席：不得注入空 authority，须回到默认配置文案。
+    assert.ok(!resolved?.prompt.includes('authority: ""'))
+    assert.ok(resolved?.prompt.includes('无需自行指定 seats'))
+  })
+
   it('returns usage prompt for empty /council args', () => {
     const resolved = resolveEcosystemWorkflowInput('/council')
 

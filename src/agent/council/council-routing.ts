@@ -16,6 +16,15 @@ export interface CouncilSeat {
   noDowngrade?: boolean
 }
 
+/** 缺省席位 —— 天权领航 · 天府护栏 · 天璇探索。调用方可经 seats 覆盖。
+ *  置于路由层（CouncilSeat 定义所在）以便工具层与 workflow 层共享，避免
+ *  workflow → tools 反向依赖。 */
+export const DEFAULT_COUNCIL_SEATS: readonly CouncilSeat[] = [
+  { authority: 'tianquan', charter: '领航：把握方向与优先级' },
+  { authority: 'tianfu', charter: '护栏：风险、边界与安全', tierHint: 'strong', noDowngrade: true },
+  { authority: 'tianxuan', charter: '探索：方案空间与替代路径' },
+]
+
 export interface CouncilSeatRoute {
   authority: string
   /** 最终生效 tier。 */

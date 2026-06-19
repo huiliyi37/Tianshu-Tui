@@ -1,5 +1,5 @@
 import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
-import { DEFAULT_COUNCIL_SEATS } from '../tools/council-convene.js'
+import { DEFAULT_COUNCIL_SEATS } from '../agent/council/council-routing.js'
 
 const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
@@ -330,14 +330,15 @@ export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOpt
 
   // Parse --seats flag: /council review the plan --seats tianquan,tianfu,tianji
   let seats: string[] | undefined
-  const seatsIdx = objective.search(/\s+--seats\s+/)
+  const seatsIdx = objective.search(/\s+--seats\b/)
   if (seatsIdx >= 0) {
-    const afterSeats = objective.slice(seatsIdx).replace(/^\s+--seats\s+/, '')
-    const seatTokens = afterSeats.split(/[\s,]+/).filter(s => !s.startsWith('--'))
-    if (seatTokens.length > 0) {
-      seats = seatTokens
-      objective = objective.slice(0, seatsIdx).trim()
-    }
+    const afterSeats = objective.slice(seatsIdx).replace(/^\s+--seats\s*/, '')
+    // 过滤空 token：`--seats` 后仅空白/无值时不注入空 authority（否则 council_convene
+    // 的 zod authority.min(1) 会拒整轮），降级回默认席。
+    const seatTokens = afterSeats.split(/[\s,]+/).filter(s => s.length > 0 && !s.startsWith('--'))
+    // 只要出现 --seats 就从 objective 剥离该段，避免噪音残留；有值才注入，无值降级默认席。
+    objective = objective.slice(0, seatsIdx).trim()
+    if (seatTokens.length > 0) seats = seatTokens
   }
 
   return objective ? { objective, ...(seats?.length ? { seats } : {}) } : null
