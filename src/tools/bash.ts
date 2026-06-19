@@ -6,6 +6,7 @@ import { killProcessTree } from './process-kill.js'
 import { getShellCommand } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
+import { applyCommandFilter } from './command-filters.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
@@ -179,6 +180,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
       const buildResult = async (code: number, isTimeout = false) => {
         const raw = stdout + (stderr ? '\n' + stderr : '')
+        // P1: Command-Aware filtering — apply before content construction so the
+        // model sees a condensed, semantically-relevant version. Raw output is
+        // still persisted for artifact recovery.
+        const filtered = applyCommandFilter(rawCommand, raw, code) ?? raw
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
@@ -196,22 +201,22 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           // post-mortem: every bash result became "[artifact:X] ... use read_section"
           // → the model started writing /tmp files just to escape the artifact loop.
           const artifactThreshold = getToolArtifactThreshold('bash', params.contextWindow)
-          const wrapInArtifact = raw.length >= artifactThreshold
+          const wrapInArtifact = filtered.length >= artifactThreshold
 
           if (!wrapInArtifact) {
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
-            const baseContent = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+            const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
             return {
               content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
-              uiContent: buildUiOutput(raw, meta),
+              uiContent: buildUiOutput(filtered, meta),
               rawPath,
               isError,
             }
           }
 
           debugLog(`[artifact-wrap] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
-          const { summary, sections } = summarizeBashOutput(raw, rawCommand, exitCode)
+          const { summary, sections } = summarizeBashOutput(filtered, rawCommand, exitCode)
           const artifactId = await params.artifactStore.save({
             tool: 'bash',
             target: rawCommand,
@@ -223,25 +228,25 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           // Even when wrapping, prepend the model-formatted output so the model
           // sees the head/tail directly — the [artifact:X] marker is a back-up
           // recovery path, not the only way to access content.
-          const lineCount = raw.split('\n').length
+          const lineCount = filtered.split('\n').length
           const successFold = exitCode === 0 && lineCount > SUCCESS_INLINE_LINES
           const modelOutput = successFold
             ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
-            : buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
+            : buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
           const baseContent = `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`
           return {
             content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
-            uiContent: buildUiOutput(raw, meta),
+            uiContent: buildUiOutput(filtered, meta),
             rawPath: artifact?.rawPath,
             isError,
           }
         }
 
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        const baseContent = buildModelOutput(raw || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+        const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
         return {
           content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
-          uiContent: buildUiOutput(raw, meta),
+          uiContent: buildUiOutput(filtered, meta),
           rawPath,
           isError,
         }

@@ -1,97 +1,102 @@
 /**
- * Command-aware output filters for common tools.
- * Compresses verbose tool output to preserve context budget.
+ * Command-aware output filter. Returns filtered output, or null when no filter
+ * matches the given command (caller falls back to original raw output).
  *
- * Design: docs/superpowers/plans/2026-05-24-token-optimization-scout-findings.md
+ * P1: Command-Aware filtering — applied in buildModelOutput and directly in
+ * bash.ts for commands whose raw output is noisy but semantically simple.
  */
+export function applyCommandFilter(
+  command: string,
+  stdout: string,
+  exitCode: number,
+): string | null {
+  const cmd = command.trim()
 
-interface CommandFilter {
-  match: RegExp
-  filter: (raw: string, exitCode: number) => string | null
-}
-
-const ERROR_LINE_RE = /error|error TS\d+|FAIL|failed|✖|✗|AssertionError/i
-const PASS_LINE_RE = /✓|✔|pass|ok\s/i
-
-/**
- * Filter tsc output: keep only error lines.
- * tsc outputs all files then errors; we just need the error summary.
- */
-function filterTsc(raw: string, exitCode: number): string | null {
-  if (exitCode === 0) {
-    // No errors — extract just the "Found X errors" line or return empty
-    const match = raw.match(/Found \d+ errors?\b/)
-    return match ? match[0] : 'tsc: no errors'
+  // tsc --noEmit
+  if (/\btsc\b/.test(cmd) && cmd.includes('--noEmit')) {
+    return filterTsc(stdout, exitCode)
   }
-  const lines = raw.split('\n')
-  const kept: string[] = []
-  for (const line of lines) {
-    if (ERROR_LINE_RE.test(line) || line.includes('error TS')) {
-      kept.push(line)
-    }
+
+  // node:test / tsx --test
+  if (/\b(node|tsx|npx\s+tsx)\b/.test(cmd) && cmd.includes('--test')) {
+    return filterNodeTest(stdout, exitCode)
   }
-  // Add summary line if present
-  const summary = raw.match(/Found \d+ errors?/)
-  if (summary) kept.push(summary[0])
-  return kept.length > 0 ? kept.join('\n') : null
-}
 
-/**
- * Filter node:test output: keep only failed test lines and summary.
- * Passing tests are noise; failures are what the agent needs to fix.
- */
-function filterNodeTest(raw: string, exitCode: number): string | null {
-  if (exitCode === 0) {
-    // Extract just the summary line
-    const match = raw.match(/\d+ passed.*\d+ failed/)
-    return match ? match[0] : 'tests: all passed'
+  // git status
+  if (/^git\s+status\b/.test(cmd)) {
+    return filterGitStatus(stdout)
   }
-  const lines = raw.split('\n')
-  const kept: string[] = []
-  let inFailBlock = false
-  for (const line of lines) {
-    if (ERROR_LINE_RE.test(line) || /not ok \d+/.test(line)) {
-      inFailBlock = true
-      kept.push(line)
-    } else if (inFailBlock && (line.startsWith('  ') || line.startsWith('\t'))) {
-      // Keep indented details after failure line
-      kept.push(line)
-    } else if (PASS_LINE_RE.test(line)) {
-      inFailBlock = false
-      // skip passing tests
-    } else {
-      inFailBlock = false
-    }
-  }
-  return kept.length > 0 ? kept.join('\n') : null
-}
 
-const GIT_HINT_RE = /^\s+\(use "/
-
-/**
- * Filter git status: remove hint lines (redundant for agent).
- */
-function filterGitStatus(raw: string, _exitCode: number): string | null {
-  const lines = raw.split('\n')
-  const kept = lines.filter(l => !GIT_HINT_RE.test(l) && l.trim() !== '')
-  return kept.length > 0 ? kept.join('\n') : null
-}
-
-const FILTERS: CommandFilter[] = [
-  { match: /\btsc\b/, filter: filterTsc },
-  { match: /\bnpm\s+test\b|node\s+--test|npx\s+tsx\s+--test/, filter: filterNodeTest },
-  { match: /\bgit\s+status\b/, filter: filterGitStatus },
-]
-
-/**
- * Apply command-aware filter to tool output.
- * Returns compressed output if a filter matches, or null if no filter applies.
- */
-export function applyCommandFilter(command: string, raw: string, exitCode: number): string | null {
-  for (const f of FILTERS) {
-    if (f.match.test(command)) {
-      return f.filter(raw, exitCode)
-    }
-  }
   return null
+}
+
+// ── tsc --noEmit ────────────────────────────────────────────────────────────
+
+function filterTsc(stdout: string, exitCode: number): string {
+  if (exitCode === 0) {
+    // Keep the "Found 0 errors" summary line if present; otherwise synthesize
+    const summary = stdout.match(/Found\s+0\s+errors?\.?/i)
+    return summary ? summary[0] : '✓ typecheck passed'
+  }
+
+  const lines = stdout.split('\n')
+  const kept: string[] = []
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    // Keep lines that contain "error TS" (the actual diagnostics)
+    if (/\berror\s+TS\d+:/i.test(trimmed)) {
+      // Strip path prefix: everything before "error TS"
+      const errStart = trimmed.search(/\berror\s+TS\d+:/i)
+      kept.push(errStart > 0 ? trimmed.slice(errStart) : trimmed)
+    }
+    // Keep the summary footer: "Found N error(s)."
+    if (/^Found\s+\d+\s+error/i.test(trimmed)) {
+      kept.push(trimmed)
+    }
+  }
+
+  return kept.length > 0 ? kept.join('\n') : stdout.trim()
+}
+
+// ── node:test (tsx --test / node --test) ────────────────────────────────────
+
+function filterNodeTest(stdout: string, exitCode: number): string {
+  const lines = stdout.split('\n')
+
+  if (exitCode === 0) {
+    // Keep summary line(s) with passed/failed counts
+    const summary = lines.filter(l => /\d+\s+passed/.test(l))
+    return summary.length > 0 ? summary.join('\n') : stdout.trim()
+  }
+
+  // Failure: keep only failing test details + summary
+  const kept: string[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (
+      /^not ok\b/.test(trimmed) ||
+      /\bAssertionError\b/.test(trimmed) ||
+      /\d+\s+passed/.test(trimmed) ||
+      /\d+\s+failed/.test(trimmed)
+    ) {
+      kept.push(trimmed)
+    }
+  }
+
+  return kept.length > 0 ? kept.join('\n') : stdout.trim()
+}
+
+// ── git status ──────────────────────────────────────────────────────────────
+
+function filterGitStatus(stdout: string): string {
+  const lines = stdout.split('\n')
+  const filtered = lines.filter(line => {
+    const trimmed = line.trim()
+    // Remove git hint lines: "(use \"git ...\")" or "(git ...)"
+    if (/^\(use\s+"git\s/.test(trimmed)) return false
+    if (/^\(git\s/.test(trimmed)) return false
+    return true
+  })
+  return filtered.join('\n')
 }
