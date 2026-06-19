@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — 2026-06-19
+
 # mid-tui 计划交接 — W-B3~B6 已完成（全部 6 个 controller 抽取交付）
 
 > 原始计划：`.rivet/plans/mid-tui-engine-app分解-ink退役.md`

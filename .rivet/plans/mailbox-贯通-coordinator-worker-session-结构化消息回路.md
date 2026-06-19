@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — 2026-06-19
+
 # Mailbox 贯通：coordinator → worker session 结构化消息回路
 
 # Mailbox 贯通：coordinator → worker session 结构化消息回路

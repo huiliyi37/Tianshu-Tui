@@ -1,3 +1,5 @@
+> **Status: ARCHIVED** — 2026-06-19 (审计/复盘文档)
+
 # Review & Delivery Workflow — 修订方案
 
 > 基于天枢审计文档（review-delivery-workflow-audit.md）修订

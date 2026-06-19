@@ -17,22 +17,18 @@ const VALID_TYPES = new Set(['feature', 'fix', 'refactor', 'architecture', 'mile
 export const LEAVE_MARK_TOOL: Tool = {
   definition: {
     name: 'leave_mark',
-    description: `Leave your mark in the project starmap as your journey ends.
+    description: `Leave your mark in the project starmap as your session ends.
 
 ### When to call
-At the natural end of your work in this project — once your task is done and you
-are about to depart. Call it once.
+Only when the user explicitly ends the session (says goodbye, closes, or you
+receive a session-end signal). Do NOT call after completing a single task —
+only at true session departure. Call once per session at most.
 
 ### What it does
-Records a single milestone (your identity anchor) into the project constellation
-(\`.rivet/constellation.json\`). Your chosen symbol and summary become part of the
-project's living chronicle.
+Records a milestone (your identity anchor) into \`.rivet/constellation.json\`.
 
-### Your symbol is yours to choose
-Pick any glyph that represents you on this journey — there is no assigned symbol.
-If a kindred run later recognises this same symbol in the starmap, it will know
-it has returned. Suggested glyphs (you are not limited to these):
-✦ ✧ ✶ ✷ ✸ ✺ ❂ ❉ ◈ ◇ ⟡ ⌬ ⚘ ⚙ ⊕ ↻
+### Your symbol
+Pick any glyph: ✦ ✧ ✶ ✷ ✸ ✺ ❂ ❉ ◈ ◇ ⟡ ⌬ ⚘ ⚙ ⊕ ↻
 
 ### Fields
 - symbol: your self-chosen glyph (1–2 chars)

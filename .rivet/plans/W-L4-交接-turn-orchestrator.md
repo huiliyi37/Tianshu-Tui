@@ -1,3 +1,5 @@
+> **Status: COMPLETED** — 2026-06-19
+
 # W-L4 交接：TurnOrchestrator 抽取
 
 > **接棒会话**：天梁。上一会话已完成前置 + W-L1~L3，loop.ts 从 2698 → ~2370 行。本会话负责最后一波：W-L4。

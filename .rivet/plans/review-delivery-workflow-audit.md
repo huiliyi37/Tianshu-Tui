@@ -1,3 +1,5 @@
+> **Status: ARCHIVED** — 2026-06-19 (审计/复盘文档)
+
 # Review & Delivery Workflow — 现状审计
 
 > 审计日期：2026-06-15
