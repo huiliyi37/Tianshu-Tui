@@ -75,7 +75,7 @@ const HELP_TEXT = `Available commands:
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
-/council <task> — Convene a single-round star-domain council to review a plan
+/council <task> [--seats id1,id2,...] — Convene a single-round star-domain council to review a plan
 /review — Manually trigger L2 review (single adversarial verifier) on current changes via deliver_task
 /review max — Manually trigger L3 review (Review Squadron, 5 inspectors) on current changes via deliver_task
 (auto: every non-trivial deliver_task commit runs a single Wiring inspector — short budget, never blocks on infra failure)

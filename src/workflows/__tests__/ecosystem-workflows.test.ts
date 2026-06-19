@@ -117,8 +117,41 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(resolved?.prompt.includes('council_convene'))
     assert.ok(resolved?.prompt.includes('拆分 loop.ts 的方案是否遗漏回滚'))
     assert.ok(resolved?.prompt.includes('只出计划不执行'))
-    // 解耦:议事会 prompt 不得诱导 model 走 team 执行链。
+    // 解耦:议事会 prompt 不得诱导 model 走 team 执行链(议事会本身不执行)。
     assert.ok(resolved?.prompt.includes('绝不触发 team_orchestrate'))
+    // 完成后引导:主动建议用户用 /team 执行产物。
+    assert.ok(resolved?.prompt.includes('/team'))
+    assert.ok(resolved?.prompt.includes('主动询问用户是否用 /team 执行'))
+  })
+
+  it('parses --seats flag and injects custom seats into prompt', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council review the plan --seats tianquan,tianfu,tianji')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('review the plan'))
+    // 席位应出现在 council_convene 调用参数中。
+    assert.ok(resolved?.prompt.includes('tianquan'))
+    assert.ok(resolved?.prompt.includes('tianfu'))
+    assert.ok(resolved?.prompt.includes('tianji'))
+    assert.ok(resolved?.prompt.includes('authority'))
+    // 不应再提“默认配置”。
+    assert.ok(!resolved?.prompt.includes('无需自行指定 seats'))
+  })
+
+  it('parses single --seats flag value', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council security audit --seats tianfu')
+
+    assert.equal(resolved?.command, '/council')
+    assert.ok(resolved?.prompt.includes('security audit'))
+    assert.ok(resolved?.prompt.includes('tianfu'))
+    assert.ok(!resolved?.prompt.includes('无需自行指定 seats'))
+  })
+
+  it('seats without --seats flag still uses default config', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council just review')
+
+    assert.ok(resolved?.prompt.includes('just review'))
+    assert.ok(resolved?.prompt.includes('默认配置(天权'))
   })
 
   it('returns usage prompt for empty /council args', () => {

@@ -215,7 +215,7 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
     maxTurns: clampWorkerMaxTurns(config.maxTurns, config.order.budget.maxTurns),
     contextWindow: config.contextWindow,
     compact: config.compact,
-    sessionId: `worker-${config.order.id}`,
+    sessionId: `worker-${config.order.id.replace(/:/g, '-')}`,
     reviewDepth: config.reviewDepth,
     // B3: the worker knows its own nesting depth, so any delegate_task it
     // issues carries it and the coordinator can cap recursion.

@@ -30,6 +30,7 @@ export interface TeamWorkflowPromptOptions {
 
 export interface CouncilWorkflowPromptOptions {
   objective: string
+  seats?: string[]
 }
 
 const WRITING_PLAN_COMMANDS = new Set(['/plan', '/write-plan'])
@@ -320,15 +321,37 @@ export function parseTeamWorkflowArgs(args: string): TeamWorkflowPromptOptions |
   return { mode: 'standard', objective: trimmed }
 }
 
-export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题>'
+export const COUNCIL_USAGE = 'Council usage: /council <要会诊的计划/问题> [--seats id1,id2,...]'
 
 export function parseCouncilWorkflowArgs(args: string): CouncilWorkflowPromptOptions | null {
-  const objective = args.trim()
-  return objective ? { objective } : null
+  let objective = args.trim()
+  if (!objective) return null
+
+  // Parse --seats flag: /council review the plan --seats tianquan,tianfu,tianji
+  let seats: string[] | undefined
+  const seatsIdx = objective.search(/\s+--seats\s+/)
+  if (seatsIdx >= 0) {
+    const afterSeats = objective.slice(seatsIdx).replace(/^\s+--seats\s+/, '')
+    const seatTokens = afterSeats.split(/[\s,]+/).filter(s => !s.startsWith('--'))
+    if (seatTokens.length > 0) {
+      seats = seatTokens
+      objective = objective.slice(0, seatsIdx).trim()
+    }
+  }
+
+  return objective ? { objective, ...(seats?.length ? { seats } : {}) } : null
 }
 
 export function buildCouncilWorkflowPrompt(options: CouncilWorkflowPromptOptions): string {
   const objective = options.objective.trim()
+  const hasCustomSeats = options.seats && options.seats.length > 0
+  const seatsNote = hasCustomSeats
+    ? `席位用自定义配置: ${options.seats!.join(' · ')}`
+    : '席位用默认配置(天权 方案权衡 · 天府 风险守护 · 天璇 跨域反证),无需自行指定 seats'
+  const seatsParam = hasCustomSeats
+    ? `, seats: [${options.seats!.map(s => `{ authority: "${s}" }`).join(', ')}]`
+    : ''
+
   return `我正在使用 /council 发起星域议事会——多星域单轮对抗评审,只出计划不执行。
 
 评审主题:
@@ -336,10 +359,10 @@ ${objective}
 
 执行契约:
 - 用户已显式发起议事会;不要再问是否使用,直接调用 council_convene 工具。
-- 调用 council_convene 工具,参数 { objective: "${objective}" };席位用默认配置(天权 方案权衡 · 天府 风险守护 · 天璇 跨域反证),无需自行指定 seats。
+- 调用 council_convene 工具,参数 { objective: "${objective}"${seatsParam} };${seatsNote}。
 - 这是单轮会诊:扇出席位 → 确定性裁决 → 产出议事记录。绝不触发 team_orchestrate 或任何执行链。
 - council_convene 返回的议事记录(席位贡献 / 裁决记录 / 冲突 / 最终任务表)直接原样呈现给用户,不要二次概括或改写。
-- 议事会只负责出计划。是否推进执行由用户后续决定(可再用 /team 执行产出的计划)。`
+- 议事会只负责出计划。产出议事记录后,主动询问用户是否用 /team 执行最终任务表中的任务(例如:"议事会评审完成。最终任务表有 N 项。需要 /team 执行吗?")。`
 }
 
 export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Date }): WorkflowResolveResult | null {
