@@ -485,6 +485,7 @@ async function main() {
       .pop()?.i
     if (matchIdx !== undefined) {
       ctx!.session.rewindToMessages(messages.slice(0, matchIdx))
+      ctx!.agent.config.promptEngine.resetAppendixBaseline()
       // Commit a rewind marker to scrollback
       tuiApp.commitStatic('⏪ Rewound — message restored to input.')
     }

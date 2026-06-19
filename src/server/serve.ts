@@ -412,8 +412,8 @@ function buildManagedAgent(
     listArtifacts: () => agent.artifactStore?.list() ?? [],
     readArtifact: (artifactId) => agent.artifactStore?.readRaw(artifactId) ?? Promise.resolve(null),
     getMessages: () => agent.session.getMessages(),
-    replaceMessages: (msgs) => agent.session.replaceMessages(msgs),
-    rewindToMessages: (msgs) => agent.session.rewindToMessages(msgs),
+    replaceMessages: (msgs) => { agent.session.replaceMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
+    rewindToMessages: (msgs) => { agent.session.rewindToMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
     // PlusMenu — star domain (delegate to the live agent).
     setSessionDomain: (domain) => agent.setSessionDomain(domain),
     resetSessionDomain: () => agent.resetSessionDomain(),

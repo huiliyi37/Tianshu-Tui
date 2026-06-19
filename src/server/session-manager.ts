@@ -182,6 +182,12 @@ export interface ManagedAgent {
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
   rewindToMessages(msgs: OaiMessage[]): void
   /**
+   * Reset the prompt engine's delta appendix baseline after any history rewrite
+   * (compaction, rewind, /compact). Optional so lightweight test doubles need
+   * not implement it; production agents (AgentLoop) delegate to promptEngine.
+   */
+  resetAppendixBaseline?(): void
+  /**
    * PlusMenu (domain) — pin a star domain (or null to disable). Mirrors
    * AgentLoop.setSessionDomain. Optional for lightweight test doubles.
    */
@@ -1211,6 +1217,7 @@ export class RuntimeSessionManager {
 
     // Truncate messages to the selected point (full derived-state reset).
     s.agent.rewindToMessages(msgs.slice(0, messageIndex))
+    s.agent.resetAppendixBaseline?.()
 
     // Update session status: rewind returns the session to idle so the user
     // can send a new prompt. Previous status (completed/failed) is stale.

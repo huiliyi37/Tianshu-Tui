@@ -325,6 +325,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: 'Micro-compacting conversation...' }))
       const { messages: compacted, truncated } = microCompactOai(msgs, ctx.maxTokens, beforeTokens)
       ctx.session.replaceMessages(compacted)
+      ctx.agent.config.promptEngine.resetAppendixBaseline()
       const afterTokens = estimateOaiTokens(compacted)
       ctx.session.recordCompactEvent({
         turn: ctx.session.getTurnCount(),
@@ -740,6 +741,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const p = new SessionPersist(targetId, ctx.agent.cwd)
       const preflight = runResumePreflightOai(p.loadOai())
       ctx.session.replaceMessages(preflight.messages)
+      ctx.agent.config.promptEngine.resetAppendixBaseline()
       if (preflight.repaired) p.compactOai(preflight.messages)
       pushStatic(createLogEntry({ type: 'system', content: `已恢复会话 ${targetId.slice(0, 8)} (${preflight.messages.length} 条消息, apiSafe=${preflight.safe})` }))
       setIsStreaming(false)

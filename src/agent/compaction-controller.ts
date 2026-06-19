@@ -438,6 +438,7 @@ export class CompactionController {
       }
 
       this.deps.session.replaceMessages(compacted)
+      this.deps.promptEngine.resetAppendixBaseline()
       this.deps.session.markCompacted(input.loopTurn)
       this.deps.pressureMonitor.recordCompaction(this.deps.session.getTurnCount())
       const afterTokens = this.deps.session.getEstimatedTokens()
@@ -723,6 +724,7 @@ export class CompactionController {
 
     const beforeTokens = estimateOaiTokens(messages)
     this.deps.session.replaceMessages(candidate)
+    this.deps.promptEngine.resetAppendixBaseline()
     this.deps.session.recordCompactEvent({
       turn: this.deps.session.getTurnCount(),
       tier: params.tier,
@@ -823,6 +825,7 @@ export class CompactionController {
 
       const newMessages = [...anchor, summaryMessage, ...recentZone]
       this.deps.session.replaceMessages(newMessages)
+      this.deps.promptEngine.resetAppendixBaseline()
       this.deps.refreshLedger()
 
       debugLog(`[partial-compact] success: ${messages.length} → ${newMessages.length} messages (removed ${oldZone.length} old, kept ${recentZone.length} recent)`)
