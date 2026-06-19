@@ -61,8 +61,20 @@ const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
 
 /** When enabled, repeated reads of unchanged files return a compact reference
- *  instead of re-emitting the full content. Controlled by RIVET_READ_REF=1. */
-const RIVET_READ_REF = process.env['RIVET_READ_REF'] === '1'
+ *  instead of re-emitting the full content. Controlled by RIVET_READ_REF=1.
+ *  Checked at call time (not module load) so tests can toggle dynamically. */
+function isReadRefEnabled(): boolean {
+  return process.env['RIVET_READ_REF'] === '1'
+}
+
+/** Minimum modelContent bytes for read-ref to apply. Smaller repeats stay
+ *  as direct content to avoid wasted round-trips for tiny fragments. */
+const READ_REF_THRESHOLD = 2048
+
+/** Telemetry: cumulative bytes saved via read-ref (avoided cacheCreate). */
+let readRefSavedBytes = 0
+/** Telemetry: number of read-ref shortcuts executed. */
+let readRefCount = 0
 
 /** Session-level file edit tracking: records which files this session has
  *  successfully written to. Used by staleness detection to disambiguate
@@ -129,6 +141,8 @@ export function __resetReadHistoryForTests(): void {
   readHistory.clear()
   fileReadHistory.clear()
   sessionFileEdits.clear()
+  readRefSavedBytes = 0
+  readRefCount = 0
 }
 
 /** Return the last known mtimeMs for a file from the read history, or null if never read. */
@@ -178,6 +192,11 @@ export function registerGrepFileAccess(canonicalPath: string, mtimeMs: number): 
     recordedAt: Date.now(),
   })
   trimFileReadHistory()
+}
+
+/** Return cumulative read-ref telemetry for cacheCreate cost analysis (B4). */
+export function getReadRefStats(): { savedBytes: number; count: number } {
+  return { savedBytes: readRefSavedBytes, count: readRefCount }
 }
 
 async function sliceFromArtifact(
@@ -490,6 +509,35 @@ export const READ_FILE_TOOL: Tool = {
       } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
         repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已完整读取过，内容未变更 (${fullPrior.totalLines} lines, ${fullPrior.modelBytes} bytes)。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
       }
+    }
+
+    // ── 重复读取引用化 (B2) ──
+    // When RIVET_READ_REF is enabled and this is an unchanged repeat read
+    // of a non-trivial file, return a compact reference instead of
+    // re-emitting the full content — avoiding a cacheCreate on bytes the
+    // model already has in its context.
+    if (unchangedRepeat && isReadRefEnabled()) {
+      const priorSame = readHistory.get(dedupKey!)
+      const fullPrior = fileReadHistory.get(canonical!)
+      const entryBytes = priorSame?.mtimeMs === currentMtimeMs ? priorSame.modelBytes : fullPrior?.modelBytes ?? 0
+      const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
+
+      if (entryBytes > READ_REF_THRESHOLD) {
+        const relPath = canonical!.replace(params.cwd + '/', '')
+        const sizeHint = totalLines > 0
+          ? `${totalLines} 行，${entryBytes} bytes`
+          : `${entryBytes} bytes`
+        const ref = [
+          `[read-ref] ${relPath} 本会话已读且未变（${sizeHint}）。`,
+          `完整内容在你上文的 tool_result 中——回看即可。`,
+          `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")`,
+        ].join('\n')
+        readRefSavedBytes += entryBytes
+        readRefCount++
+        debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${readRefSavedBytes} count=${readRefCount}`)
+        return { content: ref }
+      }
+      // Small fragment — fall through to normal read to avoid wasted round-trips
     }
 
     try {

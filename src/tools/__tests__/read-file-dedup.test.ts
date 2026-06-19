@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { READ_FILE_TOOL, __resetReadHistoryForTests, isUnchangedRepeatRead } from '../read-file.js'
+import { READ_FILE_TOOL, __resetReadHistoryForTests, isUnchangedRepeatRead, getReadRefStats } from '../read-file.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import type { ToolCallParams } from '../types.js'
 
@@ -217,5 +217,118 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
     // New read: offset=3, limit=2 — different dedup key
     const newDedupKey = `${dir}::${fp}::3::2`
     assert.equal(isUnchangedRepeatRead(fp, mtime, newDedupKey, 3, 2), false)
+  })
+})
+
+// B2 read-ref tests — dynamically toggle RIVET_READ_REF per test.
+describe('read-ref compact reference (任务 B2)', () => {
+  const savedEnv = process.env['RIVET_READ_REF']
+  let dir: string
+
+  function enableReadRef(): void {
+    process.env['RIVET_READ_REF'] = '1'
+  }
+
+  function disableReadRef(): void {
+    delete process.env['RIVET_READ_REF']
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rivet-read-ref-'))
+    __resetReadHistoryForTests()
+  })
+
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    // Restore original env
+    if (savedEnv === undefined) {
+      delete process.env['RIVET_READ_REF']
+    } else {
+      process.env['RIVET_READ_REF'] = savedEnv
+    }
+  })
+
+  function makeFile(name: string, lines: number, lineWidth = 80): string {
+    const path = join(dir, name)
+    const parent = join(dir, 'src')
+    if (!existsSync(parent)) mkdirSync(parent, { recursive: true })
+    const content = Array.from({ length: lines }, (_, i) => `line ${i + 1}`.padEnd(lineWidth, ' ')).join('\n')
+    writeFileSync(path, content, 'utf-8')
+    return name
+  }
+
+  function params(overrides: Partial<{ file_path: string; offset: number; limit: number }>, useArtifact = false): ToolCallParams {
+    return {
+      toolUseId: `test-ref-${Math.random().toString(36).slice(2, 6)}`,
+      cwd: dir,
+      input: overrides as ToolCallParams['input'],
+      ...(useArtifact ? {
+        artifactStore: new ArtifactStore(dir, 'test-ref'),
+        contextWindow: 128_000,
+      } : { contextWindow: 1_000_000 }),
+    }
+  }
+
+  it('flag off: repeat full read returns full content (regression guard)', async () => {
+    disableReadRef()
+    const file = makeFile('src/keep.ts', 100)
+    const r1 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r1.content.includes('line 1'), 'first read must return content')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.includes('line 1'), 'second read must also return content')
+    assert.ok(!r2.content.startsWith('[read-ref]'), 'must not return reference when flag is off')
+  })
+
+  it('flag on: repeat full read returns [read-ref] without full content', async () => {
+    enableReadRef()
+    const file = makeFile('src/ref.ts', 100)
+    const r1 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r1.content.includes('line 1'), 'first read must return content')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.startsWith('[read-ref]'), 'second read must return reference')
+    assert.ok(!r2.content.includes('line 1'), 'reference must not include file content')
+  })
+
+  it('flag on: modified file returns full content not reference', async () => {
+    enableReadRef()
+    const file = makeFile('src/mod.ts', 100)
+    const absPath = join(dir, file)
+
+    await READ_FILE_TOOL.execute(params({ file_path: file }))
+
+    // Modify file
+    writeFileSync(absPath, 'new content\n'.repeat(50), 'utf-8')
+
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.includes('new content'), 'modified file must return full content')
+    assert.ok(!r2.content.startsWith('[read-ref]'), 'must not return reference for modified file')
+  })
+
+  it('flag on: small fragment below threshold returns content not reference', async () => {
+    enableReadRef()
+    // File with ~1KB content (below 2KB threshold)
+    const file = makeFile('src/small.ts', 10, 50)
+    const r1 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r1.content.includes('line 1'))
+
+    // Repeat read should still return content (because it's below threshold)
+    const r2 = await READ_FILE_TOOL.execute(params({ file_path: file }))
+    assert.ok(r2.content.includes('line 1'), 'small repeat must return content')
+    assert.ok(!r2.content.startsWith('[read-ref]'), 'must not reference small fragments')
+  })
+
+  it('flag on: readRef counter increments', async () => {
+    enableReadRef()
+    const file = makeFile('src/count.ts', 100)
+    const statsBefore = getReadRefStats()
+
+    await READ_FILE_TOOL.execute(params({ file_path: file })) // first read
+    await READ_FILE_TOOL.execute(params({ file_path: file })) // repeat → ref
+
+    const statsAfter = getReadRefStats()
+    assert.ok(statsAfter.count > statsBefore.count, 'readRefCount must increment')
+    assert.ok(statsAfter.savedBytes > statsBefore.savedBytes, 'readRefSavedBytes must increase')
   })
 })
