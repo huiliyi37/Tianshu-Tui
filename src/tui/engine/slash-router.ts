@@ -145,6 +145,11 @@ export class SlashRouter {
                 routeReviewWorkflow(change, reviewDeps, { mode, focusHint: focus })
             })()
           : undefined,
+      // Submit a prompt directly to the agent pipeline, bypassing slash routing.
+      // Used by /goal (injects the goal prompt without the /goal prefix).
+      submitToAgent: (prompt: string) => {
+        this.app.submitText(prompt)
+      },
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session

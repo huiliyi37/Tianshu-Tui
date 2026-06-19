@@ -122,6 +122,8 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/skill list', description: 'List available skills' },
     { name: '/skill review', description: 'Review auto-distilled skill drafts' },
     { name: '/mission', description: '天契 — 当前任务契约', category: 'command' },
+    { name: '/goal', description: 'Set a persistent goal — agent auto-continues until achieved' },
+    { name: '/cancel-goal', description: 'Cancel the active goal' },
     { name: '/mcp', description: 'Show MCP server status' },
     { name: '/cockpit', description: 'Toggle cockpit panel' },
     { name: '/scroll', description: 'Browse output history' },

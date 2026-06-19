@@ -139,6 +139,9 @@ export interface SlashHandlerContext {
   /** 独立审查回调——/review 不经过 deliver_task 直接调 routeReviewWorkflow。
    *  未注入时 /review fallback 到 resolveAppPromptInput → deliver_task 旧路径。 */
   runReview?: (change: import('../agent/review-discipline.js').ChangeSet, mode: import('../agent/review-router.js').ReviewMode, focus?: string) => Promise<import('../agent/review-router.js').ReviewOutcome>
+  /** Submit a prompt directly to the agent pipeline, bypassing slash routing.
+   *  Used by commands that need to transform the input before sending (e.g. /goal). */
+  submitToAgent?: (prompt: string) => void
 }
 
 /** 收集当前工作区未提交的改动文件（unstaged + staged + untracked）。 */
@@ -451,6 +454,36 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/mode': {
       pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/goal': {
+      const goalText = parts.slice(1).join(' ').trim()
+      if (!goalText) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description>\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the iteration budget is exhausted.\nCancel with /cancel-goal.' }))
+        setIsStreaming(false)
+        return true
+      }
+      // Dynamic import to avoid circular dependency
+      const { GoalTracker } = await import('../agent/goal-tracker.js')
+      const tracker = new GoalTracker({
+        goal: goalText,
+        maxIterations: 50,
+        contextWindow: ctx.maxTokens,
+      })
+      ctx.agent.setGoalTracker(tracker)
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: 50. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.` }))
+      setIsStreaming(false)
+      // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
+      const prompt = `[GOAL MODE] ${goalText}\n\nYou are now in goal-driven mode. Work toward this goal continuously. When fully complete, output "GOAL ACHIEVED" on its own line.`
+      ctx.submitToAgent?.(prompt)
+      return true
+    }
+
+    case '/cancel-goal': {
+      ctx.agent.setGoalTracker(null)
+      pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
       setIsStreaming(false)
       return true
     }
