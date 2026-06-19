@@ -1,5 +1,5 @@
 import { extractJsonCandidates, type WorkerResult } from '../work-order.js'
-import { aggregateCouncil, type CouncilDraft, type CouncilPlan, type SeatContribution } from './council-plan.js'
+import { aggregateCouncil, resolveConflictsWithRebuttals, type CouncilDraft, type CouncilPlan, type SeatContribution } from './council-plan.js'
 import { renderCouncilPlan } from './council-render.js'
 import {
   routeCouncilSeat,
@@ -40,6 +40,9 @@ export interface CouncilInput {
   draft: CouncilDraft
   seats: CouncilSeat[]
   abortSignal?: AbortSignal
+  /** 多轮层最大轮数。默认 1（纯单轮，行为同今天）；≥2 时 runCouncilDebate 才叠加
+   *  round2，且仅在 round1 有冲突时扇出。runCouncil 本身忽略此参数（永远单轮）。 */
+  maxRounds?: number
 }
 
 /** 席位 objective —— 领域职责简述 + schema 指令（仿 buildPlannerObjective）。 */
@@ -54,6 +57,31 @@ export function buildSeatObjective(seat: CouncilSeat, draft: CouncilDraft): stri
     'Return a JSON WorkerResult whose `artifacts` contains ONE entry:',
     '{ "kind": "note", "title": "seat-contribution", "content": "<a JSON string of your SeatContribution>" }',
     'SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.',
+    `Set authority to "${seat.authority}".`,
+  ].join('\n')
+}
+
+/** 第二轮反驳 objective —— 席位只就 round1 冲突表态，不重出全稿。 */
+export function buildSeatRebuttalObjective(
+  seat: CouncilSeat,
+  draft: CouncilDraft,
+  conflicts: { key: string; description: string; left: string; right: string }[],
+  ownRound1Summary?: string,
+): string {
+  return [
+    `你是 ${seat.authority} 席位专家。议事会第二轮：首轮各席已出稿，现就以下分歧表态收敛，只出立场不执行。`,
+    ...(seat.charter ? [`席位章程：${seat.charter}`] : []),
+    '',
+    `Objective: ${draft.objective}`,
+    ...(ownRound1Summary ? [`你的首轮摘要：${ownRound1Summary}`] : []),
+    '',
+    '待裁分歧（针对每条给出立场）：',
+    ...conflicts.map(c => `- [${c.key}] ${c.description} | 一方: ${c.left} | 另一方: ${c.right}`),
+    '',
+    'Return a JSON WorkerResult whose `artifacts` contains ONE entry:',
+    '{ "kind": "note", "title": "seat-contribution", "content": "<a JSON string of your SeatContribution>" }',
+    'SeatContribution = { authority, summary, rebuttals }, rebuttals = [{ conflictKey, stance, argument }].',
+    'stance ∈ "concede"(让步) | "hold"(坚持) | "revise"(折中修订)；conflictKey 用上面方括号内的 key。',
     `Set authority to "${seat.authority}".`,
   ].join('\n')
 }
@@ -75,6 +103,7 @@ export function parseSeatContribution(seat: string, result: WorkerResult): SeatC
           challenges: Array.isArray(raw.challenges) ? raw.challenges : [],
           alternatives: Array.isArray(raw.alternatives) ? raw.alternatives : [],
           ...(raw.modelUsed ? { modelUsed: raw.modelUsed } : {}),
+          ...(Array.isArray(raw.rebuttals) ? { rebuttals: raw.rebuttals } : {}),
         }
       } catch {
         // 下一个候选 —— 模型输出可能夹杂散文/畸形示例
@@ -139,4 +168,43 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
   const aggregate = aggregateCouncil(input.draft, contributions)
   const finalPlanMarkdown = renderCouncilPlan({ objective: input.draft.objective, seats: authorities, contributions, aggregate, finalPlanMarkdown: '', meta: { round: 1, convenedAt, objectiveHash: hash } })
   return { objective: input.draft.objective, seats: authorities, contributions, aggregate, finalPlanMarkdown, meta: { round: 1, convenedAt, objectiveHash: hash } }
+}
+
+/**
+ * 多轮层：复用单轮 runCouncil 出 round1，按 maxRounds 叠加 round2 反驳收敛。
+ * maxRounds<2 或 round1 无冲突 → 直接返回 round1（等价单轮，零额外扇出）。
+ */
+export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): Promise<CouncilPlan> {
+  const round1 = await runCouncil(input, deps)
+  const maxRounds = input.maxRounds ?? 1
+  if (maxRounds < 2 || round1.aggregate.conflicts.length === 0) return round1
+
+  const r2requests: CouncilFanoutRequest[] = input.seats.map(seat => ({
+    parentTurnId: `council:seat-${seat.authority}-r2`,
+    objective: buildSeatRebuttalObjective(
+      seat,
+      input.draft,
+      round1.aggregate.conflicts,
+      round1.contributions.find(c => c.authority === seat.authority)?.summary,
+    ),
+    kind: 'plan',
+    profile: 'council_expert',
+    scope: {},
+    authority: seat.authority,
+  }))
+  const run2 = await deps.delegateBatch(r2requests, 'all_required', input.abortSignal,
+    deps.onSeatProgress
+      ? (completed, total) => { deps.onSeatProgress?.(`${completed}/${total}`, 'done') }
+      : undefined)
+  const r2Contributions: SeatContribution[] = input.seats.map(seat => {
+    const result = run2.results.find(r => r.workOrderId === `council:seat-${seat.authority}-r2`)
+    if (!result) return { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [], round: 2 }
+    return { ...parseSeatContribution(seat.authority, result), round: 2 }
+  })
+  const allRebuttals = r2Contributions.flatMap(c => c.rebuttals ?? [])
+  const aggregate = { ...round1.aggregate, conflicts: resolveConflictsWithRebuttals(round1.aggregate.conflicts, allRebuttals) }
+  const contributions = [...round1.contributions, ...r2Contributions]
+  const meta = { ...round1.meta, round: 2 }
+  const finalPlanMarkdown = renderCouncilPlan({ objective: input.draft.objective, seats: round1.seats, contributions, aggregate, finalPlanMarkdown: '', meta })
+  return { objective: input.draft.objective, seats: round1.seats, contributions, aggregate, finalPlanMarkdown, meta }
 }

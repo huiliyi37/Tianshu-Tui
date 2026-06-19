@@ -1,9 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { runCouncil, buildSeatObjective, parseSeatContribution } from '../council-orchestrator.js'
+import { runCouncil, runCouncilDebate, buildSeatObjective, buildSeatRebuttalObjective, parseSeatContribution } from '../council-orchestrator.js'
 import type { CouncilDeps, CouncilInput } from '../council-orchestrator.js'
 import type { WorkerResult } from '../../work-order.js'
 import { deriveStableWorkOrderId } from '../../coordinator.js'
+import { stableConflictKey } from '../council-plan.js'
 
 // 用真实 id 推导生成 workOrderId（而非手设 `council:seat-${seat}`），让测试反映
 // coordinator 实际产出的 id。若 coordinator 不再稳定化 council:，这里退化为
@@ -138,5 +139,97 @@ describe('buildSeatObjective', () => {
   it('含席位名 + schema 指令 + objective', () => {
     const o = buildSeatObjective({ authority: 'tianquan' }, input.draft)
     assert.match(o, /tianquan/); assert.match(o, /seat-contribution/); assert.match(o, /split loop.ts/)
+  })
+})
+
+// ---- runCouncilDebate 测试辅助 ----
+
+// round1 冲突贡献：两席同 id 不同 detail → 必产 1 冲突
+function r1c(seat: string, detail: string): WorkerResult {
+  return workerResult(seat, JSON.stringify({ authority: seat, summary: `${seat}-s`, additions: [{ id: 'NEW', title: 't', detail }], risks: [], challenges: [], alternatives: [] }))
+}
+// round2 结果用 -r2 后缀的稳定 id（与 orchestrator 绑定一致 — 防虚假绿灯）
+function r2Result(seat: string, contribJson: string): WorkerResult {
+  return { ...workerResult(seat, contribJson), workOrderId: deriveStableWorkOrderId(`council:seat-${seat}-r2`) ?? 'wo_unstable' }
+}
+const conflictInput: CouncilInput = {
+  draft: { objective: 'split loop.ts', items: [] },
+  seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
+}
+
+describe('runCouncilDebate — 多轮层（默认 1=单轮 opt-in）', () => {
+  it('默认 maxRounds（=1）即使有冲突也不触发 round2', async () => {
+    let calls = 0
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => { calls++; return { results: [r1c('tianquan', 'X'), r1c('tianfu', 'Y')] } },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate(conflictInput, deps) // 不传 maxRounds → 默认 1
+    assert.equal(calls, 1)
+    assert.equal(plan.meta.round, 1)
+    assert.equal(plan.aggregate.conflicts[0]!.status, 'open')
+  })
+
+  it('maxRounds=2 无冲突 → 不触发 round2', async () => {
+    let calls = 0
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => { calls++; return { results: reqs.map(r => workerResult(r.authority, '{}')) } },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate({ ...conflictInput, maxRounds: 2 }, deps)
+    assert.equal(calls, 1)
+    assert.equal(plan.meta.round, 1)
+  })
+
+  it('maxRounds=2 有冲突 → 触发 round2（2 次, meta.round=2）', async () => {
+    let calls = 0
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => {
+        calls++
+        if (calls === 1) return { results: [r1c('tianquan', 'X'), r1c('tianfu', 'Y')] }
+        return { results: reqs.map(r => r2Result(r.authority, JSON.stringify({ authority: r.authority, summary: 's', rebuttals: [] }))) }
+      },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate({ ...conflictInput, maxRounds: 2 }, deps)
+    assert.equal(calls, 2)
+    assert.equal(plan.meta.round, 2)
+  })
+
+  it('防虚假绿灯：round2 objective 真含 round1 冲突 key', async () => {
+    let round2Objectives: string[] = []
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => {
+        if (reqs[0]!.parentTurnId.endsWith('-r2')) {
+          round2Objectives = reqs.map(r => r.objective)
+          return { results: reqs.map(r => r2Result(r.authority, JSON.stringify({ authority: r.authority, summary: 's', rebuttals: [] }))) }
+        }
+        return { results: [r1c('tianquan', 'X'), r1c('tianfu', 'Y')] }
+      },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate({ ...conflictInput, maxRounds: 2 }, deps)
+    const key = plan.aggregate.conflicts[0]!.key
+    assert.ok(round2Objectives.length > 0, 'round2 必须真的扇出')
+    assert.ok(round2Objectives.some(o => o.includes(key)), 'round1 冲突 key 必须进 round2 objective')
+  })
+
+  it('round2 concede → 冲突收敛为 resolved', async () => {
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => {
+        if (reqs[0]!.parentTurnId.endsWith('-r2')) {
+          return { results: reqs.map(r => {
+            const key = stableConflictKey('X', 'Y')
+            const rebuttals = r.authority === 'tianfu' ? [{ conflictKey: key, stance: 'concede', argument: '认同方向' }] : []
+            return r2Result(r.authority, JSON.stringify({ authority: r.authority, summary: 's', rebuttals }))
+          }) }
+        }
+        return { results: [r1c('tianquan', 'X'), r1c('tianfu', 'Y')] }
+      },
+      now: () => 1,
+    }
+    const plan = await runCouncilDebate({ ...conflictInput, maxRounds: 2 }, deps)
+    assert.equal(plan.aggregate.conflicts[0]!.status, 'resolved')
+    assert.equal(plan.aggregate.conflicts[0]!.resolution, '认同方向')
   })
 })
