@@ -129,6 +129,10 @@ export interface ChangeSet {
   /** User-provided focus hint (from /review [max] <focus>). Passed to
    *  inspector/verifier objectives so workers know what to prioritize. */
   focusHint?: string
+  /** When true, review is suppressed to L1 (nudge-only) regardless of change
+   *  structure. Set by deliver_task when a goal tracker is actively driving
+   *  auto-continuation — child review workers would stall the goal loop. */
+  goalActive?: boolean
 }
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
@@ -172,6 +176,10 @@ function touchesSecurityBoundary(files: readonly string[]): boolean {
  */
 export function classifyChangeScale(change: ChangeSet): ReviewScale {
   if (change.forceLevel) return change.forceLevel
+  // Goal-active mode: suppress auto-review to L1 so child review workers
+  // don't stall the goal auto-continuation loop. L3 is reserved for the
+  // final goal-achieved commit (triggered manually or via deactivation hook).
+  if (change.goalActive) return 'L1'
   if (change.crossModule || change.files.length >= 5 || touchesSecurityBoundary(change.files)) return 'L3'
   if (change.files.some(file => DEPENDENCY_OR_COMPILER_CONFIG_PATTERN.test(file))) return 'L2'
   if (change.files.length > 0 && change.files.every(file =>

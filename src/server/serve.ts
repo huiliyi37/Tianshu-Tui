@@ -253,6 +253,7 @@ function buildSessionStores(
     getSameCwdRunningSessions: shared
       ? () => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0
       : undefined,
+    goalTrackerRef: { current: null },
   }
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
 

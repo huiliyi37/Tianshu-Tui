@@ -118,6 +118,9 @@ export interface RuntimeRefs {
    * 接入真实计数，让 VSW snapshot 决策（in-place vs worktree）真实可用。
    */
   getSameCwdRunningSessions?: () => number
+  /** Mutable ref to the current GoalTracker. Set by slash-commands /goal,
+   *  read by deliver_task B1Context for auto-review gating. */
+  goalTrackerRef: { current: import('./agent/goal-tracker.js').GoalTracker | null }
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -505,6 +508,8 @@ export function createInteractiveToolRegistry(
         return refs.coordinator.delegateBatch(requests, policy, abortSignal, onProgress)
       },
     }, { reviewDepth: params?.reviewDepth ?? 0 }),
+    isGoalActive: () => refs.goalTrackerRef.current?.isActive() ?? false,
+    isGoalAchieved: () => refs.goalTrackerRef.current?.isGoalAchieved() ?? false,
   })))
 
   return { registry: reg }
@@ -1238,6 +1243,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     lspManager: null,
     banditState: null,
     promptEngine: null,
+    goalTrackerRef: { current: null },
   }
 
   // 10. Tool registry

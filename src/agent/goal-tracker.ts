@@ -10,12 +10,15 @@ export interface GoalCheckResult {
   iteration: number
 }
 
+export type GoalDeactivationReason = 'achieved' | 'budget_exhausted' | 'context_limit' | 'cancelled'
+
 export class GoalTracker {
   private _active = false
   private _iteration = 0
   private readonly _goal: string
   private readonly _maxIterations: number
   private readonly _contextWindow: number
+  private _deactivationReason: GoalDeactivationReason | null = null
 
   constructor(config: GoalTrackerConfig) {
     this._goal = config.goal
@@ -38,6 +41,17 @@ export class GoalTracker {
 
   getMaxIterations(): number {
     return this._maxIterations
+  }
+
+  /** Reason the tracker was last deactivated, or null if still active. */
+  getDeactivationReason(): GoalDeactivationReason | null {
+    return this._deactivationReason
+  }
+
+  /** True when the goal was achieved (post-deactivation). Best-effort signal
+   *  for deliver_task to auto-trigger L3 review on the final commit. */
+  isGoalAchieved(): boolean {
+    return this._deactivationReason === 'achieved'
   }
 
   /** Check if the goal is achieved or limits are hit. Does NOT mutate state. */
@@ -70,8 +84,10 @@ export class GoalTracker {
     this._iteration++
   }
 
-  /** Deactivate the tracker (goal done or cancelled). */
-  deactivate(): void {
+  /** Deactivate the tracker (goal done, cancelled, or budget exhausted).
+   *  reason='achieved' signals deliver_task to auto-trigger L3 final review. */
+  deactivate(reason?: GoalDeactivationReason): void {
     this._active = false
+    this._deactivationReason = reason ?? null
   }
 }

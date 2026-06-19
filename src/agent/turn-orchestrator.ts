@@ -724,12 +724,18 @@ export class TurnOrchestrator {
           } else {
             // Any terminal reason: deactivate the tracker so subsequent turns
             // aren't checked. Emit a closing message for achievement.
+            // Map check reason to deactivation reason for post-goal review gating.
+            const deactivationReason = goalResult.reason === 'achieved' ? 'achieved'
+              : goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
+              : goalResult.reason === 'context_limit' ? 'context_limit'
+              : 'cancelled'
             if (goalResult.reason === 'achieved') {
               this.deps.appendSystemReminder(
-                `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。`
+                `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。\n` +
+                `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
               )
             }
-            tracker.deactivate()
+            tracker.deactivate(deactivationReason)
           }
         }
 

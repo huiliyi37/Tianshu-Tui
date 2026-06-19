@@ -150,6 +150,7 @@ export class SlashRouter {
       submitToAgent: (prompt: string) => {
         this.app.submitText(prompt)
       },
+      goalTrackerRef: this.ctx.refs.goalTrackerRef,
     }
 
     // Special-case /exit and /quit — shutdown handler already persists session

@@ -69,6 +69,13 @@ export interface B1Context {
    *  whose snapshotRef is stale (owned diff changed since they ran). Absent →
    *  no supersession (unchanged default). */
   getCurrentSnapshotRef?: () => string | undefined
+  /** True when a goal tracker is actively driving auto-continuation.
+   *  When active, post-commit auto-review is suppressed (L1 nudge-only)
+   *  to prevent child review workers from stalling the goal loop. */
+  isGoalActive?: () => boolean
+  /** True when the goal tracker deactivated with reason='achieved'.
+   *  Signals deliver_task to auto-upgrade the final commit review to L3. */
+  isGoalAchieved?: () => boolean
 }
 
 // ── Post-commit review batching ──
@@ -192,6 +199,10 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             type: 'string',
             enum: ['L2', 'L3'],
             description: 'Explicitly set review workflow depth. L2 = single adversarial verifier. L3 = Review Squadron (5 inspectors). When omitted, review level is auto-classified from change structure (default: L1 nudge-only). Use this to manually trigger deeper review for high-risk or critical-path changes.',
+          },
+          skipAutoReview: {
+            type: 'boolean',
+            description: 'Suppress automatic post-commit review. Set automatically when a goal tracker is active (goal-driven auto-continuation). Set manually to bypass review for trivial or urgent changes.',
           },
         },
       },
@@ -593,13 +604,28 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         // recursively reviewing themselves.
         // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
         const explicitReviewLevel = params.input.review_level as ReviewScale | undefined
+        const skipAutoReview = params.input.skipAutoReview === true || ctx.isGoalActive?.() === true
+        const goalAchieved = ctx.isGoalAchieved?.() === true
+
+        // Goal-achieved commit: auto-upgrade to L3 for final review sweep.
+        // Best-effort — if review deps are unavailable the commit still lands.
+        const effectiveReviewLevel: ReviewScale | undefined = goalAchieved && !explicitReviewLevel
+          ? 'L3'
+          : explicitReviewLevel
+
         const change: ChangeSet = {
           files: filesToCommit,
           crossModule: isCrossModule(filesToCommit),
           isFix: isFixContext(message),
-          ...(explicitReviewLevel ? { forceLevel: explicitReviewLevel } : {}),
+          goalActive: ctx.isGoalActive?.() === true,
+          ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
         }
-        if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
+
+        // Suppress auto review when goal is active OR caller explicitly skips.
+        // Goal-driven auto-continuation can't afford child review worker stalls.
+        if (skipAutoReview) {
+          lines.push('', '⏭ 自动审查已跳过（goal 模式或 skipAutoReview）。')
+        } else if (reviewDepth === 0 && shouldRouteReviewWorkflow(change) && isReviewDisciplineEnabled()) {
           // Batch: skip if a review was already launched within the cooldown window.
           const now = Date.now()
           if (now - lastPostCommitReviewAt < POST_COMMIT_REVIEW_COOLDOWN_MS) {
@@ -644,7 +670,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
                   // Review is best-effort post-commit: a timeout/crash never blocks
                   // delivery — the commit already landed. Report honestly.
                   outcome = {
-                    tier: reviewMode === 'auto' ? 'auto' : (explicitReviewLevel ?? 'L2'),
+                    tier: reviewMode === 'auto' ? 'auto' : (effectiveReviewLevel ?? 'L2'),
                     verdict: 'inconclusive',
                     rounds: 0,
                     evidence: `post-commit review DID NOT run (${reason.includes('timed out') ? 'timed out' : 'infra failure'}: ${reason})`,

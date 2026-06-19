@@ -142,6 +142,9 @@ export interface SlashHandlerContext {
   /** Submit a prompt directly to the agent pipeline, bypassing slash routing.
    *  Used by commands that need to transform the input before sending (e.g. /goal). */
   submitToAgent?: (prompt: string) => void
+  /** Mutable ref to the current GoalTracker. Set when /goal creates a tracker;
+   *  read by deliver_task's B1Context for auto-review gating. */
+  goalTrackerRef?: { current: import('../agent/goal-tracker.js').GoalTracker | null }
 }
 
 /** 收集当前工作区未提交的改动文件（unstaged + staged + untracked）。 */
@@ -474,7 +477,8 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         contextWindow: ctx.maxTokens,
       })
       ctx.agent.setGoalTracker(tracker)
-      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.` }))
+      if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
       setIsStreaming(false)
       // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
       const prompt = `[GOAL MODE] ${goalText}\n\nYou are now in goal-driven mode. Work toward this goal continuously. When fully complete, output "GOAL ACHIEVED" on its own line.`
@@ -484,6 +488,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/cancel-goal': {
       ctx.agent.setGoalTracker(null)
+      if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = null
       pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
       setIsStreaming(false)
       return true

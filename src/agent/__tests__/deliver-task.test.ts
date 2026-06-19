@@ -325,7 +325,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     const result = await tool.execute({ ...params, input: { commit: true, message: 'fix: scoped delivery' } })
 
     assert.equal(result.isError ?? false, false)
-    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: true })
+    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: true, goalActive: false })
     assert.deepEqual(calls, [{ files: ['src/a.ts'], message: 'fix: scoped delivery' }])
     assert.match(result.content, /审查通过 \(L2\)/)
   })
@@ -459,7 +459,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     const result = await tool.execute({ ...params, input: { commit: true, message: 'feat: scoped delivery' } })
 
     assert.equal(result.isError ?? false, false)
-    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: false })
+    assert.deepEqual(routedChange, { files: ['src/a.ts'], crossModule: false, isFix: false, goalActive: false })
     assert.match(result.content, /审查通过 \(L2\)/)
     assert.match(result.content, /Scoped commit created/)
   })
