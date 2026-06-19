@@ -15,14 +15,27 @@ npm run typecheck # tsc --noEmit
 ```
 main.tsx → AgentLoop (agent/loop.ts)
   ├── RuntimeHookPipeline (agent/runtime-hooks.ts)  ← TUI 2.x 核心
-  │     phases: preTurn → afterPerception → postTool → postTurn → postSession
-  │     9 hooks: signal-consumer, perception, vigor, theta, kick,
-  │              stigmergy, playbook-reflect, dream, telemetry-flush
+  │     纯分阶段执行器 + 错误隔离（任一 hook 抛错只走 onError，不中断 turn）
+  │     5 阶段真实调用点（非概念，已钉在 loop 主路径）：
+  │       preTurn / afterPerception → turn-perception.ts
+  │       postTool                  → tool-execution.ts（每个工具执行后）
+  │       runCompaction             → turn-orchestrator.ts（postTool 后、postTurn 前）
+  │       postTurn                  → turn-completion.ts
+  │       postSession               → loop.ts（经 turn-orchestrator 调度）
+  │     hooks 由 createDefaultRuntimeHooks() 条件装配（create-runtime-hooks.ts），
+  │       约 25 个，按 deps/开关 gated。默认会话实际激活 ~12-15 个：
+  │       常驻 8：perception, signal-consumer, kick, vigor×2(afterPerception+postTool),
+  │               theta, stigmergy, radio
+  │       gated：courage/ccr(starSoul)、playbook-reflect、dream/skill-distill、
+  │               meridian、telemetry-flush、dedup-guard、self-verify、memory-learning…
+  │       默认关(opt-in)：songline、constellation、hearth-observe、companion、dispatcher(自动委派)
   ├── AgentSession (messages, usage, turn count)
   ├── EvidenceTracker + FileHistory
   ├── Stores: claim-store, stigmergy-store, playbook-store, trace-store
   └── Tool dispatch → API (SSE streaming) → TUI (Ink 6)
 ```
+
+> ⚠️ 旧文档写「9 个固定 hook」是误导性简化。真相是条件装配，开关在 `loop-factory.ts:createRuntimeHooksPipeline` 传入的 deps。改 hook 行为前先看 `create-runtime-hooks.ts` 的 gate 条件，不要假设某 hook 一定在跑。
 
 Key modules: `src/agent/` (loop, hooks/, session, sub-agent, coordinator), `src/api/` (client, codex-client, error-classifier), `src/tui/` (app, stream, render-batch, steer-buffer), `src/tools/`, `src/compact/`, `src/context/`, `src/auth/`
 
@@ -41,6 +54,9 @@ Key modules: `src/agent/` (loop, hooks/, session, sub-agent, coordinator), `src/
 - Codex client receives text via both `output_text.delta` and `output_item.done` — `seenTextDelta` dedup handles this
 - Agent loop `onTurnComplete(usage, turn, isFinal)` — intermediate turns keep writer alive, only final turn destroys it
 - User input during streaming goes to SteerBuffer (not direct interrupt), injected at next tool result
+- **星域 `toolWhitelist` 是生效的工具交集过滤器，对当前内置域退化为恒等。** `star-domain.ts` 有 10 个域（天枢/破军/天府/天梁/天权/天机/天璇/辅/文曲/瑶光）。worker 创建时 `allowedTools = profile.allowedTools ∩ domain.toolWhitelist`（`work-order.ts:toolsForAuthority`）。当前 10 域白名单**逐字相同且是全集** → 对内置域交集退化为恒等（no-op），域间行为差异只来自 `systemPromptSuffix`/`volatileBlock`/`courageThreshold`/`decisionStyle`。但机制本身**真实生效**，三处会咬人：①profile 若含白名单外工具（`web_search`/`council_convene`/`browser` 等），设了 authority 就被静默削掉；②authority 拼错/域未加载 → **fail-closed 返回 `[]` deny-all**（有意护栏，勿改成回退 profile 全集）；③自定义域（card frontmatter）的 `toolWhitelist` 完全生效，会真实削减工具。改它前先想清楚命中的是哪种场景。
+- **Hook 信号经 AdvisoryBus 统一收编后注入**（`59e52394`）。hook 不直接改 prompt，只能用 `RuntimeHookEffects`（`injectUserMessage`/`emitPhaseChange`/`setStrategy`…）；带 priority/ttl/category 的信号优先 `advisoryBus.submit`，降级才 `injectUserMessage`。注入走 system-reminder 通道，不重写 `frozenBase`/`volatileBlock`。
+- **压缩历史重写只在 `turn===0`（用户边界）。** `compact-boundary-coordinator.ts` 的 `runCompaction` 是五级阶梯（会话分裂→maybeCompact→T9 质量压缩→陈旧轮压缩→堆驱动微压缩），命中即止。turn 中途只置 pending flag 延迟到 turn 0；1M 窗口跳过/延迟一切重写；`shouldDelayCompact` 在缓存健康时不压——全为保前缀缓存。
 
 ## MCP Tools: code-review-graph
 
