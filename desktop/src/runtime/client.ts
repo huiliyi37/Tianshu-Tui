@@ -133,6 +133,10 @@ export async function listSessions(): Promise<SessionRecord[]> {
   return sessions
 }
 
+export async function openFile(path: string): Promise<void> {
+  await apiPost('/open-file', { path })
+}
+
 export async function listAllSessions(): Promise<SessionRecord[]> {
   const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions?includeArchived=true')
   return sessions

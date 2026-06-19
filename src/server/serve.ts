@@ -456,6 +456,20 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // Config routes: provider + API key management for the desktop settings UI.
   Object.assign(routes, buildConfigRoutes(apiToken))
 
+  // Open file in system editor — thin wrapper so the Desktop webview can
+  // request the sidecar to open a local path without needing a Tauri plugin.
+  routes['POST /open-file'] = (body) => {
+    const filePath = (body as Record<string, unknown>)?.path
+    if (typeof filePath !== 'string' || !filePath) {
+      return { status: 400, body: { error: 'Missing path' } }
+    }
+    import('node:child_process').then(({ execFile }) => {
+      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
+      execFile(opener, [filePath], () => {})
+    })
+    return { status: 200, body: { opened: filePath } }
+  }
+
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
   const version = process.env.npm_package_version ?? '2.9.0'
   // registryOk lets the desktop tell "sidecar up but concurrency dormant" apart

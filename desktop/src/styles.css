@@ -1011,6 +1011,13 @@ body {
 .gh-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
 .gh-comment-body { font-size: 13px; }
 
+/* Clickable file paths */
+.file-path-link {
+  cursor: pointer; color: var(--link, #58a6ff); text-decoration: underline;
+  text-decoration-style: dotted; text-underline-offset: 3px;
+}
+.file-path-link:hover { color: var(--link-hover, #79c0ff); text-decoration-style: solid; }
+
 /* Archived sessions */
 .btn-show-archived {
   display: block; width: 100%; padding: 6px 14px; border: none; background: none;

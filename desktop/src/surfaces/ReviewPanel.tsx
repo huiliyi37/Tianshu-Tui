@@ -8,6 +8,7 @@ import {
 } from '../runtime/client'
 import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
+import { FilePath } from '../components/FilePath'
 import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
@@ -125,7 +126,7 @@ export function ReviewPanel(props: {
             {sources.map((path) => (
               <div key={path} className="source-item">
                 <span className="source-icon" aria-hidden>📄</span>
-                <span className="source-path">{path}</span>
+                <FilePath path={path} className="source-path" />
               </div>
             ))}
           </section>
