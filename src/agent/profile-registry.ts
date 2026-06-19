@@ -95,13 +95,15 @@ Do NOT modify any files.`,
 
 ### Mandate
 - Read the draft objective and items, then critique from YOUR domain charter only.
+- Use your read-only tools (grep / repo_map / related_tests / read_file) to locate the real files each item touches before opining.
 - Surface additions, risks (with severity + mitigation), challenges (open questions), and alternatives.
 - Do NOT modify files. Do NOT dispatch sub-work. This is a single advisory round.
 
 ### Output
 Return a JSON WorkerResult whose \`artifacts\` contains exactly ONE entry:
 { "kind": "note", "title": "seat-contribution", "content": "<JSON string of your SeatContribution>" }
-SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.`,
+SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.
+PlanItem (additions[]) = { id, title, detail, files?: string[] } — set files to the paths the item will modify (from real code lookup, not guesses).`,
     defaultKind: 'plan',
     defaultTimeoutMs: 600_000, // 10min — 单轮会诊需充分读上下文
     builtIn: true,

@@ -54,9 +54,13 @@ export function buildSeatObjective(seat: CouncilSeat, draft: CouncilDraft): stri
     `Objective: ${draft.objective}`,
     `Draft items: ${JSON.stringify(draft.items)}`,
     '',
+    '先用只读工具(grep / repo_map / related_tests / read_file)定位每个条目实际涉及的文件,',
+    '在 addition 的 `files` 字段列出它会改动的文件路径(相对项目根)。这些文件提示会用于后续 team 分波/同文件串行,务必基于真实代码而非臆测。',
+    '',
     'Return a JSON WorkerResult whose `artifacts` contains ONE entry:',
     '{ "kind": "note", "title": "seat-contribution", "content": "<a JSON string of your SeatContribution>" }',
     'SeatContribution = { authority, summary, additions, risks, challenges, alternatives }.',
+    'PlanItem (additions[]) = { id, title, detail, files?: string[] } —— files 为该条目涉及的文件路径。',
     `Set authority to "${seat.authority}".`,
   ].join('\n')
 }

@@ -17,6 +17,8 @@ export interface PlanItem {
   id: string
   title: string
   detail: string
+  /** 该条目涉及的文件（席位用只读工具定位后结构化输出）。W-C7 桥接 team 分波用；缺省视为全局任务。 */
+  files?: string[]
 }
 
 export interface CouncilDraft {

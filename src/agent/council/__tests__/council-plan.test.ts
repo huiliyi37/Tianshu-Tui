@@ -49,6 +49,23 @@ describe('aggregateCouncil — 去重 vs 冲突', () => {
   })
 })
 
+describe('aggregateCouncil — files 透传（W-C7 桥接）', () => {
+  it('draft item 的 files 透传进 mergedItems', () => {
+    const d: CouncilDraft = { objective: 'o', items: [{ id: 'T1', title: 't', detail: 'd', files: ['src/a.ts'] }] }
+    const agg = aggregateCouncil(d, [])
+    assert.deepEqual(agg.mergedItems.find(i => i.id === 'T1')!.files, ['src/a.ts'])
+  })
+  it('accepted addition 的 files 透传进 mergedItems', () => {
+    const c = seat({ authority: 'tianquan', additions: [{ id: 'A1', title: 'a', detail: 'd', files: ['src/b.ts', 'src/c.ts'] }] })
+    const agg = aggregateCouncil(draft, [c])
+    assert.deepEqual(agg.mergedItems.find(i => i.id === 'A1')!.files, ['src/b.ts', 'src/c.ts'])
+  })
+  it('缺省 files → undefined，不报错', () => {
+    const agg = aggregateCouncil(draft, [])
+    assert.equal(agg.mergedItems.find(i => i.id === 'T1')!.files, undefined)
+  })
+})
+
 describe('aggregateCouncil — 冲突无序去重（瑶光族②）', () => {
   it('(A,B) 与 (B,A) 只登记一次', () => {
     const a = seat({ authority: 's1', additions: [{ id: 'NEW', title: 'a', detail: 'X' }] })
