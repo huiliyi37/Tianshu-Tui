@@ -94,6 +94,7 @@ export const DEFAULT_CONFIG: Config = {
     autoReasoning: true,
     songlineEnabled: false,
     desktopTools: false,
+    crossSessionEnabled: true,
     hearthObserveEnabled: false,
     antiAnchoring: {
       enabled: false,

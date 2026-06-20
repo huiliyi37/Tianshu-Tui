@@ -115,6 +115,10 @@ export const agentSchema = z.object({
   autoReasoning: z.boolean().default(true),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
   songlineEnabled: z.boolean().default(false),
+  /** Enable cross-session knowledge loading (memory block, playbook, companion presence).
+   *  Default true — injects distilled project knowledge from .rivet/knowledge/.
+   *  Set false for fully isolated sessions. Env RIVET_NO_CROSS_SESSION=1 overrides as force-off. */
+  crossSessionEnabled: z.boolean().default(true),
   /** T8 桌面化办公工具（create_document 等 7 个）。默认关闭以守住工具数 kernel budget（≤25）。 */
   desktopTools: z.boolean().default(false),
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */

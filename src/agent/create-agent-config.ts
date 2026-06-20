@@ -39,6 +39,7 @@ export interface AgentConfigInput {
   intentRetrievalRouter?: IntentRetrievalRouterConfigInput
   autoDelegateEnabled?: boolean
   autoReasoning?: boolean
+  crossSessionEnabled?: boolean
   auth?: AuthProvider
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
@@ -74,6 +75,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     approvalMode: params.config.agent.approval as 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions',
     songlineEnabled: params.config.agent.songlineEnabled,
     hearthObserveEnabled: params.config.agent.hearthObserveEnabled,
+    crossSessionEnabled: params.config.agent.crossSessionEnabled,
     antiAnchoring: params.config.agent.antiAnchoring,
     intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
     autoDelegateEnabled: params.config.agent.autoDelegateEnabled,
@@ -86,7 +88,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -131,6 +133,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
     hearthObserveEnabled: input.hearthObserveEnabled,
+    crossSessionEnabled: input.crossSessionEnabled,
     antiAnchoring: input.antiAnchoring,
     intentRetrievalRouter: input.intentRetrievalRouter,
     autoDelegateEnabled: input.autoDelegateEnabled,

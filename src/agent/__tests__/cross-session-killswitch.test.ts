@@ -1,11 +1,17 @@
 /**
  * RIVET_NO_CROSS_SESSION kill-switch 契约测试。
  *
- * 开关开（'1' | 'true'）→ 四个跨会话注入点全部返回 null / 空 / skip：
- *   ① loop.ts warmupMemories() — 跳过跨会话学习加载
- *   ② turn-step-producer.ts setCrossSessionMemoryBlock(null) — 记忆块 null
- *   ③ turn-step-producer.ts 跨会话事件 — 跳过 consumeEvents / setCrossSessionEvents
- *   ④ turn-step-producer.ts companion presence — setCompanionPresence(null)
+ * 控制通道（优先级从高到低）：
+ *   ① env RIVET_NO_CROSS_SESSION=1/true → force-off（crossSessionDisabled=true）
+ *   ② env RIVET_NO_CROSS_SESSION=0/false → force-on（crossSessionDisabled=false）
+ *   ③ config.crossSessionEnabled（默认 true → crossSessionDisabled=false）
+ *   ④ 无 config+无 env → 回退默认 disabled=true（向后兼容）
+ *
+ * 四个注入点（turn-step-producer.ts + loop.ts）：
+ *   ① warmupMemories() — 跨会话记忆预热
+ *   ② setCrossSessionMemoryBlock() — 记忆块注入 prompt
+ *   ③ cross-session event consumption — 跨会话事件消费
+ *   ④ companion presence — 跨会话 companion 存在感
  */
 
 import { describe, it, afterEach } from 'node:test'
@@ -14,7 +20,7 @@ import { crossSessionDisabled } from '../turn-step-producer.js'
 
 // ── crossSessionDisabled() unit tests ──────────────────────────
 
-describe('crossSessionDisabled — env gate', () => {
+describe('crossSessionDisabled — env + config', () => {
   const saved = process.env.RIVET_NO_CROSS_SESSION
 
   afterEach(() => {
@@ -22,34 +28,52 @@ describe('crossSessionDisabled — env gate', () => {
     else process.env.RIVET_NO_CROSS_SESSION = saved
   })
 
-  it('returns true when env is unset (disabled by default)', () => {
+  // ── Env var overrides ──
+
+  it('env=1 force-off regardless of config', () => {
+    process.env.RIVET_NO_CROSS_SESSION = '1'
+    assert.equal(crossSessionDisabled(true), true)
+    assert.equal(crossSessionDisabled(false), true)
+  })
+
+  it('env=true force-off regardless of config', () => {
+    process.env.RIVET_NO_CROSS_SESSION = 'true'
+    assert.equal(crossSessionDisabled(true), true)
+    assert.equal(crossSessionDisabled(false), true)
+  })
+
+  it('env=0 force-on regardless of config', () => {
+    process.env.RIVET_NO_CROSS_SESSION = '0'
+    assert.equal(crossSessionDisabled(true), false)
+    assert.equal(crossSessionDisabled(false), false)
+  })
+
+  it('env=false force-on regardless of config', () => {
+    process.env.RIVET_NO_CROSS_SESSION = 'false'
+    assert.equal(crossSessionDisabled(true), false)
+    assert.equal(crossSessionDisabled(false), false)
+  })
+
+  // ── Config-driven (no env) ──
+
+  it('config enabled → cross-session NOT disabled', () => {
+    delete process.env.RIVET_NO_CROSS_SESSION
+    assert.equal(crossSessionDisabled(true), false)
+  })
+
+  it('config disabled → cross-session IS disabled', () => {
+    delete process.env.RIVET_NO_CROSS_SESSION
+    assert.equal(crossSessionDisabled(false), true)
+  })
+
+  it('config undefined → cross-session IS disabled (no env either)', () => {
     delete process.env.RIVET_NO_CROSS_SESSION
     assert.equal(crossSessionDisabled(), true)
   })
 
-  it('returns true when env = "1"', () => {
-    process.env.RIVET_NO_CROSS_SESSION = '1'
-    assert.equal(crossSessionDisabled(), true)
-  })
-
-  it('returns true when env = "true"', () => {
-    process.env.RIVET_NO_CROSS_SESSION = 'true'
-    assert.equal(crossSessionDisabled(), true)
-  })
-
-  it('returns false when env = "0" (opt-in)', () => {
-    process.env.RIVET_NO_CROSS_SESSION = '0'
-    assert.equal(crossSessionDisabled(), false)
-  })
-
-  it('returns true when env = ""', () => {
+  it('config undefined + env="" → cross-session IS disabled', () => {
     process.env.RIVET_NO_CROSS_SESSION = ''
     assert.equal(crossSessionDisabled(), true)
-  })
-
-  it('returns false when env = "false" (opt-in)', () => {
-    process.env.RIVET_NO_CROSS_SESSION = 'false'
-    assert.equal(crossSessionDisabled(), false)
   })
 })
 
@@ -67,36 +91,30 @@ describe('RIVET_NO_CROSS_SESSION=1 → 四个注入点返回 null/空/skip', () 
     else process.env.RIVET_NO_CROSS_SESSION = savedEnv
   })
 
-  it('① warmupMemories() gate present in loop.ts:956', () => {
+  it('① warmupMemories() gate present in loop.ts:966', () => {
     process.env.RIVET_NO_CROSS_SESSION = '1'
-    // loop.ts:956 — kill-switch guards loadSessionMemories call
-    //   if (process.env.RIVET_NO_CROSS_SESSION === '1' || ...) return
-    // When ON → early return, meridianDb/physarum/immune state never loaded.
-    assert.equal(crossSessionDisabled(), true)
+    // loop.ts:966 — force-off gate: env=1 overrides config
+    assert.equal(crossSessionDisabled(true), true)
   })
 
-  it('② setCrossSessionMemoryBlock(null) gate present in turn-step-producer.ts:226', () => {
+  it('② setCrossSessionMemoryBlock(null) gate present in turn-step-producer.ts:225', () => {
     process.env.RIVET_NO_CROSS_SESSION = '1'
-    // turn-step-producer.ts:226
-    //   crossSessionDisabled() ? null : renderMemoryBlock(...)
-    // When ON → null → no cross-session memory block injected into prompt.
-    assert.equal(crossSessionDisabled(), true)
+    // turn-step-producer.ts:225
+    //   crossSessionDisabled(configEnabled) ? null : renderMemoryBlock(...)
+    assert.equal(crossSessionDisabled(true), true)
   })
 
-  it('③ cross-session event consumption skipped in turn-step-producer.ts:311', () => {
+  it('③ cross-session event consumption skipped in turn-step-producer.ts:303', () => {
     process.env.RIVET_NO_CROSS_SESSION = '1'
-    // turn-step-producer.ts:311
-    //   if (!crossSessionDisabled() && ...) { consumeEvents / setCrossSessionEvents }
-    // When ON → gate short-circuits → no events consumed, appendix not set.
-    assert.equal(crossSessionDisabled(), true)
+    // turn-step-producer.ts:303
+    //   if (!crossSessionDisabled(configEnabled) && ...)
+    assert.equal(crossSessionDisabled(true), true)
   })
 
-  it('④ companion presence null in turn-step-producer.ts:338', () => {
+  it('④ companion presence null in turn-step-producer.ts:331', () => {
     process.env.RIVET_NO_CROSS_SESSION = '1'
-    // turn-step-producer.ts:338
-    //   crossSessionDisabled() ? [] : loadPresence(...)
-    //   setCompanionPresence(companions.length > 0 ? formatPresence(...) : null)
-    // When ON → companions = [] → setCompanionPresence(null).
-    assert.equal(crossSessionDisabled(), true)
+    // turn-step-producer.ts:331
+    //   crossSessionDisabled(configEnabled) ? [] : loadPresence(...)
+    assert.equal(crossSessionDisabled(true), true)
   })
 })

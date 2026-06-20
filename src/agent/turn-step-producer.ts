@@ -30,13 +30,19 @@ import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhas
 import { formatImmuneContext } from './immune-context.js'
 
 /**
- * Cross-session loading is DISABLED by default for clean isolated sessions.
- * Set RIVET_NO_CROSS_SESSION=0 to opt IN to cross-session appendix injection
- * (memory block / events / companion presence from other sessions).
+ * Cross-session loading check — prefers config over env var.
+ *
+ * - Env RIVET_NO_CROSS_SESSION=1/true → force-off (disabled=true)
+ * - Env RIVET_NO_CROSS_SESSION=0/false → force-on (disabled=false)
+ * - No env → uses config.crossSessionEnabled (default true = enabled = NOT disabled)
+ * - No config and no env → disabled (backward compat for callers without config)
  */
-export function crossSessionDisabled(): boolean {
+export function crossSessionDisabled(configEnabled?: boolean): boolean {
   const v = process.env.RIVET_NO_CROSS_SESSION
-  return v !== '0' && v !== 'false'
+  if (v === '1' || v === 'true') return true
+  if (v === '0' || v === 'false') return false
+  if (configEnabled !== undefined) return !configEnabled
+  return true
 }
 
 /** Map StarPhase values to PromptEngine phaseClass strings. */
@@ -222,7 +228,7 @@ export class TurnStepProducer {
       skillRegistry.renderDiscoveryBlock(userInput, { exclude: this.self.getDisabledSkills() }),
     )
     this.self.config.promptEngine.setCrossSessionMemoryBlock(
-      crossSessionDisabled() ? null : renderMemoryBlock(this.self.cwd, userInput),
+      crossSessionDisabled(this.self.config.crossSessionEnabled) ? null : renderMemoryBlock(this.self.cwd, userInput),
     )
     this.self.config.promptEngine.setMentionContextBlock(renderMentionContext(parseMentions(userInput)))
 
@@ -300,7 +306,7 @@ export class TurnStepProducer {
     this.self.contextInjection.refreshActiveClaims()
 
     // Read events from other sessions (cache-safe: injected into dynamic appendix only)
-    if (!crossSessionDisabled() && this.self.config.sessionRegistry && this.self.config.sessionId) {
+    if (!crossSessionDisabled(this.self.config.crossSessionEnabled) && this.self.config.sessionRegistry && this.self.config.sessionId) {
       const events = this.self.config.sessionRegistry.consumeEvents(this.self.config.sessionId, this.self.lastSeenEventId)
       let appendix = ''
       if (events.length > 0) {
@@ -328,7 +334,7 @@ export class TurnStepProducer {
     }
     // Companion presence: load other live sessions for awareness
     {
-      const companions = crossSessionDisabled() ? [] : loadPresence(this.self.cwd, this.self.config.sessionId)
+      const companions = crossSessionDisabled(this.self.config.crossSessionEnabled) ? [] : loadPresence(this.self.cwd, this.self.config.sessionId)
       this.self.config.promptEngine.setCompanionPresence(
         companions.length > 0 ? formatPresenceForAppendix(companions) : null,
       )

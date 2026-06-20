@@ -105,6 +105,10 @@ export interface AgentConfig {
   songlineEnabled?: boolean
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). Disabled by default. */
   hearthObserveEnabled?: boolean
+  /** Enable cross-session knowledge loading (memory block, playbook events, companion presence).
+   *  Default true — injects distilled project knowledge into prompt.
+   *  Env RIVET_NO_CROSS_SESSION=1 overrides as force-off. */
+  crossSessionEnabled?: boolean
   /** Explicit opt-in for anti-anchoring harness hooks. Disabled by default. */
   antiAnchoring?: AntiAnchoringConfig
   /** Disable theta (tsc --noEmit) checks. Workers use this to skip redundant typechecking. Default: false (enabled). */
