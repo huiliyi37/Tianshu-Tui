@@ -191,6 +191,15 @@ export class AgentLoop {
   intent: TurnIntentController
   contextInjection: ContextInjectionController
   compaction: CompactionController
+  // P2-6 breadcrumb state — lifted from createTurnStreamController closure
+  // to instance scope so it survives TurnStreamController recreation at each
+  // user-message boundary (turn-step-producer.ts:122). Without this, the diff
+  // against cumulative engine counters resets every segment, causing false
+  // positives (e.g. toolsUpdated=true on every turn=0) and false negatives
+  // (real events masked by the reset).
+  prevEngineStats = { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 }
+  prevMsgCount = 0
+  prevHitRate: number | null = null
   turnStream: TurnStreamController | null = null
   turnCompletion: TurnCompletionController
   toolExecution: ToolExecutionController

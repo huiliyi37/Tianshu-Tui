@@ -26,11 +26,6 @@ import { TurnStepProducer } from './turn-step-producer.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 
 export function createTurnStreamController(self: AgentLoop): TurnStreamController {
-// P2-6 breadcrumb state: previous-turn snapshots for diffing cumulative
-// engine counters and detecting history rewrites / hit-rate cliffs.
-let prevEngineStats = { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 }
-let prevMsgCount = 0
-let prevHitRate: number | null = null
 return new TurnStreamController({
       client: self.config.client,
       abortSignal: self.abortController?.signal ?? new AbortController().signal,
@@ -92,27 +87,27 @@ return new TurnStreamController({
 
           // History rewrite detection: message count shrank since last turn
           // (compact / replace / session split) — the classic mid-round breaker.
-          if (prevMsgCount > 0 && messages.length < prevMsgCount) entry.historyRewritten = true
+          if (self.prevMsgCount > 0 && messages.length < self.prevMsgCount) entry.historyRewritten = true
           const wasRewritten = entry.historyRewritten === true
-          prevMsgCount = messages.length
+          self.prevMsgCount = messages.length
 
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
           const stats = self.config.promptEngine.getCacheEventStats?.()
           if (stats) {
-            if (stats.volatileSwaps > prevEngineStats.volatileSwaps) entry.volatileSwapped = true
-            if (stats.frozenClamps > prevEngineStats.frozenClamps) entry.frozenClamped = true
-            if (stats.frozenFallbackRebuilds > prevEngineStats.frozenFallbackRebuilds) entry.frozenEvicted = true
-            if (stats.toolsUpdates > prevEngineStats.toolsUpdates) entry.toolsUpdated = true
+            if (stats.volatileSwaps > self.prevEngineStats.volatileSwaps) entry.volatileSwapped = true
+            if (stats.frozenClamps > self.prevEngineStats.frozenClamps) entry.frozenClamped = true
+            if (stats.frozenFallbackRebuilds > self.prevEngineStats.frozenFallbackRebuilds) entry.frozenEvicted = true
+            if (stats.toolsUpdates > self.prevEngineStats.toolsUpdates) entry.toolsUpdated = true
             if (stats.collapseWatermark > 0) entry.collapseWatermark = stats.collapseWatermark
-            prevEngineStats = { volatileSwaps: stats.volatileSwaps, frozenClamps: stats.frozenClamps, frozenFallbackRebuilds: stats.frozenFallbackRebuilds, toolsUpdates: stats.toolsUpdates }
+            self.prevEngineStats = { volatileSwaps: stats.volatileSwaps, frozenClamps: stats.frozenClamps, frozenFallbackRebuilds: stats.frozenFallbackRebuilds, toolsUpdates: stats.toolsUpdates }
           }
 
           // Auto-diagnose on a hit-rate cliff (> 15 percentage-point drop).
-          if (prevHitRate !== null && prevHitRate - hitRateNum > 15) {
+          if (self.prevHitRate !== null && self.prevHitRate - hitRateNum > 15) {
             const diag = diagnoseCacheMiss(self.session.getCacheHistory(), turn, null, wasRewritten)
             if (diag) entry.diagnose = `${diag.reason}: ${diag.message}`
           }
-          prevHitRate = hitRateNum
+          self.prevHitRate = hitRateNum
         } catch { /* breadcrumbs are best-effort — never break cache logging */ }
 
         const line = JSON.stringify(entry)
