@@ -47,12 +47,11 @@ export class ContextInjectionController {
     this.refreshLedger()
   }
 
-  refreshPlaybookLessons(userInput: string): void {
-    const playbookStore = this.deps.getPlaybookStore()
-    if (!playbookStore) return
-    const keywords = extractKeywords(`${userInput} ${this.deps.getRecentToolHistory().map(h => `${h.tool} ${h.target}`).join(' ')}`, 12)
-    const lessons = playbookStore.query(keywords, 3, { minImportance: 0.6 })
-    this.deps.promptEngine.updatePlaybookLessons(lessons)
+  refreshPlaybookLessons(_userInput: string): void {
+    // Playbook injection disabled — lessons are low-signal noise (14/16 entries
+    // have useCount=0) and their per-turn keyword re-query causes habituation
+    // tracker churn → consolidatedBlock mutation → prefix cache break.
+    // Re-enable with useCount>0 + importance>=0.5 filtering when content quality improves.
   }
 
   recordUserInputClaims(userInput: string): void {
