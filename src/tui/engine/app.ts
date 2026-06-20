@@ -1967,9 +1967,11 @@ export class TuiApp {
     let glanceMaxTokens: number | undefined
     if (metrics) {
       glanceCacheHitRate = metrics.cacheHitRate ?? undefined
-      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
+      // Prefer API real prompt_tokens over local estimate for progress ratio
+      const progressTokens = metrics.lastRealPromptTokens > 0 ? metrics.lastRealPromptTokens : metrics.estimatedTokens
+      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, progressTokens / metrics.maxTokens) : undefined
       glanceCost = metrics.cost
-      glanceEstimatedTokens = metrics.estimatedTokens
+      glanceEstimatedTokens = progressTokens
       glanceMaxTokens = metrics.maxTokens
     } else {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
