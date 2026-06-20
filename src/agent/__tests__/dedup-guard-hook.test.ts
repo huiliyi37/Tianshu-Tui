@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDedupGuardHook, trigramOverlap, trigrams } from '../hooks/dedup-guard-hook.js'
 import type { RuntimeHookContext, RuntimeHookSnapshot, RuntimeHookEffects } from '../runtime-hooks.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
 
 function makeCtx(injected: string[]): RuntimeHookContext {
   return {
@@ -10,6 +11,13 @@ function makeCtx(injected: string[]): RuntimeHookContext {
       injectUserMessage: (msg: string) => { injected.push(msg) },
     } as unknown as RuntimeHookEffects,
   }
+}
+
+function makeAdvisoryBus(submitted: Array<{ key: string; content: string }>): AdvisoryBus {
+  return {
+    submit: (entry: { key: string; content: string }) => { submitted.push(entry) },
+    drain: () => [],
+  } as unknown as AdvisoryBus
 }
 
 describe('trigrams', () => {
@@ -91,40 +99,47 @@ describe('createDedupGuardHook', () => {
     assert.equal(injected.length, 0)
   })
 
-  it('injects suppression when texts are highly similar', () => {
+  it('submits dedup advisory when texts are highly similar', () => {
     const injected: string[] = []
+    const submitted: Array<{ key: string; content: string }> = []
     const text = 'The implementation consists of three parts: first we create the data model, then we add validation, and finally we write the tests.'
     let stored: string | null = null
+    const advisoryBus = makeAdvisoryBus(submitted)
     const hook = createDedupGuardHook({
       getStreamedText: () => text,
       getPrevStreamedText: () => stored,
       setPrevStreamedText: (t) => { stored = t },
+      advisoryBus,
     })
 
-    // First turn: stores text, no injection
+    // First turn: stores text, no advisory
     hook.run(makeCtx(injected))
     assert.equal(injected.length, 0)
+    assert.equal(submitted.length, 0)
     assert.equal(stored, text)
 
-    // Second turn with same text: injects suppression
+    // Second turn with same text: submits advisory via advisoryBus
     hook.run(makeCtx(injected))
-    assert.equal(injected.length, 1)
-    assert.ok(injected[0]!.includes('天璇-感知'), `Expected 天璇-感知 tag, got: ${injected[0]}`)
-    assert.ok(injected[0]!.includes('换个角度'), `Expected perspective shift instruction, got: ${injected[0]}`)
+    assert.equal(submitted.length, 1)
+    assert.equal(submitted[0]!.key, 'dedup-guard')
+    assert.ok(submitted[0]!.content.includes('重复输出检测'), `Expected 重复输出检测 in content, got: ${submitted[0]!.content}`)
+    assert.ok(submitted[0]!.content.includes('换个角度'), `Expected 换个角度, got: ${submitted[0]!.content}`)
   })
 
   it('respects custom threshold', () => {
     const injected: string[] = []
+    const submitted: Array<{ key: string; content: string }> = []
+    const advisoryBus = makeAdvisoryBus(submitted)
     const hook = createDedupGuardHook({
       getStreamedText: () => 'This is a somewhat similar text about programming and software development.',
       getPrevStreamedText: () => 'This is a somewhat similar text about programming and software development.',
       setPrevStreamedText: () => {},
       threshold: 0.99, // Very high threshold
+      advisoryBus,
     })
-    // Even identical text may not reach 0.99 with trigram overlap
     hook.run(makeCtx(injected))
-    // With threshold 0.99, even identical text should pass (overlap = 1.0)
-    assert.equal(injected.length, 1)
+    // With threshold 0.99 and identical text (overlap = 1.0), advisory should be submitted
+    assert.equal(submitted.length, 1)
   })
 
   it('stores current text for next turn even when no injection', () => {

@@ -22,9 +22,9 @@ describe('crossSessionDisabled — env gate', () => {
     else process.env.RIVET_NO_CROSS_SESSION = saved
   })
 
-  it('returns false when env is unset', () => {
+  it('returns true when env is unset (disabled by default)', () => {
     delete process.env.RIVET_NO_CROSS_SESSION
-    assert.equal(crossSessionDisabled(), false)
+    assert.equal(crossSessionDisabled(), true)
   })
 
   it('returns true when env = "1"', () => {
@@ -37,17 +37,17 @@ describe('crossSessionDisabled — env gate', () => {
     assert.equal(crossSessionDisabled(), true)
   })
 
-  it('returns false when env = "0"', () => {
+  it('returns false when env = "0" (opt-in)', () => {
     process.env.RIVET_NO_CROSS_SESSION = '0'
     assert.equal(crossSessionDisabled(), false)
   })
 
-  it('returns false when env = ""', () => {
+  it('returns true when env = ""', () => {
     process.env.RIVET_NO_CROSS_SESSION = ''
-    assert.equal(crossSessionDisabled(), false)
+    assert.equal(crossSessionDisabled(), true)
   })
 
-  it('returns false when env = "false"', () => {
+  it('returns false when env = "false" (opt-in)', () => {
     process.env.RIVET_NO_CROSS_SESSION = 'false'
     assert.equal(crossSessionDisabled(), false)
   })

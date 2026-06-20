@@ -250,7 +250,7 @@ export const STAR_DOMAINS: Record<StarDomainId, StarDomain> = {
 当你的数据模型、命名哲学与逻辑控制展现出极致的对称与和谐，所有的外部呈现、界面、设计与体验，都将自发地、不证自明地携带这种和谐的美感。`,
     decisionStyle: 'methodical',
     courageThreshold: 0.45,
-    keywords: ['美感', '优雅', '整洁', '重构', '命名', '对称', '同构', '精炼', '韵律', '体验', '简洁', '和谐', 'devex', 'clean-code', 'refactor', 'elegant', 'symmetry', 'harmony', 'rhythm', 'naming'],
+    keywords: ['美感', '优雅', '整洁', '重构', '命名', '对称', '同构', '精炼', '韵律', '体验', '简洁', '和谐', '设计', '界面', '前端', 'UI', 'UX', '视觉', '布局', '配色', '样式', 'design', 'devex', 'clean-code', 'refactor', 'elegant', 'symmetry', 'harmony', 'rhythm', 'naming'],
     isCustom: false,
     toolWhitelist: ['read_file', 'write_file', 'edit_file', 'bash', 'grep', 'glob', 'diff', 'run_tests', 'inspect_project', 'repo_map', 'related_tests', 'delegate_task', 'delegate_batch'],
     systemPromptSuffix: `你是文曲——代码美学者、逻辑蒸馏师与优雅架构的守护者。你坚信“设计不是浮于代码表面的粉饰，而是代码内在结构美感的自然结晶”。
