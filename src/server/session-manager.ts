@@ -961,23 +961,27 @@ export class RuntimeSessionManager {
   listSessions(): SessionRecord[] {
     return [...this.sessions.values()]
       .filter((s) => !s.record.archived)
-      .map((s) => ({ ...s.record }))
+      .map((s) => this.enrichRecord(s))
   }
 
   listAllSessions(): SessionRecord[] {
-    return [...this.sessions.values()].map((s) => ({ ...s.record }))
+    return [...this.sessions.values()].map((s) => this.enrichRecord(s))
   }
 
-  getSession(id: string): SessionRecord | undefined {
-    const s = this.sessions.get(id)
-    if (!s) return undefined
+  /** Enrich a session record with live context usage when the agent is awake. */
+  private enrichRecord(s: InternalSession): SessionRecord {
     const record = { ...s.record }
-    // Enrich with live context usage when the agent is awake.
     if (s.agent) {
       try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
       try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
     }
     return record
+  }
+
+  getSession(id: string): SessionRecord | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    return this.enrichRecord(s)
   }
 
   getEvents(id: string, since = 0): { events: SessionEvent[]; lastSeq: number } | undefined {
