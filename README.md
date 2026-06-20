@@ -210,7 +210,13 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and auto-discover at startup.
 
 Double-tap **ESC** for rewind overlay. Press **Esc** to dismiss any overlay.
 
-## Build & Test
+## For Developers
+
+### Tech Stack
+
+Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · Ink 6 (React TUI) · tsup bundle · node:test + assert/strict
+
+### Build & Test
 
 ```bash
 npx tsc --noEmit                                    # typecheck
@@ -221,30 +227,52 @@ node dist/main.js                                    # launch TUI
 node dist/main.js -p "fix the typo"                  # headless mode
 ```
 
-## Architecture
+### Extending
+
+**Add a tool** — implement `ToolDefinition` + executor in `src/tools/`, register in `src/main.tsx`, add test in `src/tools/__tests__/`. Tools return `ToolResult { content, isError?, rawPath?, uiContent? }`.
+
+**Add a skill** — drop a `.md` file in `.rivet/skills/` with frontmatter (`name`, `description`, `triggers`). Full instructions load on demand.
+
+**Add a slash command** — project-local `.rivet/commands/*.md` with `$ARGUMENTS` interpolation.
+
+**Add a hook** — implement `PreToolUse | PostToolUse | UserPromptSubmit | PreCompact` handler, register via `HookRegistry`. Handlers are isolated — a broken hook never crashes the loop.
+
+### Architecture
 
 ```
 src/
-├── agent/          Core loop, tool pipeline, subagent coordination, verification, delivery gates
-│                   250+ modules: loop, turn-orchestrator, coordinator, advisory-bus,
-│                   goal-tracker, plan-execution-trace, star-domain, sensorium, immune system, etc.
-├── api/            Streaming API client (DeepSeek, GLM, Codex OAuth, multi-provider)
-├── prompt/         Prompt engine: frozen prefix + delta appendix + volatile context layers
-├── tools/          30+ tools: bash, edit, read/write, grep, glob, run_tests, git, delegate,
-│                   deliver_task, plan_submit, council_convene, web_fetch, lsp, etc.
-├── tui/            Terminal UI (Ink 6 / React + T9 ANSI engine)
-│   ├── engine/     Commit-engine scrollback, input controller, overlay system, stream renderer
-│   ├── cockpit/    Multi-panel cockpit: trace, verify, context, safety, model, MCP
-│   └── format/     Welcome screen, rewind, activity labels
-├── compact/        Three-layer semantic pruning + micro-compact + T7 request-time collapse
-├── context/        Context ledger, progressive compaction, claim system, anchor registry
-├── config/         Zod-validated config: defaults → ~/.rivet → project overlay
-├── server/         Desktop sidecar: session management, REST routes, SSE streaming, task registry
-├── platform/       Native module resolution (better-sqlite3 optional)
-├── skills/         Skill loading + progressive disclosure
-├── lsp/            Language Server Protocol integration
-├── mcp/            Model Context Protocol client
-└── search/         Semantic search (BM25 + embedding RRF fusion)
+├── agent/     Core loop (250+ modules): turn-orchestrator, tool pipeline, coordinator,
+│              advisory-bus, goal-tracker, plan-execution-trace, sensorium, immune system
+├── api/       Streaming API client — DeepSeek, GLM, Codex OAuth, multi-provider routing
+├── prompt/    Prompt engine — frozen prefix + delta appendix + volatile context layers
+├── tools/     30+ tools — bash, edit, read/write, grep, glob, run_tests, git, delegate,
+│              deliver_task, plan_submit, council_convene, web_fetch, lsp, undo, rewind
+├── tui/       Terminal UI (Ink 6 / React + T9 ANSI engine)
+│   ├── engine/   Commit-engine scrollback, input controller, overlay system, stream renderer
+│   └── cockpit/  Multi-panel cockpit: trace, verify, context, safety, model, MCP
+├── compact/   Three-layer semantic pruning + micro-compact + T7 request-time collapse
+├── context/   Context ledger, progressive compaction, claim system, anchor registry
+├── config/    Zod-validated config: defaults → ~/.rivet → project overlay
+├── server/    Desktop sidecar: session management, REST routes, SSE streaming
+├── mcp/       Model Context Protocol client (stdio + SSE)
+├── lsp/       Language Server Protocol integration
+└── search/    Semantic search (BM25 + embedding RRF fusion)
+```
+
+### Data Flow
+
+```
+User input → slash command router (built-in / custom / agent)
+           → AgentLoop:
+               PromptEngine.buildRequest()
+                 frozen system prompt (cache anchor)
+                 delta appendix (cross-turn diff, ~200 bytes)
+                 volatile context (git status, tool history, progress)
+               ApiClient.stream() → SSE → content blocks (text, thinking, tool_use)
+               Tool execution pipeline:
+                 PreToolUse hook → approval → execute → PostToolUse hook
+                 → evidence tracking → cache invalidation on writes
+               Loop until no tool_use or maxTurns
 ```
 
 ### Session Data
