@@ -49,6 +49,11 @@ export interface SessionState {
   /** API 最近一轮请求返回的真实 prompt_tokens（校准基准）。
    *  由 addUsage() 在每轮 API 响应后写入；0 表示尚无数据。 */
   lastRealPromptTokens: number
+  /** Ratio between local token estimate and the API's actual prompt_tokens
+   *  from the most recent request. Applied in getEstimatedTokens() so the
+   *  GlanceBar shows "current context occupancy" aligned with real API usage,
+   *  not a stale single-turn value. Starts at 1 (trust local estimate). */
+  contextCalibrationRatio: number
   turnCacheHistory: TurnCacheSnapshot[]
   compactedAtTurns: Set<number>
   contextLedger?: ContextLedger
@@ -82,6 +87,7 @@ export class SessionContext {
       estimatedTokens: 0,
       prefixOverhead: 0,
       lastRealPromptTokens: 0,
+      contextCalibrationRatio: 1,
       filesRead: new Set(),
       filesModified: new Set(),
       testResults: [],
@@ -253,6 +259,18 @@ export class SessionContext {
     if (usage.input_tokens) {
       u.input_tokens += usage.input_tokens
       this.state.lastRealPromptTokens = usage.input_tokens
+      // Calibrate local estimate against the API's real prompt_tokens.
+      // The raw estimatedTokens tracks current messages only; prefixOverhead
+      // is fixed. The ratio captures provider-specific tokenization / overhead
+      // so getEstimatedTokens() stays close to reality between API calls.
+      const localEstimate = this.state.estimatedTokens + this.state.prefixOverhead
+      if (localEstimate > 0) {
+        const ratio = usage.input_tokens / localEstimate
+        // EMA with alpha=0.7: responsive to real usage but not jittered by one
+        // outlier response. First calibration immediately adopts the ratio.
+        const alpha = this.state.contextCalibrationRatio === 1 ? 1 : 0.7
+        this.state.contextCalibrationRatio = alpha * ratio + (1 - alpha) * this.state.contextCalibrationRatio
+      }
     }
     if (usage.output_tokens) u.output_tokens += usage.output_tokens
     if (usage.cache_read_input_tokens) u.cache_read_input_tokens += usage.cache_read_input_tokens
@@ -297,7 +315,8 @@ export class SessionContext {
   }
 
   getEstimatedTokens(): number {
-    return this.state.estimatedTokens + this.state.prefixOverhead
+    const base = this.state.estimatedTokens + this.state.prefixOverhead
+    return Math.round(base * this.state.contextCalibrationRatio)
   }
 
   /** API 最近一轮返回的真实 prompt_tokens（校准基准）；0 表示尚无数据。 */

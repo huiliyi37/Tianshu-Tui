@@ -506,3 +506,39 @@ describe('SessionContext lastRealPromptTokens', () => {
     assert.equal(ctx.getLastRealPromptTokens(), 50_000)
   })
 })
+
+describe('SessionContext contextCalibrationRatio', () => {
+  it('calibrates getEstimatedTokens after addUsage', () => {
+    const ctx = new SessionContext()
+    ctx.setPrefixOverhead(0)
+    ctx.addUserMessage('hello world') // adds some local estimate tokens
+    const before = ctx.getEstimatedTokens()
+    assert.ok(before > 0, 'local estimate should be positive')
+
+    // API reports 4x the local estimate → ratio becomes 4
+    ctx.addUsage({ input_tokens: before * 4 })
+    const after = ctx.getEstimatedTokens()
+    assert.equal(after, Math.round(before * 4), 'estimated tokens should be calibrated to API reality')
+  })
+
+  it('applies EMA smoothing after the first calibration', () => {
+    const ctx = new SessionContext()
+    ctx.setPrefixOverhead(0)
+    ctx.addUserMessage('hello world')
+    const base = ctx.getEstimatedTokens()
+
+    // First calibration: ratio = 4 (alpha=1 because ratio starts at 1)
+    ctx.addUsage({ input_tokens: base * 4 })
+    assert.equal(ctx.getEstimatedTokens(), Math.round(base * 4))
+
+    // Second calibration: ratio = 2, but EMA with alpha=0.7 gives 0.7*2 + 0.3*4 = 2.6
+    ctx.addUsage({ input_tokens: base * 2 })
+    assert.equal(ctx.getEstimatedTokens(), Math.round(base * 2.6))
+  })
+
+  it('does not calibrate when local estimate is zero', () => {
+    const ctx = new SessionContext()
+    ctx.addUsage({ input_tokens: 10_000 })
+    assert.equal(ctx.getEstimatedTokens(), 0)
+  })
+})

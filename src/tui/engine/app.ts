@@ -1967,11 +1967,12 @@ export class TuiApp {
     let glanceMaxTokens: number | undefined
     if (metrics) {
       glanceCacheHitRate = metrics.cacheHitRate ?? undefined
-      // Prefer API real prompt_tokens over local estimate for progress ratio
-      const progressTokens = metrics.lastRealPromptTokens > 0 ? metrics.lastRealPromptTokens : metrics.estimatedTokens
-      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, progressTokens / metrics.maxTokens) : undefined
+      // estimatedTokens is now calibrated against real API prompt_tokens in
+      // SessionContext, so it reflects current context occupancy rather than a
+      // stale single-turn request size. Use it as the progress numerator.
+      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
       glanceCost = metrics.cost
-      glanceEstimatedTokens = progressTokens
+      glanceEstimatedTokens = metrics.estimatedTokens
       glanceMaxTokens = metrics.maxTokens
     } else {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate

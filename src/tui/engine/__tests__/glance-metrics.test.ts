@@ -59,7 +59,9 @@ test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（cache 命中率常驻
   // setModelInfo 触发一次 renderLive
   app.setModelInfo('test', 200_000)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('◧48k/200k'), `Xk/Yk: ${plain}`)
+  // estimatedTokens (50k) is the calibrated context occupancy; lastRealPromptTokens
+  // is only used internally to compute the calibration ratio.
+  assert.ok(plain.includes('◧50k/200k'), `Xk/Yk: ${plain}`)
   assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
   assert.ok(plain.includes('⚡30%'), `cache 常驻展示: ${plain}`)
 })
@@ -78,7 +80,7 @@ test('cache 健康态（≥50%）常驻展示为 dim 色，不再门控隐藏', 
   app.setModelInfo('test', 200_000)
   const plain = stripAnsi(out.chunks.join(''))
   assert.ok(plain.includes('⚡60%'), `健康态也应常驻展示命中率: ${plain}`)
-  assert.ok(plain.includes('◧48k/200k'), `token 显示 API 真实值: ${plain}`)
+  assert.ok(plain.includes('◧50k/200k'), `token 显示校准后的上下文占用: ${plain}`)
 })
 
 test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀', async () => {
