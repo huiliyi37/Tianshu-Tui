@@ -108,6 +108,23 @@ export const intentRetrievalRouterSchema = z.preprocess(
 
 export const banditPromotionModeSchema = z.enum(['off', 'shadow', 'auto', 'forced'])
 
+/** Per-profile review model override. When set, review workers with the
+ *  matching profile use this provider+model instead of the session's primary
+ *  model. The provider must exist in config.provider.providers. */
+export const reviewProfileOverrideSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+})
+
+/** Review worker configuration block.
+ *  - profiles: per-profile override map; omitted profiles fall back to session model
+ *  - skipAuto: bypass deliver_task post-commit auto review (per-config equivalent
+ *    of RIVET_REVIEW_DISCIPLINE=0, but scoped to this config file) */
+export const reviewConfigSchema = z.object({
+  profiles: z.record(z.string(), reviewProfileOverrideSchema).default({}),
+  skipAuto: z.boolean().default(false),
+}).default({})
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
@@ -146,6 +163,8 @@ export const agentSchema = z.object({
     killSwitch: z.boolean().default(false),
   }).default({}),
   permissions: permissionsSchema.default({}),
+  /** Review worker model routing — see reviewConfigSchema. */
+  review: reviewConfigSchema,
 })
 
 export const compactSchema = z.object({
