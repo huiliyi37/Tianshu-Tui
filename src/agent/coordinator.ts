@@ -193,6 +193,13 @@ export interface DelegationCoordinatorConfig {
    *  rejects the outer promise, so zombie workers are cleaned up immediately
    *  instead of waiting for their internal 180s timeout. */
   abortSignal?: AbortSignal
+  /** Review-specific model cards keyed by WorkerProfile name (e.g. 'adversarial_verifier',
+   *  'reviewer', 'verifier', 'patcher'). When a delegated work order's profile matches
+   *  a key, the override card is used directly (bypasses tier filtering and worker
+   *  routing). Lets review workers use a different provider/model from the session's
+   *  primary — key motivation: prevent prefixCache:'none' provider (GLM/Kimi/Codex)
+   *  review workers from evicting the main session's server-side cache. */
+  reviewOverrideCards?: Map<string, ModelCapabilityCard>
   /** V3 Component B: domain knowledge store for precipitate/recall lifecycle.
    *  When provided, coordinator auto-precipitates lessons from worker results. */
   domainKnowledgeStore?: DomainKnowledgeStore
@@ -491,7 +498,17 @@ export class DelegationCoordinator {
     return this.state
   }
 
-  private selectModelForTask(task: CapabilityTask, preferredTier?: ModelTier): ModelCapabilityCard {
+  private selectModelForTask(task: CapabilityTask, preferredTier?: ModelTier, profile?: string): ModelCapabilityCard {
+    // Review override fast path: when a profile-targeted override card is configured,
+    // use it directly. Bypasses tier filtering + worker routing — review workers
+    // get exactly the user-configured provider/model. Set up by bootstrap.ts from
+    // config.agent.review.profiles. Skip when absent → fall through to normal flow.
+    if (profile && this.config.reviewOverrideCards?.has(profile)) {
+      const overrideCard = this.config.reviewOverrideCards.get(profile)!
+      debugLog(`[worker-model] review-override: profile=${profile} → ${overrideCard.model} ✓`)
+      return overrideCard
+    }
+
     const eligibleCards = preferredTier
       ? this.config.modelCards.filter(card => inferModelTierFromCard(card) === preferredTier)
       : this.config.modelCards
@@ -873,7 +890,7 @@ export class DelegationCoordinator {
     const preferredTier = tierInfluence.gate.applied
       ? tierInfluence.gate.effectiveTier
       : tierRecommendation.tier
-    let selected = this.selectModelForTask(task, preferredTier)
+    let selected = this.selectModelForTask(task, preferredTier, order.profile)
     const selectedTier = inferModelTierFromCard(selected)
     const tierShadow = this.buildTierShadow(order, selected, tierRecommendation)
     const tierGatedDecision = buildModelTierGatedDecisionEvent({
