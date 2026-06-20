@@ -49,6 +49,7 @@ import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
+import { resolveReviewOverride, buildReviewOverrideCard } from './agent/review-model-override.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
@@ -596,6 +597,45 @@ export function createAgentRuntime(deps: {
     }
   })
 
+  // Review override: build per-profile model cards + StreamClients so review
+  // workers can use a different provider/model from the session's primary.
+  // Mirrors create-agent-config.ts:162-168 cross-provider client factory.
+  // Skip on credential failure → fall through to primary client.
+  const reviewOverrideCards = new Map<string, ModelCapabilityCard>()
+  const reviewStreamClients = new Map<string, import('./api/stream-client.js').StreamClient>()
+  if (config.agent.review?.profiles) {
+    for (const [profileName] of Object.entries(config.agent.review.profiles)) {
+      const resolved = resolveReviewOverride(
+        profileName as import('./agent/work-order.js').WorkerProfile,
+        config.agent.review.profiles,
+        config.provider.providers,
+      )
+      if (!resolved) {
+        debugLog(`[review-override] skip ${profileName}: provider/model not resolved`)
+        continue
+      }
+      reviewOverrideCards.set(profileName, buildReviewOverrideCard(resolved.modelId, resolved.providerConfig))
+
+      let overrideApiKey: string
+      try { overrideApiKey = resolveApiKey(resolved.providerConfig) } catch {
+        debugLog(`[review-override] skip ${profileName}: no API key for ${resolved.providerName}`)
+        continue
+      }
+      const overrideClient = createProviderClient(
+        resolved.providerConfig,
+        resolveCapabilities(resolved.providerName, resolved.providerConfig.capabilities),
+        {
+          apiKey: overrideApiKey,
+          model: resolved.modelId,
+          reasoningEffort: undefined,
+          maxTokens: Math.min(4096, resolved.providerConfig.maxTokens),
+          thinkingBudget: 4096,
+        },
+      )
+      reviewStreamClients.set(profileName, overrideClient)
+    }
+  }
+
   // Worker routing
   const workerRouting = config.workers?.profiles && Object.keys(config.workers.profiles).length > 0
     ? { profiles: config.workers.profiles, routing: config.workers.routing, providers: config.provider.providers }
@@ -615,6 +655,39 @@ export function createAgentRuntime(deps: {
   const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
     const writeProfiles = profileRegistry.listWriteProfiles()
     const isWrite = writeProfiles.includes(_order.profile)
+
+    // Review override fast path: if the profile is configured for a different
+    // provider, short-circuit and use the prebuilt override client. This is
+    // the whole point of the override — review workers must NOT touch the
+    // session primary's server-side cache (GLM cache-killer mechanism).
+    const overrideClient = reviewStreamClients.get(_order.profile)
+    if (overrideClient) {
+      const overrideSpec = config.provider.providers[
+        Object.entries(config.agent.review?.profiles ?? {}).find(([k]) => k === _order.profile)?.[1].provider ?? ''
+      ]?.models.find(m => m.id === card.model || m.alias === card.model)
+      const overrideContextWindow = overrideSpec?.contextWindow ?? card.contextWindow
+      const overrideMaxTokens = isWrite
+        ? Math.min(8192, overrideSpec?.maxTokens ?? overrideContextWindow)
+        : Math.min(4096, overrideSpec?.maxTokens ?? overrideContextWindow)
+      debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${card.model} (independent client)`)
+      return {
+        order: _order,
+        client: overrideClient,
+        promptEngine: new PromptEngine({
+          model: card.model,
+          maxTokens: overrideMaxTokens,
+          staticCtx: { tools: workerRegistry.getDefinitions() },
+          volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
+        }),
+        toolRegistry: workerRegistry,
+        cwd,
+        maxTurns: 8,
+        contextWindow: overrideContextWindow,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        activeClaims: claimStore.listActiveClaims(),
+        domainKnowledgeStore,
+      }
+    }
 
     let workerProvider = provider
     let workerApiKey = apiKey
@@ -739,6 +812,7 @@ export function createAgentRuntime(deps: {
     sessionRegistry: refs.sessionRegistry ?? undefined,
     sessionId: refs.sessionId ?? undefined,
     resumeEnabled: true,
+    reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
   })
 
   const agent = new AgentLoop(
