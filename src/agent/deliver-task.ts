@@ -76,6 +76,10 @@ export interface B1Context {
   /** True when the goal tracker deactivated with reason='achieved'.
    *  Signals deliver_task to auto-upgrade the final commit review to L3. */
   isGoalAchieved?: () => boolean
+  /** Review configuration snapshot (subset of agent.review). Used for per-config
+   *  gating of auto review (review.skipAuto) without re-reading the full Config.
+   *  Optional: absent → no-skip (preserves current behavior). */
+  reviewConfig?: { skipAuto?: boolean; profiles?: Record<string, { provider: string; model: string }> }
 }
 
 // ── Post-commit review batching ──
@@ -604,7 +608,9 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         // recursively reviewing themselves.
         // RIVET_REVIEW_DISCIPLINE=0 / false / off / no disables the gate (default: enabled).
         const explicitReviewLevel = params.input.review_level as ReviewScale | undefined
-        const skipAutoReview = params.input.skipAutoReview === true || ctx.isGoalActive?.() === true
+        const skipAutoReview = params.input.skipAutoReview === true
+          || ctx.isGoalActive?.() === true
+          || ctx.reviewConfig?.skipAuto === true
         const goalAchieved = ctx.isGoalAchieved?.() === true
 
         // Goal-achieved commit: auto-upgrade to L3 for final review sweep.
