@@ -237,7 +237,7 @@ describe('renderAllCapsulesBlock', () => {
     cleanup()
   })
 
-  it('renders bounded verification guardrail instead of unbounded exhaustive checking', () => {
+  it('renderResidentCapsuleBlock delegates to capsule index (no guardrails — moved to static.ts rules)', () => {
     const docsDir = join(tmpDir, 'docs')
     mkdirSync(docsDir)
     writeFileSync(join(docsDir, 'seed-capsule-tianxuan.md'), [
@@ -248,9 +248,11 @@ describe('renderAllCapsulesBlock', () => {
 
     const block = renderResidentCapsuleBlock(tmpDir)
     assert.ok(block)
-    assert.ok(block!.includes('必须先走查证阶梯，而不是凭感觉回答'))
-    assert.ok(block!.includes('同一工具同一错误重复 2 次必须停止变体重试'))
-    assert.ok(!block!.includes('先穷尽所有可用查证手段'))
+    // After 943414c2: resident block = capsule index with recall path, no guardrails inline
+    assert.ok(block!.includes('recall_capsule'))
+    assert.ok(block!.includes('天璇'))
+    // Guidance line for when to invoke recall_capsule
+    assert.ok(block!.includes('调用 recall_capsule'))
     cleanup()
   })
 

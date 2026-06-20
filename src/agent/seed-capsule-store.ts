@@ -180,6 +180,7 @@ export function renderCapsuleIndexBlock(cwd: string): string | undefined {
   return [
     '<seed-capsules note="前辈星域封存的方法索引。需要某位的完整原则时调用 recall_capsule(star)。">',
     ...lines,
+    '任务涉及规划/审查/验证/勘探/调校时，调用 recall_capsule(星名) 获取完整方法论。',
     '</seed-capsules>',
   ].join('\n')
 }
