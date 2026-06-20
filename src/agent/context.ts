@@ -265,11 +265,23 @@ export class SessionContext {
       // so getEstimatedTokens() stays close to reality between API calls.
       const localEstimate = this.state.estimatedTokens + this.state.prefixOverhead
       if (localEstimate > 0) {
-        const ratio = usage.input_tokens / localEstimate
-        // EMA with alpha=0.7: responsive to real usage but not jittered by one
-        // outlier response. First calibration immediately adopts the ratio.
-        const alpha = this.state.contextCalibrationRatio === 1 ? 1 : 0.7
-        this.state.contextCalibrationRatio = alpha * ratio + (1 - alpha) * this.state.contextCalibrationRatio
+        const apiTokens = usage.input_tokens
+        // Defer: when the local baseline can't explain even 10% of the API
+        // report, the ratio would be wildly off (this happens before
+        // ensurePrefixOverhead runs in maybeCompact on turn 1). Keep ratio=1
+        // — the local estimate is conservative but won't explode.
+        if (localEstimate < apiTokens * 0.1) {
+          // No calibration write — ratio stays at prior value (1 initially).
+        } else {
+          // Clamp the raw ratio to [0.5, 5] before EMA. Tokenization
+          // differences across providers are typically within 2x; 5x is a
+          // generous envelope that still rejects pathological inputs.
+          const rawRatio = apiTokens / localEstimate
+          const ratio = Math.max(0.5, Math.min(5, rawRatio))
+          // Uniform EMA α=0.7: even the first calibration is gradual, so a
+          // single outlier can never permanently poison the ratio.
+          this.state.contextCalibrationRatio = 0.7 * ratio + 0.3 * this.state.contextCalibrationRatio
+        }
       }
     }
     if (usage.output_tokens) u.output_tokens += usage.output_tokens
