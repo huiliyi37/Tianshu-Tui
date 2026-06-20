@@ -136,8 +136,8 @@ const REASONING_READ_TIMEOUT_MS = 180_000
 const SLOW_FIRST_BYTE_TIMEOUT_MS = 180_000
 const SLOW_READ_TIMEOUT_MS = 300_000
 // GLM-5.2 reasoning_effort=max: 服务端完整推理阶段可能 5min+ 不发 token，
-// 300s read timeout 会误杀。单独给到 600s（10min 硬顶兜底 runaway）。
-const GLM_READ_TIMEOUT_MS = 600_000
+// 300s read timeout 会误杀。单独给到 720s（12min 硬顶兜底 runaway）。
+const GLM_READ_TIMEOUT_MS = 720_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
 // Thinking-stall timeout 现由 config.thinkingStallTimeoutMs 控制（默认禁用，见
