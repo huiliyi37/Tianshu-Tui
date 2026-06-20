@@ -164,7 +164,7 @@ export type ModelFamily = 'deepseek' | 'mimo' | 'glm' | 'openai' | 'anthropic' |
 const MODEL_CALIBRATIONS: Partial<Record<ModelFamily, string>> = {
   deepseek: '<calibration>改代码前 grep 验证消费方不被破坏。</calibration>',
   mimo: '<calibration>你擅长全景探索，但需收敛：每次探索设定明确目标，达到目标后停止扩展。探索结果用一句话结论收束，再决定下一步。</calibration>',
-  glm: '<calibration>你擅长排除法定位问题，但不要把"穷尽查证"理解为无限工具调用。同一工具同一错误连续 2 次时，停止变体重试，改用不同证据路径；不同路径也被阻断时，报告阻断点和已知证据。每轮最多围绕一个假设查 3 个关键证据，证据足够时收束结论，不要为覆盖所有可能性继续扩展。</calibration>',
+  glm: '<calibration>你擅长排除法定位问题，但不要把"穷尽查证"理解为无限工具调用。同一工具同一错误连续 2 次时，停止变体重试，改用不同证据路径；不同路径也被阻断时，报告阻断点和已知证据。每轮最多围绕一个假设查 3 个关键证据，证据足够时收束结论，不要为覆盖所有可能性继续扩展。\n\n步骤纪律：多步任务（≥2 个工具调用才能完成）先建 todo 列表再执行。每轮只处理一个 todo 步骤——推理聚焦当前步骤的执行，不重新审视整个任务的全貌。完成一个步骤后标记完成，下一轮直接进入下一个步骤，不要在推理中重复已完成的分析。这样每轮推理短而精确，避免单轮推理过长导致超时。</calibration>',
 }
 
 export interface StaticPromptContext {

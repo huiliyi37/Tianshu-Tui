@@ -179,6 +179,8 @@ describe('buildSystemPrompt', () => {
     assert.ok(glm.includes('不要把"穷尽查证"理解为无限工具调用'))
     assert.ok(glm.includes('同一工具同一错误连续 2 次'))
     assert.ok(glm.includes('每轮最多围绕一个假设查 3 个关键证据'))
+    assert.ok(glm.includes('步骤纪律'))
+    assert.ok(glm.includes('先建 todo 列表再执行'))
 
     const unknown = buildSystemPrompt({ tools: [], modelFamily: 'unknown' })
     assert.ok(!unknown.includes('<calibration>'))
