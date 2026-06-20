@@ -163,6 +163,8 @@ export interface TuiMetrics {
   /** 会话累计 input / output token（仅用于展示，不参与 += 累加） */
   inputTokens: number
   outputTokens: number
+  /** API 最近一轮返回的真实 prompt_tokens（校准基准）；0 表示尚无数据 */
+  lastRealPromptTokens: number
 }
 
 /** 指标提供者：返回 null 表示暂无（回退 TUI 内部估算）。 */

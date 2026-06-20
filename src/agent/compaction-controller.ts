@@ -259,8 +259,8 @@ export class CompactionController {
    * systematically 5K-8K tokens too low, causing compaction decisions to
    * trigger too late.
    */
-  ensurePrefixOverhead(): void {
-    if (this._prefixOverheadSet) return
+  ensurePrefixOverhead(force = false): void {
+    if (!force && this._prefixOverheadSet) return
     this._prefixOverheadSet = true
 
     // System prompt tokens

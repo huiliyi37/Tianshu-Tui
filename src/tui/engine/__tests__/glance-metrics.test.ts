@@ -54,6 +54,7 @@ test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（cache 命中率常驻
     cost: 1.23,
     inputTokens: 50_000,
     outputTokens: 1_000,
+    lastRealPromptTokens: 48_000,
   }))
   // setModelInfo 触发一次 renderLive
   app.setModelInfo('test', 200_000)
@@ -72,6 +73,7 @@ test('cache 健康态（≥50%）常驻展示为 dim 色，不再门控隐藏', 
     cost: 1.23,
     inputTokens: 50_000,
     outputTokens: 1_000,
+    lastRealPromptTokens: 48_000,
   }))
   app.setModelInfo('test', 200_000)
   const plain = stripAnsi(out.chunks.join(''))
@@ -109,6 +111,7 @@ test('getMetrics 暴露与 GlanceBar 同源的真实指标（供 SlashRouter 读
     cost: 2.5,
     inputTokens: 80_000,
     outputTokens: 4_000,
+    lastRealPromptTokens: 78_000,
   }))
   const m = app.getMetrics()
   assert.equal(m?.cost, 2.5, 'cost 应来自 provider，不再写死 0')

@@ -91,7 +91,7 @@ export function estimateOaiMessageTokens(msg: OaiMessage): number {
       asciiChars++
     }
   }
-  return Math.ceil(asciiChars / 4) + Math.ceil(cjkChars / 1.5)
+  return Math.ceil(asciiChars / 4) + Math.ceil(cjkChars / 1.2)
 }
 
 export function estimateOaiTokens(messages: OaiMessage[]): number {

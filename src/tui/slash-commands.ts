@@ -938,10 +938,12 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const usagePct = sections.maxTokens > 0 ? Math.round(sections.estimatedTokens / sections.maxTokens * 100) : 0
       const cacheStr = ctx.cacheHitRate !== undefined ? `${Math.round(ctx.cacheHitRate * 100)}%` : 'n/a'
       const costStr = `$${(ctx.cost ?? 0).toFixed(2)}`
+      const realTokens = ctx.session.getLastRealPromptTokens()
+      const realStr = realTokens > 0 ? `\nAPI (last): ${realTokens.toLocaleString()} tokens` : ''
 
       pushStatic(createLogEntry({
         type: 'system',
-        content: `Context: ${sections.compactionState}\nTokens: ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${usagePct}%)\nCache hit: ${cacheStr}    Cost: ${costStr}\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
+        content: `Context: ${sections.compactionState}\nTokens (est): ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${usagePct}%)${realStr}\nCache hit: ${cacheStr}    Cost: ${costStr}\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
       }))
       setIsStreaming(false)
       return true

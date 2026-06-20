@@ -559,6 +559,7 @@ async function main() {
       cost,
       inputTokens: total.input_tokens,
       outputTokens: total.output_tokens,
+      lastRealPromptTokens: session.getLastRealPromptTokens(),
     }
   })
 

@@ -479,3 +479,30 @@ describe('SessionContext removeLastMessage', () => {
     assert.equal(ctx.getEstimatedTokens() > 0, true, 'tokens not corrupted')
   })
 })
+
+describe('SessionContext lastRealPromptTokens', () => {
+  it('initializes lastRealPromptTokens to 0', () => {
+    const ctx = new SessionContext()
+    assert.equal(ctx.getLastRealPromptTokens(), 0)
+  })
+
+  it('addUsage captures input_tokens as lastRealPromptTokens', () => {
+    const ctx = new SessionContext()
+    ctx.addUsage({ input_tokens: 50_000 })
+    assert.equal(ctx.getLastRealPromptTokens(), 50_000)
+  })
+
+  it('addUsage overwrites lastRealPromptTokens on each call', () => {
+    const ctx = new SessionContext()
+    ctx.addUsage({ input_tokens: 50_000 })
+    ctx.addUsage({ input_tokens: 80_000 })
+    assert.equal(ctx.getLastRealPromptTokens(), 80_000)
+  })
+
+  it('addUsage without input_tokens does not overwrite lastRealPromptTokens', () => {
+    const ctx = new SessionContext()
+    ctx.addUsage({ input_tokens: 50_000 })
+    ctx.addUsage({ output_tokens: 1_000 })
+    assert.equal(ctx.getLastRealPromptTokens(), 50_000)
+  })
+})

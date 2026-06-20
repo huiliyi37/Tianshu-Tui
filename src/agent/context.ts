@@ -46,6 +46,9 @@ export interface SessionState {
    *  that are not reflected in per-message token estimates. Set by the
    *  prompt engine after the first request build. */
   prefixOverhead: number
+  /** API 最近一轮请求返回的真实 prompt_tokens（校准基准）。
+   *  由 addUsage() 在每轮 API 响应后写入；0 表示尚无数据。 */
+  lastRealPromptTokens: number
   turnCacheHistory: TurnCacheSnapshot[]
   compactedAtTurns: Set<number>
   contextLedger?: ContextLedger
@@ -78,6 +81,7 @@ export class SessionContext {
       startTime: Date.now(),
       estimatedTokens: 0,
       prefixOverhead: 0,
+      lastRealPromptTokens: 0,
       filesRead: new Set(),
       filesModified: new Set(),
       testResults: [],
@@ -246,7 +250,10 @@ export class SessionContext {
 
   addUsage(usage: Partial<Usage>): void {
     const u = this.state.totalUsage
-    if (usage.input_tokens) u.input_tokens += usage.input_tokens
+    if (usage.input_tokens) {
+      u.input_tokens += usage.input_tokens
+      this.state.lastRealPromptTokens = usage.input_tokens
+    }
     if (usage.output_tokens) u.output_tokens += usage.output_tokens
     if (usage.cache_read_input_tokens) u.cache_read_input_tokens += usage.cache_read_input_tokens
     if (usage.cache_creation_input_tokens) u.cache_creation_input_tokens += usage.cache_creation_input_tokens
@@ -291,6 +298,11 @@ export class SessionContext {
 
   getEstimatedTokens(): number {
     return this.state.estimatedTokens + this.state.prefixOverhead
+  }
+
+  /** API 最近一轮返回的真实 prompt_tokens（校准基准）；0 表示尚无数据。 */
+  getLastRealPromptTokens(): number {
+    return this.state.lastRealPromptTokens
   }
 
   /** Set the fixed token overhead from system prompt, tool schemas, static blocks. */
