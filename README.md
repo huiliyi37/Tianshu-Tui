@@ -463,6 +463,35 @@ rivet --dangerously-skip-permissions
 
 See `docs/dangerously-skip-permissions.md` for the full safety boundary.
 
+### Cross-Session Knowledge
+
+Rivet can persist and reuse distilled knowledge across sessions — project rules, debugging lessons, and failure patterns discovered in previous conversations are injected into new sessions to give the agent a running start.
+
+Set `agent.crossSessionEnabled` in `~/.rivet/config.json`:
+
+```json
+{
+  "agent": {
+    "crossSessionEnabled": true
+  }
+}
+```
+
+| Value | Behavior |
+|---|---|
+| `true` (default) | Load distilled knowledge from `.rivet/knowledge/memory.jsonl` and `.rivet/playbook.jsonl`. Memory block, cross-session events, and companion presence are injected into the prompt. |
+| `false` | Fully isolated sessions — no cross-session data is loaded or injected. |
+
+Data sources (only distilled summaries, never raw conversation logs):
+
+| Source | Content |
+|--------|---------|
+| `.rivet/knowledge/memory.jsonl` | Project rules, debugging heuristics, architecture conventions |
+| `.rivet/playbook.jsonl` | Historical failure patterns ("when X fails, root cause is Y") |
+| `.rivet/presence.json` | Companion agent metadata (cross-session awareness) |
+
+**Emergency force-off**: set env `RIVET_NO_CROSS_SESSION=1` — this overrides the config and disables all cross-session loading regardless of the config setting.
+
 ### MCP Server Configuration
 
 Connect external tool servers via Model Context Protocol:
