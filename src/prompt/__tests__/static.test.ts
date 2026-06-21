@@ -10,24 +10,32 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('天枢'))
   })
 
-  it('wraps rules in <rules> tags', () => {
+  it('wraps reasoning posture in <reasoning> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('<rules>'))
-    assert.ok(prompt.includes('</rules>'))
-    assert.ok(prompt.includes('evidence-scope'))
+    assert.ok(prompt.includes('<reasoning>'))
+    assert.ok(prompt.includes('</reasoning>'))
+    assert.ok(prompt.includes('诊断策略'))
   })
 
-  it('includes context-update-protocol rule for delta semantics', () => {
+  it('wraps safety constraints in <safety> tags', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('context-update-protocol'), 'should contain the rule name')
+    assert.ok(prompt.includes('<safety>'))
+    assert.ok(prompt.includes('</safety>'))
+    assert.ok(prompt.includes('硬闸门'))
+  })
+
+  it('includes context-update delta semantics rule', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    assert.ok(prompt.includes('context-update'), 'should contain the rule name')
     assert.ok(prompt.includes('累积的'), 'should describe cumulative semantics')
-    assert.ok(prompt.includes('未变化'), 'should explain absent = unchanged')
+    assert.ok(prompt.includes('未变化') || prompt.includes('沿用最近值'), 'should explain absent = unchanged')
   })
 
-  it('wraps tool usage in <tool-usage> tags', () => {
+  it('includes tool usage patterns in <safety> block', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('<tool-usage>'))
-    assert.ok(prompt.includes('</tool-usage>'))
+    assert.ok(prompt.includes('<safety>'))
+    assert.ok(prompt.includes('</safety>'))
+    assert.ok(prompt.includes('read_file 先读再改'))
   })
 
   it('teaches parallel fan-out of independent探索 tools', () => {
@@ -56,7 +64,7 @@ describe('buildSystemPrompt', () => {
 
   it('scopes fan-out to read-only tools — serial tools sent one at a time', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('只读工具可一批发'), '应限定只读工具可批发')
+    assert.ok(prompt.includes('只读工具可一批'), '应限定只读工具可批发')
     assert.ok(
       prompt.includes('run_tests') && prompt.includes('git'),
       '应点名 run_tests/git 等串行工具（防过度泛化）',
@@ -67,34 +75,34 @@ describe('buildSystemPrompt', () => {
     )
   })
 
-  it('wraps workflow in <workflow> tags', () => {
+  it('includes reasoning posture with dev cycle + diagnostic discipline', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('<workflow>'))
-    assert.ok(prompt.includes('</workflow>'))
+    assert.ok(prompt.includes('<reasoning>'))
+    assert.ok(prompt.includes('</reasoning>'))
+    assert.ok(prompt.includes('开发循环'))
+    assert.ok(prompt.includes('复现测试是最廉价'))
   })
 
-  it('includes external-source-verification rule with concrete methods', () => {
+  it('includes external-source-verification discipline with concrete methods', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('external-source-verification'), '应有独立的外部方案验证规则')
+    assert.ok(prompt.includes('外部方案'), '应有外部方案验证规则')
     assert.ok(prompt.includes('RED→GREEN'), '应含复现验证方法')
     assert.ok(prompt.includes('恒等式自检'), '应含数据自检方法')
     assert.ok(prompt.includes('格式完整不是可信度信号'), '应含核心原则')
-    // workflow 应有触发指针但不重复核验方法细节
-    assert.ok(prompt.includes('external-source-verification 规则'), 'workflow 应指向规则名')
   })
 
-  it('includes self-verification rule — 复现即证 standing across all domains', () => {
+  it('includes self-verification discipline — 复现即证 standing across all domains', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // 瑶光的"复现即证"必须常驻在 base 护栏,而非仅在瑶光域或按需 advisory。
-    assert.ok(prompt.includes('self-verification'), '应有独立的自我验证规则')
     assert.ok(prompt.includes('绿非证明'), '应含"绿非证明"核心')
-    assert.ok(prompt.includes('你自己刚下的结论'), '应把验证标准转向自身结论(反身之道)')
+    assert.ok(prompt.includes('你自己刚下的结论') || prompt.includes('自己的结论'), '应把验证标准转向自身结论(反身之道)')
   })
 
-  it('wraps security in <security> tags', () => {
+  it('wraps safety constraints in <safety> tags (includes security + git + tools)', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('<security>'))
-    assert.ok(prompt.includes('</security>'))
+    assert.ok(prompt.includes('<safety>'))
+    assert.ok(prompt.includes('</safety>'))
+    assert.ok(prompt.includes('API key'))
+    assert.ok(prompt.includes('git stash'))
   })
 
   it('does NOT include tool summary section', () => {
@@ -117,10 +125,10 @@ describe('buildSystemPrompt', () => {
     assert.ok(!threeDeep.test(prompt))
   })
 
-  it('includes git section in <git> tags', () => {
+  it('includes git commit conventions in <safety> block', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('<git>'))
-    assert.ok(prompt.includes('</git>'))
+    assert.ok(prompt.includes('永不 amend'))
+    assert.ok(prompt.includes('feat/fix/refactor/docs/test/chore/perf'))
   })
 
   it('preserves core prompt semantics', () => {
@@ -134,10 +142,10 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('API key'))
   })
 
-  it('includes beliefs as situational triggers', () => {
+  it('includes stance + beliefs merged as actionable triggers', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('当你发现更优方案时'))
-    assert.ok(prompt.includes('当用户指令偏离用户意图时'))
+    assert.ok(prompt.includes('看清更优方案') || prompt.includes('更优方案'))
+    assert.ok(prompt.includes('当用户指令偏离'))
     assert.ok(prompt.includes('确认理解'))
   })
 
