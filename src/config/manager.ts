@@ -106,7 +106,7 @@ export function loadConfigDefault(): Config {
   return loadConfig()
 }
 
-function saveConfig(config: Config): void {
+export function saveConfig(config: Config): void {
   writeFileAtomicSync(getUserConfigPath(), JSON.stringify(config, null, 2) + '\n')
 }
 
