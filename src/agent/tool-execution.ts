@@ -25,6 +25,7 @@ import type { ImmuneHook } from './immune-hook.js'
 import type { LspManager } from '../lsp/manager.js'
 import { classifyFailure } from './failure-classifier.js'
 import { ToolAccumulator } from './tool-accumulator.js'
+import { guardLossyToolResult } from './negative-fact-detector.js'
 import { getToolStormLevel, type ToolStormLevel } from './trace-store.js'
 import { extractTrailingArtifactId, tierToolResult } from './tool-result-tiering.js'
 import {
@@ -458,6 +459,18 @@ export class ToolExecutionController {
       if (steerText) {
         const existing = typeof lastResult.content === 'string' ? lastResult.content : ''
         toolResults[toolResults.length - 1] = { ...lastResult, content: existing + '\n\n' + steerText }
+      }
+    }
+
+    // ── Lossy Observation Guard: detect negative facts in collapsed/truncated tool results
+    // and inject VERIFICATION_REQUIRED marker before the model reads them.
+    for (let i = 0; i < toolResults.length; i++) {
+      const tr = toolResults[i]!
+      if (tr.type === 'tool_result' && typeof tr.content === 'string') {
+        const guarded = guardLossyToolResult(tr.content)
+        if (guarded !== tr.content) {
+          toolResults[i] = { ...tr, content: guarded }
+        }
       }
     }
 

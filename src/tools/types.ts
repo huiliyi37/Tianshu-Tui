@@ -135,6 +135,13 @@ export interface ToolResult {
   uiContent?: string
   /** Path to persisted raw output file */
   rawPath?: string
+  /** Observational fidelity of this result:
+   *  - lossless: full output, no truncation or collapse
+   *  - truncated: output was clipped (stdout ring buffer, line limit)
+   *  - collapsed: output was replaced by an aggregate summary (ToolAccumulator storm-collapse)
+   *  - preview_only: output is a head/tail preview, not the full content
+   *  Undefined = lossless (backward compatible default). */
+  lossiness?: 'lossless' | 'truncated' | 'collapsed' | 'preview_only'
   isError?: boolean
   verification?: VerificationMetadata
   /** Additional verification events to record beyond the primary one. VSW uses
