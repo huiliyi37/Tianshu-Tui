@@ -150,13 +150,13 @@ function validateDomainId(id: string): string {
 }
 
 /** Sanitize a string field: trim and cap length */
-function sanitizeString(value: unknown, fieldName: string): string {
+function sanitizeString(value: unknown, _fieldName: string): string {
   if (typeof value !== 'string') return ''
   return value.slice(0, MAX_STRING_FIELD_LENGTH).trim()
 }
 
 /** Sanitize an array of strings: cap items, trim, and remove empty strings */
-function sanitizeStringArray(value: unknown, fieldName: string): string[] {
+function sanitizeStringArray(value: unknown, _fieldName: string): string[] {
   if (!Array.isArray(value)) return []
   return value
     .filter((v): v is string => typeof v === 'string')
