@@ -19,6 +19,8 @@ import { buildScheduleRoutes } from './schedule-routes.js'
 import { buildConfigRoutes } from './config-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
+import { buildMcpRoutes } from './mcp-api.js'
+import { McpManager } from '../mcp/manager.js'
 import { CronLock } from './cron-lock.js'
 import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
@@ -110,6 +112,8 @@ export interface SharedRuntime {
   /** late-bound: 在 sessions = new RuntimeSessionManager(...) 之后由 runServe
    *  回写。值为 null 时退化为 0（sessions 尚未初始化的窗口期）。 */
   sameCwdRunningCount: ((cwd: string, excludeSessionId?: string) => number) | null
+  /** Server-level MCP manager — one connection pool for all sessions. */
+  mcpManager: McpManager | null
 }
 
 /** sidecar 内部：按 cwd 取/建 DomainKnowledgeStore，多 session 共享同一实例。 */
@@ -275,6 +279,18 @@ function buildSessionStores(
     baseline: createWorktreeBaseline(captureGitBaseline(cwd)),
     taskLedger,
   })
+
+  // Register MCP tools (if the server-level manager has already initialized).
+  // Late-init: sessions created before MCP finishes connecting won't get MCP
+  // tools, but subsequent sessions will.
+  const mcpMgr = shared?.mcpManager
+  if (mcpMgr) {
+    const mcpTools = mcpMgr.getAllTools()
+    for (const tool of mcpTools) {
+      toolRegistry.register(tool)
+    }
+  }
+
   return { persist, claimStore, fileHistory, toolRegistry, session, taskLedger, ownershipLedger, refs }
 }
 
@@ -524,7 +540,22 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     providerHealth: new ProviderHealthTracker(),
     domainStores: new Map(),
     sameCwdRunningCount: null,
+    mcpManager: null,
   }
+
+  // Initialize MCP manager asynchronously — connects to configured servers,
+  // discovers tools, and registers them to the shared runtime. Fire-and-forget
+  // so server startup isn't blocked on slow MCP servers.
+  void (async () => {
+    try {
+      const mgr = new McpManager(ctx.config.mcp)
+      await mgr.initialize()
+      sharedRuntime.mcpManager = mgr
+      serverLogger.info(`MCP: ${mgr.getStates().filter(s => s.status === 'connected').length} servers connected, ${mgr.getAllTools().length} tools`)
+    } catch (err) {
+      serverLogger.warn('MCP initialization failed:', (err as Error)?.message ?? err)
+    }
+  })()
 
   // Multi-session manager (M0.5): each session is an independent AgentLoop,
   // adapted to the manager's ManagedAgent surface (run/abort + artifacts). The
@@ -591,6 +622,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Config routes: provider + API key management for the desktop settings UI.
   Object.assign(routes, buildConfigRoutes(apiToken))
+
+  // MCP routes: server management + live status for the desktop MCP settings UI.
+  Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))
 
   // Open file in system editor — thin wrapper so the Desktop webview can
   // request the sidecar to open a local path without needing a Tauri plugin.
