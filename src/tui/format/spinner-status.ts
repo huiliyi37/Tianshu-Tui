@@ -1,10 +1,9 @@
 /**
  * T9 格式化函数 — spinner 状态行（运行态指示器）。
  *
- * 对标 Claude Code 的克制形态：单一 spinner 字形（不分相位）+ 一个缓慢轮换的
- * 中文俏皮词 + 计时，例如 `⠹ 推演中… 12s · esc 中断`。
- * - 不再有「思考/书写/运作/待命」多相位 × 多字形 × 各自动画的复杂叙事。
- * - 词从词池里按 elapsed 每 4s 缓慢轮换（确定性、可测、不闪）。
+ * 与 commit 37cbed7b 同步：spinner 只承担"正在跑"指示，词静态为 'thinking'，
+ * 配合 elapsed 计时，例如 `⠹ thinking… 12s`。不再做花活词池轮换，也不再
+ * 在末尾追加 esc 中断提示。
  * - stall（10s 无 token）时整行转琥珀色。
  * - 提供 ASCII fallback 兼容。
  */
@@ -15,18 +14,6 @@ import type { RivetTheme } from '../theme.js'
 import { brailleSpinnerFrame } from '../braille-spinner.js'
 
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
-
-/** CC 风格的运行态俏皮词池（中文，面向中国市场）。按 elapsed 缓慢轮换。 */
-const WORD_POOL = [
-  '思索中', '推演中', '打磨中', '运筹中', '琢磨中', '梳理中',
-  '编织中', '雕琢中', '求索中', '测算中', '沉淀中', '校准中',
-] as const
-
-/** 每 4s 推进一个词，独立于 120ms 帧 tick，保持平静不闪。 */
-function pickWord(elapsedMs: number): string {
-  const idx = Math.floor(Math.max(0, elapsedMs) / 4000) % WORD_POOL.length
-  return WORD_POOL[idx]!
-}
 
 const ASCII_FRAMES = ['-', '\\', '|', '/'] as const
 
@@ -52,8 +39,7 @@ export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme
   if (input.phase === 'idle') return null
   const useAscii = chalk.level < 3
   const frame = spinnerFrame(input.tick, useAscii)
-  const word = pickWord(input.elapsedMs)
-  const text = `${frame} ${word}… ${formatElapsedHuman(input.elapsedMs)} · esc 中断`
+  const text = `${frame} thinking… ${formatElapsedHuman(input.elapsedMs)}`
   return color(text, input.stalled ? theme.warning : theme.muted)
 }
 

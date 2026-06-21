@@ -20,16 +20,17 @@ describe('formatSpinnerStatus', () => {
     assert.equal(formatSpinnerStatus({ tick: 0, phase: 'idle', elapsedMs: 0 }, theme), null)
   })
 
-  it('shows single spinner frame + rotating word + elapsed + esc hint', () => {
+  it('shows single spinner frame + static word + elapsed', () => {
     const line = formatSpinnerStatus({ tick: 3, phase: 'thinking', elapsedMs: 12_000 }, theme)
     assert.ok(line)
     const plain = stripAnsi(line!)
     const useAscii = chalk.level < 3
     const expectedFrame = useAscii ? '/' : brailleSpinnerFrame(3)
     assert.ok(plain.startsWith(expectedFrame), 'leads with single spinner frame matching tick')
+    assert.ok(plain.includes('thinking'), 'word is the static label')
     assert.ok(plain.includes('…'), 'word carries ellipsis')
     assert.ok(plain.includes('12s'))
-    assert.ok(plain.includes('esc 中断'))
+    assert.ok(!plain.includes('esc'), 'no interrupt hint appended')
   })
 
   it('spinner frame is phase-agnostic (same frame regardless of phase)', () => {
@@ -38,10 +39,13 @@ describe('formatSpinnerStatus', () => {
     assert.equal(a, b, 'thinking and streaming render identically')
   })
 
-  it('word rotates slowly with elapsed', () => {
+  it('word is static (does not rotate with elapsed)', () => {
     const early = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 0 }, theme)!)
-    const later = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 4000 }, theme)!)
-    assert.notEqual(early, later, 'word advances every 4s')
+    const later = stripAnsi(formatSpinnerStatus({ tick: 0, phase: 'thinking', elapsedMs: 12_000 }, theme)!)
+    // 仅词区域（'…' 之前）应保持不变——elapsed 部分本就该随时间走。
+    assert.equal(early.split('…')[0], later.split('…')[0], 'word region is identical regardless of elapsed')
+    assert.ok(early.includes('thinking'), 'uses static English "thinking" word')
+    assert.ok(!/[\u4e00-\u9fff]/.test(early), 'no Chinese characters leaked into output')
   })
 
   it('spinner frame advances with tick', () => {
