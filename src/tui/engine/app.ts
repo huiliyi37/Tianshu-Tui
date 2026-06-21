@@ -35,7 +35,7 @@ import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../form
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
+import { formatGlanceBar, formatGlanceBarDual, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -59,6 +59,7 @@ import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
 import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
+import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
 import { searchHistory, loadHistory } from '../history.js'
 
 // NOTE: exported for the mid-tui decomposition safety net. These are pure leaf
@@ -1550,6 +1551,8 @@ export class TuiApp {
       rawPath,
       toolInput: meta?.input,
       elapsedMs: meta ? Date.now() - meta.startMs : undefined,
+      boxed: this.columns >= 80,
+      boxWidth: this.columns,
     }
     const formatted = formatToolCard(cardInput, this.theme)
 
@@ -1602,6 +1605,8 @@ export class TuiApp {
       rawPath: t.rawPath,
       toolInput: t.toolInput,
       expanded: true,
+      boxed: this.columns >= 80,
+      boxWidth: this.columns,
     }, this.theme)
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
@@ -1648,6 +1653,14 @@ export class TuiApp {
       this.metricsGlanceController.delegationDomainOverride = undefined
       this.applyGlanceDomainDisplay()
 
+      // Turn 分隔线：标记本轮结束
+      const turnElapsed = Date.now() - this.state.turnStartMs
+      const turnTokens = usage.input_tokens ?? 0
+      const turnSep = color(
+        `${'─'.repeat(4)} turn ${turnNumber} · ${formatElapsedShort(turnElapsed)} · ${formatTokensK(turnTokens)} tokens ${'─'.repeat(Math.max(4, this.columns - 30))}`,
+        this.theme.muted,
+      )
+
       // 回合耗时文案：✦ Worked for 1m 6s · 12.3k in / 890 out
       const elapsed = Date.now() - this.state.turnStartMs
       const summary = formatTurnWorkSummary({
@@ -1656,6 +1669,7 @@ export class TuiApp {
         outputTokens: usage.output_tokens ?? 0,
       }, this.theme)
       this.commitAbove(() => {
+        this.commit.write({ text: turnSep, trailingNewline: true })
         this.commit.write({ text: summary, trailingNewline: true })
         this.state.committedCount++
       })
@@ -1993,8 +2007,10 @@ export class TuiApp {
       const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n')
       const isStreaming = this.state.phase !== 'idle'
 
-      // Domain-accent border color: slash=primary, streaming=dim, else domain accent
-      const borderColor = isSlash ? this.theme.primary
+      // Domain-accent border color: approval=warning, slash=primary, streaming=dim, else domain accent
+      const isApproval = this.input.getMode() === 'approval'
+      const borderColor = isApproval ? this.theme.warning
+        : isSlash ? this.theme.primary
         : isStreaming ? this.theme.dim
         : resolveStarDomainAccent(this.state.domainName, this.theme)
 
@@ -2034,12 +2050,39 @@ export class TuiApp {
         turnCount: this.state.turnNumber,
       }, this.theme)
 
+      // 3b. 中端终端（60-99 列）：双行 GlanceBar 拆出输入框，独立渲染
+      const useDualGlance = this.columns >= 60 && this.columns < 100
+      if (useDualGlance) {
+        const [glanceL1, glanceL2] = formatGlanceBarDual({
+          width: this.columns,
+          domainGlyph: this.state.domainGlyph,
+          domainName: this.state.domainName,
+          branch: this.metricsGlanceController.gitBranch,
+          modelName: this.state.modelName,
+          cacheHitRate: glanceCacheHitRate,
+          estimatedTokens: glanceEstimatedTokens,
+          maxTokens: glanceMaxTokens,
+          cost: glanceCost,
+          elapsedMs: Date.now() - this.state.turnStartMs,
+          turnCount: this.state.turnNumber,
+        }, this.theme)
+        lines.push({ text: glanceL1 })
+        lines.push({ text: glanceL2 })
+        // 窄空行分隔 GlanceBar 与输入框
+        if (lines.length > 0 && !lines[lines.length - 1]!.text.endsWith('\n')) {
+          // 不额外加空行，双行已足够区隔
+        }
+      }
+
       const plainLeft = stripAnsiLen(leftStr)
       const plainRight = stripAnsiLen(rightStr)
 
       // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
+      //    双行模式下，top border 收敛为纯装饰（不嵌入 GlanceBar 信息）
       let topBorder = ''
-      if (innerWidth < plainLeft + plainRight + 10) {
+      if (useDualGlance) {
+        topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
+      } else if (innerWidth < plainLeft + plainRight + 10) {
         topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
       } else {
         const lineRem = innerWidth - plainLeft - plainRight - 4 // 4 = label border paddings
@@ -2059,9 +2102,13 @@ export class TuiApp {
 
       const MAX_INPUT_DISPLAY_LINES = 12
       const arrowColor = this.theme.success
+      const domainGlyph = this.state.domainGlyph ?? ''
+      const glyphPrefix = domainGlyph
+        ? `${color(domainGlyph, resolveStarDomainAccent(this.state.domainName, this.theme))} `
+        : ''
       const inputLines = this.inputLine.value
         ? this.inputLine.displayLines({ maxLines: MAX_INPUT_DISPLAY_LINES, maxWidth: innerWidth })
-        : [`${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
+        : [`${glyphPrefix}${color('〉', arrowColor)} ${color('█', this.theme.primary)}${color(this.inputLine.placeholder, this.theme.dim)}`]
 
       /** 着色输入行：光标行前缀 〉 涂 success 绿，其余保持原样。
        *  光标行已在 displayLines 内做了水平视窗截断，不再二次 truncateToWidth。 */
@@ -2106,7 +2153,51 @@ export class TuiApp {
       }
     }
 
-    this.live.render(lines, { reservedTail: lines.length - chromeStart })
+    // ── W2: 右侧持久面板（≥100 列，非 overlay 态）──
+    const SIDE_PANEL_WIDTH = this.columns >= 120 ? 32 : this.columns >= 100 ? 24 : 0
+    if (SIDE_PANEL_WIDTH > 0 && !this.overlay.isActive()) {
+      const mainWidth = this.columns - SIDE_PANEL_WIDTH - 1 // 1 列分隔
+      const panelInput: SidePanelInput = {
+        columns: SIDE_PANEL_WIDTH,
+        todos: this.state.todos,
+        workers: this.fleet.getActiveWorkers(),
+        currentToolName: (() => {
+          const pending = [...this.toolGroupController.getPendingEntries()]
+          if (pending.length === 0) return undefined
+          return pending[pending.length - 1]![1]!.name
+        })(),
+        currentToolElapsedMs: (() => {
+          const pending = [...this.toolGroupController.getPendingEntries()]
+          if (pending.length === 0) return undefined
+          return Date.now() - pending[pending.length - 1]![1]!.startMs
+        })(),
+        modelName: this.state.modelName,
+        domainGlyph: this.state.domainGlyph,
+        domainName: this.state.domainName,
+        estimatedTokens: glanceEstimatedTokens,
+        maxTokens: glanceMaxTokens,
+        cacheHitRate: glanceCacheHitRate,
+      }
+      const panelLines = renderSidePanel(panelInput, this.theme)
+      // Merge: 每个 main 逻辑行的每 display row 贴 panel 行到右侧
+      const merged: LiveRegionLine[] = []
+      let panelRow = 0
+      for (const line of lines) {
+        const dw = Math.max(1, Math.ceil(stringWidth(line.text) / Math.max(1, this.columns)))
+        for (let r = 0; r < dw; r++) {
+          const panel = panelLines[panelRow % panelLines.length] ?? ''
+          const mainPart = (r === 0)
+            ? line.text.slice(0, Math.min(line.text.length, mainWidth))
+            : line.text.slice(r * this.columns, Math.min(line.text.length, (r + 1) * this.columns))
+          const mainPadded = mainPart + ' '.repeat(Math.max(0, mainWidth - stringWidth(mainPart)))
+          merged.push({ text: mainPadded + color('│', this.theme.muted) + panel })
+          panelRow++
+        }
+      }
+      this.live.render(merged, { reservedTail: merged.length - chromeStart })
+    } else {
+      this.live.render(lines, { reservedTail: lines.length - chromeStart })
+    }
   }
 
   /** 强制重绘（resize 后） */
