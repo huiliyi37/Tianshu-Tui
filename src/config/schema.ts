@@ -125,6 +125,10 @@ export const reviewConfigSchema = z.object({
   skipAuto: z.boolean().default(false),
 }).default({})
 
+/** Inferred TS type for the review config block. Consumers (e.g. B1Context.reviewConfig)
+ *  should use this instead of redeclaring the shape inline. */
+export type ReviewConfig = z.infer<typeof reviewConfigSchema>
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),

@@ -34,6 +34,7 @@ import { checkCommitCohesion } from './commit-cohesion.js'
 import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
+import type { ReviewConfig } from '../config/schema.js'
 import { recordAutoReviewRun } from './review-health.js'
 import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
@@ -79,7 +80,7 @@ export interface B1Context {
   /** Review configuration snapshot (subset of agent.review). Used for per-config
    *  gating of auto review (review.skipAuto) without re-reading the full Config.
    *  Optional: absent → no-skip (preserves current behavior). */
-  reviewConfig?: { skipAuto?: boolean; profiles?: Record<string, { provider: string; model: string }> }
+  reviewConfig?: ReviewConfig
 }
 
 // ── Post-commit review batching ──

@@ -49,7 +49,8 @@ import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
-import { resolveReviewOverride, buildReviewOverrideCard } from './agent/review-model-override.js'
+import { buildReviewOverrideState } from './agent/review-model-override.js'
+import type { ResolvedReviewOverride } from './agent/review-model-override.js'
 import { createAuthProvider } from './auth/registry.js'
 import { resolveCapabilities } from './api/provider.js'
 import { DelegationCoordinator } from './agent/coordinator.js'
@@ -511,7 +512,7 @@ export function createInteractiveToolRegistry(
     }, { reviewDepth: params?.reviewDepth ?? 0 }),
     isGoalActive: () => refs.goalTrackerRef.current?.isActive() ?? false,
     isGoalAchieved: () => refs.goalTrackerRef.current?.isGoalAchieved() ?? false,
-    reviewConfig: { skipAuto: config.agent.review?.skipAuto, profiles: config.agent.review?.profiles },
+    reviewConfig: config.agent.review,
   })))
 
   return { registry: reg }
@@ -598,42 +599,24 @@ export function createAgentRuntime(deps: {
     }
   })
 
-  // Review override: build per-profile model cards + StreamClients so review
-  // workers can use a different provider/model from the session's primary.
-  // Mirrors create-agent-config.ts:162-168 cross-provider client factory.
-  // Skip on credential failure → fall through to primary client.
-  const reviewOverrideCards = new Map<string, ModelCapabilityCard>()
-  const reviewStreamClients = new Map<string, import('./api/stream-client.js').StreamClient>()
-  if (config.agent.review?.profiles) {
-    for (const [profileName] of Object.entries(config.agent.review.profiles)) {
-      const resolved = resolveReviewOverride(
-        profileName as import('./agent/work-order.js').WorkerProfile,
-        config.agent.review.profiles,
-        config.provider.providers,
-      )
-      if (!resolved) {
-        debugLog(`[review-override] skip ${profileName}: provider/model not resolved`)
-        continue
-      }
-      reviewOverrideCards.set(profileName, buildReviewOverrideCard(resolved.modelId, resolved.providerConfig))
-
-      let overrideApiKey: string
-      try { overrideApiKey = resolveApiKey(resolved.providerConfig) } catch {
-        debugLog(`[review-override] skip ${profileName}: no API key for ${resolved.providerName}`)
-        continue
-      }
-      const overrideClient = createProviderClient(
-        resolved.providerConfig,
-        resolveCapabilities(resolved.providerName, resolved.providerConfig.capabilities),
-        {
-          apiKey: overrideApiKey,
-          model: resolved.modelId,
-          reasoningEffort: undefined,
-          maxTokens: Math.min(4096, resolved.providerConfig.maxTokens),
-          thinkingBudget: 4096,
-        },
-      )
-      reviewStreamClients.set(profileName, overrideClient)
+  // Review override: pre-resolve each profile's provider/model + validate
+  // credentials eagerly, but defer StreamClient construction to runtimeFactory
+  // so maxTokens/thinkingBudget can be set from per-call isWrite (read vs write
+  // profile). Without this deferral, override workers were hardcoded to 4096
+  // even for write profiles like 'patcher' — half the token budget of normal
+  // workers. Mirrors create-agent-config.ts:162-168 cross-provider client
+  // factory. Skip on credential failure → fall through to primary client.
+  const overrideState = config.agent.review?.profiles
+    ? buildReviewOverrideState(config.agent.review.profiles, config.provider.providers)
+    : { cards: new Map<string, ModelCapabilityCard>(), overrides: new Map<string, ResolvedReviewOverride>() }
+  const reviewOverrideCards = overrideState.cards
+  const reviewOverrides = overrideState.overrides
+  const reviewOverrideApiKeys = new Map<string, string>()
+  for (const [profileName, resolved] of reviewOverrides) {
+    try { reviewOverrideApiKeys.set(profileName, resolveApiKey(resolved.providerConfig)) } catch {
+      debugLog(`[review-override] skip ${profileName}: no API key for ${resolved.providerName}`)
+      reviewOverrides.delete(profileName)
+      reviewOverrideCards.delete(profileName)
     }
   }
 
@@ -658,35 +641,54 @@ export function createAgentRuntime(deps: {
     const isWrite = writeProfiles.includes(_order.profile)
 
     // Review override fast path: if the profile is configured for a different
-    // provider, short-circuit and use the prebuilt override client. This is
-    // the whole point of the override — review workers must NOT touch the
-    // session primary's server-side cache (GLM cache-killer mechanism).
-    const overrideClient = reviewStreamClients.get(_order.profile)
-    if (overrideClient) {
-      const overrideSpec = config.provider.providers[
-        Object.entries(config.agent.review?.profiles ?? {}).find(([k]) => k === _order.profile)?.[1].provider ?? ''
-      ]?.models.find(m => m.id === card.model || m.alias === card.model)
-      const overrideContextWindow = overrideSpec?.contextWindow ?? card.contextWindow
-      const overrideMaxTokens = isWrite
-        ? Math.min(8192, overrideSpec?.maxTokens ?? overrideContextWindow)
-        : Math.min(4096, overrideSpec?.maxTokens ?? overrideContextWindow)
-      debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${card.model} (independent client)`)
-      return {
-        order: _order,
-        client: overrideClient,
-        promptEngine: new PromptEngine({
-          model: card.model,
-          maxTokens: overrideMaxTokens,
-          staticCtx: { tools: workerRegistry.getDefinitions() },
-          volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
-        }),
-        toolRegistry: workerRegistry,
-        cwd,
-        maxTurns: 8,
-        contextWindow: overrideContextWindow,
-        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
-        activeClaims: claimStore.listActiveClaims(),
-        domainKnowledgeStore,
+    // provider, use the pre-resolved override (different provider+model from
+    // session primary). This is the whole point of the override — review
+    // workers must NOT touch the session primary's server-side cache (GLM
+    // cache-killer mechanism). StreamClient is built lazily here (not at
+    // bootstrap) so maxTokens/thinkingBudget reflect this call's isWrite —
+    // write profiles (e.g. 'patcher') get 8192, read-only profiles get 4096,
+    // matching the non-override worker path.
+    const overrideResolved = reviewOverrides.get(_order.profile)
+    if (overrideResolved) {
+      const overrideApiKey = reviewOverrideApiKeys.get(_order.profile)
+      if (!overrideApiKey) {
+        debugLog(`[review-override] skip ${_order.profile}: no cached API key (credential failure at bootstrap)`)
+      } else {
+        const overrideSpec = overrideResolved.providerConfig.models.find(
+          m => m.id === overrideResolved.modelId || m.alias === overrideResolved.modelId,
+        )
+        const overrideContextWindow = overrideSpec?.contextWindow ?? card.contextWindow
+        const overrideMaxTokens = isWrite
+          ? Math.min(8192, overrideSpec?.maxTokens ?? overrideContextWindow)
+          : Math.min(4096, overrideSpec?.maxTokens ?? overrideContextWindow)
+        debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${overrideResolved.modelId} isWrite=${isWrite}`)
+        return {
+          order: _order,
+          client: createProviderClient(
+            overrideResolved.providerConfig,
+            resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities),
+            {
+              apiKey: overrideApiKey,
+              model: overrideResolved.modelId,
+              reasoningEffort: undefined,
+              maxTokens: overrideMaxTokens,
+              thinkingBudget: isWrite ? 8192 : 4096,
+            },
+          ),
+          promptEngine: new PromptEngine({
+            model: overrideResolved.modelId,
+            maxTokens: overrideMaxTokens,
+            staticCtx: { tools: workerRegistry.getDefinitions() },
+            volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
+          }),
+          toolRegistry: workerRegistry,
+          cwd,
+          maxTurns: 8,
+          contextWindow: overrideContextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+          activeClaims: claimStore.listActiveClaims(),
+          domainKnowledgeStore,
+        }
       }
     }
 

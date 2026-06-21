@@ -60,9 +60,15 @@ export function resolveReviewOverride(
 /**
  * Build a ModelCapabilityCard for a review override model.
  *
- * 复用 bootstrap.ts:578-595 的 isPro/isFlash 检测，确保与现有 modelCards
- * 的 tier 推断（inferModelTierFromCard from model-tier-policy.ts）一致。
- * Review 是只读验证——不需要重型 capability scoring，给保守值即可。
+ * Tier inference (isPro / isFlash / treatAsStrong) is intentionally duplicated
+ * from bootstrap.ts's modelCards construction — see `bootstrap.ts` near the
+ * `modelCards` map. Kept duplicated to avoid a circular import between this
+ * pure module and the runtime bootstrap; the bootstrap version feeds
+ * `inferModelTierFromCard` in `model-tier-policy.ts`. If the tier heuristic
+ * changes in either place, update both.
+ *
+ * Review is read-only verification — heavy capability scoring is unnecessary,
+ * conservative values are fine.
  */
 export function buildReviewOverrideCard(
   modelId: string,
@@ -73,19 +79,64 @@ export function buildReviewOverrideCard(
   )
   const contextWindow = model?.contextWindow ?? 128_000
 
-  // 与 bootstrap.ts:578-585 完全一致的检测，避免 tier 漂移
+  // Mirrors the isPro/isFlash detection used to build bootstrap.ts's modelCards
+  // map. Kept duplicated to avoid a circular import between this pure module
+  // and the runtime bootstrap. See JSDoc above — if this heuristic changes,
+  // update both places (and verify `inferModelTierFromCard` in
+  // model-tier-policy.ts still agrees).
   const isPro = modelId.includes('pro') || model?.alias?.includes('pro')
   const isFlash = modelId.includes('flash') || model?.alias?.includes('flash')
   const treatAsStrong = isPro || (!isFlash && !isPro)
 
-  return {
-    model: modelId,
-    toolUseReliability: treatAsStrong ? 0.8 : 0.6,
-    jsonStability: treatAsStrong ? 0.8 : 0.65,
-    editSuccessRate: treatAsStrong ? 0.7 : 0.5,
-    testRepairRate: treatAsStrong ? 0.6 : 0.45,
-    contextWindow,
-    cacheEconomics: 'strong' as const,
-    recommendedTasks: ['code_search'],
+return {
+      model: modelId,
+      toolUseReliability: treatAsStrong ? 0.8 : 0.6,
+      jsonStability: treatAsStrong ? 0.8 : 0.65,
+      editSuccessRate: treatAsStrong ? 0.7 : 0.5,
+      testRepairRate: treatAsStrong ? 0.6 : 0.45,
+      contextWindow,
+      cacheEconomics: 'strong' as const,
+      recommendedTasks: ['code_search'],
+    }
+}
+
+/**
+ * Result of building the review override state from config. Cards feed the
+ * DelegationCoordinator's fast path; resolved overrides feed the runtimeFactory
+ * where StreamClients are constructed lazily (so per-call isWrite sets the
+ * right maxTokens/thinkingBudget).
+ *
+ * Both maps are sparse — profiles whose provider/model can't be resolved are
+ * silently dropped (logged at the call site) so the coordinator/runtimeFactory
+ * fall through to the session's primary model.
+ */
+export interface ReviewOverrideState {
+  cards: Map<string, ModelCapabilityCard>
+  overrides: Map<string, ResolvedReviewOverride>
+}
+
+/**
+ * Build the per-profile override state for review workers from config.
+ *
+ * Iterates `review.profiles` and resolves each profile's provider+model against
+ * the providers map. Profiles that fail to resolve (unknown provider or model)
+ * are dropped — bootstrap logs and falls through.
+ */
+export function buildReviewOverrideState(
+  reviewProfiles: Record<string, { provider: string; model: string }>,
+  providers: Record<string, ProviderConfig>,
+): ReviewOverrideState {
+  const cards = new Map<string, ModelCapabilityCard>()
+  const overrides = new Map<string, ResolvedReviewOverride>()
+  for (const profileName of Object.keys(reviewProfiles)) {
+    const resolved = resolveReviewOverride(
+      profileName as WorkerProfile,
+      reviewProfiles,
+      providers,
+    )
+    if (!resolved) continue
+    cards.set(profileName, buildReviewOverrideCard(resolved.modelId, resolved.providerConfig))
+    overrides.set(profileName, resolved)
   }
+  return { cards, overrides }
 }
