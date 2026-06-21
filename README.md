@@ -80,6 +80,41 @@ Convenes multiple expert seats to review a plan or design, with optional second-
 
 Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progressive disclosure: only name + description enters context; full instructions load on demand via the `skill` tool. Import specific Claude Code skills by name in config.
 
+**Built-in skills** ship in `.rivet/skills/`:
+
+| Skill | Description |
+|-------|-------------|
+| `writing-plans` | Structured plan writing with Mermaid diagrams, spec sections, verification plan |
+| `executing-plans` | Task graph decomposition, wave-by-wave execution, verification at each wave |
+| `subagent-driven-development` | Delegate complex tasks with typed profiles, batch dispatch, parallel workers |
+| `agent-harness-testing` | TDD feasibility probes, test scaffolding, red-green-refactor workflow |
+| `research-spec` | Research + spec workflow: exploration → condition matrix → counterexample table |
+
+**Using a skill**:
+
+```
+/skill writing-plans       # loads full instructions into context
+```
+
+Or the agent auto-loads skills when the task matches their trigger patterns.
+
+**Creating a custom skill** — drop a `.md` file in `.rivet/skills/` with YAML frontmatter:
+
+```markdown
+---
+name: my-workflow
+description: Describe what this skill does in one line.
+triggers:
+  - keyword or pattern that suggests this skill
+---
+
+# My Workflow
+
+Step-by-step instructions the agent follows when this skill is loaded...
+```
+
+Skills are shareable: copy `.rivet/skills/` between projects, or reference a central skills directory via config.
+
 ### Cross-Session Knowledge
 
 Distilled knowledge persists across sessions (enabled by default):
@@ -91,6 +126,50 @@ Distilled knowledge persists across sessions (enabled by default):
 | `.rivet/presence.json` | Companion agent awareness |
 
 Toggle via `agent.crossSessionEnabled` in config. Force-off: `RIVET_NO_CROSS_SESSION=1`.
+
+### MCP (Model Context Protocol)
+
+Connect external tool servers — documentation search, databases, APIs — directly into the agent's tool pipeline. MCP servers auto-discover at startup; their tools appear as `mcp__<serverId>__<toolName>`.
+
+**Prerequisites**: Node.js 22+ with `npx` available (for stdio transport). SSE servers are network-based and need no local runtime.
+
+**Adding an MCP server**:
+
+```bash
+# stdio transport (local process)
+rivet config mcp add-stdio <server-id> npx -y <package> [args...]
+
+# SSE transport (remote/network server)  
+rivet config mcp add-sse <server-id> http://localhost:3001/sse
+
+# Streamable HTTP transport (2025 spec)
+rivet config mcp add-http <server-id> http://localhost:3001/mcp
+```
+
+**Built-in presets** — one-command setup for popular servers:
+
+```bash
+rivet config mcp add-preset context7    # @upstash/context7-mcp — up-to-date library docs
+```
+
+**Listing and managing**:
+
+```bash
+rivet config mcp list                   # show all registered servers + status
+rivet config mcp remove <server-id>     # remove a server
+rivet config mcp set-timeout <server-id> 30000  # override default 60s timeout
+```
+
+**Inside a session**:
+
+```
+/mcp                          # show MCP connection status for all servers
+/debug mcp                    # detailed diagnostics (startup errors, tool discovery)
+```
+
+MCP tools respect the same approval mode as built-in tools (`auto-safe` / `manual` / `dangerously-skip-permissions`).
+
+**Troubleshooting**: If `npx` install hangs on first run, increase the timeout (`rivet config mcp set-timeout <id> 120000`). For SSE servers that fail to connect, verify the server is running and the URL is reachable from the agent process.
 
 ### Approval Modes
 
@@ -214,7 +293,7 @@ Double-tap **ESC** for rewind overlay. Press **Esc** to dismiss any overlay.
 
 ### Tech Stack
 
-Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · Ink 6 (React TUI) · tsup bundle · node:test + assert/strict
+Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI rendering engine · tsup bundle · node:test + assert/strict
 
 ### Build & Test
 
@@ -247,7 +326,7 @@ src/
 ├── prompt/    Prompt engine — frozen prefix + delta appendix + volatile context layers
 ├── tools/     30+ tools — bash, edit, read/write, grep, glob, run_tests, git, delegate,
 │              deliver_task, plan_submit, council_convene, web_fetch, lsp, undo, rewind
-├── tui/       Terminal UI (Ink 6 / React + T9 ANSI engine)
+├── tui/       Terminal UI (T9 ANSI engine: commit-engine scrollback, input controller, overlay system, stream renderer)
 │   ├── engine/   Commit-engine scrollback, input controller, overlay system, stream renderer
 │   └── cockpit/  Multi-panel cockpit: trace, verify, context, safety, model, MCP
 ├── compact/   Three-layer semantic pruning + micro-compact + T7 request-time collapse
