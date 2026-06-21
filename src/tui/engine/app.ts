@@ -818,6 +818,11 @@ export class TuiApp {
     return this.commit.getContent()
   }
 
+  /** 返回当前活跃星域名称（供 starmap overlay 高亮） */
+  getDomainName(): string | undefined {
+    return this.state.domainName
+  }
+
   /**
    * Get running delegation workers for the `/tasks` overlay.
    * Reads per-worker state from the fleet read model (fed by onDelegationActivity),
@@ -2016,6 +2021,8 @@ export class TuiApp {
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
+        busy: this.agentBusy,
+        tick: this.streamRenderController.tick,
       }, this.theme)
 
       const rightStr = formatGlanceRight({

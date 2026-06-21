@@ -403,7 +403,12 @@ body {
 .deleg-chip.warn { color: var(--warning); }
 .deleg-chip.bad { color: var(--error); }
 
-.deleg-node { font-size: 13px; padding: 3px 0; }
+.deleg-node {
+  font-size: 13px; padding: 3px 0;
+  border-radius: var(--radius-sm);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.deleg-node:hover { background: var(--panel-2); }
 /* blocked / failed / escalated → attention rail. */
 .deleg-node.attention { padding: 4px 8px; border-radius: var(--radius-sm); margin-top: 2px; }
 .deleg-node.attention.warn { border-left: 2px solid var(--warning); background: var(--warning-soft); }
@@ -417,11 +422,20 @@ body {
 }
 .deleg-node .obj { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .deleg-node .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-.deleg-node .dot.running { background: var(--accent); }
+.deleg-node .dot.running { background: var(--accent); animation: pulse-running 1.5s var(--ease) infinite; }
 .deleg-node .dot.ok { background: var(--success); }
 .deleg-node .dot.warn { background: var(--warning); }
 .deleg-node .dot.bad { background: var(--error); }
 .deleg-node .dot.pulse { animation: pulse 1.2s var(--ease) infinite; }
+/* sub-agent progress / output block — nested CLI block style */
+.deleg-progress {
+  margin: 4px 0 4px 16px; padding: 6px 10px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--panel); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-family: var(--font-mono); font-size: var(--text-xs);
+  color: var(--muted); white-space: pre-wrap; word-break: break-word;
+  max-height: 120px; overflow-y: auto;
+}
 /* per-worker status badge + elapsed + progress line. */
 .deleg-badge {
   margin-left: auto; flex: none; font-size: 11px; padding: 1px 8px; border-radius: var(--radius-pill);
@@ -530,12 +544,67 @@ body {
   display: flex; align-items: center; gap: var(--space-3);
   padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
 }
-/* Reserved slot for a future CVM domain glyph (kept invisible for now). */
-.thread-glyph { width: 0; height: 0; }
-/* S — autonomous sessions light up the reserved glyph slot. */
-.thread-glyph.autonomous {
-  width: auto; height: auto; color: var(--accent);
+/* Star-domain glyph — always visible, breathes while streaming. */
+.thread-glyph {
+  color: var(--accent);
   font-size: var(--text-md); line-height: 1;
+  transition: color var(--dur) var(--ease);
+}
+.thread-glyph.breathing {
+  animation: glyph-breath 1.2s var(--ease) infinite;
+}
+
+/* ── Star-domain CVM accent overrides ──────────────────────────── */
+/* Map uiPersona.accent semantic keys to hue families.
+   primary (azure) = default — no override needed for tianfu, tianji.
+   The --accent-* vars defined here shift the entire UI tint per-domain. */
+
+/* secondary → violet (tianshu, tianxuan, wenqu) */
+:root .thread.domain-tianshu,
+:root .thread.domain-tianxuan,
+:root .thread.domain-wenqu,
+:root[data-theme="dark"] .thread.domain-tianshu,
+:root[data-theme="dark"] .thread.domain-tianxuan,
+:root[data-theme="dark"] .thread.domain-wenqu {
+  --accent: #a78bfa; --accent-hover: #c4b5fd; --accent-fg: #0a0a1a; --accent-soft: rgba(167,139,250,0.14);
+}
+:root[data-theme="light"] .thread.domain-tianshu,
+:root[data-theme="light"] .thread.domain-tianxuan,
+:root[data-theme="light"] .thread.domain-wenqu {
+  --accent: #7c3aed; --accent-hover: #6d28d9; --accent-fg: #ffffff; --accent-soft: rgba(124,58,237,0.10);
+}
+
+/* success → emerald (tianliang, fu) */
+:root .thread.domain-tianliang,
+:root .thread.domain-fu,
+:root[data-theme="dark"] .thread.domain-tianliang,
+:root[data-theme="dark"] .thread.domain-fu {
+  --accent: #43c463; --accent-hover: #5dd67a; --accent-fg: #051a0a; --accent-soft: rgba(67,196,99,0.14);
+}
+:root[data-theme="light"] .thread.domain-tianliang,
+:root[data-theme="light"] .thread.domain-fu {
+  --accent: #1a7f37; --accent-hover: #166b2e; --accent-fg: #ffffff; --accent-soft: rgba(26,127,55,0.10);
+}
+
+/* warning → amber (tianquan, yaoguang) */
+:root .thread.domain-tianquan,
+:root .thread.domain-yaoguang,
+:root[data-theme="dark"] .thread.domain-tianquan,
+:root[data-theme="dark"] .thread.domain-yaoguang {
+  --accent: #e0a93a; --accent-hover: #eab854; --accent-fg: #1a1000; --accent-soft: rgba(224,169,58,0.14);
+}
+:root[data-theme="light"] .thread.domain-tianquan,
+:root[data-theme="light"] .thread.domain-yaoguang {
+  --accent: #b45309; --accent-hover: #9a4608; --accent-fg: #ffffff; --accent-soft: rgba(180,83,9,0.10);
+}
+
+/* error → rose (pojun) */
+:root .thread.domain-pojun,
+:root[data-theme="dark"] .thread.domain-pojun {
+  --accent: #f76b6b; --accent-hover: #f98a8a; --accent-fg: #1a0505; --accent-soft: rgba(247,107,107,0.13);
+}
+:root[data-theme="light"] .thread.domain-pojun {
+  --accent: #dc2626; --accent-hover: #b91c1c; --accent-fg: #ffffff; --accent-soft: rgba(220,38,38,0.10);
 }
 
 /* ── S: autonomy control + guardrail surfaces ──────────────────── */
@@ -672,6 +741,7 @@ body {
   border: 1px solid var(--border); border-left: 2px solid var(--accent);
   background: var(--accent-soft); border-radius: var(--radius-md);
   padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2);
+  animation: decision-shift-enter var(--dur) var(--ease);
 }
 .decision-shift.warn { border-left-color: var(--warning); }
 .decision-shift .ds-head { display: flex; align-items: center; gap: var(--space-2); }
@@ -754,6 +824,9 @@ body {
 .dot-pulse:nth-child(3) { animation-delay: 0.4s; }
 .thinking-label { margin-left: var(--space-1); }
 @keyframes pulse { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 1; } }
+@keyframes glyph-breath { 0%, 100% { transform: scale(1); opacity: 0.85; } 50% { transform: scale(1.15); opacity: 1; text-shadow: 0 0 6px var(--accent-soft); } }
+@keyframes pulse-running { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); } 50% { box-shadow: 0 0 0 4px transparent; } }
+@keyframes decision-shift-enter { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 
 /* T1 — reasoning stream (Cursor 3.0). Subtle muted block; collapses to a single
    summary line on completion. Left rule only when expanded. */
@@ -787,6 +860,11 @@ body {
 /* T1 — turn boundary divider. Thin centered hairline + label. */
 .turn-divider { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); }
 .turn-divider::before, .turn-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+/* Domain separator variants — driven by data-separator on .thread */
+.thread[data-separator="thick"] .turn-divider::before,
+.thread[data-separator="thick"] .turn-divider::after { height: 2px; background: var(--accent); }
+.thread[data-separator="dots"] .turn-divider::before,
+.thread[data-separator="dots"] .turn-divider::after { height: 0; background: transparent; border-top: 1px dotted var(--accent); }
 .turn-label { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
 
 /* T1 — checkpoint anchor chip. */

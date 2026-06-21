@@ -327,12 +327,14 @@ async function main() {
       const milestones = constellation
         ? constellation.milestones.slice(-5).reverse().map(m => formatMilestoneLine(m))
         : []
+      const activeDomainName = tuiApp.getDomainName?.()
       return {
         entries: domains.map(d => ({
           name: d.name,
-          glyph: '✦',
+          glyph: d.uiPersona.glyph,
           description: d.motto ?? '',
-          active: false,
+          active: activeDomainName != null && (d.name === activeDomainName || d.id === activeDomainName),
+          accent: d.uiPersona.accent,
         })),
         milestones,
       }

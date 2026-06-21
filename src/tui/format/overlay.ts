@@ -120,6 +120,8 @@ export interface StarmapEntry {
   active: boolean
   /** 最近活跃时间描述 */
   lastActive?: string
+  /** UI 微气质 — 主题语义色键 (primary/secondary/success/warning/error/dim) */
+  accent?: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim'
 }
 
 export interface StarmapData {
@@ -164,11 +166,13 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
   const visible = data.entries.slice(0, maxEntries)
 
   for (const entry of visible) {
+    const accentKey = (entry.accent as keyof RivetTheme) ?? 'primary'
+    const accentColor = (theme as any)[accentKey] ?? theme.primary
     const glyph = entry.active
-      ? color(` ${entry.glyph} `.padEnd(glyphWidth), theme.primary, { bold: true })
+      ? color(` ${entry.glyph} `.padEnd(glyphWidth), accentColor, { bold: true })
       : color(` ${entry.glyph} `.padEnd(glyphWidth), theme.dim)
     const name = entry.active
-      ? color(entry.name.padEnd(nameWidth), theme.primary)
+      ? color(entry.name.padEnd(nameWidth), accentColor)
       : color(entry.name.padEnd(nameWidth), theme.dim)
     const desc = entry.active
       ? entry.description.slice(0, descWidth).padEnd(descWidth)

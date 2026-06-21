@@ -66,6 +66,10 @@ export interface GlanceBarInput {
   narrow?: boolean
   /** 会话序号 */
   turnCount?: number
+  /** agent 是否在繁忙（streaming/thinking），驱动呼吸动画 */
+  busy?: boolean
+  /** 单调递增的渲染 tick，用于呼吸动画相位 */
+  tick?: number
 }
 
 export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
@@ -73,8 +77,21 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
   const domainGlyph = input.domainGlyph ?? ''
   const domainLabel = input.domainName ?? '天枢'
   const branchPart = !narrow && input.branch ? ` (${input.branch})` : ''
-  const glyphPart = domainGlyph ? `${color(domainGlyph, theme.muted)} ` : ''
-  return `${glyphPart}${color(domainLabel, theme.muted)}${color(branchPart, theme.dim)}`
+
+  // 星域专属 accent 色；单色克制主题降级为 muted
+  const accentColor = resolveStarDomainAccent(input.domainName, theme)
+
+  // 呼吸动画：busy 时 glyph 在 bold → normal → dim → normal 间循环
+  // tick % 4 相位驱动，120ms ticker 下周期约 480ms
+  let glyphStyle: { bold?: boolean; dim?: boolean } = {}
+  if (input.busy && input.tick !== undefined) {
+    const phase = input.tick % 4
+    if (phase === 0) glyphStyle = { bold: true }
+    else if (phase === 2) glyphStyle = { dim: true }
+  }
+
+  const glyphPart = domainGlyph ? `${color(domainGlyph, accentColor, glyphStyle)} ` : ''
+  return `${glyphPart}${color(domainLabel, accentColor)}${color(branchPart, theme.dim)}`
 }
 
 export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): string {

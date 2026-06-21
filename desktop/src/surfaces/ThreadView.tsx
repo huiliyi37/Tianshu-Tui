@@ -15,6 +15,8 @@ import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autono
 import { useUiState } from '../state/store'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl } from '../runtime/client'
+import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
+import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -22,6 +24,20 @@ const STATUS_LABEL: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
   aborted: '已中止',
+}
+
+/** Resolve the active star domain for this session. Desktop currently defaults
+ *  to 天枢 (tianshu) — real-time domain events will make this dynamic later. */
+function resolveActiveDomain(_session: SessionRecord, _view: EventViewState): StarDomainId {
+  return 'tianshu'
+}
+
+/** Look up a domain glyph by name or ID. Falls back to the default ✹. */
+function domainGlyphForName(name: string): string {
+  for (const [, d] of Object.entries(STAR_DOMAINS)) {
+    if (d.name === name || d.id === name) return d.uiPersona.glyph
+  }
+  return '✹'
 }
 
 // Thread view (P2/Q1) — the single-session working surface. Status header (with a
@@ -47,6 +63,10 @@ export function ThreadView(props: {
   const [scrolledUp, setScrolledUp] = useState(false)
   const busy = session.status === 'running'
   const autonomous = isAutonomous(session.approvalMode)
+  const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
+  const activeDomain = STAR_DOMAINS[activeDomainId]
+  const domainGlyph = activeDomain?.uiPersona.glyph ?? '✹'
+  const domainSeparator = activeDomain?.uiPersona.separator ?? 'thin'
 
   const isNearBottom = useCallback(() => {
     const el = msgRef.current
@@ -213,10 +233,10 @@ export function ThreadView(props: {
   ], [onSetApprovalMode, onSend])
 
   return (
-    <div className="thread">
+    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator}>
       <header className="thread-header">
-        <span className={`thread-glyph ${autonomous ? 'autonomous' : ''}`} aria-hidden>
-          {autonomous ? '✦' : ''}
+        <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
+          {domainGlyph}
         </span>
         <div className="thread-id">
           <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
@@ -530,10 +550,11 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
   }
   if (block.kind === 'decision_shift' && block.shift) {
     const s = block.shift
+    const shiftGlyph = s.domain ? domainGlyphForName(s.domain) : '✦'
     return (
       <div className={`decision-shift ${s.severity}`}>
         <div className="ds-head">
-          <span className="ds-glyph" aria-hidden>✦</span>
+          <span className="ds-glyph" aria-hidden>{shiftGlyph}</span>
           <span className="ds-domain">{s.domain ? `星域 · ${s.domain}` : '星域 · 改道'}</span>
           <span className="ds-tag">提醒 → 改道</span>
         </div>
@@ -547,7 +568,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
     )
   }
   return (
-    <MsgBlock role="天枢">
+    <MsgBlock role={STAR_DOMAINS.tianshu.name}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} />
     </MsgBlock>
   )
