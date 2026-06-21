@@ -5,8 +5,6 @@
  * 统一到单一数据源，同时支持 .rivet/agents/ 目录加载用户自定义 profile。
  */
 
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { progressiveTimeout, WORKER_EXIT_GRACE_MS } from './timeout-ladder.js'
 
 export type AgentRole = 'brain' | 'hands' | 'readonly' | 'readonly_plus_test'
@@ -426,13 +424,16 @@ export class ProfileRegistry {
   }
 
   /** 从 .rivet/agents/ 目录加载用户自定义 profile */
-  loadFromDirectory(dir: string): { loaded: string[]; errors: string[] } {
+  async loadFromDirectory(dir: string): Promise<{ loaded: string[]; errors: string[] }> {
     const loaded: string[] = []
     const errors: string[] = []
     try {
+      const { readdirSync } = await import('node:fs')
+      const { join } = await import('node:path')
       const files = readdirSync(dir).filter(f => f.endsWith('.md') && f !== 'README.md')
       for (const file of files) {
         try {
+          const { readFileSync } = await import('node:fs')
           const content = readFileSync(join(dir, file), 'utf-8')
           const def = parseAgentMarkdown(content)
           if (this.profiles.has(def.name) && this.profiles.get(def.name)!.builtIn) {

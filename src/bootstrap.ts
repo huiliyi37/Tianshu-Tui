@@ -1290,14 +1290,14 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 8. Load profiles + star domains
   const agentsDir = join(cwd, '.rivet', 'agents')
-  const agentLoadResult = profileRegistry.loadFromDirectory(agentsDir)
+  const agentLoadResult = await profileRegistry.loadFromDirectory(agentsDir)
   if (agentLoadResult.loaded.length > 0 || agentLoadResult.errors.length > 0) {
     for (const err of agentLoadResult.errors) {
       console.warn(`[agents] ${err}`)
     }
   }
   const domainsDir = join(cwd, '.rivet', 'domains')
-  const domainLoadResult = starDomainRegistry.loadFromDirectory(domainsDir)
+  const domainLoadResult = await starDomainRegistry.loadFromDirectory(domainsDir)
   if (domainLoadResult.errors.length > 0) {
     for (const err of domainLoadResult.errors) {
       console.warn(`[domains] ${err}`)
