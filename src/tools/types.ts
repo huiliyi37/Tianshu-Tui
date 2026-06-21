@@ -141,6 +141,14 @@ export interface ToolResult {
    *  this to record the Phase B (integration) verification alongside the
    *  primary Phase A (isolated) verification from a single run_tests call. */
   extraVerifications?: VerificationMetadata[]
+  /** Raw output byte count before any truncation (bash stdout+stderr). */
+  rawBytes?: number
+  /** Raw output line count before any truncation (bash stdout+stderr). */
+  rawLines?: number
+  /** Exit code for shell commands (bash). */
+  exitCode?: number
+  /** Executed command (bash) — used by ToolAccumulator for per-command collapse summaries. */
+  command?: string
 }
 
 export interface Tool {

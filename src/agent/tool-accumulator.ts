@@ -13,6 +13,14 @@ export interface AccumulatorEntry {
   toolUseId: string
   content: string
   turn: number
+  /** Raw output bytes before truncation (for collapse summaries). */
+  rawBytes?: number
+  /** Raw output lines before truncation (for collapse summaries). */
+  rawLines?: number
+  /** Exit code (bash). */
+  exitCode?: number
+  /** Executed command (bash) — displayed in per-command collapse summaries. */
+  command?: string
 }
 
 export interface CollapseResult {
@@ -150,15 +158,39 @@ export class ToolAccumulator {
   }
 
   private buildBashSummary(entries: AccumulatorEntry[], count: number, totalChars: number): string {
-    const lastLines = entries.map(e => {
-      const lines = e.content.trim().split('\n')
-      return lines[lines.length - 1] ?? ''
-    })
-    const preview = lastLines
-      .slice(0, MAX_AGGREGATE_LINES)
+    // Parse per-command metadata from the output header:
+    //   [ls -la .rivet/sessions/] exit=0 time=0.1s lines=248
+    const headerRe = /^\[(.+?)\]\s+exit=(\d+)\s+time=[\d.]+\S\s+lines=(\d+)/
+    const cmdLines: string[] = []
+    for (const e of entries) {
+      const m = e.content.match(headerRe)
+      if (m) {
+        const cmd = m[1]!.length > 72 ? m[1]!.slice(0, 69) + '…' : m[1]!
+        const exit = m[2]!
+        const lines = m[3]!
+        cmdLines.push(`  ${cmd}  exit=${exit}  ${lines} lines  (collapsed)`)
+      } else {
+        // Fallback: show content size
+        const preview = e.content.slice(0, 80).replace(/\n/g, '↵')
+        cmdLines.push(`  [unrecognized header] ${e.content.length} chars  (collapsed)`)
+      }
+    }
+
+    // Last output preview from most recent entry
+    const last = entries[entries.length - 1]!
+    const lastLines = last.content.trim().split('\n')
+    const lastPreview = lastLines.slice(-8)
       .map(l => `  ${l}`)
       .join('\n')
-    return `[storm-collapsed: ${count} bash calls, ${totalChars} chars collapsed]\nLast lines:\n${preview}`
+    const lastCmd = last.command ?? (last.content.match(headerRe)?.[1] ?? 'unknown')
+
+    const parts = [
+      `[storm-collapsed: ${count} bash calls consolidated — raw output saved, use rawPath or read_section to recover]`,
+      ...cmdLines,
+      `Last output from most recent call (${lastCmd}):`,
+      lastPreview,
+    ]
+    return parts.join('\n')
   }
 
   private buildGenericSummary(toolName: string, entries: AccumulatorEntry[], count: number, totalChars: number): string {

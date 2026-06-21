@@ -159,27 +159,45 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       let stdout = ''
       let stderr = ''
       let timedOut = false
+      let stdoutTruncated = false
+      let stderrTruncated = false
+      let stdoutRawBytes = 0
+      let stderrRawBytes = 0
 
       child.stdout!.on('data', (data: Buffer) => {
         const text = data.toString()
+        stdoutRawBytes += data.length
         stdout += text
         params.onOutput?.(text)
         if (stdout.length > 32_000) {
+          if (!stdoutTruncated) {
+            stdoutTruncated = true
+          }
           stdout = stdout.slice(-24_000)
         }
       })
 
       child.stderr!.on('data', (data: Buffer) => {
         const text = data.toString()
+        stderrRawBytes += data.length
         stderr += text
         params.onOutput?.(text)
         if (stderr.length > 32_000) {
+          stderrTruncated = true
           stderr = stderr.slice(-24_000)
         }
       })
 
       const buildResult = async (code: number, isTimeout = false) => {
-        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const truncNote = stdoutTruncated
+          ? `[stdout truncated: output exceeded 32KB (${stdoutRawBytes} bytes total), showing last 24KB — full output at rawPath below]\n`
+          : ''
+        const stderrNote = stderrTruncated
+          ? `[stderr truncated: output exceeded 32KB, showing last 24KB]\n`
+          : ''
+        const raw = truncNote + stderrNote + stdout + (stderr ? '\n' + stderr : '')
+        const totalRawBytes = stdoutRawBytes + stderrRawBytes
+        const totalRawLines = raw.split('\n').length - (truncNote ? truncNote.split('\n').length - 1 : 0) - (stderrNote ? stderrNote.split('\n').length - 1 : 0)
         // P1: Command-Aware filtering — apply before content construction so the
         // model sees a condensed, semantically-relevant version. Raw output is
         // still persisted for artifact recovery.
@@ -212,6 +230,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
               uiContent: buildUiOutput(filtered, meta),
               rawPath,
               isError,
+              rawBytes: totalRawBytes,
+              rawLines: totalRawLines,
+              exitCode,
+              command: rawCommand,
             }
           }
 
@@ -239,6 +261,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
             uiContent: buildUiOutput(filtered, meta),
             rawPath: artifact?.rawPath,
             isError,
+            rawBytes: totalRawBytes,
+            rawLines: totalRawLines,
+            exitCode,
+            command: rawCommand,
           }
         }
 
@@ -249,6 +275,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           uiContent: buildUiOutput(filtered, meta),
           rawPath,
           isError,
+          rawBytes: totalRawBytes,
+          rawLines: totalRawLines,
+          exitCode,
+          command: rawCommand,
         }
       }
 

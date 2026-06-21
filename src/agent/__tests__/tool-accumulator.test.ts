@@ -109,13 +109,14 @@ describe('ToolAccumulator', () => {
     assert.ok(result.summary.includes('files: '))
   })
 
-  it('builds bash summary with last lines', () => {
+  it('builds bash summary with per-command metadata', () => {
     for (let i = 0; i < 5; i++) {
-      acc.record({ toolName: 'bash', toolUseId: `b${i}`, content: `output line 1\noutput line ${i}`, turn: 1 })
+      acc.record({ toolName: 'bash', toolUseId: `b${i}`, content: `[cmd_${i}] exit=0 time=0.1s lines=3\noutput line 1\noutput line ${i}`, turn: 1 })
     }
     const result = acc.tryCollapse('bash')!
-    assert.ok(result.summary.includes('bash calls'))
-    assert.ok(result.summary.includes('Last lines'))
+    assert.ok(result.summary.includes('bash calls consolidated'))
+    assert.ok(result.summary.includes('collapsed'))
+    assert.ok(result.summary.includes('Last output'))
   })
 
   it('builds generic summary for unknown tool types', () => {
