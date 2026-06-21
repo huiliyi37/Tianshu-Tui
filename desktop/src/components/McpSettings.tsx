@@ -19,10 +19,10 @@ const MCP_PRESETS: McpPreset[] = [
   {
     id: 'context7',
     name: 'Context7',
-    description: '实时库文档查询 —— 为编码 agent 提供最新的框架/库 API 参考',
+    description: '实时库文档查询 —— 为编码 agent 提供最新框架/库 API 参考，减少幻觉',
     transport: 'stdio',
     command: 'npx',
-    args: ['-y', '@context7/mcp'],
+    args: ['-y', '@upstash/context7-mcp@latest'],
   },
 ]
 
