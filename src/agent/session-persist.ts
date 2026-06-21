@@ -60,6 +60,13 @@ import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
 import { appendChecksum, verifyAndExtract, verifyLines } from './checksum.js'
 
+function dataHome(): string {
+  if (process.platform === 'win32') {
+    return process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')
+  }
+  return homedir()
+}
+
 function projectSlug(cwd: string): string {
   const name = cwd.split('/').filter(Boolean).pop() || 'unknown'
   const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 6)
@@ -67,7 +74,7 @@ function projectSlug(cwd: string): string {
 }
 
 export function getSessionDir(cwd: string): string {
-  return process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions', projectSlug(cwd))
+  return process.env.RIVET_SESSION_DIR ?? join(dataHome(), '.rivet', 'sessions', projectSlug(cwd))
 }
 
 function ensureDir(dir: string): void {
