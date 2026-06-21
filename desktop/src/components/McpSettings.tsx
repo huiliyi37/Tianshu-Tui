@@ -1,6 +1,31 @@
 import { useState } from 'react'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState } from '../runtime/types'
 
+// ── MCP 预设 ──────────────────────────────────────────────────
+// 常用 MCP 服务器的一键添加配置。Context7 提供库文档查询能力，
+// 是编码 agent 最常用的外部知识源之一。
+
+interface McpPreset {
+  id: string
+  name: string
+  description: string
+  transport: 'stdio'
+  command: string
+  args: string[]
+  env?: Record<string, string>
+}
+
+const MCP_PRESETS: McpPreset[] = [
+  {
+    id: 'context7',
+    name: 'Context7',
+    description: '实时库文档查询 —— 为编码 agent 提供最新的框架/库 API 参考',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@context7/mcp'],
+  },
+]
+
 interface McpSettingsProps {
   status: McpStatusResponse | null
   statusLoading: boolean
@@ -136,6 +161,39 @@ export function McpSettings({
       )}
 
       {!showAdd && (
+        <>
+          <div className="mcp-presets">
+            <div className="mcp-presets-label">推荐添加</div>
+            <div className="mcp-presets-grid">
+              {MCP_PRESETS.map(p => (
+                <div
+                  key={p.id}
+                  className="mcp-preset-card"
+                  onClick={() => {
+                    const config: McpServerConfig = {
+                      serverId: p.id,
+                      command: p.command,
+                      args: p.args,
+                      env: p.env,
+                    }
+                    onAdd(config)
+                  }}
+                >
+                  <div className="mcp-preset-name">+ {p.name}</div>
+                  <div className="mcp-preset-desc">{p.description}</div>
+                  <div className="mcp-preset-cmd">
+                    {p.command} {p.args.join(' ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button className="btn-mini" onClick={() => setShowAdd(true)}>
+            + 添加 MCP 服务器
+          </button>
+        </>
+      )}
+      {!showAdd && !MCP_PRESETS.length && (
         <button className="btn-mini" onClick={() => setShowAdd(true)}>
           + 添加 MCP 服务器
         </button>

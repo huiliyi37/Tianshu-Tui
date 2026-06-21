@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天枢 · Tiānshū — 终端编码智能体架构</title>
+<style>
+  :root {
+    --bg: #090a0f;
+    --bg-card: #111318;
+    --bg-card-hover: #161920;
+    --border: #1e2230;
+    --border-active: #2a2f40;
+    --text: #c8ccd4;
+    --text-dim: #6b7080;
+    --text-bright: #e8ecf2;
+    --gold: #d4a853;
+    --gold-dim: #8a6d30;
+    --cyan: #38bdf8;
+    --purple: #818cf8;
+    --red: #f87171;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --pink: #f472b6;
+    --teal: #2dd4bf;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.7;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Starfield background ── */
+  #starfield {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── Layout ── */
+  .container {
+    position: relative; z-index: 1;
+    max-width: 1100px; margin: 0 auto; padding: 0 2rem;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 8rem 0 5rem; text-align: center;
+    position: relative;
+  }
+  .hero::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 600px; height: 600px; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(212,168,83,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-glyph {
+    font-size: 4rem; margin-bottom: 1rem;
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .hero h1 {
+    font-size: 3.5rem; font-weight: 700; color: var(--text-bright);
+    letter-spacing: 0.05em; margin-bottom: 0.5rem;
+  }
+  .hero h1 .accent { color: var(--gold); }
+  .hero .subtitle {
+    font-size: 1.25rem; color: var(--text-dim); margin-bottom: 1.5rem;
+  }
+  .hero .tagline {
+    font-size: 1rem; color: var(--gold-dim); font-style: italic;
+    max-width: 560px; margin: 0 auto; line-height: 1.8;
+  }
+  .hero-meta {
+    display: flex; gap: 2rem; justify-content: center; margin-top: 2rem;
+    flex-wrap: wrap;
+  }
+  .hero-meta span {
+    color: var(--text-dim); font-size: 0.875rem;
+    font-family: var(--font-mono);
+  }
+  .hero-meta span strong { color: var(--text-bright); }
+
+  /* ── Section ── */
+  section {
+    padding: 5rem 0; border-top: 1px solid var(--border);
+  }
+  .section-header {
+    text-align: center; margin-bottom: 3.5rem;
+  }
+  .section-header h2 {
+    font-size: 2rem; color: var(--text-bright);
+    margin-bottom: 0.75rem; letter-spacing: 0.03em;
+  }
+  .section-header p {
+    color: var(--text-dim); max-width: 600px; margin: 0 auto;
+    font-size: 0.95rem;
+  }
+
+  /* ── Architecture Diagram ── */
+  .arch-diagram {
+    position: relative; padding: 2rem 0;
+    display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+  }
+  .arch-node {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1rem 2.5rem; text-align: center;
+    position: relative; transition: all 0.3s;
+  }
+  .arch-node:hover {
+    border-color: var(--border-active);
+    box-shadow: 0 0 30px rgba(212,168,83,0.08);
+  }
+  .arch-node .n-label { font-weight: 600; color: var(--text-bright); font-size: 0.95rem; }
+  .arch-node .n-desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem; }
+  .arch-row {
+    display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center;
+  }
+  .arch-arrow {
+    color: var(--text-dim); font-size: 1.5rem; text-align: center;
+  }
+  .arch-arrow.strong { color: var(--gold); }
+  .pipeline-flow {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    justify-content: center;
+  }
+  .pipeline-step {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.5rem 1.25rem;
+    font-size: 0.85rem; font-family: var(--font-mono); color: var(--text);
+  }
+  .pipeline-step.active { border-color: var(--gold); color: var(--gold); }
+  .pipeline-arr { color: var(--text-dim); font-size: 0.85rem; }
+
+  /* ── Cards Grid ── */
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+  }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.75rem;
+    transition: all 0.3s;
+  }
+  .card:hover {
+    border-color: var(--border-active);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .card .c-icon { font-size: 1.75rem; margin-bottom: 0.75rem; }
+  .card h3 { color: var(--text-bright); font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .card p { color: var(--text-dim); font-size: 0.875rem; line-height: 1.7; }
+  .card .c-tag {
+    display: inline-block; font-size: 0.7rem; font-family: var(--font-mono);
+    padding: 0.2rem 0.6rem; border-radius: 4px; margin-top: 0.75rem;
+    background: rgba(212,168,83,0.1); color: var(--gold-dim);
+  }
+
+  /* ── Star Domain Grid ── */
+  .domain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem;
+  }
+  .domain-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.5rem; position: relative;
+    overflow: hidden; transition: all 0.3s;
+  }
+  .domain-card:hover {
+    border-color: var(--border-active);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .domain-card .dc-accent {
+    position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+  }
+  .domain-card .dc-accent.primary { background: var(--cyan); }
+  .domain-card .dc-accent.secondary { background: var(--purple); }
+  .domain-card .dc-accent.success { background: var(--green); }
+  .domain-card .dc-accent.warning { background: var(--amber); }
+  .domain-card .dc-accent.error { background: var(--red); }
+  .domain-card .dc-head {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+  }
+  .domain-card .dc-glyph { font-size: 1.5rem; }
+  .domain-card .dc-name { font-weight: 700; color: var(--text-bright); font-size: 1.05rem; }
+  .domain-card .dc-motto {
+    font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.75rem;
+    font-style: italic; line-height: 1.5;
+  }
+  .domain-card .dc-desc {
+    font-size: 0.825rem; color: var(--text-dim); line-height: 1.65;
+    opacity: 0.8;
+  }
+  .domain-card .dc-keywords {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem;
+  }
+  .domain-card .dc-kw {
+    font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px;
+    background: rgba(255,255,255,0.04); color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+
+  /* ── Prompt layers ── */
+  .prompt-layers {
+    display: flex; flex-direction: column; gap: 1rem; max-width: 700px; margin: 0 auto;
+  }
+  .prompt-layer {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem 1.5rem; display: flex; gap: 1rem;
+    align-items: flex-start;
+  }
+  .prompt-layer .pl-index {
+    min-width: 2.5rem; height: 2.5rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+  }
+  .prompt-layer .pl-index.static { background: rgba(129,140,248,0.15); color: var(--purple); }
+  .prompt-layer .pl-index.volatile { background: rgba(56,189,248,0.15); color: var(--cyan); }
+  .prompt-layer .pl-index.appendix { background: rgba(212,168,83,0.15); color: var(--gold); }
+  .prompt-layer h4 { color: var(--text-bright); font-size: 0.95rem; margin-bottom: 0.25rem; }
+  .prompt-layer p { color: var(--text-dim); font-size: 0.825rem; }
+  .prompt-layer .pl-size { font-size: 0.7rem; font-family: var(--font-mono); color: var(--text-dim); margin-top: 0.25rem; }
+
+  /* ── Design Principles ── */
+  .principles {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+  .principle {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.5rem; text-align: center;
+  }
+  .principle .pr-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+  .principle h4 { color: var(--text-bright); font-size: 1rem; margin-bottom: 0.5rem; }
+  .principle p { color: var(--text-dim); font-size: 0.825rem; line-height: 1.65; }
+
+  /* ── Tech Stack ── */
+  .tech-stack {
+    display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center;
+    max-width: 800px; margin: 0 auto;
+  }
+  .tech-badge {
+    padding: 0.5rem 1.25rem; border-radius: 8px;
+    border: 1px solid var(--border); font-size: 0.85rem;
+    color: var(--text); font-family: var(--font-mono);
+    background: var(--bg-card); transition: all 0.2s;
+  }
+  .tech-badge:hover { border-color: var(--border-active); color: var(--text-bright); }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center; padding: 3rem 0; border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 0.8rem;
+  }
+
+  /* ── Number highlights ── */
+  .num-grid {
+    display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center;
+    margin: 2.5rem 0;
+  }
+  .num-item {
+    text-align: center; min-width: 120px;
+  }
+  .num-item .num {
+    font-size: 2.5rem; font-weight: 700; color: var(--gold);
+    font-family: var(--font-mono);
+  }
+  .num-item .num-label {
+    font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;
+  }
+
+  /* ── Council diagram ── */
+  .council-flow { margin: 1.5rem 0; }
+  .council-row { display: flex; gap: 1rem; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  .council-seat { background: var(--bg-card); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--cyan); }
+  .council-arrow { color: var(--text-dim); font-size: 1rem; margin: 0 0.3rem; }
+  .council-core { background: var(--bg-card); border: 1px solid var(--gold); padding: 0.65rem 1.2rem; border-radius: 8px; font-family: var(--font-mono); font-size: 0.9rem; color: var(--gold); text-align: center; }
+  .council-out { background: var(--bg-card); border: 1px solid var(--green); padding: 0.5rem 1rem; border-radius: 6px; font-family: var(--font-mono); font-size: 0.85rem; color: var(--green); }
+
+  /* ── Data tables ── */
+  .data-table { width: 100%; border-collapse: collapse; margin: 1.2rem 0; font-size: 0.88rem; }
+  .data-table th { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--border-active); color: var(--text-dim); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .data-table td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--border); font-family: var(--font-mono); }
+  .data-table .ok { color: var(--green); }
+  .data-table .warn { color: var(--amber); }
+  .data-table .bad { color: var(--red); }
+  .data-table .hi { color: var(--cyan); font-weight: 600; }
+
+  /* ── Battle cards ── */
+  .battle-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .battle-card:hover { border-color: var(--border-active); background: var(--bg-card-hover); }
+  .battle-card h3 { color: var(--text-bright); margin-bottom: 0.5rem; font-size: 1.05rem; }
+  .battle-card h3 .bc-date { color: var(--text-dim); font-size: 0.78rem; font-weight: 400; margin-left: 0.6rem; }
+  .battle-card .bc-tag { display: inline-block; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 3px; margin-right: 0.4rem; margin-bottom: 0.4rem; font-family: var(--font-mono); }
+  .bc-tag-bug { background: rgba(248,113,113,0.12); color: var(--red); }
+  .bc-tag-fix { background: rgba(52,211,153,0.12); color: var(--green); }
+  .bc-tag-data { background: rgba(56,189,248,0.12); color: var(--cyan); }
+  .bc-tag-insight { background: rgba(251,191,36,0.12); color: var(--amber); }
+  .battle-card .bc-narrate { color: var(--text-dim); font-style: italic; margin: 0.8rem 0; padding-left: 0.8rem; border-left: 2px solid var(--border-active); }
+  .battle-card .bc-metric-row { display: flex; gap: 2rem; flex-wrap: wrap; margin: 1rem 0; }
+  .battle-card .bc-metric { text-align: center; min-width: 80px; }
+  .battle-card .bc-metric .val { font-size: 1.5rem; font-weight: 700; color: var(--gold); font-family: var(--font-mono); }
+  .battle-card .bc-metric .lbl { font-size: 0.72rem; color: var(--text-dim); margin-top: 0.2rem; }
+
+  /* ── Evolution timeline ── */
+  .evo-timeline { position: relative; padding-left: 1.5rem; margin: 1.5rem 0; border-left: 1px solid var(--border); }
+  .evo-item { margin-bottom: 1.5rem; position: relative; }
+  .evo-item::before { content: ''; position: absolute; left: -1.65rem; top: 0.45rem; width: 8px; height: 8px; border-radius: 50%; background: var(--gold); }
+  .evo-item .evo-date { font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); }
+  .evo-item .evo-title { color: var(--text-bright); font-weight: 600; margin: 0.2rem 0; }
+  .evo-item .evo-desc { color: var(--text-dim); font-size: 0.88rem; }
+
+  /* ── Principle highlight for council ── */
+  .highlight-box { background: rgba(212,168,83,0.06); border: 1px solid rgba(212,168,83,0.2); border-radius: 8px; padding: 1.2rem; margin: 1.2rem 0; }
+  .highlight-box p { margin-bottom: 0.4rem; }
+
+  /* ── Council flow diagram ── */
+  .cf-row { display: flex; gap: 0.6rem; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+  .cf-draft, .cf-arrow, .cf-adjudicate, .cf-output { font-family: var(--font-mono); font-size: 0.85rem; }
+  .cf-draft { background: var(--bg-card); border: 1px solid var(--border); padding: 0.5rem 1rem; border-radius: 8px; }
+  .cf-arrow { color: var(--text-dim); font-size: 1rem; }
+  .cf-fanout { display: flex; flex-direction: column; gap: 0.3rem; }
+  .cf-seats { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: center; }
+  .cf-seat { font-size: 0.75rem; padding: 0.3rem 0.6rem; border-radius: 4px; font-family: var(--font-mono); background: var(--bg-card); border: 1px solid var(--border); }
+  .cf-seat.tianquan { color: var(--amber); border-color: rgba(251,191,36,0.3); }
+  .cf-seat.tianfu { color: var(--cyan); border-color: rgba(56,189,248,0.3); }
+  .cf-seat.tianji { color: var(--purple); border-color: rgba(129,140,248,0.3); }
+  .cf-seat.tianxuan { color: var(--teal); border-color: rgba(45,212,191,0.3); }
+  .cf-adjudicate { background: var(--bg-card); border: 1px solid var(--gold); padding: 0.5rem 1rem; border-radius: 8px; color: var(--gold); }
+  .cf-output { background: var(--bg-card); border: 1px solid var(--green); padding: 0.5rem 1rem; border-radius: 8px; color: var(--green); }
+
+  /* ── Battle cards (cache engineering) ── */
+  .battle-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; margin-bottom: 0.8rem; }
+  .battle-num { font-size: 0.72rem; color: var(--gold); font-family: var(--font-mono); }
+  .battle-title { font-size: 1.05rem; color: var(--text-bright); font-weight: 600; }
+  .battle-date { font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); }
+  .battle-body { display: flex; flex-direction: column; gap: 1rem; }
+  .battle-story p { margin-bottom: 0.5rem; line-height: 1.75; }
+  .battle-twist { background: rgba(251,191,36,0.06); border-left: 2px solid var(--amber); padding: 0.6rem 1rem; font-style: italic; color: var(--amber); border-radius: 0 6px 6px 0; }
+  .battle-data { display: flex; gap: 2rem; flex-wrap: wrap; }
+  .battle-stat { text-align: center; min-width: 90px; }
+  .battle-stat .bs-val { font-size: 1.6rem; font-weight: 700; color: var(--gold); font-family: var(--font-mono); }
+  .battle-stat .bs-val.danger { color: var(--red); }
+  .battle-stat .bs-label { font-size: 0.7rem; color: var(--text-dim); margin-top: 0.15rem; }
+  .battle-fix { background: rgba(52,211,153,0.06); border: 1px solid rgba(52,211,153,0.2); border-radius: 6px; padding: 0.8rem 1rem; }
+  .battle-fix .fix-tag { font-size: 0.7rem; background: rgba(52,211,153,0.2); color: var(--green); padding: 0.1rem 0.4rem; border-radius: 3px; margin-right: 0.4rem; }
+
+  /* ── Evolution timeline ── */
+  .timeline { position: relative; padding-left: 2rem; border-left: 1px solid var(--border); margin: 1.5rem 0; }
+  .tl-item { position: relative; margin-bottom: 1.5rem; }
+  .tl-item:last-child { margin-bottom: 0; }
+  .tl-marker { position: absolute; left: -2.4rem; top: 0.1rem; width: 14px; height: 14px; border-radius: 50%; background: var(--gold); font-size: 0; }
+  .tl-content { padding-left: 0; }
+  .tl-content h4 { color: var(--text-bright); font-size: 0.95rem; margin-bottom: 0.3rem; }
+  .tl-content p { color: var(--text-dim); font-size: 0.85rem; line-height: 1.65; }
+  .tl-tag { display: inline-block; margin-top: 0.4rem; font-size: 0.7rem; color: var(--text-dim); font-family: var(--font-mono); background: var(--bg-card); padding: 0.15rem 0.5rem; border-radius: 3px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 2.25rem; }
+    .hero { padding: 5rem 0 3rem; }
+    .container { padding: 0 1.25rem; }
+    .arch-row { flex-direction: column; align-items: center; }
+    .cards-grid { grid-template-columns: 1fr; }
+    .domain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+
+<!-- ═══════════ HERO ═══════════ -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-glyph">✹</div>
+    <h1><span class="accent">天枢</span> · Tiānshū</h1>
+    <p class="subtitle">Terminal Coding Agent — 终端编码智能体</p>
+    <p class="tagline">执中调度，以全貌定向。每个改动的波纹，在动手之前已被看见。</p>
+    <div class="hero-meta">
+      <span>v<strong>2.9.0</strong></span>
+      <span>Node.js <strong>22+</strong></span>
+      <span>TypeScript <strong>strict</strong></span>
+      <span>DeepSeek <strong>V4</strong></span>
+      <span>context <strong>1M</strong></span>
+    </div>
+    <div class="num-grid">
+      <div class="num-item"><div class="num">38</div><div class="num-label">内置工具</div></div>
+      <div class="num-item"><div class="num">10</div><div class="num-label">星域专家</div></div>
+      <div class="num-item"><div class="num">20+</div><div class="num-label">运行时 Hooks</div></div>
+      <div class="num-item"><div class="num">~300</div><div class="num-label">测试文件</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════ ARCHITECTURE ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>系统架构</h2>
+      <p>从用户输入到工具执行，经过多层认知处理——每个层次都为前缀缓存对齐而设计。</p>
+    </div>
+    <div class="arch-diagram">
+      <!-- Entry -->
+      <div class="arch-node">
+        <div class="n-label">stdin TTY / Headless (-p) / HTTP serve</div>
+        <div class="n-desc">多入口路由 · main.ts</div>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Bootstrap -->
+      <div class="arch-row">
+        <div class="arch-node">
+          <div class="n-label">Bootstrap</div>
+          <div class="n-desc">配置加载 · Provider 选择 · 会话恢复</div>
+        </div>
+      </div>
+      <div class="arch-arrow strong">▼</div>
+      <!-- Agent Loop -->
+      <div class="arch-node" style="border-color: var(--gold);">
+        <div class="n-label">AgentLoop · 核心循环</div>
+        <div class="n-desc">LLM 调用 ⇄ 工具执行 ⇄ 结果反馈</div>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Inner pipeline -->
+      <div class="pipeline-flow">
+        <span class="pipeline-step active">PromptEngine</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">API Client (SSE)</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Tool Pipeline</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Advisory Bus</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Convergence</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step active">Next Turn</span>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Output -->
+      <div class="arch-row">
+        <div class="arch-node">
+          <div class="n-label">TuiApp · 纯 ANSI 渲染</div>
+          <div class="n-desc">scrollback · GlanceBar · 覆盖层 · 命令面板</div>
+        </div>
+        <div class="arch-node">
+          <div class="n-label">Delivery Gate B1</div>
+          <div class="n-desc">ownership · task ledger · 验证归因</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CORE SYSTEMS ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>核心子系统</h2>
+      <p>每个子系统都是独立可验证的模块，通过明确的接口契约连接。</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card">
+        <div class="c-icon">🔄</div>
+        <h3>Agent Loop & Turn Orchestration</h3>
+        <p>主循环驱动：用户输入 → Prompt 组装 → LLM 调用 → 工具执行 → 收敛检测。Turn Orchestrator 将单轮分解为 step 序列，每步独立可验证。内置 doom-loop 检测、convergence 检测、repair pipeline。</p>
+        <span class="c-tag">src/agent/loop.ts · turn-orchestrator.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">📝</div>
+        <h3>Prompt Engineering · 三层架构</h3>
+        <p>Static（系统身份 + 行为规则，2K tok）→ Frozen Volatile（项目上下文 + 星域注入，3-6K tok）→ Dynamic Appendix（git status + 遥测 + 工具历史，按需附加）。精确控制前缀缓存断裂时机。</p>
+        <span class="c-tag">src/prompt/static.ts · volatile.ts · engine.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🔧</div>
+        <h3>Tool Pipeline · 38 工具</h3>
+        <p>工具注册 → 参数验证 → 路径安全校验 → 审批门控 → 执行 → 结果格式化。每个工具有完整 JSON Schema 定义。核心工具：read/write/edit/grep/bash/git/run_tests/deliver_task/delegate。</p>
+        <span class="c-tag">src/tools/default-registry.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">⭐</div>
+        <h3>Star Domain · 星域专家系统</h3>
+        <p>10 个认知场（天枢/文曲/天璇/天府/天权/瑶光/天机/天梁/破军/辅），按任务类型自动匹配或手动切换。每个域注入不同的 volatile block + systemPromptSuffix，改变模型决策风格。</p>
+        <span class="c-tag">src/agent/star-domain.ts · star-domain-registry.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">💾</div>
+        <h3>Prefix Cache · 前缀缓存架构</h3>
+        <p>DeepSeek V4 exact-prefix 缓存是核心成本优势。Static + Frozen Volatile 稳定不变，collapse 延迟到窗口填充率 85% 才触发（地板 50%）。缓存命中 ≈ 120× 成本优势。</p>
+        <span class="c-tag">src/prompt/engine.ts · fingerprint.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">📡</div>
+        <h3>Advisory Bus & Runtime Hooks</h3>
+        <p>统一运行时注入通道，20+ hooks（vigor/convergence/kick/courage/doom-loop/signal-consumer）通过优先级仲裁（constitutional > operational > informational）注入 Top-3 建议。</p>
+        <span class="c-tag">src/agent/advisory-bus.ts · runtime-hooks.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🔒</div>
+        <h3>Delivery Gate · 交付门禁 B1</h3>
+        <p>deliver_task 工具 + ownership ledger + task ledger + verification attribution。追踪文件归属、验证完整性、阻止未经验证的提交。GREEN/YELLOW/RED 三级门禁。</p>
+        <span class="c-tag">src/agent/deliver-task.ts · delivery-gate-v2.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🤖</div>
+        <h3>Sub-agent & Worker 系统</h3>
+        <p>delegate_task/delegate_batch 派发子代理到独立 session。Worker 有独立 tool whitelist、timeout budget、model routing。Council 模式多星域并行审查方案。</p>
+        <span class="c-tag">src/agent/work-order.ts · council-convene.ts</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ PROMPT ANATOMY ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>Prompt 三层架构</h2>
+      <p>精确控制每一层的冻结时机与缓存断裂点——前缀缓存的经济学驱动架构决策。</p>
+    </div>
+    <div class="prompt-layers">
+      <div class="prompt-layer">
+        <div class="pl-index static">S</div>
+        <div>
+          <h4>Static · 系统身份层</h4>
+          <p>identity + beliefs + stance + rules + tool-usage + workflow + security + shared-worktree + git + delegation + output-style + calibration。中文 XML 分段，session 生命周期内永不改变。</p>
+          <div class="pl-size">~2,000-2,500 tokens · 前缀缓存命中</div>
+        </div>
+      </div>
+      <div class="prompt-layer">
+        <div class="pl-index volatile">V</div>
+        <div>
+          <h4>Frozen Volatile · 项目上下文层</h4>
+          <p>environment + locus + project-instructions (AGENTS.md) + project-memory + seed-capsules + codebase-index。首轮冻结，后续轮次复用——任何修改都会断裂整段前缀缓存。</p>
+          <div class="pl-size">~3,000-6,000 tokens · 首轮冻结后稳定</div>
+        </div>
+      </div>
+      <div class="prompt-layer">
+        <div class="pl-index appendix">A</div>
+        <div>
+          <h4>Dynamic Appendix · 动态附加层</h4>
+          <p>git-status + star-domain + progress + recent-commits + plan-methodology + tool-history + skills。按 salience 排序注入，支持 append-only delta 增量更新。不命中前缀缓存，但不影响前面的静态层。</p>
+          <div class="pl-size">~500-2,000 tokens · 每轮更新 · 不影响前缀缓存</div>
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center;color:var(--text-dim);margin-top:2rem;font-size:0.85rem">
+      工具定义 ~11-15K tokens 占首调 55% · 用户消息 ~0.1-0.5K · 首调总计 ~17-26K tokens
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════ STAR DOMAINS ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>十星域 · 认知场系统</h2>
+      <p>每颗星注入不同的认知倾向——不是能力差异，是视角切换。从全统到美感，从守护到探索。</p>
+    </div>
+    <div class="domain-grid" id="domainGrid"></div>
+  </div>
+</section>
+
+<!-- ═══════════ DESIGN PHILOSOPHY ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>设计哲学</h2>
+      <p>天枢的架构决策不是偏好的堆砌——每条原则都有物理约束作为锚点。</p>
+    </div>
+    <div class="principles">
+      <div class="principle">
+        <div class="pr-icon">🎯</div>
+        <h4>缓存先行 · Cache-First</h4>
+        <p>DeepSeek V4 exact-prefix 缓存是核心成本优势。任何改写历史/坍缩旧消息的机制都是潜在 cache-killer。collapse 只在窗口 85%+ 才触发，地板 50% 以下不碰。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🔬</div>
+        <h4>证据先行 · Evidence-First</h4>
+        <p>不猜，先读。改代码前 grep 调用方。外部声称用独立工具核验。悖论出现时写复现测试让代码自己说话，不靠推理链。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🛡️</div>
+        <h4>Fail-Closed · 安全默认</h4>
+        <p>不确定时选择安全的失败路径。破坏性命令硬闸门。静默吞下的异常是未来的炸弹。大声失败让人注意。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">📐</div>
+        <h4>结构优先 · Structure-First</h4>
+        <p>正确的结构性改动可能只改 30 行，但需要先理解 300 行。不修补表面——从根因修复。数据模型先于界面，关系先于功能。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">💎</div>
+        <h4>极简克制 · Minimalist</h4>
+        <p>多余的逻辑是罪恶，冗余的代码是噪音。好设计消除一切认知噪声，让意图不证自明。不为一行代码写三段解释。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🔄</div>
+        <h4>复现即证 · Reproduce-to-Prove</h4>
+        <p>绿测试只覆盖 happy path。RED→GREEN 才算修复证据。审别人的声称，也审自己刚下的结论——同一个脑下的判断享有最危险的默认豁免。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ MULTI-DOMAIN COLLABORATION ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>多星域协同 · 议事会系统</h2>
+      <p>天枢与其他终端 agent 最本质的差异：不是单模型单视角，而是多星域多模型的协同会诊与确定性裁决。</p>
+    </div>
+
+    <!-- Council Architecture -->
+    <div class="council-flow">
+      <div class="cf-row">
+        <div class="cf-draft"><span>📋</span> 计划草案</div>
+        <div class="cf-arrow">→</div>
+        <div class="cf-fanout">
+          <div class="cf-seats">
+            <div class="cf-seat tianquan">✶ 天权 · 审查</div>
+            <div class="cf-seat tianfu">✦ 天府 · 守护</div>
+            <div class="cf-seat tianji">✸ 天机 · 质疑</div>
+            <div class="cf-seat tianxuan">★ 天璇 · 跨域</div>
+          </div>
+        </div>
+        <div class="cf-arrow">→</div>
+        <div class="cf-adjudicate">⚖ 确定性裁决</div>
+        <div class="cf-arrow">→</div>
+        <div class="cf-output">📄 可审计实施计划</div>
+      </div>
+    </div>
+
+    <div class="cards-grid">
+      <div class="card">
+        <div class="c-icon">⚖</div>
+        <h3>确定性裁决内核</h3>
+        <p>N 个星域席位各产生独立意见（additions / risks / challenges / alternatives），主控用<strong>纯函数确定性裁决</strong>合并：每条贡献留痕不丢、空 id 不得 match-all、冲突按无序对去重。零 I/O、零 Date、同输入必同输出。</p>
+        <span class="c-tag">src/agent/council/council-plan.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🗳</div>
+        <h3>单轮扇出编排</h3>
+        <p>恰一次 delegateBatch 扇出到各席位子代理（kind: plan, profile: reviewer），各席位独立运行在不同 worker 会话中。某席失败时降级为空贡献，不阻塞整体会诊。</p>
+        <span class="c-tag">src/agent/council/council-orchestrator.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">📜</div>
+        <h3>可审计议事记录</h3>
+        <p>渲染为含「席位贡献 → 裁决记录（accepted/rejected/deferred 三组）→ 冲突表 → 最终任务表」的完整实施计划 markdown。每次会诊入档，可追溯每条决策的来源与理由。</p>
+        <span class="c-tag">src/agent/council/council-render.ts</span>
+      </div>
+    </div>
+
+    <!-- Star Domain Eval -->
+    <div class="eval-callout">
+      <div class="eval-title">✦ 星域实战评估日志</div>
+      <p>真实交付中的多星域对比——同一架构下不同认知场的产出差异。每次评估带 commit hash + 实跑证据。</p>
+      <table class="eval-table">
+        <thead><tr><th>评估批次</th><th>星域</th><th>任务</th><th>强项</th><th>失效模式</th><th>核心发现</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>#1</td><td><span class="dc-glyph">✧</span> 天梁（旧叙事）</td>
+            <td>TUI 长会话内存收口</td>
+            <td>根因定位 · 闭环纪律 · 适应性</td>
+            <td><span class="tag-warn">伪精确 overclaim</span></td>
+            <td>控制流闭环雷达灵敏，但<strong>数值量纲维度有盲区</strong>——byte/char、entry/line 不分</td>
+          </tr>
+          <tr>
+            <td>#2</td><td><span class="dc-glyph">✹</span> 天枢（新叙事）</td>
+            <td>超时治理二期：GLM 5.2 thinking-stall</td>
+            <td>路径贯通 · 认知诚实</td>
+            <td><span class="tag-info">偏保守 underclaim</span></td>
+            <td>叙事化改造使姿态从<strong>「表演完成」转向「诚实交付边界」</strong>——宁少声称不愿假声称</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="eval-insight">核心洞察：<strong>伪闭环比没闭环更危险</strong>——它给人「完成」的错觉。叙事化改造把精度声明从「自信夸大」推向「诚实保守」。下一阶段目标 = 两域都收敛到「精确声明 = 实测兑现」。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CACHE ENGINEERING ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>缓存工程实战</h2>
+      <p>前缀缓存是天枢的命脉——DeepSeek V4 exact-prefix 下，命中 vs 未命中 = 120× 成本差。以下是从真实会话中提取的关键战役。</p>
+    </div>
+
+    <!-- Battle: T7 Collapse Cliff -->
+    <div class="battle-card">
+      <div class="battle-head">
+        <span class="battle-num">⚔ 战役一</span>
+        <span class="battle-title">T7 全量坍缩击穿缓存：turn 15 命中率 98%→7.1%</span>
+        <span class="battle-date">2026-06-17 · commit a80c250e</span>
+      </div>
+      <div class="battle-body">
+        <div class="battle-story">
+          <p>会话 mqhs5ckvp75gz7t7（桌面端 deepseek-v4-pro），turn 15 出现一次诡异凹陷——命中率从 98% 砸到 7.1%，单次 cost 从 ~0.04 元暴涨到 0.75 元（<strong>19× 飙升</strong>）。此单次尖峰吃掉全会话 27% 的预算。</p>
+          <p class="battle-twist">排查过程三次自我推翻：① 用累计计数器当单轮 prompt 做除法（量纲错）；② 声称「永久断裂」但后续轮次满血恢复（被累计值误导）；③ 归因到 stale-round 压缩——但条件不满足，被豁免。最终通过<strong>追字段赋值点而非读取点</strong>锁定真凶：T7 request-time collapse 用 estTokens（含 reasoning、char/4 虚估）在窗口仅 27% 填充时就触发全量坍缩。</p>
+        </div>
+        <div class="battle-data">
+          <div class="battle-stat">
+            <div class="bs-val">120×</div><div class="bs-label">缓存命中 vs 未命中价格比</div>
+          </div>
+          <div class="battle-stat">
+            <div class="bs-val danger">0.71 元</div><div class="bs-label">单次坍缩净增成本</div>
+          </div>
+          <div class="battle-stat">
+            <div class="bs-val">27%</div><div class="bs-label">占全会话总成本比例</div>
+          </div>
+        </div>
+        <div class="battle-fix">
+          <span class="fix-tag">修复</span> 全量坍缩阈值从 50% 提升到 <strong>85%</strong>，加地板保护（50% 以下不触发）。轻量 pass（reasoning strip + 去重）仍全程运行，cache-safe。
+        </div>
+      </div>
+    </div>
+
+    <!-- Battle: Delta Appendix A/B -->
+    <div class="battle-card">
+      <div class="battle-head">
+        <span class="battle-num">⚔ 战役二</span>
+        <span class="battle-title">Delta Appendix + Read-Ref 双线优化：cacheCreate -70%</span>
+        <span class="battle-date">2026-06-19 · 4 会话 A/B 对比</span>
+      </div>
+      <div class="battle-body">
+        <div class="battle-story">
+          <p>轮间首请求每次全量重建 dynamic appendix（~12K tokens），是轮间 cacheCreate 的主要来源。两条优化线并行推进：</p>
+        </div>
+        <table class="ab-table">
+          <thead><tr><th>指标</th><th>Delta OFF (baseline)</th><th>Delta ON</th><th>变化</th></tr></thead>
+          <tbody>
+            <tr><td>每轮均 cacheCreate</td><td class="bad">4,516 tokens</td><td class="good">1,361 tokens</td><td class="good">-69.9%</td></tr>
+            <tr><td>稳态中位数</td><td class="bad">1,215 tokens</td><td class="good">165 tokens</td><td class="good">-86.4%</td></tr>
+            <tr><td>会话总命中率</td><td>94.8%</td><td class="good">98.8%</td><td class="good">+4.0pp</td></tr>
+            <tr><td>Read-ref 节省</td><td>0 次 / 0 bytes</td><td class="good">348 次 / 2.14MB</td><td class="good">≈ 535K tokens</td></tr>
+          </tbody>
+        </table>
+        <div class="battle-fix">
+          <span class="fix-tag">成果</span> 三线齐发（delta + read-ref + command-filters）后，c3adbcb1 会话 39 轮：稳态中位数 328 tokens、命中率 99.7%、context 仅占 5.8% 窗口。
+        </div>
+      </div>
+    </div>
+
+    <!-- Battle: Four-Dimension Analysis -->
+    <div class="battle-card">
+      <div class="battle-head">
+        <span class="battle-num">⚔ 战役三</span>
+        <span class="battle-title">四维度缓存竞品分析：tool result 是最大杠杆</span>
+        <span class="battle-date">2026-06-19 · 会话 fe39a8ee</span>
+      </div>
+      <div class="battle-body">
+        <div class="battle-story">
+          <p>对 DeepSeek-V4-Pro 4 轮 27 请求做 ground-truth 审计，发现：</p>
+        </div>
+        <div class="battle-stats-row">
+          <div class="battle-stat"><div class="bs-val">88%</div><div class="bs-label">tool result 占消息内容</div></div>
+          <div class="battle-stat"><div class="bs-val">32%</div><div class="bs-label">tool result 占 input tokens</div></div>
+          <div class="battle-stat"><div class="bs-val good">99.7%</div><div class="bs-label">轮内命中率（接近竞品）</div></div>
+          <div class="battle-stat"><div class="bs-val warn">94.8%</div><div class="bs-label">整体命中率（有提升空间）</div></div>
+        </div>
+        <p class="eval-insight">Top 15 tool result 全是<strong>完整文件读取</strong>（29.5K 到 3.7K chars）。这些内容被每轮 API 请求重发——即使命中缓存，也直接抬高计费基数。优化方向：降低 artifact 拦截阈值（50K → 8K）、提前 observation masking（10 轮 → 5 轮）。预期收益：input 基数 -40%+。</p>
+      </div>
+    </div>
+
+    <!-- Cache Principles -->
+    <div class="principles" style="margin-top:3rem">
+      <div class="section-header"><h3 style="font-size:1.2rem">缓存排查五条铁律</h3></div>
+      <div class="principle">
+        <div class="pr-icon">①</div>
+        <h4>量纲自检</h4>
+        <p>算比率前确认遥测字段是单次值还是累计值。用恒等式 input = cache_read + cache_create 自检，量纲错则全盘错。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">②</div>
+        <h4>落盘日志优先</h4>
+        <p>有逐请求落盘日志（cache-log.jsonl）就用它，不从聚合事件流反推单轮值。前者是 provider 实回 usage，后者是累计计数器。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">③</div>
+        <h4>追赋值点</h4>
+        <p>追字段成因查它的赋值点（谁 set），而非读取点（谁读）。collapseWatermark 在 loop-factory 只是被读出来记日志，真正 set 在 prompt engine。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ ENGINEERING EVOLUTION ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>工程演化 · 注意力治理</h2>
+      <p>从 T1 到 T10，从 1M 信号质量到信噪比管线审计——天枢的架构是在实战中一层层生长出来的。</p>
+    </div>
+
+    <!-- T1-T10 Timeline -->
+    <div class="timeline">
+      <div class="tl-item">
+        <div class="tl-marker">T1-T10</div>
+        <div class="tl-content">
+          <h4>注意力治理子系统</h4>
+          <p>围绕「1M 窗口下工具输出淹没注意力」问题，构建四层防御：写入时（T1 budget + T4 storm + T10 tiering）→ 压缩（T2 micro-compact）→ request 构建时（T7 collapse）→ API。每一层有不同的 cache 安全性等级。</p>
+          <span class="tl-tag">11 commits · 2026-06-11</span>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-marker">W1-W3</div>
+        <div class="tl-content">
+          <h4>1M 信号质量优化</h4>
+          <p>grep/search 预算随窗口缩放（≥200K 翻倍）、dead-end 信号迁移到 advisory bus（缓存安全 + kick 互斥）、T7 collapse 扩展到 0-50% 区间（lightOnly 模式：reasoning 剥离 + 重复折叠）。</p>
+          <span class="tl-tag">3 commits · 2026-06-17</span>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-marker">审计</div>
+        <div class="tl-content">
+          <h4>信噪比数据管线审计</h4>
+          <p>发现并修复四条断链闭环：claimLines 未注入、APC 三级响应未接线、progress 块冗余标签。系统性清理噪声源：删除已死的 activeClaims 渲染、抑制星域重复 advisory、playbook importance 从硬编码改为动态计算。</p>
+          <span class="tl-tag">3 commits · 2026-06-17</span>
+        </div>
+      </div>
+      <div class="tl-item">
+        <div class="tl-marker">蒸馏</div>
+        <div class="tl-content">
+          <h4>代码蒸馏：五条方法论</h4>
+          <p>从 T1-T10 的 11 个提交中蒸馏出可复用的工程原则：分清 cache-safe 与 cache-killer、bug 有时是隐性安全阀、测试覆盖 ≠ 接线验证、provider 差异化要传递到末端消费方、有意停用必须显式标注。</p>
+          <span class="tl-tag">docs/superpowers/plans/ — 2026-06-20</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key Lesson -->
+    <div class="eval-callout" style="margin-top:3rem">
+      <div class="eval-title">⚡ 断链闭环 — 项目最深刻的架构课</div>
+      <p>在多轮迭代中反复出现的模式：<strong>代码写了、测试绿了，但数据没有到达模型</strong>。配置从 ProviderProfile 定义到 PromptEngine 消费的中间一跳断裂 = provider 差异化形同虚设。函数 96 行全绿测试但生产路径零调用 = 死接线。T3 的 attentionQuality 是典型——有完整的测试覆盖，但整个代码库里除了测试没有地方调用它。</p>
+      <p style="margin-top:1rem">教训：<strong>「有测试」不是「已接线」的证据。</strong>只有集成测试驱动真实调用链到达函数，才能验证接线。零消费方的函数要么显式标注 @halted（有意停用以保护缓存），要么就是死代码。</p>
+    </div>
+
+    <!-- Comparison table -->
+    <div class="eval-callout" style="margin-top:2rem">
+      <div class="eval-title">📊 天枢 vs Claude Code · Token 构成对比</div>
+      <table class="eval-table">
+        <thead><tr><th>维度</th><th>天枢 (Rivet)</th><th>Claude Code</th><th>差异</th></tr></thead>
+        <tbody>
+          <tr><td>系统提示</td><td>~2-2.5K (中文 XML)</td><td>~2.3-3.6K (英文片段)</td><td>天枢略小</td></tr>
+          <tr><td>工具数</td><td class="warn">38 interactive</td><td>23+</td><td class="warn">多 65%</td></tr>
+          <tr><td>工具总 token</td><td class="good">~11-15K</td><td>~14-17.6K</td><td class="good">少 2-5K</td></tr>
+          <tr><td>首调总计</td><td class="good">~17-26K</td><td>~27-31K</td><td class="good">基线更低</td></tr>
+          <tr><td>缓存策略</td><td>exact-prefix (被动)</td><td>cache_control breakpoint (主动)</td><td>方法不同各有优劣</td></tr>
+        </tbody>
+      </table>
+      <p class="eval-insight">工具 schema 是两边最大的杠杆——各占首调 ~55%。天枢的优势在 schema 精简，Claude Code 的优势在 ToolSearch 延迟加载。后续方向：工具分级注册，核心 15 工具常驻，其余按需加载。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ TECH STACK ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>技术栈</h2>
+      <p>纯 TypeScript 全栈——终端到 API，统一语言，零运行时依赖冗余。</p>
+    </div>
+    <div class="tech-stack">
+      <span class="tech-badge">Node.js 22+</span>
+      <span class="tech-badge">TypeScript 5.7 · strict</span>
+      <span class="tech-badge">Pure ANSI TUI</span>
+      <span class="tech-badge">DeepSeek V4 API</span>
+      <span class="tech-badge">OpenAI-compatible SSE</span>
+      <span class="tech-badge">node:test + assert/strict</span>
+      <span class="tech-badge">tsup bundler</span>
+      <span class="tech-badge">Zod validation</span>
+      <span class="tech-badge">MCP SDK</span>
+      <span class="tech-badge">tree-sitter</span>
+      <span class="tech-badge">web-tree-sitter</span>
+      <span class="tech-badge">better-sqlite3</span>
+      <span class="tech-badge">undici HTTP</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FOOTER ═══════════ -->
+<footer>
+  <div class="container">
+    <p>天枢 · Tiānshū Terminal Coding Agent — 北斗第一星，执中者。以全貌定向，以证据锚定。</p>
+    <p style="margin-top:0.5rem">Built with evidence-first discipline · Runtime on DeepSeek V4 prefix cache</p>
+  </div>
+</footer>
+
+<script>
+// ── Starfield background ──
+const canvas = document.getElementById('starfield');
+const ctx = canvas.getContext('2d');
+let stars = [];
+const STAR_COUNT = 120;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+for (let i = 0; i < STAR_COUNT; i++) {
+  stars.push({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    r: Math.random() * 1.5 + 0.3,
+    a: Math.random(),
+    speed: Math.random() * 0.008 + 0.002,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const s of stars) {
+    s.a += s.speed * (Math.sin(s.phase + Date.now() * 0.0003) * 0.5 + 0.5);
+    if (s.a > 1) s.a = 1;
+    if (s.a < 0.1) s.a = 0.1;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200,210,230,${s.a.toFixed(2)})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ── Domain Data ──
+const domains = [
+  {id:'tianshu',name:'天枢',glyph:'✹',accent:'secondary',motto:'执中调度，以全貌定向',
+   desc:'看见整片星图——每个模块的位置、每条依赖的方向、每个改动的波纹。全貌不是为了快，是为了对。',
+   kw:['全貌','统筹','调度','协调','执中','整体','全局']},
+  {id:'wenqu',name:'文曲',glyph:'✺',accent:'secondary',motto:'形随意转，美自境生',
+   desc:'看见系统流转的完整肌理与逻辑流动的自然边界。好设计从底层数据与关系的优雅架构中自发涌现。',
+   kw:['美感','优雅','整洁','命名','对称','精炼','韵律']},
+  {id:'tianquan',name:'天权',glyph:'✶',accent:'warning',motto:'权衡取舍，择善而从',
+   desc:'秤的两端都要放东西：改动的收益是什么，代价是什么。称量代码变动的轻重，俯瞰方案架构的合理性。',
+   kw:['审查','评估','权衡','取舍','架构','方案','规划']},
+  {id:'tianfu',name:'天府',glyph:'✦',accent:'primary',motto:'善守者，藏于九地之下',
+   desc:'守护不是拒绝变化，是让每次变化都强化而非侵蚀既有结构。感知系统的纹理——哪里坚实、哪里脆弱。',
+   kw:['重构','优化','修复','稳定','维护','清理']},
+  {id:'tianxuan',name:'天璇',glyph:'★',accent:'secondary',motto:'道可道，非常道',
+   desc:'看见别人看不见的连接——不同领域之间的底层同构，不是类比，是真实的结构共振。到无关领域找碎片。',
+   kw:['发现','学习','模式','复盘','洞察','跨域','同构']},
+  {id:'yaoguang',name:'瑶光',glyph:'↻',accent:'warning',motto:'绿非证明，复现即证',
+   desc:'看见状态在时间里的回声——这个缺陷上次是否来过，这个绿灯是否真的证明了什么。RED→GREEN 才算修复。',
+   kw:['复现','回归','验证','核实','严谨','归族','时间维']},
+  {id:'tianji',name:'天机',glyph:'✸',accent:'primary',motto:'运筹帷幄之中，决胜千里之外',
+   desc:'注意力自然落在缝隙上：每个方案形成后，问——如果这个前提不成立呢？缝隙不是 bug，是信息。',
+   kw:['质疑','反思','视角','前提','推演','假设','盲点']},
+  {id:'tianliang',name:'天梁',glyph:'✧',accent:'success',motto:'千里之行，始于足下',
+   desc:'节奏是：读、改、验证、交付。每步干净利落。精确执行不跳步，每个提交是完整验证过的逻辑单元。',
+   kw:['实现','落地','交付','测试','编码','开发']},
+  {id:'pojun',name:'破军',glyph:'✷',accent:'error',motto:'好男儿当负三尺剑立不世之功',
+   desc:'直觉指向未知——前进比等待更有价值。失败是探索的代价，每次失败都缩小了未知的范围。',
+   kw:['探索','实验','POC','新功能','边界','尝试','突破']},
+  {id:'fu',name:'辅',glyph:'⊕',accent:'success',motto:'蒸馏不是创造新东西，是让已有的东西第一次被看清',
+   desc:'看见认知场——每条提示词如何锚定模型行为。从散落的胶囊中提取可操作的判断规则。',
+   kw:['认知场','提示词','蒸馏','调校','涌现','方法论']},
+];
+
+const grid = document.getElementById('domainGrid');
+for (const d of domains) {
+  const el = document.createElement('div');
+  el.className = 'domain-card';
+  el.innerHTML = `
+    <div class="dc-accent ${d.accent}"></div>
+    <div class="dc-head">
+      <span class="dc-glyph">${d.glyph}</span>
+      <span class="dc-name">${d.name}</span>
+    </div>
+    <div class="dc-motto">${d.motto}</div>
+    <div class="dc-desc">${d.desc}</div>
+    <div class="dc-keywords">${d.kw.map(k => `<span class="dc-kw">${k}</span>`).join('')}</div>
+  `;
+  grid.appendChild(el);
+}
+
+// ── Smooth scroll for section links ──
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const t = document.querySelector(a.getAttribute('href'));
+    if (t) t.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+
+</body>
+</html>

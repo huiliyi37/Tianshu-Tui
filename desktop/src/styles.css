@@ -221,6 +221,65 @@ body {
 .btn.danger { background: var(--error); color: #fff; }
 .btn.ghost.danger { background: transparent; color: var(--error); }
 
+/* ── MCP Settings (W4) ────────────────────────────────────────── */
+.mcp-summary { margin: 0 0 var(--space-2); }
+.mcp-server-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.mcp-server-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--panel-2);
+}
+.mcp-server-info { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.mcp-server-id { font-weight: 600; color: var(--text-strong); font-family: var(--font-mono); }
+.mcp-server-transport { font-size: var(--text-xs); color: var(--muted); }
+.mcp-server-error { font-size: var(--text-xs); color: var(--error); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-server-actions { display: flex; gap: var(--space-1); }
+
+.mcp-status-badge { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); }
+.mcp-status-badge .dot { font-size: 10px; }
+.mcp-status-badge .count { color: var(--muted); margin-left: 2px; }
+.mcp-status-badge.green .dot { color: var(--green, #34d399); }
+.mcp-status-badge.yellow .dot { color: var(--warning, #fbbf24); }
+.mcp-status-badge.red .dot { color: var(--error, #f87171); }
+.mcp-status-badge.muted .dot { color: var(--muted); }
+
+.mcp-add-form { margin-top: var(--space-3); padding: var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel-2); }
+.mcp-add-form .form-row { margin-bottom: var(--space-2); display: flex; flex-direction: column; gap: 4px; }
+.mcp-add-form .form-row label { font-size: var(--text-xs); color: var(--muted); }
+.mcp-add-form .form-row input,
+.mcp-add-form .form-row select {
+  padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--input, var(--bg)); color: var(--text); font-size: var(--text-sm);
+}
+.mcp-add-form .form-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+.btn-mini {
+  padding: 4px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--text); font-size: var(--text-sm); cursor: pointer;
+}
+.btn-mini:hover { background: var(--panel-3); }
+.btn-mini.danger:hover { background: var(--error); color: #fff; }
+
+/* ── MCP Presets ───────────────────────────────────────────────── */
+.mcp-presets { margin: var(--space-2) 0; }
+.mcp-presets-label { font-size: var(--text-xs); color: var(--muted); margin-bottom: var(--space-2); }
+.mcp-presets-grid { display: flex; flex-direction: column; gap: var(--space-2); }
+.mcp-preset-card {
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  border: 1px dashed var(--border); cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.mcp-preset-card:hover {
+  border-color: var(--accent); border-style: solid;
+  background: var(--accent-soft, var(--panel-2));
+}
+.mcp-preset-name { font-weight: 600; color: var(--accent); font-size: var(--text-sm); margin-bottom: 2px; }
+.mcp-preset-desc { font-size: var(--text-xs); color: var(--muted); margin-bottom: 4px; }
+.mcp-preset-cmd {
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted);
+  background: var(--panel-3, var(--bg)); padding: 2px 8px; border-radius: 3px;
+  display: inline-block;
+}
+
 /* Rollback (R3) */
 .rollback { padding: 0 var(--space-3); }
 .rollback-preview .rp-preview { max-height: 200px; }
