@@ -10,7 +10,7 @@ import { StarDomainRegistry, starDomainRegistry } from '../star-domain-registry.
 const _require = createRequire(import.meta.url)
 
 describe('StarDomainRegistry — built-in domains', () => {
-  test('has all 10 built-in domains', () => {
+  test('has all 10 built-in domains', async () => {
     const reg = new StarDomainRegistry()
     assert.equal(reg.getDomainIds().length, 10)
     for (const id of Object.keys(STAR_DOMAINS) as Array<keyof typeof STAR_DOMAINS>) {
@@ -19,7 +19,7 @@ describe('StarDomainRegistry — built-in domains', () => {
     }
   })
 
-  test('get() returns domain definition with all required fields', () => {
+  test('get() returns domain definition with all required fields', async () => {
     const reg = new StarDomainRegistry()
     const tianquan = reg.get('tianquan')
     assert.ok(tianquan)
@@ -32,7 +32,7 @@ describe('StarDomainRegistry — built-in domains', () => {
     assert.ok(tianquan.uiPersona.glyph)
   })
 
-  test('matchDomain returns correct domain for known keywords', () => {
+  test('matchDomain returns correct domain for known keywords', async () => {
     const reg = new StarDomainRegistry()
     // '按计划实现功能' → tianliang scores 2 ('实现'+'按计划')
     assert.equal(reg.matchDomain('按计划实现功能'), 'tianliang')
@@ -40,7 +40,7 @@ describe('StarDomainRegistry — built-in domains', () => {
     assert.equal(reg.matchDomain('重构优化性能'), 'tianfu')
   })
 
-  test('resolved former ties: 审查 exclusive to tianquan, 探索 exclusive to pojun', () => {
+  test('resolved former ties: 审查 exclusive to tianquan, 探索 exclusive to pojun', async () => {
     const reg = new StarDomainRegistry()
     // '审查' is now exclusive to tianquan (removed from tianfu)
     assert.equal(reg.matchDomain('审查代码质量'), 'tianquan')
@@ -48,12 +48,12 @@ describe('StarDomainRegistry — built-in domains', () => {
     assert.equal(reg.matchDomain('探索新的可能性'), 'pojun')
   })
 
-  test('matchDomain returns null when no keywords match', () => {
+  test('matchDomain returns null when no keywords match', async () => {
     const reg = new StarDomainRegistry()
     assert.equal(reg.matchDomain('hello world xyz'), null)
   })
 
-  test('方案 shared between tianquan and tianji — context keywords break tie', () => {
+  test('方案 shared between tianquan and tianji — context keywords break tie', async () => {
     const reg = new StarDomainRegistry()
     // '审查方案' → tianquan:2(审查+方案) vs tianji:1(方案) → tianquan
     assert.equal(reg.matchDomain('审查方案'), 'tianquan')
@@ -63,7 +63,7 @@ describe('StarDomainRegistry — built-in domains', () => {
     assert.equal(reg.matchDomain('这个方案'), null)
   })
 
-  test('list() returns all domains', () => {
+  test('list() returns all domains', async () => {
     const reg = new StarDomainRegistry()
     assert.equal(reg.list().length, 10)
   })
@@ -72,7 +72,7 @@ describe('StarDomainRegistry — built-in domains', () => {
 describe('StarDomainRegistry — user domain loading', () => {
   const tmpBase = join(tmpdir(), `rivet-domain-reg-test-${Date.now()}`)
 
-  test('loads a valid user domain from directory', () => {
+  test('loads a valid user domain from directory', async () => {
     const dir = join(tmpBase, 'test-load')
     mkdirSync(join(dir, 'machao'), { recursive: true })
     writeFileSync(join(dir, 'machao', 'card.md'), [
@@ -93,7 +93,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(errors.length, 0)
       assert.ok(loaded.includes('machao'))
 
@@ -109,7 +109,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('rejects override of built-in domain', () => {
+  test('rejects override of built-in domain', async () => {
     const dir = join(tmpBase, 'test-override')
     mkdirSync(join(dir, 'tianquan'), { recursive: true })
     writeFileSync(join(dir, 'tianquan', 'card.md'), [
@@ -125,7 +125,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0)
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /cannot override built-in/)
@@ -136,7 +136,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('rejects duplicate custom domain id', () => {
+  test('rejects duplicate custom domain id', async () => {
     const dir = join(tmpBase, 'test-dup')
     mkdirSync(join(dir, 'machao'), { recursive: true })
     mkdirSync(join(dir, 'machao2'), { recursive: true })
@@ -156,7 +156,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 1)
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /duplicate custom domain id/)
@@ -165,7 +165,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('rejects invalid domain id characters', () => {
+  test('rejects invalid domain id characters', async () => {
     const dir = join(tmpBase, 'test-bad-id')
     mkdirSync(join(dir, 'BAD DOMAIN!'), { recursive: true })
     writeFileSync(join(dir, 'BAD DOMAIN!', 'card.md'), [
@@ -181,7 +181,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0)
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /Invalid domain id/)
@@ -190,7 +190,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('clamps courageThreshold to [0, 1]', () => {
+  test('clamps courageThreshold to [0, 1]', async () => {
     const dir = join(tmpBase, 'test-clamp')
     mkdirSync(join(dir, 'brave'), { recursive: true })
     writeFileSync(join(dir, 'brave', 'card.md'), [
@@ -207,7 +207,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 1)
       assert.equal(errors.length, 0)
       assert.equal(reg.get('brave')!.courageThreshold, 1)
@@ -216,7 +216,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('truncates long systemPromptSuffix to 2000 chars', () => {
+  test('truncates long systemPromptSuffix to 2000 chars', async () => {
     const dir = join(tmpBase, 'test-truncate')
     mkdirSync(join(dir, 'talker'), { recursive: true })
     writeFileSync(join(dir, 'talker', 'card.md'), [
@@ -232,7 +232,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 1)
       assert.equal(errors.length, 0)
       assert.equal(reg.get('talker')!.systemPromptSuffix.length, 2000)
@@ -241,7 +241,7 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('rejects arrays whose sanitized values are empty', () => {
+  test('rejects arrays whose sanitized values are empty', async () => {
     const dir = join(tmpBase, 'test-sanitized-empty')
     mkdirSync(join(dir, 'empty-tools'), { recursive: true })
     writeFileSync(join(dir, 'empty-tools', 'card.md'), [
@@ -266,7 +266,7 @@ describe('StarDomainRegistry — user domain loading', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0)
       assert.equal(errors.length, 2)
       assert.ok(errors.some(e => e.includes('toolWhitelist must contain')))
@@ -276,14 +276,14 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('reports parse errors gracefully', () => {
+  test('reports parse errors gracefully', async () => {
     const dir = join(tmpBase, 'test-error')
     mkdirSync(join(dir, 'bad-domain'), { recursive: true })
     writeFileSync(join(dir, 'bad-domain', 'card.md'), 'not valid yaml at all')
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0)
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /Missing YAML frontmatter/)
@@ -292,20 +292,20 @@ describe('StarDomainRegistry — user domain loading', () => {
     }
   })
 
-  test('handles missing directory gracefully', () => {
+  test('handles missing directory gracefully', async () => {
     const reg = new StarDomainRegistry()
-    const { loaded, errors } = reg.loadFromDirectory('/nonexistent/path')
+    const { loaded, errors } = await reg.loadFromDirectory('/nonexistent/path')
     assert.equal(loaded.length, 0)
     assert.equal(errors.length, 0)
   })
 })
 
 describe('starDomainRegistry singleton', () => {
-  test('is an instance of StarDomainRegistry', () => {
+  test('is an instance of StarDomainRegistry', async () => {
     assert.ok(starDomainRegistry instanceof StarDomainRegistry)
   })
 
-  test('has the 10 built-in domains', () => {
+  test('has the 10 built-in domains', async () => {
     assert.equal(starDomainRegistry.getDomainIds().length, 10)
   })
 })
@@ -314,7 +314,7 @@ describe('starDomainRegistry singleton', () => {
 describe('parseDomainCard — P0-A2 fail-closed validation', () => {
   const tmpBase = join(tmpdir(), `rivet-p0a2-test-${Date.now()}`)
 
-  test('toolWhitelist:[1,2,3] → rejected (all non-string items filtered, empty after sanitize)', () => {
+  test('toolWhitelist:[1,2,3] → rejected (all non-string items filtered, empty after sanitize)', async () => {
     const dir = join(tmpBase, 'test-nonstring-wl')
     mkdirSync(join(dir, 'numwhitelist'), { recursive: true })
     // The YAML parser parses [1,2,3] as an array of numbers
@@ -331,7 +331,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0, 'should not load domain with non-string toolWhitelist')
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
@@ -340,7 +340,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
     }
   })
 
-  test("keywords:[''] → rejected (empty string filtered, no real keywords)", () => {
+  test("keywords:[''] → rejected (empty string filtered, no real keywords)", async () => {
     const dir = join(tmpBase, 'test-empty-kw')
     mkdirSync(join(dir, 'emptykw'), { recursive: true })
     writeFileSync(join(dir, 'emptykw', 'card.md'), [
@@ -356,7 +356,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0, 'should not load domain with empty-string keywords')
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /keywords must contain at least one non-empty string/)
@@ -365,7 +365,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
     }
   })
 
-  test("toolWhitelist:[''] → rejected (empty string filtered)", () => {
+  test("toolWhitelist:[''] → rejected (empty string filtered)", async () => {
     const dir = join(tmpBase, 'test-empty-wl')
     mkdirSync(join(dir, 'emptywl'), { recursive: true })
     writeFileSync(join(dir, 'emptywl', 'card.md'), [
@@ -381,7 +381,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
 
     try {
       const reg = new StarDomainRegistry()
-      const { loaded, errors } = reg.loadFromDirectory(dir)
+      const { loaded, errors } = await reg.loadFromDirectory(dir)
       assert.equal(loaded.length, 0, 'should not load domain with empty-string toolWhitelist')
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
@@ -410,7 +410,7 @@ describe('P1-1 — custom domain visible to runtime matchDomain', () => {
 
     try {
       // Load into the GLOBAL singleton — this is what runtime matchDomain delegates to
-      const { loaded } = starDomainRegistry.loadFromDirectory(dir)
+      const { loaded } = await starDomainRegistry.loadFromDirectory(dir)
       assert.ok(loaded.includes('machao'))
 
       // Use dynamic ESM import to get the runtime matchDomain (same as dispatcher.ts uses)
