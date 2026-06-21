@@ -1,6 +1,6 @@
 import type { ToolHistoryEntry } from '../prompt/volatile.js'
 import { SessionContext } from './context.js'
-import { SessionPersist } from './session-persist.js'
+import { SessionPersist, getSessionDir } from './session-persist.js'
 import { attachSessionPersistListener } from './session-persist-listener.js'
 import { PrewarmCache } from './prewarm.js'
 import { validatePathSafe } from '../tools/path-validate.js'
@@ -304,7 +304,7 @@ export class AgentLoop {
     this.resourceSensor = new ResourceSensor(this.config.resourceSensorOptions)
     this.fsWatcher = this.config.fsWatcherEnabled === false ? null : createFsWatcher({ cwd: this.cwd })
     this.telemetryWriter = createTelemetryWriter(this.cwd, this.config.sessionId)
-    const sessionDir = join(this.cwd, '.rivet', 'sessions', this.config.sessionId ?? 'anon')
+    const sessionDir = join(getSessionDir(this.cwd), this.config.sessionId ?? 'anon')
     const pheromonesPath = join(sessionDir, 'pheromones.json')
     this.stigmergyStore = new StigmergyStore(pheromonesPath)
 

@@ -12,6 +12,7 @@ import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOw
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
 import { grantPath } from '../tools/path-grants.js'
 import { dirname, join, resolve as resolvePath } from 'node:path'
+import { getSessionDir } from './session-persist.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
@@ -102,8 +103,8 @@ async function emitToolInputTrace(input: { cwd: string; sessionId?: string; mess
   }
   try {
     const sessionDir = input.sessionId
-      ? join(input.cwd, '.rivet', 'sessions', input.sessionId)
-      : join(input.cwd, '.rivet', 'sessions', 'unknown')
+      ? join(getSessionDir(input.cwd), input.sessionId)
+      : join(getSessionDir(input.cwd), 'unknown')
     await mkdir(sessionDir, { recursive: true })
     await appendFile(join(sessionDir, 'tool-input-trace.jsonl'), `${input.message}\n`, 'utf8')
   } catch {

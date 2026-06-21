@@ -2,6 +2,8 @@ import { appendFile } from 'fs/promises'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join, resolve } from 'path'
+import { createHash } from 'crypto'
+import { homedir } from 'os'
 import type { ContentBlock, Message } from '../api/types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
 import { stableStringify } from '../api/stable-json.js'
@@ -58,8 +60,14 @@ import type { ContextClaim } from '../context/claims.js'
 import { assertValidSessionId } from '../validation.js'
 import { appendChecksum, verifyAndExtract, verifyLines } from './checksum.js'
 
-function getSessionDir(cwd: string): string {
-  return process.env.RIVET_SESSION_DIR ?? join(cwd, '.rivet', 'sessions')
+function projectSlug(cwd: string): string {
+  const name = cwd.split('/').filter(Boolean).pop() || 'unknown'
+  const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 6)
+  return `${name}-${hash}`
+}
+
+export function getSessionDir(cwd: string): string {
+  return process.env.RIVET_SESSION_DIR ?? join(homedir(), '.rivet', 'sessions', projectSlug(cwd))
 }
 
 function ensureDir(dir: string): void {

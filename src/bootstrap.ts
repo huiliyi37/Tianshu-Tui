@@ -25,7 +25,7 @@ import { loadConfig as loadLayeredConfig } from './config/manager.js'
 import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
-import { SessionPersist, evictOldSessions } from './agent/session-persist.js'
+import { SessionPersist, evictOldSessions, getSessionDir } from './agent/session-persist.js'
 import { decideStartupSession, RESUME_FRESHNESS_MS } from './agent/session-recovery.js'
 import { runResumePreflightOai } from './context/resume-preflight.js'
 import { FileHistory } from './agent/file-history.js'
@@ -319,7 +319,7 @@ export function getOrCreateSessionId(): string {
 export const WORKER_DIR_STALE_THRESHOLD_MS = 3_600_000 // 1 hour
 
 export function cleanupStaleWorkerSessionDirs(cwd: string, thresholdMs = WORKER_DIR_STALE_THRESHOLD_MS): number {
-  const sessionsDir = join(cwd, '.rivet', 'sessions')
+  const sessionsDir = getSessionDir(cwd)
   if (!existsSync(sessionsDir)) return 0
   let cleaned = 0
   try {
@@ -962,7 +962,7 @@ export function createShutdownHandler(ctx: BootstrapContext): () => void {
       ctx.persist.compactOai(ctx.session.getMessages())
       if (ctx.fileHistory) {
         persistFileHistory(
-          join(ctx.cwd, '.rivet', 'sessions', ctx.sessionId, 'file-history.json'),
+          join(getSessionDir(ctx.cwd), ctx.sessionId, 'file-history.json'),
           ctx.fileHistory.getAllSnapshots(),
         )
       }

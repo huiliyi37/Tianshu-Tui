@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { getSessionDir } from './session-persist.js'
 import type { PerceptionTelemetrySnapshot } from './perception.js'
 
 export interface TelemetryWriter {
@@ -21,7 +22,7 @@ const NOOP_WRITER: TelemetryWriter = {
 export function createTelemetryWriter(cwd: string, sessionId?: string): TelemetryWriter {
   if (!process.env['RIVET_DEBUG_TELEMETRY']) return NOOP_WRITER
 
-  const dir = sessionId ? join(cwd, '.rivet', 'sessions', sessionId) : join(cwd, '.rivet')
+  const dir = sessionId ? join(getSessionDir(cwd), sessionId) : join(cwd, '.rivet')
   const path = join(dir, 'sensorium.jsonl')
   const pendingWrites: Promise<void>[] = []
   let writesSinceTrim = 0

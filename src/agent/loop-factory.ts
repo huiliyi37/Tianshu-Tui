@@ -10,6 +10,7 @@ import { mapQueriedPheromones } from './pheromone-map.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
 import { join } from 'node:path'
+import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
@@ -112,7 +113,7 @@ return new TurnStreamController({
 
         const line = JSON.stringify(entry)
         import('node:fs/promises').then(fs => {
-          const dir = join(self.cwd, '.rivet', 'sessions', sid)
+          const dir = join(getSessionDir(self.cwd), sid)
           return fs.mkdir(dir, { recursive: true })
             .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
         }).catch(() => {})
