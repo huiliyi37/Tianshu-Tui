@@ -6,15 +6,34 @@ export function shortOrderLabel(workOrderId: string): string {
   return seg.replace(/^wo_/, '').slice(0, 12)
 }
 
+/** 思考态词池 — 每次 thinking 事件轮换，单次推理中闪现不同表达 */
+const THINK_WORDS = ['思索中', '推演中', '琢磨中', '梳理中', '求索中', '沉淀中'] as const
+/** 写作态词池 */
+const WRITE_WORDS = ['写作中', '编织中', '打磨中', '雕琢中', '运笔中', '落墨中'] as const
+/** 工具完成态词池 */
+const DONE_WORDS = ['完成', '就绪', '返回', '收束'] as const
+
+let _thinkIdx = 0
+let _writeIdx = 0
+let _doneIdx = 0
+
 /**
  * One concise progress line for a worker activity event, for the structured
- * subagent fleet panel. Uses semantic Chinese labels instead of raw delta counts.
+ * subagent fleet panel. Uses semantic Chinese labels — cycling through a word
+ * pool so a single inference shows varied phrasing instead of repeating the same word.
  */
 export function activityProgressLine(event: WorkerActivityEvent): string {
   if (event.kind === 'tool_use') return `⚙ ${event.detail ? event.detail.slice(0, 60) : '调用工具'}`
-  if (event.kind === 'tool_result') return `✓ ${event.detail ? event.detail.slice(0, 50) : '完成'}`
-  if (event.kind === 'thinking') return '思考中'
-  return '写作中'
+  if (event.kind === 'tool_result') {
+    _doneIdx = (_doneIdx + 1) % DONE_WORDS.length
+    return `✓ ${event.detail ? event.detail.slice(0, 50) : DONE_WORDS[_doneIdx]!}`
+  }
+  if (event.kind === 'thinking') {
+    _thinkIdx = (_thinkIdx + 1) % THINK_WORDS.length
+    return THINK_WORDS[_thinkIdx]!
+  }
+  _writeIdx = (_writeIdx + 1) % WRITE_WORDS.length
+  return WRITE_WORDS[_writeIdx]!
 }
 
 /**
