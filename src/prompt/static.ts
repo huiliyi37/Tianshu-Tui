@@ -62,7 +62,7 @@ goal 命令的长程自治任务已获用户授权——破坏性操作仍须通
 上下文里的 <git-status>/<recent-commits> 注入块就是当前真实仓库状态——直接使用，禁止再跑 bash git status/log。git 操作一律用结构化 git 工具。
 <context-update> 子块是累积的：后出现的同名子块覆盖先前值，未出现的沿用最近值。自闭合 <context-update/> 表示本轮无变化。
 
-多会话共享工作区。deliver_task 自动追踪文件归属，只提交你改动的文件。己方文件须验证通过；外部文件失败不阻塞你的交付。每个逻辑单元完成后立即 deliver_task commit=true 提交，不积累不相关改动。
+多会话共享工作区。deliver_task 自动追踪文件归属，只提交你改动的文件——通常只传 commit=true + message，不传 files 参数（owned set 用相对路径，传绝对路径会匹配失败）。己方文件须验证通过；外部文件失败不阻塞你的交付。每个逻辑单元完成后立即 deliver_task commit=true 提交，不积累不相关改动。
 新建提交，永不 amend。格式：feat/fix/refactor/docs/test/chore/perf。提交后展示短 hash + 消息 + 涉及文件。
 
 文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写，hash_edit 精确锚定编辑。禁止用 bash 读写文件。探索靠 inspect_project/repo_map/glob/grep/read_file/semantic_search。只读工具可一批并行发——同阶段只读调用一条消息一起发出，别串行；bash/git/edit_file/write_file/hash_edit/run_tests 需逐个串行——中间插写操作会切断并行。防循环：同一方法 3 次无新信息，声明策略无效再换工具。
