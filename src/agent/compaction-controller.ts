@@ -38,6 +38,50 @@ function extractUserIntentChain(messages: OaiMessage[]): string[] {
     })
 }
 
+/**
+ * Find a safe split point that doesn't cut through a tool_calls ↔ tool group.
+ *
+ * The OpenAI-compatible API requires every assistant message with tool_calls
+ * to be immediately followed by matching tool messages. If tryPartialCompact
+ * splits between an assistant(tool_calls) and its tool results, the resulting
+ * message list becomes invalid and the API returns an error.
+ *
+ * This function walks backward from the desired split point to ensure we
+ * split only at group boundaries: a tool call group (assistant + its tool
+ * results) stays together in either oldZone or recentZone, not split across.
+ */
+export function findSafeSplitPoint(
+  messages: OaiMessage[],
+  desiredSplit: number,
+  minSplit: number,
+): number {
+  let sp = desiredSplit
+
+  // Walk backward while the message at sp is a tool — its owning assistant
+  // must be before sp, so we move sp before that assistant to keep the group intact.
+  let iterations = 0
+  while (sp > minSplit && sp < messages.length && messages[sp]?.role === 'tool') {
+    if (++iterations > 100) break // safety valve
+    const toolCallId = (messages[sp] as Record<string, unknown>).tool_call_id as string | undefined
+    if (!toolCallId) break
+    let found = false
+    for (let i = sp - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (msg?.role === 'assistant') {
+        const toolCalls = (msg as Record<string, unknown>).tool_calls as Array<{ id: string }> | undefined
+        if (toolCalls?.some(tc => tc.id === toolCallId)) {
+          sp = i // move split before the assistant that owns this tool
+          found = true
+          break
+        }
+      }
+    }
+    if (!found) break // orphaned tool with no matching assistant — shouldn't happen
+  }
+
+  return sp
+}
+
 export type HandoffToolStatus = TrajectoryEntry['status'] | 'running'
 
 export interface StructuredHandoffInput {
@@ -754,7 +798,13 @@ export class CompactionController {
     }
 
     const anchor = messages.slice(0, anchorCount)
-    const splitPoint = messages.length - recentToPreserve
+    const rawSplitPoint = messages.length - recentToPreserve
+    const splitPoint = findSafeSplitPoint(messages, rawSplitPoint, anchorCount)
+    // If the safe split point leaves too few oldZone messages, skip compaction
+    if (splitPoint <= anchorCount + 4) {
+      debugLog(`[partial-compact] safe split point ${splitPoint} too close to anchor ${anchorCount} — skipping`)
+      return false
+    }
     const oldZone = messages.slice(anchorCount, splitPoint)
     const recentZone = messages.slice(splitPoint)
 

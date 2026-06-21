@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { CompactionController } from '../compaction-controller.js'
+import { CompactionController, findSafeSplitPoint } from '../compaction-controller.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
 import type { TrajectoryEntry } from '../trajectory.js'
-import type { OaiChatRequest } from '../../api/oai-types.js'
+import type { OaiChatRequest, OaiMessage } from '../../api/oai-types.js'
 import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
 import { extractTaskContract } from '../../context/task-contract.js'
 
@@ -851,5 +851,169 @@ describe('CompactionController', () => {
         }
       }
     })
+  })
+})
+
+// ── findSafeSplitPoint ──────────────────────────────────────────────────
+
+describe('findSafeSplitPoint', () => {
+  function makeMsg(role: string, content: string, extra?: Record<string, unknown>): OaiMessage {
+    return { role, content, ...extra } as OaiMessage
+  }
+
+  function makeAssistant(content: string, toolCalls?: Array<{ id: string }>): OaiMessage {
+    const msg: Record<string, unknown> = { role: 'assistant', content }
+    if (toolCalls) {
+      msg.tool_calls = toolCalls.map(tc => ({
+        ...tc,
+        type: 'function',
+        function: { name: 'test', arguments: '{}' },
+      }))
+    }
+    return msg as OaiMessage
+  }
+
+  function makeTool(content: string, toolCallId: string): OaiMessage {
+    return { role: 'tool', content, tool_call_id: toolCallId } as OaiMessage
+  }
+
+  it('returns desired split point when no tool calls are involved', () => {
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'task 2'),
+      makeMsg('assistant', 'result 2'),
+      makeMsg('user', 'task 3'),
+      makeMsg('assistant', 'result 3'),
+    ]
+    const result = findSafeSplitPoint(msgs, 5, 2)
+    assert.equal(result, 5)
+  })
+
+  it('moves split point before assistant when a tool result would be orphaned', () => {
+    // assistant(tool_calls=[A]) at index 4, tool(A) at index 5
+    // desired split at 5 → would orphan tool(A) in recentZone
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'do X'),
+      makeAssistant('calling tool', [{ id: 'call_A' }]),
+      makeTool('result A', 'call_A'),
+      makeMsg('assistant', 'text after tool'),
+      makeMsg('user', 'next task'),
+    ]
+    const result = findSafeSplitPoint(msgs, 5, 2)
+    // Should move split before the assistant at index 4
+    assert.equal(result, 4)
+  })
+
+  it('moves split before assistant when tool result is in middle of group', () => {
+    // assistant(tool_calls=[A,B]) at 4, tool(A) at 5, tool(B) at 6
+    // desired split at 6 → tool(B) would be orphaned
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'do X'),
+      makeAssistant('calling tools', [{ id: 'call_A' }, { id: 'call_B' }]),
+      makeTool('result A', 'call_A'),
+      makeTool('result B', 'call_B'),
+      makeMsg('assistant', 'text after tools'),
+    ]
+    const result = findSafeSplitPoint(msgs, 6, 2)
+    assert.equal(result, 4)
+  })
+
+  it('handles consecutive tool call groups correctly', () => {
+    // Group 1: assistant(tool_calls=[A]) at 3, tool(A) at 4
+    // Group 2: assistant(tool_calls=[B]) at 5, tool(B) at 6
+    // desired split at 6 (tool B) → should move before assistant B at 5
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeAssistant('call A', [{ id: 'call_A' }]),
+      makeTool('result A', 'call_A'),
+      makeAssistant('call B', [{ id: 'call_B' }]),
+      makeTool('result B', 'call_B'),
+      makeMsg('assistant', 'done'),
+    ]
+    const result = findSafeSplitPoint(msgs, 6, 2)
+    assert.equal(result, 5)
+  })
+
+  it('returns desired split when split is after tool group end', () => {
+    // assistant(tool_calls=[A]) at 4, tool(A) at 5, next assistant at 6
+    // desired split at 6 (after tool group) → safe, no adjustment needed
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'do X'),
+      makeAssistant('calling tool', [{ id: 'call_A' }]),
+      makeTool('result A', 'call_A'),
+      makeMsg('assistant', 'after tool text'),
+      makeMsg('user', 'next'),
+    ]
+    const result = findSafeSplitPoint(msgs, 6, 2)
+    assert.equal(result, 6)
+  })
+
+  it('returns desired split when split is on assistant with tool_calls (group intact in recentZone)', () => {
+    // assistant(tool_calls=[A]) at 4, tool(A) at 5
+    // desired split at 4 → assistant + tool are both in recentZone, safe
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'do X'),
+      makeAssistant('calling tool', [{ id: 'call_A' }]),
+      makeTool('result A', 'call_A'),
+      makeMsg('assistant', 'text'),
+    ]
+    const result = findSafeSplitPoint(msgs, 4, 2)
+    assert.equal(result, 4)
+  })
+
+  it('does not move split below minSplit', () => {
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'hello'),
+      makeAssistant('calling tool', [{ id: 'call_A' }]),
+      makeTool('result A', 'call_A'),
+      makeMsg('user', 'another task'),
+      makeMsg('assistant', 'hi'),
+      makeMsg('user', 'third'),
+      makeMsg('assistant', 'done'),
+    ]
+    // desired split at 3 (tool A), minSplit = 3
+    // Should return 3 (at or above minSplit), even though the assistant is at 2
+    const result = findSafeSplitPoint(msgs, 3, 3)
+    assert.equal(result, 3, 'should respect minSplit floor')
+  })
+
+  it('demonstrates the original bug: split between tool results breaks pairing', () => {
+    // Simulate the exact bug pattern:
+    // ...old messages, assistant(tool_calls=[A,B]) at 6, tool(A) at 7, tool(B) at 8, ...
+    // Without fix: desired split at 8 → recentZone starts at tool(B), orphaned
+    const msgs: OaiMessage[] = [
+      makeMsg('system', 'sys'),
+      makeMsg('user', 'initial'),
+      makeMsg('assistant', 'ack'),
+      makeMsg('user', 'task 1'),
+      makeMsg('assistant', 'done 1'),
+      makeMsg('user', 'task 2'),
+      makeAssistant('calling multiple tools', [{ id: 'tc_A' }, { id: 'tc_B' }]),
+      makeTool('result A', 'tc_A'),
+      makeTool('result B', 'tc_B'),
+      makeMsg('assistant', 'after tools'),
+      makeMsg('user', 'task 3'),
+      makeMsg('assistant', 'working'),
+    ]
+    const result = findSafeSplitPoint(msgs, 8, 2)
+    // Should adjust to 6 (before the assistant) to keep the group intact
+    assert.equal(result, 6)
   })
 })
