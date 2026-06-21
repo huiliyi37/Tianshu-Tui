@@ -6,12 +6,14 @@ import {
   listModels, switchModel,
   listDomains, setDomain,
   listSkills, setSkillEnabled,
+  getMcpStatus,
 } from '../runtime/client'
+import type { McpStatusResponse } from '../runtime/types'
 
 // Cursor 3.0-style "+" menu. Root popover consolidates mode / image / slash
-// commands; Models / Skills / 星域 open second-level panels (searchable list,
+// commands; Models / Skills / 星域 / MCP open second-level panels (searchable list,
 // current item checked, keyboard nav, live SSE re-fetch) wired to the runtime.
-type Panel = 'root' | 'models' | 'skills' | 'domain'
+type Panel = 'root' | 'models' | 'skills' | 'domain' | 'mcp'
 
 /** A normalized list row shared by all three sub-panels. */
 interface Row {
@@ -121,6 +123,16 @@ export function PlusMenu(props: {
     )
   }
 
+  if (panel === 'mcp') {
+    return (
+      <McpPanel
+        sessionId={sessionId}
+        menuRev={menuRev}
+        onBack={() => setPanel('root')}
+      />
+    )
+  }
+
   return (
     <div className="plus-menu" role="menu">
       {onSetPlanMode && (
@@ -165,6 +177,7 @@ export function PlusMenu(props: {
           { glyph: '◇', label: 'Models', panel: 'models' as const },
           { glyph: '✦', label: 'Skills', panel: 'skills' as const },
           { glyph: '✶', label: '星域 Domain', panel: 'domain' as const },
+          { glyph: '⚙', label: 'MCP Servers', panel: 'mcp' as const },
         ]).map((it) => (
           <button
             key={it.label}
@@ -178,11 +191,84 @@ export function PlusMenu(props: {
             <span className="pm-chev" aria-hidden>▸</span>
           </button>
         ))}
-        <button className="plus-menu-item disabled" role="menuitem" disabled title="暂未接入">
-          <span className="pm-glyph" aria-hidden>⚙</span>
-          <span className="pm-label">MCP Servers</span>
-          <span className="pm-trailing pm-hint">暂未接入</span>
-        </button>
+      </div>
+    </div>
+  )
+}
+
+/** MCP status dot + label for a single server state. */
+function McpStatusBadge({ status, toolCount, error }: { status: string; toolCount: number; error?: string }) {
+  const dot: Record<string, string> = {
+    connected: '●', connecting: '◐', degraded: '◐', error: '✗', disconnected: '○',
+  }
+  const label: Record<string, string> = {
+    connected: '已连接', connecting: '连接中', degraded: '降级', error: '错误', disconnected: '未连接',
+  }
+  const cls = status === 'connected' ? 'mcp-status-green' : status === 'error' ? 'mcp-status-red' : status === 'disconnected' ? 'mcp-status-muted' : 'mcp-status-yellow'
+  return (
+    <span className={`mcp-status-line ${cls}`} title={error ?? ''}>
+      <span>{dot[status] ?? '○'}</span>
+      <span>{label[status] ?? status}</span>
+      {toolCount > 0 && <span className="pm-hint">{toolCount} tools</span>}
+    </span>
+  )
+}
+
+/**
+ * MCP second-level panel: lists configured servers with connection status
+ * and tool count. Read-only; full management is in Settings.
+ */
+function McpPanel(props: { sessionId: string; menuRev?: number; onBack: () => void }) {
+  const { menuRev, onBack } = props
+  const [status, setStatus] = useState<McpStatusResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const reqSeq = useRef(0)
+
+  const fetch = useCallback(async () => {
+    const seq = ++reqSeq.current
+    setLoading(true)
+    try {
+      const s = await getMcpStatus()
+      if (seq !== reqSeq.current) return
+      setStatus(s)
+      setError(null)
+    } catch {
+      if (seq !== reqSeq.current) return
+      setError('获取 MCP 状态失败')
+    } finally {
+      if (seq === reqSeq.current) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetch() }, [fetch, menuRev])
+
+  return (
+    <div className="plus-menu plus-submenu" role="menu">
+      <div className="plus-sub-head">
+        <button className="plus-back" onClick={onBack} aria-label="返回" title="返回">‹</button>
+        <span className="plus-sub-title">MCP Servers</span>
+      </div>
+      <div className="plus-sub-list">
+        {loading && <div className="plus-sub-state">加载中…</div>}
+        {error && <div className="plus-sub-state error">{error}</div>}
+        {status && !error && status.servers.length === 0 && (
+          <div className="plus-sub-state">未配置 MCP 服务器</div>
+        )}
+        {status && status.servers.map((s) => (
+          <div key={s.serverId} className="plus-menu-item mcp-row" style={{ cursor: 'default' }}>
+            <span className="pm-label">
+              {s.serverId}
+              <span className="pm-row-desc">{s.transport ?? '—'}</span>
+            </span>
+            <McpStatusBadge status={s.status} toolCount={s.toolCount} error={s.error} />
+          </div>
+        ))}
+        {status && status.servers.length > 0 && (
+          <div className="plus-sub-state meta" style={{ borderTop: '1px solid var(--border)' }}>
+            {status.totalTools} 个 MCP 工具可用 · 在设置中管理
+          </div>
+        )}
       </div>
     </div>
   )
