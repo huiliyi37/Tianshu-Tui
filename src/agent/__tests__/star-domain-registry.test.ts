@@ -1,11 +1,11 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { STAR_DOMAINS } from '../star-domain.js'
 import { StarDomainRegistry, starDomainRegistry } from '../star-domain-registry.js'
+import { makeTestDir, cleanupTestDir } from '../../tui/__tests__/_test-tmp.js'
 
 const _require = createRequire(import.meta.url)
 
@@ -70,7 +70,7 @@ describe('StarDomainRegistry — built-in domains', () => {
 })
 
 describe('StarDomainRegistry — user domain loading', () => {
-  const tmpBase = join(tmpdir(), `rivet-domain-reg-test-${Date.now()}`)
+  const tmpBase = makeTestDir('rivet-domain-reg-test-')
 
   test('loads a valid user domain from directory', async () => {
     const dir = join(tmpBase, 'test-load')
@@ -105,7 +105,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.deepEqual(machao.keywords, ['网络', '渗透', '安全', 'attack', 'network'])
       assert.equal(machao.uiPersona.glyph, '⚔')
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -132,7 +132,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       // Original tianquan is intact
       assert.equal(reg.get('tianquan')!.name, '天权')
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -161,7 +161,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /duplicate custom domain id/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -186,7 +186,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /Invalid domain id/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -212,7 +212,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.equal(errors.length, 0)
       assert.equal(reg.get('brave')!.courageThreshold, 1)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -237,7 +237,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.equal(errors.length, 0)
       assert.equal(reg.get('talker')!.systemPromptSuffix.length, 2000)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -272,7 +272,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.ok(errors.some(e => e.includes('toolWhitelist must contain')))
       assert.ok(errors.some(e => e.includes('keywords must contain')))
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -288,7 +288,7 @@ describe('StarDomainRegistry — user domain loading', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /Missing YAML frontmatter/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -312,7 +312,7 @@ describe('starDomainRegistry singleton', () => {
 
 // ─── P0-A2 fail-closed: sanitize-then-validate ────────────────
 describe('parseDomainCard — P0-A2 fail-closed validation', () => {
-  const tmpBase = join(tmpdir(), `rivet-p0a2-test-${Date.now()}`)
+  const tmpBase = makeTestDir('rivet-p0a2-test-')
 
   test('toolWhitelist:[1,2,3] → rejected (all non-string items filtered, empty after sanitize)', async () => {
     const dir = join(tmpBase, 'test-nonstring-wl')
@@ -336,7 +336,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -361,7 +361,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /keywords must contain at least one non-empty string/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 
@@ -386,7 +386,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
       assert.equal(errors.length, 1)
       assert.match(errors[0]!, /toolWhitelist must contain at least one non-empty string/)
     } finally {
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 })
@@ -394,7 +394,7 @@ describe('parseDomainCard — P0-A2 fail-closed validation', () => {
 // ─── P1-1 matchDomain unified: custom domain visible at runtime ──
 describe('P1-1 — custom domain visible to runtime matchDomain', () => {
   test('runtime matchDomain (star-domain.ts delegate) sees custom domain in singleton registry', async () => {
-    const tmpBase = join(tmpdir(), `rivet-p11-test-${Date.now()}`)
+    const tmpBase = makeTestDir('rivet-p11-test-')
     const dir = join(tmpBase, 'test-rt-match')
     mkdirSync(join(dir, 'machao'), { recursive: true })
     writeFileSync(join(dir, 'machao', 'card.md'), [
@@ -422,7 +422,7 @@ describe('P1-1 — custom domain visible to runtime matchDomain', () => {
       // Cleanup: remove custom domain so it doesn't leak
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
       ;(starDomainRegistry as unknown as { domains: Map<string, unknown> }).domains.delete('machao')
-      rmSync(tmpBase, { recursive: true, force: true })
+      cleanupTestDir(tmpBase)
     }
   })
 })
