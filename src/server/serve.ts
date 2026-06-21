@@ -686,6 +686,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       void wiring?.stop()
       wiring?.dispose()
       scheduler?.stop()
+      // Kill MCP child processes synchronously — async shutdown() may not
+      // complete before the process exits, leaving orphaned subprocesses.
+      sharedRuntime.mcpManager?.killChildrenSync()
       server.close()
     },
   }
