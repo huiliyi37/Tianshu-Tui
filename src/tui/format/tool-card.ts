@@ -40,10 +40,6 @@ export interface FormatToolCardInput {
   toolInput?: Record<string, unknown>
   /** 完整展开（ctrl+o），不截断 */
   expanded?: boolean
-  /** 使用 box-drawing 边框包裹卡片（≥80 列终端推荐） */
-  boxed?: boolean
-  /** box-drawing 模式下的可用宽度（内容区，不含边框） */
-  boxWidth?: number
 }
 
 const DEFAULT_MAX_LINES = 4
@@ -78,12 +74,6 @@ function indentBody(bodyLines: readonly string[], indent: string, theme: RivetTh
  * 格式化工具卡片为 ANSI 行数组（Claude Code ●/⎿ 结构）。
  */
 export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): string[] {
-  const result = formatToolCardInner(input, theme)
-  if (!input.boxed) return result
-  return wrapBoxed(result, input, theme)
-}
-
-function formatToolCardInner(input: FormatToolCardInput, theme: RivetTheme): string[] {
   const {
     toolName,
     content,
@@ -172,48 +162,6 @@ function formatToolCardInner(input: FormatToolCardInput, theme: RivetTheme): str
   ]
   lines.push(...indentBody(body, indent, theme))
   return lines
-}
-
-/** 用 box-drawing 字符包裹工具卡片行。
- *  ┌─ Header ──────────────────────────┐
- *  │ ────────────────────────────────── │
- *  │ body lines                         │
- *  └────────────────────────────────────┘
- */
-function wrapBoxed(inner: string[], input: FormatToolCardInput, theme: RivetTheme): string[] {
-  const w = input.boxWidth ?? 72
-  const contentW = Math.max(12, w - 4) // 减去 │ + 两侧空格
-  const h = '─'
-  const isError = input.isError ?? false
-  const borderColor = isError ? theme.error : theme.muted
-
-  const result: string[] = []
-
-  // 顶层：header 行
-  const header = inner[0] ?? ''
-  const headerPlain = header.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
-  const padW = Math.max(0, contentW - headerPlain.length)
-  result.push(color(`┌${h.repeat(2)} ${header}${' '.repeat(padW)} ${h.repeat(2)}┐`, borderColor))
-
-  // 分隔线
-  result.push(color(`│${h.repeat(contentW + 4)}│`, borderColor))
-
-  // 内容行
-  const maxLines = inner.length - 1
-  if (maxLines > 0) {
-    for (const bodyLine of inner.slice(1)) {
-      const plain = bodyLine.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
-      const bp = Math.max(0, contentW - plain.length)
-      result.push(`${color('│ ', borderColor)}${bodyLine}${' '.repeat(bp)}${color(' │', borderColor)}`)
-    }
-  } else {
-    result.push(`${color('│ ', borderColor)}${color('(no output)', theme.muted)}${' '.repeat(Math.max(0, contentW - 10))}${color(' │', borderColor)}`)
-  }
-
-  // 底边
-  result.push(color(`└${h.repeat(contentW + 4)}┘`, borderColor))
-
-  return result
 }
 
 /** 判断该工具结果在折叠渲染下是否被截断（供 ctrl+o 展开记录用） */
