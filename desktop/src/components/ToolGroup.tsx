@@ -2,6 +2,7 @@ import { memo, useState, useMemo, useEffect } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
 import { FilePath } from './FilePath'
+import { parseMcpToolName } from '../lib/approval-preview'
 
 const TOOL_BODY_MAX = 10000
 
@@ -176,6 +177,12 @@ export const ToolGroup = memo(ToolGroupImpl, (a, b) =>
   a.density === b.density && a.items.length === b.items.length && a.items.every((x, i) => x === b.items[i])
 )
 
+function McpBadge({ name }: { name: string }) {
+  const parsed = parseMcpToolName(name)
+  if (!parsed) return null
+  return <span className="mcp-badge" title={`MCP: ${parsed.serverId} · ${parsed.toolName}`}>[{parsed.serverId}]</span>
+}
+
 function PairedRowImpl({ entry }: { entry: PairedEntry }) {
   const [open, setOpen] = useState(!!entry.result?.isError)
   const name = entry.name
@@ -189,6 +196,7 @@ function PairedRowImpl({ entry }: { entry: PairedEntry }) {
       <button className="tool-row-head" onClick={() => setOpen(o => !o)}>
         <span className={`tool-dot ${status}`} aria-hidden />
         <span className="tool-name">{name}</span>
+        <McpBadge name={name} />
         {!open && preview && <PreviewText text={preview} />}
       </button>
       {open && <pre className="tool-body">{truncateBody(text)}</pre>}
@@ -216,6 +224,7 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
         <span className={`tool-dot ${status}`} aria-hidden />
         <span className={`chev ${open ? 'open' : ''}`} aria-hidden>▸</span>
         <span className="tool-name">{isResult ? `↳ ${name}` : name}</span>
+        <McpBadge name={name} />
         {!open && preview && <PreviewText text={preview} />}
       </button>
       {open && <pre className="tool-body">{truncateBody(block.text)}</pre>}

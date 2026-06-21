@@ -477,3 +477,29 @@ export function setProviderKey(
 export function setProviderAsDefault(name: string): Promise<{ ok: boolean }> {
   return apiPost(`/config/providers/${name}/default`, {})
 }
+
+// ── MCP (Model Context Protocol) ────────────────────────────────────
+
+import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse } from './types'
+
+export async function getMcpStatus(): Promise<McpStatusResponse> {
+  return apiGet<McpStatusResponse>('/mcp/status')
+}
+
+export function addMcpServer(input: McpServerConfig): Promise<{ ok: boolean; serverId: string }> {
+  return apiPost<{ ok: boolean; serverId: string }>('/mcp/servers', input)
+}
+
+export async function removeMcpServer(serverId: string): Promise<{ ok: boolean }> {
+  const res = await rivetFetch(`/mcp/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE /mcp/servers/${serverId} -> ${res.status}`)
+  return res.json() as Promise<{ ok: boolean }>
+}
+
+export async function restartMcpServer(serverId: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/mcp/servers/${encodeURIComponent(serverId)}/restart`)
+}
+
+export async function listMcpServerTools(serverId: string): Promise<McpServerToolsResponse> {
+  return apiGet<McpServerToolsResponse>(`/mcp/servers/${encodeURIComponent(serverId)}/tools`)
+}

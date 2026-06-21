@@ -195,3 +195,43 @@ export interface ArtifactSummary {
   lineCount: number
   createdAt: number
 }
+
+// ── MCP (Model Context Protocol) ────────────────────────────────────
+
+export type McpTransport = 'stdio' | 'sse'
+export type McpServerStatus = 'disconnected' | 'connecting' | 'connected' | 'degraded' | 'error'
+
+export interface McpConnectionState {
+  serverId: string
+  status: McpServerStatus
+  transport?: McpTransport
+  toolCount: number
+  error?: string
+  lastErrorClass?: string
+  lastConnectedAt?: number
+}
+
+export interface McpStatusResponse {
+  servers: McpConnectionState[]
+  totalTools: number
+  enabled: boolean
+}
+
+export interface McpServerConfig {
+  serverId: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  cwd?: string
+  url?: string
+  headers?: Record<string, string>
+  disabled?: boolean
+}
+
+export interface McpServerToolsResponse {
+  tools: Array<{
+    name: string
+    description: string
+    inputSchema: Record<string, unknown>
+  }>
+}

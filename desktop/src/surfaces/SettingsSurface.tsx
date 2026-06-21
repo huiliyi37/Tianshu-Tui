@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useHealth } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -6,6 +6,9 @@ import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, type ToolDensity } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
+import { McpSettings } from '../components/McpSettings'
+import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
+import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -87,6 +90,10 @@ export function SettingsSurface() {
       </section>
 
       <section className="settings-group">
+        <McpSettingsManager />
+      </section>
+
+      <section className="settings-group">
         <h4>运行时 (sidecar)</h4>
         {health.isError ? (
           <div className="meta warn">sidecar 离线，重连中…</div>
@@ -103,5 +110,52 @@ export function SettingsSurface() {
         )}
       </section>
     </div>
+  )
+}
+
+/** Inner component that manages MCP status polling and delegates to McpSettings UI. */
+function McpSettingsManager() {
+  const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
+  const [mcpLoading, setMcpLoading] = useState(true)
+  const [mcpError, setMcpError] = useState<string | null>(null)
+
+  const fetchStatus = useCallback(() => {
+    getMcpStatus()
+      .then((s) => { setMcpStatus(s); setMcpError(null) })
+      .catch((err) => setMcpError((err as Error).message))
+      .finally(() => setMcpLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetchStatus()
+  }, [fetchStatus])
+
+  const handleAdd = useCallback((config: McpServerConfig) => {
+    addMcpServer(config)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  const handleRemove = useCallback((serverId: string) => {
+    removeMcpServer(serverId)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  const handleRestart = useCallback((serverId: string) => {
+    restartMcpServer(serverId)
+      .then(() => fetchStatus())
+      .catch((err) => setMcpError((err as Error).message))
+  }, [fetchStatus])
+
+  return (
+    <McpSettings
+      status={mcpStatus}
+      statusLoading={mcpLoading}
+      statusError={mcpError}
+      onAdd={handleAdd}
+      onRemove={handleRemove}
+      onRestart={handleRestart}
+    />
   )
 }
