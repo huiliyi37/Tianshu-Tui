@@ -6,7 +6,7 @@ import type { McpConnectionState } from './types.js'
 import { createMcpToolWrapper, createMcpConnectorConsent, type McpConnectorConsent } from './wrapper.js'
 import { classifyMcpError } from './failure-classifier.js'
 
-const DEFAULT_MCP_TIMEOUT_MS = 15_000
+const DEFAULT_MCP_TIMEOUT_MS = 60_000
 
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {

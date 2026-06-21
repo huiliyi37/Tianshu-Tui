@@ -22,7 +22,7 @@ const MCP_PRESETS: McpPreset[] = [
     description: '实时库文档查询 —— 为编码 agent 提供最新框架/库 API 参考，减少幻觉',
     transport: 'stdio',
     command: 'npx',
-    args: ['-y', '@upstash/context7-mcp@latest'],
+    args: ['-y', '@upstash/context7-mcp'],
   },
 ]
 
