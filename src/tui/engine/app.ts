@@ -2021,8 +2021,6 @@ export class TuiApp {
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
-        busy: this.agentBusy,
-        tick: this.streamRenderController.tick,
       }, this.theme)
 
       const rightStr = formatGlanceRight({
