@@ -810,7 +810,15 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    this.forceRedraw()
+    // Alt screen exit restores the pre-overlay main screen frame, but the
+    // cursor position is unreliable. cursorUp(lastDisplayRows) in clear()
+    // starts from the wrong row, leaving old border lines unerased.
+    // Fix: send a large cursorUp to guarantee reaching the top of the
+    // terminal, then ERASE_SCREEN_END wipes everything, then renderLive
+    // draws the live frame cleanly from the top.
+    this.stdout.write('\x1B[999A\r\x1B[0J')
+    this.live.reset()
+    this.renderLive()
   }
 
   /** 返回 scrollback 完整文本（供 pager overlay 读取） */
