@@ -2,6 +2,8 @@
 
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
+> 🌐 [天枢官方落地页 →](docs/index.html) — 产品特性 · 架构深潜 · 三大差异化定位
+
 ## Quick Start
 
 ```bash
