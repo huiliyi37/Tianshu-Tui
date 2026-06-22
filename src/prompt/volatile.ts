@@ -317,9 +317,9 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Sections that rarely change go first so their bytes stay in cache;
   // sections that change every turn go last so only the tail is new.
 
-  if (ctx.activeDomain) {
-    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
-  }
+  // star-domain: rendered ONLY in frozen base (buildVolatileBlockInternal).
+  // Skip here — frozen already has it. Previously duplicated, causing the motto
+  // to appear twice per turn (once in <consolidated>, once in <context-update>).
 
   // Historical lessons: rarely change after first few turns
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {

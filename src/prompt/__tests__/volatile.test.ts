@@ -97,7 +97,7 @@ describe('tool-history XML section', () => {
     assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
   })
 
-  it('renders active star domain in latest context and excludes it from stable context', () => {
+  it('excludes active star domain from both stable and dynamic appendix (rendered in consolidated block by engine)', () => {
     const ctx: VolatileContext = {
       ...base,
       activeDomain: {
@@ -109,11 +109,10 @@ describe('tool-history XML section', () => {
 
     const latest = buildLatestTurnVolatileBlock(ctx)
     const stable = buildStableVolatileBlock(ctx)
-
-    assert.ok(latest.includes('<star-domain'))
-    assert.ok(latest.includes('name="破军&lt;域&gt;"'))
-    assert.ok(latest.includes('突破 &lt;边界&gt; &amp; 记录失败'))
-    assert.ok(!stable.includes('<star-domain'))
+    // star-domain is rendered in <consolidated> by engine.ts habituation,
+    // NOT in stable or dynamic appendix — avoids duplicate injection per turn.
+    assert.ok(!stable.includes('<star-domain'), 'stable must not contain star-domain')
+    assert.ok(!latest.includes('<star-domain'), 'dynamic appendix must not contain star-domain')
   })
 
   it('escapes XML special chars in targets', () => {
