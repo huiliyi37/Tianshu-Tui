@@ -1028,8 +1028,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1048,8 +1048,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1068,8 +1068,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
+        this.deactivateOverlay()
         return true
       }
       return false
