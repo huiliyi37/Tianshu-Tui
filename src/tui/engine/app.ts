@@ -810,7 +810,7 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    this.renderLive()
+    this.forceRedraw()
   }
 
   /** 返回 scrollback 完整文本（供 pager overlay 读取） */
