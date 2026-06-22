@@ -528,6 +528,7 @@ async function main() {
   }, /* themePickerExec: */ (themeName: string) => {
     // Theme Picker Enter 回调：切换主题。
     setTheme(themeName as ThemeName)
+    tuiApp.forceRedraw()
     tuiApp.commitStatic(`Theme switched to: ${themeName}`)
   })
 

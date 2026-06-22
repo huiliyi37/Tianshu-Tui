@@ -1124,6 +1124,16 @@ export class TuiApp {
   }
 
   /**
+   * Force a clean full redraw — physically erase the live region then repaint.
+   * Use after any state change that alters GlanceBar layout (theme color codes,
+   * domain name, model name) to prevent ghost rendering from stale lineCache.
+   */
+  forceRedraw(): void {
+    this.live.clear()
+    this.renderLive()
+  }
+
+  /**
    * Submit text directly to the agent — resolves the ecosystem workflow path
    * where SlashRouter already has a resolved prompt from resolveAppPromptInput.
    * Commits the user prompt to scrollback and fires onSubmitCallback.
@@ -1279,13 +1289,7 @@ export class TuiApp {
   setModelInfo(modelName: string, contextWindow?: number): void {
     this.state.modelName = modelName
     if (contextWindow !== undefined) this.metricsGlanceController.contextWindow = contextWindow
-    // Model name length change (e.g. v4-pro → v4-flash) alters GlanceBar
-    // border width. clear() physically erases the old frame from the terminal
-    // (moveToTop + ERASE_SCREEN_END), then renderLive() draws the new frame
-    // cleanly. reset() alone only clears the line cache without erasing the
-    // screen, leaving the old border visible (double-border ghost).
-    this.live.clear()
-    this.renderLive()
+    this.forceRedraw()
   }
 
   /** 设置外部 slash command 处理器（如 SlashRouter） */
@@ -1315,7 +1319,7 @@ export class TuiApp {
     if (!this.metricsGlanceController.delegationDomainOverride) {
       this.applyGlanceDomainDisplay()
     }
-    this.renderLive()
+    this.forceRedraw()
   }
 
   /** 注册 agent 星域同步（streaming ticker ~1Hz 读取 getSessionDomain） */
