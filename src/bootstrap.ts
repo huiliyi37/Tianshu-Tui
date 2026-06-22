@@ -38,6 +38,7 @@ import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
+import { debugLog } from './utils/debug.js'
 import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
@@ -882,7 +883,12 @@ export async function initializeMcp(
       if (failed.length > 0) {
         parts.push(`${failed.length} server(s) failed: ${failed.map(s => `${s.serverId}: ${s.error}`).join(', ')}`)
       }
-      console.error(`[MCP] ${parts.join('; ')}`)
+      // Use debugLog instead of console.error — console.error writes directly
+      // to stderr, bypassing the LiveEngine's row management. When MCP loads
+      // asynchronously after the TUI's first frame, this rogue line corrupts
+      // the engine's cursor tracking, causing double-border ghost rendering
+      // on the next slash-command redraw.
+      debugLog(`[MCP] ${parts.join('; ')}`)
     }
   } catch (err) {
     console.error('[MCP] Initialization failed:', (err as Error).message)
