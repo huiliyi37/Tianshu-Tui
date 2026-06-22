@@ -624,13 +624,13 @@ describe('GWT salience and Top-K selection', () => {
     it('preserves high-salience blocks when budget is constrained', () => {
       const ctx: VolatileContext = {
         cwd: '/repo',
-        activeDomain: { name: 'test', motto: 'test motto', volatileBlock: 'test block' },
         gitStatus: 'M src/main.ts',
         decisions: ['low priority decision'],
       }
-      // With moderate budget, star-domain (salience 1.0) should be preserved
+      // star-domain is no longer in dynamic appendix (moved to consolidated
+      // block by engine). git-status (salience 1.0) should be preserved.
       const limited = buildDynamicAppendix(ctx, 500)
-      assert.ok(limited.includes('star-domain'))
+      assert.ok(limited.includes('git-status'))
     })
 
     it('wraps output in <context-update> tags', () => {
@@ -727,9 +727,10 @@ describe('GWT salience and Top-K selection', () => {
       const parts = buildDynamicAppendixParts(ctx)
       assert.ok(parts.length > 0, 'should produce parts')
       const names = parts.map(p => p.name)
-      assert.ok(names.includes('star-domain'), `expected star-domain in ${names}`)
+      // star-domain is rendered in consolidated block, NOT in dynamic appendix parts
       assert.ok(names.includes('git-status'), `expected git-status in ${names}`)
       assert.ok(names.includes('progress'), `expected progress in ${names}`)
+      assert.ok(!names.includes('star-domain'), `star-domain should not be in dynamic appendix parts: ${names}`)
     })
 
     it('appendixBlockName extracts leading XML tag', () => {
