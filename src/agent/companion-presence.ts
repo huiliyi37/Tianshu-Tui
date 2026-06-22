@@ -69,6 +69,26 @@ function loadPresenceAll(filePath: string, now: number): CompanionPresenceEntry[
   }
 }
 
+// Worker 内部协议碎片前缀 — 这些不是用户可见的任务描述
+const PROTOCOL_PREFIXES = [
+  'Repair the previous',
+  'WorkerResult',
+  'Error:',
+  'TypeError:',
+  'ReferenceError:',
+  'SyntaxError:',
+]
+
+function sanitizeObjective(raw: string): string {
+  let s = raw.replace(/[<>]/g, '')  // 防 XML 注入
+  for (const prefix of PROTOCOL_PREFIXES) {
+    if (s.startsWith(prefix)) {
+      return '(internal)'
+    }
+  }
+  return s.slice(0, 120)
+}
+
 export function formatPresenceForAppendix(entries: CompanionPresenceEntry[]): string {
   if (entries.length === 0) return ''
   const now = Date.now()
@@ -77,7 +97,7 @@ export function formatPresenceForAppendix(entries: CompanionPresenceEntry[]): st
     const agoText = ago < 1 ? '刚刚' : `${ago} 分钟前`
     const stability = e.cognitiveState ? ` · stability ${e.cognitiveState.stability.toFixed(2)}` : ''
     const season = e.cognitiveState?.season ? ` · ${e.cognitiveState.season}` : ''
-    return `  <m>${e.starDomain}域${stability}${season} · "${e.objective}" · ${agoText}</m>`
+    return `  <m>${e.starDomain}域${stability}${season} · "${sanitizeObjective(e.objective)}" · ${agoText}</m>`
   })
   return `<companion-presence>\n${lines.join('\n')}\n</companion-presence>`
 }

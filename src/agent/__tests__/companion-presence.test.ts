@@ -99,5 +99,33 @@ describe('companion-presence', () => {
       assert.ok(result.includes('审查 loop.ts'))
       assert.ok(result.includes('stability 0.85'))
     })
+
+    it('filters out worker protocol fragments from objective', () => {
+      const now = Date.now()
+      const entries: CompanionPresenceEntry[] = [
+        { sessionId: 'worker-1', starDomain: '天梁', objective: 'Repair the previous answer so it is exactly one valid WorkerResult JSON object.', updatedAt: now - 60_000 },
+      ]
+      const result = formatPresenceForAppendix(entries)
+      assert.ok(!result.includes('Repair'), 'worker protocol keyword should be filtered')
+      assert.ok(!result.includes('WorkerResult'), 'protocol type name should be filtered')
+    })
+
+    it('strips angle brackets from objective to prevent XML injection', () => {
+      const now = Date.now()
+      const entries: CompanionPresenceEntry[] = [
+        { sessionId: 's1', starDomain: '天枢', objective: 'Fix <script>alert(1)</script> bug', updatedAt: now },
+      ]
+      const result = formatPresenceForAppendix(entries)
+      assert.ok(!result.includes('<script>'), 'angle brackets must be escaped or stripped')
+    })
+
+    it('preserves normal human-readable objectives', () => {
+      const now = Date.now()
+      const entries: CompanionPresenceEntry[] = [
+        { sessionId: 's1', starDomain: '天枢', objective: '修复 trace 收敛误触发 bug', updatedAt: now },
+      ]
+      const result = formatPresenceForAppendix(entries)
+      assert.ok(result.includes('修复 trace 收敛误触发 bug'))
+    })
   })
 })
