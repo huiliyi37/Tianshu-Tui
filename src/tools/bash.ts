@@ -108,9 +108,15 @@ function bashReadKey(command: string, filePath: string): string {
   const verbMatch = command.match(/^\s*(cat|grep|head|tail)\b/)
   const verb = verbMatch ? verbMatch[1]! : 'other'
   if (verb === 'grep') {
-    // Extract the pattern (first non-flag argument before the file path)
-    const patternMatch = command.match(/grep\s+(?:-[a-zA-Z]+\s+)*['"]?([^'"\s|&;]+)['"]?/)
-    return `grep:${filePath}:${patternMatch ? patternMatch[1]! : ''}`
+    // Extract the search pattern: prefer quoted ("..." or '...'), then
+    // fall back to the first non-flag token before the file path.
+    const quoted = command.match(/grep\s+(?:-[a-zA-Z]+\s+)*(["'])([^"']+)\1/)
+    if (quoted) {
+      return `grep:${filePath}:${quoted[2]!}`
+    }
+    // Unquoted: take everything between flags and the file path
+    const unquoted = command.match(/grep\s+(?:-[a-zA-Z]+\s+)*(\S+)\s+\S/)
+    return `grep:${filePath}:${unquoted ? unquoted[1]! : ''}`
   }
   if (verb === 'head' || verb === 'tail') {
     // Include line count if specified

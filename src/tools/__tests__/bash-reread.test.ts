@@ -67,4 +67,16 @@ describe('checkBashReread', () => {
     const w2 = checkBashReread("head -10 /etc/hosts", 'id-2')
     assert.equal(w2, null, 'head with different line count should not trigger reread')
   })
+
+  it('does NOT warn when same file is grepped with different quoted patterns containing spaces', () => {
+    checkBashReread("grep 'foo bar' /etc/hosts", 'id-1')
+    const w2 = checkBashReread("grep 'foo baz' /etc/hosts", 'id-2')
+    assert.equal(w2, null, 'different quoted patterns with spaces should not trigger reread')
+  })
+
+  it('warns when same quoted pattern with spaces is repeated', () => {
+    checkBashReread('grep "error message" /etc/hosts', 'id-1')
+    const w2 = checkBashReread('grep "error message" /etc/hosts', 'id-2')
+    assert.ok(w2 !== null, 'same quoted pattern with spaces should trigger reread')
+  })
 })
