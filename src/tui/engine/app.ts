@@ -1280,9 +1280,11 @@ export class TuiApp {
     this.state.modelName = modelName
     if (contextWindow !== undefined) this.metricsGlanceController.contextWindow = contextWindow
     // Model name length change (e.g. v4-pro → v4-flash) alters GlanceBar
-    // layout width. Incremental diff may misidentify unchanged lines, leaving
-    // the old border on screen (double-border ghost). Reset forces full redraw.
-    this.live.reset()
+    // border width. clear() physically erases the old frame from the terminal
+    // (moveToTop + ERASE_SCREEN_END), then renderLive() draws the new frame
+    // cleanly. reset() alone only clears the line cache without erasing the
+    // screen, leaving the old border visible (double-border ghost).
+    this.live.clear()
     this.renderLive()
   }
 
