@@ -145,6 +145,14 @@ export function injectReplanContext(
     return { text: '', deviationType: 'none' }
   }
 
+  // replanned = 所有步骤已走完。trace appendix (serializeTrace) 已反映
+  // status="completed"，agent 从 appendix 自然感知计划完成。
+  // 不注入 system-reminder —— step "done" 只代表工具没报错，不代表目标
+  // 真完成，注入"已完成"提示会误导 agent 提前收尾（见 session 1acdf939 案例）。
+  if (deviation.type === 'replanned') {
+    return { text: '', deviationType: 'replanned' }
+  }
+
   const lines: string[] = [
     `<replan-context deviation="${deviation.type}">`,
     `偏差类型: ${deviationTypeLabel(deviation.type)}`,

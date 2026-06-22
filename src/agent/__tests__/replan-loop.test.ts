@@ -106,10 +106,18 @@ describe('injectReplanContext', () => {
   })
 
   it('handles all deviation types without crash', () => {
-    for (const type of ['blocked', 'deviated', 'replanned', 'stray', 'stalled'] as const) {
+    for (const type of ['blocked', 'deviated', 'stray', 'stalled'] as const) {
       const ctx = injectReplanContext(makeDeviation(type), [])
-      assert.ok(ctx.text.length > 0)
+      assert.ok(ctx.text.length > 0, `${type} should produce text`)
       assert.equal(ctx.deviationType, type)
     }
+  })
+
+  // replanned 不注入 system-reminder —— trace appendix 已反映 completed 状态，
+  // 注入"已完成"文字会误导 agent 提前收尾（step done ≠ 目标达成）。
+  it('returns empty text for replanned deviation (no injection)', () => {
+    const ctx = injectReplanContext(makeDeviation('replanned'), [])
+    assert.equal(ctx.text, '')
+    assert.equal(ctx.deviationType, 'replanned')
   })
 })
