@@ -66,8 +66,8 @@ describe('cognitive mirror — 认知镜面', () => {
 
     assert.ok(mirror.startsWith('<cognitive-mirror '))
     assert.ok(mirror.endsWith(' />'))
-    assert.ok(mirror.includes('verification_coverage="0.30"'))
-    assert.ok(mirror.includes('complexity="0.70"'))
+    assert.ok(mirror.includes('verification_coverage="low"'), `expected coarse label, got: ${mirror}`)
+    assert.ok(mirror.includes('complexity="high"'), `expected coarse label, got: ${mirror}`)
     assert.ok(mirror.includes('files_modified="0"'))
   })
 
@@ -152,13 +152,13 @@ describe('cognitive mirror — 认知镜面', () => {
     assert.ok(!mirror.includes('curiosity'))
   })
 
-  it('formats dimensions to 2 decimal places', () => {
+  it('formats dimensions to 2 decimal places when evidence present', () => {
     const sensorium = makeSensorium({ confidence: 0.3333, complexity: 0.7777 })
-    const ledger = makeLedger({ sensorium })
+    const ledger = makeLedger({ sensorium, evidence: { filesModified: new Set(['src/x.ts']), toolResults: new Set() } })
     const mirror = buildCognitiveMirror(ledger)
 
-    assert.ok(mirror.includes('verification_coverage="0.33"'))
-    assert.ok(mirror.includes('complexity="0.78"'))
+    assert.ok(mirror.includes('verification_coverage="0.33"'), `got: ${mirror}`)
+    assert.ok(mirror.includes('complexity="0.78"'), `got: ${mirror}`)
   })
 
   it('returns concise mirror — no commentary, pure reflection', () => {

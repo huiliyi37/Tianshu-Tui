@@ -98,11 +98,19 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   const s = ledger.sensorium
   if (!s) return ''
 
-  const parts: string[] = [`verification_coverage="${formatDim(s.confidence)}"`]
+  // Coarse-grain confidence and complexity to avoid false precision in early turns.
+  // A 2-decimal float like "1.00" implies measurement granularity that doesn't exist
+  // before any tools have run. Use low/mid/high bands until evidence accumulates.
+  const hasEvidence = (ledger.evidence?.filesModified?.size ?? 0) > 0 || (ledger.evidence?.toolResults?.size ?? 0) > 0
+  const confLabel = !hasEvidence ? coarseLabel(s.confidence) : formatDim(s.confidence)
+  const parts: string[] = [`verification_coverage="${confLabel}"`]
 
   parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 
-  if (s.complexity !== undefined) parts.push(`complexity="${formatDim(s.complexity)}"`)
+  if (s.complexity !== undefined) {
+    const cxLabel = !hasEvidence ? coarseLabel(s.complexity) : formatDim(s.complexity)
+    parts.push(`complexity="${cxLabel}"`)
+  }
   // momentum, freshness, pressure — routing-only: consumed by hooks from sensorium directly
   if (s.stability !== undefined) parts.push(`stability="${formatDim(s.stability)}"`)
 
@@ -134,6 +142,13 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
 /** Format a 0–1 dimension value to 2 decimal places. */
 function formatDim(value: number): string {
   return value.toFixed(2)
+}
+
+/** Coarse-grain a 0–1 value to low/mid/high for early-turn false-precision avoidance. */
+function coarseLabel(value: number): string {
+  if (value < 0.34) return 'low'
+  if (value < 0.67) return 'mid'
+  return 'high'
 }
 
 export function buildCognitivePromptProjection(
