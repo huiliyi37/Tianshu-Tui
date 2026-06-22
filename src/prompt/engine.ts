@@ -119,6 +119,9 @@ export class PromptEngine {
   private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
   private planMethodology?: import('../context/task-contract.js').PlanMethodology
   private planMethodologyReason?: string
+  /** Advisory text — only set when methodology changes, null otherwise to avoid noise. */
+  private planMethodologyAdvisory: string | null = null
+  private planMethodologyReason?: string
   private skillAdvisoryBlock?: string | null
   private crossSessionMemoryBlock?: string | null
   private mentionContextBlock?: string | null
@@ -303,7 +306,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason), skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) }
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
 
             if (this.tracker) {
               const fieldValues: Record<string, string> = {}
@@ -753,8 +756,14 @@ export class PromptEngine {
   }
 
   setPlanMethodology(methodology: import('../context/task-contract.js').PlanMethodology | undefined, reason?: string): void {
+    const changed = this.planMethodology !== methodology
     this.planMethodology = methodology
     this.planMethodologyReason = reason
+    // Only inject the advisory when methodology changes or is first set.
+    // Repeated identical advisory every turn is pure noise (~60 tokens/turn).
+    this.planMethodologyAdvisory = changed
+      ? renderPlanMethodologyAdvisory(methodology, reason)
+      : null
   }
 
   getPlanMethodology(): import('../context/task-contract.js').PlanMethodology | undefined {
@@ -944,7 +953,7 @@ export class PromptEngine {
       planTraceAppendix: this.planTraceAppendix,
       intentRetrievalRoute: this.intentRetrievalRoute,
       taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer),
-      planMethodologyAdvisory: renderPlanMethodologyAdvisory(this.planMethodology, this.planMethodologyReason),
+      planMethodologyAdvisory: this.planMethodologyAdvisory,
       harnessAdvisoryBlock: this.harnessAdvisoryBlock,
       decisions: this.decisions,
       activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
