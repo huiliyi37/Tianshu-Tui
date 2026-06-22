@@ -4,6 +4,7 @@ import { CACHE_ANCHOR_MESSAGES, summaryOutputBudgetChars } from '../compact/cons
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 
 import { debugLog } from '../utils/debug.js'
+import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { decideCompactTier, recordCompactFailure, recordCompactSuccess } from '../context/compact-policy.js'
 import type { CompactCircuitBreakerState, CompactTier } from '../context/types.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
@@ -481,7 +482,7 @@ export class CompactionController {
         }
       }
 
-      this.deps.session.replaceMessages(compacted)
+      this.safeReplaceMessages(compacted)
       this.deps.promptEngine.resetAppendixBaseline()
       this.deps.session.markCompacted(input.loopTurn)
       this.deps.pressureMonitor.recordCompaction(this.deps.session.getTurnCount())
@@ -699,6 +700,26 @@ export class CompactionController {
     return this.deps.getAbortSignal?.()?.aborted === true
   }
 
+  /**
+   * Replace session messages after running OAI orphan-tool_call preflight.
+   *
+   * Compaction paths (tryPartialCompact, replaceWithCheckpoint, microCompact)
+   * can produce message lists where an assistant(tool_calls) survives but its
+   * matching tool result was deleted. The OpenAI-compatible API rejects such
+   * sequences with: "An assistant message with 'tool_calls' must be followed
+   * by tool messages responding to each 'tool_call_id'."
+   *
+   * runResumePreflightOai detects orphans and inserts synthetic tool results,
+   * making the sequence safe to send.
+   */
+  private safeReplaceMessages(messages: OaiMessage[]): void {
+    const preflight = runResumePreflightOai(messages)
+    if (preflight.repaired) {
+      debugLog(`[compact-preflight] repaired ${preflight.syntheticResultsInserted} orphan tool_call(s)`)
+    }
+    this.deps.session.replaceMessages(preflight.messages)
+  }
+
   private persistExtractedMemories(trajectory: TrajectoryEntry[]): void {
     if (!this.deps.persistMemories) return
 
@@ -767,7 +788,7 @@ export class CompactionController {
     }
 
     const beforeTokens = estimateOaiTokens(messages)
-    this.deps.session.replaceMessages(candidate)
+    this.safeReplaceMessages(candidate)
     this.deps.promptEngine.resetAppendixBaseline()
     this.deps.session.recordCompactEvent({
       turn: this.deps.session.getTurnCount(),
@@ -874,7 +895,7 @@ export class CompactionController {
       }
 
       const newMessages = [...anchor, summaryMessage, ...recentZone]
-      this.deps.session.replaceMessages(newMessages)
+      this.safeReplaceMessages(newMessages)
       this.deps.promptEngine.resetAppendixBaseline()
       this.deps.refreshLedger()
 
