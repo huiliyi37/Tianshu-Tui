@@ -1279,6 +1279,10 @@ export class TuiApp {
   setModelInfo(modelName: string, contextWindow?: number): void {
     this.state.modelName = modelName
     if (contextWindow !== undefined) this.metricsGlanceController.contextWindow = contextWindow
+    // Model name length change (e.g. v4-pro → v4-flash) alters GlanceBar
+    // layout width. Incremental diff may misidentify unchanged lines, leaving
+    // the old border on screen (double-border ghost). Reset forces full redraw.
+    this.live.reset()
     this.renderLive()
   }
 
