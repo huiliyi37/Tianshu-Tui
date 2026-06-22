@@ -35,6 +35,7 @@ import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
 import { join } from 'path'
 import { execSync } from 'child_process'
+import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -607,6 +608,42 @@ async function main() {
   app.onExit(() => {
     shutdown(0)
   })
+
+  // ── First-run template prompt (before clearing screen) ───────
+  if (ctx.templatesPendingAgents && !args.includes('--dangerously-skip-permissions')) {
+    const { createInterface } = await import('node:readline/promises')
+    const rl = createInterface({ input: stdin, output: stdout })
+    try {
+      stdout.write('\n')
+      stdout.write('╭─ First-run setup ────────────────────────────────╮\n')
+      stdout.write('│ This project has no AGENTS.md or .rivet.md.     │\n')
+      stdout.write('│ Create them from templates?                      │\n')
+      stdout.write('╰──────────────────────────────────────────────────╯\n')
+      stdout.write('  [1] Create both (AGENTS.md + .rivet.md)\n')
+      stdout.write('  [2] Skip                         \n')
+      stdout.write('\n')
+      const answer = (await rl.question('Choice [1-2] (default: 1): ')).trim()
+      if (answer === '' || answer === '1') {
+        const result = applyProjectTemplates(process.cwd(), { agentsMode: 'overwrite' })
+        recordTemplatesDecision(process.cwd(), 'created', {
+          created: result.created,
+          appended: result.appended,
+          skipped: result.skipped,
+        })
+        stdout.write(`✓ Created: ${result.created.join(', ') || 'none'}\n`)
+      } else {
+        applyProjectTemplates(process.cwd(), { agentsMode: 'skip' })
+        recordTemplatesDecision(process.cwd(), 'declined')
+        stdout.write('Skipped template creation.\n')
+      }
+    } finally {
+      rl.close()
+    }
+  } else if (ctx.templatesPendingAgents) {
+    // headless / --dangerously-skip-permissions: silent .rivet.md, decline AGENTS.md
+    applyProjectTemplates(process.cwd(), { agentsMode: 'skip' })
+    recordTemplatesDecision(process.cwd(), 'declined')
+  }
 
   // ── Clear screen ─────────────────────────────────────────────
   stdout.write('\x1B[2J\x1B[H')

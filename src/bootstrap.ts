@@ -38,6 +38,7 @@ import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
+import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
 import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
@@ -145,6 +146,9 @@ export interface BootstrapContext {
   cwd: string
   shutdown: () => void
   heartbeatInterval: ReturnType<typeof setInterval>
+  /** True when first-run template init is pending — TUI layer handles the
+   *  AGENTS.md prompt. Set by needsTemplatesInit() during bootstrap. */
+  templatesPendingAgents?: boolean
 }
 
 // ── HTTP Proxy ─────────────────────────────────────────────────
@@ -1236,6 +1240,11 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // 4. Session infrastructure
   const { registry: sessionRegistry, sessionId, heartbeatInterval } = await createSessionInfrastructure()
 
+  // 4a. First-run template detection — set flag for TUI layer to prompt.
+  // We only detect here; actual file creation + sentinel write happens in
+  // main.ts after the user decides (so file creation and sentinel stay atomic).
+  const templatesPendingAgents = needsTemplatesInit(cwd)
+
   // 5. Session persist + claim store
   const persist = new SessionPersist(sessionId, cwd)
   const claimStore = persist.createClaimStore()
@@ -1386,6 +1395,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     domainKnowledgeStore, meridianIndexer, cwd,
     shutdown,
     heartbeatInterval,
+    templatesPendingAgents,
   }
 
   return ctx
