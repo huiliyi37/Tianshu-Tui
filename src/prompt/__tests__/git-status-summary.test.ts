@@ -203,4 +203,30 @@ describe('parseGitStatus', () => {
     const result = parseGitStatus(status)
     assert.deepEqual(result.untracked, ['README'])
   })
+
+  it('strips double-quote wrapping from non-ASCII filenames (git status -s quoting)', () => {
+    // git wraps non-ASCII paths in quotes with octal escapes:
+    // ?? ".rivet/plans/\346\237\220\350\256\241\345\210\222.md"
+    // Without quote stripping, classifyPath sees the quoted prefix (".rivet)
+    // instead of the real prefix (.rivet) → RIVET_RUNTIME_DIRS match fails →
+    // file falls through to L3_content instead of being folded as L1_fragment.
+    const status = [
+      '## main',
+      '?? ".rivet/plans/\\346\\237\\220\\350\\256\\241\\345\\210\\222.md"',
+      '?? ".rivet/knowledge/\\347\\274\\223\\345\\255\\230.md"',
+      '?? src/new.ts',
+    ].join('\n')
+    const result = parseGitStatus(status)
+    // src/new.ts is real content → untracked
+    assert.ok(result.untracked.includes('src/new.ts'))
+    // .rivet/plans/ is a runtime dir → should be folded as fragment, not untracked.
+    // If quote stripping fails, the quoted prefix (".rivet) won't match
+    // RIVET_RUNTIME_DIRS and the file will leak into untracked instead.
+    for (const p of result.untracked) {
+      assert.ok(!p.startsWith('"'), `quoted path leaked into untracked: ${p}`)
+      assert.ok(!p.includes('.rivet/plans/'), `runtime fragment leaked into untracked: ${p}`)
+    }
+    // Confirm runtime fragments were folded (quote stripping made classifyPath work)
+    assert.ok(result.foldedRuntimeFragments >= 1, 'expected at least 1 folded runtime fragment')
+  })
 })

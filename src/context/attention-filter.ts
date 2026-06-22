@@ -23,6 +23,8 @@ const FOREIGN_DIRS = new Set([
   '.codex',
   '.obsidian',
   '.claude',
+  '.cursor',
+  '.od-skills',
 ])
 
 const FRAGMENT_EXTENSIONS = new Set([

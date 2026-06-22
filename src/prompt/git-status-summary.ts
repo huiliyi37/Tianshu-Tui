@@ -54,7 +54,13 @@ function parseBranch(lines: string[]): string {
 function renameTarget(filePath: string): string {
   const marker = ' -> '
   const idx = filePath.lastIndexOf(marker)
-  return idx >= 0 ? filePath.slice(idx + marker.length).trim() : filePath.trim()
+  const raw = idx >= 0 ? filePath.slice(idx + marker.length).trim() : filePath.trim()
+  // git wraps non-ASCII filenames in double quotes with octal escapes (e.g.
+  // ?? ".rivet/plans/某计划.md"). Strip the wrapping quotes so classifyPath
+  // sees the real path prefix (.rivet → matches RIVET_RUNTIME_DIRS), not the
+  // quoted form (".rivet → no match → falls through to L3_content).
+  if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) return raw.slice(1, -1)
+  return raw
 }
 
 function isShortStatus(lines: string[]): boolean {
