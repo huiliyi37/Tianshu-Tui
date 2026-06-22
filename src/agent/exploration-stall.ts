@@ -52,11 +52,14 @@ export function detectExplorationStall(
   }
   count++ // include current tool
 
-  // threshold parameter overrides HARD_BLOCK_THRESHOLD for backward compat
-  const HARD_BLOCK_THRESHOLD = threshold ?? 15
+  // threshold parameter overrides HARD_BLOCK_THRESHOLD for backward compat.
+  // When caller passes an explicit small threshold, they want strict blocking —
+  // advisory zone is disabled (ADVISORY_THRESHOLD only applies to default 15).
+  const hardBlock = threshold ?? 15
+  const advisoryEnabled = threshold === undefined
   const ADVISORY_THRESHOLD = 12
 
-  if (count >= HARD_BLOCK_THRESHOLD) {
+  if (count >= hardBlock) {
     return {
       blocked: true,
       consecutiveExploreCount: count,
@@ -69,7 +72,7 @@ export function detectExplorationStall(
     }
   }
 
-  if (count >= ADVISORY_THRESHOLD) {
+  if (advisoryEnabled && count >= ADVISORY_THRESHOLD) {
     return {
       blocked: false,
       consecutiveExploreCount: count,

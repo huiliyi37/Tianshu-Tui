@@ -78,6 +78,14 @@ describe('detectExplorationStall', () => {
     assert.equal(result.advisory, null)
   })
 
+  it('disables advisory when explicit small threshold is passed', () => {
+    // Caller passes threshold=5 → strict blocking mode, no advisory zone
+    const history = traj(Array.from({ length: 11 }, () => 'read_file'))
+    const result = detectExplorationStall(history, 'read_file', 5)
+    assert.equal(result.blocked, true, 'small threshold should hard-block')
+    assert.equal(result.advisory, null, 'advisory should be disabled with explicit small threshold')
+  })
+
   it('does not trigger advisory before threshold 12', () => {
     const history = traj(Array.from({ length: 10 }, () => 'read_file'))
     const result = detectExplorationStall(history, 'read_file')
