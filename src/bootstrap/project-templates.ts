@@ -19,7 +19,6 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
-  statSync,
 } from 'node:fs'
 import { join } from 'node:path'
 
@@ -204,12 +203,7 @@ export function applyProjectTemplates(
 
   if (options.agentsMode === 'overwrite') {
     writeFileSync(agentsPath, AGENTS_MD_TEMPLATE, 'utf-8')
-    if (agentsExists) {
-      // Overwrote existing file — report as appended (content replaced) for sentinel accounting
-      appended.push(AGENTS_MD_PATH)
-    } else {
-      created.push(AGENTS_MD_PATH)
-    }
+    created.push(AGENTS_MD_PATH)
   } else if (options.agentsMode === 'append' && agentsExists) {
     appendFileSync(agentsPath, '\n\n' + AGENTS_MD_TEMPLATE, 'utf-8')
     appended.push(AGENTS_MD_PATH)
@@ -241,8 +235,3 @@ export function recordTemplatesDecision(
     skipped: options?.skipped ?? [],
   })
 }
-
-// ── Touch helper exposed for tests that need to verify file integrity ──
-
-/** Re-export statSync for tests (avoids CommonJS `require` in ESM context). */
-export { statSync }
