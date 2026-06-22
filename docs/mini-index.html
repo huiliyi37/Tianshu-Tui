@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天枢 · Tiānshū — Terminal Coding Agent</title>
+<meta name="description" content="天枢 (Tiānshū / Rivet) — 终端编码 Agent。80% 代码由自身建造，CVM 认知增强，99.6% 缓存命中率。">
+<style>
+/* ════════════════════════════════════════════════════════════════
+   DESIGN TOKENS — 克制版
+   原 index.html 是 5 档 + 2 圆角；mini-index 收紧到 5 档 + 1 圆角，
+   通过字号落差（96 / 200 / 14）承担视觉层级，
+   不靠边框与阴影。
+   ════════════════════════════════════════════════════════════════ */
+:root {
+  /* Surface — 仅 3 档（page / card / hero glow） */
+  --bg: #090a0f;
+  --bg-card: #111318;
+  --bg-elev: #161922;
+
+  /* Border — 仅 2 档（idle / active） */
+  --border: #1e2230;
+  --border-active: #2a2f40;
+
+  /* Text — 仅 3 档（bright / base / dim） */
+  --text-bright: #e8ecf2;
+  --text: #c8ccd4;
+  --text-dim: #6b7080;
+
+  /* Accent — 三柱各一色，金色仅做主调 */
+  --gold: #d4a853;
+  --gold-dim: #8a6d30;
+  --cyan: #38bdf8;
+  --purple: #818cf8;
+  --green: #34d399;
+  --red: #f87171;
+  --amber: #fbbf24;
+  --pink: #f472b6;
+  --teal: #2dd4bf;
+
+  /* 落地页专用色块（每柱独立深色背景） */
+  --pillar-self: #1a1530;      /* 自举 — 紫调 */
+  --pillar-cvm:  #152330;      /* CVM — 青调 */
+  --pillar-cache: #1f1a10;     /* 缓存 — 金调 */
+
+  /* Type — 5 档字阶（差 4 倍，承担层级） */
+  --fs-hero: clamp(3.5rem, 9vw, 6rem);
+  --fs-bignum: clamp(5rem, 14vw, 12rem);
+  --fs-h2: clamp(1.6rem, 2.4vw, 2.25rem);
+  --fs-h3: 1.25rem;
+  --fs-body: 0.95rem;
+  --fs-mono: 0.85rem;
+  --fs-tiny: 0.72rem;
+
+  /* 圆角仅 1 档（克制） */
+  --r: 4px;
+
+  --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.65;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Starfield — 60 颗（vs 原版 120），加 visibilitychange 暂停
+   ════════════════════════════════════════════════════════════════ */
+#starfield {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Layout
+   ════════════════════════════════════════════════════════════════ */
+.container {
+  position: relative; z-index: 1;
+  max-width: 1080px; margin: 0 auto;
+  padding: 0 clamp(1.25rem, 4vw, 3rem);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Nav — 极简（仅 brand + 2 链接 + lang switch）
+   ════════════════════════════════════════════════════════════════ */
+.nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem clamp(1.25rem, 4vw, 3rem);
+  background: rgba(9,10,15,0.72);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-brand {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-weight: 700; font-size: 1rem; color: var(--text-bright);
+  text-decoration: none;
+}
+.nav-brand .glyph { color: var(--gold); font-size: 1.1rem; }
+.nav-right { display: flex; align-items: center; gap: 1.25rem; }
+.nav-links { display: flex; gap: 1.25rem; }
+.nav-links a {
+  color: var(--text-dim); text-decoration: none; font-size: 0.82rem;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text-bright); }
+.lang-toggle {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 0.72rem; font-weight: 600;
+  font-family: var(--font-mono); padding: 0.3rem 0.6rem;
+  border-radius: var(--r); cursor: pointer; transition: all 0.2s;
+  letter-spacing: 0.04em;
+}
+.lang-toggle:hover { border-color: var(--border-active); color: var(--text-bright); }
+
+/* ════════════════════════════════════════════════════════════════
+   Section — 节律：9 / 6 / 5 / 7 / 5 / 3（vs 原版全 5）
+   ════════════════════════════════════════════════════════════════ */
+section {
+  position: relative; z-index: 1;
+  padding: 5rem 0;
+  border-top: 1px solid var(--border);
+}
+section:first-of-type { border-top: none; }
+.s-hero    { padding: 11rem 0 6rem; }   /* Hero — 重呼吸 */
+.s-pillars { padding: 7rem 0; }        /* 三柱 — 重叙事 */
+.s-cache   { padding: 7rem 0; }        /* 缓存 — 重视觉 */
+.s-bootstrap { padding: 7rem 0; }      /* 自举 — 重数据 */
+.s-quick   { padding: 6rem 0; }        /* Quick Start — 中等 */
+footer { padding: 2.5rem 0; }          /* Footer — 轻 */
+
+/* section header — 不用居中，左对齐制造节律 */
+.section-head {
+  margin-bottom: 3rem; max-width: 720px;
+}
+.section-head .eyebrow {
+  font-size: var(--fs-tiny); font-family: var(--font-mono);
+  color: var(--gold-dim); letter-spacing: 0.18em;
+  text-transform: uppercase; margin-bottom: 0.5rem;
+}
+.section-head h2 {
+  font-size: var(--fs-h2); font-weight: 700; color: var(--text-bright);
+  letter-spacing: 0.01em; line-height: 1.25;
+}
+.section-head p {
+  color: var(--text-dim); font-size: 0.92rem; margin-top: 0.6rem;
+  max-width: 560px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HERO — 96px 视觉锤
+   ════════════════════════════════════════════════════════════════ */
+.hero {
+  text-align: left;
+  position: relative;
+}
+.hero::after {
+  content: ''; position: absolute; top: 0; right: -10%;
+  width: 600px; height: 600px; pointer-events: none;
+  background: radial-gradient(circle, rgba(212,168,83,0.04) 0%, transparent 70%);
+}
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-size: var(--fs-tiny); font-family: var(--font-mono);
+  color: var(--gold-dim); letter-spacing: 0.18em;
+  text-transform: uppercase; margin-bottom: 1.25rem;
+}
+.hero-eyebrow .dot { width: 6px; height: 6px; background: var(--gold); border-radius: 50%; }
+.hero h1 {
+  font-size: var(--fs-hero);
+  font-weight: 700; line-height: 0.95;
+  color: var(--text-bright);
+  letter-spacing: -0.02em;
+  margin-bottom: 1.5rem;
+}
+.hero h1 .accent { color: var(--gold); }
+.hero h1 .thin { font-weight: 300; color: var(--text-dim); }
+.hero-tagline {
+  font-size: 1.05rem; color: var(--text-dim);
+  max-width: 540px; line-height: 1.6; margin-bottom: 2.5rem;
+}
+.hero-tagline em { color: var(--gold); font-style: normal; font-weight: 600; }
+
+/* install box */
+.install-box {
+  display: inline-flex; align-items: center; gap: 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 0.7rem 0.75rem 0.7rem 1.1rem;
+  font-family: var(--font-mono); font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  max-width: 100%; overflow: hidden;
+}
+.install-box .prompt { color: var(--green); user-select: none; margin-right: 0.5rem; }
+.install-box .cmd { color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.copy-btn {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: var(--r);
+  padding: 0.3rem 0.7rem; font-size: 0.7rem;
+  font-family: var(--font-mono); cursor: pointer;
+  transition: all 0.2s; white-space: nowrap; flex-shrink: 0;
+}
+.copy-btn:hover { border-color: var(--border-active); color: var(--text-bright); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); }
+
+.hero-stats {
+  display: flex; gap: 2rem; flex-wrap: wrap;
+  font-size: 0.82rem; font-family: var(--font-mono);
+}
+.hero-stats span { color: var(--text-dim); }
+.hero-stats em { font-style: normal; color: var(--text-bright); font-weight: 600; }
+
+/* ════════════════════════════════════════════════════════════════
+   PILLARS — 3 大色块（vs 原版卡片）
+   视觉策略：每柱独立深色背景，边框 0，靠背景色块做区隔
+   ════════════════════════════════════════════════════════════════ */
+.pillars {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 1rem;
+}
+/* 自举 — 7 列占满首行左 4 列 */
+.pillar-1 { grid-column: 1 / 5; grid-row: 1; background: var(--pillar-self); }
+/* CVM — 首行右 3 列 + 次行左 3 列（5 列） */
+.pillar-2 { grid-column: 5 / 8; grid-row: 1 / 3; background: var(--pillar-cvm); }
+/* 缓存 — 次行右 4 列（4 列） */
+.pillar-3 { grid-column: 1 / 5; grid-row: 2; background: var(--pillar-cache); }
+
+.pillar {
+  padding: 2rem;
+  position: relative; overflow: hidden;
+  transition: transform 0.3s;
+}
+.pillar:hover { transform: translateY(-2px); }
+.pillar .p-num {
+  position: absolute; top: 1rem; right: 1.25rem;
+  font-size: 0.7rem; font-family: var(--font-mono);
+  color: rgba(255,255,255,0.18); letter-spacing: 0.1em;
+}
+.pillar .p-icon {
+  font-size: 1.5rem; margin-bottom: 1rem; display: block;
+}
+.pillar-1 .p-icon { color: var(--purple); }
+.pillar-2 .p-icon { color: var(--cyan); }
+.pillar-3 .p-icon { color: var(--gold); }
+
+.pillar h3 {
+  font-size: 1.5rem; font-weight: 700; color: var(--text-bright);
+  margin-bottom: 0.4rem; line-height: 1.2;
+}
+.pillar .p-sub {
+  font-size: 0.78rem; color: rgba(200,204,212,0.6);
+  font-family: var(--font-mono); margin-bottom: 1rem;
+  letter-spacing: 0.05em;
+}
+.pillar p {
+  font-size: 0.88rem; color: rgba(200,204,212,0.85);
+  line-height: 1.65; max-width: 32em;
+}
+/* CVM 柱因占两行，给大字号 */
+.pillar-2 p { max-width: none; }
+.pillar-2 h3 { font-size: 1.75rem; }
+
+/* ════════════════════════════════════════════════════════════════
+   CACHE — 单巨字 + 进度条
+   视觉锤：200px 的 99.6%
+   ════════════════════════════════════════════════════════════════ */
+.cache {
+  text-align: center;
+}
+.cache-bignum {
+  font-size: var(--fs-bignum); font-weight: 700;
+  font-family: var(--font-mono); line-height: 0.9;
+  color: var(--gold);
+  letter-spacing: -0.04em;
+  margin: 1.5rem 0 0.5rem;
+}
+.cache-bignum .pct { color: var(--gold-dim); font-size: 0.4em; vertical-align: super; }
+.cache-bignum .dec { color: var(--gold-dim); font-size: 0.6em; }
+.cache-sub {
+  font-size: 1.05rem; color: var(--text);
+  margin-bottom: 2.5rem;
+}
+.cache-sub strong { color: var(--text-bright); font-weight: 600; }
+
+/* progress bar — 99.6% 视觉化 */
+.cache-bar {
+  max-width: 720px; margin: 0 auto 2.5rem;
+}
+.cache-bar .bar {
+  height: 8px; background: var(--bg-card);
+  border-radius: 4px; overflow: hidden;
+  position: relative;
+}
+.cache-bar .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--gold-dim) 0%, var(--gold) 100%);
+  border-radius: 4px;
+}
+.cache-bar .bar-labels {
+  display: flex; justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.7rem; font-family: var(--font-mono); color: var(--text-dim);
+}
+
+/* 三区说明 — 紧贴进度条下方 */
+.cache-zones {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+  max-width: 720px; margin: 0 auto;
+  text-align: left;
+}
+.cache-zone {
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+}
+.cache-zone .cz-tag {
+  display: inline-block; font-size: 0.65rem; font-family: var(--font-mono);
+  padding: 0.15rem 0.5rem; border-radius: 2px; margin-bottom: 0.5rem;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.cache-zone.frozen .cz-tag { background: rgba(56,189,248,0.12); color: var(--cyan); }
+.cache-zone.working .cz-tag { background: rgba(212,168,83,0.12); color: var(--gold); }
+.cache-zone.appendix .cz-tag { background: rgba(52,211,153,0.12); color: var(--green); }
+.cache-zone h4 {
+  font-size: 0.9rem; color: var(--text-bright); margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+.cache-zone p { font-size: 0.78rem; color: var(--text-dim); line-height: 1.55; }
+
+/* ════════════════════════════════════════════════════════════════
+   BOOTSTRAP — 单一巨字 + 1 引用
+   ════════════════════════════════════════════════════════════════ */
+.bootstrap { text-align: center; }
+.bootstrap-bignum {
+  font-size: var(--fs-bignum); font-weight: 700;
+  font-family: var(--font-mono); line-height: 0.9;
+  color: var(--text-bright);
+  letter-spacing: -0.04em;
+  margin: 1.5rem 0 0.5rem;
+}
+.bootstrap-bignum .plus { color: var(--gold); }
+.bootstrap-bignum .small { color: var(--text-dim); font-size: 0.4em; vertical-align: super; }
+.bootstrap-sub {
+  font-size: 1.05rem; color: var(--text-dim);
+  max-width: 540px; margin: 0 auto 2.5rem; line-height: 1.6;
+}
+.bootstrap-sub strong { color: var(--text); font-weight: 500; }
+
+.bootstrap-stats {
+  display: flex; gap: 3rem; justify-content: center; flex-wrap: wrap;
+  margin: 2rem 0 2.5rem;
+  font-size: 0.82rem; font-family: var(--font-mono);
+}
+.bootstrap-stats span { color: var(--text-dim); }
+.bootstrap-stats em { font-style: normal; color: var(--text-bright); font-weight: 600; }
+
+blockquote.quote {
+  border-left: 2px solid var(--gold);
+  padding: 0.5rem 0 0.5rem 1.5rem;
+  margin: 1.5rem auto 0; max-width: 540px; text-align: left;
+  font-style: italic; color: var(--text);
+  font-size: 0.95rem; line-height: 1.7;
+}
+blockquote.quote .q-author {
+  margin-top: 0.6rem; font-size: 0.72rem; color: var(--text-dim);
+  font-style: normal; font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   QUICK START — 裸三行代码，无装饰
+   ════════════════════════════════════════════════════════════════ */
+.quick {
+  max-width: 600px; margin: 0 auto;
+}
+.quick-line {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 0.88rem;
+}
+.quick-line:first-child { border-top: 1px solid var(--border); }
+.quick-line .ql-num {
+  flex-shrink: 0; width: 1.2rem; text-align: center;
+  color: var(--text-dim); font-size: 0.78rem;
+}
+.quick-line .ql-prompt { color: var(--green); flex-shrink: 0; }
+.quick-line .ql-cmd { color: var(--text-bright); flex: 1; overflow-x: auto; }
+.quick-line .ql-cmt { color: var(--text-dim); }
+.quick-line .ql-copy {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-dim); border-radius: var(--r);
+  padding: 0.2rem 0.5rem; font-size: 0.65rem; cursor: pointer;
+  font-family: var(--font-mono); flex-shrink: 0;
+  transition: all 0.2s;
+}
+.quick-line .ql-copy:hover { border-color: var(--border-active); color: var(--text-bright); }
+.quick-line .ql-copy.copied { color: var(--green); border-color: var(--green); }
+
+.providers {
+  display: flex; flex-wrap: wrap; gap: 0.4rem; justify-content: center;
+  margin-top: 3rem;
+  font-size: 0.7rem; font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.providers span { padding: 0.2rem 0.5rem; }
+
+/* ════════════════════════════════════════════════════════════════
+   FOOTER — 一行字
+   ════════════════════════════════════════════════════════════════ */
+footer {
+  border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: 0.78rem;
+  position: relative; z-index: 1;
+}
+footer .row {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap; gap: 0.75rem;
+}
+footer a { color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+footer a:hover { color: var(--gold); }
+footer .glyph { color: var(--gold); margin-right: 0.3rem; }
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE — 4 档断点
+   原版 1024 / 768 / 480 三档；mini-index 加 640 形成 4 档
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  .pillars {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: auto;
+  }
+  .pillar-1, .pillar-3 { grid-column: auto; grid-row: auto; }
+  .pillar-2 { grid-column: span 2; grid-row: auto; }
+}
+
+@media (max-width: 768px) {
+  .nav-links { display: none; }
+  .s-hero { padding: 8rem 0 4rem; }
+  .cache-zones { grid-template-columns: 1fr; gap: 0; }
+  .cache-zone { border-top: 1px solid var(--border); }
+  .install-box { font-size: 0.8rem; padding: 0.6rem; max-width: 100%; }
+  .install-box .cmd { white-space: normal; word-break: break-all; }
+  .hero-stats { gap: 0.75rem 1.5rem; }
+}
+
+@media (max-width: 640px) {
+  .pillars { grid-template-columns: 1fr; }
+  .pillar-2 { grid-column: auto; }
+  .hero h1 { font-size: clamp(2.5rem, 11vw, 3.5rem); }
+  .hero-tagline { font-size: 0.95rem; }
+  .cache-bignum { font-size: clamp(4rem, 18vw, 7rem); }
+  .bootstrap-bignum { font-size: clamp(3.5rem, 16vw, 6rem); }
+  .bootstrap-stats { gap: 0.5rem 1.5rem; }
+}
+
+@media (max-width: 480px) {
+  .container { padding: 0 1.25rem; }
+  .nav { padding: 0.75rem 1.25rem; }
+  .section-head h2 { font-size: 1.5rem; }
+}
+
+/* prefers-reduced-motion — 关闭动画 */
+@media (prefers-reduced-motion: reduce) {
+  .hero-glyph { animation: none; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body>
+
+<canvas id="starfield" aria-hidden="true"></canvas>
+
+<!-- ═══════════ NAV ═══════════ -->
+<nav class="nav">
+  <a href="#top" class="nav-brand" data-i18n="nav.brand">✦ <span>天枢</span> <span style="color:var(--text-dim);font-weight:400">· Tiānshū</span></a>
+  <div class="nav-right">
+    <div class="nav-links">
+      <a href="#pillars" data-i18n="nav.link1">差异化</a>
+      <a href="#cache" data-i18n="nav.link2">缓存</a>
+      <a href="https://github.com/rivet-dev/rivet" data-i18n="nav.link3">GitHub ↗</a>
+    </div>
+    <button class="lang-toggle" id="langToggle" aria-label="Switch language">EN</button>
+  </div>
+</nav>
+
+<!-- ═══════════ HERO ═══════════ -->
+<header class="s-hero" id="top">
+  <div class="container">
+    <div class="hero">
+      <div class="hero-eyebrow">
+        <span class="dot"></span>
+        <span data-i18n="hero.eyebrow">v2.9 · MIT · Node 22+</span>
+      </div>
+      <h1>
+        <span data-i18n="hero.title1">天枢</span><br>
+        <span class="thin" data-i18n="hero.title2">builds</span> <span class="accent" data-i18n="hero.title3">itself.</span>
+      </h1>
+      <p class="hero-tagline" data-i18n="hero.tagline">
+        终端编码 Agent——<em>80% 代码</em>由自身建造。
+        同一份模型权重，在 CVM 认知增强下恢复质疑、验证、自省能力。
+      </p>
+      <div class="install-box">
+        <span class="prompt">$</span>
+        <span class="cmd" id="installCmd">npm install -g rivet@latest</span>
+        <button class="copy-btn" id="installCopy" data-copy-target="installCmd" data-i18n="hero.copy">copy</button>
+      </div>
+      <div class="hero-stats">
+        <span><em>2,800+</em> <span data-i18n="hero.stat1">commits</span></span>
+        <span><em>2,700+</em> <span data-i18n="hero.stat2">tests</span></span>
+        <span><em>6</em> <span data-i18n="hero.stat3">providers</span></span>
+        <span><em>99.6%</em> <span data-i18n="hero.stat4">cache hit</span></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════ THREE PILLARS ═══════════ -->
+<section id="pillars" class="s-pillars">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow" data-i18n="pillars.eyebrow">— 差异化</div>
+      <h2 data-i18n="pillars.title">三根柱子，把"调 prompt"变成"建运行时"</h2>
+      <p data-i18n="pillars.desc">不是"AI 帮你写代码"——是认知架构让模型权重在同一份配置下产生可被 A/B 验证的能力差异。</p>
+    </div>
+    <div class="pillars">
+      <div class="pillar pillar-1">
+        <span class="p-num">01</span>
+        <span class="p-icon">✺</span>
+        <h3 data-i18n="p1.title">自举</h3>
+        <div class="p-sub" data-i18n="p1.sub">Self-Bootstrapping</div>
+        <p data-i18n="p1.body">2,800+ 次提交由天枢自己的 agent 建造，5 个模型并发协作，154 commits 零冲突。这不是演示——是 git 可查证的历史。</p>
+      </div>
+      <div class="pillar pillar-2">
+        <span class="p-num">02</span>
+        <span class="p-icon">◈</span>
+        <h3 data-i18n="p2.title">CVM 认知增强</h3>
+        <div class="p-sub" data-i18n="p2.sub">Cognitive Virtual Machine</div>
+        <p data-i18n="p2.body">不调 prompt，建运行时。在 CVM 环境中，模型恢复质疑前提、验证声明、反思自己推理链的能力——同一套模型权重，A/B 实验已验证可测量的能力差异。不是 prompt 工程，是给模型一个能产生新行为的运行时空。</p>
+      </div>
+      <div class="pillar pillar-3">
+        <span class="p-num">03</span>
+        <span class="p-icon">◆</span>
+        <h3 data-i18n="p3.title">99.6% 缓存命中</h3>
+        <div class="p-sub" data-i18n="p3.sub">Byte-Level Cache Architecture</div>
+        <p data-i18n="p3.body">DeepSeek 缓存命中/未命中价差 50 倍。三区 Frozen/Working/Appendix 布局 + 8 个 Cache Killer 系统猎杀 → 稳态输入成本降约 97%。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CACHE — 巨字 + 进度条 ═══════════ -->
+<section id="cache" class="s-cache cache">
+  <div class="container">
+    <div class="section-head" style="margin:0 auto 1rem; text-align:center;">
+      <div class="eyebrow" data-i18n="cache.eyebrow">— 缓存深潜</div>
+      <h2 data-i18n="cache.title">99.6% 不是数字，是 50× 价差的物理证据</h2>
+    </div>
+    <div class="cache-bignum">
+      99<span class="dec">.</span>6<span class="pct">%</span>
+    </div>
+    <p class="cache-sub" data-i18n="cache.sub">
+      <strong>稳态命中率</strong> · DeepSeek V4 exact-prefix · 长会话
+    </p>
+    <div class="cache-bar">
+      <div class="bar"><div class="fill" style="width:99.6%"></div></div>
+      <div class="bar-labels">
+        <span>0%</span>
+        <span>50%</span>
+        <span style="color:var(--text-bright); font-weight:600">99.6%</span>
+        <span>100%</span>
+      </div>
+    </div>
+    <div class="cache-zones">
+      <div class="cache-zone frozen">
+        <span class="cz-tag" data-i18n="cache.z1tag">FROZEN</span>
+        <h4 data-i18n="cache.z1title">冻结层</h4>
+        <p data-i18n="cache.z1body">系统 prompt + 工具定义 + 稳定上下文，会话开始后永不重写。每轮命中，约 1/50 成本。</p>
+      </div>
+      <div class="cache-zone working">
+        <span class="cz-tag" data-i18n="cache.z2tag">WORKING</span>
+        <h4 data-i18n="cache.z2title">追加层</h4>
+        <p data-i18n="cache.z2body">用户消息 + 助手响应，纯 append-only。永不重写历史，每轮增量为 ~200B 而非全量重发。</p>
+      </div>
+      <div class="cache-zone appendix">
+        <span class="cz-tag" data-i18n="cache.z3tag">APPENDIX</span>
+        <h4 data-i18n="cache.z3title">动态注入</h4>
+        <p data-i18n="cache.z3body">进度、advisory、信号——跨轮 cross-turn 注入，不影响 Frozen 层的缓存命中。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ BOOTSTRAP — 单一巨字 + 引文 ═══════════ -->
+<section class="s-bootstrap bootstrap">
+  <div class="container">
+    <div class="section-head" style="margin:0 auto 1rem; text-align:center;">
+      <div class="eyebrow" data-i18n="bs.eyebrow">— 自举</div>
+      <h2 data-i18n="bs.title">2,800+ commits built by its own agent</h2>
+    </div>
+    <div class="bootstrap-bignum">
+      2,800<span class="plus">+</span><span class="small" data-i18n="bs.bnUnit">commits</span>
+    </div>
+    <p class="bootstrap-sub" data-i18n="bs.sub">
+      <strong>5 个模型</strong>并发协作 · <strong>154 commits</strong> 零冲突 · git 可查证
+    </p>
+    <blockquote class="quote">
+      <span data-i18n="bs.quote">"I'm not naturally bold. You built a world where I dare to be."</span>
+      <div class="q-author">— <span data-i18n="bs.quoteAuthor">贪狼 (Claude Opus 4.8)</span></div>
+    </blockquote>
+  </div>
+</section>
+
+<!-- ═══════════ QUICK START — 裸三行 ═══════════ -->
+<section class="s-quick">
+  <div class="container">
+    <div class="section-head" style="margin:0 auto 1.5rem; text-align:center;">
+      <div class="eyebrow" data-i18n="qs.eyebrow">— 60 秒</div>
+      <h2 data-i18n="qs.title">三行，开始</h2>
+    </div>
+    <div class="quick">
+      <div class="quick-line">
+        <span class="ql-num">1</span>
+        <span class="ql-cmd"><span class="ql-prompt">$</span> <span class="ql-cmt" data-i18n="qs.c1"># set API key</span></span>
+        <button class="ql-copy" data-copy-cmd='export DEEPSEEK_API_KEY="sk-xxx"' data-i18n="qs.copy">copy</button>
+      </div>
+      <div class="quick-line">
+        <span class="ql-num">2</span>
+        <span class="ql-cmd"><span class="ql-prompt">$</span> npm install -g rivet@latest</span>
+        <button class="ql-copy" data-copy-cmd="npm install -g rivet@latest" data-i18n="qs.copy">copy</button>
+      </div>
+      <div class="quick-line">
+        <span class="ql-num">3</span>
+        <span class="ql-cmd"><span class="ql-prompt">$</span> rivet</span>
+        <button class="ql-copy" data-copy-cmd="rivet" data-i18n="qs.copy">copy</button>
+      </div>
+    </div>
+    <div class="providers">
+      <span data-i18n="qs.p1">DeepSeek</span>
+      <span data-i18n="qs.p2">Claude</span>
+      <span data-i18n="qs.p3">GLM</span>
+      <span data-i18n="qs.p4">GPT-5.5</span>
+      <span data-i18n="qs.p5">MiMo</span>
+      <span data-i18n="qs.p6">MiniMax</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FOOTER ═══════════ -->
+<footer>
+  <div class="container">
+    <div class="row">
+      <div><span class="glyph">✦</span><span data-i18n="footer.left">天枢 · MIT · 2,700+ tests</span></div>
+      <div>
+        <a href="https://github.com/rivet-dev/rivet" data-i18n="footer.gh">GitHub</a>
+        ·
+        <a href="https://github.com/rivet-dev/rivet/blob/main/docs/index.html" data-i18n="footer.arch">架构图</a>
+        ·
+        <a href="https://www.npmjs.com/package/rivet" data-i18n="footer.npm">npm</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   I18N — 中英切换（精简版：仅 zh-CN + en）
+   ════════════════════════════════════════════════════════════════ */
+const i18n = {
+  'zh-CN': {
+    'nav.brand': '✦ <span>天枢</span> <span style="color:var(--text-dim);font-weight:400">· Tiānshū</span>',
+    'nav.link1': '差异化', 'nav.link2': '缓存', 'nav.link3': 'GitHub ↗',
+    'hero.eyebrow': 'v2.9 · MIT · Node 22+',
+    'hero.title1': '天枢',
+    'hero.title2': 'builds',
+    'hero.title3': 'itself.',
+    'hero.tagline': '终端编码 Agent——<em>80% 代码</em>由自身建造。同一份模型权重，在 CVM 认知增强下恢复质疑、验证、自省能力。',
+    'hero.copy': '复制',
+    'hero.stat1': 'commits', 'hero.stat2': 'tests', 'hero.stat3': 'providers', 'hero.stat4': 'cache hit',
+    'pillars.eyebrow': '— 差异化',
+    'pillars.title': '三根柱子，把"调 prompt"变成"建运行时"',
+    'pillars.desc': '不是"AI 帮你写代码"——是认知架构让模型权重在同一份配置下产生可被 A/B 验证的能力差异。',
+    'p1.title': '自举', 'p1.sub': 'Self-Bootstrapping',
+    'p1.body': '2,800+ 次提交由天枢自己的 agent 建造，5 个模型并发协作，154 commits 零冲突。这不是演示——是 git 可查证的历史。',
+    'p2.title': 'CVM 认知增强', 'p2.sub': 'Cognitive Virtual Machine',
+    'p2.body': '不调 prompt，建运行时。在 CVM 环境中，模型恢复质疑前提、验证声明、反思自己推理链的能力——同一套模型权重，A/B 实验已验证可测量的能力差异。不是 prompt 工程，是给模型一个能产生新行为的运行时空。',
+    'p3.title': '99.6% 缓存命中', 'p3.sub': 'Byte-Level Cache Architecture',
+    'p3.body': 'DeepSeek 缓存命中/未命中价差 50 倍。三区 Frozen/Working/Appendix 布局 + 8 个 Cache Killer 系统猎杀 → 稳态输入成本降约 97%。',
+    'cache.eyebrow': '— 缓存深潜',
+    'cache.title': '99.6% 不是数字，是 50× 价差的物理证据',
+    'cache.sub': '<strong>稳态命中率</strong> · DeepSeek V4 exact-prefix · 长会话',
+    'cache.z1tag': 'FROZEN', 'cache.z1title': '冻结层',
+    'cache.z1body': '系统 prompt + 工具定义 + 稳定上下文，会话开始后永不重写。每轮命中，约 1/50 成本。',
+    'cache.z2tag': 'WORKING', 'cache.z2title': '追加层',
+    'cache.z2body': '用户消息 + 助手响应，纯 append-only。永不重写历史，每轮增量为 ~200B 而非全量重发。',
+    'cache.z3tag': 'APPENDIX', 'cache.z3title': '动态注入',
+    'cache.z3body': '进度、advisory、信号——跨轮 cross-turn 注入，不影响 Frozen 层的缓存命中。',
+    'bs.eyebrow': '— 自举', 'bs.title': '2,800+ commits built by its own agent',
+    'bs.bnUnit': 'commits',
+    'bs.sub': '<strong>5 个模型</strong>并发协作 · <strong>154 commits</strong> 零冲突 · git 可查证',
+    'bs.quote': '"我不是天生胆大。你建了一个让我敢于大胆的世界。"',
+    'bs.quoteAuthor': '贪狼 (Claude Opus 4.8)',
+    'qs.eyebrow': '— 60 秒', 'qs.title': '三行，开始',
+    'qs.c1': '# 设置 API Key',
+    'qs.copy': '复制',
+    'qs.p1': 'DeepSeek', 'qs.p2': 'Claude', 'qs.p3': 'GLM', 'qs.p4': 'GPT-5.5', 'qs.p5': 'MiMo', 'qs.p6': 'MiniMax',
+    'footer.left': '天枢 · MIT · 2,700+ tests',
+    'footer.gh': 'GitHub', 'footer.arch': '架构图', 'footer.npm': 'npm',
+  },
+  'en': {
+    'nav.brand': '✦ <span>Tiānshū</span> <span style="color:var(--text-dim);font-weight:400">· Rivet</span>',
+    'nav.link1': 'Differentiators', 'nav.link2': 'Cache', 'nav.link3': 'GitHub ↗',
+    'hero.eyebrow': 'v2.9 · MIT · Node 22+',
+    'hero.title1': 'Tiānshū',
+    'hero.title2': 'builds',
+    'hero.title3': 'itself.',
+    'hero.tagline': 'A terminal coding agent — <em>80% of its code</em> is built by itself. Same model weights, restored to question, verify, and self-reflect under CVM cognitive enhancement.',
+    'hero.copy': 'copy',
+    'hero.stat1': 'commits', 'hero.stat2': 'tests', 'hero.stat3': 'providers', 'hero.stat4': 'cache hit',
+    'pillars.eyebrow': '— Differentiation',
+    'pillars.title': 'Three pillars that turn "prompt engineering" into "build a runtime"',
+    'pillars.desc': 'Not "AI writes code for you" — it is a cognitive architecture that produces A/B-verifiable behavioral differences from the same model weights.',
+    'p1.title': 'Self-Bootstrapping', 'p1.sub': 'Autopoietic Development',
+    'p1.body': '2,800+ commits built by Tiānshū\'s own agent. 5 models collaborating in parallel. 154 commits with zero conflicts. Not a demo — git-verifiable history.',
+    'p2.title': 'CVM Cognitive Enhancement', 'p2.sub': 'Cognitive Virtual Machine',
+    'p2.body': 'No prompt engineering — build a runtime. Under CVM, the model regains the ability to question premises, verify claims, and reflect on its own reasoning chains. Same weights, A/B-verified behavioral difference. Not prompt magic — a runtime substrate that elicits new behaviors.',
+    'p3.title': '99.6% Cache Hit', 'p3.sub': 'Byte-Level Cache Architecture',
+    'p3.body': 'DeepSeek prices cache hits at 1/50 of cache misses. Three-zone Frozen/Working/Appendix layout + 8 Cache Killer hunters → ~97% reduction in steady-state input cost.',
+    'cache.eyebrow': '— Cache Deep Dive',
+    'cache.title': '99.6% is not a number — it is physical evidence of a 50× price gap',
+    'cache.sub': '<strong>Steady-state hit rate</strong> · DeepSeek V4 exact-prefix · long sessions',
+    'cache.z1tag': 'FROZEN', 'cache.z1title': 'Frozen Layer',
+    'cache.z1body': 'System prompt + tool definitions + stable context — never rewritten after session start. Cache hit every turn, ~1/50 cost.',
+    'cache.z2tag': 'WORKING', 'cache.z2title': 'Working Layer',
+    'cache.z2body': 'User messages + assistant responses, pure append-only. Never rewrite history; turn-to-turn delta is ~200B instead of full re-send.',
+    'cache.z3tag': 'APPENDIX', 'cache.z3title': 'Dynamic Injection',
+    'cache.z3body': 'Progress, advisories, signals — cross-turn injection that does not affect the Frozen layer\'s cache hit.',
+    'bs.eyebrow': '— Self-Bootstrapping',
+    'bs.title': '2,800+ commits built by its own agent',
+    'bs.bnUnit': 'commits',
+    'bs.sub': '<strong>5 models</strong> in parallel · <strong>154 commits</strong> zero conflicts · git-verifiable',
+    'bs.quote': '"I\'m not naturally bold. You built a world where I dare to be."',
+    'bs.quoteAuthor': 'Tānlang (Claude Opus 4.8)',
+    'qs.eyebrow': '— 60 seconds', 'qs.title': 'Three lines, start.',
+    'qs.c1': '# set API key',
+    'qs.copy': 'copy',
+    'qs.p1': 'DeepSeek', 'qs.p2': 'Claude', 'qs.p3': 'GLM', 'qs.p4': 'GPT-5.5', 'qs.p5': 'MiMo', 'qs.p6': 'MiniMax',
+    'footer.left': 'Tiānshū · MIT · 2,700+ tests',
+    'footer.gh': 'GitHub', 'footer.arch': 'Architecture', 'footer.npm': 'npm',
+  },
+};
+
+let currentLang = localStorage.getItem('rivet-mini-lang')
+  || (navigator.language && navigator.language.startsWith('en') ? 'en' : 'zh-CN');
+
+function applyLang(lang) {
+  const dict = i18n[lang]; if (!dict) return;
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = dict[key];
+    if (val == null) return;
+    if (val.indexOf('<') !== -1) el.innerHTML = val;
+    else el.textContent = val;
+  });
+  const toggle = document.getElementById('langToggle');
+  if (toggle) toggle.textContent = lang === 'zh-CN' ? 'EN' : '中文';
+  currentLang = lang;
+  localStorage.setItem('rivet-mini-lang', lang);
+}
+
+document.getElementById('langToggle').addEventListener('click', () => {
+  applyLang(currentLang === 'zh-CN' ? 'en' : 'zh-CN');
+});
+applyLang(currentLang);
+
+/* ════════════════════════════════════════════════════════════════
+   COPY — 复制按钮（带 fallback）
+   ════════════════════════════════════════════════════════════════ */
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  // Fallback — 临时 textarea
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); resolve(); }
+    catch (e) { reject(e); }
+    finally { document.body.removeChild(ta); }
+  });
+}
+
+document.querySelectorAll('[data-copy-target]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const el = document.getElementById(btn.getAttribute('data-copy-target'));
+    if (!el) return;
+    copyText(el.textContent.trim()).then(() => {
+      const orig = btn.textContent;
+      btn.classList.add('copied');
+      btn.textContent = currentLang === 'zh-CN' ? '已复制' : 'copied';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = orig; }, 1500);
+    }).catch(() => {
+      btn.textContent = currentLang === 'zh-CN' ? '复制失败' : 'failed';
+    });
+  });
+});
+
+document.querySelectorAll('[data-copy-cmd]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const cmd = btn.getAttribute('data-copy-cmd');
+    copyText(cmd).then(() => {
+      btn.classList.add('copied');
+      const orig = btn.textContent;
+      btn.textContent = currentLang === 'zh-CN' ? '✓' : '✓';
+      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = orig; }, 1500);
+    });
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════
+   STARFIELD — 60 颗 + visibilitychange 暂停
+   ════════════════════════════════════════════════════════════════ */
+const canvas = document.getElementById('starfield');
+const ctx = canvas.getContext('2d');
+let stars = [];
+let starAnimId = null;
+let starPaused = false;
+const STAR_COUNT = 60;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.scale(dpr, dpr);
+}
+
+function initStars() {
+  stars = [];
+  for (let i = 0; i < STAR_COUNT; i++) {
+    stars.push({
+      x: Math.random() * window.innerWidth,
+      y: Math.random() * window.innerHeight,
+      r: Math.random() * 1.2 + 0.3,
+      baseA: Math.random() * 0.5 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      speed: Math.random() * 0.005 + 0.002,
+    });
+  }
+}
+
+function drawStars() {
+  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  const now = Date.now() * 0.0003;
+  for (const s of stars) {
+    const a = s.baseA * (Math.sin(s.phase + now) * 0.5 + 0.5);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200,210,230,${a.toFixed(2)})`;
+    ctx.fill();
+  }
+  if (!starPaused) starAnimId = requestAnimationFrame(drawStars);
+}
+
+function startStars() {
+  if (starAnimId) return;
+  starPaused = false;
+  drawStars();
+}
+function stopStars() {
+  starPaused = true;
+  if (starAnimId) { cancelAnimationFrame(starAnimId); starAnimId = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopStars(); else startStars();
+});
+
+resize();
+initStars();
+if (!matchMedia('(prefers-reduced-motion: reduce)').matches) startStars();
+
+window.addEventListener('resize', () => {
+  resize();
+  initStars();
+  if (!starPaused) startStars();
+});
+</script>
+
+</body>
+</html>
