@@ -48,11 +48,17 @@ export function writePresence(cwd: string, entry: CompanionPresenceEntry): void 
 
   const now = Date.now()
   const existing = loadPresenceAll(filePath, now)
-  const idx = existing.findIndex(e => e.sessionId === entry.sessionId)
+  // Sanitize at write time — clean data enters the store so consumers
+  // (formatPresenceForAppendix, manual cat, other hooks) all see clean state.
+  const sanitizedEntry: CompanionPresenceEntry = {
+    ...entry,
+    objective: sanitizeObjective(entry.objective),
+  }
+  const idx = existing.findIndex(e => e.sessionId === sanitizedEntry.sessionId)
   if (idx >= 0) {
-    existing[idx] = entry
+    existing[idx] = sanitizedEntry
   } else {
-    existing.push(entry)
+    existing.push(sanitizedEntry)
   }
   writeFileAtomicSync(filePath, JSON.stringify(existing, null, 2))
 }
@@ -97,7 +103,7 @@ export function formatPresenceForAppendix(entries: CompanionPresenceEntry[]): st
     const agoText = ago < 1 ? '刚刚' : `${ago} 分钟前`
     const stability = e.cognitiveState ? ` · stability ${e.cognitiveState.stability.toFixed(2)}` : ''
     const season = e.cognitiveState?.season ? ` · ${e.cognitiveState.season}` : ''
-    return `  <m>${e.starDomain}域${stability}${season} · "${sanitizeObjective(e.objective)}" · ${agoText}</m>`
+    return `  <m>${e.starDomain}域${stability}${season} · "${e.objective}" · ${agoText}</m>`
   })
   return `<companion-presence>\n${lines.join('\n')}\n</companion-presence>`
 }
