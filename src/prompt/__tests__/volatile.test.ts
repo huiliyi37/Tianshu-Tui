@@ -1,10 +1,23 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
 import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildDynamicAppendixParts, appendixBlockName, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
+
+/** Fallback temp dir for sandboxed environments where os.tmpdir() is read-only. */
+function sandboxTmpDir(): string {
+  const sys = tmpdir()
+  try {
+    mkdtempSync(join(sys, 'probe-'))
+    return sys
+  } catch {
+    const local = join(process.cwd(), '.test-tmp')
+    if (!existsSync(local)) mkdirSync(local, { recursive: true })
+    return local
+  }
+}
 
 function ledger(): ContextLedger {
   return {
@@ -52,7 +65,7 @@ describe('volatile context layers', () => {
   })
 
   it('does not inject project knowledge files into prompt context', () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'volatile-knowledge-'))
+    const cwd = mkdtempSync(join(sandboxTmpDir(), 'volatile-knowledge-'))
     try {
       const knowledgeDir = join(cwd, '.rivet', 'knowledge')
       mkdirSync(knowledgeDir, { recursive: true })
