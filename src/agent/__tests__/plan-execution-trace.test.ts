@@ -187,7 +187,7 @@ describe('detectDeviation', () => {
     assert.equal(dev.type, 'none')
   })
 
-  it('detects replanned when all steps done but trace not completed', () => {
+  it('detects replanned when all steps done with sufficient history coverage', () => {
     let trace = createTrace('c1', 'unit', [
       makeStep('step-1'),
       makeStep('step-2'),
@@ -195,6 +195,37 @@ describe('detectDeviation', () => {
     trace = appendResult(trace, makeResult('step-1', 1))
     trace = appendResult(trace, makeResult('step-2', 2))
 
+    const dev = detectDeviation(trace, undefined)
+    assert.equal(dev.type, 'replanned')
+  })
+
+  // ── 反证：history 覆盖不足时不触发 replanned（防止虚假收敛）──
+  // 场景：agent 在一个 turn 里标记所有 step done 但只有 1 条 history。
+  // step "done" 只代表工具没报错，不代表目标真完成。
+  it('does NOT trigger replanned when history does not cover all steps', () => {
+    let trace = createTrace('c1', 'unit', [
+      makeStep('step-1'),
+      makeStep('step-2'),
+      makeStep('step-3'),
+    ])
+    // 只有 1 条 history——agent 可能在同一轮把所有 step 标记 done
+    trace = appendResult(trace, makeResult('step-1', 1))
+    // 手动标记其余为 done（模拟 buildStepResultFromTurn 的批量标记场景）
+    trace = { ...trace, steps: trace.steps.map(s => ({ ...s, status: 'done' as const })) }
+
+    const dev = detectDeviation(trace, undefined)
+    assert.notEqual(dev.type, 'replanned', 'history coverage < steps → 不应触发 replanned')
+  })
+
+  // 守卫边界：history.length === steps.length 刚好触发
+  it('triggers replanned at exact coverage boundary (history == steps)', () => {
+    let trace = createTrace('c1', 'unit', [
+      makeStep('step-1'),
+      makeStep('step-2'),
+    ])
+    trace = appendResult(trace, makeResult('step-1', 1))
+    trace = appendResult(trace, makeResult('step-2', 2))
+    // 2 steps, 2 history → 刚好满足
     const dev = detectDeviation(trace, undefined)
     assert.equal(dev.type, 'replanned')
   })

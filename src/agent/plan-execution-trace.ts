@@ -238,14 +238,18 @@ export function detectDeviation(
     }
   }
 
-  // replanned 检测不依赖 lastResult——所有步骤完成即可判断
+  // replanned 检测：所有步骤标记完成 + 足够的执行证据
+  // 守卫：history 覆盖率 >= steps 数量，防止 agent 在少数轮次内一口气
+  // 标记所有 step done 但实际未逐步执行（step done 只代表"工具没报错"，
+  // 不代表目标真完成）。见 plan-trace-coordinator.buildStepResultFromTurn。
   const allDone = trace.steps.length > 0 && trace.steps.every(
     s => s.status === 'done' || s.status === 'skip',
   )
-  if (allDone && trace.status !== 'completed') {
+  const historyCoversSteps = trace.history.length >= trace.steps.length
+  if (allDone && historyCoversSteps && trace.status !== 'completed') {
     return {
       type: 'replanned',
-      reason: '所有计划步骤已完成，trace 可标记为 completed',
+      reason: '所有计划步骤已逐步执行完成，trace 可标记为 completed',
     }
   }
 
