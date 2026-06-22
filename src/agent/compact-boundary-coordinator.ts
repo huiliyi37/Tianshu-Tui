@@ -30,6 +30,7 @@ export interface CompactBoundaryDeps {
   tryPartialCompact: (targetTurnAge: number) => Promise<boolean>
   shouldDelayCompact: (turnThreshold: number, ctx?: { estimatedTokens?: number; contextWindow?: number }) => boolean
   getStalePreviewChars: () => number
+  isCachePreservingProvider: () => boolean
   injectImmuneSignal: (signal: { kind: string; severity: number; turn: number; source: string }) => void
 }
 
@@ -86,7 +87,10 @@ export class CompactBoundaryCoordinator {
 
     // T9: Proactive Quality Compact — phase transition partial compact.
     // P2-5: only at user boundaries (turn 0).
-    if (!compactResult.compacted && this.deps.getContextWindow() >= 500_000 && turn === 0) {
+    // DeepSeek (exact-prefix cache) skips this entirely: any history reshape
+    // invalidates the prefix cache, and on a 1M window the 0.3 threshold fired
+    // at ~300K — far too aggressive, truncating usable context to 30%.
+    if (!compactResult.compacted && this.deps.getContextWindow() >= 500_000 && turn === 0 && !this.deps.isCachePreservingProvider?.()) {
       const qTokens = this.deps.getEstimatedTokens()
       const qRatio = qTokens / this.deps.getContextWindow()
       const phaseHint = this.deps.getPhaseHint()
@@ -94,7 +98,7 @@ export class CompactBoundaryCoordinator {
       this.deps.setPrevPhaseHint(phaseHint)
       const phaseTransition = prevPhaseHint !== undefined && phaseHint !== prevPhaseHint
 
-      if (qRatio > 0.3 && phaseTransition) {
+      if (qRatio > 0.55 && phaseTransition) {
         const partialOk = await this.deps.tryPartialCompact(30)
         if (partialOk) {
           userMessageConsumed = true

@@ -700,6 +700,11 @@ export class CompactionController {
     return this.deps.getAbortSignal?.()?.aborted === true
   }
 
+  /** Whether this provider uses exact-prefix cache (e.g. DeepSeek). */
+  isCachePreservingProvider(): boolean {
+    return this.deps.providerProfile?.cacheType === 'exact-prefix' && (this.deps.providerProfile?.persistent ?? false)
+  }
+
   /**
    * Replace session messages after running OAI orphan-tool_call preflight.
    *

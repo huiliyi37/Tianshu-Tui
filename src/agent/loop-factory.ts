@@ -379,6 +379,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     tryPartialCompact: target => self.compaction.tryPartialCompact(target),
     shouldDelayCompact: (threshold, ctx) => self.cacheAdvisor.shouldDelayCompact(threshold, ctx?.estimatedTokens !== undefined && ctx?.contextWindow !== undefined ? { estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow } : undefined),
     getStalePreviewChars: () => self.cacheAdvisor.getStalePreviewChars(),
+    isCachePreservingProvider: () => self.compaction.isCachePreservingProvider(),
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
   })
 }
