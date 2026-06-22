@@ -912,6 +912,11 @@ export async function executeToolUse(
     // can cause ~0.5% cache miss from otherwise identical tool results.
     finalContent = finalContent.trimEnd()
 
+    // Exploration stall advisory: append non-blocking hint to output
+    if (stall.advisory) {
+      finalContent = finalContent + '\n' + stall.advisory
+    }
+
     // LSP: notify the language server that a file changed on disk.
     // Must happen BEFORE diagnostics so the server's view is current.
     if (!harnessResult.isError && (tu.name === 'edit_file' || tu.name === 'write_file' || tu.name === 'apply_patch')) {

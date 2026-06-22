@@ -9,11 +9,12 @@ function traj(tools: string[]) {
 describe('detectExplorationStall', () => {
   it('blocks after threshold consecutive exploration tools', () => {
     const history = traj(['grep', 'read_file', 'grep', 'glob', 'read_file', 'grep', 'read_file'])
-    // 7 in history + 1 current = 8 → blocked at threshold=8
-    const result = detectExplorationStall(history, 'grep')
+    // 7 in history + 1 current = 8 → blocked at explicit threshold=8
+    const result = detectExplorationStall(history, 'grep', 8)
     assert.equal(result.blocked, true)
     assert.equal(result.consecutiveExploreCount, 8)
     assert.match(result.message!, /Exploration stall/)
+    assert.equal(result.advisory, null)
   })
 
   it('does NOT block below threshold', () => {
@@ -21,6 +22,7 @@ describe('detectExplorationStall', () => {
     const result = detectExplorationStall(history, 'read_file')
     assert.equal(result.blocked, false)
     assert.equal(result.consecutiveExploreCount, 4)
+    assert.equal(result.advisory, null)
   })
 
   it('resets count when an action tool appears in history', () => {
@@ -29,6 +31,7 @@ describe('detectExplorationStall', () => {
     const result = detectExplorationStall(history, 'grep')
     assert.equal(result.blocked, false)
     assert.equal(result.consecutiveExploreCount, 3)
+    assert.equal(result.advisory, null)
   })
 
   it('only gates exploration tools — action tools pass through', () => {
@@ -55,6 +58,32 @@ describe('detectExplorationStall', () => {
     const result = detectExplorationStall([], 'grep')
     assert.equal(result.blocked, false)
     assert.equal(result.consecutiveExploreCount, 1)
+  })
+
+  it('returns soft advisory (not blocked) at 12-14 consecutive', () => {
+    // 11 in history + 1 current = 12 → advisory, not blocked
+    const history = traj(Array.from({ length: 11 }, () => 'read_file'))
+    const result = detectExplorationStall(history, 'read_file')
+    assert.equal(result.blocked, false, 'should not hard-block at advisory level')
+    assert.equal(result.consecutiveExploreCount, 12)
+    assert.ok(result.advisory !== null, 'should have advisory message')
+    assert.ok(result.advisory!.includes('exploration'))
+  })
+
+  it('hard-blocks at 15+ consecutive', () => {
+    const history = traj(Array.from({ length: 14 }, () => 'read_file'))
+    const result = detectExplorationStall(history, 'read_file')
+    assert.equal(result.blocked, true, 'should hard-block at 15+')
+    assert.equal(result.consecutiveExploreCount, 15)
+    assert.equal(result.advisory, null)
+  })
+
+  it('does not trigger advisory before threshold 12', () => {
+    const history = traj(Array.from({ length: 10 }, () => 'read_file'))
+    const result = detectExplorationStall(history, 'read_file')
+    assert.equal(result.blocked, false)
+    assert.equal(result.consecutiveExploreCount, 11)
+    assert.equal(result.advisory, null)
   })
 
   it('EXPLORATION_TOOLS includes expected set', () => {

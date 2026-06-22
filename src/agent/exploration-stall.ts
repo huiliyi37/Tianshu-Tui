@@ -24,16 +24,18 @@ export interface ExplorationStallResult {
   blocked: boolean
   consecutiveExploreCount: number
   message: string | null
+  /** 软警告：不阻断工具，只在输出末尾追加提示 */
+  advisory: string | null
 }
 
 export function detectExplorationStall(
   trajectory: { tool: string; status: string }[],
   currentTool: string,
-  threshold = 8,
+  threshold?: number,
 ): ExplorationStallResult {
   // Only gate exploration tools
   if (!EXPLORATION_TOOLS.has(currentTool)) {
-    return { blocked: false, consecutiveExploreCount: 0, message: null }
+    return { blocked: false, consecutiveExploreCount: 0, message: null, advisory: null }
   }
 
   // Count consecutive exploration tools from end of history backwards
@@ -50,17 +52,31 @@ export function detectExplorationStall(
   }
   count++ // include current tool
 
-  if (count < threshold) {
-    return { blocked: false, consecutiveExploreCount: count, message: null }
+  // threshold parameter overrides HARD_BLOCK_THRESHOLD for backward compat
+  const HARD_BLOCK_THRESHOLD = threshold ?? 15
+  const ADVISORY_THRESHOLD = 12
+
+  if (count >= HARD_BLOCK_THRESHOLD) {
+    return {
+      blocked: true,
+      consecutiveExploreCount: count,
+      message: [
+        `Exploration stall: ${count} consecutive exploration tools (grep/read_file/glob/...) without any code changes.`,
+        'You have enough context. Write the test or implementation now.',
+        'If you truly need more exploration, explicitly state why before the next read.',
+      ].join('\n'),
+      advisory: null,
+    }
   }
 
-  return {
-    blocked: true,
-    consecutiveExploreCount: count,
-    message: [
-      `Exploration stall: ${count} consecutive exploration tools (grep/read_file/glob/...) without any code changes.`,
-      'You have enough context. Write the test or implementation now.',
-      'If you truly need more exploration, explicitly state why before the next read.',
-    ].join('\n'),
+  if (count >= ADVISORY_THRESHOLD) {
+    return {
+      blocked: false,
+      consecutiveExploreCount: count,
+      message: null,
+      advisory: `ℹ Exploration stall advisory: ${count} consecutive exploration tools. Consider acting on your findings soon.`,
+    }
   }
+
+  return { blocked: false, consecutiveExploreCount: count, message: null, advisory: null }
 }
