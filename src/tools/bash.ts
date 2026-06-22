@@ -91,8 +91,10 @@ function rtkRewrite(command: string, toolUseId?: string): string {
 }
 
 // ── bash-level file read tracking ──
-// Detects when the model repeatedly reads the same file via cat/grep/head/tail/wc,
-// which burns context tokens without adding information. Mirrors read_file's dedup.
+// Detects when the model repeats the same command on the same file, which burns
+// context tokens without adding information. Keyed by verb+path+pattern to
+// avoid false warnings when different commands access the same path (e.g.
+// head vs tail, grep with different patterns).
 const bashFileReads = new Map<string, { command: string; toolUseId: string; at: number }>()
 const BASH_READ_PATTERNS = [
   /(?:^|[;&|]\s*)cat\s+['"]?([^'"\s;|&]+)['"]?/g,
@@ -100,18 +102,36 @@ const BASH_READ_PATTERNS = [
   /(?:^|[;&|]\s*)head\s+.*\s+['"]?([^'"\s;|&]+)['"]?/g,
   /(?:^|[;&|]\s*)tail\s+.*\s+['"]?([^'"\s;|&]+)['"]?/g,
 ]
-function checkBashReread(command: string, toolUseId: string): string | null {
+
+/** Derive a command-verb + file-path signature for bash reread dedup. */
+function bashReadKey(command: string, filePath: string): string {
+  const verbMatch = command.match(/^\s*(cat|grep|head|tail)\b/)
+  const verb = verbMatch ? verbMatch[1]! : 'other'
+  if (verb === 'grep') {
+    // Extract the pattern (first non-flag argument before the file path)
+    const patternMatch = command.match(/grep\s+(?:-[a-zA-Z]+\s+)*['"]?([^'"\s|&;]+)['"]?/)
+    return `grep:${filePath}:${patternMatch ? patternMatch[1]! : ''}`
+  }
+  if (verb === 'head' || verb === 'tail') {
+    // Include line count if specified
+    const lineCount = command.match(/-\d+/)?.[0] ?? ''
+    return `${verb}:${filePath}:${lineCount}`
+  }
+  return `${verb}:${filePath}`
+}
+
+export function checkBashReread(command: string, toolUseId: string): string | null {
   for (const pattern of BASH_READ_PATTERNS) {
     pattern.lastIndex = 0
     let match: RegExpExecArray | null
     while ((match = pattern.exec(command)) !== null) {
       const filePath = match[1]!
       if (filePath.startsWith('/tmp/') || filePath.startsWith('/dev/') || filePath === '-') continue
-      const key = filePath
+      const key = bashReadKey(command, filePath)
       const prior = bashFileReads.get(key)
       if (prior && prior.toolUseId !== toolUseId) {
         bashFileReads.set(key, { command: command.slice(0, 80), toolUseId, at: Date.now() })
-        return `── bash-reread ──\n⚠ 该文件已被 bash 读取过: ${prior.command}。重复读取浪费上下文。如需多次查询，先 cat > /tmp 一次，后续操作在 /tmp 上进行。\n── bash-reread ──`
+        return `── bash-reread ──\n⚠ 已用相同的 bash 命令读取过该文件: ${prior.command}。重复读取浪费上下文。如需多次查询，先 cat > /tmp 一次，后续操作在 /tmp 上进行。\n── bash-reread ──`
       }
       bashFileReads.set(key, { command: command.slice(0, 80), toolUseId, at: Date.now() })
     }
