@@ -557,7 +557,10 @@ async function main() {
     const cost = (normalInput * 1 + cacheRead * 0.1 + total.output_tokens * 4) / 1_000_000
     const maxTokens = ctx.agent.config.contextWindow ?? currentModel?.contextWindow ?? 0
     return {
-      estimatedTokens: session.getEstimatedTokens(),
+      // Real occupancy: anchor on last API prompt_tokens + estimate the tail
+      // appended since (provider-agnostic — works for DeepSeek/MiMo/GLM). Falls
+      // back to the calibrated estimate before the first response / post-compact.
+      estimatedTokens: session.getRealOccupancy(),
       maxTokens,
       cacheHitRate: session.getRecentTurnHitRate(3) ?? session.getCacheHitRate(),
       cost,

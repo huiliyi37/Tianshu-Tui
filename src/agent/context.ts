@@ -40,6 +40,14 @@ export interface SessionState {
   turnCount: number
   startTime: number
   estimatedTokens: number
+  /** Estimated tokens of messages appended SINCE the last API response
+   *  (the "tail" not yet reflected in lastRealPromptTokens). Reset to 0 on
+   *  every addUsage() carrying input_tokens; incremented as messages are
+   *  appended. Used by getRealOccupancy() to anchor on exact tokenization and
+   *  estimate only the un-sent tail — mirrors Claude Code's tokenCountWith-
+   *  Estimation, adapted for OpenAI-compatible providers (prompt_tokens already
+   *  includes cache, so no cache add-back). */
+  tailEstimate: number
   filesRead: Set<string>
   filesModified: Set<string>
   testResults: Array<{ passed: number; failed: number }>
@@ -86,6 +94,7 @@ export class SessionContext {
       turnCount: 0,
       startTime: Date.now(),
       estimatedTokens: 0,
+      tailEstimate: 0,
       prefixOverhead: 0,
       lastRealPromptTokens: 0,
       contextCalibrationRatio: 1,
@@ -127,7 +136,9 @@ export class SessionContext {
       msg = { role: 'user', content: sanitizeForJsonTransport(content) }
     }
     this.state.oaiMessages.push(msg)
-    this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+    const t = estimateOaiMessageTokens(msg)
+    this.state.estimatedTokens += t
+    this.state.tailEstimate += t
     this.state.turnCount++
     this.onMutation?.({ type: 'append', message: msg })
   }
@@ -160,7 +171,9 @@ export class SessionContext {
       const oldTokens = estimateOaiMessageTokens(last)
       const merged = { ...last, content: last.content + '\n' + sanitizeForJsonTransport(wrapped) }
       msgs[msgs.length - 1] = merged
-      this.state.estimatedTokens += estimateOaiMessageTokens(merged) - oldTokens
+      const delta = estimateOaiMessageTokens(merged) - oldTokens
+      this.state.estimatedTokens += delta
+      this.state.tailEstimate += delta
       this.onMutation?.({ type: 'replace', messages: msgs.slice() })
       return
     }
@@ -185,7 +198,9 @@ export class SessionContext {
           'This method may only be used to roll back user messages on abort/error.',
         )
       }
-      this.state.estimatedTokens -= estimateOaiMessageTokens(msg)
+      const t = estimateOaiMessageTokens(msg)
+      this.state.estimatedTokens -= t
+      this.state.tailEstimate = Math.max(0, this.state.tailEstimate - t)
       this.state.turnCount--
       // Emit a replace mutation so the persistence layer rewrites the file
       // without the removed message. We use 'replace' (full rewrite) rather
@@ -200,6 +215,12 @@ export class SessionContext {
   replaceMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
+    // Compaction rebuilt the history → the real-prompt anchor now reflects the
+    // pre-compaction (larger) request and would over-report. Invalidate it so
+    // getRealOccupancy() falls back to the freshly recomputed local estimate of
+    // the new (smaller) message list until the next API response re-anchors.
+    this.state.lastRealPromptTokens = 0
+    this.state.tailEstimate = 0
     // Snapshot the array so subsequent mutations to state.oaiMessages don't
     // bleed into a listener's deferred work (e.g. async disk write).
     this.onMutation?.({ type: 'replace', messages: messages.slice() })
@@ -214,6 +235,8 @@ export class SessionContext {
   rewindToMessages(messages: OaiMessage[]): void {
     this.state.oaiMessages = messages
     this.state.estimatedTokens = estimateOaiTokens(messages)
+    this.state.lastRealPromptTokens = 0
+    this.state.tailEstimate = 0
     this.state.turnCount = messages.filter(m => m.role === 'user').length
     this.state.turnCacheHistory = []
     this.state.compactedAtTurns = new Set()
@@ -239,7 +262,9 @@ export class SessionContext {
       ...(processedCalls.length > 0 ? { tool_calls: processedCalls } : {}),
     }
     this.state.oaiMessages.push(msg)
-    this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+    const t = estimateOaiMessageTokens(msg)
+    this.state.estimatedTokens += t
+    this.state.tailEstimate += t
     this.onMutation?.({ type: 'append', message: msg })
   }
 
@@ -249,7 +274,9 @@ export class SessionContext {
         const trimmed = sanitizeForJsonTransport(trimToolResultForMemory(block.content))
         const msg: OaiMessage = { role: 'tool', tool_call_id: block.tool_use_id, content: trimmed }
         this.state.oaiMessages.push(msg)
-        this.state.estimatedTokens += estimateOaiMessageTokens(msg)
+        const t = estimateOaiMessageTokens(msg)
+        this.state.estimatedTokens += t
+        this.state.tailEstimate += t
         this.onMutation?.({ type: 'append', message: msg })
       }
     }
@@ -260,6 +287,11 @@ export class SessionContext {
     if (usage.input_tokens) {
       u.input_tokens += usage.input_tokens
       this.state.lastRealPromptTokens = usage.input_tokens
+      // This API response just measured the exact prompt occupancy; everything
+      // sent is now folded into lastRealPromptTokens, so the estimated tail
+      // resets. Messages appended after this point (assistant reply, tool
+      // results, next user turn) rebuild the tail until the next response.
+      this.state.tailEstimate = 0
       // Calibrate local estimate against the API's real prompt_tokens.
       // The raw estimatedTokens tracks current messages only; prefixOverhead
       // is fixed. The ratio captures provider-specific tokenization / overhead
@@ -331,6 +363,31 @@ export class SessionContext {
   getEstimatedTokens(): number {
     const base = this.state.estimatedTokens + this.state.prefixOverhead
     return Math.round(base * this.state.contextCalibrationRatio)
+  }
+
+  /**
+   * Real context-window occupancy for display: anchor on the model's exact
+   * tokenization (last API prompt_tokens) and estimate only the un-sent tail.
+   *
+   *   realOccupancy = lastRealPromptTokens + estimate(messages since last response)
+   *
+   * Provider-agnostic: lastRealPromptTokens is the post-calibration input_tokens
+   * recorded in addUsage(), which calibrateUsage() already normalizes per model
+   * — for OpenAI-compatible providers (DeepSeek / MiMo) prompt_tokens already
+   * includes cache, and for GLM (usageCalibrationFactor=0) it is replaced by a
+   * local request estimate. Either way it is the best available "real" anchor,
+   * so no per-model branching is needed here.
+   *
+   * Before the first API response of a session (or right after a compaction
+   * invalidates the anchor) lastRealPromptTokens is 0 → fall back to the
+   * calibrated whole-history estimate. This is display-only; compaction and
+   * pressure thresholds keep using getEstimatedTokens().
+   */
+  getRealOccupancy(): number {
+    if (this.state.lastRealPromptTokens > 0) {
+      return this.state.lastRealPromptTokens + this.state.tailEstimate
+    }
+    return this.getEstimatedTokens()
   }
 
   /** API 最近一轮返回的真实 prompt_tokens（校准基准）；0 表示尚无数据。 */

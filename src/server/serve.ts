@@ -455,8 +455,9 @@ function buildManagedAgent(
       }
       return spec.model.id
     },
-    // Context usage display (desktop header progress bar).
-    getEstimatedTokens: () => agent.session.getEstimatedTokens(),
+    // Context usage display (desktop header progress bar) — real occupancy
+    // (last API prompt_tokens + tail estimate), provider-agnostic.
+    getEstimatedTokens: () => agent.session.getRealOccupancy(),
     getContextWindow: () => spec.model.contextWindow,
     // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
     // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。

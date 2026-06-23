@@ -875,6 +875,12 @@ export class AgentLoop {
     return this.session.getEstimatedTokens()
   }
 
+  /** Real context-window occupancy (anchor on last API prompt_tokens + tail
+   *  estimate) — for display only. See SessionContext.getRealOccupancy. */
+  getRealOccupancy(): number {
+    return this.session.getRealOccupancy()
+  }
+
   /** Model context window size in tokens. */
   getContextWindow(): number {
     return this.config.contextWindow

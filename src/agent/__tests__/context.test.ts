@@ -507,6 +507,80 @@ describe('SessionContext lastRealPromptTokens', () => {
   })
 })
 
+describe('SessionContext getRealOccupancy', () => {
+  it('falls back to getEstimatedTokens before the first API response', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello world')
+    assert.equal(ctx.getLastRealPromptTokens(), 0)
+    assert.equal(ctx.getRealOccupancy(), ctx.getEstimatedTokens())
+  })
+
+  it('anchors on lastRealPromptTokens once the API has responded (no tail yet)', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 50_000 })
+    // Right after the response, the tail is empty → occupancy == anchor.
+    assert.equal(ctx.getRealOccupancy(), 50_000)
+  })
+
+  it('adds the estimated tail (messages appended since the last response)', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 50_000 })
+    ctx.addAssistantBlocks([{ type: 'text', text: 'a reply that adds some tail tokens' }])
+    ctx.addToolResults([{ type: 'tool_result', tool_use_id: 't1', content: 'tool output here' }])
+    const occ = ctx.getRealOccupancy()
+    assert.ok(occ > 50_000, `expected tail to lift occupancy above the anchor, got ${occ}`)
+    // The lift equals exactly the estimate of the appended tail messages.
+    assert.equal(occ - 50_000 > 0, true)
+  })
+
+  it('resets the tail on the next API response (anchor re-captures everything sent)', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 50_000 })
+    ctx.addAssistantBlocks([{ type: 'text', text: 'reply' }])
+    ctx.addToolResults([{ type: 'tool_result', tool_use_id: 't1', content: 'output' }])
+    assert.ok(ctx.getRealOccupancy() > 50_000)
+    // Next request sends the grown history; the API reports the true total.
+    ctx.addUsage({ input_tokens: 53_000 })
+    assert.equal(ctx.getRealOccupancy(), 53_000, 'tail must reset to 0 on the new anchor')
+  })
+
+  it('output-only addUsage (abort path) does not reset the tail', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 50_000 })
+    ctx.addAssistantBlocks([{ type: 'text', text: 'partial reply' }])
+    const withTail = ctx.getRealOccupancy()
+    ctx.addUsage({ output_tokens: 200 })
+    assert.equal(ctx.getRealOccupancy(), withTail, 'abort usage must not collapse the tail')
+  })
+
+  it('invalidates the anchor after compaction (replaceMessages) → falls back to local estimate', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('hello')
+    ctx.addUsage({ input_tokens: 500_000 })
+    // Compaction rebuilds a much smaller history.
+    ctx.replaceMessages([{ role: 'user', content: 'compacted summary' }])
+    assert.equal(ctx.getLastRealPromptTokens(), 0, 'anchor invalidated by compaction')
+    // Occupancy now reflects the small compacted list, not the stale 500k anchor.
+    assert.equal(ctx.getRealOccupancy(), ctx.getEstimatedTokens())
+    assert.ok(ctx.getRealOccupancy() < 500_000, 'must not over-report the pre-compaction prompt')
+  })
+
+  it('removeLastMessage (abort rollback) decrements the tail', () => {
+    const ctx = new SessionContext()
+    ctx.addUserMessage('first')
+    ctx.addUsage({ input_tokens: 10_000 })
+    const anchorOnly = ctx.getRealOccupancy()
+    ctx.addUserMessage('a rolled-back user message')
+    assert.ok(ctx.getRealOccupancy() > anchorOnly)
+    ctx.removeLastMessage()
+    assert.equal(ctx.getRealOccupancy(), anchorOnly, 'tail must return to baseline after rollback')
+  })
+})
+
 describe('SessionContext contextCalibrationRatio', () => {
   it('calibrates getEstimatedTokens after addUsage', () => {
     const ctx = new SessionContext()
