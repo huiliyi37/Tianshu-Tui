@@ -74,48 +74,19 @@ export const HASH_EDIT_TOOL: Tool = {
     name: 'hash_edit',
     description: `Content-hash anchored file editing. Safer alternative to edit_file.
 
-### Why use hash_edit instead of edit_file
-- No whitespace ambiguity — anchors are L<num>:<8-char-hex-hash>
-- No "unique in file" requirement — each anchor is line-specific
-- Stale file detection — if the file changed since your read, the edit is rejected
-- Token efficiency — anchors are tiny compared to reproducing content verbatim
+Anchors use format L<line>:<8-char-hex> (full hash verification) or L<line>
+(position-only fast path — use only when you just read the file). Supply 1-3
+anchors: first and last define the inclusive replacement range; a middle anchor
+validates the interior. Single-anchor mode inserts content after that line.
 
-### How anchors work
-After reading a file, compute the hash of each target line:
-  L5:a1b2c3d4 means "line 5's content hashes to a1b2c3d4"
+Hash: SHA256(line_content_without_trailing_cr)[0:8].
+Grep results include anchor hints for single-file matches.
 
-Supply 1-3 anchors that identify the block to replace. The first and last anchor
-define the inclusive range; a middle anchor validates the interior.
+⚠ Position-only: never chain consecutive calls — each hash_edit changes the
+file, invalidating subsequent L<line> anchors.
 
-### Examples
-Replace lines 5-7 (3 lines) with new content:
-  hash_edit(file_path="/abs/path/src/app.ts", anchors=["L5:a1b2c3d4", "L7:e5f6a7b8"], new_string="new line 5\\nnew line 6\\nnew line 7")
-
-Delete lines 10-12:
-  hash_edit(file_path="/abs/path/src/app.ts", anchors=["L10:deadbeef", "L12:cafebabe"], new_string="")
-
-Insert after line 42 (anchor points to line 42, replace 0 lines):
-  hash_edit(file_path="/abs/path/src/app.ts", anchors=["L42:feedface"], new_string="inserted line\\n")
-
-### Position-only mode (fast path)
-When you just read the file and are confident it hasn't changed, omit the hash:
-  hash_edit(file_path="/abs/path/src/app.ts", anchors=["L5", "L7"], new_string="new line 5\\nnew line 6\\nnew line 7")
-This verifies the line number exists AND checks that the file has not been
-modified by another tool since your last read_file (same staleness guard as
-edit_file). Use when you just read the file — never chain position-only calls.
-
-### Hash computation
-The hash is SHA256(line_content_without_trailing_cr)[0:8].
-Use read_file first to see current content, then construct anchors from the lines you want to target.
-
-### grep → hash_edit direct path (large file editing)
-For large files, you can skip read_file entirely:
-1. grep(pattern="targetCode", path="/abs/path/file.ts") → grep results include hash_edit anchor hints
-2. Copy the anchor from the hints (e.g. L580:a1b2c3d4)
-3. hash_edit(file_path="/abs/path/file.ts", anchors=["L580:a1b2c3d4"], new_string="replacement")
-This avoids the read→truncate→re-read loop for large files.
-
-**Note:** For large new_string blocks, the message history keeps only a short pointer (file_path + size) instead of the full replacement text. The edit is still applied to disk in full — use \`read_file\` to review the current content in a later turn.`,
+Note: For large new_string, the message history keeps only a short pointer
+(file_path + size). Use read_file to review the current content in a later turn.`,
     input_schema: {
       type: 'object',
       properties: {

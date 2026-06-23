@@ -20,14 +20,10 @@ export const REQUEST_PATH_ACCESS_TOOL: Tool = {
     name: 'request_path_access',
     description: `Request user permission to access a path OUTSIDE the current workspace.
 
-Use this when the user has authorized work outside the project directory — e.g. writing an artifact to ~/Desktop, reading a file under /tmp, or letting bash touch the parent directory. The user must approve the request; on approval the directory subtree becomes readable/writable for this session (and persistently for this workspace if remember=true).
-
-Prefer this for bash-based out-of-workspace work and when granting a whole directory up-front. For a single out-of-workspace read_file/write_file, you can just call that tool directly — it will prompt for the same grant inline.
-
-Examples:
-Good: request_path_access(path="~/Desktop", mode="write")  → then write the zip there
-Good: request_path_access(path="/tmp", mode="read")  → then read_file under /tmp
-Good: request_path_access(path="../sibling-project", mode="write", remember=true)`,
+Use for batch/directory grants or bash-based out-of-workspace work. On approval
+the directory subtree becomes readable/writable for this session (persist with
+remember=true). For single out-of-workspace file reads/writes, calling
+read_file/write_file directly triggers the same inline prompt.`,
     input_schema: {
       type: 'object',
       properties: {
