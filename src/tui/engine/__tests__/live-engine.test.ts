@@ -154,6 +154,103 @@ test('R2: 仅一行变化时，未变行不被重写', () => {
   assert.ok(!frame.includes('INPUT'), '未变行 INPUT 不应被重写')
 })
 
+// ── H2：无变化短路（内容相同不产生任何写入） ──────────────────
+
+test('H2: 内容与上帧逐行相同时短路，不产生任何 stdout 写入', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+  // 完全相同内容重渲
+  engine.render(lines('A', 'B', 'C'))
+  const frame = term.flush()
+
+  assert.equal(frame, '', '内容未变应短路，零写入')
+})
+
+test('H2: 内容变化后正常渲染（短路不影响真实更新）', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+  engine.render(lines('A', 'B', 'C')) // 短路
+  assert.equal(term.flush(), '')
+  engine.render(lines('A', 'B', 'C2')) // 真实变化
+  const frame = term.flush()
+  assert.ok(frame.includes('C2'), '变化帧应正常渲染')
+})
+
+test('H2: clear 后即使内容相同也重新 append（forceRedraw 不被误短路）', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  engine.render(lines('A', 'B', 'C'))
+  term.flush()
+  engine.clear() // 模拟 forceRedraw 的 live.clear()
+  term.flush()
+  engine.render(lines('A', 'B', 'C')) // 相同内容，但 clear 后必须重画
+  const frame = term.flush()
+  assert.ok(frame.includes('A') && frame.includes('C'), 'clear 后相同内容必须重新 append，不可短路')
+})
+
+// ── H1：wrap 行参与增量 diff（高度不变时不全量重写） ──────────
+
+test('H1: 多行 wrap 行高度不变时走增量 diff（未变 wrap 行不重写）', () => {
+  const term = new MockTerminal(40, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  // 第一行 90 字符 → 宽 40 时 ceil(90/40)=3 显示行。STATUS 短行 1 显示行。
+  const wide = 'W'.repeat(90)
+  engine.render(lines('STATUS-0', wide, 'INPUT'))
+  term.flush()
+  // 仅 STATUS 变化；wide(3行) 与 INPUT 不变，wrap 高度全部不变 → 应走增量。
+  engine.render(lines('STATUS-1', wide, 'INPUT'))
+  const frame = term.flush()
+
+  assert.ok(frame.includes('STATUS-1'), '变化行应被重写')
+  assert.ok(!frame.includes('W'.repeat(90)), '未变的 wrap 行不应被重写')
+  assert.ok(!frame.includes('INPUT'), '未变的 INPUT 不应被重写')
+  // 增量路径标志：含 cursorUp 回顶，不含全量 ERASE_SCREEN_END 之外仍是增量
+  assert.ok(/\x1B\[\d+A/.test(frame) || frame.includes('\x1B[1A') || frame.startsWith('\x1B[?2026h'),
+    '应为增量帧（CSI 2026 包裹）')
+})
+
+test('H1: 变化的多行 wrap 行被完整擦除续行后重写（不留 ghost）', () => {
+  const term = new MockTerminal(40, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  const wideA = 'A'.repeat(90) // 3 显示行
+  const wideB = 'B'.repeat(90) // 3 显示行（高度相同 → 仍可增量）
+  engine.render(lines('TOP', wideA, 'INPUT'))
+  term.flush()
+  engine.render(lines('TOP', wideB, 'INPUT'))
+  const frame = term.flush()
+
+  // 变化的 wrap 行：应对其 3 个显示行各发一次 ERASE_LINE（首行 + 2 续行）
+  const eraseCount = (frame.match(/\x1B\[2K/g) || []).length
+  assert.ok(eraseCount >= 3, `变化的 3 显示行 wrap 行应擦除全部续行（≥3 次 ERASE_LINE），实际 ${eraseCount}`)
+  assert.ok(frame.includes('B'.repeat(90)), '新内容应被写入')
+  assert.ok(!frame.includes('TOP'), '未变的 TOP 不应被重写')
+})
+
+test('H1: wrap 高度变化时回退全量重写（不走增量）', () => {
+  const term = new MockTerminal(40, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 30 })
+
+  const short = 'S'.repeat(30) // 1 显示行
+  const grown = 'S'.repeat(90) // 3 显示行（高度变化 → 级联，回退全量）
+  engine.render(lines('TOP', short, 'INPUT'))
+  term.flush()
+  engine.render(lines('TOP', grown, 'INPUT'))
+  const frame = term.flush()
+
+  // 全量重写会用 ERASE_SCREEN_END（\x1B[0J）一次性擦到屏末并重写全部行
+  assert.ok(frame.includes('\x1B[0J'), 'wrap 高度变化应回退全量重写（含 ERASE_SCREEN_END）')
+  assert.ok(frame.includes('TOP'), '全量重写会重写所有行（含 TOP）')
+})
+
 // ── R3 / 阶段3：CSI 2026 同步输出包裹增量帧 ─────────────────────
 
 test('阶段3: 增量帧用 CSI 2026 同步输出包裹（防撕裂）', () => {

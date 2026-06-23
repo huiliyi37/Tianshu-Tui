@@ -109,8 +109,24 @@ export class LiveEngine {
    * @param lines 要显示的行（含 ANSI 格式化）
    */
   render(lines: readonly LiveRegionLine[], opts?: { reservedTail?: number }): void {
-    this.reconcileWidth()
     const bounded = this.applyRowBudget(lines, opts?.reservedTail)
+
+    // H2 无变化短路：屏上 live region 内容与本帧逐行完全一致且终端宽度未变 →
+    // 无需任何重绘（省去 diff 计算与 stdout 写入）。idle / ticker 空转的主要省功点。
+    // 用 lineCache（屏上真实内容的权威记录）比对，天然兼容 clear/reset/overlay 退出：
+    // 那些路径会令 lastDisplayRows===0 或 hasRendered===false，不会被误短路。
+    const currentColumns = this.stdout.columns || 80
+    if (
+      this.hasRendered &&
+      this.lastDisplayRows > 0 &&
+      currentColumns === this.lastColumns &&
+      bounded.length === this.lineCache.length &&
+      bounded.every((l, i) => l.text === this.lineCache[i])
+    ) {
+      return
+    }
+
+    this.reconcileWidth()
     const newDisplayRows = this.countDisplayRows(bounded)
 
     // 首次渲染 或 clear/clearForCommit 之后（lastDisplayRows === 0）：
@@ -125,11 +141,13 @@ export class LiveEngine {
 
     const prevDisplayRows = this.lastDisplayRows
 
-    // 行级 diff 资格：行数相同且新旧每行均为单显示行（多行 wrap 走全量重写更稳）。
+    // 行级 diff 资格：行数相同，且**每行**的显示行数（wrap 高度）新旧一致。
+    // 关键不变量：逐行 wrap 高度不变 → 改某行不会让后续行整体上/下移（无级联），
+    // 相对光标步进（cursorDown 按显示行数）才能精确对齐。任一行 wrap 高度变化 →
+    // 会级联错位，回退全量重写（更稳）。允许多行 wrap 行参与增量。
     const canDiff =
       bounded.length === this.lineCache.length &&
-      bounded.every(l => this.rowsForLine(l.text) === 1) &&
-      this.lineCache.every(t => this.rowsForLine(t) === 1)
+      bounded.every((l, i) => this.rowsForLine(l.text) === this.rowsForLine(this.lineCache[i]!))
 
     const body = canDiff
       ? this.buildDiff(bounded, prevDisplayRows)
@@ -193,17 +211,32 @@ export class LiveEngine {
   }
 
   /**
-   * 行级 diff（仅在结构未变 + 全单显示行时调用）：
-   * 回顶后逐行——变化行 `\r` + 整行擦除 + 重写；未变行只 cursorDown 跳过不重写。
+   * 行级 diff（结构未变 + 每行 wrap 高度未变时调用，见 canDiff）：
+   * 回顶后逐行处理——变化行清除其全部显示行后重写；未变行只按显示行数 cursorDown 跳过。
    * 不写任何 `\n`（cursorDown 在底行会被 clamp，不触发滚屏）。
+   *
+   * 光标步进不变量：每次迭代开始时光标位于「逻辑行 i 的首个显示行」，
+   * 处理结束时（cursorDown 之前）位于「逻辑行 i 的最后一个显示行」，
+   * 再 cursorDown(1) 进入下一逻辑行首行。变化行与未变行两条分支都满足该不变量。
    */
   private buildDiff(bounded: readonly LiveRegionLine[], prevDisplayRows: number): string {
     let out = this.moveToTop(prevDisplayRows)
     for (let i = 0; i < bounded.length; i++) {
       const text = bounded[i]!.text
+      const rows = this.rowsForLine(text) // == rowsForLine(lineCache[i])，canDiff 已保证
       out += '\r'
       if (this.lineCache[i] !== text) {
-        out += ANSI.ERASE_LINE + text
+        // 变化行：先擦除其占用的全部显示行（含 wrap 续行），再写入新内容。
+        // 仅擦首行会让旧的 wrap 续行残留为 ghost。
+        out += ANSI.ERASE_LINE
+        for (let k = 1; k < rows; k++) {
+          out += cursorDown(1) + '\r' + ANSI.ERASE_LINE
+        }
+        if (rows > 1) out += cursorUp(rows - 1) // 回到本行首行再写
+        out += text // 自动 wrap 至 rows 个显示行，光标落在最后一个显示行末
+      } else if (rows > 1) {
+        // 未变的多行 wrap 行：不重写，仅下移到其最后一个显示行。
+        out += cursorDown(rows - 1)
       }
       if (i < bounded.length - 1) out += cursorDown(1)
     }
