@@ -76,7 +76,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           alias: 'glm',
           contextWindow: 1_000_000,
           maxTokens: 131072,
-          reasoningEffort: 'high',
+          reasoningEffort: 'max',
         },
       ],
       unsupported: ['stream_options'],

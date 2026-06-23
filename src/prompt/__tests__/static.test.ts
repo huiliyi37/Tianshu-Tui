@@ -181,6 +181,13 @@ describe('buildSystemPrompt', () => {
     assert.ok(glm.includes('每轮最多围绕一个假设查 3 个关键证据'))
     assert.ok(glm.includes('步骤纪律'))
     assert.ok(glm.includes('先建 todo 列表再执行'))
+    // action-driven elimination methodology + plan/implement layering
+    assert.ok(glm.includes('用行动排除，不用推理排除'))
+    assert.ok(glm.includes('探针'))
+    assert.ok(glm.includes('红灯'))
+    assert.ok(glm.includes('不要在推理里写完整代码'))
+    assert.ok(glm.includes('计划阶段'))
+    assert.ok(glm.includes('实施阶段'))
 
     const unknown = buildSystemPrompt({ tools: [], modelFamily: 'unknown' })
     assert.ok(!unknown.includes('<calibration>'))
