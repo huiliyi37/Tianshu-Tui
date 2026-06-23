@@ -104,6 +104,8 @@ body {
 }
 .thread-tab:hover .thread-tab-close { opacity: 0.6; }
 .thread-tab-close:hover { opacity: 1 !important; color: var(--error); }
+.thread-tab.dragging { opacity: 0.4; cursor: grabbing; }
+.thread-tab.drag-over { border-bottom-color: var(--accent); opacity: 0.7; }
 
 /* Terminal panel — placeholder. Height reserved for future PTY. */
 .terminal-panel {

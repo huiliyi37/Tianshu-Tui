@@ -11,6 +11,23 @@ const KEY_SIDEBAR = 'tianshu.sidebarVisible'
 const KEY_REVIEW = 'tianshu.reviewVisible'
 const KEY_TERMINAL = 'tianshu.terminalVisible'
 const KEY_TABS = 'tianshu.openTabs'
+const KEY_SPLIT_MODE = 'tianshu.splitMode'
+
+// ── Split mode (Phase 3 preview, persisted now) ──
+
+export type SplitMode = 'none' | 'horizontal' | 'vertical'
+
+export function loadSplitMode(): SplitMode {
+  try {
+    const v = localStorage.getItem(KEY_SPLIT_MODE)
+    if (v === 'horizontal' || v === 'vertical') return v
+  } catch { /* non-fatal */ }
+  return 'none'
+}
+
+export function saveSplitMode(mode: SplitMode): void {
+  try { localStorage.setItem(KEY_SPLIT_MODE, mode) } catch { /* non-fatal */ }
+}
 
 // ── Tool density ──
 

@@ -63,9 +63,20 @@ export function App() {
         return
       }
       // Cmd+1..4 → switch surface
-      if (mod && e.key >= '1' && e.key <= '4') {
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '4') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
+        return
+      }
+      // Cmd+Shift+[ / ] → cycle tabs (previous / next)
+      if (mod && e.shiftKey && (e.key === '[' || e.key === ']')) {
+        e.preventDefault()
+        const tabs = ui.openTabs
+        if (tabs.length < 2) return
+        const idx = ui.activeSessionId ? tabs.indexOf(ui.activeSessionId) : -1
+        const dir = e.key === '[' ? -1 : 1
+        const next = tabs[(idx + dir + tabs.length) % tabs.length]
+        if (next) dispatch({ type: 'setActive', id: next })
         return
       }
       // Cmd+Shift+B → toggle review panel (must precede Cmd+B)
@@ -114,7 +125,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible, ui.activeSessionId])
+  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible, ui.activeSessionId, ui.openTabs])
 
   const jumpTo = (cwd: string, id: string) => {
     dispatch({ type: 'setProject', cwd })

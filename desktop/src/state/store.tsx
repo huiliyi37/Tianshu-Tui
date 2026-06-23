@@ -8,6 +8,7 @@ import {
   loadReviewVisible,
   loadTerminalVisible,
   loadToolDensity,
+  loadSplitMode,
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
@@ -16,7 +17,9 @@ import {
   saveReviewVisible,
   saveTerminalVisible,
   saveToolDensity,
+  saveSplitMode,
   type ToolDensity,
+  type SplitMode,
 } from '../lib/persist'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
@@ -36,6 +39,8 @@ export interface UiState {
   terminalVisible: boolean
   /** Ordered list of open thread IDs (tabs). First = most recently used. */
   openTabs: string[]
+  /** Split editor mode — reserved for Phase 3, persisted now so it survives reload. */
+  splitMode: SplitMode
   /** True when the user explicitly toggled review panel open (Cmd+Shift+B).
    *  Resets when the workspace width recovers above the responsive threshold. */
   reviewManuallyToggled: boolean
@@ -53,6 +58,8 @@ type UiAction =
   | { type: 'setReview'; visible: boolean }
   | { type: 'setTerminal'; visible: boolean }
   | { type: 'closeTab'; id: string }
+  | { type: 'reorderTabs'; from: number; to: number }
+  | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
 
 function reducer(state: UiState, action: UiAction): UiState {
@@ -92,6 +99,15 @@ function reducer(state: UiState, action: UiAction): UiState {
         : state.activeSessionId
       return { ...state, openTabs: tabs, activeSessionId: activeId }
     }
+    case 'reorderTabs': {
+      const tabs = [...state.openTabs]
+      const [moved] = tabs.splice(action.from, 1)
+      if (!moved) return state
+      tabs.splice(action.to, 0, moved)
+      return { ...state, openTabs: tabs }
+    }
+    case 'setSplitMode':
+      return { ...state, splitMode: action.mode }
     case 'setReviewManual':
       return { ...state, reviewManuallyToggled: action.on }
     default:
@@ -115,6 +131,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
     openTabs: loadOpenTabs(),
+    splitMode: loadSplitMode(),
     reviewManuallyToggled: false,
   }))
 
@@ -149,6 +166,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveOpenTabs(state.openTabs)
   }, [state.openTabs])
+
+  useEffect(() => {
+    saveSplitMode(state.splitMode)
+  }, [state.splitMode])
 
   return (
     <StateCtx.Provider value={state}>
