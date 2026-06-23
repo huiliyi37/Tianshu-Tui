@@ -41,8 +41,7 @@ import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
 import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
-import { createRecallTool } from '../tools/recall.js'
-import { createRememberTool } from '../tools/remember.js'
+import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import { ProviderHealthTracker } from '../agent/provider-health.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
@@ -261,15 +260,12 @@ function buildSessionStores(
   }
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
 
-  // recall / remember：bootstrap 在 createInteractiveToolRegistry 外装的两个工具，
+  // memory (unified recall + remember)：bootstrap 在 createInteractiveToolRegistry 外装的工具，
   // 这里复用 sidecar 已有的 claimStore + session 完成对齐。
-  toolRegistry.register(createRecallTool(claimStore, {
+  toolRegistry.register(createMemoryTool(claimStore, {
     sessionId,
     getTurn: () => session.getTurnCount(),
-  }))
-  toolRegistry.register(createRememberTool(claimStore, {
-    sessionId,
-    getTurn: () => session.getTurnCount(),
+    cwd,
   }))
 
   // taskLedger / ownershipLedger 由 createInteractiveToolRegistry 的 B1 装配段
