@@ -8,6 +8,8 @@ import type { TrajectoryEntry } from '../trajectory.js'
 import type { OaiChatRequest, OaiMessage } from '../../api/oai-types.js'
 import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
 import { extractTaskContract } from '../../context/task-contract.js'
+import type { ProviderProfile } from '../../api/provider-profile.js'
+import type { CacheAdvisor } from '../../cache/advisor.js'
 
 function makeEngine(): PromptEngine {
   return new PromptEngine({
@@ -188,14 +190,19 @@ describe('CompactionController', () => {
     )
   })
 
-  // Phase 2.1: On 1M+ windows, skip microCompactOai to preserve exact prefix cache.
-  // The 1M window has enough headroom — enforceContextCeiling (95%) remains as
-  // emergency last resort, but regular compaction is permanently disabled.
-  it('P2.1: skips compaction on 1M+ context window even when thresholds are crossed', async () => {
+  // Phase 2.1: On 1M+ windows the 60% partial-compact path needs BOTH a
+  // primaryClient AND enough messages to split (> anchor + recentToPreserve + 4
+  // ≈ 66). Here a client is wired but there are only 10 messages at 65% ratio,
+  // so tryPartialCompact bails (too few to split) and the full path (≥75%) is
+  // not reached — net result is no compaction, history left intact.
+  //
+  // NOTE: the previous version of this test omitted primaryClient entirely, so
+  // the 60%/75% branches were skipped on the `&& this.deps.primaryClient` gate
+  // and never actually exercised — a false green. The client is now provided so
+  // the branch is genuinely entered and the "too few messages" bail is tested.
+  it('P2.1: 1M window at 65% with too few messages does not compact', async () => {
     const session = new SessionContext()
-    // Create enough content to cross the 60% watch threshold on a 1M window.
-    // Balanced strategy: watch=0.60 → need 600K+ tokens.
-    // 10 messages × 65K tokens each = 650K tokens → 65% ratio → should trigger.
+    // 10 messages × 65K tokens each = 650K tokens → 65% ratio (60-75% band).
     const chunk = 'x'.repeat(260_000) // 260K chars / 4 ≈ 65K tokens
     const msgs = [
       { role: 'user' as const, content: chunk },
@@ -213,15 +220,22 @@ describe('CompactionController', () => {
     const tokensBefore = session.getEstimatedTokens()
     const messagesBefore = session.getMessages()
 
-    // Ratio check: must actually cross the threshold
     assert.ok(
-      tokensBefore / 1_000_000 >= 0.60,
-      `setup: tokens ${tokensBefore} must exceed 60% of 1M window`
+      tokensBefore / 1_000_000 >= 0.60 && tokensBefore / 1_000_000 < 0.75,
+      `setup: tokens ${tokensBefore} must land in the 60-75% partial band`
     )
 
     let refreshed = false
+    let streamCalled = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        streamCalled = true
+        callbacks.onTextDelta('summary')
+      },
+    }
     const controller = makeController(session, {
       contextWindow: 1_000_000,
+      primaryClient,
       refreshLedger: () => { refreshed = true },
     })
 
@@ -230,18 +244,128 @@ describe('CompactionController', () => {
       failures: { consecutiveFailures: 0 },
     })
 
-    // Core assertion: compaction must not happen on 1M+ window
-    assert.equal(result.compacted, false, 'must not compact on 1M+ window')
+    // 10 messages < 66 → partial bails before issuing an LLM request.
+    assert.equal(result.compacted, false, 'too few messages to partial-compact at 65%')
+    assert.equal(streamCalled, false, 'partial must bail before calling the model')
     assert.deepEqual(result.failures, { consecutiveFailures: 0 })
     assert.equal(refreshed, false)
 
-    // Storage must be untouched
     const messagesAfter = session.getMessages()
     assert.deepStrictEqual(
       messagesAfter.map(m => m.content),
       messagesBefore.map(m => m.content),
       'messages must be unchanged when compaction is skipped'
     )
+  })
+
+  // P2.1b: with a client AND enough messages, the 60% partial path actually
+  // fires — this is the branch the old false-green test never reached.
+  it('P2.1b: 1M window at 65% with enough messages triggers partial compact', async () => {
+    const session = new SessionContext()
+    // 70 messages × 10K tokens = 700K tokens → 70% ratio, and 70 > 66 so the
+    // partial split has room (anchor 2 + recent 60 + summary).
+    const chunk = 'x'.repeat(40_000) // 40K chars / 4 ≈ 10K tokens
+    const msgs = Array.from({ length: 70 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: chunk,
+    }))
+    session.replaceMessages(msgs)
+    const ratio = session.getEstimatedTokens() / 1_000_000
+    assert.ok(ratio >= 0.60 && ratio < 0.75, `setup: ratio ${ratio} must be in 60-75% band`)
+
+    let streamCalled = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        streamCalled = true
+        callbacks.onTextDelta('partial summary of old zone')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+    })
+
+    const result = await controller.maybeCompact({
+      loopTurn: 0,
+      failures: { consecutiveFailures: 0 },
+    })
+
+    assert.equal(streamCalled, true, 'partial compact must call the model')
+    assert.equal(result.compacted, true, 'partial compact must succeed')
+    const after = session.getMessages()
+    assert.ok(after.length < 70, `expected fewer messages after partial compact, got ${after.length}`)
+    assert.match(String(after[2]?.content), /partial-compact-summary/)
+  })
+
+  // P2.1c: P2 gate — on a cache-preserving provider with a hot cache, the 1M
+  // partial path defers compaction instead of breaking the prefix.
+  it('P2.1c: 1M partial compact is delayed when cache-preserving provider cache is hot', async () => {
+    const session = new SessionContext()
+    const chunk = 'x'.repeat(40_000)
+    const msgs = Array.from({ length: 70 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: chunk,
+    }))
+    session.replaceMessages(msgs)
+
+    let streamCalled = false
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        streamCalled = true
+        callbacks.onTextDelta('summary')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      providerProfile: { cacheType: 'exact-prefix', persistent: true } as ProviderProfile,
+      cacheAdvisor: { shouldDelayCompact: () => true } as unknown as CacheAdvisor,
+    })
+
+    const result = await controller.maybeCompact({
+      loopTurn: 0,
+      failures: { consecutiveFailures: 0 },
+    })
+
+    assert.equal(result.compacted, false, 'cache-preserving + hot cache must defer compaction')
+    assert.equal(streamCalled, false, 'no LLM request when compaction is deferred')
+    assert.equal(session.getMessages().length, 70, 'history untouched when deferred')
+  })
+
+  // P2.1d: P1 — partial compact appends the authoritative task-anchor so
+  // constraints/scope survive even if the LLM summary drops them.
+  it('P2.1d: partial compact injects task-anchor appendix when a contract is active', async () => {
+    const session = new SessionContext()
+    const chunk = 'x'.repeat(40_000)
+    const msgs = Array.from({ length: 70 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: chunk,
+    }))
+    session.replaceMessages(msgs)
+
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('summary that omits the constraints')
+      },
+    }
+    const contract = extractTaskContract(
+      'Refactor compaction-controller.ts. Constraint: do not break the prefix cache. Touch src/agent/compaction-controller.ts only.',
+    )
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getActiveContract: () => contract,
+    })
+
+    const result = await controller.maybeCompact({
+      loopTurn: 0,
+      failures: { consecutiveFailures: 0 },
+    })
+
+    assert.equal(result.compacted, true)
+    const after = session.getMessages()
+    const tail = String(after[after.length - 1]?.content ?? '')
+    assert.match(tail, /task-anchor/, 'partial compact must append the task-anchor appendix')
   })
 
   // Phase 2.1: enforceContextCeiling MUST still fire on 1M+ windows.

@@ -365,8 +365,19 @@ export class CompactionController {
         return { failures: input.failures, compacted: false }
       }
 
+      // P2: on exact-prefix providers (DeepSeek), the 1M LLM-compact paths used
+      // to bypass shouldDelayCompact entirely — breaking the prefix cache even
+      // when it was hot. Gate them through the same cache-protection check the
+      // non-1M tier path already uses (L430), so we only pay the cache-miss
+      // rebuild when the headroom is genuinely worth more than cache warmth.
+      const cachePreserving = this.isCachePreservingProvider()
+
       // T8: Partial Compact at 60% — earlier, lighter, preserves recent context.
       if (ratio >= 0.60 && ratio < 0.75 && this.deps.primaryClient) {
+        if (cachePreserving && this.deps.cacheAdvisor?.shouldDelayCompact(1, { estimatedTokens, contextWindow })) {
+          debugLog(`[partial-compact] 1M at ${(ratio * 100).toFixed(0)}% — cache healthy, delaying`)
+          return { failures: input.failures, compacted: false }
+        }
         debugLog(`[partial-compact] 1M window at ${(ratio * 100).toFixed(0)}% — trying partial compact`)
         const partialResult = await this.tryPartialCompact(60)
         if (partialResult) {
@@ -378,6 +389,13 @@ export class CompactionController {
 
       // Full LLM compact at 75% — fallback when partial was insufficient
       if (ratio >= 0.75 && this.deps.primaryClient) {
+        // P2: tier-2 delay check. At 75%+ pressure shouldDelayCompact rarely
+        // holds (protection = hitRate × (1 − pressure) ≤ 0.25 < 0.45), so this
+        // mainly defers the 75-80% band when the cache is exceptionally hot.
+        if (cachePreserving && this.deps.cacheAdvisor?.shouldDelayCompact(2, { estimatedTokens, contextWindow })) {
+          debugLog(`[llm-compact] 1M at ${(ratio * 100).toFixed(0)}% — cache healthy, delaying`)
+          return { failures: input.failures, compacted: false }
+        }
         // Try partial compact first (lighter)
         debugLog(`[llm-compact] 1M window at ${(ratio * 100).toFixed(0)}% — trying partial compact before full`)
         const partialResult = await this.tryPartialCompact(60)
@@ -386,6 +404,11 @@ export class CompactionController {
         }
 
         debugLog(`[llm-compact] partial compact insufficient — triggering full LLM compact`)
+        // P3: persist heuristic session memories from the trajectory BEFORE the
+        // checkpoint replace wipes history. extractSessionMemories reads the
+        // current message list, so it must run while history is still intact —
+        // same ordering as enforceContextCeiling (L517) and trySessionSplit.
+        this.persistExtractedMemories(this.deps.getTrajectoryEntries())
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
         if (this.isAbortRequested()) {
           debugLog('[llm-compact] turn aborted after compact returned — skipping checkpoint replacement')
@@ -899,12 +922,26 @@ export class CompactionController {
         content: `<partial-compact-summary turn="${this.deps.session.getTurnCount()}">\n${summary}\n</partial-compact-summary>`,
       }
 
+      // P3: persist heuristic memories before history is replaced —
+      // extractSessionMemories reads the live message list, so it must run while
+      // the old zone is still present (same ordering as enforceContextCeiling).
+      this.persistExtractedMemories(this.deps.getTrajectoryEntries())
+
+      // P1: append the authoritative task anchor, matching replaceWithCheckpoint.
+      // The LLM summary above may drift or drop constraints/scope, and the
+      // preserved recent zone may not contain the original constraint
+      // declarations — without this anchor, partial compact has no deterministic
+      // fallback for the task contract (issue 1 × issue 2 crossover gap).
       const newMessages = [...anchor, summaryMessage, ...recentZone]
+      const anchorAppendix = this.buildTaskAnchorAppendix()
+      if (anchorAppendix) {
+        newMessages.push({ role: 'user', content: anchorAppendix })
+      }
       this.safeReplaceMessages(newMessages)
       this.deps.promptEngine.resetAppendixBaseline()
       this.deps.refreshLedger()
 
-      debugLog(`[partial-compact] success: ${messages.length} → ${newMessages.length} messages (removed ${oldZone.length} old, kept ${recentZone.length} recent)`)
+      debugLog(`[partial-compact] success: ${messages.length} → ${newMessages.length} messages (removed ${oldZone.length} old, kept ${recentZone.length} recent${anchorAppendix ? ', +task-anchor' : ''})`)
       return true
     } finally {
       this._llmCompactInFlight = false

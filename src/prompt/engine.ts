@@ -3,6 +3,7 @@ import { semanticPruneLayer1 } from '../compact/semantic-prune.js'
 import { collapseToolResult } from '../compact/context-collapse.js'
 import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
+import { estimateOaiTokens } from '../compact/micro.js'
 import { buildSystemPrompt, type StaticPromptContext } from './static.js'
 import type { ToolDefinition } from '../api/types.js'
 import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendixParts, buildConsolidatedBlock, renderTaskDepthAdvisory, renderPlanMethodologyAdvisory, type VolatileContext, type ToolHistoryEntry } from './volatile.js'
@@ -545,17 +546,13 @@ export class PromptEngine {
     // not on every turn (rolling break would defeat the prefix cache).
     if (contextWindow && contextWindow >= 200_000) {
       const collapseAge = this.config.attentionProfile?.collapseAgeTurns ?? 8
-      let estChars = 0
-      for (const m of result) {
-        if (typeof m.content === 'string') estChars += m.content.length
-        // reasoning_content is echoed back on tool-call turns and can dominate
-        // token usage in tool-dense sessions — excluding it from the gate made
-        // reasoning-heavy sessions paradoxically never reach the 50% trigger.
-        if (m.role === 'assistant' && typeof m.reasoning_content === 'string') {
-          estChars += m.reasoning_content.length
-        }
-      }
-      const estTokens = Math.ceil(estChars / 4)
+      // Use the same CJK-aware accounting as the session layer
+      // (estimateOaiMessageTokens: cjk/1.2, ascii/4, plus tool_calls and the
+      // reasoning_content echoed back on tool-call turns). The old hand-rolled
+      // `chars/4` undercounted CJK text by ~3.3× and ignored tool_calls, so on
+      // CJK-heavy sessions the T7 gate fired far later than maybeCompact's
+      // ratio — leaving the two subsystems' compaction decisions uncoordinated.
+      const estTokens = estimateOaiTokens(result)
       const fillRatio = estTokens / contextWindow
 
       // Lightweight pass (0–85%): strip reasoning + fold duplicate grep/read.
