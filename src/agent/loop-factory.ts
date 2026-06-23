@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
+import { computeCompactAttribution } from './compact-attribution.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
@@ -99,6 +100,17 @@ return new TurnStreamController({
           if (self.prevMsgCount > 0 && messages.length < self.prevMsgCount) entry.historyRewritten = true
           const wasRewritten = entry.historyRewritten === true
           self.prevMsgCount = messages.length
+
+          // Compact attribution: when history shrank, record whether the window
+          // was actually under pressure before the rewrite (compactPreRatio) and
+          // how much it reclaimed. Combined with this turn's hitRate (the cache
+          // cost), this makes "was the compact necessary?" answerable from the
+          // cache-log alone — see scripts/analyze-compact-events.ts.
+          const estTokensNow = self.session.getEstimatedTokens()
+          if (wasRewritten) {
+            Object.assign(entry, computeCompactAttribution(self.prevEstTokens, estTokensNow, self.config.contextWindow))
+          }
+          self.prevEstTokens = estTokensNow
 
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
           const stats = self.config.promptEngine.getCacheEventStats?.()
