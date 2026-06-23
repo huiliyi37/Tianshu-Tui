@@ -31,6 +31,7 @@ import { TODO_TOOL } from './todo.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
 import { WEB_FETCH_TOOL } from './web-fetch.js'
+import { WEB_SEARCH_TOOL } from './web-search.js'
 import { WRITE_FILE_TOOL } from './write-file.js'
 
 export interface DefaultRegistryOptions {
@@ -44,7 +45,8 @@ export interface DefaultRegistryOptions {
 
 export function createDefaultToolRegistry(extraTools: Tool[] = [], options: DefaultRegistryOptions = {}): ToolRegistry {
   const registry = new ToolRegistry()
-  registry.register(APPLY_PATCH_TOOL)
+  // apply_patch moved to EXTENDED layer (interactive/bootstrap) — overlap with
+  // hash_edit covers >90% of use cases; keep in interactive for edge cases.
   registry.register(IMPORT_RESOURCE_TOOL)
   registry.register(READ_FILE_TOOL)
   registry.register(WRITE_FILE_TOOL)
@@ -69,6 +71,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(GIT_TOOL)
   registry.register(TODO_TOOL)
   registry.register(WEB_FETCH_TOOL)
+  registry.register(WEB_SEARCH_TOOL)
   registry.register(INSPECT_PROJECT_TOOL)
   registry.register(REPO_MAP_TOOL)
   registry.register(RELATED_TESTS_TOOL)

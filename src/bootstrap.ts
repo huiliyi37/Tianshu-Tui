@@ -68,6 +68,7 @@ import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
 import { WEB_SEARCH_TOOL } from './tools/web-search.js'
+import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createRecallTool } from './tools/recall.js'
 import { createRememberTool } from './tools/remember.js'
@@ -450,10 +451,12 @@ export function createInteractiveToolRegistry(
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
 
   reg.register(SEMANTIC_SEARCH_TOOL)
-  // web_search: registered at the interactive layer (not the kernel default-registry,
-  // to preserve the ≤25 kernel budget). Available to the primary agent and referenced
-  // by PLAN_MODE_ALLOWED_TOOLS alongside recall.
-  reg.register(WEB_SEARCH_TOOL)
+  // APPLY_PATCH: EXTENDED layer — overlap with hash_edit covers >90% of
+  // use cases; kept here (interactive) for edge cases (e.g. git-format patches).
+  reg.register(APPLY_PATCH_TOOL)
+  // web_search is now in the kernel default-registry (CORE layer).
+  // Remove the interactive registration to avoid double-registration.
+  // PLAN_MODE_ALLOWED_TOOLS already references web_search alongside recall.
   reg.register(createPlanTaskTool({
     getCoordinator: () => refs.coordinator,
   }))
