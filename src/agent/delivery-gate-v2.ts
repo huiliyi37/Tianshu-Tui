@@ -126,6 +126,9 @@ export interface DeliveryReport {
   currentBlockingFailure?: string
   shortestNextStep?: string
   blockingReason?: string
+  /** The verification attribution class causing this gate state.
+   *  Used by deliver_task to decide mechanical-change bypass. */
+  attributionClass?: AttributionClass
   /** Full attribution result for diagnostics */
   attributionSummary: string
 }
@@ -433,6 +436,7 @@ export function createDeliveryGateV2(opts: {
       currentBlockingFailure: result.currentBlockingFailure,
       shortestNextStep: result.shortestNextStep,
       blockingReason: result.blockingReason,
+      attributionClass: result.attributionClass,
       attributionSummary: result.reason ?? 'No attribution available.',
     }
   }

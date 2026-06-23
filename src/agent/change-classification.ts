@@ -65,7 +65,9 @@ function parsePatchLines(patch: string): PatchLines {
   return { added, removed }
 }
 
-/** Check if patch lines are only comments, whitespace, or import reordering. */
+/** Check if patch lines are only comments or whitespace.
+ *  Note: import reordering is NOT included here — import lines are code,
+ *  not noise. The comment below mentioning "import reordering" was inaccurate. */
 function isWhitespaceOrCommentOnly(added: string[], removed: string[]): boolean {
   const isNoise = (l: string) =>
     l.trim() === '' || l.trim().startsWith('//') || l.trim().startsWith('/*') || l.trim().startsWith('*') || l.trim().startsWith('*/')
@@ -239,7 +241,7 @@ export function classifyChange(
       class: 'rename-mechanical',
       skipReview: true,
       skipVerification: true,
-      reason: 'all changes are comments, whitespace, or import reordering',
+      reason: 'all changes are comments or whitespace only',
       files,
     }
   }
@@ -311,7 +313,8 @@ export function createGitDiffProvider(cwd: string, files: readonly string[]): Di
   return { nameStatus, filePatch }
 }
 
-/** Quick check: is mechanical fast-path enabled in config? */
-export function isMechanicalFastPathEnabled(config?: { review?: { mechanicalFastPath?: boolean } }): boolean {
-  return config?.review?.mechanicalFastPath !== false
+/** Quick check: is mechanical fast-path enabled in config?
+ *  Accepts the review config block directly (e.g. ctx.reviewConfig). */
+export function isMechanicalFastPathEnabled(reviewConfig?: { mechanicalFastPath?: boolean }): boolean {
+  return reviewConfig?.mechanicalFastPath !== false
 }

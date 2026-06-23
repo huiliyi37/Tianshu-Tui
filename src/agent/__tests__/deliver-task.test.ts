@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -1681,6 +1681,88 @@ Do not declare a streamed response duplicate in the middle of the stream.
       // adopt is ignored in status-only mode — no adoption log
       assert.match(result.content, /Delivery Gate: GREEN/)
       assert.doesNotMatch(result.content, /Adopted/)
+    })
+  })
+
+  // ── Mechanical-change fast-path (docs/rename bypass) ──
+
+  describe('mechanical-change fast-path', () => {
+    function tmpGitRepo(): string {
+      const dir = mkdtempSync(join(tmpdir(), 'mech-'))
+      const run = (args: string[]) => spawnSync('git', args, { cwd: dir })
+      run(['init', '-q'])
+      run(['config', 'user.email', 't@t']); run(['config', 'user.name', 't'])
+      writeFileSync(join(dir, 'README.md'), '# Base\n')
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      return dir
+    }
+
+    function tmpGitRepoWithTracked(file: string, content: string): string {
+      const dir = mkdtempSync(join(tmpdir(), 'mech-'))
+      const run = (args: string[]) => spawnSync('git', args, { cwd: dir })
+      run(['init', '-q'])
+      run(['config', 'user.email', 't@t']); run(['config', 'user.name', 't'])
+      mkdirSync(join(dir, 'src'), { recursive: true })
+      writeFileSync(join(dir, file), content)
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      return dir
+    }
+
+    it('docs-only untracked file bypasses RED gate and commits successfully', async () => {
+      const dir = tmpGitRepo()
+      // Create a new untracked docs file
+      writeFileSync(join(dir, 'CHANGELOG.md'), '# v2\n')
+
+      const { tool, params } = makeContext({
+        taskId: 't-docs',
+        ownedFiles: ['CHANGELOG.md'],
+        dirtyFiles: ['CHANGELOG.md'],
+        verifications: [],  // no verification → unverified RED
+        commitOwnedFiles: (_cwd, files, msg) => {
+          const add = spawnSync('git', ['add', ...files], { cwd: dir })
+          const commit = spawnSync('git', ['commit', '-qm', msg], { cwd: dir })
+          return { ok: add.status === 0 && commit.status === 0, output: '' }
+        },
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'docs: update changelog' } })
+      assert.equal(result.isError, undefined, `Expected successful commit, got error:\n${result.content}`)
+      assert.match(result.content, /机械式变更.*docs-only/)
+    })
+
+    it('normal code change with unverified RED is NOT bypassed', async () => {
+      const dir = tmpGitRepoWithTracked('src/a.ts', 'const x = 1\n')
+      // Modify the tracked code file
+      writeFileSync(join(dir, 'src/a.ts'), 'const x = 2\nconst y = 3\n')
+
+      const { tool, params } = makeContext({
+        taskId: 't-code',
+        ownedFiles: ['src/a.ts'],
+        dirtyFiles: ['src/a.ts'],
+        verifications: [],
+        commitOwnedFiles: () => ({ ok: true, output: '' }),
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'feat: change x' } })
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Cannot commit/)
+    })
+
+    it('owned_failure RED is NEVER bypassed even for docs files', async () => {
+      const dir = tmpGitRepo()
+      writeFileSync(join(dir, 'GUIDE.md'), '# Guide\n')
+
+      const { tool, params } = makeContext({
+        taskId: 't-fail',
+        ownedFiles: ['GUIDE.md'],
+        dirtyFiles: ['GUIDE.md'],
+        verifications: [{ command: 'npm test', status: 'failed' }],
+        commitOwnedFiles: () => ({ ok: true, output: '' }),
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'docs: guide' } })
+      assert.equal(result.isError, true)
+      assert.match(result.content, /Cannot commit/)
     })
   })
 })

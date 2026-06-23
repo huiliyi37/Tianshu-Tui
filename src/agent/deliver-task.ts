@@ -503,15 +503,22 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           ? ctx.gate.getReport([], currentDirtyFiles, ctx.getCurrentSnapshotRef?.())
           : report
         if (postAdoptionReport.state === 'RED') {
-          lines.push('', '❌ Cannot commit: delivery gate is RED after adoption.')
-          if (postAdoptionReport.blockingReason) {
-            lines.push(`  Reason: ${postAdoptionReport.blockingReason}`)
+          // Mechanical fast-path also applies to the post-adoption gate
+          // (when no adoption happens, postAdoptionReport === report, and the
+          // bypass was already decided above — don't re-block).
+          const postAdoptionBypass = postAdoptionReport.attributionClass === 'unverified'
+            && mechanicalClass?.skipVerification
+          if (!postAdoptionBypass) {
+            lines.push('', '❌ Cannot commit: delivery gate is RED after adoption.')
+            if (postAdoptionReport.blockingReason) {
+              lines.push(`  Reason: ${postAdoptionReport.blockingReason}`)
+            }
+            if (postAdoptionReport.currentBlockingFailure) {
+              lines.push(`  Detail: ${postAdoptionReport.currentBlockingFailure}`)
+            }
+            lines.push('  → Run verification for the adopted files, then re-run deliver_task.')
+            return { content: lines.join('\n'), isError: true }
           }
-          if (postAdoptionReport.currentBlockingFailure) {
-            lines.push(`  Detail: ${postAdoptionReport.currentBlockingFailure}`)
-          }
-          lines.push('  → Run verification for the adopted files, then re-run deliver_task.')
-          return { content: lines.join('\n'), isError: true }
         }
 
         // Resolve files to commit: subset from `files` param, or all owned
