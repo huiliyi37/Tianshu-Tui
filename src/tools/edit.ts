@@ -18,20 +18,12 @@ export const EDIT_FILE_TOOL: Tool = {
     name: 'edit_file',
     description: `Perform exact string replacements in existing files.
 
-### Usage
-- Read the file first before editing
-- old_string must be unique in the file — include surrounding context if needed
+- old_string must be unique — include surrounding context if needed
 - Preserve exact indentation (tabs/spaces) from the file
-- Use replace_all to replace every occurrence of old_string
-- Prefer editing existing files over creating new ones
-- Choosing between editors: edit_file for exact unique-string swaps; hash_edit when whitespace makes old_string ambiguous or for large files; apply_patch for multi-file unified diffs
+- replace_all replaces every occurrence; expected_count warns on mismatch
+- For large edits, message history keeps only a short pointer; use read_file to review
 
-### Examples
-Good: reading the file, finding the exact string with surrounding context, then replacing
-Bad: editing without reading the file first
-Bad: using a too-short old_string that matches multiple locations
-
-**Note:** For unusually large edits, the message history keeps only a short pointer (file path + a preview of the old block) instead of the full old_string/new_string. The edit is still applied to disk in full — use \`read_file\` to review the current content in a later turn.`,
+Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous edits or large files.`,
     input_schema: {
       type: 'object',
       properties: {

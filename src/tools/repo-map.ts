@@ -134,24 +134,11 @@ function formatTree(nodes: TreeNode[], prefix: string, isLast: boolean[]): strin
 export const REPO_MAP_TOOL: Tool = {
   definition: {
     name: 'repo_map',
-    description: `Return a condensed file tree showing project structure with key entry points and test files.
+    description: `Return a condensed file tree with annotated entry points, test files, and config files.
 
-### Usage
-- Use repo_map when entering a project to understand its file layout
-- Shows directory tree with important files annotated
-- Excludes node_modules, .git, dist, build, .next, coverage
-- repo_map shows the file tree; for structural relationships (what imports/calls a file, blast radius) use repo_graph instead
+For file tree use repo_map; for structural relationships (imports/calls, blast radius) use repo_graph.
 
-### On-demand exploration
-- Start with a shallow scan: \`repo_map({ depth: 2 })\` for a high-level overview
-- Then drill into specific areas: \`repo_map({ path: "src/agent/" })\`
-- This avoids dumping the entire project tree at once
-
-### Examples
-Good: repo_map() — get project file tree (depth 4, up to 200 files)
-Good: repo_map({ depth: 2 }) — shallow overview of large projects
-Good: repo_map({ path: "src/agent/" }) — focus on a specific directory
-Good: repo_map({ max_files: 100 }) — smaller tree for large projects`,
+Start shallow: repo_map({ depth: 2 }), then drill into areas: repo_map({ path: "src/agent/" }).`,
     input_schema: {
       type: 'object',
       properties: {

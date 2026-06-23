@@ -430,14 +430,11 @@ export const READ_FILE_TOOL: Tool = {
     name: 'read_file',
     description: `Read files from the filesystem with optional line range.
 
-### Usage
-- Always provide absolute file paths
-- Files up to ~50,000 lines are returned in full — DO NOT split them yourself by writing temp files and reading slices, just call read_file once
-- Use offset and limit ONLY when you specifically need a known sub-range (e.g. a function at line 800-900); never as a workaround for "the file might be too long"
-- This tool reads text files only (UTF-8). Binary files (images, PDFs, executables) will be rejected
-- Do NOT re-read a file that you already read in the current session unless you have edited it since — your earlier tool_result is still in context
-- Files > ~2000 lines: returned as PARTIAL view (first page + navigation hints). Use grep to locate, then read_file(offset, limit) for specific ranges. For editing: grep → hash_edit with anchors
-- read_file(file_paths=[...]) reads up to 5 files in one call — use instead of repeated single calls`,
+- Files up to ~50,000 lines returned in full — don't split them into slices yourself
+- Use offset/limit only for known sub-ranges (e.g. lines 800-900), not as a workaround for long files
+- Files > ~2000 lines returned as PARTIAL view with navigation hints
+- Don't re-read unchanged files — prior result is still in context
+- file_paths reads up to 5 files in one call`,
     input_schema: {
       type: 'object',
       properties: {
