@@ -963,11 +963,6 @@ body {
 }
 /* Star-domain glyph — always visible, breathes while streaming. */
 .thread-glyph {
-  display: flex; align-items: center; gap: var(--space-3);
-  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
-}
-/* Star-domain glyph — always visible, breathes while streaming. */
-.thread-glyph {
   color: var(--accent);
   font-size: var(--text-md); line-height: 1;
   transition: color var(--dur) var(--ease);
