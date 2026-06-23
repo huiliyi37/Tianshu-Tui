@@ -138,6 +138,21 @@ body {
 }
 .skill-toggle.on .skill-toggle-knob { transform: translateX(16px); }
 
+/* File viewer */
+.file-viewer {
+  border: 1px solid var(--border); border-radius: 8px; overflow: auto;
+  max-height: 500px; font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; line-height: 1.5;
+}
+.file-viewer-code { padding: var(--space-2) 0; }
+.file-line { display: flex; align-items: flex-start; padding: 0 var(--space-2); }
+.file-line:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.file-line.highlighted { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.file-line-num { flex-shrink: 0; width: 40px; text-align: right; padding-right: var(--space-2);
+  color: var(--text-faint); user-select: none; }
+.file-line-content { flex: 1; white-space: pre-wrap; word-break: break-all; min-width: 0; }
+.review-file-viewer { margin-top: var(--space-3); }
+.review-file-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+
 /* Terminal panel — placeholder. Height reserved for future PTY. */
 .terminal-panel {
   flex-shrink: 0;

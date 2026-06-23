@@ -2,14 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getArtifact,
   openFile,
+  getFileContent,
   sendArtifactFeedback,
   getRollbackPreview,
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
+import { FileViewer } from '../components/FileViewer'
 import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
@@ -57,6 +59,8 @@ export function ReviewPanel(props: {
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [comment, setComment] = useState('')
   const [sending, setSending] = useState(false)
+  const [fileContent, setFileContent] = useState<FileContent | null>(null)
+  const [fileLoading, setFileLoading] = useState(false)
 
   const view = useCallback(async (a: ArtifactSummary) => {
     if (!sessionId) return
@@ -65,6 +69,20 @@ export function ReviewPanel(props: {
       setComment('')
     } catch {
       // ignore
+    }
+  }, [sessionId])
+
+  const viewFile = useCallback(async (path: string) => {
+    if (!sessionId) return
+    setFileLoading(true)
+    try {
+      const content = await getFileContent(sessionId, path)
+      setFileContent(content)
+    } catch {
+      // Fall back to external editor
+      openFile(path).catch(() => {})
+    } finally {
+      setFileLoading(false)
     }
   }, [sessionId])
 
@@ -128,13 +146,30 @@ export function ReviewPanel(props: {
               <div
                 key={path}
                 className="source-item"
-                title={`在编辑器中打开 ${path}`}
-                onClick={() => { openFile(path).catch(() => {}) }}
+                title={`查看 ${path}`}
+                onClick={() => viewFile(path)}
               >
                 <span className="source-icon" aria-hidden>📄</span>
                 <FilePath path={path} className="source-path" />
               </div>
             ))}
+            {fileLoading && <div className="empty sm">加载文件…</div>}
+            {fileContent && (
+              <div className="review-file-viewer">
+                <div className="review-file-header">
+                  <FilePath path={fileContent.path} />
+                  <button className="btn ghost sm" onClick={() => openFile(fileContent.path).catch(() => {})}>
+                    在编辑器中打开
+                  </button>
+                  <button className="btn ghost sm" onClick={() => setFileContent(null)}>关闭</button>
+                </div>
+                <FileViewer
+                  content={fileContent.content}
+                  language={fileContent.language}
+                  startLine={fileContent.startLine}
+                />
+              </div>
+            )}
           </section>
 
           <section className="review-section">

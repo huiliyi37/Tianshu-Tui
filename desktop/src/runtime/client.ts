@@ -4,6 +4,7 @@ import type {
   ApprovalMode,
   ArtifactSummary,
   DomainEntry,
+  FileContent,
   HealthInfo,
   ModelEntry,
   PlanDoc,
@@ -208,6 +209,18 @@ export async function listFiles(id: string, query: string, limit = 50): Promise<
   const qs = `q=${encodeURIComponent(query)}&limit=${limit}`
   const { files } = await apiGet<{ files: string[] }>(`/sessions/${id}/files?${qs}`)
   return files
+}
+
+/** P2-2 — file content viewer: read a file within the session cwd. */
+export async function getFileContent(
+  id: string,
+  path: string,
+  range?: { start?: number; end?: number },
+): Promise<FileContent> {
+  const qs = new URLSearchParams({ path })
+  if (range?.start) qs.set('start', String(range.start))
+  if (range?.end) qs.set('end', String(range.end))
+  return apiGet<FileContent>(`/sessions/${id}/file-content?${qs}`)
 }
 
 export function answerApproval(

@@ -72,6 +72,16 @@ export interface SkillStatus {
   enabled: boolean
 }
 
+/** P2-2 — file content viewer response. */
+export interface FileContent {
+  path: string
+  content: string
+  language: string
+  totalLines: number
+  startLine: number
+  endLine: number
+}
+
 /** Plan list entry (no markdown body). createdAt/approvedAt are epoch ms. */
 export interface PlanSummary {
   slug: string
