@@ -58,14 +58,14 @@ describe('computeModelReadCap', () => {
     assert.equal(cap.maxChars, 15_600)
   })
 
-  it('hits the absolute ceiling at 200k chars even on huge windows', () => {
+  it('hits the absolute ceiling at 120k chars even on huge windows', () => {
     // 1M window, cache-preserving: 1_000_000 * 0.05 * 4 * 1.3 = 260_000
-    // → capped at 200_000.
+    // → capped at 120_000 (B1 lowered from 200K).
     const cap = computeModelReadCap({
       contextWindow: 1_000_000,
       providerProfile: { cacheType: 'exact-prefix', persistent: true },
     })
-    assert.equal(cap.maxChars, 200_000)
+    assert.equal(cap.maxChars, 120_000)
   })
 
   it('keeps a 60/30 head/tail split', () => {

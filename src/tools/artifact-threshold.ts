@@ -25,16 +25,16 @@ import { pruneThresholds } from '../compact/constants.js'
  *  Multipliers > 1.0 mean higher threshold → more content stays inline.
  *  Multipliers < 1.0 mean lower threshold → wraps smaller outputs too. */
 const TOOL_ARTIFACT_MULTIPLIERS: Record<string, number> = {
-  read_file: 5.0,   // code files are large; prefer inline up to ~150K on 1M window
-  bash: 1.67,        // command output varies; ~50K threshold on 1M window
-  grep: 0.67,        // search results are compact; wrap earlier at ~20K
-  run_tests: 3.33,   // test output can be long; ~100K threshold on 1M window
-  diff: 2.0,         // diffs are moderate; ~60K on 1M window
+  read_file: 2.0,   // B3 lowered from 5.0; on 1M window: 300K (B1 cap at 120K is tighter)
+  bash: 1.0,         // B3 lowered from 1.67; ~150K on 1M window (matches prune minChars)
+  grep: 0.67,        // search results are compact; wrap earlier at ~100K
+  run_tests: 1.5,    // B3 lowered from 3.33; ~225K on 1M window
+  diff: 1.0,         // B3 lowered from 2.0; ~150K on 1M window
   glob: 0.5,         // file lists are very compact
   repo_map: 0.5,     // file trees are compact
   inspect_project: 0.5, // project summaries are compact
   web_fetch: 1.0,    // web content varies; default
-  read_section: 5.0, // same as read_file — content already on disk
+  read_section: 2.0, // B3 lowered from 5.0; same as read_file
 }
 
 const DEFAULT_MULTIPLIER = 1.0

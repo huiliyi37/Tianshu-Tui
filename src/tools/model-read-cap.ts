@@ -33,8 +33,11 @@ export const DEFAULT_MODEL_READ_CAP: ModelReadCap = {
   tailChars: 2_000,
 }
 
-/** Hard ceiling: anything bigger should go through the artifact store. */
-const ABSOLUTE_MAX_CHARS = 200_000
+/** Hard ceiling: beyond 120K chars, content should go through the artifact store.
+ *  Lowered from 200K (B1): on a 1M window, a single 200K read_file consumes
+ *  ~50K tokens (~5%) in one shot. 120K keeps the ceiling high enough for large
+ *  source files (~62K for loop.ts) while capping extreme outliers. */
+const ABSOLUTE_MAX_CHARS = 120_000
 
 /**
  * Fraction of the context window allocated to a single tool result that is

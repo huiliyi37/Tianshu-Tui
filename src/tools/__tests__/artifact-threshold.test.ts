@@ -15,10 +15,10 @@ describe('getToolArtifactThreshold', () => {
     assert.ok(grep < defaultThresh, `grep ${grep} should be below default ${defaultThresh}`)
   })
 
-  it('returns higher threshold for bash than default', () => {
+  it('returns threshold >= default for bash (same multiplier 1.0)', () => {
     const bash = getToolArtifactThreshold('bash', 1_000_000)
     const defaultThresh = getToolArtifactThreshold('unknown_tool', 1_000_000)
-    assert.ok(bash > defaultThresh, `bash ${bash} should exceed default ${defaultThresh}`)
+    assert.ok(bash >= defaultThresh, `bash ${bash} should be >= default ${defaultThresh}`)
   })
 
   it('returns higher threshold for run_tests than default', () => {
@@ -36,8 +36,8 @@ describe('getToolArtifactThreshold', () => {
   it('falls back to legacy 800 for undefined contextWindow', () => {
     const thresh = getToolArtifactThreshold('bash', undefined)
     assert.ok(thresh > 0)
-    // 800 * 1.67 ≈ 1336
-    assert.ok(thresh >= 1000)
+    // 800 * 1.0 = 800
+    assert.ok(thresh >= 800)
   })
 
   it('returns default multiplier for unknown tool names', () => {
@@ -46,11 +46,11 @@ describe('getToolArtifactThreshold', () => {
     assert.equal(unknown, explicit) // web_fetch has multiplier 1.0 = default
   })
 
-  it('read_file threshold is roughly 5x the base on 1M window', () => {
+  it('read_file threshold is roughly 2x the base on 1M window', () => {
     const readFile = getToolArtifactThreshold('read_file', 1_000_000)
     const base = getToolArtifactThreshold('unknown_tool', 1_000_000)
     const ratio = readFile / base
-    assert.ok(ratio >= 4.5 && ratio <= 5.5, `expected ~5x, got ${ratio.toFixed(1)}x (${readFile} / ${base})`)
+    assert.ok(ratio >= 1.8 && ratio <= 2.2, `expected ~2x, got ${ratio.toFixed(1)}x (${readFile} / ${base})`)
   })
 
   it('grep threshold is roughly 0.67x the base on 1M window', () => {

@@ -421,8 +421,12 @@ export class ToolExecutionController {
         if (tr.type !== 'tool_result') continue
         const tu = input.toolUses[i]
         const toolName = tu?.name ?? 'unknown'
-        if (TIERING_EXEMPT_TOOLS.has(toolName)) continue
         const content = typeof tr.content === 'string' ? tr.content : ''
+        // Read-path tools are exempt from tiering at normal sizes — head/tail
+        // summary breaks the read→edit workflow. B2: but when a single read
+        // exceeds 300K chars, tiering still fires (content is already on disk
+        // via artifact — the model can recover via read_section).
+        if (TIERING_EXEMPT_TOOLS.has(toolName) && content.length < 300_000) continue
         const target = typeof tu?.input?.file_path === 'string' ? tu.input.file_path
           : typeof tu?.input?.path === 'string' ? tu.input.path
           : toolName
