@@ -53,6 +53,12 @@ body {
 
 .workspace {
   display: grid;
+  position: relative;
+  grid-template-columns: 264px minmax(0, 1fr) 360px;
+  height: 100%;
+  transition: grid-template-columns 200ms var(--ease);
+}
+  display: grid;
   grid-template-columns: 264px minmax(0, 1fr) 360px;
   height: 100%;
   transition: grid-template-columns 200ms var(--ease);
@@ -60,6 +66,17 @@ body {
 /* Collapsed panels: overflow hidden so content doesn't bleed during transition. */
 .workspace.sidebar-collapsed > :first-child { overflow: hidden; }
 .workspace.review-collapsed > :last-child { overflow: hidden; }
+
+/* Collapsed panel expand hints — visible strip so users know a panel exists */
+.review-expand-hint {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 60px; border: 1px solid var(--border); border-right: none;
+  border-radius: 6px 0 0 6px; background: var(--panel); color: var(--muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; z-index: 5; opacity: 0.5;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.review-expand-hint:hover { opacity: 1; color: var(--accent); }
 .single-pane { height: 100%; overflow-y: auto; }
 
 /* ── Conversation + Terminal ──────────────────────────────────── */

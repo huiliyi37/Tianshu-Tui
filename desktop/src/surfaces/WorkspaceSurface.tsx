@@ -158,6 +158,20 @@ export function WorkspaceSurface() {
         sources={view.sources}
       />
       )}
+
+      {!ui.reviewVisible && (
+        <button
+          className="review-expand-hint"
+          title="展开审查面板 (Cmd+Shift+B)"
+          onClick={() => {
+            dispatch({ type: 'setReview', visible: true })
+            dispatch({ type: 'setReviewManual', on: true })
+          }}
+          aria-label="展开审查面板"
+        >
+          ◀
+        </button>
+      )}
     </div>
   )
 }
