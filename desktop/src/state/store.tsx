@@ -4,6 +4,9 @@ import {
   loadActiveSessionId,
   loadAttentionSeen,
   loadOpenTabs,
+  loadSidebarVisible,
+  loadReviewVisible,
+  loadTerminalVisible,
   loadToolDensity,
   saveActiveProject,
   saveActiveSessionId,
@@ -102,9 +105,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     error: null,
     attentionSeen: loadAttentionSeen(),
     toolDensity: loadToolDensity(),
-    sidebarVisible: true,
-    reviewVisible: true,
-    terminalVisible: false,
+    sidebarVisible: loadSidebarVisible(),
+    reviewVisible: loadReviewVisible(),
+    terminalVisible: loadTerminalVisible(),
     openTabs: loadOpenTabs(),
   }))
 
