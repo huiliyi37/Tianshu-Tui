@@ -5,6 +5,20 @@ import { staleRoundThresholds } from '../compact/constants.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
 import { debugLog } from '../utils/debug.js'
 
+/** T9 quality-compaction trigger ratios. Mirrors compactSchema.qualityCompact
+ *  defaults — used when config does not supply overrides. */
+export interface QualityCompactThresholds {
+  perTokenThreshold: number
+  subscriptionThreshold: number
+  subscriptionCeiling: number
+}
+
+export const DEFAULT_QUALITY_COMPACT_THRESHOLDS: QualityCompactThresholds = {
+  perTokenThreshold: 0.55,
+  subscriptionThreshold: 0.45,
+  subscriptionCeiling: 0.6,
+}
+
 export interface CompactBoundaryDeps {
   // Field accessors
   getCompactFailures: () => CompactCircuitBreakerState
@@ -37,6 +51,8 @@ export interface CompactBoundaryDeps {
    *  shrinking the prefix cache costs latency but no money. */
   isCostInsensitiveProvider?: () => boolean
   getProviderName?: () => string | undefined
+  /** T9 trigger ratios from config; falls back to DEFAULT_QUALITY_COMPACT_THRESHOLDS. */
+  getQualityThresholds?: () => QualityCompactThresholds
   injectImmuneSignal: (signal: { kind: string; severity: number; turn: number; source: string }) => void
 }
 
@@ -116,10 +132,11 @@ export class CompactBoundaryCoordinator {
       const prevPhaseHint = this.deps.getPrevPhaseHint()
       this.deps.setPrevPhaseHint(phaseHint)
       const phaseTransition = prevPhaseHint !== undefined && phaseHint !== prevPhaseHint
-      // Subscription providers compact leaner (0.45) and get a ceiling fallback
-      // so context can't creep up without a phase change.
-      const qThreshold = costInsensitive ? 0.45 : 0.55
-      const shouldTrigger = !skip && ((qRatio > qThreshold && phaseTransition) || (costInsensitive && qRatio > 0.6))
+      // Subscription providers compact leaner and get a ceiling fallback so
+      // context can't creep up without a phase change. Thresholds are config-tunable.
+      const thresholds = this.deps.getQualityThresholds?.() ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS
+      const qThreshold = costInsensitive ? thresholds.subscriptionThreshold : thresholds.perTokenThreshold
+      const shouldTrigger = !skip && ((qRatio > qThreshold && phaseTransition) || (costInsensitive && qRatio > thresholds.subscriptionCeiling))
 
       let decision: 'skip-paid-cache' | 'no-trigger' | 'compacted' | 'compact-failed' = skip ? 'skip-paid-cache' : 'no-trigger'
       if (shouldTrigger) {

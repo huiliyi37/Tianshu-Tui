@@ -18,7 +18,7 @@ import { isCostInsensitiveProvider } from '../api/cost-model.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
-import { CompactBoundaryCoordinator } from './compact-boundary-coordinator.js'
+import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator } from './turn-orchestrator.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
@@ -407,6 +407,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     isCachePreservingProvider: () => self.compaction.isCachePreservingProvider(),
     isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
     getProviderName: () => self.config.providerName,
+    getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
   })
 }

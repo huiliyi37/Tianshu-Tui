@@ -149,6 +149,7 @@ describe('CompactBoundaryCoordinator T9 (provider cost-aware quality compaction)
     qRatio: number
     phaseTransition: boolean
     partialOk?: boolean
+    thresholds?: { perTokenThreshold: number; subscriptionThreshold: number; subscriptionCeiling: number }
   }) {
     const contextWindow = 1_000_000
     let partialCalls = 0
@@ -159,6 +160,7 @@ describe('CompactBoundaryCoordinator T9 (provider cost-aware quality compaction)
       getPhaseHint: () => 'build',
       isCachePreservingProvider: () => opts.cachePreserving,
       isCostInsensitiveProvider: () => opts.costInsensitive,
+      ...(opts.thresholds ? { getQualityThresholds: () => opts.thresholds! } : {}),
       tryPartialCompact: async () => {
         partialCalls++
         return opts.partialOk ?? true
@@ -213,5 +215,20 @@ describe('CompactBoundaryCoordinator T9 (provider cost-aware quality compaction)
     const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.9, phaseTransition: true })
     await t.coord.runCompaction(5, null)
     assert.equal(t.partialCalls(), 0, 'mid-turn quality compaction is never allowed (cache re-prefill guard)')
+  })
+
+  it('config-tunable: GLM with a lowered subscription threshold (0.267) fires earlier', async () => {
+    const aggressive = { perTokenThreshold: 0.55, subscriptionThreshold: 0.267, subscriptionCeiling: 0.4 }
+    // qRatio 0.3 is below the 0.45 default but above the 0.267 override → triggers.
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.3, phaseTransition: true, thresholds: aggressive })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1, 'lowered config threshold compacts GLM/MiMo earlier')
+  })
+
+  it('config-tunable: lowered subscription ceiling fires without a phase transition', async () => {
+    const aggressive = { perTokenThreshold: 0.55, subscriptionThreshold: 0.45, subscriptionCeiling: 0.3 }
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.35, phaseTransition: false, thresholds: aggressive })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1, 'ceiling override triggers without phase change')
   })
 })

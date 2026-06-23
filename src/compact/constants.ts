@@ -143,6 +143,13 @@ export interface CompactionConfig {
   autoThreshold: number
   autoFloor: number
   model: string
+  /** T9 turn-0 quality-compaction trigger ratios (provider cost-aware).
+   *  Optional — runtime falls back to DEFAULT_QUALITY_COMPACT_THRESHOLDS when absent. */
+  qualityCompact?: {
+    perTokenThreshold: number
+    subscriptionThreshold: number
+    subscriptionCeiling: number
+  }
 }
 
 /**
