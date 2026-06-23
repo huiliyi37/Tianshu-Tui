@@ -32,7 +32,7 @@ import { classifyChange, createGitDiffProvider, isMechanicalFastPathEnabled } fr
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
-import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, type ChangeSet, type ReviewScale } from './review-discipline.js'
+import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, GENERAL_DEV_DISCIPLINES, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import type { ReviewConfig } from '../config/schema.js'
@@ -739,6 +739,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
                   lines.push('   → 此变更未经审查。运行 /review max 进行完整编队审查。')
                 } else if (outcome.verdict === 'nudge') {
                   lines.push('', `⚠️ 审查提醒 (${outcome.tier})：请在后续工作中应用审查纪律。`)
+                  lines.push('通用开发方法论：')
+                  for (const directive of GENERAL_DEV_DISCIPLINES) lines.push(`  - ${directive}`)
                 }
               }
               }

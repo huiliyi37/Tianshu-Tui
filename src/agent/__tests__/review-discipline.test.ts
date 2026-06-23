@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { OBJECTIVE_REVIEW_STANCE, PATH_BOUNDARY_REVIEW_STANCE, REVIEW_DISCIPLINES, METHODOLOGY_VERIFICATION_STANCE, classifyChangeScale, formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatMethodologyVerificationStance, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
+import { OBJECTIVE_REVIEW_STANCE, PATH_BOUNDARY_REVIEW_STANCE, REVIEW_DISCIPLINES, METHODOLOGY_VERIFICATION_STANCE, GENERAL_DEV_DISCIPLINES, classifyChangeScale, formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatMethodologyVerificationStance, formatGeneralDevDisciplines, isCrossModule, isFixContext, shouldRouteReviewWorkflow } from '../review-discipline.js'
 
 describe('review disciplines', () => {
   it('contains all four review disciplines', () => {
@@ -13,12 +13,25 @@ describe('review disciplines', () => {
   })
 
   it('captures the objective external-review stance as reusable workflow text', () => {
-    assert.equal(OBJECTIVE_REVIEW_STANCE.length, 4)
+    assert.equal(OBJECTIVE_REVIEW_STANCE.length, 5)
     const text = formatObjectiveReviewStance()
     assert.match(text, /外部审查者/)
     assert.match(text, /亲自观察的证据/)
     assert.match(text, /主动构造反例/)
     assert.match(text, /定义.*真实边界/)
+    // 代理真值漂移（point ①）
+    assert.match(text, /代理真值漂移/)
+    assert.match(text, /弱代理为真.*强谓词为假/)
+  })
+
+  it('captures the general dev methodology (L1 nudge) — cumulative-channel value lifecycle', () => {
+    assert.equal(GENERAL_DEV_DISCIPLINES.length, 1)
+    const text = formatGeneralDevDisciplines()
+    assert.match(text, /累积通道只接幂等的状态派生值/)
+    assert.match(text, /未显式更新就沿用上一次值/)
+    assert.match(text, /tombstone/)
+    // 通用化：不绑定本项目实现（无 appendixDelta 等内部术语）
+    assert.doesNotMatch(text, /appendixDelta|cognitiveProjection|瑶光/)
   })
 
   it('captures path-boundary review stance so T7/MeridianIndexer regressions do not depend on memory recall', () => {

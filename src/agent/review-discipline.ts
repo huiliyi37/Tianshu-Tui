@@ -14,6 +14,24 @@ export const REVIEW_DISCIPLINES: readonly string[] = [
 ]
 
 /**
+ * 通用开发方法论 — L1（最轻量 / 默认 nudge）层面对每次交付都适用的工程纪律。
+ *
+ * 与 OBJECTIVE/WIRING 等对抗审查 stance 不同：这里不绑定本项目实现，面向开源用户的
+ * 任意代码库；当一次交付只命中 L1（nudge）时随交付报告提示，作为通用提醒而非阻断门。
+ *
+ * 沉淀来源：把「一次性 / 瞬时值」塞进有「未更新即沿用」语义的累积通道导致黏滞的缺陷
+ * （本仓库 appendixDelta 的 ephemeral hint 黏滞是其一个实例，此处抽象为通用原则）。
+ * 与瑶光「复现即证」属同一方法星域的累积——根都是「未核实语义就复用」。
+ */
+export const GENERAL_DEV_DISCIPLINES: readonly string[] = [
+  '累积通道只接幂等的状态派生值：当一个通道带有「未显式更新就沿用上一次值」的语义（缓存、增量/delta 同步、diff 编码、记忆化 memo、脏标记渲染、快照复用、last-write-wins 合并、增量索引），它只能承载可由当前状态确定性重算的幂等值。一次性/瞬时值（提示、告警、本轮事件、只应展示一次的内容）放进去会黏滞——消费端会把「这次没出现」解读为「沿用上次」而非「已消失」。改动任何带状态复用语义的通道前先问：值消失时消费端会当它「清空」还是「沿用」？瞬时值应走每次显式重发 / 显式清除的通道，或为累积通道配 tombstone（显式失效标记）。',
+]
+
+export function formatGeneralDevDisciplines(): string {
+  return GENERAL_DEV_DISCIPLINES.map((directive, index) => `${index + 1}. ${directive}`).join('\n')
+}
+
+/**
  * 外部 Claude Code Opus 审查经验内化出的客观审查姿态。
  *
  * 目的不是长期依赖外部模型，而是在外部辅助不在场时，让本地
@@ -25,6 +43,9 @@ export const OBJECTIVE_REVIEW_STANCE: readonly string[] = [
   '区分亲自观察的证据与沿用他人声明；未运行命令、未看到输出、未复核调用链时，必须标记为 unverified/blocked。',
   '主动构造反例：畸形输入、缺失字段、换序集合、并发交错、错误路径、删除行相邻回归。',
   '查“定义”是否接到真实边界：常量、allowlist、guard 存在不等于调用链生效；沿调用方确认。',
+  // 沉淀自一次 objective-dedup 守卫缺陷（!!projection 当成「含 objective」用，投影因一次性提示非空时误删目标）。
+  // 与瑶光「绿非证明」同源——都是「未核实语义等价就复用一个弱信号」。
+  '代理真值漂移：守卫/分支用「X 存在 / 非空 / 非零 / truthy」代理「X 满足某更强的内容谓词（含某字段、等于某值、处于某状态）」时，要么证明二者在所有真实数据形态下等价，要么构造「弱代理为真、强谓词为假」的反例。典型反模式：`if (obj)` 当成 `if (obj.hasFoo)`、`!list.length` 当成「无有效项」、`!!str` 当成「含目标标记」。审 diff 时对每个新增/改动的布尔守卫追问：这个条件真的等于它所守卫的语义吗？',
 ]
 
 export function formatObjectiveReviewStance(): string {
