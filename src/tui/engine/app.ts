@@ -767,6 +767,10 @@ export class TuiApp {
 
   /** 激活 overlay */
   activateOverlay(id: string): boolean {
+    // 在激活任何全屏覆盖层之前，必须先干净地清除主屏幕底部的 live region（输入框和 GlanceBar），
+    // 避免退出覆盖层后主屏幕残留旧的 live region 导致重影和重复行。
+    this.live.clear()
+
     switch (id) {
       case 'pager':
       case 'starmap':
@@ -810,14 +814,9 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    // Alt screen exit restores the pre-overlay main screen frame, but the
-    // cursor position is unreliable. cursorUp(lastDisplayRows) in clear()
-    // starts from the wrong row, leaving old border lines unerased.
-    // Fix: send a large cursorUp to guarantee reaching the top of the
-    // terminal, then ERASE_SCREEN_END wipes everything, then renderLive
-    // draws the live frame cleanly from the top.
-    this.stdout.write('\x1B[999A\r\x1B[0J')
-    this.live.reset()
+    // 退出覆盖层后，由于我们在激活时已经干净地清除了旧的 live region，
+    // 此时主屏幕底部是完全干净的，且光标也处于正确的起始行。
+    // 我们只需直接调用 renderLive()，它会以 append 模式在最底部重新绘制全新的 live region。
     this.renderLive()
   }
 
@@ -1028,8 +1027,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
         this.deactivateOverlay()
+        if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
         return true
       }
       return false
@@ -1048,8 +1047,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
         this.deactivateOverlay()
+        if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
         return true
       }
       return false
@@ -1068,8 +1067,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
-        if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
         this.deactivateOverlay()
+        if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
         return true
       }
       return false
@@ -1137,6 +1136,8 @@ export class TuiApp {
    * domain name, model name) to prevent ghost rendering from stale lineCache.
    */
   forceRedraw(): void {
+    // 主题/域/模型变更会改变颜色码，记忆化的 thinking 行需失效以用新主题重算。
+    this.thinkingLinesMemo = null
     this.live.clear()
     this.renderLive()
   }
@@ -1163,9 +1164,18 @@ export class TuiApp {
    * 不走该协议的裸 commit 会留下 ghost 行 / 覆盖已提交文本。
    */
   private commitAbove(write: () => void): void {
-    this.live.clearForCommit()
-    write()
-    this.renderLive()
+    // H3：clearForCommit + commit + renderLive 三段写入用 cork/uncork 合并为一次 flush，
+    // 减少 syscall 与中间态可见（提交时的瞬时闪烁）。协议顺序不变。
+    const s = this.stdout as WriteStream & { cork?: () => void; uncork?: () => void }
+    const canCork = typeof s.cork === 'function' && typeof s.uncork === 'function'
+    if (canCork) s.cork()
+    try {
+      this.live.clearForCommit()
+      write()
+      this.renderLive()
+    } finally {
+      if (canCork) s.uncork!()
+    }
   }
 
   /**
@@ -1203,7 +1213,9 @@ export class TuiApp {
         }
         // Keep todo panel in sync during long agent runs (not just on tool result / turn boundary).
         this.refreshTodos()
-        this.renderLive()
+        // H4：ticker 经 WriteBatcher 调度而非直接 renderLive，与流式 chunk 的渲染在
+        // 同一 microtask 合并为单帧；配合 H2 无变化短路，spinner 空转 tick 变廉价。
+        this.writeBatcher.schedule()
       }, 120)
       this.streamRenderController.ticker.unref?.()
     } else if (!active && this.streamRenderController.ticker) {
@@ -1800,6 +1812,25 @@ export class TuiApp {
    * │ InputLine                  │
    * └────────────────────────────┘
    */
+  /** H5：thinking 行 split 结果记忆化，key = expanded 标志 + 全文。
+   *  header:false 时 formatThinking 输出与 elapsedMs 无关，故仅文本/展开态变化才需重算。
+   *  ticker / 批渲染帧文本未变时直接复用，消除每帧 O(n) split。主题切换经 forceRedraw 失效。 */
+  private thinkingLinesMemo: { key: string; lines: string[] } | null = null
+
+  private getThinkingLines(expanded: boolean): string[] {
+    const text = this.state.thinkingText
+    const key = `${expanded ? '1' : '0'}\u0000${text}`
+    if (this.thinkingLinesMemo?.key === key) return this.thinkingLinesMemo.lines
+    const computed = formatThinking({
+      text,
+      elapsedMs: Date.now() - this.state.thinkStartMs,
+      header: false,
+      expanded,
+    }, this.theme)
+    this.thinkingLinesMemo = { key, lines: computed }
+    return computed
+  }
+
   private renderLive(): void {
     const lines: LiveRegionLine[] = []
 
@@ -1815,15 +1846,9 @@ export class TuiApp {
       lines.push({ text: spinnerLine })
     }
 
-    // 1b. Thinking 展开内容（状态行已由 spinner 承担）
+    // 1b. Thinking 展开内容（状态行已由 spinner 承担）。split 结果记忆化见 getThinkingLines。
     if (this.state.isThinking && this.state.thinkingText) {
-      const thinkingLines = formatThinking({
-        text: this.state.thinkingText,
-        elapsedMs: Date.now() - this.state.thinkStartMs,
-        header: false,
-        expanded: this.state.thinkingExpanded,
-      }, this.theme)
-      for (const line of thinkingLines) {
+      for (const line of this.getThinkingLines(this.state.thinkingExpanded)) {
         lines.push({ text: line })
       }
     }
