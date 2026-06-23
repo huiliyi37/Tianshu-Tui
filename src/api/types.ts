@@ -62,4 +62,11 @@ export interface Usage {
   output_tokens: number
   cache_read_input_tokens: number
   cache_creation_input_tokens: number
+  /**
+   * Reasoning/thinking tokens, a subset of output_tokens (NOT additive).
+   * Optional: only thinking-capable providers report it (DeepSeek V4 via
+   * completion_tokens_details.reasoning_tokens, etc.). Undefined when the
+   * provider does not surface the split. Text tokens = output_tokens - reasoning_tokens.
+   */
+  reasoning_tokens?: number
 }

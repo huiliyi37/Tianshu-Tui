@@ -468,6 +468,56 @@ describe('DeepSeek-specific features', () => {
     assert.equal(stopUsage.output_tokens, 20)
   })
 
+  it('5b: threads reasoning_tokens from completion_tokens_details (separate usage chunk)', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    let stopUsage: any = null
+    const callbacks = {
+      onTextDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: (_reason: string, usage: any) => { stopUsage = usage },
+    }
+
+    client.processDelta({ choices: [{ delta: {}, finish_reason: 'stop' }] }, callbacks)
+    client.processDelta(
+      { usage: { prompt_tokens: 100, completion_tokens: 200, completion_tokens_details: { reasoning_tokens: 150 } } },
+      callbacks,
+    )
+
+    assert.equal(stopUsage.output_tokens, 200)
+    assert.equal(stopUsage.reasoning_tokens, 150)
+  })
+
+  it('5c: threads reasoning_tokens from COMBINED chunk; undefined when absent', () => {
+    const client = new OpenAIClient(TEST_CONFIG)
+    let stopUsage: any = null
+    const callbacks = {
+      onTextDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: (_reason: string, usage: any) => { stopUsage = usage },
+    }
+
+    client.processDelta(
+      {
+        choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 100, completion_tokens: 200, completion_tokens_details: { reasoning_tokens: 80 } },
+      },
+      callbacks,
+    )
+    assert.equal(stopUsage.reasoning_tokens, 80)
+
+    // Provider without the split → reasoning_tokens undefined, not zero.
+    const client2 = new OpenAIClient(TEST_CONFIG)
+    let usage2: any = null
+    client2.processDelta(
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+      { onTextDelta: () => {}, onContentBlock: () => {}, onStopReason: (_r: string, u: any) => { usage2 = u } },
+    )
+    client2.processDelta({ usage: { prompt_tokens: 10, completion_tokens: 5 } }, {
+      onTextDelta: () => {}, onContentBlock: () => {}, onStopReason: (_r: string, u: any) => { usage2 = u },
+    })
+    assert.equal(usage2.reasoning_tokens, undefined)
+  })
+
   it('6: maps insufficient_system_resource finish_reason to end_turn', () => {
     const client = new OpenAIClient(TEST_CONFIG)
 

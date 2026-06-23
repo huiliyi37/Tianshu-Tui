@@ -10,6 +10,7 @@ import type { Sensorium, SensoriumInput, StrategyProfile } from './sensorium.js'
 import { adaptThetaInterval, buildStarPhaseContext, buildTelemetrySnapshot } from './perception.js'
 import type { ThetaTelemetrySnapshot } from './perception.js'
 import { createStarEvent } from './star-event.js'
+import { routeRoutineEffort } from './effort-routing.js'
 import type { StarEvent, ThetaState } from './star-event.js'
 import type { VigorState } from './vigor.js'
 import type { TelemetryWriter } from './telemetry-writer.js'
@@ -126,7 +127,14 @@ export class TurnPerceptionController {
       this.hasEnteredHighComplexity = true
     }
 
-    this.deps.setReasoningEffort(nextStrategy.reasoningEffort)
+    // Phase 2A effort routing (opt-in via RIVET_EFFORT_ROUTING=1, off by default):
+    // step effort down one tier on routine, on-track turns. Floor is enforced
+    // downstream in ReasoningEffortController.set().
+    this.deps.setReasoningEffort(routeRoutineEffort(nextStrategy.reasoningEffort, {
+      complexity: nextSensorium.complexity,
+      momentum: nextSensorium.momentum,
+      confidence: nextSensorium.confidence,
+    }))
     const thetaState = {
       ...input.thetaState,
       interval: adaptThetaInterval(nextStrategy.thetaCycleInterval, input.gitChangeRate),

@@ -23,6 +23,7 @@ export const EMPTY_USAGE: Usage = {
   output_tokens: 0,
   cache_read_input_tokens: 0,
   cache_creation_input_tokens: 0,
+  reasoning_tokens: 0,
 }
 
 export interface TurnCacheSnapshot {
@@ -287,6 +288,7 @@ export class SessionContext {
     if (usage.output_tokens) u.output_tokens += usage.output_tokens
     if (usage.cache_read_input_tokens) u.cache_read_input_tokens += usage.cache_read_input_tokens
     if (usage.cache_creation_input_tokens) u.cache_creation_input_tokens += usage.cache_creation_input_tokens
+    if (usage.reasoning_tokens) u.reasoning_tokens = (u.reasoning_tokens ?? 0) + usage.reasoning_tokens
   }
 
   getCacheHitRate(): number {

@@ -60,6 +60,14 @@ return new TurnStreamController({
           cacheRead: usage.cache_read_input_tokens,
           cacheCreate: usage.cache_creation_input_tokens,
           hitRate: `${hitRate}%`,
+          // Output token breakdown: total vs reasoning vs text. Phase 0 of the
+          // output-token optimization — lets us see whether the spend is in
+          // thinking (reasoning) or final prose (text) before any intervention.
+          output: usage.output_tokens,
+        }
+        if (usage.reasoning_tokens !== undefined) {
+          entry.reasoning = usage.reasoning_tokens
+          entry.text = Math.max(0, usage.output_tokens - usage.reasoning_tokens)
         }
         try {
           const messages = self.session.getMessages()
@@ -308,7 +316,6 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       },
     },
     autoDelegate: (self.config.coordinatorRef && self.config.autoDelegateEnabled) ? {
-      coordinator: () => self.config.coordinatorRef?.() ?? null,
       getTaskContract: () => self.getTaskContract(),
       getSensorium: () => self.sensorium,
     } : undefined,

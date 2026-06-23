@@ -738,6 +738,7 @@ export class OpenAIClient implements StreamClient {
         output_tokens: usage.completion_tokens ?? 0,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
+        reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens,
       }))
       return
     }
@@ -807,6 +808,7 @@ export class OpenAIClient implements StreamClient {
         output_tokens: usage.completion_tokens ?? 0,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: usage.prompt_cache_miss_tokens ?? 0,
+        reasoning_tokens: usage.completion_tokens_details?.reasoning_tokens,
       }))
     }
   }
@@ -912,6 +914,7 @@ export class OpenAIClient implements StreamClient {
     output_tokens: number
     cache_read_input_tokens: number
     cache_creation_input_tokens: number
+    reasoning_tokens?: number
   }): typeof usage {
     const factor = this.config.usageCalibrationFactor
     if (factor === undefined || factor >= 1) return usage

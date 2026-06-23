@@ -17,6 +17,17 @@ export interface CodexClientConfig {
 const CODEX_USER_AGENT = 'codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9'
 const CODEX_ORIGINATOR = 'codex_cli_rs'
 
+/**
+ * Extract reasoning tokens from a Responses-API usage object.
+ * The Responses API nests it under `output_tokens_details.reasoning_tokens`
+ * (a subset of output_tokens). Returns undefined when absent.
+ */
+function extractReasoningTokens(usage: Record<string, unknown>): number | undefined {
+  const details = usage.output_tokens_details as Record<string, unknown> | undefined
+  const reasoning = details?.reasoning_tokens
+  return typeof reasoning === 'number' ? reasoning : undefined
+}
+
 export class CodexClient implements StreamClient {
   constructor(private config: CodexClientConfig) {}
 
@@ -188,7 +199,7 @@ export class CodexClient implements StreamClient {
     const decoder = new TextDecoder()
     let buffer = ''
     let stopReason: string | null = null
-    let usage: { input_tokens?: number; output_tokens?: number } | undefined
+    let usage: { input_tokens?: number; output_tokens?: number; reasoning_tokens?: number } | undefined
 
     // Track function calls by index
     const functionCalls = new Map<number, { id: string; name: string; arguments: string }>()
@@ -221,6 +232,7 @@ export class CodexClient implements StreamClient {
         usage = {
           input_tokens: pendingMessageItem.msgUsage.input_tokens as number,
           output_tokens: pendingMessageItem.msgUsage.output_tokens as number,
+          reasoning_tokens: extractReasoningTokens(pendingMessageItem.msgUsage),
         }
       }
       pendingMessageItem = null
@@ -389,6 +401,7 @@ export class CodexClient implements StreamClient {
                     usage = {
                       input_tokens: msgUsage.input_tokens as number,
                       output_tokens: msgUsage.output_tokens as number,
+                      reasoning_tokens: extractReasoningTokens(msgUsage),
                     }
                   }
                 }
@@ -403,6 +416,7 @@ export class CodexClient implements StreamClient {
                 usage = {
                   input_tokens: u.input_tokens as number,
                   output_tokens: u.output_tokens as number,
+                  reasoning_tokens: extractReasoningTokens(u),
                 }
               }
               stopReason = 'stop'
@@ -455,6 +469,7 @@ export class CodexClient implements StreamClient {
       output_tokens: usage?.output_tokens ?? 0,
       cache_creation_input_tokens: 0,
       cache_read_input_tokens: 0,
+      reasoning_tokens: usage?.reasoning_tokens,
     })
   }
 }

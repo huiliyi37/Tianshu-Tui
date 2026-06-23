@@ -91,6 +91,25 @@ The user will respond with:
 </plan-mode>`
 }
 
+/**
+ * Phase 2B: output verbosity steering nudge.
+ *
+ * OPT-IN via RIVET_TERSE=1 (or ctx.tersenessEnabled) — OFF by default, so the
+ * default session is byte-for-byte unchanged. Cache-safe: this is only ever
+ * pushed into the DYNAMIC appendix, never the frozen base.
+ *
+ * Scope discipline: the nudge governs OUTPUT PROSE ONLY. It must never be read
+ * as license to skip verification, tests, evidence, or the delivery-report
+ * rigor mandated by AGENTS.md — that conflict is the classic terseness failure
+ * mode, so it is called out explicitly in the prompt text.
+ */
+export function renderTersenessNudge(escalate = false): string {
+  const strict = escalate
+    ? ' You appear to be repeating work or looping — be especially terse this turn: one short paragraph, no restated context.'
+    : ''
+  return `<output-style>Be terse in prose. Skip preambles, self-narration, and closing summaries. Do not reproduce code, file contents, or context already shown — reference it instead. Lead with the answer or the action.${strict} This governs OUTPUT PROSE ONLY — never reduce verification, testing, evidence-gathering, or delivery-report rigor.</output-style>`
+}
+
 export interface ToolHistoryEntry {
   tool: string
   target: string
@@ -190,6 +209,13 @@ export interface VolatileContext {
    *  渲染到 frozen base 中，session 全程稳定，prefix cache safe。
    *  Phase 1: 仅天璇胶囊。后续可扩展为多星域胶囊数组。 */
   seedCapsuleBlock?: string
+  /** Phase 2B output verbosity steering — opt-in, OFF by default. When unset,
+   *  falls back to the RIVET_TERSE=1 env flag. Cache-safe: rendered ONLY into the
+   *  dynamic appendix, so a default session's frozen base stays byte-for-byte
+   *  unchanged (engine-cache-stability tests pass without modification). */
+  tersenessEnabled?: boolean
+  /** When true, render a stricter terseness nudge (e.g. doom-loop / storm turns). */
+  tersenessEscalate?: boolean
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -470,6 +496,14 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(renderPlanModeBlock())
   }
 
+  // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).
+  // Cache-safe: dynamic appendix only — default sessions are byte-for-byte
+  // unchanged. Escalates on doom-loop/storm turns when the caller signals it.
+  const tersenessEnabled = ctx.tersenessEnabled ?? (process.env['RIVET_TERSE'] === '1')
+  if (tersenessEnabled) {
+    parts.push(renderTersenessNudge(ctx.tersenessEscalate ?? false))
+  }
+
   if (parts.length === 0) return []
 
   // ── GWT Top-K selection (when budget is set) ────────────────────
@@ -590,6 +624,9 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<cross-session')) return 0.4
   if (blockContent.startsWith('<companion-presence>')) return 0.4 // ambient presence, housekeeping tier
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
+  // Output-style nudge (Phase 2B): tiny + governs the whole reply's prose —
+  // keep it above the drop line so budget pressure never silently removes it.
+  if (blockContent.startsWith('<output-style>')) return 0.75
   return 0.5 // default: moderate salience
 }
 
