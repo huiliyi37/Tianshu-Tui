@@ -216,6 +216,13 @@ export interface VolatileContext {
   tersenessEnabled?: boolean
   /** When true, render a stricter terseness nudge (e.g. doom-loop / storm turns). */
   tersenessEscalate?: boolean
+  /**
+   * Cognitive projection (task-contract + verification gap + cognitive mirror +
+   * uncertainty framing). Cache-safe: rendered ONLY into the dynamic appendix.
+   * When appendixDelta is enabled, the projection participates in delta diff —
+   * emitted only when changed, not every user-message boundary.
+   */
+  cognitiveProjection?: string | null
 }
 
 let rivetMdCache = new Map<string, { value: string | undefined; timestamp: number }>()
@@ -374,9 +381,19 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     }
   }
 
+  // Cognitive projection: task-contract + verification gap + cognitive mirror +
+  // uncertainty framing. Rarely changes within a task (only on status transitions
+  // or evidence updates). Under appendixDelta, emitted only when changed.
+  if (ctx.cognitiveProjection) {
+    parts.push(ctx.cognitiveProjection)
+  }
+
   // Unified progress block: merges session-state, task-progress, and decisions
   // into a single <progress> to eliminate triple repetition in the prompt.
-  const progressBlock = renderProgressBlock(ctx)
+  // C1: when cognitiveProjection carries the task-contract (with objective),
+  // the progress block omits the objective line to avoid duplication. The
+  // sessionState still carries plan-step/files/decisions for progress tracking.
+  const progressBlock = renderProgressBlock(ctx, !!ctx.cognitiveProjection)
   if (progressBlock) parts.push(progressBlock)
 
   // Tool history: most recent tools appended at end → prefix cacheable
@@ -566,16 +583,23 @@ export interface SalientBlock {
  * into a single `<progress>` XML block. Eliminates triple repetition where
  * these three independent blocks each reported overlapping objective/status/decisions.
  */
-function renderProgressBlock(ctx: VolatileContext): string | null {
+function renderProgressBlock(ctx: VolatileContext, hasProjection?: boolean): string | null {
   // When sessionState is available, it's the richest source (objective + plan step
   // + modified files + decisions + failed tests). Extract its content and wrap as <progress>.
   if (ctx.sessionState) {
     // sessionState is pre-rendered as `<session-state>...\n</session-state>`
     // Re-wrap as <progress> to unify the tag namespace
-    const inner = ctx.sessionState
+    let inner = ctx.sessionState
       .replace(/^<session-state>\n?/, '')
       .replace(/\n?<\/session-state>$/, '')
-    return `<progress>\n${inner}\n</progress>`
+    // C1+C3: when cognitive projection carries the objective, strip it from progress
+    // to avoid duplicated objective lines (saves ~60-80 chars per boundary).
+    if (hasProjection) {
+      inner = inner.replace(/^Objective:.*\n?/m, '')
+    }
+    const trimmed = inner.trim()
+    if (!trimmed) return null
+    return `<progress>\n${trimmed}\n</progress>`
   }
 
   // Fallback: build from individual fields (early turns before sessionStateManager is ready)
