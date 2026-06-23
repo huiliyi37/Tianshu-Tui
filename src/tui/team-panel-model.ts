@@ -3,6 +3,7 @@ import type { TeamRunSummary } from '../agent/team-orchestrator.js'
 import type { TeamTask } from '../agent/team-plan.js'
 import type { TeamWave } from '../agent/team-grouping.js'
 import type { WorkerResult } from '../agent/work-order.js'
+import type { FleetWorkerView } from './fleet-registry.js'
 
 export const TEAM_PANEL_UI_PREFIX = 'rivet:team-panel:v1:'
 
@@ -24,6 +25,10 @@ export interface TeamPanelTask {
     glyph: string
   }
   summary?: string
+  /** Live overlay: wall-clock ms since the worker for this task was first seen. */
+  elapsedMs?: number
+  /** Live overlay: latest worker activity line (running) or a readiness cue. */
+  activity?: string
 }
 
 export interface TeamPanelWave {
@@ -156,4 +161,70 @@ export function starFor(authority: string): { name: string; glyph: string; color
 export function taskIdFromActivity(workOrderId: string): string | undefined {
   const match = workOrderId.match(/team:(\S+)/)
   return match ? match[1] : undefined
+}
+
+function fleetViewToPanelStatus(view: FleetWorkerView): TeamPanelStatus {
+  if (view.status === 'passed') return 'done'
+  if (view.status === 'blocked') return 'blocked'
+  if (view.terminal) return 'failed' // failed / escalated
+  return 'running'
+}
+
+/** Rank so an overlay never downgrades a more-advanced state (e.g. done→running). */
+function panelStatusRank(status: TeamPanelStatus): number {
+  switch (status) {
+    case 'done': return 4
+    case 'failed': return 3
+    case 'blocked': return 3
+    case 'running': return 2
+    case 'waiting': return 1
+  }
+}
+
+/**
+ * P5: 把 FleetRegistry 的实时 per-worker 状态叠加到（通常是派发前全 waiting 的）
+ * 面板模型上。纯读投影：
+ *  - 经 taskIdFromActivity 把 worker 映射回 task，升级 status（不降级）；
+ *  - 为有 worker 的 task 附 elapsedMs / 最新 activity 行；
+ *  - 依赖解锁可视化：deps 全部 done 的 waiting task 标 "ready · deps met"。
+ */
+export function overlayFleetStatus(model: TeamPanelModel, workers: readonly FleetWorkerView[]): TeamPanelModel {
+  if (workers.length === 0) return model
+
+  const statusByTask = new Map<string, TeamPanelStatus>()
+  const viewByTask = new Map<string, FleetWorkerView>()
+  for (const view of workers) {
+    const taskId = taskIdFromActivity(view.workerId)
+    if (!taskId) continue
+    const status = fleetViewToPanelStatus(view)
+    const prev = statusByTask.get(taskId)
+    if (!prev || panelStatusRank(status) >= panelStatusRank(prev)) {
+      statusByTask.set(taskId, status)
+      viewByTask.set(taskId, view)
+    }
+  }
+  if (viewByTask.size === 0) return model
+
+  const doneSet = new Set([...statusByTask].filter(([, status]) => status === 'done').map(([id]) => id))
+
+  return {
+    ...model,
+    tasks: model.tasks.map(task => {
+      const view = viewByTask.get(task.id)
+      if (view) {
+        const overlaid = statusByTask.get(task.id)!
+        const status = panelStatusRank(overlaid) >= panelStatusRank(task.status) ? overlaid : task.status
+        return {
+          ...task,
+          status,
+          elapsedMs: view.elapsedMs,
+          ...(view.activity ? { activity: view.activity } : {}),
+        }
+      }
+      if (task.status === 'waiting' && task.dependsOn.length > 0 && task.dependsOn.every(dep => doneSet.has(dep))) {
+        return { ...task, activity: 'ready · deps met' }
+      }
+      return task
+    }),
+  }
 }

@@ -33,6 +33,8 @@ const testConfig = {
     crossSessionEnabled: true,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256, anchorBreakScout: { enabled: false, complexityThreshold: 0.5, minTurn: 3, scoutBudgetMs: 60_000, scoutMaxTokens: 2048 } },
     autoDelegateEnabled: false,
+    maxDelegationDepth: 2,
+    maxTeamParallel: 3,
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,

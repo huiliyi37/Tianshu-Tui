@@ -4,6 +4,7 @@ import type { TeamWaveTelemetry } from '../team-wave-telemetry.js'
 import {
   buildTeamEpisode,
   deriveTeamEpisodeRewardInput,
+  formatTeamDelivery,
   persistTeamEpisode,
   teamEpisodeKey,
   teamEpisodePersistKind,
@@ -146,5 +147,34 @@ describe('team episode aggregation', () => {
 
     assert.doesNotThrow(() => persistTeamEpisode(undefined, episode))
     assert.doesNotThrow(() => persistTeamEpisode({ saveBanditState: () => { throw new Error('db unavailable') } }, episode))
+  })
+})
+
+describe('formatTeamDelivery', () => {
+  it('renders per-wave tasks, cumulative changed files, and overall verdict', () => {
+    const episode = buildTeamEpisode([
+      fragment({ fromWave: 0, waveCount: 2, planned: { ...fragment().planned, taskIds: ['T1'] } }),
+      fragment({ fromWave: 1, waveCount: 2, planned: { ...fragment().planned, taskIds: ['T2'] } }),
+    ])
+    const text = formatTeamDelivery(episode)
+    assert.ok(text.includes('2/2 waves'), `wave count: ${text}`)
+    assert.ok(text.includes('wave 1: T1'), 'wave 1 tasks')
+    assert.ok(text.includes('wave 2: T2'), 'wave 2 tasks')
+    assert.ok(text.includes('Changed files (2)'), 'cumulative changed files')
+    assert.ok(text.includes('review=pass'), 'overall verdict')
+  })
+
+  it('surfaces files touched by multiple waves as a conflict face', () => {
+    const shared = {
+      observedChangedFiles: ['src/shared.ts'],
+      changedFilesSource: 'diff_artifact' as const,
+    }
+    const episode = buildTeamEpisode([
+      fragment({ fromWave: 0, waveCount: 2, changedFiles: shared }),
+      fragment({ fromWave: 1, waveCount: 2, changedFiles: shared }),
+    ])
+    const text = formatTeamDelivery(episode)
+    assert.ok(text.includes('touched by multiple waves'), `conflict line: ${text}`)
+    assert.ok(text.includes('src/shared.ts'), 'conflict file listed')
   })
 })

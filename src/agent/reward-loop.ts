@@ -258,10 +258,15 @@ function parseWaveFragment(json: string): TeamWaveTelemetry | null {
  * - episode 不完整（缺波）→ 不产出 reward（deriveTeamEpisodeRewardInput
  *   返回 null），但 episode 本体仍持久化以便诊断。
  */
-export function recordTeamEpisodeClosureFromStore(
+/**
+ * 以最后一波遥测为锚，从 append-only 存储捞回同 objective+session 的全部
+ * wave 片段，聚合成 episode（不落盘、不算 reward）。供交付综合（P2）与
+ * episode 闭环共用同一聚合逻辑。
+ */
+export function buildTeamEpisodeFromStore(
   store: TeamEpisodeClosureStore | undefined | null,
   lastFragment: TeamWaveTelemetry,
-): RewardClosureRecord | null {
+): TeamEpisode {
   const byWave = new Map<number, TeamWaveTelemetry>()
   if (store?.loadBanditStatesByPrefix) {
     const prefix = `team_wave:${lastFragment.objectiveHash}:${lastFragment.sessionId}:`
@@ -279,8 +284,14 @@ export function recordTeamEpisodeClosureFromStore(
   }
   // The anchor fragment carries the final reviewVerdict — it wins its wave slot.
   byWave.set(lastFragment.fromWave, lastFragment)
+  return buildTeamEpisode([...byWave.values()])
+}
 
-  const episode = buildTeamEpisode([...byWave.values()])
+export function recordTeamEpisodeClosureFromStore(
+  store: TeamEpisodeClosureStore | undefined | null,
+  lastFragment: TeamWaveTelemetry,
+): RewardClosureRecord | null {
+  const episode = buildTeamEpisodeFromStore(store, lastFragment)
   const persistStore = store?.saveBanditState ? { saveBanditState: store.saveBanditState.bind(store) } : null
   persistTeamEpisode(persistStore, episode)
   return recordTeamEpisodeRewardClosure(persistStore, episode)

@@ -9,7 +9,8 @@ import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } f
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
 import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../agent/gated-influence-audit.js'
-import { recordTeamEpisodeClosureFromStore } from '../agent/reward-loop.js'
+import { buildTeamEpisodeFromStore, recordTeamEpisodeClosureFromStore } from '../agent/reward-loop.js'
+import { formatTeamDelivery } from '../agent/team-episode.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
@@ -77,7 +78,10 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
   return lines.join('\n')
 }
 
-export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinator): Tool {
+export function createTeamOrchestrateTool(
+  coordinator: TeamOrchestrateCoordinator,
+  options?: { defaultMaxParallel?: number },
+): Tool {
   return {
     definition: {
       name: 'team_orchestrate',
@@ -152,7 +156,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
             objective,
             planMarkdown: markdown,
             tasks,
-            maxParallel,
+            maxParallel: maxParallel ?? options?.defaultMaxParallel,
             fromWave,
             parentTurnId: params.toolUseId,
             abortSignal: params.abortSignal,
@@ -213,6 +217,7 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
       }
 
       let reviewNote = ''
+      let deliverySynthesis = ''
       let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
@@ -272,12 +277,19 @@ export function createTeamOrchestrateTool(coordinator: TeamOrchestrateCoordinato
           } catch {
             // Episode closure must never affect team dispatch or review reporting.
           }
+          // 终局跨波交付综合（P2）：聚合全部 wave 片段成单一交付报告追加到返回。
+          try {
+            const episode = buildTeamEpisodeFromStore(coordinator.getTeamSchedulerRewardStore?.(), closedTelemetry)
+            deliverySynthesis = `\n\n${formatTeamDelivery(episode)}`
+          } catch {
+            // Delivery synthesis is presentation-only; never block the wave result.
+          }
         }
       }
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote,
+        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + deliverySynthesis,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

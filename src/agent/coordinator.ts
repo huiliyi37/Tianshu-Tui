@@ -225,6 +225,8 @@ export interface DelegationCoordinatorConfig {
    *  repeatedly failing, preventing cascade waste. When omitted a default
    *  instance is created internally. */
   circuitBreaker?: CircuitBreakerManager
+  /** Max nesting depth for delegation. Falls back to MAX_DELEGATION_DEPTH when unset. */
+  maxDelegationDepth?: number
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -734,13 +736,14 @@ export class DelegationCoordinator {
       // delegate) but bounded. Reject, don't throw: the requesting worker
       // gets a structured blocked result it can act on.
       const depth = request.delegationDepth ?? 0
-      if (depth >= MAX_DELEGATION_DEPTH) {
+      const depthCap = this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH
+      if (depth >= depthCap) {
         return {
           status: 'completed',
           results: [{
             workOrderId: `depth-capped-${request.parentTurnId}`,
             status: 'blocked',
-            summary: `Delegation rejected: max delegation depth (${MAX_DELEGATION_DEPTH}) reached — do the work inline instead of delegating further`,
+            summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
             findings: [],
             artifacts: [],
             changedFiles: [],
@@ -1335,12 +1338,13 @@ export class DelegationCoordinator {
     if (abortSignal) this.config.abortSignal = abortSignal
     try {
       // B3: depth-capped requests are rejected as blocked, not silently dropped.
+      const depthCap = this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH
       const depthCapped: WorkerResult[] = requests
-        .filter(r => (r.delegationDepth ?? 0) >= MAX_DELEGATION_DEPTH)
+        .filter(r => (r.delegationDepth ?? 0) >= depthCap)
         .map(r => ({
           workOrderId: `depth-capped-${r.parentTurnId}`,
           status: 'blocked' as const,
-          summary: `Delegation rejected: max delegation depth (${MAX_DELEGATION_DEPTH}) reached — do the work inline instead of delegating further`,
+          summary: `Delegation rejected: max delegation depth (${depthCap}) reached — do the work inline instead of delegating further`,
           findings: [],
           artifacts: [],
           changedFiles: [],
@@ -1349,7 +1353,7 @@ export class DelegationCoordinator {
           evidenceStatus: 'blocked' as const,
         }))
       const runnables = requests.filter(r =>
-        (r.delegationDepth ?? 0) < MAX_DELEGATION_DEPTH && shouldDelegateObjective(r.objective, r.scope))
+        (r.delegationDepth ?? 0) < depthCap && shouldDelegateObjective(r.objective, r.scope))
       if (runnables.length === 0 && depthCapped.length === 0) {
         return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([]) }
       }

@@ -209,6 +209,56 @@ export function deriveTeamEpisodeRewardInput(episode: TeamEpisode): TeamWaveRewa
   }
 }
 
+/** Files changed in more than one wave — surfaced as a conflict/review hotspot. */
+function filesTouchedByMultipleWaves(episode: TeamEpisode): string[] {
+  const counts = new Map<string, number>()
+  for (const fragment of episode.fragments) {
+    const files = fragment.telemetry.changedFiles.observedChangedFiles
+      ?? fragment.telemetry.changedFiles.reportedChangedFiles
+      ?? []
+    for (const file of new Set(files.filter(Boolean))) counts.set(file, (counts.get(file) ?? 0) + 1)
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([file]) => file).sort()
+}
+
+/**
+ * 终局跨波交付综合（P2）—— 把一个 episode 的全部 wave 聚合成单一交付报告：
+ * 各波任务与通过数、累计 changedFiles、被多波触碰的文件（冲突面）、整体裁决。
+ * 纯展示函数，确定性、零模型成本。
+ */
+export function formatTeamDelivery(episode: TeamEpisode): string {
+  const lines: string[] = []
+  lines.push(
+    `Team delivery synthesis — ${episode.observedWaveIndexes.length}/${episode.waveCount} waves, ` +
+    `${episode.outcome.dispatched} workers${episode.complete ? '' : ' (incomplete)'}`
+  )
+
+  for (const fragment of episode.fragments) {
+    const t = fragment.telemetry
+    const statuses = t.outcome.statuses
+    const ok = statuses.filter(s => s.status === 'passed' || s.status === 'completed').length
+    const total = statuses.length || t.planned.taskIds.length
+    const ids = t.planned.taskIds.join(', ') || '—'
+    lines.push(`  wave ${t.fromWave + 1}: ${ids} (${ok}/${total} ok)`)
+  }
+
+  const changed = episode.changedFiles.observedChangedFiles ?? episode.changedFiles.reportedChangedFiles ?? []
+  lines.push(`Changed files (${changed.length}): ${changed.length > 0 ? changed.join(', ') : 'none'}`)
+
+  const conflicts = filesTouchedByMultipleWaves(episode)
+  if (conflicts.length > 0) {
+    lines.push(`⚠ Files touched by multiple waves (review for conflicts): ${conflicts.join(', ')}`)
+  }
+
+  const verification = episode.outcome.verificationPassed
+  const verdict = episode.outcome.reviewVerdict
+    ?? (verification === true ? 'verified' : verification === false ? 'verification-failed' : 'no-verdict')
+  const verifNote = verification !== undefined ? ` verification=${verification ? 'pass' : 'fail'}` : ''
+  lines.push(`Overall: review=${verdict}${verifNote}`)
+
+  return lines.join('\n')
+}
+
 export function persistTeamEpisode(store: TeamEpisodeStore | undefined | null, episode: TeamEpisode): void {
   if (!store) return
   try {

@@ -148,6 +148,10 @@ export const agentSchema = z.object({
   antiAnchoring: antiAnchoringSchema,
   /** Explicit opt-in for auto-delegation of exploration tasks. Default off — workers cost API budget. */
   autoDelegateEnabled: z.boolean().default(false),
+  /** Max nesting depth for delegation (a worker delegating to a sub-worker). Default 2. */
+  maxDelegationDepth: z.number().int().positive().default(2),
+  /** Default max concurrent workers per team wave when input.maxParallel is unset. Clamped 1..5. */
+  maxTeamParallel: z.number().int().min(1).max(5).default(3),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */

@@ -1,6 +1,6 @@
 # 子代理（Subagent）架构设计文档
 
-> 基于代码级验证。最后更新：2026-06-01。
+> 基于代码级验证。最后更新：2026-06-23（新增 §16 Team 模式）。
 
 ## 1. 概览
 
@@ -489,3 +489,90 @@ WorkOrder    Collaboration   Model
 | `08742d7` | 修复 R1/R2 delegate_batch 缺口 |
 | `db67ec7` | P2 创新批：prefix completion, adaptive routing, shadow queue, split policy |
 | `f84f390` | 子代理能力参考文档 |
+
+---
+
+## 16. Team 模式（team_orchestrate）
+
+> §1–§15 描述的是 `delegate_task` / `delegate_batch` 这一层「主控直接派 worker」。Team 模式是其**上层编排器**：把一份计划拆成多波（wave）、按文件冲突与依赖排程、逐波派发并在末波做交付综合。它复用下层 `delegateBatch`，不替代。
+
+### 16.1 逐波重入模型
+
+`team_orchestrate` 是**逐波重入**的：每次调用只派一波，返回后由主控集成该波的 diff，再以 `fromWave++` 调下一波。
+
+```
+team_orchestrate(plan, fromWave=0)
+    │  parse plan → tasks → groupTeamTasks → waves[]
+    ▼
+dispatchWaveAt(fromWave) ── delegateBatch(wave.tasks, 'all_required')
+    │
+    ▼  返回 [wave X/Y] packet；主控集成 diff
+fromWave++ 再调 ──► … ──► 末波：review gate + episode 闭环 + 交付综合
+```
+
+**核心文件**：
+
+| 文件 | 职责 |
+|------|------|
+| `src/tools/team-orchestrate.ts` | 工具入口：解析计划、逐波派发、末波 review/episode/交付综合 |
+| `src/agent/team-orchestrator.ts` | `runTeamSkeleton` / `dispatchWaveAt`：骨架与单波派发 |
+| `src/agent/team-grouping.ts` | `groupTeamTasks`：文件冲突 + 依赖感知的波分组 |
+| `src/agent/team-plan.ts` | 计划解析（Markdown / UnifiedPlan → TeamTask[]） |
+| `src/agent/team-episode.ts` | 跨波 episode 聚合 + **`formatTeamDelivery` 交付综合** |
+| `src/agent/reward-loop.ts` | `buildTeamEpisodeFromStore` / episode reward 闭环 |
+| `src/tui/team-panel-model.ts` | TeamPanel 读模型 + **`overlayFleetStatus` 实时叠加** |
+| `src/tui/fleet-registry.ts` | 事件流驱动的 per-worker 实时读模型 |
+| `src/tui/format/team-panel.ts` | TeamPanel ANSI 渲染（含进度条 / live 行） |
+
+### 16.2 波分组（grouping）
+
+`groupTeamTasks` 把 task 列表分成有序的 wave，规则：
+
+- **依赖**：`dependsOn` 未满足的 task 推迟到后续波。
+- **文件冲突**：同一波内 task 的 `files` 不重叠；触碰相同文件的 task 被串行化到不同波。
+- 同波内的 task 并行派发（`delegateBatch('all_required')` —— 任一失败则该波失败）。
+
+### 16.3 并发与深度（可配置 · P4）
+
+| 配置项（`agent` 段） | 默认 | 范围 | 作用 |
+|----------------------|------|------|------|
+| `maxTeamParallel` | 3 | 1..5 | 单波默认并发 worker 数（`input.maxParallel` 未传时回退到它） |
+| `maxDelegationDepth` | 2 | ≥1 | 委派嵌套深度上限（worker 再派 sub-worker）；超限 fail-closed 返回 blocked |
+
+`maxTeamParallel` 经 `createTeamOrchestrateTool(coordinator, { defaultMaxParallel })` 注入；`maxDelegationDepth` 经 `DelegationCoordinatorConfig.maxDelegationDepth` 注入，`coordinator.ts` 内用 `this.config.maxDelegationDepth ?? MAX_DELEGATION_DEPTH`（常量保留为默认，未配置时行为不变）。两者均在 `bootstrap.ts` 装配处从 `config.agent.*` 透传。
+
+### 16.4 末波闭环
+
+仅**最后一波**触发以下三步（非末波行为不变）：
+
+1. **Review gate**：对跨模块 / 修复类的累计 changedFiles 跑 `routeReviewWorkflow`，产出 `reviewVerdict` 追加到返回。
+2. **Episode 闭环**：`recordTeamEpisodeClosureFromStore` 以末波遥测为锚，从 reward store 捞回本 objective 的全部波片段，按 `byWave` 聚合成 `TeamEpisode` 并落 episode 级 reward closure（晋升闸的生产者）。
+3. **交付综合（P2）**：`buildTeamEpisodeFromStore` 复用同一聚合得到 episode，`formatTeamDelivery(episode)` 渲染单一交付报告追加到返回 `content` —— 确定性、零模型成本、prefix-cache 安全。
+
+`formatTeamDelivery` 报告含：各波任务与通过数、累计 changedFiles、**被多波触碰的文件（冲突面）**、整体 review/verification 裁决。
+
+### 16.5 实时舰队任务板（TeamPanel · P5）
+
+TUI 内纯读投影，不改调度：
+
+- 派发前 `team_orchestrate` 先流式吐一个全 `waiting` 的 wave/task DAG（`onPlanReady`）。
+- 运行中 `engine/app.ts` 用 `overlayFleetStatus(model, fleet.getWorkers())` 把 `FleetRegistry` 的 per-worker 实时态叠加回面板：经 `taskIdFromActivity` 映射 worker→task，升级 status（`waiting→running→done/failed`，rank 保护不降级），附 `elapsedMs` / 最新 activity 行。
+- **依赖解锁可视化**：deps 全部 `done` 的 `waiting` task 标 `ready · deps met`。
+- **组进度条**：渲染层按 task done 计数派生 `[████░░] n/total done`。
+
+### 16.6 测试覆盖（team 专属）
+
+| 模块 | 测试文件 |
+|------|---------|
+| Team 编排骨架 / 波派发 | `team-orchestrator.test.ts` |
+| Team 工具入口 | `team-orchestrate.test.ts` |
+| Episode 聚合 + 交付综合 | `team-episode.test.ts`（含 `formatTeamDelivery`） |
+| Episode 闭环 | `team-episode-closure.test.ts` / `reward-loop.test.ts` |
+| TeamPanel 叠加 + 进度条 | `team-panel-overlay.test.ts` |
+| FleetRegistry 读模型 | `fleet-registry.test.ts` |
+
+### 16.7 已知边界
+
+- **交付综合仅末波触发**；中途波只返回 `[wave X/Y] packet`。
+- **LLM 级解冲突未做**（可选升级）：当前冲突面只是「被多波触碰的文件」清单，不派 reviewer worker 读全 diff 做语义解冲突——成本更高，暂不在默认范围。
+- Team 不自行 commit；worker diff 由主控集成。

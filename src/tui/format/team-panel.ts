@@ -29,6 +29,18 @@ function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, Math.max(0, max - 1))}…` : text
 }
 
+function formatElapsed(ms: number): string {
+  if (ms >= 60_000) return `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`
+  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10_000 ? 0 : 1)}s`
+  return `${ms}ms`
+}
+
+function progressBar(done: number, total: number, segments = 12): string {
+  const ratio = total > 0 ? Math.min(1, done / total) : 0
+  const filled = Math.round(ratio * segments)
+  return `  [${'█'.repeat(filled)}${'░'.repeat(Math.max(0, segments - filled))}] ${done}/${total} done`
+}
+
 /**
  * 生成 TeamPanel 的纯文本行（无颜色，便于宽度计算/测试）。
  *
@@ -61,12 +73,23 @@ export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[]
       if (task.dependsOn.length > 0) {
         lines.push(truncate(`      depends: ${task.dependsOn.join(', ')}`, rule))
       }
+      // Live overlay row: elapsed + latest activity (P5), shown while running/ready.
+      const liveMeta: string[] = []
+      if (typeof task.elapsedMs === 'number' && task.status !== 'waiting') liveMeta.push(formatElapsed(task.elapsedMs))
+      if (task.activity) liveMeta.push(task.activity)
+      if (liveMeta.length > 0) {
+        lines.push(truncate(`      ${liveMeta.join(' · ')}`, rule))
+      }
       if (task.summary && task.status !== 'waiting') {
         lines.push(truncate(`      ${task.summary}`, rule))
       }
     }
   }
 
+  if (model.tasks.length > 0) {
+    const doneCount = model.tasks.filter(t => t.status === 'done').length
+    lines.push(progressBar(doneCount, model.tasks.length))
+  }
   if (model.blocked.length > 0) {
     lines.push(truncate(`  blocked: ${model.blocked.join('; ')}`, rule))
   }

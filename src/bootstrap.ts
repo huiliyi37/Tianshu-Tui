@@ -427,7 +427,7 @@ export function createInteractiveToolRegistry(
       store: refs.meridianIndexer?.getDb(),
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
-  }))
+  }, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
   reg.register(createCouncilConveneTool({
@@ -821,6 +821,7 @@ export function createAgentRuntime(deps: {
     sessionId: refs.sessionId ?? undefined,
     resumeEnabled: true,
     reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
+    maxDelegationDepth: config.agent.maxDelegationDepth,
   })
 
   const agent = new AgentLoop(

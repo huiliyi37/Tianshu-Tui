@@ -41,7 +41,7 @@ import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
-import { decodeTeamPanelModel, taskIdFromActivity, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
+import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -1479,18 +1479,9 @@ export class TuiApp {
    * 终态任务（在 fleet 已无活跃记录）保持 waiting，待终态面板权威覆盖。
    */
   private teamModelWithLiveStatus(model: TeamPanelModel): TeamPanelModel {
-    const activeIds = new Set<string>()
-    for (const w of this.fleet.getActiveWorkers()) {
-      const tid = taskIdFromActivity(w.workerId)
-      if (tid) activeIds.add(tid)
-    }
-    if (activeIds.size === 0) return model
-    return {
-      ...model,
-      tasks: model.tasks.map(t =>
-        t.status === 'waiting' && activeIds.has(t.id) ? { ...t, status: 'running' } : t,
-      ),
-    }
+    // P5: overlay full live fleet status (running/done/failed + elapsed/activity +
+    // dependency-unlock cue) from all observed workers, not just running task ids.
+    return overlayFleetStatus(model, this.fleet.getWorkers())
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
