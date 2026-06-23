@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
@@ -7,6 +7,8 @@ import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
+import { TerminalPanel } from '../components/TerminalPanel'
+import { ThreadTabs } from '../components/ThreadTabs'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -22,6 +24,24 @@ export function WorkspaceSurface() {
   const setPlanMode = useSetPlanMode()
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
+
+  // Responsive: auto-collapse panels when window < 1200px.
+  // Uses ResizeObserver (not window.resize) — fires only when the workspace
+  // element actually changes size, not on every browser chrome resize event.
+  const wsRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = wsRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      if (!entry) return
+      const w = entry.contentRect.width
+      if (w < 1200) {
+        if (ui.reviewVisible) dispatch({ type: 'setReview', visible: false })
+      }
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [dispatch, ui.reviewVisible])
 
   // Desktop notifications now fire globally for ANY session (Q2) via
   // useGlobalNotifications mounted in App — no per-active-session effects here.
@@ -69,11 +89,20 @@ export function WorkspaceSurface() {
     dispatch({ type: 'setActive', id: '' })
   }, [activeId, closeSession, dispatch])
 
+  const sidebarW = ui.sidebarVisible ? '264px' : '0px'
+  const reviewW = ui.reviewVisible ? '360px' : '0px'
+
   return (
-    <div className="workspace">
-      <ProjectSidebar />
+    <div
+      ref={wsRef}
+      className={`workspace${!ui.sidebarVisible ? ' sidebar-collapsed' : ''}${!ui.reviewVisible ? ' review-collapsed' : ''}`}
+      style={{ gridTemplateColumns: `${sidebarW} minmax(0, 1fr) ${reviewW}` }}
+    >
+      {ui.sidebarVisible && <ProjectSidebar />}
 
       <div className="conversation">
+        <div className="conversation-body">
+        <ThreadTabs />
         {active ? (
           <ThreadView
             session={active}
@@ -93,8 +122,11 @@ export function WorkspaceSurface() {
             </button>
           </div>
         )}
+        </div>
+        {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
       </div>
 
+      {ui.reviewVisible && (
       <ReviewPanel
         sessionId={activeId}
         artifacts={artifacts.data ?? []}
@@ -110,6 +142,7 @@ export function WorkspaceSurface() {
         todos={view.todos}
         sources={view.sources}
       />
+      )}
     </div>
   )
 }

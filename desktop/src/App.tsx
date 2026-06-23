@@ -51,23 +51,69 @@ export function App() {
     new Set(ui.attentionSeen),
   ).unseenCount
 
-  // Global shortcuts: Cmd/Ctrl+K palette, Cmd/Ctrl+1..4 switch surface.
+  // Global shortcuts. All desktop shortcuts register here, in a single
+  // handler, to avoid N component-level window.addEventListener calls.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey
+      // Cmd+K → command palette toggle
       if (mod && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault()
         setPaletteOpen((o) => !o)
         return
       }
+      // Cmd+1..4 → switch surface
       if (mod && e.key >= '1' && e.key <= '4') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
+        return
+      }
+      // Cmd+B → toggle sidebar
+      if (mod && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault()
+        dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
+        return
+      }
+      // Cmd+Shift+B → toggle review panel
+      if (mod && e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault()
+        dispatch({ type: 'setReview', visible: !ui.reviewVisible })
+        return
+      }
+      // Cmd+J → toggle terminal
+      if (mod && (e.key === 'j' || e.key === 'J')) {
+        e.preventDefault()
+        dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })
+        return
+      }
+      // Cmd+N → new thread dialog
+      if (mod && (e.key === 'n' || e.key === 'N')) {
+        e.preventDefault()
+        dispatch({ type: 'openNew', open: true })
+        return
+      }
+      // Cmd+, → settings surface
+      if (mod && e.key === ',') {
+        e.preventDefault()
+        dispatch({ type: 'setSurface', surface: 'settings' })
+        return
+      }
+      // Cmd+/ → shortcut cheatsheet (via command palette search)
+      if (mod && e.key === '/') {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+      // Cmd+W → close current thread tab
+      if (mod && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault()
+        if (ui.activeSessionId) dispatch({ type: 'closeTab', id: ui.activeSessionId })
+        return
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch])
+  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible])
 
   const jumpTo = (cwd: string, id: string) => {
     dispatch({ type: 'setProject', cwd })

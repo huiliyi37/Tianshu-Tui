@@ -167,9 +167,26 @@ export function ReviewPanel(props: {
         )}
 
         <section className="review-section">
-          <h4>工件 · 信任层</h4>
-          {artifacts.length === 0 && <div className="empty sm">还没有工件</div>}
-          {artifacts.map((a) => (
+          <h4>Git 变更 · 代码审查</h4>
+          {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
+            <div className="empty sm">
+              <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
+            </div>
+          ) : (
+            artifacts.filter(a => a.kind === 'diff').map((a) => (
+              <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
+                <div className="kind">{a.kind} · {a.target}</div>
+                <div className="summary">{a.summary || a.target}</div>
+                <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+              </div>
+            ))
+          )}
+        </section>
+
+        <section className="review-section">
+          <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
+          {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
+          {artifacts.filter(a => a.kind !== 'diff').map((a) => (
             <div key={a.id} className="artifact-card" onClick={() => view(a)}>
               <div className="kind">{a.kind}</div>
               <div className="summary">{a.summary || a.target}</div>

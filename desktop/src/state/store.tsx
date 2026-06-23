@@ -7,6 +7,9 @@ import {
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
+  saveSidebarVisible,
+  saveReviewVisible,
+  saveTerminalVisible,
   saveToolDensity,
   type ToolDensity,
 } from '../lib/persist'
@@ -23,6 +26,11 @@ export interface UiState {
   error: string | null
   attentionSeen: string[] // seen attention signatures (Q2)
   toolDensity: ToolDensity
+  sidebarVisible: boolean
+  reviewVisible: boolean
+  terminalVisible: boolean
+  /** Ordered list of open thread IDs (tabs). First = most recently used. */
+  openTabs: string[]
 }
 
 type UiAction =
@@ -33,11 +41,19 @@ type UiAction =
   | { type: 'setError'; error: string | null }
   | { type: 'markSeen'; sigs: string[] }
   | { type: 'setToolDensity'; density: ToolDensity }
+  | { type: 'setSidebar'; visible: boolean }
+  | { type: 'setReview'; visible: boolean }
+  | { type: 'setTerminal'; visible: boolean }
+  | { type: 'closeTab'; id: string }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
-    case 'setActive':
-      return { ...state, activeSessionId: action.id }
+    case 'setActive': {
+      const tabs = action.id
+        ? [action.id, ...state.openTabs.filter((t) => t !== action.id)]
+        : state.openTabs
+      return { ...state, activeSessionId: action.id, openTabs: tabs }
+    }
     case 'setProject':
       // Switching project drops the active thread; it belongs to another project.
       return { ...state, activeProject: action.cwd, activeSessionId: null }
@@ -54,6 +70,19 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setToolDensity':
       return { ...state, toolDensity: action.density }
+    case 'setSidebar':
+      return { ...state, sidebarVisible: action.visible }
+    case 'setReview':
+      return { ...state, reviewVisible: action.visible }
+    case 'setTerminal':
+      return { ...state, terminalVisible: action.visible }
+    case 'closeTab': {
+      const tabs = state.openTabs.filter((t) => t !== action.id)
+      const activeId = state.activeSessionId === action.id
+        ? (tabs[0] ?? null)
+        : state.activeSessionId
+      return { ...state, openTabs: tabs, activeSessionId: activeId }
+    }
     default:
       return state
   }
@@ -71,6 +100,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     error: null,
     attentionSeen: loadAttentionSeen(),
     toolDensity: loadToolDensity(),
+    sidebarVisible: true,
+    reviewVisible: true,
+    terminalVisible: false,
+    openTabs: loadActiveSessionId() ? [loadActiveSessionId()!] : [],
   }))
 
   useEffect(() => {
@@ -88,6 +121,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveToolDensity(state.toolDensity)
   }, [state.toolDensity])
+
+  useEffect(() => {
+    saveSidebarVisible(state.sidebarVisible)
+  }, [state.sidebarVisible])
+
+  useEffect(() => {
+    saveReviewVisible(state.reviewVisible)
+  }, [state.reviewVisible])
+
+  useEffect(() => {
+    saveTerminalVisible(state.terminalVisible)
+  }, [state.terminalVisible])
 
   return (
     <StateCtx.Provider value={state}>

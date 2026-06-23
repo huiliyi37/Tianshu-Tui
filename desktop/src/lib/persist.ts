@@ -7,6 +7,9 @@ const KEY_PROJECT = 'tianshu.activeProject'
 const KEY_SEEN = 'tianshu.attentionSeen'
 const KEY_AUTONOMY = 'tianshu.defaultAutonomy'
 const KEY_TOOL_DENSITY = 'tianshu.toolDensity'
+const KEY_SIDEBAR = 'tianshu.sidebarVisible'
+const KEY_REVIEW = 'tianshu.reviewVisible'
+const KEY_TERMINAL = 'tianshu.terminalVisible'
 
 // ── Tool density ──
 
@@ -103,3 +106,27 @@ export function saveDefaultAutonomy(level: string): void {
     // non-fatal
   }
 }
+
+// ── Panel visibility ──
+
+function loadBool(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    if (v === 'true') return true
+    if (v === 'false') return false
+  } catch { /* non-fatal */ }
+  return fallback
+}
+
+function saveBool(key: string, v: boolean): void {
+  try { localStorage.setItem(key, String(v)) } catch { /* non-fatal */ }
+}
+
+export function loadSidebarVisible(): boolean { return loadBool(KEY_SIDEBAR, true) }
+export function saveSidebarVisible(v: boolean): void { saveBool(KEY_SIDEBAR, v) }
+
+export function loadReviewVisible(): boolean { return loadBool(KEY_REVIEW, true) }
+export function saveReviewVisible(v: boolean): void { saveBool(KEY_REVIEW, v) }
+
+export function loadTerminalVisible(): boolean { return loadBool(KEY_TERMINAL, false) }
+export function saveTerminalVisible(v: boolean): void { saveBool(KEY_TERMINAL, v) }

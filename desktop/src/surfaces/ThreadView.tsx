@@ -235,19 +235,29 @@ export function ThreadView(props: {
   return (
     <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator}>
       <header className="thread-header">
-        <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
-          {domainGlyph}
-        </span>
-        <div className="thread-id">
-          <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
-          <div className="thread-sub" title={session.cwd}>{basename(session.cwd) || session.cwd}</div>
+        <div className="thread-header-main">
+          <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
+            {domainGlyph}
+          </span>
+          <div className="thread-id">
+            <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
+            <div className="thread-sub" title={session.cwd}>{basename(session.cwd) || session.cwd}</div>
+          </div>
+          <AutonomyControl
+            compact
+            value={modeToLevel(session.approvalMode)}
+            onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
+          />
+          <span className={`status-dot status-${session.status}`} />
+          <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
+          <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-        <AutonomyControl
-          compact
-          value={modeToLevel(session.approvalMode)}
-          onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
-        />
-        <div className="thread-status">
+        <div className="thread-header-meta">
           {session.model && (
             <span className="model-chip" title={`当前模型: ${session.model}`}>
               {session.model.replace(/^(deepseek-|glm-|mimo-)/, '').slice(0, 16)}
@@ -274,16 +284,8 @@ export function ThreadView(props: {
               +{formatTokens(ctxDelta)}
             </span>
           ) : null}
-          <span className={`status-dot status-${session.status}`} />
-          <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
         </div>
-        <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
       </header>
       {autonomous && (
         <div className="autonomy-banner">
@@ -297,12 +299,42 @@ export function ThreadView(props: {
 
       <div className="messages" ref={msgRef} onScroll={onScroll}>
         {view.blocks.length === 0 && (
-          <div className="empty sm">
-            <svg className="empty-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-            </svg>
-            <span>发一条消息开始</span>
+          <div className="empty welcome">
+            <div className="welcome-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              </svg>
+            </div>
+            <p className="welcome-title">开始对话</p>
+            <p className="welcome-hint">输入消息或使用下方快捷命令</p>
+            <div className="welcome-cards">
+              <button className="welcome-card" onClick={() => onSend('/plan 创建方案')}>
+                <span className="wc-glyph" aria-hidden>📋</span>
+                <span className="wc-label">创建方案</span>
+                <span className="wc-desc">调研代码库后输出实施计划</span>
+              </button>
+              <button className="welcome-card" onClick={() => onSend('/review 审查代码')}>
+                <span className="wc-glyph" aria-hidden>🔍</span>
+                <span className="wc-label">审查变更</span>
+                <span className="wc-desc">对未提交改动进行代码审查</span>
+              </button>
+              <button className="welcome-card" onClick={() => onSetApprovalMode(levelToMode('autonomous'))}>
+                <span className="wc-glyph" aria-hidden>✦</span>
+                <span className="wc-label">自治模式</span>
+                <span className="wc-desc">项目内操作自动执行，无需逐条审批</span>
+              </button>
+            </div>
+            <div className="welcome-pills">
+              <span className="welcome-pill" onClick={() => onSend('/review')}>/review</span>
+              <span className="welcome-pill" onClick={() => onSend('/plan')}>/plan</span>
+              <span className="welcome-pill" onClick={() => onSend('/autonomous')}>/autonomous</span>
+              <span className="welcome-pill" onClick={() => onSend('/team')}>/team</span>
+              <span className="welcome-pill" onClick={() => onSend('/compact')}>/compact</span>
+              <span className="welcome-pill" onClick={() => onSend('/context')}>/context</span>
+              <span className="welcome-pill" onClick={() => onSend('/verify')}>/verify</span>
+              <span className="welcome-pill" onClick={() => onSend('/constellation')}>/constellation</span>
+            </div>
           </div>
         )}
         {rendered.length > 0 && (

@@ -55,8 +55,90 @@ body {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr) 360px;
   height: 100%;
+  transition: grid-template-columns 200ms var(--ease);
 }
+/* Collapsed panels: overflow hidden so content doesn't bleed during transition. */
+.workspace.sidebar-collapsed > :first-child { overflow: hidden; }
+.workspace.review-collapsed > :last-child { overflow: hidden; }
 .single-pane { height: 100%; overflow-y: auto; }
+
+/* ── Conversation + Terminal ──────────────────────────────────── */
+.conversation {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.conversation-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Thread Tabs (Cursor 3.0 Agent Tabs) ──────────────────────── */
+.thread-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.thread-tabs::-webkit-scrollbar { display: none; }
+.thread-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  background: transparent; color: var(--muted);
+  border: none; border-bottom: 2px solid transparent;
+  cursor: pointer; white-space: nowrap;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.thread-tab:hover { color: var(--text); }
+.thread-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.thread-tab-title { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.thread-tab-close {
+  font-size: 14px; line-height: 1; opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.thread-tab:hover .thread-tab-close { opacity: 0.6; }
+.thread-tab-close:hover { opacity: 1 !important; color: var(--error); }
+
+/* Terminal panel — placeholder. Height reserved for future PTY. */
+.terminal-panel {
+  flex-shrink: 0;
+  height: 200px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.terminal-placeholder {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.terminal-glyph { color: var(--accent); font-weight: var(--weight-semibold); }
+.terminal-path { color: var(--text-dim); font-family: var(--font-mono); font-size: var(--text-xs); }
+.terminal-hint { margin-left: auto; font-style: italic; }
+.terminal-output {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-dim);
+}
+.terminal-output[aria-disabled="true"] {
+  opacity: 0.4;
+  user-select: none;
+}
 
 .artifacts { background: var(--panel); overflow-y: auto; border-left: 1px solid var(--border); }
 
@@ -853,7 +935,34 @@ body {
 
 /* ── Thread (single-session) ───────────────────────────────────── */
 .thread { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* ── Thread header (Codex-style two-tier) ─────────────────────── */
 .thread-header {
+  display: flex; flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  /* hover: expand the second tier */
+}
+.thread-header-main {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.thread-header-meta {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-2);
+  font-size: var(--text-xs);
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 160ms var(--ease), opacity 120ms var(--ease), padding 160ms var(--ease);
+}
+/* Expand on header hover or keyboard focus-within */
+.thread-header:hover .thread-header-meta,
+.thread-header:focus-within .thread-header-meta {
+  max-height: 32px;
+  opacity: 1;
+  padding: 0 var(--space-4) var(--space-2);
+}
+/* Star-domain glyph — always visible, breathes while streaming. */
+.thread-glyph {
   display: flex; align-items: center; gap: var(--space-3);
   padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
 }
@@ -958,7 +1067,7 @@ body {
 .thread-id { flex: 1; min-width: 0; }
 .thread-title { font-weight: var(--weight-semibold); color: var(--text-strong); }
 .thread-sub { color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.thread-status { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); color: var(--muted); }
+/* thread-status removed; chips now live in .thread-header-main / .thread-header-meta */
 .phase-chip {
   background: var(--accent-soft); color: var(--accent);
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
@@ -1462,6 +1571,45 @@ body {
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 .empty.sm { padding: var(--space-4); font-size: var(--text-sm); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
 .empty-icon { color: var(--faint); flex: none; }
+
+/* ── Welcome empty state (Codex-style) ────────────────────────── */
+.empty.welcome {
+  display: flex; flex-direction: column; align-items: center;
+  padding: var(--space-6) var(--space-4); gap: var(--space-3);
+  text-align: center;
+}
+.welcome-icon { color: var(--accent); opacity: 0.5; margin-bottom: var(--space-1); }
+.welcome-title { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--text); margin: 0; }
+.welcome-hint { font-size: var(--text-sm); color: var(--muted); margin: 0; }
+.welcome-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  width: 100%; max-width: 520px;
+  margin-top: var(--space-2);
+}
+.welcome-card {
+  display: flex; flex-direction: column; align-items: center; gap: var(--space-1);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-3); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.welcome-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.wc-glyph { font-size: 20px; }
+.wc-label { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text); }
+.wc-desc { font-size: var(--text-xs); color: var(--muted); line-height: 1.4; }
+.welcome-pills {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2);
+  max-width: 520px; margin-top: var(--space-1);
+}
+.welcome-pill {
+  font-size: var(--text-xs); font-family: var(--font-mono);
+  background: var(--panel-2); color: var(--text-dim);
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  padding: 2px 10px; cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.welcome-pill:hover { color: var(--accent); border-color: var(--accent); }
 .banner { padding: 8px 14px; font-size: 13px; }
 .banner { padding: 8px 14px; font-size: 13px; }
 .banner.error { background: var(--error-soft); color: var(--error); }
