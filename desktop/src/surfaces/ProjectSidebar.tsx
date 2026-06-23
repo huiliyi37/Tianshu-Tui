@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
@@ -26,6 +26,18 @@ export function ProjectSidebar() {
   const [filter, setFilter] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
+  const [isOpen, setIsOpen] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   const loadArchived = async () => {
     const next = !showArchived
@@ -68,20 +80,53 @@ export function ProjectSidebar() {
     dispatch({ type: 'setProject', cwd })
   }
 
+  const activeProjectObj = projects.find((p) => p.cwd === ui.activeProject)
+  const activeLabel = activeProjectObj ? `${activeProjectObj.name} · ${activeProjectObj.threadCount}` : '所有项目'
+
   return (
     <div className="project-sidebar">
-      <div className="project-switch">
-        <select
-          value={ui.activeProject ?? ''}
-          onChange={(e) => dispatch({ type: 'setProject', cwd: e.target.value || null })}
-        >
-          <option value="">所有项目</option>
-          {projects.map((p) => (
-            <option key={p.cwd} value={p.cwd}>
-              {p.name} · {p.threadCount}
-            </option>
-          ))}
-        </select>
+      <div className="project-switch" ref={dropdownRef}>
+        <div className="custom-select-wrapper">
+          <button
+            className={`custom-select-trigger ${isOpen ? 'open' : ''}`}
+            onClick={() => setIsOpen(!isOpen)}
+            aria-haspopup="listbox"
+            aria-expanded={isOpen}
+          >
+            <span className="custom-select-label">{activeLabel}</span>
+            <span className={`chev ${isOpen ? 'open' : ''}`} aria-hidden>▸</span>
+          </button>
+          {isOpen && (
+            <div className="custom-select-options" role="listbox">
+              <button
+                role="option"
+                aria-selected={!ui.activeProject}
+                className={`custom-select-option ${!ui.activeProject ? 'active' : ''}`}
+                onClick={() => {
+                  dispatch({ type: 'setProject', cwd: null })
+                  setIsOpen(false)
+                }}
+              >
+                所有项目
+              </button>
+              {projects.map((p) => (
+                <button
+                  key={p.cwd}
+                  role="option"
+                  aria-selected={p.cwd === ui.activeProject}
+                  className={`custom-select-option ${p.cwd === ui.activeProject ? 'active' : ''}`}
+                  onClick={() => {
+                    dispatch({ type: 'setProject', cwd: p.cwd })
+                    setIsOpen(false)
+                  }}
+                >
+                  <span className="proj-name">{p.name}</span>
+                  <span className="proj-count">{p.threadCount}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <button className="icon-btn" title="打开文件夹" onClick={openFolder}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -92,20 +137,50 @@ export function ProjectSidebar() {
       </div>
 
       {threads.length > 0 || filter ? (
-        <input
-          className="thread-filter"
-          type="text"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="搜索线程…"
-          aria-label="搜索线程"
-        />
+        <div className="search-wrapper">
+          <span className="search-icon" aria-hidden>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </span>
+          <input
+            className="thread-filter"
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="搜索线程…"
+            aria-label="搜索线程"
+          />
+          {filter && (
+            <button
+              className="search-clear"
+              onClick={() => setFilter('')}
+              aria-label="清除搜索"
+              title="清除搜索"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       ) : null}
 
       <div className="thread-head">
-        <span>线程{filter ? ` · ${threads.length}` : ''}</span>
-        <button className="btn sm" onClick={() => dispatch({ type: 'openNew', open: true })}>
-          + 新线程
+        <span className="thread-head-title">线程{filter ? ` · ${threads.length}` : ''}</span>
+        <button
+          className="icon-btn sm"
+          title="新建线程"
+          aria-label="新建线程"
+          onClick={() => dispatch({ type: 'openNew', open: true })}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M5 12h14M12 5v14" />
+          </svg>
         </button>
       </div>
 
@@ -154,36 +229,46 @@ export function ProjectSidebar() {
         </div>
       ))}
 
-      <button className="btn-show-archived" onClick={loadArchived}>
-        {showArchived ? '隐藏归档' : '显示归档会话'}
-      </button>
+      <div className="archived-section-wrapper">
+        <button className={`btn-show-archived ${showArchived ? 'open' : ''}`} onClick={loadArchived}>
+          <span className="folder-icon" aria-hidden>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+            </svg>
+          </span>
+          <span className="label-text">{showArchived ? '隐藏归档会话' : '显示归档会话'}</span>
+          <span className="archived-count">{archivedSessions.length > 0 ? archivedSessions.length : ''}</span>
+          <span className={`chev ${showArchived ? 'open' : ''}`} aria-hidden>▸</span>
+        </button>
 
-      {showArchived && archivedSessions.length > 0 && (
-        <div className="archived-section">
-          {archivedSessions.map(s => (
-            <div key={s.id} className="thread-card archived">
-              <div className="thread-card-main">
-                <div className="title">
-                  <span className="status-dot status-archived" />
-                  {s.title ?? s.id.slice(0, 8)}
+        {showArchived && archivedSessions.length > 0 && (
+          <div className="archived-section">
+            {archivedSessions.map(s => (
+              <div key={s.id} className="thread-card archived">
+                <div className="thread-card-main">
+                  <div className="title">
+                    <span className="status-dot status-archived" />
+                    {s.title ?? s.id.slice(0, 8)}
+                  </div>
+                  <div className="meta">归档 · {s.status}</div>
                 </div>
-                <div className="meta">归档 · {s.status}</div>
+                <button
+                  className="btn-sm"
+                  title="恢复"
+                  onClick={() => {
+                    unarchive.mutate(s.id)
+                    setArchivedSessions(prev => prev.filter(a => a.id !== s.id))
+                  }}
+                >恢复</button>
               </div>
-              <button
-                className="btn-sm"
-                title="恢复"
-                onClick={() => {
-                  unarchive.mutate(s.id)
-                  setArchivedSessions(prev => prev.filter(a => a.id !== s.id))
-                }}
-              >恢复</button>
-            </div>
-          ))}
-        </div>
-      )}
-      {showArchived && archivedSessions.length === 0 && (
-        <div className="empty sm">没有归档的会话</div>
-      )}
+            ))}
+          </div>
+        )}
+        {showArchived && archivedSessions.length === 0 && (
+          <div className="empty sm">没有归档的会话</div>
+        )}
+      </div>
     </div>
   )
 }
