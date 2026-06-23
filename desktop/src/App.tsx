@@ -22,12 +22,16 @@ const AutomationsSurface = lazy(() =>
 const SettingsSurface = lazy(() =>
   import('./surfaces/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
 )
+const SkillsSurface = lazy(() =>
+  import('./surfaces/SkillsSurface').then((m) => ({ default: m.SkillsSurface })),
+)
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'settings']
+const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'settings']
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
   automations: '自动化',
   attention: '需处理',
+  skills: '技能',
   settings: '设置',
 }
 
@@ -62,8 +66,8 @@ export function App() {
         setPaletteOpen((o) => !o)
         return
       }
-      // Cmd+1..4 → switch surface
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '4') {
+      // Cmd+1..5 → switch surface
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '5') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
         return
@@ -177,6 +181,7 @@ export function App() {
               {ui.surface === 'workspace' && <WorkspaceSurface />}
               {ui.surface === 'automations' && <AutomationsSurface />}
               {ui.surface === 'attention' && <InboxSurface />}
+              {ui.surface === 'skills' && <SkillsSurface />}
               {ui.surface === 'settings' && <SettingsSurface />}
             </Suspense>
           </ErrorBoundary>

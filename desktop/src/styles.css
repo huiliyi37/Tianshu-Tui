@@ -107,6 +107,37 @@ body {
 .thread-tab.dragging { opacity: 0.4; cursor: grabbing; }
 .thread-tab.drag-over { border-bottom-color: var(--accent); opacity: 0.7; }
 
+/* Skills surface */
+.skills-toolbar { padding: var(--space-3) var(--space-4); }
+.skills-search {
+  width: 100%; padding: 6px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: var(--text-sm); outline: none;
+}
+.skills-search:focus { border-color: var(--accent); }
+.skills-list { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-4) var(--space-4); }
+.skill-card {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-3); border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); transition: border-color var(--dur) var(--ease);
+}
+.skill-card.enabled { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.skill-info { flex: 1; min-width: 0; }
+.skill-name { font-weight: 600; font-size: var(--text-sm); color: var(--text); }
+.skill-desc { font-size: var(--text-xs); color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+.skill-source { font-size: 10px; color: var(--text-faint); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.skill-toggle {
+  flex-shrink: 0; width: 36px; height: 20px; border-radius: 10px; border: none;
+  background: var(--border); position: relative; cursor: pointer; padding: 0;
+  transition: background var(--dur) var(--ease);
+}
+.skill-toggle.on { background: var(--accent); }
+.skill-toggle-knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: white; transition: transform var(--dur) var(--ease);
+}
+.skill-toggle.on .skill-toggle-knob { transform: translateX(16px); }
+
 /* Terminal panel — placeholder. Height reserved for future PTY. */
 .terminal-panel {
   flex-shrink: 0;

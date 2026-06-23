@@ -17,6 +17,7 @@ const ICONS: Record<Surface, string> = {
   workspace: 'M4 5h16M4 5v14M4 19h16M14 5v14',
   automations: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
   attention: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.5 21a2 2 0 0 0 3 0',
+  skills: 'M12 6.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM12 22a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0ZM14 12a4 4 0 1 0 8 0 4 4 0 0 0-8 0Z',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.4-2.4H9.5l-.4 2.4a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.4h4.9l.4-2.4a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.6c.06-.33.1-.66.1-1Z',
 }
 
@@ -24,6 +25,7 @@ const LABELS: Record<Surface, string> = {
   workspace: '工作台',
   automations: '自动化',
   attention: '需处理',
+  skills: '技能',
   settings: '设置',
 }
 
@@ -43,7 +45,7 @@ export function Rail(props: {
   const { surface, onSurface, attentionCount } = props
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'attention', 'settings']
+  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)
