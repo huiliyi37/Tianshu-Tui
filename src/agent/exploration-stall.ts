@@ -17,7 +17,7 @@ export const EXPLORATION_TOOLS = new Set([
 
 const ACTION_TOOLS = new Set([
   'edit_file', 'write_file', 'hash_edit', 'bash', 'run_tests',
-  'apply_patch', 'deliver_task', 'todo', 'plan_submit', 'plan_close',
+  'apply_patch', 'deliver_task', 'todo', 'plan',
 ])
 
 export interface ExplorationStallResult {

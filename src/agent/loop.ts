@@ -54,6 +54,7 @@ import { createFsWatcher } from '../context/fs-watcher.js'
 import type { FsWatcherState } from '../context/fs-watcher.js'
 import { type CognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { CacheAdvisor } from '../cache/advisor.js'
+import type { RecallMetricsSummary } from '../cache/recall-metrics.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
@@ -206,6 +207,10 @@ export class AgentLoop {
   /** Estimated context tokens at the end of the previous turn — baseline for
    *  compact attribution (compactPreRatio / compactReclaimed in the cache-log). */
   prevEstTokens = 0
+  /** The compact-history artifact most recently produced by a compaction, set in
+   *  the onArchive callback and consumed once when the rewrite turn's cache-log
+   *  entry is built (loop-factory attaches it as entry.archiveId, then clears). */
+  lastArchive: { id: string; turn: number } | null = null
   turnStream: TurnStreamController | null = null
   turnCompletion: TurnCompletionController
   toolExecution: ToolExecutionController
@@ -447,6 +452,9 @@ export class AgentLoop {
       // can be computed when the model later read_sections this artifact.
       onArchive: (artifactId, turn) => {
         try { this.cacheAdvisor.registerArchive(artifactId, turn) } catch { /* non-critical */ }
+        // Stash for the cache-log: the rewrite turn's entry attaches this id so
+        // compaction necessity can be correlated with later recalls (consume-once).
+        this.lastArchive = { id: artifactId, turn }
       },
       // Optional disaster-recovery snapshot of the full pre-compaction transcript.
       backupTranscript: (messages, turn) => {
@@ -915,6 +923,12 @@ export class AgentLoop {
    *  estimate) — for display only. See SessionContext.getRealOccupancy. */
   getRealOccupancy(): number {
     return this.session.getRealOccupancy()
+  }
+
+  /** Observe-only recall stats for compacted-history artifacts (for /context).
+   *  Cheap delegate — avoids the heavier getDebugInfo() build. */
+  getRecallSummary(): RecallMetricsSummary {
+    return this.cacheAdvisor.getRecallSummary()
   }
 
   /** Model context window size in tokens. */

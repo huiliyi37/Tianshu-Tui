@@ -15,7 +15,7 @@ import { slugify } from '../plan/plan-store.js'
 const PLAN_POINTER_PREFIX = '[plan persisted to'
 
 export const planSubmitArgProcessor = createFileContentArgProcessor({
-  toolName: 'plan_submit',
+  toolName: 'plan',
   contentField: 'plan',
   pointerPrefix: PLAN_POINTER_PREFIX,
   threshold: 0,

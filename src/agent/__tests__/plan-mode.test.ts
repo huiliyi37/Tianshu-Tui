@@ -16,7 +16,7 @@ describe('checkPlanMode', () => {
 
   it('planning state allows read-only exploration tools', () => {
     const allowedTools = ['read_file', 'read_section', 'grep', 'glob', 'repo_map',
-      'inspect_project', 'related_tests', 'diff', 'todo', 'plan_close',
+      'inspect_project', 'related_tests', 'diff', 'todo', 'plan',
       'repo_graph', 'web_fetch', 'web_search', 'recall']
     for (const tool of allowedTools) {
       assert.deepEqual(checkPlanMode('planning', tool), { allowed: true }, `${tool} should be allowed`)
