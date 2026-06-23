@@ -116,12 +116,16 @@ describe('evaluatePhantomContinuation — Layer 1 task-contract', () => {
   })
 
   it('falls through to heuristic when contract is non-actionable', () => {
+    // Use text WITH action intent so the check reaches isActionable
+    // (not short-circuited by intent===false before the Layer 1 gate).
+    // isActionable:false blocks Layer 1, but action-intent triggers Layer 2.
     const d = evaluatePhantomContinuation({
       ...BASE,
-      streamedText: 'Here is a summary of the work so far.', // no action intent either
+      streamedText: '让我 grep 一下相关代码。',
       activeContract: contract({ status: 'executing', isActionable: false }),
     })
-    assert.equal(d.shouldContinue, false)
+    assert.equal(d.shouldContinue, true)
+    assert.equal(d.reason, 'action-intent')
   })
 })
 
