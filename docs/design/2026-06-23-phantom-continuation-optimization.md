@@ -42,6 +42,19 @@ Agent 一轮结束时 **没有 tool call**（`consecutiveNoToolTurns` 递增）�
 
 Layer 2 有正确的防护——要求 action promise + tool verb 同时存在。但 Layer 1 绕过了这个检查。
 
+## 根因分析
+
+问题的直接原因是 Layer 1 不看回合性质，但更深一层的根因在 **contract 状态机未及时收束**。
+
+contract 从 `executing` 推进到 `ready_to_deliver` 的唯一触发路径是 `contractStatusFromPhaseClass('deliver')`，这依赖 agent 在回合中触发 deliver phase classification。当用户插入一个纯问答回合（"有什么区别""为什么一直说无待办"）时：
+
+1. agent 进入问答模式，正确回答用户问题
+2. 该回合未触发 deliver phase —— 因为 agent 没有"交付任务"的意图
+3. contract 滞留在 `executing` / `exploring`
+4. Layer 1 看到 contract 仍开放 → 误触发 phantom continuation
+
+理想状态下，contract 状态机应有能力识别"本回合是纯信息查询而非任务推进"并维持（而非推进）contract 状态。这属于 contract 层面的改进，不在当前修复范围内，但标注于此作为长期治本方向。当前修复（方案 A）是治标——让 phantom continuation 的门控更严，不依赖 contract 状态的单一信号。
+
 ## 修复方案
 
 ### 方案 A: Layer 1 加 action-intent 附加条件（推荐）
@@ -67,7 +80,7 @@ if (
 
 **效果**: 纯问答回合（无行动承诺/工具动词）即使在 contract 开放期间也不会被误触发。
 
-**风险**: 如果 agent 真的在执行任务但用了一种不含行动承诺的表达方式（如直接列出计划），可能漏触发。但这种情况 Layer 2 的 fallback 会捕获——只是 reason 变成 `action-intent` 而非 `contract-open`，行为完全一样。
+**风险**: 如果 agent 真的在执行任务但用了一种不含行动承诺的表达方式（如直接列出计划），可能漏触发。但实际场景中，真正的执行回合几乎必然包含"我要做 X"的表达——双模式同时匹配的概率极高。且漏触发（false negative）的代价远小于误触发（false positive）：前者只需用户手动 nudge 一次，后者浪费 token 并产生 UI 噪音。另外注意：方案 A 之后 Layer 1 和 Layer 2 使用完全相同的双模式门控——如果 Layer 1 因模式不匹配而未触发，Layer 2 走到同样的判断也会得出同样结论。不存在"Layer 2 兜底捕获"的机制，这里的取舍是：**宁可漏触发也不误触发**。
 
 ### 方案 B: Layer 1 检查 user message 性质
 
@@ -102,12 +115,18 @@ if (
 
 Layer 2 保持不变（已经是对的条件）。
 
+**设计说明**:
+
+- **tail slicing**: 当前 Layer 1 完全不看文本内容，方案 A 引入 `text.length > 600 ? text.slice(-600) : text` 以与 Layer 2 保持一致——行动承诺总是在文本尾部。这是一个行为变化，但对性能无影响（600 字符的正则匹配可忽略不计）。
+- **isSocialOrTrivial 的缺位**: Layer 2 有 `if (!isSocialOrTrivial(text))` 前置检查，方案 A 的 Layer 1 路径没有。这不构成问题：社交/琐碎文本（"好的，谢谢""了解了"）不可能同时匹配 ACTION_PROMISE_PATTERN 和 TOOL_VERB_PATTERN，双模式匹配本身就是比 isSocialOrTrivial 更强的过滤。显式调用反成冗余。
+
 ### 测试
 
 新增测试用例：
 1. contract 开放 + 纯回答文本（无行动承诺）→ shouldContinue=false
-2. contract 开放 + 行动承诺+工具动词 → shouldContinue=true
+2. contract 开放 + 行动承诺+工具动词 → shouldContinue=true（reason='contract-open'）
 3. contract 开放 + 行动承诺但无工具动词 → shouldContinue=false
+4. contract 开放 + 工具动词但无行动承诺 → shouldContinue=false（如 `"需要修改 src/tools/bash.ts"`，"需要"不在 ACTION_PROMISE_PATTERN 中，"修改"在 TOOL_VERB_PATTERN 中——仅一边匹配不触发）
 
 ### 认知影响
 
