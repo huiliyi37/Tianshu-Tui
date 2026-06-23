@@ -37,10 +37,10 @@ export interface ProfileDefinition {
 }
 
 /** 内置只读工具集 */
-const READ_ONLY_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests'] as const
+const READ_ONLY_TOOLS = ['read_file', 'read_section', 'glob', 'grep', 'diff', 'inspect_project', 'repo_map', 'repo_graph', 'related_tests', 'file_info', 'semantic_search', 'web_search', 'web_fetch'] as const
 
 /** 内置写入工具集 */
-const WRITE_TOOLS = [...READ_ONLY_TOOLS, 'edit_file', 'write_file', 'bash', 'run_tests'] as const
+const WRITE_TOOLS = [...READ_ONLY_TOOLS, 'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'bash', 'run_tests', 'git'] as const
 
 /** 内置 profile 定义 — 与当前硬编码逻辑完全一致 */
 const BUILTIN_PROFILES: ProfileDefinition[] = [

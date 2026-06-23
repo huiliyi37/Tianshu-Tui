@@ -31,6 +31,7 @@ import { runResumePreflightOai } from './context/resume-preflight.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
+import { resolveMainToolTier } from './agent/tool-tiers.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
@@ -573,7 +574,14 @@ export function createAgentRuntime(deps: {
     allProviders: config.provider.providers,
     config,
     sessionId,
-    toolDefinitions: toolRegistry.getDefinitions(),
+    toolDefinitions: (() => {
+      const gating = config.agent.toolGating
+      const tier = resolveMainToolTier(null, gating.enabled, gating.coreTools)
+      const extraSet = new Set(gating.extraCore ?? [])
+      const allowed = new Set([...tier, ...extraSet])
+      const allDefs = toolRegistry.getDefinitions()
+      return allowed.size > 0 ? allDefs.filter(d => allowed.has(d.name)) : allDefs
+    })(),
     sessionMemoryBlock: persist.buildMemoryBlock(),
     auth,
   }))

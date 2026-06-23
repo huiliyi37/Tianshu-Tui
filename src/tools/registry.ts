@@ -42,7 +42,7 @@ export class ToolRegistry {
       // name from memory. Surfacing a did-you-mean hint + the full tool
       // catalog turns the failure into a learnable signal.
       const hint = didYouMeanHint(name, this.getAllNames())
-      throw new Error(`Unknown tool: ${name}. ${hint}`)
+      throw new Error(`Unknown tool: ${name}. ${hint}If this is an EXTENDED-layer tool, use delegate_task to dispatch a worker, or /tools enable <name> to mount it on the primary agent.`)
     }
     if (!tool.isEnabled()) throw new Error(`Tool ${name} is disabled`)
     return tool.execute(params)

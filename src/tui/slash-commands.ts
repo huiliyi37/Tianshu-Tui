@@ -273,6 +273,24 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
   const cmd = parts[0]!.toLowerCase()
 
   switch (cmd) {
+    case '/tools': {
+      const sub = parts[1]?.toLowerCase()
+      if (sub === 'enable') {
+        const toolName = parts[2]
+        if (!toolName) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /tools enable <tool_name>\nThis will mount an EXTENDED-layer tool onto the primary agent at the next turn boundary, accepting a one-time cache miss.\nAlternatively, use delegate_task to dispatch a worker with that tool.' }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: `To use "${toolName}": dispatch a worker via delegate_task (recommended, zero cache cost), or add it to config agent.toolGating.extraCore to mount it permanently on the primary agent.` }))
+        }
+      } else {
+        // List current tool tiers
+        const { CORE_TOOLS, EXTENDED_TOOLS } = await import('../agent/tool-tiers.js')
+        const lines: string[] = ['Tool Gating Tiers', '═════════════════════', '', `CORE (${CORE_TOOLS.length}):`, ...CORE_TOOLS.map(t => `  ✓ ${t}`), '', `EXTENDED (${EXTENDED_TOOLS.length}):`, ...EXTENDED_TOOLS.map(t => `  · ${t}`), '', 'EXTENDED tools are available to workers via delegate_task.', 'Use /tools enable <name> for escape-hatch guidance.']
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      }
+      setIsStreaming(false)
+      return true
+    }
     case '/help':
       pushStatic(createLogEntry({ type: 'system', content: HELP_TEXT }))
       setIsStreaming(false)
@@ -941,9 +959,16 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const realTokens = ctx.session.getLastRealPromptTokens()
       const realStr = realTokens > 0 ? `\nAPI (last): ${realTokens.toLocaleString()} tokens` : ''
 
+      // Recall visibility: compacted history can be pulled back verbatim via
+      // read_section. Surface how often that happened this session (observe-only).
+      const recall = ctx.agent.getRecallSummary?.()
+      const recallStr = recall && recall.totalRecalls > 0
+        ? `\nRecall: ${recall.totalRecalls} recalls / ${recall.uniqueArtifacts} archives${recall.avgTurnDistance !== null ? `, avg ${Math.round(recall.avgTurnDistance)} turns back` : ''}`
+        : ''
+
       pushStatic(createLogEntry({
         type: 'system',
-        content: `Context: ${sections.compactionState}\nTokens (est): ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${usagePct}%)${realStr}\nCache hit: ${cacheStr}    Cost: ${costStr}\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
+        content: `Context: ${sections.compactionState}\nTokens (est): ${sections.estimatedTokens.toLocaleString()}/${sections.maxTokens.toLocaleString()} (${usagePct}%)${realStr}${recallStr}\nCache hit: ${cacheStr}    Cost: ${costStr}\nRounds: ${ledger.rounds.length}\n${diagnostics}\n\nCompaction:\n${compactStr}${anchorLines}`,
       }))
       setIsStreaming(false)
       return true
