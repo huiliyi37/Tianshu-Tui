@@ -72,6 +72,7 @@ import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
 import { createPlanTaskTool } from './tools/plan-task.js'
 import { createRecallTool } from './tools/recall.js'
 import { createRememberTool } from './tools/remember.js'
+import { createMemoryTool } from './tools/memory.js'
 import { MeridianIndexer } from './repo/meridian-indexer.js'
 import { loadProjectRules } from './context/rules-loader.js'
 import { loadProjectSkills } from './skills/skill-loader.js'
@@ -1346,12 +1347,8 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // 10. Tool registry
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, config, cwd)
 
-  // 11. Recall + remember tools
-  toolRegistry.register(createRecallTool(claimStore, {
-    sessionId,
-    getTurn: () => session.getTurnCount(),
-  }))
-  toolRegistry.register(createRememberTool(claimStore, {
+  // 11. Memory tool (unified recall + remember)
+  toolRegistry.register(createMemoryTool(claimStore, {
     sessionId,
     getTurn: () => session.getTurnCount(),
     cwd,
