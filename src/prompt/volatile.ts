@@ -399,7 +399,9 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
       .filter(e => e.tool === 'read_file' && e.status === 'success')
       .map(e => e.target)
       .filter((v, i, a) => a.indexOf(v) === i)
-    if (readFiles.length > 0) {
+    // Only emit when there are enough files to dedup or the history is long
+    // enough that re-reading becomes a real token-waste risk (C2: condition gate).
+    if (readFiles.length > 5 || ctx.toolHistory.length > 8) {
       const listed = readFiles.slice(0, 5).map(f => escapeXml(f)).join(', ')
       const tail = readFiles.length > 5 ? ` …及另外 ${readFiles.length - 5} 个文件` : ''
       parts.push(`<read-file-dedup-hint>已读取 ${readFiles.length} 个文件：${listed}${tail}。上述文件无需重复读取，除非磁盘内容已变更。</read-file-dedup-hint>`)
