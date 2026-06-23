@@ -12,7 +12,7 @@ import { createThetaState, getThetaPhase } from './star-event.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { getGitInjectedContext } from '../prompt/volatile-git.js'
 import { detectWorktreeReality, type InjectedWorktreeContext } from './worktree-reality.js'
-import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, type TurnMode } from '../context/task-contract.js'
+import { advanceContractStatus, classifyPlanMethodology, classifyTaskDepth, classifyTurnMode, contractStatusFromPhaseClass, extractTaskContract, mergeFollowUpIntoContract, type TurnMode } from '../context/task-contract.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { renderMemoryBlock } from '../memory/unified-memory.js'
 import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
@@ -198,7 +198,16 @@ export class TurnStepProducer {
     if (turnMode === 'task') {
       this.self.taskContract = extractTaskContract(userInput, this.self.session.getTurnCount())
     } else if (turnMode === 'followUp') {
-      // Inherit active contract — no new extraction
+      // P5: inherit the active contract, but fold in any new constraints/files
+      // from this follow-up (multi-line corrections whose constraint sits past
+      // the first line are classified followUp yet must reach the task-anchor).
+      if (this.self.taskContract) {
+        this.self.taskContract = mergeFollowUpIntoContract(
+          this.self.taskContract,
+          userInput,
+          this.self.session.getTurnCount(),
+        )
+      }
     } else if (!this.self.taskContract || this.self.taskContract.status === 'ready_to_deliver') {
       this.self.taskContract = undefined
     }

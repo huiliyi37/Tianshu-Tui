@@ -4,6 +4,7 @@ import {
   advanceContractStatus,
   contractStatusFromPhaseClass,
   extractTaskContract,
+  mergeFollowUpIntoContract,
   renderContractProjection,
   renderTaskAnchor,
   isActionableTurn,
@@ -390,5 +391,39 @@ describe('classifyPlanMethodology', () => {
     // "实现" without files → unit depth, but Rule 2a verb pattern triggers first
     const methodology = classifyPlanMethodology(contract, depth)
     assert.equal(methodology, 'full', '双门 keyword must trigger full via Rule 2a')
+  })
+})
+
+describe('mergeFollowUpIntoContract (P5)', () => {
+  it('folds a constraint that sits on a later line into the contract', () => {
+    const base = extractTaskContract('implement src/foo.ts feature', 1)
+    assert.equal(base.constraints.length, 0)
+    // Multi-line follow-up: constraint on the 2nd line — classifyTurnMode's
+    // first-line check misses it, so this would otherwise be dropped.
+    const merged = mergeFollowUpIntoContract(base, 'keep going\nyou must not touch the public API', 4)
+    assert.ok(merged.constraints.some(c => /must not touch the public API/.test(c)), 'constraint merged')
+    assert.equal(merged.updatedAtTurn, 4)
+    assert.notEqual(merged, base)
+  })
+
+  it('folds newly mentioned files into scope', () => {
+    const base = extractTaskContract('implement src/foo.ts feature', 1)
+    const merged = mergeFollowUpIntoContract(base, 'also update src/bar.ts', 2)
+    assert.ok(merged.scope.mentionedFiles.includes('src/bar.ts'))
+    assert.ok(merged.scope.mentionedFiles.includes('src/foo.ts'))
+  })
+
+  it('returns the same contract identity when nothing new is found', () => {
+    const base = extractTaskContract('implement src/foo.ts feature', 1)
+    const merged = mergeFollowUpIntoContract(base, 'continue please', 2)
+    assert.equal(merged, base, 'no-op merge must preserve identity (avoid anchor churn)')
+  })
+
+  it('does not duplicate an already-known constraint or file', () => {
+    const base = extractTaskContract("refactor src/foo.ts. Don't break the API.", 1)
+    // Re-state the SAME constraint and file verbatim — extractConstraints yields
+    // identical text, so dedup must preserve the contract identity.
+    const merged = mergeFollowUpIntoContract(base, "Don't break the API.\nsrc/foo.ts", 2)
+    assert.equal(merged, base, 'duplicate constraint/file must not grow the contract')
   })
 })

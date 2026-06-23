@@ -625,7 +625,30 @@ export class CompactionController {
       }
     }
 
-    // Fallback: structured extraction
+    // Fallback: deterministic structured handoff (no LLM available or it failed).
+    const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
+    const handoffContent = this.buildHandoffFromState()
+
+    this.replaceWithCheckpoint({
+      tier: 3,
+      reason: `session split at ${(ratio * 100).toFixed(0)}% context`,
+      summary: handoffContent,
+      maxFallback: this.deps.contextWindow * 0.3,
+      fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`,
+    })
+
+    debugLog(`[session-split] structured handoff ratio=${ratio.toFixed(2)} tokens=${this.deps.session.getEstimatedTokens()}`)
+
+    return true
+  }
+
+  /**
+   * P6: build the deterministic structured handoff from current session state
+   * (task-state + trajectory + recent reasoning). Shared by trySessionSplit's
+   * non-LLM fallback and llmCompact's post-check fallback.
+   */
+  private buildHandoffFromState(): string {
+    const trajectory = this.deps.getTrajectoryEntries()
     const messages = this.deps.session.getMessages()
     const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
 
@@ -649,7 +672,7 @@ export class CompactionController {
 
     const recentTools = trajectory.slice(-10)
     const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
-    const handoffContent = buildStructuredHandoff({
+    return buildStructuredHandoff({
       taskState: {
         current: taskState.current,
         completed: taskState.completed,
@@ -674,22 +697,37 @@ export class CompactionController {
       })),
       stanceSummary: this.deps.getStanceSummary?.(),
     })
+  }
 
-    this.replaceWithCheckpoint({
-      tier: 3,
-      reason: `session split at ${(ratio * 100).toFixed(0)}% context`,
-      summary: handoffContent,
-      maxFallback: this.deps.contextWindow * 0.3,
-      fallbackText: `<session-handoff>Session split at ${(ratio * 100).toFixed(0)}% context. ${taskState.current}</session-handoff>`,
-    })
+  /**
+   * P6: post-check that an LLM summary reflects the material state recorded in
+   * the trajectory (failed error classes / touched files). Conservative — only
+   * fails when the summary reflects NONE of the dimensions that actually exist,
+   * to avoid false positives on legitimate paraphrasing.
+   */
+  private summaryCoversState(summary: string): boolean {
+    const trajectory = this.deps.getTrajectoryEntries()
+    const lower = summary.toLowerCase()
 
-    debugLog(
-      `[session-split] ratio=${ratio.toFixed(2)} files=${filesSeen.size} ` +
-      `reasoning_chars=${reasoningParts.join('').length} ` +
-      `tokens=${this.deps.session.getEstimatedTokens()}`
-    )
+    const failures = trajectory.filter(t => t.status === 'failed' || t.status === 'retried-failed')
+    const errorClasses = [...new Set(
+      failures.map(f => f.errorClass).filter((e): e is string => Boolean(e)),
+    )]
+    const fileBasenames = [...new Set(
+      trajectory
+        .map(t => t.target)
+        .filter((t): t is string => Boolean(t) && /\.[a-z0-9]{1,8}$/i.test(t))
+        .map(t => t.split('/').pop()!.toLowerCase()),
+    )]
 
-    return true
+    const covered: boolean[] = []
+    if (errorClasses.length > 0) covered.push(errorClasses.some(e => lower.includes(e.toLowerCase())))
+    if (fileBasenames.length > 0) covered.push(fileBasenames.some(f => lower.includes(f)))
+
+    // Nothing material in the trajectory → nothing to verify against.
+    if (covered.length === 0) return true
+    // Pass if at least one present dimension is reflected in the summary.
+    return covered.some(c => c)
   }
 
   refreshCacheDiagnostic(loopTurn: number): string | null {
@@ -1025,6 +1063,15 @@ export class CompactionController {
 
       const summary = chunks.join('').trim()
       if (summary.length === 0) return null
+
+      // P6: post-check — if the summary reflects none of the material state
+      // (failed error classes / touched files) recorded in the trajectory, fall
+      // back to the deterministic structured handoff rather than trust a summary
+      // that likely dropped critical context.
+      if (!this.summaryCoversState(summary)) {
+        debugLog('[llm-compact] summary failed state-coverage post-check — using structured handoff')
+        return this.buildHandoffFromState()
+      }
 
       return `<compact-summary turn="${this.deps.session.getTurnCount()}" tokens="${this.deps.session.getEstimatedTokens()}">\n${summary}\n</compact-summary>`
     } finally {

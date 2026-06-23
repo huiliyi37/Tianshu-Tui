@@ -405,6 +405,111 @@ describe('CompactionController', () => {
     )
   })
 
+  // P6: llmCompact post-check — a summary that reflects the trajectory's error
+  // class / touched files is kept verbatim as a compact-summary.
+  it('P6: llmCompact keeps a summary that covers trajectory state', async () => {
+    const session = new SessionContext()
+    session.replaceMessages([
+      { role: 'user', content: 'fix the bug' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'done' },
+    ])
+    const trajectory: TrajectoryEntry[] = [
+      { turn: 1, tool: 'write_file', target: 'src/foo.ts', durationMs: 10, status: 'failed', errorClass: 'TS2322', inputSummary: 'edit', resultSummary: 'type error' },
+    ]
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('Fixed the TS2322 type error in src/foo.ts by adding a cast.')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getTrajectoryEntries: () => trajectory,
+    })
+
+    const result = await controller.llmCompact()
+    assert.match(String(result), /<compact-summary/, 'covering summary kept as LLM compact')
+    assert.match(String(result), /TS2322/)
+  })
+
+  // P6: a summary that reflects NONE of the trajectory's material state falls
+  // back to the deterministic structured handoff.
+  it('P6: llmCompact falls back to structured handoff when summary covers nothing', async () => {
+    const session = new SessionContext()
+    session.replaceMessages([
+      { role: 'user', content: 'fix the bug' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'done' },
+    ])
+    const trajectory: TrajectoryEntry[] = [
+      { turn: 1, tool: 'write_file', target: 'src/foo.ts', durationMs: 10, status: 'failed', errorClass: 'TS2322', inputSummary: 'edit', resultSummary: 'type error' },
+    ]
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('We did some work and made progress on various things.')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getTrajectoryEntries: () => trajectory,
+    })
+
+    const result = await controller.llmCompact()
+    assert.doesNotMatch(String(result), /<compact-summary/, 'non-covering summary must not be wrapped')
+    assert.match(String(result), /用户核心需求/, 'must fall back to the structured handoff')
+  })
+
+  // P7 (E2E): drive a real partial compact over a long history and assert the
+  // re-injected task-anchor still carries objective / file-scope / user
+  // constraint / completed+remaining todos — the deterministic backstop the LLM
+  // summary may have dropped. Complements the prompt-engine-level safety net in
+  // compact-prompt-contract.test.ts by exercising the compaction-controller lane.
+  it('P7 (E2E): long history → partial compact → anchor retains objective/constraints/todos', async () => {
+    const session = new SessionContext()
+    const msgs = Array.from({ length: 70 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: 'x'.repeat(40_000),
+    }))
+    session.replaceMessages(msgs)
+
+    const contract = extractTaskContract(
+      "Refactor src/auth.ts to use JWT. Don't touch the billing module.",
+      1,
+    )
+    const trajectory: TrajectoryEntry[] = [
+      { turn: 1, tool: 'read_file', target: 'src/auth.ts', durationMs: 5, status: 'success', inputSummary: 'read', resultSummary: 'ok' },
+    ]
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        // Summary deliberately elides the contract details — the anchor must
+        // carry them deterministically.
+        callbacks.onTextDelta('Earlier work elided.')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getActiveContract: () => contract,
+      getTrajectoryEntries: () => trajectory,
+      getStreamedText: () => 'Next step: migrate auth middleware',
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, true)
+
+    const after = session.getMessages()
+    const tail = String(after[after.length - 1]?.content ?? '')
+    assert.match(tail, /<task-anchor authoritative="true"/, 'anchor present after partial compact')
+    assert.match(tail, /src\/auth\.ts/, 'objective/file-scope survives')
+    assert.match(tail, /billing/i, 'user hard-constraint survives')
+    assert.match(tail, /read_file auth\.ts/, 'completed todo survives')
+    assert.match(tail, /migrate auth middleware/, 'remaining todo survives')
+  })
+
   // Phase 2.1: enforceContextCeiling MUST still fire on 1M+ windows.
   // The 95% ceiling is the emergency last resort — if we're truly about to
   // overflow, we checkpoint-resume regardless of cache implications.

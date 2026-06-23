@@ -205,6 +205,51 @@ export function extractTaskContract(userMessage: string, turn: number = 0): Task
   }
 }
 
+/**
+ * P5: merge new constraints / files mentioned in a follow-up turn into the
+ * inherited contract.
+ *
+ * classifyTurnMode's gate-2 checks for new constraints using only the first
+ * line (objective), so a multi-line follow-up whose constraint sits on a later
+ * line is classified as 'followUp' and would otherwise be dropped. Here we
+ * re-scan the WHOLE message (same extractors extractTaskContract uses) and fold
+ * anything new into the contract, so corrections survive into the task-anchor
+ * that is re-injected after compaction.
+ *
+ * Returns the original contract unchanged when nothing new is found, preserving
+ * identity (and thus avoiding needless task-anchor churn / cache invalidation).
+ */
+export function mergeFollowUpIntoContract(
+  contract: TaskContract,
+  userMessage: string,
+  turn: number = contract.updatedAtTurn,
+): TaskContract {
+  const newConstraints = extractConstraints(userMessage)
+  const newFiles: string[] = []
+  for (const match of userMessage.matchAll(FILE_PATTERN)) {
+    const file = match[1]
+    if (file) newFiles.push(file)
+  }
+  if (newConstraints.length === 0 && newFiles.length === 0) return contract
+
+  const constraints = [...contract.constraints]
+  for (const c of newConstraints) if (!constraints.includes(c)) constraints.push(c)
+  const mentionedFiles = [...contract.scope.mentionedFiles]
+  for (const f of newFiles) if (!mentionedFiles.includes(f)) mentionedFiles.push(f)
+
+  const constraintsChanged = constraints.length !== contract.constraints.length
+  const filesChanged = mentionedFiles.length !== contract.scope.mentionedFiles.length
+  if (!constraintsChanged && !filesChanged) return contract
+
+  return {
+    ...contract,
+    constraints,
+    scope: { mentionedFiles },
+    updatedAtTurn: turn,
+    isActionable: contract.isActionable || isActionableObjective(contract.objective, mentionedFiles, constraints),
+  }
+}
+
 export function advanceContractStatus(contract: TaskContract, nextStatus: ContractStatus, turn: number = contract.updatedAtTurn): TaskContract {
   if (contract.status === nextStatus) return contract
   if (nextStatus === 'blocked') return { ...contract, status: 'blocked', updatedAtTurn: turn }
