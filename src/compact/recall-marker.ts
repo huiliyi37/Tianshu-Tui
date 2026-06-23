@@ -23,11 +23,13 @@ export function isCompactHistoryId(id: string): boolean {
   return id.startsWith(`${COMPACT_HISTORY_TOOL}:`)
 }
 
-const RECALL_MARKER_RE = /^↺ \[recalled (compact-history:[^\s\]]+) (L\d+-L\d+|c\d+-c\d+)\]/
+// ASCII-only marker: avoids Unicode (↺) cross-platform / storage edge cases
+// and false matches when model output happens to contain the glyph.
+const RECALL_MARKER_RE = /^\[recalled (compact-history:[^\s\]]+) (L\d+-L\d+|c\d+-c\d+)\]/
 
 /** Build the single-line marker prepended to recalled compact-history content. */
 export function buildRecallMarker(artifactId: string, section: string): string {
-  return `↺ [recalled ${artifactId} ${section}]`
+  return `[recalled ${artifactId} ${section}]`
 }
 
 /**

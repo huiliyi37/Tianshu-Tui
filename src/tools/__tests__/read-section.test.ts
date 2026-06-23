@@ -8,7 +8,11 @@ import { ArtifactStore } from '../../artifact/store.js'
 import { __setFileReadMtimeForTests, __resetReadHistoryForTests } from '../read-file.js'
 
 function makeTempDir(): string {
-  return mkdtempSync(join(tmpdir(), 'read-section-test-'))
+  // Use project-local dir instead of os.tmpdir() — the latter is often
+  // EPERM-restricted in sandboxed agent runtimes.
+  const base = join(process.cwd(), '.rivet', 'tmp')
+  mkdirSync(base, { recursive: true })
+  return mkdtempSync(join(base, 'read-section-test-'))
 }
 
 function cleanup(dir: string): void {
@@ -222,7 +226,7 @@ describe('read_section file_path branch (任务 B3)', () => {
   let tempDir: string
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'read-section-file-'))
+    tempDir = mkdtempSync(join(process.cwd(), '.rivet', 'tmp', 'read-section-file-'))
   })
 
   afterEach(() => {
