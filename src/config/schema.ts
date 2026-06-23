@@ -142,6 +142,15 @@ export const agentSchema = z.object({
   crossSessionEnabled: z.boolean().default(true),
   /** T8 桌面化办公工具（create_document 等 7 个）。默认关闭以守住工具数 kernel budget（≤25）。 */
   desktopTools: z.boolean().default(false),
+  /** Tool gating: 主控工具分层门控。enabled 时只暴露 CORE_TOOLS 给主控，
+   *  EXTENDED 工具下放子代理。关闭则全量暴露（向后兼容）。 */
+  toolGating: z.object({
+    enabled: z.boolean().default(true),
+    /** 可选：覆盖默认 CORE 清单（工具名数组） */
+    coreTools: z.array(z.string()).optional(),
+    /** 可选：额外加入 CORE 的工具名（追加到默认清单） */
+    extraCore: z.array(z.string()).default([]),
+  }).default({ enabled: true }),
   /** Explicit opt-in for HEARTH anchor invariant observation (postTurn, diagnostic only). */
   hearthObserveEnabled: z.boolean().default(false),
   /** Explicit opt-in for anti-anchoring harness hooks (prompt-flow intervention). */

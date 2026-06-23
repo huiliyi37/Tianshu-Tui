@@ -12,6 +12,9 @@ export interface StarDomain {
   isCustom: boolean
   /** Worker 执行时允许的工具白名单 */
   toolWhitelist: readonly string[]
+  /** 主控核心工具层（可选；不填则用全局 CORE_TOOLS）。
+   *  不变量：mainToolTier ⊆ toolWhitelist（主控不应有其 worker 调不到的工具）。 */
+  mainToolTier?: readonly string[]
   /** Worker system prompt 末尾追加的权域指令 */
   systemPromptSuffix: string
   /** UI 微气质 — 分隔线、配色等视觉质感 */

@@ -1,0 +1,144 @@
+/**
+ * Tool Gating Tiers — 主控工具分层门控
+ *
+ * 把主控可见工具从 ~37 (kernel 24 + interactive 13) 压到 CORE ~25，
+ * 主收益是降认知负荷（工具过多→选择瘫痪→退回不选工具，见 kernel-budget.test.ts）。
+ *
+ * EXTENDED 工具从主控 getDefinitions() 过滤掉，但保留在 worker 的 baseToolRegistry
+ * 全集中，主控需要时经 delegate_task 派子代理调用。
+ */
+
+import type { StarDomain } from './star-domain.js'
+
+/**
+ * CORE 层 — 主控常驻工具（~25）。
+ * 这些是每个 turn 都可能需要的工具：读写编辑、搜索、测试、委派、交付。
+ */
+export const CORE_TOOLS = [
+  // 文件读写编辑
+  'read_file',
+  'write_file',
+  'edit_file',
+  'hash_edit',
+  'read_section',
+  // 搜索导航
+  'grep',
+  'glob',
+  'diff',
+  'semantic_search',
+  'inspect_project',
+  'repo_map',
+  'related_tests',
+  'file_info',
+  // 执行
+  'bash',
+  'run_tests',
+  'git',
+  'todo',
+  // 规划与交付
+  'plan_submit',
+  'plan_close',
+  'plan_task',
+  'deliver_task',
+  'leave_mark',
+  // 委派
+  'delegate_task',
+  'delegate_batch',
+  // 记忆
+  'memory',
+  // 用户交互
+  'ask_user_question',
+] as const
+
+/**
+ * EXTENDED 层 — 子代理可用，主控需 opt-in 或委派。
+ * web/browser/doc/council/team/import/lsp/undo 等低频或重场景工具。
+ */
+export const EXTENDED_TOOLS = [
+  'web_search',
+  'web_fetch',
+  'browser',
+  'repo_graph',
+  'council_convene',
+  'team_orchestrate',
+  'import_resource',
+  'recall_capsule',
+  'apply_patch',
+  'undo',
+  'request_path_access',
+  'skill',
+  // desktop tools (create_document, create_spreadsheet, etc.)
+  'create_document',
+  'create_spreadsheet',
+  'create_image',
+  'create_presentation',
+  'create_pdf',
+  'export_file',
+  'open_path',
+] as const
+
+/** 所有已知工具名 — CORE ∪ EXTENDED */
+export const ALL_KNOWN_TOOLS: readonly string[] = [...CORE_TOOLS, ...EXTENDED_TOOLS]
+
+/** CORE 工具集合（O(1) 查找） */
+const CORE_SET: ReadonlySet<string> = new Set(CORE_TOOLS)
+
+/** EXTENDED 工具集合 */
+const EXTENDED_SET: ReadonlySet<string> = new Set(EXTENDED_TOOLS)
+
+/**
+ * 解析主控应使用的工具层。
+ *
+ * @param domain 当前会话域（可选自定义 mainToolTier 覆盖）
+ * @param configEnabled config.toolGating.enabled（默认 true）
+ * @param coreOverride 可选的 config 级 CORE 覆盖清单
+ * @returns 主控可见的工具名列表
+ */
+export function resolveMainToolTier(
+  domain: Pick<StarDomain, 'mainToolTier'> | null | undefined,
+  configEnabled: boolean = true,
+  coreOverride?: readonly string[],
+): readonly string[] {
+  // 门控关闭 → 全量（不做过滤）
+  if (!configEnabled) return ALL_KNOWN_TOOLS
+
+  // 域级覆盖优先
+  if (domain?.mainToolTier && domain.mainToolTier.length > 0) {
+    return domain.mainToolTier
+  }
+
+  // config 级覆盖
+  if (coreOverride && coreOverride.length > 0) {
+    return coreOverride
+  }
+
+  // 默认 CORE
+  return CORE_TOOLS
+}
+
+/** 判断工具是否在 CORE 层 */
+export function isCoreTool(name: string): boolean {
+  return CORE_SET.has(name)
+}
+
+/** 判断工具是否在 EXTENDED 层 */
+export function isExtendedTool(name: string): boolean {
+  return EXTENDED_SET.has(name)
+}
+
+/**
+ * 不变量校验：mainToolTier ⊆ toolWhitelist
+ * （主控不应有其 worker 调不到的工具）
+ */
+export function validateTierInvariant(
+  mainToolTier: readonly string[],
+  toolWhitelist: readonly string[],
+): void {
+  const whitelistSet = new Set(toolWhitelist)
+  const violations = mainToolTier.filter(t => !whitelistSet.has(t))
+  if (violations.length > 0) {
+    throw new Error(
+      `mainToolTier ⊆ toolWhitelist invariant violated: [${violations.join(', ')}] not in toolWhitelist`,
+    )
+  }
+}
