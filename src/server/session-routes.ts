@@ -32,6 +32,9 @@ import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '..
 import { listProjectFiles, rankFiles } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
+import { validatePath } from '../tools/path-validate.js'
+import { readFileSync, statSync } from 'node:fs'
+import { extname, relative } from 'node:path'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
 
@@ -390,6 +393,59 @@ export function buildSessionRoutes(
       const limit = Math.min(Math.max(Number(params?.limit ?? 50) || 50, 1), 200)
       const all = await listProjectFiles(rec.cwd)
       return { status: 200, body: { files: rankFiles(all, q, limit) } }
+    }, apiToken),
+
+    // P2-2 — file content viewer. Reads a file within the session cwd, returns
+    // content + language hint. Path is sandboxed via validatePath. Optional
+    // ?start=1&end=50 line range to avoid transferring huge files. Bearer-gated.
+    'GET /sessions/:id/file-content': withAuth(async (_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const relPath = typeof params?.path === 'string' ? params.path : ''
+      if (!relPath) return { status: 400, body: { error: 'Missing "path" query param' } }
+
+      let absPath: string
+      try {
+        absPath = validatePath(rec.cwd, relPath, 'read')
+      } catch {
+        return { status: 403, body: { error: 'Path outside session cwd' } }
+      }
+
+      let stat
+      try {
+        stat = statSync(absPath)
+      } catch {
+        return { status: 404, body: { error: 'File not found' } }
+      }
+      if (!stat.isFile()) return { status: 400, body: { error: 'Not a file' } }
+      // Cap at 512KB to avoid sending huge files over IPC
+      if (stat.size > 512 * 1024) return { status: 413, body: { error: 'File too large (>512KB)' } }
+
+      const content = readFileSync(absPath, 'utf-8')
+      const lines = content.split('\n')
+      const start = Math.max(1, Number(params?.start) || 1)
+      const end = Math.min(lines.length, Number(params?.end) || lines.length)
+      const sliced = lines.slice(start - 1, end).join('\n')
+
+      const ext = extname(absPath).slice(1).toLowerCase()
+      const LANGUAGE_MAP: Record<string, string> = {
+        ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+        py: 'python', rs: 'rust', go: 'go', rb: 'ruby', java: 'java',
+        css: 'css', scss: 'scss', json: 'json', md: 'markdown', yml: 'yaml',
+        yaml: 'yaml', sh: 'bash', bash: 'bash', sql: 'sql', html: 'html', xml: 'xml',
+      }
+
+      return {
+        status: 200,
+        body: {
+          path: relative(rec.cwd, absPath),
+          content: sliced,
+          language: LANGUAGE_MAP[ext] ?? 'plaintext',
+          totalLines: lines.length,
+          startLine: start,
+          endLine: end,
+        },
+      }
     }, apiToken),
 
     'GET /sessions/:id/stream': withAuth((_body, params, _headers, res) => {
