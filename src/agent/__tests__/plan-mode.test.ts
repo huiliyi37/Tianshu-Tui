@@ -4,7 +4,6 @@ import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS } from '../plan-mode.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
 import { createRepoGraphTool } from '../../tools/repo-graph.js'
-import { createRecallTool } from '../../tools/recall.js'
 import { createMemoryTool } from '../../tools/memory.js'
 import type { ContextClaimStore } from '../../context/claim-store.js'
 
