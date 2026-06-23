@@ -114,7 +114,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible])
+  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible, ui.activeSessionId])
 
   const jumpTo = (cwd: string, id: string) => {
     dispatch({ type: 'setProject', cwd })

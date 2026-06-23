@@ -117,26 +117,26 @@ export function WorkspaceSurface() {
 
       <div className="conversation">
         <div className="conversation-body">
-        <ThreadTabs />
-        {active ? (
-          <ThreadView
-            session={active}
-            view={view}
-            onSend={handleSend}
-            onSteer={handleSteer}
-            onAbort={() => abortSession.mutate(active.id)}
-            onSetApprovalMode={handleSetApprovalMode}
-            onSetPlanMode={handleSetPlanMode}
-            onClose={handleClose}
-          />
-        ) : (
-          <div className="empty thread-empty">
-            <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
-            <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
-              + 新线程
-            </button>
-          </div>
-        )}
+          <ThreadTabs />
+          {active ? (
+            <ThreadView
+              session={active}
+              view={view}
+              onSend={handleSend}
+              onSteer={handleSteer}
+              onAbort={() => abortSession.mutate(active.id)}
+              onSetApprovalMode={handleSetApprovalMode}
+              onSetPlanMode={handleSetPlanMode}
+              onClose={handleClose}
+            />
+          ) : (
+            <div className="empty thread-empty">
+              <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
+              <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                + 新线程
+              </button>
+            </div>
+          )}
         </div>
         {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
       </div>
