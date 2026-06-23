@@ -419,7 +419,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         if (isMechanicalFastPathEnabled(ctx.reviewConfig)) {
           mechanicalClass = classifyChange(
             report.ownedFiles,
-            createGitDiffProvider(params.cwd, report.ownedFiles),
+            createGitDiffProvider(params.cwd, report.ownedFiles, currentDirtyFiles ?? undefined),
           )
         }
 

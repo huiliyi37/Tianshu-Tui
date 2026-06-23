@@ -1,7 +1,12 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
 import {
   classifyChange,
+  createGitDiffProvider,
   type DiffProvider,
   type ChangeClass,
 } from '../change-classification.js'
@@ -66,6 +71,25 @@ describe('change-classification', () => {
       'R100\ta/old1.ts\ta/new1.ts\nR100\tb/old2.ts\tb/new2.ts',
     ))
     assert.equal(result.class, 'rename-mechanical')
+  })
+
+  test('rename-mechanical: pre-existing file rename — only the new path is owned', () => {
+    // The old path is pre-existing (external) and absent from owned files, but the
+    // dirty-scoped name-status still pairs the rename. The new path being the R100
+    // target is enough to classify as a pure rename.
+    const result = classifyChange(['src/new.ts'], makeDiff('R100\tsrc/old.ts\tsrc/new.ts'))
+    assert.equal(result.class, 'rename-mechanical')
+    assert.equal(result.skipVerification, true)
+  })
+
+  test('not rename-mechanical: owned file has a real change alongside a rename', () => {
+    // src/changed.ts is modified (not an R100 endpoint) → must not be treated as
+    // a pure rename even though another file is a clean R100 rename.
+    const result = classifyChange(['src/new.ts', 'src/changed.ts'], makeDiff(
+      'R100\tsrc/old.ts\tsrc/new.ts\nM\tsrc/changed.ts',
+      { 'src/changed.ts': patchLine('+const real = compute()\n-const real = 1\n') },
+    ))
+    assert.notEqual(result.class, 'rename-mechanical')
   })
 
   // ── rename-mechanical (whitespace/comment only) ──
@@ -180,5 +204,83 @@ describe('change-classification', () => {
       { 'src/main.ts': patch },
     ))
     assert.equal(result.class, 'normal')
+  })
+})
+
+describe('createGitDiffProvider — lazy git partition', () => {
+  function tmpRepo(setup: (dir: string, run: (args: string[]) => void) => void): string {
+    const dir = mkdtempSync(join(tmpdir(), 'gdp-'))
+    const run = (args: string[]) => { spawnSync('git', args, { cwd: dir }) }
+    run(['init', '-q'])
+    run(['config', 'user.email', 't@t']); run(['config', 'user.name', 't'])
+    setup(dir, run)
+    return dir
+  }
+
+  test('no git subprocess runs when neither nameStatus nor filePatch is called (docs-only path)', () => {
+    // Point at a non-existent dir: if the provider eagerly shelled out to git
+    // there, the constructor would still spawn. We assert laziness by never
+    // touching the diff methods and confirming construction is side-effect free.
+    let provider: DiffProvider | undefined
+    assert.doesNotThrow(() => {
+      provider = createGitDiffProvider('/nonexistent-dir-xyz', ['README.md', 'src/a.ts'])
+    })
+    assert.ok(provider)
+    // classifyChange on docs-only never calls into the provider:
+    const result = classifyChange(['README.md'], provider!)
+    assert.equal(result.class, 'docs-only')
+  })
+
+  test('partitions tracked vs untracked via a single ls-files; untracked filePatch is empty', () => {
+    const dir = tmpRepo((d, run) => {
+      mkdirSync(join(d, 'src'), { recursive: true })
+      writeFileSync(join(d, 'src/a.ts'), 'const x = 1\n')
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      writeFileSync(join(d, 'src/a.ts'), 'const x = 2\n')   // tracked, modified
+      writeFileSync(join(d, 'src/new.ts'), 'const y = 1\n') // untracked
+    })
+    try {
+      const provider = createGitDiffProvider(dir, ['src/a.ts', 'src/new.ts'])
+      assert.equal(provider.filePatch('src/new.ts'), '', 'untracked file has no diff')
+      assert.match(provider.filePatch('src/a.ts'), /const x = 2/, 'tracked file diff returned')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('detects a real R100 rename via the dirty-set scope (old path not owned)', () => {
+    const dir = tmpRepo((d, run) => {
+      mkdirSync(join(d, 'src'), { recursive: true })
+      writeFileSync(join(d, 'src/old.ts'), 'export const x = 1\n')
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      run(['mv', 'src/old.ts', 'src/new.ts']) // staged rename, byte-identical
+    })
+    try {
+      // Owned files contain only the new path; the dirty set carries both endpoints
+      // so `git -M` can pair them into an R100 rename.
+      const provider = createGitDiffProvider(dir, ['src/new.ts'], ['src/old.ts', 'src/new.ts'])
+      const result = classifyChange(['src/new.ts'], provider)
+      assert.equal(result.class, 'rename-mechanical', 'pure file rename detected end-to-end')
+      assert.equal(result.skipVerification, true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('nameStatus is memoized — repeated calls return the same result', () => {
+    const dir = tmpRepo((d, run) => {
+      mkdirSync(join(d, 'src'), { recursive: true })
+      writeFileSync(join(d, 'src/a.ts'), 'const x = 1\n')
+      run(['add', '.']); run(['commit', '-qm', 'base'])
+      writeFileSync(join(d, 'src/a.ts'), 'const x = 2\n')
+    })
+    try {
+      const provider = createGitDiffProvider(dir, ['src/a.ts'])
+      const first = provider.nameStatus()
+      assert.match(first, /M\tsrc\/a\.ts/)
+      assert.equal(provider.nameStatus(), first, 'second call returns cached value')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

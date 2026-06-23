@@ -1748,6 +1748,27 @@ Do not declare a streamed response duplicate in the middle of the stream.
       assert.match(result.content, /Cannot commit/)
     })
 
+    it('pure file rename (R100) bypasses RED gate — only the new path is owned', async () => {
+      const dir = tmpGitRepoWithTracked('src/old.ts', 'export const x = 1\n')
+      spawnSync('git', ['mv', 'src/old.ts', 'src/new.ts'], { cwd: dir }) // byte-identical rename
+
+      const { tool, params } = makeContext({
+        taskId: 't-rename',
+        ownedFiles: ['src/new.ts'],            // old path is pre-existing/external
+        dirtyFiles: ['src/old.ts', 'src/new.ts'],
+        verifications: [],                      // no verification → unverified RED
+        commitOwnedFiles: (_cwd, _files, msg) => {
+          const add = spawnSync('git', ['add', '-A'], { cwd: dir })
+          const commit = spawnSync('git', ['commit', '-qm', msg], { cwd: dir })
+          return { ok: add.status === 0 && commit.status === 0, output: '' }
+        },
+      })
+
+      const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'refactor: rename old to new' } })
+      assert.equal(result.isError, undefined, `Expected rename bypass, got error:\n${result.content}`)
+      assert.match(result.content, /机械式变更.*rename-mechanical/)
+    })
+
     it('owned_failure RED is NEVER bypassed even for docs files', async () => {
       const dir = tmpGitRepo()
       writeFileSync(join(dir, 'GUIDE.md'), '# Guide\n')

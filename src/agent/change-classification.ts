@@ -176,21 +176,31 @@ export function classifyChange(
   }
 
   // ── For non-docs files, analyze git diff ──
+  // Collect pure-rename (R100 = byte-identical content) endpoints. The name-status
+  // is scoped to the dirty set (not just owned files), so git can pair the renamed
+  // old path (often pre-existing/external) with the new owned path.
   const nameStatus = diff.nameStatus()
-  const lines = nameStatus.split('\n').filter(Boolean)
+  const renameEndpoints = new Set<string>()
+  for (const line of nameStatus.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    const status = parts[0] ?? ''
+    if (status.startsWith('R100')) {
+      // Format: "R100\told\tnew"
+      if (parts[1]) renameEndpoints.add(parts[1])
+      if (parts[2]) renameEndpoints.add(parts[2])
+    }
+  }
 
-  // Parse name-status: "R100\told\tnew" or "M\tfile" or "A\tfile"
-  const allRenameR100 = lines.length > 0 && lines.every(line => {
-    const status = line.split('\t')[0] ?? ''
-    return status.startsWith('R100')
-  })
-
-  if (allRenameR100 && lines.length > 0) {
+  // rename-mechanical: every owned file is either a doc/test or a pure-rename
+  // endpoint. A renamed file's content is byte-identical (R100), so there is no
+  // logic to verify or review — even when the old path is external.
+  if (renameEndpoints.size > 0 && files.every(f => isDocsOrTestFile(f) || renameEndpoints.has(f))) {
     return {
       class: 'rename-mechanical',
       skipReview: true,
       skipVerification: true,
-      reason: `pure rename(s) R100, zero content change: ${lines.map(l => l.split('\t').slice(-1)[0]).join(', ')}`,
+      reason: `pure rename(s) R100, zero content change: ${[...renameEndpoints].join(', ')}`,
       files,
     }
   }
@@ -271,30 +281,50 @@ export function classifyChange(
 /**
  * Create a DiffProvider that uses `git diff` to inspect tracked files.
  * Untracked (new) files are not renames — classify by path only.
+ *
+ * The tracked/untracked partition is computed lazily on first `filePatch` access
+ * and via a SINGLE `git ls-files` call. Docs-only classifications short-circuit
+ * before touching any diff, so they incur zero git subprocess cost.
+ *
+ * `dirtyFiles` (optional) widens the rename-detection scope: name-status runs
+ * over the whole dirty set so `git -M` can pair a renamed old path (often
+ * pre-existing/external, hence absent from the owned `files`) with its new path.
+ * Falls back to `files` when omitted.
  */
-export function createGitDiffProvider(cwd: string, files: readonly string[]): DiffProvider {
-  // Separate tracked vs untracked
-  const trackedFiles: string[] = []
-  const untrackedFiles: string[] = []
-
-  for (const file of files) {
-    const check = spawnSync('git', ['ls-files', '--error-unmatch', '--', file], {
-      cwd, encoding: 'utf-8', timeout: 5000,
-    })
-    if (check.status === 0) {
-      trackedFiles.push(file)
-    } else {
-      untrackedFiles.push(file)
+export function createGitDiffProvider(
+  cwd: string,
+  files: readonly string[],
+  dirtyFiles?: readonly string[],
+): DiffProvider {
+  // Lazy, memoized tracked/untracked split for owned files — used only by
+  // filePatch. One `git ls-files -- <files>` returns the tracked subset.
+  let partition: { untracked: ReadonlySet<string> } | undefined
+  const getPartition = () => {
+    if (partition) return partition
+    const untracked = new Set<string>()
+    if (files.length > 0) {
+      const result = spawnSync('git', ['-c', 'core.quotePath=false', 'ls-files', '--', ...files], {
+        cwd, encoding: 'utf-8', timeout: 5000,
+      })
+      const listed = result.status === 0
+        ? new Set(result.stdout.split('\n').filter(Boolean))
+        : new Set<string>()
+      for (const f of files) {
+        if (!listed.has(f)) untracked.add(f)
+      }
     }
+    partition = { untracked }
+    return partition
   }
 
-  // Cache name-status for tracked files
+  // Name-status over the dirty set (or owned files) so `git -M` can pair renames.
+  const renameScope = dirtyFiles && dirtyFiles.length > 0 ? dirtyFiles : files
   let cachedNameStatus: string | undefined
   const nameStatus = (): string => {
     if (cachedNameStatus !== undefined) return cachedNameStatus
-    if (trackedFiles.length === 0) { cachedNameStatus = ''; return cachedNameStatus }
+    if (renameScope.length === 0) { cachedNameStatus = ''; return cachedNameStatus }
 
-    const result = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '-M', '--name-status', 'HEAD', '--', ...trackedFiles], {
+    const result = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', '-M', '--name-status', 'HEAD', '--', ...renameScope], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
     cachedNameStatus = result.status === 0 ? result.stdout : ''
@@ -303,7 +333,7 @@ export function createGitDiffProvider(cwd: string, files: readonly string[]): Di
 
   const filePatch = (file: string): string => {
     // Untracked files have no diff against HEAD
-    if (untrackedFiles.includes(file)) return ''
+    if (getPartition().untracked.has(file)) return ''
     const result = spawnSync('git', ['-c', 'core.quotePath=false', 'diff', 'HEAD', '--', file], {
       cwd, encoding: 'utf-8', timeout: 10_000,
     })
