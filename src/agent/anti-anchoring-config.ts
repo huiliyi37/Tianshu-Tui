@@ -42,7 +42,11 @@ export const DEFAULT_ANCHOR_BREAK_SCOUT_CONFIG: AnchorBreakScoutConfig = {
 export const DEFAULT_ANTI_ANCHORING_CONFIG: AntiAnchoringConfig = {
   enabled: true,
   blindExploration: true,
-  mctsPlanning: true,
+  // mctsPlanning disabled by default — 3 extra same-model API calls on turn 1
+  // rarely produce deeper insight than the main model's own exploration, and
+  // add ~3-5s latency to first response. Enable per-project if seed model is
+  // a lightweight/cheaper model (env: RIVET_ANTI_ANCHORING_MCTS=1).
+  mctsPlanning: false,
   branches: 3,
   planningTurn: 1,
   projectionThreshold: 0.4,

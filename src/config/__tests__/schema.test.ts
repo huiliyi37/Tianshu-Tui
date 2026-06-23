@@ -106,7 +106,7 @@ describe('config permissions schema', () => {
 
     assert.equal(agent.antiAnchoring.enabled, true)
     assert.equal(agent.antiAnchoring.blindExploration, true)
-    assert.equal(agent.antiAnchoring.mctsPlanning, true)
+    assert.equal(agent.antiAnchoring.mctsPlanning, false)
     assert.equal(agent.antiAnchoring.branches, 3)
   })
 

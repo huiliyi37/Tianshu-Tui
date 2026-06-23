@@ -99,7 +99,7 @@ export const DEFAULT_CONFIG: Config = {
     antiAnchoring: {
       enabled: false,
       blindExploration: true,
-      mctsPlanning: true,
+      mctsPlanning: false,
       branches: 3,
       planningTurn: 1,
       projectionThreshold: 0.4,

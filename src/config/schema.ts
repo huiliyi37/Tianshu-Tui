@@ -76,7 +76,7 @@ export const permissionsSchema = z.object({
 export const antiAnchoringSchema = z.object({
   enabled: z.boolean().default(false),
   blindExploration: z.boolean().default(true),
-  mctsPlanning: z.boolean().default(true),
+  mctsPlanning: z.boolean().default(false),
   branches: z.number().int().positive().default(3),
   planningTurn: z.number().int().positive().default(1),
   projectionThreshold: z.number().min(0).max(1).default(0.4),
