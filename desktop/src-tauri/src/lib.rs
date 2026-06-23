@@ -1,3 +1,5 @@
+mod pty;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
@@ -198,7 +200,14 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![runtime_info])
+        .manage(pty::PtyManager::default())
+        .invoke_handler(tauri::generate_handler![
+            runtime_info,
+            pty::pty_spawn,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill
+        ])
         .setup(|app| {
             let (info, child) = spawn_sidecar(app);
             app.manage(Sidecar {
