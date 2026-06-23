@@ -86,7 +86,7 @@ export function WorkspaceSurface() {
   const handleClose = useCallback(() => {
     if (!activeId) return
     closeSession.mutate(activeId)
-    dispatch({ type: 'setActive', id: '' })
+    dispatch({ type: 'closeTab', id: activeId })
   }, [activeId, closeSession, dispatch])
 
   const sidebarW = ui.sidebarVisible ? '264px' : '0px'

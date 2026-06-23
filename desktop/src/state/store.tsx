@@ -3,10 +3,12 @@ import {
   loadActiveProject,
   loadActiveSessionId,
   loadAttentionSeen,
+  loadOpenTabs,
   loadToolDensity,
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
+  saveOpenTabs,
   saveSidebarVisible,
   saveReviewVisible,
   saveTerminalVisible,
@@ -50,7 +52,7 @@ function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
     case 'setActive': {
       const tabs = action.id
-        ? [action.id, ...state.openTabs.filter((t) => t !== action.id)]
+        ? [action.id, ...state.openTabs.filter((t) => t !== action.id)].slice(0, 10)
         : state.openTabs
       return { ...state, activeSessionId: action.id, openTabs: tabs }
     }
@@ -103,7 +105,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     sidebarVisible: true,
     reviewVisible: true,
     terminalVisible: false,
-    openTabs: loadActiveSessionId() ? [loadActiveSessionId()!] : [],
+    openTabs: loadOpenTabs(),
   }))
 
   useEffect(() => {
@@ -133,6 +135,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveTerminalVisible(state.terminalVisible)
   }, [state.terminalVisible])
+
+  useEffect(() => {
+    saveOpenTabs(state.openTabs)
+  }, [state.openTabs])
 
   return (
     <StateCtx.Provider value={state}>

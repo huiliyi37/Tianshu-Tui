@@ -10,6 +10,7 @@ const KEY_TOOL_DENSITY = 'tianshu.toolDensity'
 const KEY_SIDEBAR = 'tianshu.sidebarVisible'
 const KEY_REVIEW = 'tianshu.reviewVisible'
 const KEY_TERMINAL = 'tianshu.terminalVisible'
+const KEY_TABS = 'tianshu.openTabs'
 
 // ── Tool density ──
 
@@ -130,3 +131,22 @@ export function saveReviewVisible(v: boolean): void { saveBool(KEY_REVIEW, v) }
 
 export function loadTerminalVisible(): boolean { return loadBool(KEY_TERMINAL, false) }
 export function saveTerminalVisible(v: boolean): void { saveBool(KEY_TERMINAL, v) }
+
+// ── Open tabs ──
+
+export function loadOpenTabs(): string[] {
+  try {
+    const v = localStorage.getItem(KEY_TABS)
+    if (v) {
+      const parsed = JSON.parse(v)
+      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string').slice(0, 10)
+    }
+  } catch { /* non-fatal */ }
+  return []
+}
+
+export function saveOpenTabs(tabs: string[]): void {
+  try {
+    localStorage.setItem(KEY_TABS, JSON.stringify(tabs.slice(0, 10)))
+  } catch { /* non-fatal */ }
+}
