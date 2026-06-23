@@ -28,6 +28,7 @@ import type { OwnershipLedger } from './ownership-ledger.js'
 import type { DeliveryGateV2 } from './delivery-gate-v2.js'
 import { filterExternalNoise } from './delivery-gate-v2.js'
 import { summarizeOwnershipHealth } from './ownership-health.js'
+import { classifyChange, createGitDiffProvider, isMechanicalFastPathEnabled } from './change-classification.js'
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
@@ -411,12 +412,28 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         )
 
         const forceGate = params.input.force === true
+
+        // Mechanical-change classification (computed once, reused for gate bypass
+        // and post-commit review). Only meaningful when fast-path is enabled.
+        let mechanicalClass: import('./change-classification.js').ChangeClassification | undefined
+        if (isMechanicalFastPathEnabled(ctx.reviewConfig)) {
+          mechanicalClass = classifyChange(
+            report.ownedFiles,
+            createGitDiffProvider(params.cwd, report.ownedFiles),
+          )
+        }
+
         if (report.state === 'RED') {
           // Stale failure candidates: failures that likely pre-date this change.
           // force=true allows override when all blocking failures look pre-existing.
           if (forceGate && report.staleFailureCandidates > 0) {
             lines.push('', '⚠️  RED overridden (force=true): stale failure candidates detected.')
             lines.push('   Verify these pre-existing failures are unrelated to your changes before proceeding.')
+          } else if (
+            report.attributionClass === 'unverified'
+            && mechanicalClass?.skipVerification
+          ) {
+            lines.push('', `✅ 机械式变更 (${mechanicalClass.class})，免验证交付：${mechanicalClass.reason}`)
           } else {
             lines.push('', '❌ Cannot commit: delivery gate is RED.')
             if (report.staleFailureCandidates > 0) {
@@ -626,6 +643,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           isFix: isFixContext(message),
           goalActive: ctx.isGoalActive?.() === true,
           ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
+          ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
         }
 
         // Suppress auto review when goal is active OR caller explicitly skips.

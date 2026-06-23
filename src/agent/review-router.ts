@@ -158,6 +158,8 @@ export async function routeReviewWorkflow(
   }
 
   if (options.mode === 'auto') {
+    // Mechanical-change fast-path: skip review workers for docs/rename/heuristic-rename
+    if (change.changeClass?.skipReview) return { tier: 'auto', verdict: 'nudge' }
     if (isTrivialChange(change.files)) return { tier: 'auto', verdict: 'nudge' }
     if (!deps.spawnWiringReviewer) return { tier: 'auto', verdict: 'nudge' }
 

@@ -118,6 +118,8 @@ export function isFixContext(message: string): boolean {
   return FIX_PATTERNS.some(pattern => pattern.test(message))
 }
 
+import type { ChangeClassification } from './change-classification.js'
+
 export type ReviewScale = 'L1' | 'L2' | 'L3'
 
 export interface ChangeSet {
@@ -133,6 +135,9 @@ export interface ChangeSet {
    *  structure. Set by deliver_task when a goal tracker is actively driving
    *  auto-continuation — child review workers would stall the goal loop. */
   goalActive?: boolean
+  /** Mechanical-change classification from deliver_task. When present with
+   *  skipReview=true, auto review skips workers (nudge only). */
+  changeClass?: ChangeClassification
 }
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i

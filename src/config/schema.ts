@@ -123,6 +123,10 @@ export const reviewProfileOverrideSchema = z.object({
 export const reviewConfigSchema = z.object({
   profiles: z.record(z.string(), reviewProfileOverrideSchema).default({}),
   skipAuto: z.boolean().default(false),
+  /** Enable mechanical-change fast-path: docs-only and pure rename changes
+   *  bypass verification gate (unverified RED only) and skip review workers.
+   *  owned_failure RED is NEVER bypassed. Default true. */
+  mechanicalFastPath: z.boolean().default(true),
 }).default({})
 
 /** Inferred TS type for the review config block. Consumers (e.g. B1Context.reviewConfig)
