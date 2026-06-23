@@ -368,6 +368,43 @@ describe('CompactionController', () => {
     assert.match(tail, /task-anchor/, 'partial compact must append the task-anchor appendix')
   })
 
+  // P3: partial compact persists heuristic session memories before history is
+  // replaced — the hook the loop callback uses to hot-refresh session memory.
+  it('P3: partial compact persists extracted memories before replacing history', async () => {
+    const session = new SessionContext()
+    const msgs = Array.from({ length: 70 }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: i % 2 === 0
+        ? 'I always prefer prefix-cache safety. ' + 'x'.repeat(40_000)
+        : 'x'.repeat(40_000),
+    }))
+    session.replaceMessages(msgs)
+
+    const primaryClient: StreamClient = {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta('summary')
+      },
+    }
+    const persisted: Array<{ text: string; kind: string; source: string }> = []
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      persistMemories: mems => { persisted.push(...mems) },
+    })
+
+    const result = await controller.maybeCompact({
+      loopTurn: 0,
+      failures: { consecutiveFailures: 0 },
+    })
+
+    assert.equal(result.compacted, true)
+    assert.ok(persisted.length > 0, 'partial compact must persist extracted memories')
+    assert.ok(
+      persisted.some(m => m.kind === 'user_preference'),
+      'should extract the user preference from history before replacement',
+    )
+  })
+
   // Phase 2.1: enforceContextCeiling MUST still fire on 1M+ windows.
   // The 95% ceiling is the emergency last resort — if we're truly about to
   // overflow, we checkpoint-resume regardless of cache implications.

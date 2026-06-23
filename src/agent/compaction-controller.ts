@@ -404,17 +404,18 @@ export class CompactionController {
         }
 
         debugLog(`[llm-compact] partial compact insufficient — triggering full LLM compact`)
-        // P3: persist heuristic session memories from the trajectory BEFORE the
-        // checkpoint replace wipes history. extractSessionMemories reads the
-        // current message list, so it must run while history is still intact —
-        // same ordering as enforceContextCeiling (L517) and trySessionSplit.
-        this.persistExtractedMemories(this.deps.getTrajectoryEntries())
         const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
         if (this.isAbortRequested()) {
           debugLog('[llm-compact] turn aborted after compact returned — skipping checkpoint replacement')
           return { failures: input.failures, compacted: false }
         }
         if (summary) {
+          // P3: persist heuristic session memories BEFORE replaceWithCheckpoint
+          // wipes history (extractSessionMemories reads the live message list).
+          // Placed AFTER llmCompact so the compaction request itself still reuses
+          // the prefix cache with the pre-refresh frozen base — the persist
+          // callback hot-refreshes session memory, which rebuilds the frozen base.
+          this.persistExtractedMemories(this.deps.getTrajectoryEntries())
           this.replaceWithCheckpoint({
             tier: 2,
             reason: `LLM compact at ${(ratio * 100).toFixed(0)}% context (1M window graceful degradation)`,
