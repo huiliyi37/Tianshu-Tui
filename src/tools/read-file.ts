@@ -11,6 +11,7 @@ import { computeModelReadCap, DEFAULT_MODEL_READ_CAP, type ModelReadCap } from '
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
+import { foldCode } from '../compact/code-fold.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -227,6 +228,19 @@ function getGitignoreFilter(cwd: string): Promise<GitignoreFilter> {
 const MAX_TOOL_INPUT_BYTES = 100 * 1024
 const LOG_PREVIEW_LINES = 80
 
+/**
+ * Fold code into a signature skeleton, then apply byte-level partial view truncation.
+ * If folding doesn't help (unknown lang, short file, or <30% reduction), fall back
+ * to the original content's partial view.
+ */
+function applyFoldThenPartial(content: string, filePath: string, cap: ModelReadCap): string {
+  const fold = foldCode(content, { filePath, maxLines: 200 })
+  if (fold.wasFolded && fold.foldedLines < fold.originalLines * 0.7) {
+    return buildPartialView(fold.folded, filePath, cap.maxChars)
+  }
+  return buildPartialView(content, filePath, cap.maxChars)
+}
+
 /** File extensions known to be binary — read_file rejects them with a clear error
  *  instead of returning garbled UTF-8 to the model. */
 const BINARY_EXTENSIONS = new Set([
@@ -329,7 +343,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
       // Large source file: read and return PARTIAL view instead of hard error
       const content = await readFile(filePath, 'utf-8')
       const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
-      const partialContent = buildPartialView(content, filePath, cap.maxChars)
+      const partialContent = applyFoldThenPartial(content, filePath, cap)
       return {
         canonicalPath: filePath,
         rawContent: content,
@@ -365,7 +379,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
 
   // PARTIAL view for source files that fit in memory but exceed the model cap
   if (policy.action === 'partial' && !hasExplicitRange) {
-    const partialContent = buildPartialView(content, filePath, cap.maxChars)
+    const partialContent = applyFoldThenPartial(content, filePath, cap)
     return {
       canonicalPath: filePath,
       rawContent: content,
