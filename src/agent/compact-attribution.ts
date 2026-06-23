@@ -28,6 +28,11 @@ export interface CompactAttribution {
   compactReclaimed?: number
   /** Window fill ratio just before the rewrite, rounded to 3 decimals. Omitted on the first turn or unknown window. */
   compactPreRatio?: number
+  /** Id of the compact-history artifact this rewrite produced, when the dropped
+   *  zone was archived (layered archival). Lets analyze-compact-events correlate
+   *  a rewrite turn with the recall telemetry by artifact id — i.e. "was the
+   *  dropped content ever recalled?". Omitted when nothing was archived. */
+  archiveId?: string
 }
 
 export function computeCompactAttribution(
