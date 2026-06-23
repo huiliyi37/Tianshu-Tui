@@ -378,7 +378,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   }
 
   if (deps.autoDelegate) {
-    hooks.push(createDispatcherHook(deps.autoDelegate))
+    hooks.push(createDispatcherHook({ ...deps.autoDelegate, advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.memoryLearning) {

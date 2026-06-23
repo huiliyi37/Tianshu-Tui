@@ -1,50 +1,56 @@
 import type { AfterPerceptionRuntimeHook } from '../runtime-hooks.js'
 import type { TaskContract } from '../../context/task-contract.js'
 import type { Sensorium } from '../sensorium.js'
-import type { DelegationCoordinator, DelegationRequest } from '../coordinator.js'
-import type { WorkOrderKind, WorkerProfile } from '../work-order.js'
-import type { DomainArea } from '../work-order.js'
+import type { AdvisoryBus } from '../advisory-bus.js'
 import { decomposeByDataContract } from '../dispatcher.js'
-import { matchDomain } from '../star-domain.js'
-import { profileRegistry } from '../profile-registry.js'
-import { shouldDelegateObjective as _shouldDelegate } from '../coordinator.js'
 
 export interface DispatcherHookDeps {
-  /** Lazy getter for coordinator — called each turn so stale references are never used. */
-  coordinator: () => DelegationCoordinator | null
   getTaskContract: () => TaskContract | undefined
   getSensorium: () => Sensorium | null
+  /** Unified advisory bus — the delegation suggestion is routed here (prefix-cache safe).
+   *  Without it the hook only emits the UI phase-change signal. */
+  advisoryBus?: AdvisoryBus
   complexityThreshold?: number
-  /** Kill-switch: disable auto-delegation entirely. Default: true (enabled). */
+  /** Local kill-switch once registered. NB: delegation advisory is system-level
+   *  opt-in — this hook is only registered when config.agent.autoDelegateEnabled is
+   *  true (default false). This flag is a per-instance override on top of that. */
   enabled?: boolean
-  /** Minimum turns between auto-delegation spawns. Default: 3. */
+  /** Minimum turns between advisory emissions. Default: 3. */
   cooldownTurns?: number
 }
 
+/**
+ * Delegation advisor — model-driven, not an actor.
+ *
+ * When an actionable, sufficiently-complex TaskContract decomposes into >1
+ * cross-domain subtask, this hook submits a single advisory suggesting the
+ * primary agent explicitly call delegate_batch (with dependency hints). It
+ * never spawns workers itself — the delegation decision stays with the model,
+ * which keeps the prefix cache stable and reuses the coordinator's existing
+ * dependency queue, file-conflict serialization, and aggregation.
+ */
 export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionRuntimeHook {
-  /** Per-contract.id dedup: track which contracts have been dispatched. */
-  const dispatchedIds = new Set<string>()
-  /** Last turn an auto-delegation was spawned. */
-  let lastDispatchTurn = -Infinity
+  /** Per-contract.id dedup: track which contracts have already been advised. */
+  const advisedIds = new Set<string>()
+  /** Last turn an advisory was emitted. */
+  let lastAdvisoryTurn = -Infinity
 
   return {
     phase: 'afterPerception',
     name: 'task-dispatcher',
     async run(ctx) {
-      // Kill-switch: respect config.agent.autoDelegateEnabled
+      // Kill-switch
       if (deps.enabled === false) return
-      const coordinator = deps.coordinator()
-      if (!coordinator) return
 
-      // 冷却: skip if last auto-delegation was within cooldownTurns
+      // 冷却: skip if last advisory was within cooldownTurns
       const cooldown = deps.cooldownTurns ?? 3
-      if (ctx.snapshot.turn - lastDispatchTurn < cooldown) return
+      if (ctx.snapshot.turn - lastAdvisoryTurn < cooldown) return
 
       const contract = deps.getTaskContract()
       if (!contract || !contract.isActionable) return
 
-      // Per-contract.id dedup: each contract only auto-dispatches once
-      if (dispatchedIds.has(contract.id)) return
+      // Per-contract.id dedup: each contract is advised at most once
+      if (advisedIds.has(contract.id)) return
 
       // 复用 shouldDelegateObjective 门槛（内联判断，TaskContract.scope 与 WorkOrderScope 结构不同）
       const wordCount = contract.objective.trim().split(/\s+/).filter(Boolean).length
@@ -58,51 +64,30 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
       const subtasks = decomposeByDataContract(contract)
       if (subtasks.length <= 1) return
 
-      // 转换为 DelegationRequest[]，喂入现有 coordinator
-      const requests: DelegationRequest[] = subtasks.map(st => ({
-        parentTurnId: `dispatcher-${contract.id}`,
-        objective: st.objective,
-        kind: inferWorkOrderKind(st.domain),
-        profile: inferWorkerProfile(st.domain),
-        scope: st.scope,
-        authority: st.authority,
-      }))
+      // 建议模型显式委派——不替它行动。依赖箭头来自 decomposeByDataContract 的 dependsOn
+      // （A←[B] 表示 A 依赖 B，B 必须先跑）。
+      const depHint = subtasks
+        .map(st =>
+          st.dependsOn.length > 0
+            ? `${st.domain}←[${st.dependsOn.map(d => subtasks[d]?.domain ?? `#${d}`).join(',')}]`
+            : st.domain
+        )
+        .join('; ')
 
-      // 通过现有 coordinator 执行（复用模型路由、工具过滤、session 隔离）
-      // TaskBoard 通过 queue 事件自动更新，不需要手动调用
-      for (const req of requests) {
-        coordinator.delegate(req).catch(error => {
-          const msg = error instanceof Error ? error.message : String(error)
-          ctx.effects.emitPhaseChange('worker-failed', { reason: msg })
-        })
-      }
+      deps.advisoryBus?.submit({
+        key: `delegation-advisor:${contract.id}`,
+        priority: 0.5,
+        category: 'delegation',
+        ttl: 2,
+        content: `【天梁】检测到可并行拆分为 ${subtasks.length} 个子任务（${depHint}）。如需并行推进，显式调 delegate_batch 并按箭头传 dependencies（被指向方先跑）；只读探查用 code_search profile。`,
+      })
 
-      dispatchedIds.add(contract.id)
-      lastDispatchTurn = ctx.snapshot.turn
+      advisedIds.add(contract.id)
+      lastAdvisoryTurn = ctx.snapshot.turn
       ctx.effects.emitPhaseChange('task-decomposed', {
         reason: `${subtasks.length} subtasks by data-flow analysis`,
-        suggestion: subtasks.map(t => `${t.domain}:${t.authority}`).join(', '),
+        suggestion: subtasks.map(t => t.domain).join(', '),
       })
     },
   }
-}
-
-function inferWorkOrderKind(domain: DomainArea): WorkOrderKind {
-  if (domain === 'tests') return 'verify'
-  if (domain === 'docs') return 'doc_research'
-  // Auto-delegation is read-only only. Frontend/backend/tools/config
-  // all get code_search (exploration), never patch_proposal (write).
-  // Write operations require explicit delegate_task from primary agent.
-  return 'code_search'
-}
-
-function inferWorkerProfile(domain: DomainArea): WorkerProfile {
-  // Try registry first — user-defined profiles may declare defaultKind
-  for (const p of profileRegistry.list()) {
-    if (p.defaultKind === domain) return p.name as WorkerProfile
-  }
-  // Built-in fallbacks
-  if (domain === 'tests') return 'verifier'
-  if (domain === 'docs') return 'doc_scout'
-  return 'code_scout'
 }
