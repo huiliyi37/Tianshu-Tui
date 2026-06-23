@@ -232,6 +232,14 @@ export function ThreadView(props: {
     },
   ], [onSetApprovalMode, onSend])
 
+  // Lookup map for welcome cards/pills to call the actual slash command
+  // run() instead of sending raw text to the model.
+  const runCommand = useMemo(() => {
+    const m = new Map<string, () => void>()
+    for (const c of commands) m.set(c.name, c.run)
+    return (name: string) => m.get(name)?.()
+  }, [commands])
+
   return (
     <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator}>
       <header className="thread-header">
@@ -309,31 +317,31 @@ export function ThreadView(props: {
             <p className="welcome-title">开始对话</p>
             <p className="welcome-hint">输入消息或使用下方快捷命令</p>
             <div className="welcome-cards">
-              <button className="welcome-card" onClick={() => onSend('/plan 创建方案')}>
+              <button className="welcome-card" onClick={() => runCommand('/plan')}>
                 <span className="wc-glyph" aria-hidden>📋</span>
                 <span className="wc-label">创建方案</span>
                 <span className="wc-desc">调研代码库后输出实施计划</span>
               </button>
-              <button className="welcome-card" onClick={() => onSend('/review 审查代码')}>
+              <button className="welcome-card" onClick={() => runCommand('/review')}>
                 <span className="wc-glyph" aria-hidden>🔍</span>
                 <span className="wc-label">审查变更</span>
                 <span className="wc-desc">对未提交改动进行代码审查</span>
               </button>
-              <button className="welcome-card" onClick={() => onSetApprovalMode(levelToMode('autonomous'))}>
+              <button className="welcome-card" onClick={() => runCommand('/autonomous')}>
                 <span className="wc-glyph" aria-hidden>✦</span>
                 <span className="wc-label">自治模式</span>
                 <span className="wc-desc">项目内操作自动执行，无需逐条审批</span>
               </button>
             </div>
             <div className="welcome-pills">
-              <span className="welcome-pill" onClick={() => onSend('/review')}>/review</span>
-              <span className="welcome-pill" onClick={() => onSend('/plan')}>/plan</span>
-              <span className="welcome-pill" onClick={() => onSend('/autonomous')}>/autonomous</span>
-              <span className="welcome-pill" onClick={() => onSend('/team')}>/team</span>
-              <span className="welcome-pill" onClick={() => onSend('/compact')}>/compact</span>
-              <span className="welcome-pill" onClick={() => onSend('/context')}>/context</span>
-              <span className="welcome-pill" onClick={() => onSend('/verify')}>/verify</span>
-              <span className="welcome-pill" onClick={() => onSend('/constellation')}>/constellation</span>
+              <span className="welcome-pill" onClick={() => runCommand('/review')}>/review</span>
+              <span className="welcome-pill" onClick={() => runCommand('/plan')}>/plan</span>
+              <span className="welcome-pill" onClick={() => runCommand('/autonomous')}>/autonomous</span>
+              <span className="welcome-pill" onClick={() => runCommand('/team')}>/team</span>
+              <span className="welcome-pill" onClick={() => runCommand('/compact')}>/compact</span>
+              <span className="welcome-pill" onClick={() => runCommand('/context')}>/context</span>
+              <span className="welcome-pill" onClick={() => runCommand('/verify')}>/verify</span>
+              <span className="welcome-pill" onClick={() => runCommand('/constellation')}>/constellation</span>
             </div>
           </div>
         )}

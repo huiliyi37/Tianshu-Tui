@@ -68,16 +68,17 @@ export function App() {
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
         return
       }
-      // Cmd+B → toggle sidebar
-      if (mod && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault()
-        dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
-        return
-      }
-      // Cmd+Shift+B → toggle review panel
+      // Cmd+Shift+B → toggle review panel (must precede Cmd+B)
       if (mod && e.shiftKey && (e.key === 'b' || e.key === 'B')) {
         e.preventDefault()
         dispatch({ type: 'setReview', visible: !ui.reviewVisible })
+        dispatch({ type: 'setReviewManual', on: true })
+        return
+      }
+      // Cmd+B → toggle sidebar
+      if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault()
+        dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
         return
       }
       // Cmd+J → toggle terminal

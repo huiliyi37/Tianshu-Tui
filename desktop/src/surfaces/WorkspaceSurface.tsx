@@ -25,10 +25,17 @@ export function WorkspaceSurface() {
 
   const active = sessions.data?.find((s) => s.id === activeId) ?? null
 
-  // Responsive: auto-collapse panels when window < 1200px.
-  // Uses ResizeObserver (not window.resize) — fires only when the workspace
-  // element actually changes size, not on every browser chrome resize event.
+  // Responsive: auto-collapse review panel when workspace < 1200px.
+  // Uses ResizeObserver — only fires when the element actually resizes.
+  // A `reviewManuallyToggled` flag prevents the observer from fighting the
+  // user: if the user pressed Cmd+Shift+B to open the panel, we don't
+  // auto-close it. The flag resets when width recovers above threshold.
   const wsRef = useRef<HTMLDivElement>(null)
+  const reviewVisibleRef = useRef(ui.reviewVisible)
+  reviewVisibleRef.current = ui.reviewVisible
+  const reviewManualRef = useRef(ui.reviewManuallyToggled)
+  reviewManualRef.current = ui.reviewManuallyToggled
+
   useEffect(() => {
     const el = wsRef.current
     if (!el) return
@@ -36,12 +43,20 @@ export function WorkspaceSurface() {
       if (!entry) return
       const w = entry.contentRect.width
       if (w < 1200) {
-        if (ui.reviewVisible) dispatch({ type: 'setReview', visible: false })
+        if (reviewVisibleRef.current && !reviewManualRef.current) {
+          dispatch({ type: 'setReview', visible: false })
+        }
+      } else {
+        // Width recovered — reset manual flag so auto-collapse works again
+        // next time the window shrinks.
+        if (reviewManualRef.current) {
+          dispatch({ type: 'setReviewManual', on: false })
+        }
       }
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [dispatch, ui.reviewVisible])
+  }, [dispatch])
 
   // Desktop notifications now fire globally for ANY session (Q2) via
   // useGlobalNotifications mounted in App — no per-active-session effects here.

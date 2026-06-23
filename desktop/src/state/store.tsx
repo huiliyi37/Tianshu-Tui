@@ -36,6 +36,9 @@ export interface UiState {
   terminalVisible: boolean
   /** Ordered list of open thread IDs (tabs). First = most recently used. */
   openTabs: string[]
+  /** True when the user explicitly toggled review panel open (Cmd+Shift+B).
+   *  Resets when the workspace width recovers above the responsive threshold. */
+  reviewManuallyToggled: boolean
 }
 
 type UiAction =
@@ -50,6 +53,7 @@ type UiAction =
   | { type: 'setReview'; visible: boolean }
   | { type: 'setTerminal'; visible: boolean }
   | { type: 'closeTab'; id: string }
+  | { type: 'setReviewManual'; on: boolean }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -88,6 +92,8 @@ function reducer(state: UiState, action: UiAction): UiState {
         : state.activeSessionId
       return { ...state, openTabs: tabs, activeSessionId: activeId }
     }
+    case 'setReviewManual':
+      return { ...state, reviewManuallyToggled: action.on }
     default:
       return state
   }
@@ -109,6 +115,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
     openTabs: loadOpenTabs(),
+    reviewManuallyToggled: false,
   }))
 
   useEffect(() => {
