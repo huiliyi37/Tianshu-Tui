@@ -26,7 +26,7 @@ import { classifySeason } from './cognitive-season.js'
 import { renderToolContext, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
 import { selectPolicy } from './policy-selection.js'
 import { checkTddGate } from './tdd-gate.js'
-import { buildCognitivePromptProjection, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
+import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
 
 /**
@@ -411,8 +411,10 @@ export class TurnStepProducer {
     const sycophancyHint = this.self.sycophancyTrap.getHint()
     const immuneHint = this.self._lastImmuneHint ? formatImmuneContext(this.self._lastImmuneHint) : undefined
     this.self._lastImmuneHint = undefined // consume once
-    const projection = actionable ? buildCognitivePromptProjection(cognitiveLedger, { sycophancyHint, immuneHint, yaoguangHint }) : ''
-    this.self.config.promptEngine.setCognitiveProjection(projection)
+    const { stable: projectionStable, ephemeral: projectionEphemeral } = actionable
+      ? buildCognitiveProjectionParts(cognitiveLedger, { sycophancyHint, immuneHint, yaoguangHint })
+      : { stable: '', ephemeral: '' }
+    this.self.config.promptEngine.setCognitiveProjection(projectionStable, projectionEphemeral)
 
     // ── CVM overhead tracking ──
     // 盘古呼吸：CVM 保护的资源（context）也是它消耗的资源。
@@ -420,7 +422,7 @@ export class TurnStepProducer {
     // chars / 4 ≈ tokens (crude but fast estimate for overhead ratio)
     if (actionable) {
       const toolCtxLen = this.self.config.promptEngine.getToolContextLength()
-      const cvmTokenEstimate = Math.ceil((projection.length + toolCtxLen) / 4)
+      const cvmTokenEstimate = Math.ceil((projectionStable.length + projectionEphemeral.length + toolCtxLen) / 4)
       this.self.pressureMonitor.recordCvmInjection(cvmTokenEstimate)
     }
   }

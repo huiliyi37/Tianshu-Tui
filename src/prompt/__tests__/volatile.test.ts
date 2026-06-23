@@ -837,3 +837,38 @@ describe('stripFirstMarkdownTable', () => {
     assert.equal(stripFirstMarkdownTable(input), input)
   })
 })
+
+describe('progress objective dedup (C3)', () => {
+  const sessionState = '<session-state>\nObjective: ship the feature\nStep: writing code\n</session-state>'
+
+  it('keeps the objective when projection has no <objective> (only a one-shot hint)', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      sessionState,
+      cognitiveProjection: '【瑶光·复现即证】上轮回复引用了文件名但未读取任何文件。',
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.match(appendix, /Objective: ship the feature/)
+  })
+
+  it('keeps the objective when projection is a non-actionable contract (renders no objective)', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      sessionState,
+      cognitiveProjection: '<verification-gap claims="2" verified="0" />',
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.match(appendix, /Objective: ship the feature/)
+  })
+
+  it('strips the duplicate objective only when projection actually carries <objective>', () => {
+    const ctx: VolatileContext = {
+      cwd: '/repo',
+      sessionState,
+      cognitiveProjection: '<task-contract status="executing"><objective>ship the feature</objective></task-contract>',
+    }
+    const appendix = buildDynamicAppendix(ctx)
+    assert.doesNotMatch(appendix, /Objective: ship the feature/)
+    assert.match(appendix, /<objective>ship the feature<\/objective>/)
+  })
+})

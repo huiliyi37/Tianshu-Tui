@@ -137,6 +137,8 @@ export class PromptEngine {
   private contextLayerReportData: ContextLayerReport
   private phaseHint?: string
   private cognitiveProjection?: string
+  /** Per-turn one-shot cognitive hints, emitted outside appendixDelta (C1 fix). */
+  private cognitiveEphemeral?: string
   private crossSessionEvents?: string
   private companionPresence?: string
   private sessionStateText?: string
@@ -350,12 +352,12 @@ export class PromptEngine {
 
               const activeAppendix = this.actionableTurn ? this.buildAppendixBody(activeCtx, appendixMaxChars) : ''
               this.cachedConsolidated = this.consolidatedBlock
-              this.cachedAppendix = activeAppendix
+              this.cachedAppendix = this.withEphemeralProjection(activeAppendix)
             } else {
               if (this.actionableTurn) {
                 const appendix = this.buildAppendixBody(dynamicCtx, appendixMaxChars)
                 this.cachedConsolidated = this.consolidatedBlock
-                this.cachedAppendix = appendix
+                this.cachedAppendix = this.withEphemeralProjection(appendix)
               } else {
                 this.cachedConsolidated = ''
                 this.cachedAppendix = ''
@@ -835,8 +837,21 @@ export class PromptEngine {
    * volatile block — projection refreshes only at user-message boundaries.
    * This preserves DeepSeek prefix cache across tool turns (~10% hit rate gain).
    */
-  setCognitiveProjection(projection: string | null): void {
+  setCognitiveProjection(projection: string | null, ephemeral?: string | null): void {
     this.cognitiveProjection = projection && projection.trim().length > 0 ? projection : undefined
+    // Ephemeral one-shot hints (sycophancy / yaoguang / immune) are stored
+    // separately and emitted OUTSIDE the appendixDelta context-update, so a
+    // hint shown once never persists via the cumulative "absent = reuse last"
+    // protocol. Only the state-derived stable projection participates in delta.
+    this.cognitiveEphemeral = ephemeral && ephemeral.trim().length > 0 ? ephemeral : undefined
+  }
+
+  /** Prepend per-turn ephemeral cognitive hints OUTSIDE the delta context-update.
+   *  cachedAppendix is frozen across a user message's tool turns, so this stays
+   *  stable within a turn sequence and only refreshes at the next user boundary. */
+  private withEphemeralProjection(appendix: string): string {
+    if (!this.cognitiveEphemeral) return appendix
+    return appendix ? `${this.cognitiveEphemeral}\n${appendix}` : this.cognitiveEphemeral
   }
 
   private invalidateFreshCache(): void {

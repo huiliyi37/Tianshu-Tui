@@ -390,10 +390,13 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
 
   // Unified progress block: merges session-state, task-progress, and decisions
   // into a single <progress> to eliminate triple repetition in the prompt.
-  // C1: when cognitiveProjection carries the task-contract (with objective),
-  // the progress block omits the objective line to avoid duplication. The
-  // sessionState still carries plan-step/files/decisions for progress tracking.
-  const progressBlock = renderProgressBlock(ctx, !!ctx.cognitiveProjection)
+  // C3 fix: only dedup the objective when the projection ACTUALLY carries it.
+  // The projection is non-empty in many cases without an objective (verification
+  // gap / cognitive mirror / one-shot hints, or a non-actionable contract which
+  // renders ''). Gating on mere non-emptiness silently dropped the objective from
+  // both progress AND projection. Gate on the real <objective> marker instead.
+  const projHasObjective = !!ctx.cognitiveProjection && ctx.cognitiveProjection.includes('<objective>')
+  const progressBlock = renderProgressBlock(ctx, projHasObjective)
   if (progressBlock) parts.push(progressBlock)
 
   // Tool history: most recent tools appended at end → prefix cacheable

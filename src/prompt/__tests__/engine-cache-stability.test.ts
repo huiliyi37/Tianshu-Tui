@@ -617,6 +617,43 @@ describe('agent loop mode: volatile block cached across tool-call turns', () => 
     )
     assert.equal(engine.checkDrift(), null)
   })
+
+  it('one-shot ephemeral hint does NOT re-emit in the latest trailer once cleared (C1)', () => {
+    const engine = createEngine()
+    const stable = '<task-contract status="executing"><objective>do A</objective></task-contract>'
+    const lastContent = (req: { messages: { content: unknown }[] }): string => {
+      const last = req.messages[req.messages.length - 1]
+      return last && typeof last.content === 'string' ? last.content : ''
+    }
+
+    const base: OaiMessage[] = [
+      { role: 'user', content: 'task A' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+    ]
+
+    // Boundary 1: hint is live → appears in the latest trailer.
+    engine.setCognitiveProjection(stable, 'EPHEMERAL-ONESHOT-HINT')
+    const m1: OaiMessage[] = [...base, { role: 'user', content: 'continue A' }]
+    const trailer1 = lastContent(engine.buildOaiRequest(m1))
+    assert.match(trailer1, /EPHEMERAL-ONESHOT-HINT/)
+    assert.match(trailer1, /<task-contract status="executing">/)
+
+    // Boundary 2: hint consumed (not re-set), stable unchanged → the latest trailer
+    // must NOT carry the hint. If the hint lived inside appendixDelta, the cumulative
+    // "absent = reuse last" protocol would re-surface it here.
+    engine.setCognitiveProjection(stable, null)
+    const m2: OaiMessage[] = [
+      { role: 'user', content: 'task A' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+      { role: 'user', content: 'continue A' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c2', type: 'function' as const, function: { name: 'read_file', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c2', content: 'ok' },
+      { role: 'user', content: 'now B' },
+    ]
+    assert.doesNotMatch(lastContent(engine.buildOaiRequest(m2)), /EPHEMERAL-ONESHOT-HINT/)
+  })
 })
 
 describe('sessionState injection — cache safety + path coverage', () => {

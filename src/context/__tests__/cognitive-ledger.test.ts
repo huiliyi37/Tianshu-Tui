@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildCognitivePromptProjection,
+  buildCognitiveProjectionParts,
   buildVerificationGapProjection,
   createCognitiveLedger,
   getCognitivePhaseSnapshot,
@@ -43,6 +44,35 @@ describe('CognitiveLedger read model', () => {
     const projection = buildCognitivePromptProjection(ledger)
     assert.ok(projection.length < 800, `Projection too long: ${projection.length}`)
     assert.match(projection, /<verification-gap/)
+  })
+
+  it('buildCognitiveProjectionParts separates one-shot hints from the stable projection (C1)', () => {
+    const ledger = createCognitiveLedger({ contract: makeContract(), evidence: makeEvidence(), trace: makeTrace(), turn: 5 })
+    const hint = '【瑶光·复现即证】绿非证明,复现即证。'
+    const { stable, ephemeral } = buildCognitiveProjectionParts(ledger, { yaoguangHint: hint })
+
+    // stable carries the contract/objective and verification gap; never the hint.
+    assert.match(stable, /<task-contract/)
+    assert.match(stable, /<objective>/)
+    assert.doesNotMatch(stable, /复现即证/)
+    // ephemeral carries only the one-shot hint.
+    assert.equal(ephemeral, hint)
+  })
+
+  it('buildCognitiveProjectionParts yields empty ephemeral when no hints are present', () => {
+    const ledger = createCognitiveLedger({ contract: makeContract(), evidence: makeEvidence(), trace: makeTrace(), turn: 5 })
+    const { stable, ephemeral } = buildCognitiveProjectionParts(ledger)
+    assert.equal(ephemeral, '')
+    assert.ok(stable.length > 0)
+  })
+
+  it('buildCognitivePromptProjection equals stable + ephemeral joined (backward compat)', () => {
+    const ledger = createCognitiveLedger({ contract: makeContract(), evidence: makeEvidence(), trace: makeTrace(), turn: 5 })
+    const hint = 'one-shot hint text'
+    const combined = buildCognitivePromptProjection(ledger, { sycophancyHint: hint })
+    const { stable, ephemeral } = buildCognitiveProjectionParts(ledger, { sycophancyHint: hint })
+    assert.equal(combined, [stable, ephemeral].filter(Boolean).join('\n'))
+    assert.match(combined, /one-shot hint text/)
   })
 
   it('omits non-actionable contract while preserving other cognitive projections', () => {

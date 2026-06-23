@@ -151,6 +151,43 @@ function coarseLabel(value: number): string {
   return 'high'
 }
 
+export interface CognitiveProjectionParts {
+  /** State-derived projection (contract + verification gap + mirror + uncertainty).
+   *  Delta-safe: changes in place when ledger state changes, so appendixDelta can
+   *  diff it by content. */
+  stable: string
+  /** Per-turn one-shot hints (sycophancy / yaoguang / immune). Must be emitted
+   *  OUTSIDE appendixDelta — under delta's cumulative "absent = reuse last"
+   *  protocol a one-shot hint would otherwise persist across turns. */
+  ephemeral: string
+}
+
+/**
+ * Split the cognitive projection into a delta-safe stable part and per-turn
+ * ephemeral hints. See {@link CognitiveProjectionParts}.
+ */
+export function buildCognitiveProjectionParts(
+  ledger: CognitiveLedger,
+  opts?: {
+    sycophancyHint?: string | null
+    immuneHint?: string | null
+    yaoguangHint?: string | null
+  },
+): CognitiveProjectionParts {
+  const stable = [
+    ledger.contract ? renderContractProjection(ledger.contract) : '',
+    buildVerificationGapProjection(ledger),
+    buildCognitiveMirror(ledger),
+    buildUncertaintyProjection(ledger),
+  ].filter(Boolean).join('\n')
+  const ephemeral = [
+    opts?.sycophancyHint ?? '',
+    opts?.yaoguangHint ?? '',
+    opts?.immuneHint ?? '',
+  ].filter(Boolean).join('\n')
+  return { stable, ephemeral }
+}
+
 export function buildCognitivePromptProjection(
   ledger: CognitiveLedger,
   opts?: {
@@ -159,15 +196,8 @@ export function buildCognitivePromptProjection(
     yaoguangHint?: string | null
   },
 ): string {
-  return [
-    ledger.contract ? renderContractProjection(ledger.contract) : '',
-    buildVerificationGapProjection(ledger),
-    buildCognitiveMirror(ledger),
-    buildUncertaintyProjection(ledger),
-    opts?.sycophancyHint ?? '',
-    opts?.yaoguangHint ?? '',
-    opts?.immuneHint ?? '',
-  ].filter(Boolean).join('\n')
+  const { stable, ephemeral } = buildCognitiveProjectionParts(ledger, opts)
+  return [stable, ephemeral].filter(Boolean).join('\n')
 }
 
 /**
