@@ -11,6 +11,7 @@
  */
 
 import type { ArtifactStore } from '../artifact/store.js'
+import { collapseGrepResult, collapseReadFileResult, collapseBashResult } from '../compact/context-collapse.js'
 
 const TIER_0_MAX_CHARS = 8_000
 const TIER_1_MAX_CHARS = 150_000
@@ -102,7 +103,42 @@ function buildTierSummary(toolName: string, content: string, tier: TierLevel): s
   return `[tier-${tier} ${toolName}: ${content.length} chars, ${lines.length} lines]`
 }
 
+const CHARS_PER_TOKEN = 4
+
+/**
+ * Content-type-aware compression for Tier 1.
+ * Dispatches to context-collapse's pure functions, bypassing collapseToolResult's
+ * turnAge guard (tiering runs at first-write time, before any turn aging).
+ * Returns null for unhandled tool types → caller falls back to head+tail.
+ */
+function compressByToolType(toolName: string, content: string): string | null {
+  const originalTokens = Math.ceil(content.length / CHARS_PER_TOKEN)
+
+  if (toolName === 'grep' || toolName === 'glob' || toolName === 'search') {
+    return collapseGrepResult(toolName, content, originalTokens).summary
+  }
+  if (toolName === 'read_file') {
+    return collapseReadFileResult(content, originalTokens, 300).summary
+  }
+  if (toolName === 'bash') {
+    return collapseBashResult(content, originalTokens).summary
+  }
+
+  // Unhandled tool types: return null → buildTier1Inline falls back to head+tail.
+  // collapseGenericResult only keeps 3-line preview, which is more aggressive than
+  // head 30 + tail 10 for large results (e.g. delegate_task, web_fetch).
+  return null
+}
+
 function buildTier1Inline(toolName: string, content: string, artifactId?: string): string {
+  // 1. Try content-type-aware compression
+  const compressed = compressByToolType(toolName, content)
+  if (compressed && compressed.length < content.length * 0.8) {
+    const ref = artifactId ? ` [artifact:${artifactId}]` : ''
+    return `${compressed}${ref}`
+  }
+
+  // 2. Fallback: head + tail
   const lines = content.split('\n')
   const lineCount = lines.length
   const head = lines.slice(0, 30).join('\n')

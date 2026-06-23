@@ -36,17 +36,29 @@ describe('tool-result-tiering', () => {
       assert.equal(result.content, content)
     })
 
-    it('returns tier 1 summary for medium content in 1M window', async () => {
+    it('returns tier 1 collapsed summary for medium read_file content in 1M window', async () => {
       const lines = Array.from({ length: 500 }, (_, i) => `line ${i}: ${'data'.repeat(10)}`).join('\n')
       assert.ok(lines.length > 8_000)
       assert.ok(lines.length < 150_000)
 
       const result = await tierToolResult('read_file', lines, 'big.ts', undefined, 1_000_000)
       assert.equal(result.tier, 1)
+      // read_file now uses collapseReadFileResult → [collapsed read_file: ...]
+      assert.ok(result.content.includes('[collapsed read_file:'))
+      assert.ok(result.content.length < lines.length)
+      assert.equal(result.originalChars, lines.length)
+    })
+
+    it('returns tier 1 head+tail fallback for unhandled tool types', async () => {
+      const lines = Array.from({ length: 500 }, (_, i) => `line ${i}: ${'data'.repeat(10)}`).join('\n')
+      assert.ok(lines.length > 8_000)
+
+      // delegate_task is not in compressByToolType → falls back to head+tail
+      const result = await tierToolResult('delegate_task', lines, 'task-1', undefined, 1_000_000)
+      assert.equal(result.tier, 1)
       assert.ok(result.content.includes('[tiered-summary:'))
       assert.ok(result.content.includes('lines omitted'))
       assert.ok(result.content.length < lines.length)
-      assert.equal(result.originalChars, lines.length)
     })
 
     it('returns tier 2 minimal for huge content in 1M window', async () => {
@@ -107,6 +119,102 @@ describe('tool-result-tiering', () => {
       assert.equal(result.artifactId, 'artifact-orig')
       assert.ok(result.content.includes('[artifact:artifact-orig]'))
       assert.equal(saveCalls, 0)
+    })
+  })
+
+  describe('content-type-aware compression (Tier 1)', () => {
+    it('grep output: collapses to file-name + count summary', async () => {
+      // Simulate grep output: multiple files with matches (enough to exceed 8K)
+      const matches: string[] = []
+      for (let f = 0; f < 20; f++) {
+        for (let m = 0; m < 15; m++) {
+          matches.push(`src/path/module${f}.ts:${m * 10 + 1}:const value_${f}_${m} = some long data here for padding`)
+        }
+      }
+      const content = matches.join('\n')
+      assert.ok(content.length > 8_000)
+
+      const result = await tierToolResult('grep', content, 'src/', undefined, 1_000_000)
+      assert.equal(result.tier, 1)
+      assert.ok(result.content.includes('[collapsed grep:'), `got: ${result.content.slice(0, 100)}`)
+      assert.ok(result.content.includes('matches'))
+      assert.ok(result.content.includes('files'))
+      // Should be much smaller than original
+      assert.ok(result.content.length < content.length * 0.2)
+    })
+
+    it('bash test output: preserves fail lines in collapse summary', async () => {
+      const lines: string[] = []
+      for (let i = 0; i < 300; i++) {
+        lines.push(`✔ test_${i} (passed in ${i}ms with some extra padding text here)`)
+      }
+      lines.push('FAIL test_critical: expected 42 but got 24')
+      lines.push('AssertionError: values do not match')
+      lines.push('exit code: 1')
+      const content = lines.join('\n')
+      assert.ok(content.length > 8_000)
+
+      const result = await tierToolResult('bash', content, '/tmp/test', undefined, 1_000_000)
+      assert.equal(result.tier, 1)
+      assert.ok(result.content.includes('[collapsed bash:'), `got: ${result.content.slice(0, 100)}`)
+      // Fail line must be preserved — it's the highest-signal info
+      assert.ok(result.content.includes('FAIL'), `fail line missing in: ${result.content}`)
+      assert.ok(result.content.includes('AssertionError'), `error line missing in: ${result.content}`)
+    })
+
+    it('read_file output: extracts function/class signatures', async () => {
+      const lines: string[] = []
+      // Padding before signatures (enough to exceed 8K total)
+      for (let i = 0; i < 50; i++) lines.push(`// comment line ${i} with extra padding for byte threshold`)
+      lines.push('export function handleRequest(req: Request): Response {')
+      for (let i = 0; i < 100; i++) lines.push(`  const x${i} = ${i}`)
+      lines.push('}')
+      lines.push('export class UserService {')
+      for (let i = 0; i < 100; i++) lines.push(`  field${i} = ${i}`)
+      lines.push('}')
+      // Padding after
+      for (let i = 0; i < 200; i++) lines.push(`// trailing ${i} with padding for threshold`)
+      const content = lines.join('\n')
+      assert.ok(content.length > 8_000)
+
+      const result = await tierToolResult('read_file', content, 'big.ts', undefined, 1_000_000)
+      assert.equal(result.tier, 1)
+      assert.ok(result.content.includes('[collapsed read_file:'), `got: ${result.content.slice(0, 100)}`)
+      assert.ok(result.content.includes('handleRequest'), `function name missing in: ${result.content}`)
+      assert.ok(result.content.includes('UserService'), `class name missing in: ${result.content}`)
+    })
+
+    it('unknown tool type: falls back to head+tail (not generic collapse)', async () => {
+      const lines = Array.from({ length: 500 }, (_, i) => `line ${i}: ${'data'.repeat(10)}`).join('\n')
+      assert.ok(lines.length > 8_000)
+
+      const result = await tierToolResult('custom_tool', lines, 'target', undefined, 1_000_000)
+      assert.equal(result.tier, 1)
+      // Should use head+tail, not collapseGenericResult
+      assert.ok(result.content.includes('[tiered-summary:'), `got: ${result.content.slice(0, 100)}`)
+      assert.ok(result.content.includes('lines omitted'))
+    })
+
+    it('Tier 0: small results bypass content-type compression entirely', async () => {
+      const content = 'export function small() { return 42 }'
+      const result = await tierToolResult('read_file', content, 'small.ts', undefined, 1_000_000)
+      assert.equal(result.tier, 0)
+      assert.equal(result.content, content)
+    })
+
+    it('artifact reference preserved after content-type compression', async () => {
+      const matches: string[] = []
+      for (let f = 0; f < 20; f++) {
+        for (let m = 0; m < 15; m++) {
+          matches.push(`src/path/module${f}.ts:${m * 10 + 1}:const value_${f}_${m} = padding data here`)
+        }
+      }
+      const content = matches.join('\n')
+      assert.ok(content.length > 8_000)
+
+      const result = await tierToolResult('grep', content, 'src/', undefined, 1_000_000, 'existing-art')
+      assert.equal(result.tier, 1)
+      assert.ok(result.content.includes('[artifact:existing-art]'), `artifact ref missing in: ${result.content}`)
     })
   })
 

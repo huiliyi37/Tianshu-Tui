@@ -55,7 +55,7 @@ export function collapseToolResult(
   return collapseGenericResult(toolName, content, originalTokens)
 }
 
-function collapseGrepResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
+export function collapseGrepResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
   const lines = content.split('\n').filter(l => l.trim())
   const fileSet = new Set<string>()
   let matchCount = 0
@@ -76,7 +76,11 @@ function collapseGrepResult(toolName: string, content: string, originalTokens: n
   return { toolName, summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
 }
 
-function collapseReadFileResult(content: string, originalTokens: number): CollapsedResult {
+export function collapseReadFileResult(
+  content: string,
+  originalTokens: number,
+  maxScanLines = 100,
+): CollapsedResult {
   const lines = content.split('\n')
   const lineCount = lines.length
 
@@ -84,7 +88,7 @@ function collapseReadFileResult(content: string, originalTokens: number): Collap
   const functions: string[] = []
   const classes: string[] = []
 
-  for (const line of lines.slice(0, 100)) {
+  for (const line of lines.slice(0, maxScanLines)) {
     const trimmed = line.trim()
     if (trimmed.startsWith('export ')) exports.push(trimmed.slice(0, 80))
     if (/^(export\s+)?(async\s+)?function\s+\w/.test(trimmed)) {
@@ -108,7 +112,7 @@ function collapseReadFileResult(content: string, originalTokens: number): Collap
   return { toolName: 'read_file', summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
 }
 
-function collapseBashResult(content: string, originalTokens: number): CollapsedResult {
+export function collapseBashResult(content: string, originalTokens: number): CollapsedResult {
   const lines = content.split('\n').filter(l => l.trim())
   const lineCount = lines.length
 
@@ -116,8 +120,15 @@ function collapseBashResult(content: string, originalTokens: number): CollapsedR
   const exitCodeMatch = content.match(/exit code[:\s]+(\d+)/i)
   const exitCode = exitCodeMatch?.[1] ?? null
 
+  // Extract fail/error lines — highest signal in test output
+  const failPattern = /fail|error|FAIL|ERROR|✗|✘|❌/i
+  const failLines = lines
+    .filter(l => failPattern.test(l) && !/^\s*[✓✔●◌⊙]/.test(l))
+    .slice(0, 5)
+
   const parts: string[] = [`${lineCount} lines output`]
   if (exitCode !== null) parts.push(`exit ${exitCode}`)
+  if (failLines.length > 0) parts.push(`fails: ${failLines.map(l => l.slice(0, 80)).join(' | ')}`)
   parts.push(`tail: ${lastLines.map(l => l.slice(0, 60)).join(' | ')}`)
 
   const summary = `[collapsed bash: ${parts.join(', ')}]`
@@ -129,7 +140,7 @@ function collapseWriteResult(toolName: string, content: string, originalTokens: 
   return { toolName, summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
 }
 
-function collapseGenericResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
+export function collapseGenericResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
   const lines = content.split('\n')
   const preview = lines.slice(0, 3).map(l => l.slice(0, 80)).join(' | ')
   const summary = `[collapsed ${toolName}: ${lines.length} lines, ${content.length} chars. Preview: ${preview}]`
