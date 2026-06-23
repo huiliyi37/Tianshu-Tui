@@ -191,6 +191,18 @@ export const compactSchema = z.object({
    *  Retained for config compatibility; not read by the runtime. */
   autoFloor: z.number().int().positive().default(500_000),
   model: z.string().default('deepseek-v4-flash'),
+  /** T9 turn-0 quality-compaction trigger ratios (provider cost-aware).
+   *  Only the turn-0, phase-gated quality lever — mid-turn delay guards are
+   *  unaffected. Per-token cache-preserving providers (DeepSeek) skip T9
+   *  entirely regardless of these. */
+  qualityCompact: z.object({
+    /** Context ratio to trigger T9 on per-token providers (e.g. openai). */
+    perTokenThreshold: z.number().min(0).max(1).default(0.55),
+    /** Leaner ratio for cost-insensitive subscription providers (GLM/MiMo/Codex/Claude). */
+    subscriptionThreshold: z.number().min(0).max(1).default(0.45),
+    /** Ceiling ratio that fires T9 for subscription providers even with no phase transition. */
+    subscriptionCeiling: z.number().min(0).max(1).default(0.6),
+  }).default({}),
 })
 
 export const cacheSchema = z.object({

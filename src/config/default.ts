@@ -143,6 +143,11 @@ export const DEFAULT_CONFIG: Config = {
     autoThreshold: 800_000,
     autoFloor: 500_000,
     model: 'deepseek-v4-flash',
+    qualityCompact: {
+      perTokenThreshold: 0.55,
+      subscriptionThreshold: 0.45,
+      subscriptionCeiling: 0.6,
+    },
   },
   cache: {
     enabled: true,

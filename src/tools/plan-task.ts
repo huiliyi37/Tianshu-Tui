@@ -5,6 +5,7 @@ import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
 import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+import { setTodos, type TodoItem } from './todo.js'
 
 const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
@@ -90,6 +91,20 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
       // Step 1: decompose into TaskGraph
       const graph = decomposeObjective({ objective, files })
 
+      // Populate todo store so the PlanExecutionTrace baseline is immediately
+      // seeded (U6: trace captures steps from the first todo write). Skip the
+      // "verify" node (task-graph.ts always appends one) — it's a post-hoc
+      // gate, not a user-facing step.
+      const leafNodes = graph.nodes.filter(n => n.kind !== 'verify')
+      if (leafNodes.length > 0) {
+        const todoItems: TodoItem[] = leafNodes.map(n => ({
+          id: n.id,
+          content: n.title,
+          status: 'pending' as const,
+        }))
+        setTodos(todoItems)
+      }
+
       // Step 2: convert to UnifiedPlan
       const plan = taskGraphToUnifiedPlan(graph)
 
@@ -107,8 +122,11 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         // Return JSON + human-readable summary with methodology guidance
         const json = serializeUnifiedPlan(plan)
         const guidance = buildMethodologyGuidance(objective, files ?? [])
+        const todoNote = leafNodes.length > 0
+          ? `\n\n✅ Todo list 已同步 (${leafNodes.length} 项)。用 \`todo read\` 查看,完成后用 \`todo write\` 标记进度。`
+          : ''
         return {
-          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}\n\n---\n## UnifiedPlan JSON (pass to team_orchestrate as planJson)\n\`\`\`json\n${json}\n\`\`\``,
+          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n---\n## UnifiedPlan JSON (pass to team_orchestrate as planJson)\n\`\`\`json\n${json}\n\`\`\``,
         }
       }
 
@@ -142,7 +160,10 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
       try {
         const summary = await runTeamSkeleton(input, orchestratorDeps)
         const guidance = buildMethodologyGuidance(objective, files ?? [])
-        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}\n\n${summary.packet}` }
+        const todoNote = leafNodes.length > 0
+          ? `\n\n✅ Todo list 已同步 (${leafNodes.length} 项)。`
+          : ''
+        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${summary.packet}` }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `${renderUnifiedPlanSummary(plan)}\n\nExecution failed: ${msg}`, isError: true }
