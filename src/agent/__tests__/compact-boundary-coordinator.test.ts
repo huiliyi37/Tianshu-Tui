@@ -45,7 +45,8 @@ function makeCoord(overrides: Partial<CompactBoundaryDeps> & {
     lastCompactTurn: null,
     setFailures: null,
   }
-  const failures = overrides.failures ?? { consecutiveFailures: 0 }
+  const { aborted, failures: failuresOverride, splitConsumes, compacted, ...depOverrides } = overrides
+  const failures = failuresOverride ?? { consecutiveFailures: 0 }
   const msgs = overrides.getMessages ? overrides.getMessages() : bigMsgs(4)
 
   const deps: CompactBoundaryDeps = {
@@ -59,23 +60,24 @@ function makeCoord(overrides: Partial<CompactBoundaryDeps> & {
     setPendingHeapCompact: (v) => { calls.pendingHeapCompact = v },
     getPrevPhaseHint: () => undefined,
     setPrevPhaseHint: () => {},
-    getAbortSignal: () => (overrides.aborted ? ({ aborted: true } as AbortSignal) : undefined),
+    getAbortSignal: () => (aborted ? ({ aborted: true } as AbortSignal) : undefined),
     getContextWindow: () => 200_000,
     getPhaseHint: () => undefined,
     getEstimatedTokens: () => 0,
     getMessages: () => msgs,
     replaceMessages: () => { calls.replaceMessages++ },
     dietMessages: (m) => ({ removedCount: 0, messages: m }),
-    trySessionSplit: async () => overrides.splitConsumes ?? false,
+    trySessionSplit: async () => splitConsumes ?? false,
     maybeCompact: async () => {
       calls.maybeCompact++
-      return { compacted: overrides.compacted ?? false, failures }
+      return { compacted: compacted ?? false, failures }
     },
     tryPartialCompact: async () => false,
     shouldDelayCompact: () => false,
     getStalePreviewChars: () => 0,
+    isCachePreservingProvider: () => false,
     injectImmuneSignal: (s) => { calls.immuneSignals.push(s) },
-    ...overrides,
+    ...depOverrides,
   }
   return { coord: new CompactBoundaryCoordinator(deps), calls }
 }
@@ -134,5 +136,82 @@ describe('CompactBoundaryCoordinator (C-line: extracted, was untested)', () => {
     assert.equal(r.compacted, true)
     assert.equal(r.userMessageConsumed, true)
     assert.equal(calls.lastCompactTurn, 7)
+  })
+})
+
+describe('CompactBoundaryCoordinator T9 (provider cost-aware quality compaction)', () => {
+  // Build a coord whose T9 gate is reachable (large window) with a tracked
+  // tryPartialCompact, configurable cost/cache classification, and an optional
+  // phase transition.
+  function makeT9(opts: {
+    cachePreserving: boolean
+    costInsensitive: boolean
+    qRatio: number
+    phaseTransition: boolean
+    partialOk?: boolean
+  }) {
+    const contextWindow = 1_000_000
+    let partialCalls = 0
+    const { coord, calls } = makeCoord({
+      getContextWindow: () => contextWindow,
+      getEstimatedTokens: () => Math.round(opts.qRatio * contextWindow),
+      getPrevPhaseHint: () => (opts.phaseTransition ? 'explore' : 'build'),
+      getPhaseHint: () => 'build',
+      isCachePreservingProvider: () => opts.cachePreserving,
+      isCostInsensitiveProvider: () => opts.costInsensitive,
+      tryPartialCompact: async () => {
+        partialCalls++
+        return opts.partialOk ?? true
+      },
+    })
+    return { coord, calls, partialCalls: () => partialCalls }
+  }
+
+  it('GLM (cache-preserving + subscription): triggers at turn 0 on phase transition above 0.45', async () => {
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.5, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1, 'GLM gets T9 quality compaction')
+  })
+
+  it('GLM: ceiling fallback fires above 0.6 even without a phase transition', async () => {
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.65, phaseTransition: false })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1, 'subscription ceiling (>0.6) triggers without phase change')
+  })
+
+  it('GLM: stays below the 0.45 threshold → no compaction', async () => {
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.4, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 0, 'below lean threshold, nothing fires')
+  })
+
+  it('DeepSeek (cache-preserving + per-token): SKIPS to protect the paid prefix cache', async () => {
+    const t = makeT9({ cachePreserving: true, costInsensitive: false, qRatio: 0.9, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 0, 'DeepSeek never gets T9 (paid cache protection)')
+  })
+
+  it('codex/claude (no cache + subscription): leaner 0.45 threshold applies', async () => {
+    const t = makeT9({ cachePreserving: false, costInsensitive: true, qRatio: 0.5, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1, 'subscription leaner threshold triggers at 0.5')
+  })
+
+  it('openai (no cache + per-token): keeps the 0.55 threshold — 0.5 does NOT trigger', async () => {
+    const t = makeT9({ cachePreserving: false, costInsensitive: false, qRatio: 0.5, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 0, 'per-token non-cache provider stays at 0.55')
+  })
+
+  it('openai: triggers above 0.55 on phase transition', async () => {
+    const t = makeT9({ cachePreserving: false, costInsensitive: false, qRatio: 0.6, phaseTransition: true })
+    await t.coord.runCompaction(0, null)
+    assert.equal(t.partialCalls(), 1)
+  })
+
+  it('timeout guard: NO T9 mid-turn (turn ≠ 0) for any provider, even GLM well over the ceiling', async () => {
+    const t = makeT9({ cachePreserving: true, costInsensitive: true, qRatio: 0.9, phaseTransition: true })
+    await t.coord.runCompaction(5, null)
+    assert.equal(t.partialCalls(), 0, 'mid-turn quality compaction is never allowed (cache re-prefill guard)')
   })
 })

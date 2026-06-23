@@ -3,6 +3,7 @@ import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { microCompactOai } from '../compact/micro.js'
 import { staleRoundThresholds } from '../compact/constants.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
+import { debugLog } from '../utils/debug.js'
 
 export interface CompactBoundaryDeps {
   // Field accessors
@@ -31,6 +32,11 @@ export interface CompactBoundaryDeps {
   shouldDelayCompact: (turnThreshold: number, ctx?: { estimatedTokens?: number; contextWindow?: number }) => boolean
   getStalePreviewChars: () => number
   isCachePreservingProvider: () => boolean
+  /** True when the provider is NOT billed per token (flat subscription / coding-plan).
+   *  Such providers may compact more eagerly at turn-0 for a leaner context, since
+   *  shrinking the prefix cache costs latency but no money. */
+  isCostInsensitiveProvider?: () => boolean
+  getProviderName?: () => string | undefined
   injectImmuneSignal: (signal: { kind: string; severity: number; turn: number; source: string }) => void
 }
 
@@ -86,25 +92,55 @@ export class CompactBoundaryCoordinator {
     }
 
     // T9: Proactive Quality Compact — phase transition partial compact.
-    // P2-5: only at user boundaries (turn 0).
-    // DeepSeek (exact-prefix cache) skips this entirely: any history reshape
-    // invalidates the prefix cache, and on a 1M window the 0.3 threshold fired
-    // at ~300K — far too aggressive, truncating usable context to 30%.
-    if (!compactResult.compacted && this.deps.getContextWindow() >= 500_000 && turn === 0 && !this.deps.isCachePreservingProvider?.()) {
+    // P2-5: only at user boundaries (turn 0) — never mid-turn (timeout guard:
+    // a mid-turn rewrite breaks the GLM/MiMo exact-prefix cache and forces a
+    // giant re-prefill, the ac191c61 timeout storm).
+    //
+    // Provider cost asymmetry decides whether to defer at turn-0:
+    //   - per-token + cache-preserving (DeepSeek): SKIP — any reshape invalidates
+    //     the paid prefix cache; on a 1M window the old 0.3 gate fired at ~300K,
+    //     far too aggressive.
+    //   - subscription + cache-preserving (GLM/MiMo): RUN — tokens are flat, and
+    //     compacting *early* at turn-0 keeps surviving context small, so the
+    //     subsequent re-prefill is smaller than deferring until ~600K.
+    //   - no cache (Codex/Claude OAuth): RUN — nothing to protect.
+    if (!compactResult.compacted && this.deps.getContextWindow() >= 500_000 && turn === 0) {
+      const cachePreserving = this.deps.isCachePreservingProvider?.() ?? false
+      const costInsensitive = this.deps.isCostInsensitiveProvider?.() ?? false
+      // Only per-token cache-preserving providers (DeepSeek) skip to protect paid cache.
+      const skip = cachePreserving && !costInsensitive
+
       const qTokens = this.deps.getEstimatedTokens()
       const qRatio = qTokens / this.deps.getContextWindow()
       const phaseHint = this.deps.getPhaseHint()
       const prevPhaseHint = this.deps.getPrevPhaseHint()
       this.deps.setPrevPhaseHint(phaseHint)
       const phaseTransition = prevPhaseHint !== undefined && phaseHint !== prevPhaseHint
+      // Subscription providers compact leaner (0.45) and get a ceiling fallback
+      // so context can't creep up without a phase change.
+      const qThreshold = costInsensitive ? 0.45 : 0.55
+      const shouldTrigger = !skip && ((qRatio > qThreshold && phaseTransition) || (costInsensitive && qRatio > 0.6))
 
-      if (qRatio > 0.55 && phaseTransition) {
+      let decision: 'skip-paid-cache' | 'no-trigger' | 'compacted' | 'compact-failed' = skip ? 'skip-paid-cache' : 'no-trigger'
+      if (shouldTrigger) {
         const partialOk = await this.deps.tryPartialCompact(30)
         if (partialOk) {
           userMessageConsumed = true
           this.deps.setLastCompactTurn(turn)
+          decision = 'compacted'
+        } else {
+          decision = 'compact-failed'
         }
       }
+      debugLog('[T9-quality-compact]', {
+        provider: this.deps.getProviderName?.() ?? 'unknown',
+        costModel: costInsensitive ? 'subscription' : 'per-token',
+        cachePreserving,
+        qRatio: Number(qRatio.toFixed(3)),
+        threshold: qThreshold,
+        phaseTransition,
+        decision,
+      })
     }
 
     // Stale round compaction: proactively shrink N-2+ tool_results

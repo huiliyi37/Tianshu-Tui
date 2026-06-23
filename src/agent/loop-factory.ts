@@ -14,6 +14,7 @@ import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
 import { computeCompactAttribution } from './compact-attribution.js'
+import { isCostInsensitiveProvider } from '../api/cost-model.js'
 import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
@@ -109,7 +110,12 @@ return new TurnStreamController({
           const estTokensNow = self.session.getEstimatedTokens()
           if (wasRewritten) {
             Object.assign(entry, computeCompactAttribution(self.prevEstTokens, estTokensNow, self.config.contextWindow))
+            // Attach the archive id (if this rewrite archived its dropped zone)
+            // so the recall telemetry can be joined back to this turn. Consume
+            // once: clear so a later non-archiving rewrite doesn't reuse it.
+            if (self.lastArchive) entry.archiveId = self.lastArchive.id
           }
+          self.lastArchive = null
           self.prevEstTokens = estTokensNow
 
           // Engine event diffs (volatile swap / frozen clamp / fallback / tools)
@@ -399,6 +405,8 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     shouldDelayCompact: (threshold, ctx) => self.cacheAdvisor.shouldDelayCompact(threshold, ctx?.estimatedTokens !== undefined && ctx?.contextWindow !== undefined ? { estimatedTokens: ctx.estimatedTokens, contextWindow: ctx.contextWindow } : undefined),
     getStalePreviewChars: () => self.cacheAdvisor.getStalePreviewChars(),
     isCachePreservingProvider: () => self.compaction.isCachePreservingProvider(),
+    isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
+    getProviderName: () => self.config.providerName,
     injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
   })
 }
