@@ -60,11 +60,15 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         cacheControl: false,
         stripParams: [],
         toolJsonBug: false,
-        prefixCache: 'none',
+        // GLM-5.2 implicit exact-prefix cache (隐式缓存) — keeps the stable prefix
+        // cache-warm so compaction stops re-prefilling the full 1M-window prompt.
+        prefixCache: 'deepseek-native',
         prefixCompletion: false,
       },
       thinking: 'enabled',
       maxTokens: 131072,
+      // Keep 0: GLM coding API inflates prompt_tokens; calibrateUsage scales
+      // cache_read proportionally so the cache hit-ratio is preserved.
       usageCalibrationFactor: 0,
       models: [
         {

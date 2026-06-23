@@ -28,7 +28,11 @@ const PROFILES: Record<string, Omit<ProviderProfile, 'contextWindow'>> = {
   qwen: { cacheType: 'explicit-breakpoint', persistent: false, minCacheTokens: 1024, ttlSeconds: 300 },
   vllm: { cacheType: 'block-kv', persistent: false, minCacheTokens: 0 },
   glm: {
-    cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0,
+    // GLM-5.2 supports implicit exact-prefix context cache (隐式缓存) like DeepSeek —
+    // see docs.bigmodel.cn/cn/guide/capabilities/cache. Marking it cache-preserving
+    // lets compaction protect the stable prefix instead of triggering 600K-token
+    // cache-miss reprefills that time out on the 1M window.
+    cacheType: 'exact-prefix' as CacheType, persistent: true, minCacheTokens: 64,
     attentionProfile: { effectiveAttentionRatio: 0.85, toolDensityThreshold: 0.6, collapseAgeTurns: 4 },
   },
   minimax: { cacheType: 'none' as CacheType, persistent: false, minCacheTokens: 0 },

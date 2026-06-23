@@ -418,9 +418,9 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     assert.ok(beforeSep.includes('tianshu'), 'consolidated block must contain star-domain')
   })
 
-  it('non-deepseek model does NOT fast-promote on turn 1', () => {
+  it('no-cache model does NOT fast-promote on turn 1', () => {
     const engine = new PromptEngine({
-      model: 'glm-5.2',
+      model: 'minimax-m3',
       maxTokens: 4096,
       staticCtx: { tools: [] },
       volatileCtx: { cwd: '/test' },
@@ -431,7 +431,24 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     const trailer = req.messages[req.messages.length - 1]!
     const content = typeof trailer.content === 'string' ? trailer.content : ''
     const beforeSep = content.split('\n---\n')[0]!
-    assert.ok(!beforeSep.includes('<consolidated>'), 'no consolidated on turn 1 for non-deepseek')
+    assert.ok(!beforeSep.includes('<consolidated>'), 'no consolidated on turn 1 for no-cache provider')
+  })
+
+  it('GLM (deepseek-native) fast-promotes star-domain on turn 1', () => {
+    const engine = new PromptEngine({
+      model: 'glm-5.2',
+      maxTokens: 4096,
+      staticCtx: { tools: [] },
+      volatileCtx: { cwd: '/test' },
+      prefixCache: 'deepseek-native',
+    })
+    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    const req = engine.buildOaiRequest([{ role: 'user', content: 'first' }])
+    const trailer = req.messages[req.messages.length - 1]!
+    const content = typeof trailer.content === 'string' ? trailer.content : ''
+    const beforeSep = content.split('\n---\n')[0]!
+    assert.ok(beforeSep.includes('<consolidated>'), 'GLM implicit cache must fast-promote on turn 1')
+    assert.ok(beforeSep.includes('tianshu'), 'consolidated block must contain star-domain')
   })
 
   it('star-domain removed from appendix after fast promotion', () => {

@@ -92,6 +92,15 @@ test('deepseek has usage mapping', () => {
   assert.ok(entry.hasUsageMapping)
 })
 
+test('glm has implicit exact-prefix cache (deepseek-native)', () => {
+  const entry = PROVIDER_REGISTRY['glm']
+  assert.ok(entry)
+  assert.equal(entry.capabilities.prefixCacheStrategy, 'deepseek-native')
+  assert.equal(entry.cacheProfile.cacheType, 'exact-prefix')
+  assert.ok(entry.cacheProfile.persistent)
+  assert.ok(entry.hasUsageMapping, 'GLM must map cached_tokens from usage')
+})
+
 test('openai has explicit-breakpoint cache', () => {
   const entry = PROVIDER_REGISTRY['openai']
   assert.ok(entry)

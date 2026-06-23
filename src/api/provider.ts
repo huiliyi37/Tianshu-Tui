@@ -88,7 +88,10 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     stripParams: ['top_k', 'metadata', 'service_tier'],
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
-    prefixCacheStrategy: 'none',
+    // GLM-5.2 has implicit exact-prefix caching (no cache_control breakpoints),
+    // reported via usage.prompt_tokens_details.cached_tokens — same model as DeepSeek.
+    prefixCacheStrategy: 'deepseek-native',
+    mapUsage: mapDeepSeekUsage,
   },
   minimax: {
     supportsThinking: true,

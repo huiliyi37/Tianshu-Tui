@@ -91,6 +91,7 @@ export const PROVIDER_REGISTRY: Record<string, ProviderEntry> = {
   glm: buildEntry('glm', 'GLM (Zhipu)', WELL_KNOWN_DEFAULTS['glm']!, [
     'OpenAI-compatible protocol via /api/paas/v4',
     'OpenAI-compatible thinking format',
+    'Implicit exact-prefix cache (cached_tokens in prompt_tokens_details), 1M context',
   ]),
   minimax: buildEntry('minimax', 'MiniMax', WELL_KNOWN_DEFAULTS['minimax']!, [
     'MiniMax-M3: 1M context, multimodal (image/video)',

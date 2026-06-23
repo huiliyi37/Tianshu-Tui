@@ -33,3 +33,25 @@ describe('DeepSeek provider usage mapping', () => {
     })
   })
 })
+
+describe('GLM provider implicit prefix cache', () => {
+  it('resolves GLM as a deepseek-native (implicit exact-prefix) cache provider', () => {
+    const capabilities = resolveCapabilities('glm')
+    assert.equal(capabilities.prefixCacheStrategy, 'deepseek-native')
+    assert.ok(capabilities.mapUsage, 'GLM must expose a usage mapping to read cached_tokens')
+  })
+
+  it('maps GLM OpenAI-style prompt_tokens_details.cached_tokens into cache_read_input_tokens', () => {
+    const capabilities = resolveCapabilities('glm')
+    assert.deepEqual(capabilities.mapUsage?.({
+      prompt_tokens: 1200,
+      completion_tokens: 300,
+      prompt_tokens_details: { cached_tokens: 800 },
+    }), {
+      input_tokens: 1200,
+      output_tokens: 300,
+      cache_read_input_tokens: 800,
+      cache_creation_input_tokens: 0,
+    })
+  })
+})
