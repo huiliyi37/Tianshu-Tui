@@ -6,7 +6,7 @@ import { getTheme } from '../theme.js'
 
 const theme = getTheme()
 
-test('welcome renders ≤7 lines', () => {
+test('welcome renders ≤11 lines', () => {
   const lines = formatWelcome({
     modelName: 'opus-4-8',
     cwd: '/Users/x/app/deepseek-tui/opencode-tui',
@@ -14,16 +14,16 @@ test('welcome renders ≤7 lines', () => {
     priorMsgCount: 0,
     columns: 80,
   }, theme)
-  assert.ok(lines.length <= 7, `welcome should be ≤7 lines, got ${lines.length}`)
+  assert.ok(lines.length <= 11, `welcome should be ≤11 lines, got ${lines.length}`)
   assert.ok(lines.length >= 2)
 })
 
-test('welcome title contains Tianshu', () => {
+test('welcome title contains T I A N S H U', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 80,
   }, theme)
   const joined = lines.join('\n')
-  assert.ok(joined.includes('Tianshu'), 'should contain Tianshu branding')
+  assert.ok(joined.includes('T I A N S H U'), 'should contain T I A N S H U branding')
 })
 
 test('welcome contains model and session', () => {
