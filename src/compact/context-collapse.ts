@@ -39,20 +39,40 @@ export function collapseToolResult(
 
   const originalTokens = Math.ceil(content.length / CHARS_PER_TOKEN)
 
+  let result: CollapsedResult
   if (toolName === 'grep' || toolName === 'search') {
-    return collapseGrepResult(toolName, content, originalTokens)
-  }
-  if (toolName === 'read_file') {
-    return collapseReadFileResult(content, originalTokens)
-  }
-  if (toolName === 'bash') {
-    return collapseBashResult(content, originalTokens)
-  }
-  if (toolName === 'write_file' || toolName === 'edit_file') {
-    return collapseWriteResult(toolName, content, originalTokens)
+    result = collapseGrepResult(toolName, content, originalTokens)
+  } else if (toolName === 'read_file') {
+    result = collapseReadFileResult(content, originalTokens)
+  } else if (toolName === 'bash') {
+    result = collapseBashResult(content, originalTokens)
+  } else if (toolName === 'write_file' || toolName === 'edit_file') {
+    result = collapseWriteResult(toolName, content, originalTokens)
+  } else {
+    result = collapseGenericResult(toolName, content, originalTokens)
   }
 
-  return collapseGenericResult(toolName, content, originalTokens)
+  return preserveArtifactRef(content, result)
+}
+
+/**
+ * T7 layering: request-layer collapse must not become a recall blind spot.
+ * Large tool results carry a trailing/leading `[artifact:id]` marker (added by
+ * the storage-layer artifact intercept). When T7 folds such a result into a
+ * `[collapsed ...]` summary, preserve the artifact id so the model can still
+ * read_section it — the storage original is untouched, only the request copy is
+ * folded, so the reference stays valid. Results without a marker are left as-is
+ * (no disk write on the request hot path); their storage original is intact and
+ * naturally restored when fillRatio recovers.
+ */
+function preserveArtifactRef(content: string, result: CollapsedResult): CollapsedResult {
+  const artifactId = content.match(/\[artifact:([^\]]+)\]/)?.[1]
+  if (!artifactId || result.summary.includes(artifactId)) return result
+  // Insert the recall hint before the closing bracket of the summary.
+  const summary = result.summary.endsWith(']')
+    ? `${result.summary.slice(0, -1)} | read_section artifact:${artifactId}]`
+    : `${result.summary} [read_section artifact:${artifactId}]`
+  return { ...result, summary, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
 }
 
 export function collapseGrepResult(toolName: string, content: string, originalTokens: number): CollapsedResult {

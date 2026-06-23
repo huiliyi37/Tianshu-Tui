@@ -2,6 +2,7 @@
 
 > 调查时间：2026-06-23 | 状态：已验证，原审查部分准确
 > 核实时间：2026-06-23 | 核实结论：文档核心断言全部成立；补充了 token 估算口径偏差（第 3 节）、partial compact 无 TaskAnchor 交叉缺口（第 4 节）、测试 P2.1 虚假绿灯根因（第 5 节）、中文会话影响评估（第 6 节）、优先级修订（第 7 节）
+> 实现时间：2026-06-23 | 实现状态：P0~P7 全部落地，见第 8 节「实现记录」。提交 `a1731b79` / `cd76b582` / `06cf5ab5`，loop.ts P3 热更新随对方 `87ebf037` 入库。
 
 ## 结论
 
@@ -152,6 +153,36 @@ T7 请求时折叠是主要减压阀——它在 50-85% 区间用**不改存储*
 
 ---
 
+## 8. 实现记录（2026-06-23）
+
+P0~P7 全部落地，分三次提交。下表为方向 → 实现的对照。
+
+| 项 | 状态 | 实现摘要 | 落点 | 提交 |
+|----|------|---------|------|------|
+| **P0** 修测试 P2.1 虚假绿灯 | ✅ | 原测试无 `primaryClient`，60%/75% 分支从未走到。重写为带 mock client 的「消息不足 → 不 compact」，并加 P2.1b（真正触发 partial）、P2.1c（cache-hot 延迟）、P2.1d（注入 anchor） | `compaction-controller.test.ts` | `a1731b79` |
+| **P1** partial 注入 TaskAnchor | ✅ | `tryPartialCompact` 在 `safeReplaceMessages` 后追加 `buildTaskAnchorAppendix()`，对齐 `replaceWithCheckpoint` | `compaction-controller.ts:tryPartialCompact` | `a1731b79` |
+| **P2** 1M 路径接入缓存保护 | ✅ | **未改阈值**（改 86% 会与 `trySessionSplit` 撞车）。改为 60%/75% 分支接入 `isCachePreservingProvider() && cacheAdvisor.shouldDelayCompact(tier)`，与非 1M 路径(L430) 统一 | `compaction-controller.ts:maybeCompact` | `a1731b79` |
+| **P3** persist memory + 热更新 | ✅ | persist 在 replace 前（partial）/ llmCompact 后（full，保护压缩请求自身 prefix cache）。热更新：`persistMemories` 回调追加 `updateSessionMemory(buildMemoryBlock())`，复用既有 `rebuildFrozenBase` 机制（延迟到 user 边界，cache-safe） | `loop.ts` 回调 + `compaction-controller.ts` 时序 | loop 部分随 `87ebf037`；时序 `cd76b582` |
+| **P4** 统一 token 估算口径 | ✅ | T7 手工 `chars/4` 改用 `estimateOaiTokens(result)`（CJK 感知 cjk/1.2 + tool_calls），消除中文会话 ~3.3× 低估 | `engine.ts` T7 块 | `a1731b79` |
+| 用户边界约束 | ⏸️ 未做 | 1M LLM compact 限制 `turn===0`——当前靠 `shouldDelayCompact` 缓解，未单独加 turn gate | — | — |
+| 文档同步 | ⏸️ 部分 | 本文件已更新；`CLAUDE.md` / baseline 文档仍待改 | — | — |
+| 监控 | ⏸️ 未做 | 对方 `095757f0 feat(observability)` 已加 cache 影响归因，部分覆盖 | — | — |
+
+### 实现中的发现 / 与方向的偏差
+
+- **P2 没按字面改阈值**：调度器 `runCompaction` 先调 `trySessionSplit`(86%) 再 `maybeCompact`(60%/75%)，把 full compact 提到 86% 会与 split 撞车。改为接入 `shouldDelayCompact`（方向 1 的备选项），既保护缓存又不破坏调度。75%+ 压力下 `protection = hitRate×(1−0.75) ≤ 0.25 < 0.45`，gate 自然很少拦截——只在 75-80% 且缓存极热时延迟，符合预期。
+- **P3 时序拆成两处**：partial 的 LLM 请求在 persist 前已完成，persist 放 `safeReplaceMessages` 前即可；full 的 `llmCompact` 在 persist 后才发，故 persist 移到 `llmCompact` 之后、`replaceWithCheckpoint` 之前——否则热更新的 `rebuildFrozenBase` 会破坏压缩请求自身的 prefix cache 复用。
+- **P3 热更新无需新接口**：`PromptEngine.updateSessionMemory`/`rebuildFrozenBase`/`sessionMemoryOverride` 已存在（`/remember` 用），直接复用。
+- **测试 P1.2 预存失败**：与本次无关，经干净 HEAD（`ff0a8ad7`）复现确认，是 128K 路径 micro compact 行为 vs 测试期望的预存不一致。
+
+### 验证
+
+- `compaction-controller.test.ts`：38 pass / 1 fail（P1.2 预存）
+- `full-collapse-threshold.test.ts`（T7）：4/4
+- typecheck：改动文件零新错误（`findSafeSplitPoint:66/72` 两个 TS2352 为预存 OaiMessage union cast）
+
+---
+
 ## 涉及文件
 
 - `src/agent/compaction-controller.ts` — 1M 专用分支（359-411）、tryPartialCompact（815-912）、llmCompact（922-995）
@@ -160,3 +191,32 @@ T7 请求时折叠是主要减压阀——它在 50-85% 区间用**不改存储*
 - `src/cache/advisor.ts` — shouldDelayCompact（79-102）
 - `src/context/compact-policy.ts` — decideCompactTier（40-47）
 - `src/prompt/engine.ts` — T7 请求时折叠（540-591）、1M 跳过 prune/mask（447-489）
+
+---
+
+## 9. 后续：分层归档召回压缩（2026-06-23）
+
+P0~P4 解决的是「压缩何时触发、触发时保不保缓存」。但本文档核心矛盾的另一半——**压缩真发生时历史被一次性丢弃且不可恢复**（JSONL atomic 覆盖）——P0~P4 未触及。长线程（几百轮）里模型只能靠有损 LLM 摘要转述，反复"失忆"。
+
+按 plan「分层归档召回压缩」实现**三层上下文 + 按需召回**，把"保缓存 vs 防失忆"从二选一变为兼得：
+
+| 维度 | 实现 | 缓存安全性 |
+|------|------|-----------|
+| **归档**（Cold） | 被压的 oldZone/discarded 序列化为 `compact-history` artifact 写盘 | 只写磁盘，完全不碰 prompt 前缀 |
+| **引用注入**（Warm） | `[artifact:id]` + turn→行目录嵌进本就新写的 summary/checkpoint 消息 | 不影响 anchor 前缀 |
+| **召回**（Hot） | 模型 `read_section(id, L范围)` 取原文，作为尾部 tool result | 前缀缓存完整保留 |
+
+**关键决策**：因为归档/引用/召回都不动 anchor 前缀，**可以继续为 DeepSeek 推迟压缩（P2 的 cache-preserving 策略不变）**，压缩真发生时也不再丢历史。这消解了本文档标题的"矛盾"——不再需要在缓存与记忆间权衡。
+
+| 项 | 落点 | 缓存关联 |
+|----|------|---------|
+| 序列化（固定分隔头 `--- turn:N role:ROLE ---`，section 按消息切） | `compact-archive.ts`（新） | — |
+| `archiveDiscardedHistory` fail-soft 归档 + 引用块 | `compaction-controller.ts` | 归档失败不阻断压缩 |
+| `tryPartialCompact` / `replaceWithCheckpoint`(async) 归档被丢历史 | `compaction-controller.ts` | 断言前两条 anchor 字节不变 |
+| **T7 请求层折叠保留 `[artifact:id]`** | `context-collapse.ts` | 消除请求层折叠召回盲区（本文档第 3 节 T7 的延伸） |
+| `safeReplaceMessages` 单点接 pre-compact JSONL 快照 | `compaction-controller.ts` + `loop.ts` | 灾备，独立于召回 |
+| 召回观测（次数/turn 距离，observe-only） | `cache/recall-metrics.ts`（新）+ `advisor.ts` | 不反馈调节阈值 |
+
+**与 T7 的分层定位**（本文档第 3 节的收口）：存储层压缩（永久）归档 oldZone；请求层 T7（临时、不改存储）现也保留已有 `[artifact:id]`，使两层折叠都可召回。未在请求热路径做 `save()`（避免 `buildOaiRequest` 每轮异步写盘竞态）——无引用的小结果其存储原文完整，fillRatio 回落自然恢复，符合 T7 既有契约。
+
+验证：`compact-archive.test.ts` 13、`recall-metrics.test.ts`、controller 集成 4（归档+引用 / ceiling 归档 / fail-soft / 快照）、read-section 召回 2、context-collapse T7 保留引用 3；`src/compact` 全套 98 通过。

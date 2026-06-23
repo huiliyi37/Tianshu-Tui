@@ -2,6 +2,7 @@
 
 > 调查时间：2026-06-23 | 状态：已验证，原审查核心成立但遗漏了多层保护
 > 核实时间：2026-06-23 | 核实结论：文档核心断言成立；补充了 partial compact 无 TaskAnchor 交叉缺口（缺口表 C 新增行）、P0 persist 执行顺序陷阱（第 8 节 P3）、token 估算口径偏差（第 8 节 P4，详见 issue 1 第 3 节）、测试 P2.1 虚假绿灯前置条件（第 8 节 P0）、优先级修订
+> 实现时间：2026-06-23 | 实现状态：P0~P7 全部落地，见第 9 节「实现记录」。本文档关注的 P3（persist+热更新）、P5（followUp merge）、P6（摘要 post-check）、P7（E2E）均已实现。
 
 ## 结论
 
@@ -195,6 +196,33 @@ Prompt 要求保留：
 
 ---
 
+## 9. 实现记录（2026-06-23）
+
+本文档关注的缺口全部实现。完整 P0~P4 对照见 issue 1 文档第 8 节，此处聚焦本文档主导的 P3/P5/P6/P7。
+
+| 项 | 状态 | 实现摘要 | 落点 | 提交 |
+|----|------|---------|------|------|
+| **P3** persist + 热更新 | ✅ | 第 3 节缺口表 C「maybeCompact/partial 不 persist memory」「compact 后不热更新」两条已闭合。persist 接到 partial（replace 前）与 full（llmCompact 后）；热更新经 `persistMemories` 回调调 `updateSessionMemory(buildMemoryBlock())`，复用 `rebuildFrozenBase`（延迟到 user 边界，cache-safe） | `loop.ts` 回调 + `compaction-controller.ts` | loop 随 `87ebf037`；时序 `cd76b582` |
+| **P5** followUp merge | ✅ | 第 5 节「followUp 继承旧 contract 不更新」已闭合。新增 `mergeFollowUpIntoContract`：followUp 分支全文重扫 constraints/files 并 merge（多行约束在非首行时 gate-2 漏检，此处补救）；无新内容时返回原对象保持 identity | `task-contract.ts` + `turn-step-producer.ts` | `06cf5ab5` |
+| **P6** 摘要 post-check | ✅ | 第 3 节缺口「摘要质量无校验」已闭合（保守版）。抽 `buildHandoffFromState()`（与 split fallback 共用）+ `summaryCoversState()`；摘要不反映任何 trajectory 实质状态（errorClass/文件）时回退确定性 handoff | `compaction-controller.ts:llmCompact` | `06cf5ab5` |
+| **P7** E2E | ✅ | 第 9 节（旧）「缺 E2E」已闭合。compaction-controller 层驱动真实 partial compact，断言 anchor 含 objective/scope/constraint/completed+remaining。与对方 prompt-engine 层 `compact-prompt-contract.test.ts`（`3cbc352e`）互补 | `compaction-controller.test.ts` | `06cf5ab5` |
+| multimodal 意图链 | ⏸️ 未做 | `extractUserIntentChain` 仍跳过非 string content（缺口表 C 末行），影响面小，未处理 | — | — |
+
+### 实现中的发现 / 与方向的偏差
+
+- **P6 故意保守**：LLM 自然语言摘要无法精确字段校验。`summaryCoversState` 只在摘要「不反映任何存在的维度」时才判失败（覆盖任一维度即放行），优先避免误杀正常转述，而非追求严格校验。这意味着「摘要质量无校验」是部分闭合——能挡住完全跑偏的摘要，挡不住「提了文件但漏了关键决策」的细粒度漂移。
+- **P5 的固有限制**：纯短纠正且无 file/constraint 标记的消息无可结构化提取的信号，仍只能靠 LLM 摘要的意图链承载——P5 范围外。
+- **P5 去重是字符串完全匹配**：`extractConstraints` 提取的文本带上下文前缀（"reminder: don't…" ≠ "Don't…"），措辞不同的同一约束不会去重。可接受（宁可重复也不漏）。
+- **P3 热更新无需新接口**：复用既有 `updateSessionMemory`（`/remember` 路径），仅在 persist 回调追加一行。
+
+### 验证
+
+- `task-contract.test.ts`：47/0（含 P5 的 4 个 merge 测试）
+- `compaction-controller.test.ts`：38 pass / 1 fail（P1.2 预存；含 P6 ×2、P7 ×1、P3 ×1）
+- typecheck：改动文件零新错误
+
+---
+
 ## 涉及文件
 
 - `src/agent/compaction-controller.ts` — llmCompact（922-995）、tryPartialCompact（815-912）、buildCompactSummary（212-250）、replaceWithCheckpoint（772-807）、persistExtractedMemories（728-744）
@@ -208,3 +236,26 @@ Prompt 要求保留：
 - `src/agent/context.ts` — session 层 getEstimatedTokens（331-333）、estimateOaiMessageTokens CJK 感知
 - `src/compact/micro.ts` — estimateOaiMessageTokens CJK 分叉（77-94）
 - `src/agent/__tests__/compaction-controller.test.ts` — P2.1 虚假绿灯（191-245）、makeController 无 primaryClient（21-32）
+
+---
+
+## 10. 后续：分层归档召回补强摘要有损（2026-06-23）
+
+P6 的 `summaryCoversState` 是"摘要不跑偏"的下限校验，但本质无法解决 LLM 摘要**有损**——细粒度漂移（提了文件漏了关键决策、约束被压扁）挡不住。按 plan「分层归档召回压缩」从另一方向补强：**不再让有损摘要成为早期历史的唯一载体**。
+
+被压缩的 oldZone 现在**逐字归档**为 `compact-history` artifact，摘要里嵌 `[artifact:id]` + turn→行目录。摘要仍可能丢细节，但模型需要原始约束/决策/文件细节时可 `read_section(id, "L起-L止")` 精准翻回原文——摘要从"有损的唯一真相"降级为"索引 + 概览"，原文始终可召回。
+
+与本文档既有机制的分工：
+
+| 载体 | 内容 | 角色 |
+|------|------|------|
+| `.memory.json`（session-memory，P3 热更新） | 蒸馏事实/结论 | "结论" |
+| TaskAnchor（P1/C4 确定性后备） | objective/constraints/scope verbatim | "契约" |
+| `<partial-compact-summary>`（LLM 摘要 + P6 校验） | 有损概览 | "索引" |
+| **`compact-history` artifact（本次新增）** | oldZone 逐字原文 | "原始细节" |
+
+四者互补：memory 给结论、anchor 给契约、summary 给概览、artifact 给原文。摘要漂移时，前三层兜底关键信息，第四层提供精确召回。
+
+**召回淘汰**：`read_section` 召回结果在 `L0_WRAPPED_TOOLS` 豁免 re-wrap，会以原文进存储累积。淘汰机制——读 compact-history 时打召回标记（`recall-marker.ts`），下轮压缩序列化时识别标记 → 折叠回一行指针（复用原 artifact id，仍可再召回），防止累积抵消压缩空间。
+
+落点：`compact-archive.ts` / `recall-marker.ts` / `recall-metrics.ts`（均新增）、`compaction-controller.ts`、`read-section.ts`、`context-collapse.ts`、`static.ts`（告知模型可召回）。完整对照见 issue 1 文档第 9 节。

@@ -6,6 +6,8 @@ import { GhostRegistry } from './ghost-registry.js'
 import { CacheBehaviorLearner } from './behavior-learner.js'
 import { AdaptiveThresholdController } from './adaptive-threshold.js'
 import { SessionWarmthTracker } from './session-warmth.js'
+import { RecallMetrics, type RecallMetricsSummary } from './recall-metrics.js'
+import { isCompactHistoryId } from '../compact/recall-marker.js'
 
 export interface CacheAdvisorConfig {
   providerProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'>
@@ -29,6 +31,7 @@ export class CacheAdvisor {
   private readonly behaviorLearner: CacheBehaviorLearner
   private readonly thresholdController: AdaptiveThresholdController
   private readonly warmthTracker: SessionWarmthTracker
+  private readonly recallMetrics: RecallMetrics
   private readonly staticProfile: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   private recentHitRate: number | null = null
   private currentTurn = 0
@@ -36,6 +39,7 @@ export class CacheAdvisor {
   constructor(config: CacheAdvisorConfig) {
     this.staticProfile = config.providerProfile
     this.ghostRegistry = new GhostRegistry()
+    this.recallMetrics = new RecallMetrics()
     this.behaviorLearner = new CacheBehaviorLearner()
     this.thresholdController = new AdaptiveThresholdController({ ghostRegistry: this.ghostRegistry, contextWindow: config.contextWindow })
     this.warmthTracker = new SessionWarmthTracker({ ttlMs: config.ttlMs, now: config.now })
@@ -66,6 +70,12 @@ export class CacheAdvisor {
     // Mark ghost accesses (read_section calls to previously-evicted artifacts)
     for (const id of metrics.artifactIdsAccessed) {
       this.ghostRegistry.markAccessed(id, metrics.turn)
+      // Recall observability: a read_section of a compact-history artifact is a
+      // recall of archived storage-layer history. Observe-only — does not feed
+      // back into compaction thresholds (see RecallMetrics rationale).
+      if (isCompactHistoryId(id)) {
+        this.recallMetrics.recordRecall(id, metrics.turn)
+      }
     }
 
     // Compute recent hit rate
@@ -123,6 +133,17 @@ export class CacheAdvisor {
 
   getRecentHitRate(): number | null {
     return this.recentHitRate
+  }
+
+  /** Register the turn at which a compact-history artifact was archived, so a
+   *  later recall can be tagged with its turn distance. */
+  registerArchive(artifactId: string, turn: number): void {
+    this.recallMetrics.registerArchive(artifactId, turn)
+  }
+
+  /** Observe-only recall statistics for compacted-history artifacts. */
+  getRecallSummary(): RecallMetricsSummary {
+    return this.recallMetrics.getSummary()
   }
 
   shouldOpportunisticCompact(): boolean {

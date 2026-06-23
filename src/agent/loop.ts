@@ -39,6 +39,7 @@ import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
 import { appendMilestone } from '../constellation/store.js'
 import { ArtifactStore } from '../artifact/store.js'
+import { COMPACT_HISTORY_TOOL } from '../compact/recall-marker.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import { debugLog } from '../utils/debug.js'
@@ -72,6 +73,7 @@ import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
+import { writeFileSync } from 'node:fs'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
@@ -424,6 +426,40 @@ export class AgentLoop {
       },
       getAbortSignal: () => this.abortController?.signal,
       getActiveContract: () => this.taskContract,
+      // Layered archival: persist discarded history as a recallable
+      // compact-history artifact. Disk-only write, never touches the prefix.
+      archiveHistory: async (input) => {
+        const store = this.artifactStore
+        if (!store) return null
+        try {
+          return await store.save({
+            tool: COMPACT_HISTORY_TOOL,
+            target: input.target,
+            rawContent: input.rawContent,
+            summary: input.summary,
+            sections: input.sections,
+          })
+        } catch {
+          return null
+        }
+      },
+      // Recall observability: register the archive turn so recall turn-distance
+      // can be computed when the model later read_sections this artifact.
+      onArchive: (artifactId, turn) => {
+        try { this.cacheAdvisor.registerArchive(artifactId, turn) } catch { /* non-critical */ }
+      },
+      // Optional disaster-recovery snapshot of the full pre-compaction transcript.
+      backupTranscript: (messages, turn) => {
+        const persist = this.persist
+        if (!persist) return
+        try {
+          const path = join(persist.getBackupDir(), `pre-compact-${turn}.jsonl`)
+          const body = messages.map(m => JSON.stringify(m)).join('\n') + '\n'
+          writeFileSync(path, body, 'utf-8')
+        } catch {
+          // Snapshot is best-effort; never block compaction.
+        }
+      },
     })
     // 在 AgentLoop 构造时立即设置 prefixOverhead，关闭 UI 启动到 maybeCompact 之间的窗口。
     // 否则首次响应前 GlanceBar 显示 ctx 0%、◧ 0/1.0M（数据未接入而非真的 0%）。

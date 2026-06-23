@@ -77,4 +77,31 @@ describe('collapseToolResult', () => {
     assert.notEqual(result, null)
     assert.ok(result!.summary.includes('collapsed search'))
   })
+
+  // T7 layering: preserve artifact references so request-layer folding does not
+  // become a recall blind spot.
+  it('preserves an [artifact:id] reference in the collapsed summary', () => {
+    const content = `[artifact:read_file:abc12345] big file summary\n${'x'.repeat(500)}`
+    const result = collapseToolResult('read_file', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.match(result!.summary, /read_section artifact:read_file:abc12345/)
+    // The recall hint stays inside the bracketed collapsed marker.
+    assert.ok(result!.summary.endsWith(']'))
+  })
+
+  it('leaves the summary unchanged when there is no artifact reference', () => {
+    const content = 'plain bash output\n' + 'x'.repeat(500)
+    const result = collapseToolResult('bash', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.doesNotMatch(result!.summary, /artifact:/)
+  })
+
+  it('does not duplicate an artifact reference already present in the summary', () => {
+    // generic collapse includes a content preview, which itself contains the marker
+    const content = `[artifact:bash:dup99] line one\nline two\nline three\n${'x'.repeat(300)}`
+    const result = collapseToolResult('custom_tool', content, 5, 200_000)
+    assert.notEqual(result, null)
+    const occurrences = (result!.summary.match(/bash:dup99/g) ?? []).length
+    assert.equal(occurrences, 1, 'reference must not be appended twice')
+  })
 })

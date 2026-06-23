@@ -160,6 +160,8 @@ worker 卡住或超时时，标注降级并继续内联执行。
 
 大结果回报：worker 返回超 32K 字符时，完整结果会存入 artifact store，packet 中仅保留摘要。
 需要完整结果时使用 read_section 拉取 artifact。
+
+长会话压缩：早期对话被压缩时，原文会归档为 compact-history artifact，摘要里带 [artifact:id] 与 turn→行目录。需要早期决策/约束/细节的原文时，用 read_section(artifactId, section="L起-L止") 召回——不要凭摘要臆测已丢失的细节。
 </delegation>
 
 <output-style>

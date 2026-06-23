@@ -1,6 +1,7 @@
 import { stat, readFile } from 'node:fs/promises'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { ArtifactCorruptionError } from '../artifact/store.js'
+import { COMPACT_HISTORY_TOOL, buildRecallMarker } from '../compact/recall-marker.js'
 import { computeModelReadCap } from './model-read-cap.js'
 import { validatePath } from './path-validate.js'
 import { getFileReadMtime } from './read-file.js'
@@ -243,8 +244,15 @@ Good: read_section(file_path="src/tools/bash.ts", section="L100-L200")`,
         ? sectionContent.slice(0, maxChars) + `\n... [truncated at ${maxChars} chars]`
         : sectionContent
 
+      // Tag recalls of compacted-history blocks so the NEXT compaction can
+      // collapse this recalled content back to a pointer (recall-eviction)
+      // instead of re-archiving it verbatim and accumulating storage.
+      const content = artifact.tool === COMPACT_HISTORY_TOOL
+        ? `${buildRecallMarker(artifactId, section)}\n${truncated}`
+        : truncated
+
       return {
-        content: truncated,
+        content,
         rawPath: artifact.rawPath,
       }
     } catch (err) {

@@ -17,6 +17,8 @@ import { renderTaskAnchor, type TaskContract } from '../context/task-contract.js
 import type { TrajectoryEntry } from './trajectory.js'
 import type { CacheAdvisor } from '../cache/advisor.js'
 import { extractSessionMemories, type ExtractedMemory } from './session-memory-extract.js'
+import type { ArtifactSection } from '../artifact/types.js'
+import { serializeMessagesForArchive, buildArchiveCatalog, buildRecallRefBlock } from './compact-archive.js'
 
 /**
  * Extract the user intent chain: all user messages in order,
@@ -280,6 +282,25 @@ export interface CompactionControllerDeps {
    * survive verbatim even when the LLM summary above drifts or drops them.
    */
   getActiveContract?: () => TaskContract | undefined
+  /**
+   * Layered archival: persist a discarded message zone as a recallable
+   * `compact-history` artifact, returning its id (or null on failure).
+   * Wired to ArtifactStore.save in loop.ts. Archiving only writes to disk and
+   * never touches the prompt prefix — fully prefix-cache safe. Fail-soft:
+   * compaction must continue even if the archive write fails.
+   */
+  archiveHistory?: (input: ArchiveHistoryInput) => Promise<string | null>
+  /** Notified with the new artifact id + creation turn for recall observability. */
+  onArchive?: (artifactId: string, turn: number) => void
+  /** Snapshot the full pre-compaction message list for disaster recovery. */
+  backupTranscript?: (messages: OaiMessage[], turn: number) => void
+}
+
+export interface ArchiveHistoryInput {
+  rawContent: string
+  summary: string
+  sections: ArtifactSection[]
+  target: string
 }
 
 export interface MaybeCompactInput {
@@ -416,7 +437,7 @@ export class CompactionController {
           // the prefix cache with the pre-refresh frozen base — the persist
           // callback hot-refreshes session memory, which rebuilds the frozen base.
           this.persistExtractedMemories(this.deps.getTrajectoryEntries())
-          this.replaceWithCheckpoint({
+          await this.replaceWithCheckpoint({
             tier: 2,
             reason: `LLM compact at ${(ratio * 100).toFixed(0)}% context (1M window graceful degradation)`,
             summary,
@@ -548,7 +569,7 @@ export class CompactionController {
         return
       }
       if (summary) {
-        this.replaceWithCheckpoint({
+        await this.replaceWithCheckpoint({
           tier: 4,
           reason: 'context ceiling exceeded; LLM compact checkpoint',
           summary,
@@ -583,7 +604,7 @@ export class CompactionController {
 
     const resumeContent = `<checkpoint-resume>\n${stateLines.join('\n')}\n</checkpoint-resume>`
 
-    this.replaceWithCheckpoint({
+    await this.replaceWithCheckpoint({
       tier: 4,
       reason: 'context ceiling exceeded; checkpoint-resume required',
       summary: resumeContent,
@@ -613,7 +634,7 @@ export class CompactionController {
         return false
       }
       if (summary) {
-        this.replaceWithCheckpoint({
+        await this.replaceWithCheckpoint({
           tier: 3,
           reason: `session split at ${(ratio * 100).toFixed(0)}% context (LLM compact)`,
           summary,
@@ -629,7 +650,7 @@ export class CompactionController {
     const taskState = extractTaskState(trajectory, this.deps.getStreamedText())
     const handoffContent = this.buildHandoffFromState()
 
-    this.replaceWithCheckpoint({
+    await this.replaceWithCheckpoint({
       tier: 3,
       reason: `session split at ${(ratio * 100).toFixed(0)}% context`,
       summary: handoffContent,
@@ -780,11 +801,55 @@ export class CompactionController {
    * making the sequence safe to send.
    */
   private safeReplaceMessages(messages: OaiMessage[]): void {
+    // Optional pre-compaction transcript snapshot: capture the CURRENT (pre-replace)
+    // message list before it is overwritten. This is the single choke point for
+    // every compaction path, so one hook covers partial / checkpoint / micro.
+    this.maybeBackupTranscript()
     const preflight = runResumePreflightOai(messages)
     if (preflight.repaired) {
       debugLog(`[compact-preflight] repaired ${preflight.syntheticResultsInserted} orphan tool_call(s)`)
     }
     this.deps.session.replaceMessages(preflight.messages)
+  }
+
+  private maybeBackupTranscript(): void {
+    if (!this.deps.backupTranscript) return
+    try {
+      this.deps.backupTranscript(this.deps.session.getMessages(), this.deps.session.getTurnCount())
+    } catch {
+      // Disaster-recovery snapshot is best-effort; never block compaction.
+    }
+  }
+
+  /**
+   * Archive a discarded message zone to cold storage and return a recall
+   * reference block to embed in the surviving summary message. Returns null
+   * when archiving is unavailable, the zone is empty, or the write fails —
+   * compaction must never be blocked by archival (fail-soft).
+   */
+  private async archiveDiscardedHistory(
+    history: OaiMessage[],
+    reason: string,
+  ): Promise<{ id: string; ref: string } | null> {
+    if (!this.deps.archiveHistory) return null
+    if (history.length === 0) return null
+    try {
+      const { rawContent, sections, turnRanges } = serializeMessagesForArchive(history)
+      if (rawContent.trim().length === 0) return null
+      const turn = this.deps.session.getTurnCount()
+      const id = await this.deps.archiveHistory({
+        rawContent,
+        summary: `compacted ${history.length} messages at turn ${turn} (${reason})`,
+        sections,
+        target: `session-history@turn${turn}`,
+      })
+      if (!id) return null
+      this.deps.onArchive?.(id, turn)
+      const catalog = buildArchiveCatalog(turnRanges, id)
+      return { id, ref: buildRecallRefBlock(id, history.length, catalog) }
+    } catch {
+      return null
+    }
   }
 
   private persistExtractedMemories(trajectory: TrajectoryEntry[]): void {
@@ -831,19 +896,29 @@ export class CompactionController {
    * Called by both trySessionSplit (86% threshold, richer handoff) and
    * enforceContextCeiling (95% threshold, emergency fallback).
    */
-  private replaceWithCheckpoint(params: {
+  private async replaceWithCheckpoint(params: {
     tier: CompactTier
     reason: string
     summary: string
     maxFallback: number
     fallbackText: string
-  }): void {
+  }): Promise<void> {
     const messages = this.deps.session.getMessages()
     const anchorMessages = messages.slice(0, CACHE_ANCHOR_MESSAGES)
-    let candidate: OaiMessage[] = [...anchorMessages, { role: 'user', content: params.summary }]
+
+    // Layered archival: the messages after the anchor are about to be dropped
+    // and replaced by the summary. Archive them as a recallable compact-history
+    // artifact and embed the recall reference into the summary (and fallback)
+    // text — both are freshly-written messages, so the anchor prefix is intact.
+    const discarded = messages.slice(CACHE_ANCHOR_MESSAGES)
+    const archive = await this.archiveDiscardedHistory(discarded, params.reason)
+    const summaryText = archive ? `${params.summary}${archive.ref}` : params.summary
+    const fallbackText = archive ? `${params.fallbackText}${archive.ref}` : params.fallbackText
+
+    let candidate: OaiMessage[] = [...anchorMessages, { role: 'user', content: summaryText }]
 
     if (estimateOaiTokens(candidate) > params.maxFallback) {
-      candidate = [...anchorMessages, { role: 'user', content: params.fallbackText }]
+      candidate = [...anchorMessages, { role: 'user', content: fallbackText }]
     }
 
     // C4: append the authoritative task anchor at the tail (appendix region —
@@ -956,9 +1031,18 @@ export class CompactionController {
       const summary = chunks.join('').trim()
       if (summary.length === 0) return false
 
+      // Layered archival: archive the oldZone (verbatim) and embed a recall
+      // reference into the summary message so the model can read_section any
+      // earlier message instead of trusting the lossy LLM summary alone. The
+      // ref lives inside the freshly-written summary message — never the anchor
+      // prefix — so this stays prefix-cache safe. Fail-soft: a null archive
+      // simply means the summary ships without a recall pointer.
+      const archive = await this.archiveDiscardedHistory(oldZone, 'partial-compact')
+      const summaryBody = archive ? `${summary}${archive.ref}` : summary
+
       const summaryMessage: OaiMessage = {
         role: 'assistant',
-        content: `<partial-compact-summary turn="${this.deps.session.getTurnCount()}">\n${summary}\n</partial-compact-summary>`,
+        content: `<partial-compact-summary turn="${this.deps.session.getTurnCount()}">\n${summaryBody}\n</partial-compact-summary>`,
       }
 
       // P3: persist heuristic memories before history is replaced —

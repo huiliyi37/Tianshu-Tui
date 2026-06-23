@@ -1122,6 +1122,133 @@ describe('CompactionController', () => {
   })
 })
 
+// ── layered archival + recall ───────────────────────────────────────────
+
+describe('CompactionController layered archival', () => {
+  function make1MSession(count = 70): SessionContext {
+    const session = new SessionContext()
+    const chunk = 'x'.repeat(40_000)
+    const msgs = Array.from({ length: count }, (_, i) => ({
+      role: (i % 2 === 0 ? 'user' : 'assistant') as 'user' | 'assistant',
+      content: chunk,
+    }))
+    session.replaceMessages(msgs)
+    return session
+  }
+
+  function summarizingClient(text = 'partial summary'): StreamClient {
+    return {
+      stream: async (_request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        callbacks.onTextDelta(text)
+      },
+    }
+  }
+
+  it('partial compact archives the old zone and embeds a recall reference', async () => {
+    const session = make1MSession()
+    const anchor0 = session.getMessages()[0]!
+    const anchor1 = session.getMessages()[1]!
+
+    const saved: Array<{ target: string; rawContent: string }> = []
+    const archived: Array<[string, number]> = []
+    let counter = 0
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient: summarizingClient(),
+      archiveHistory: async (input) => {
+        saved.push({ target: input.target, rawContent: input.rawContent })
+        return `compact-history:id${counter++}`
+      },
+      onArchive: (id, turn) => { archived.push([id, turn]) },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, true)
+
+    // Archived exactly once, with the verbatim old zone serialized.
+    assert.equal(saved.length, 1)
+    assert.match(saved[0]!.rawContent, /--- turn:\d+ role:(user|assistant) ---/)
+    assert.equal(archived.length, 1)
+    assert.equal(archived[0]![0], 'compact-history:id0')
+
+    // Recall reference embedded into the partial-compact-summary message.
+    const after = session.getMessages()
+    const summaryMsg = after.find(m => String(m.content).includes('partial-compact-summary'))
+    assert.ok(summaryMsg, 'summary message must exist')
+    assert.match(String(summaryMsg!.content), /artifact:compact-history:id0/)
+    assert.match(String(summaryMsg!.content), /read_section/)
+
+    // Cache safety: the first two anchor messages are byte-identical.
+    assert.equal(after[0]!.content, anchor0.content)
+    assert.equal(after[1]!.content, anchor1.content)
+  })
+
+  it('checkpoint (ceiling) archives discarded history and embeds a recall reference', async () => {
+    const session = new SessionContext()
+    const huge = 'x'.repeat(80_000 * 4)
+    session.replaceMessages([
+      { role: 'user', content: 'anchor user' },
+      { role: 'assistant', content: 'anchor assistant' },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+      { role: 'user', content: huge },
+      { role: 'assistant', content: huge },
+    ])
+
+    const saved: string[] = []
+    let counter = 0
+    const controller = makeController(session, {
+      archiveHistory: async (input) => {
+        saved.push(input.target)
+        return `compact-history:ck${counter++}`
+      },
+    })
+
+    await controller.enforceContextCeiling()
+
+    const after = session.getMessages()
+    assert.equal(after[0]!.content, 'anchor user')
+    assert.equal(after[1]!.content, 'anchor assistant')
+    assert.equal(saved.length, 1, 'ceiling checkpoint archives the discarded zone')
+    const checkpoint = String(after[2]!.content)
+    assert.match(checkpoint, /<checkpoint-resume>/)
+    assert.match(checkpoint, /artifact:compact-history:ck0/)
+  })
+
+  it('is fail-soft: compaction succeeds even when archiving throws', async () => {
+    const session = make1MSession()
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient: summarizingClient(),
+      archiveHistory: async () => { throw new Error('disk full') },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, true, 'archive failure must not block compaction')
+    const after = session.getMessages()
+    const summaryMsg = after.find(m => String(m.content).includes('partial-compact-summary'))
+    assert.ok(summaryMsg, 'summary still produced')
+    assert.doesNotMatch(String(summaryMsg!.content), /artifact:compact-history/)
+  })
+
+  it('snapshots the pre-compaction transcript before replacing history', async () => {
+    const session = make1MSession()
+    const before = session.getMessages().length
+    const snapshots: Array<{ count: number; turn: number }> = []
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient: summarizingClient(),
+      archiveHistory: async () => 'compact-history:snap',
+      backupTranscript: (messages, turn) => { snapshots.push({ count: messages.length, turn }) },
+    })
+
+    const result = await controller.maybeCompact({ loopTurn: 0, failures: { consecutiveFailures: 0 } })
+    assert.equal(result.compacted, true)
+    assert.equal(snapshots.length, 1, 'one snapshot per compaction')
+    assert.equal(snapshots[0]!.count, before, 'snapshot captures the full pre-compaction list')
+  })
+})
+
 // ── findSafeSplitPoint ──────────────────────────────────────────────────
 
 describe('findSafeSplitPoint', () => {

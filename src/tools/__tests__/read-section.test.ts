@@ -320,3 +320,70 @@ describe('read_section file_path branch (任务 B3)', () => {
     assert.match(result.content, /已变更/i, 'must include staleness warning')
   })
 })
+
+describe('read_section recall of compact-history artifacts', () => {
+  it('recalls archived history verbatim and tags it with a recall marker', async () => {
+    const tempDir = makeTempDir()
+    try {
+      const store = new ArtifactStore(tempDir, 'recall-session')
+      const { serializeMessagesForArchive } = await import('../../agent/compact-archive.js')
+      const { parseRecallMarker, COMPACT_HISTORY_TOOL } = await import('../../compact/recall-marker.js')
+
+      const { rawContent, sections } = serializeMessagesForArchive([
+        { role: 'user', content: 'original constraint: keep prefix cache stable' },
+        { role: 'assistant', content: 'acknowledged' },
+      ])
+      const id = await store.save({
+        tool: COMPACT_HISTORY_TOOL,
+        target: 'session-history@turn0',
+        rawContent,
+        summary: 'compacted 2 messages',
+        sections,
+      })
+      assert.ok(id.startsWith('compact-history:'))
+
+      const result = await READ_SECTION_TOOL.execute({
+        input: { artifactId: id, section: 'L1-L4' },
+        toolUseId: 'recall-1',
+        cwd: tempDir,
+        artifactStore: store,
+      })
+
+      assert.ok(!result.isError)
+      // Verbatim content recoverable section-by-section.
+      assert.match(result.content, /original constraint: keep prefix cache stable/)
+      // Tagged so the next compaction can evict the recalled block.
+      const parsed = parseRecallMarker(result.content)
+      assert.ok(parsed, 'recalled compact-history must carry a recall marker')
+      assert.equal(parsed!.artifactId, id)
+      assert.equal(parsed!.section, 'L1-L4')
+    } finally {
+      cleanup(tempDir)
+    }
+  })
+
+  it('does NOT tag normal (non-history) artifacts with a recall marker', async () => {
+    const tempDir = makeTempDir()
+    try {
+      const store = new ArtifactStore(tempDir, 'recall-session')
+      const { parseRecallMarker } = await import('../../compact/recall-marker.js')
+      const id = await store.save({
+        tool: 'read_file',
+        target: 'src/foo.ts',
+        rawContent: 'line a\nline b\nline c',
+        summary: 'a file',
+        sections: [],
+      })
+      const result = await READ_SECTION_TOOL.execute({
+        input: { artifactId: id, section: 'L1-L2' },
+        toolUseId: 'recall-2',
+        cwd: tempDir,
+        artifactStore: store,
+      })
+      assert.ok(!result.isError)
+      assert.equal(parseRecallMarker(result.content), null)
+    } finally {
+      cleanup(tempDir)
+    }
+  })
+})
