@@ -85,12 +85,23 @@ const PROTOCOL_PREFIXES = [
   'SyntaxError:',
 ]
 
+// Privacy-safe labels: only these parenthesized labels may appear in presence.json.
+// Any other text (including user message text) is replaced with '(active)' to
+// prevent cross-session information leakage via the shared presence store.
+const SAFE_LABELS = /^\((active task|follow-up|chat|internal|active)\)$/
+
 function sanitizeObjective(raw: string): string {
   let s = raw.replace(/[<>]/g, '')  // 防 XML 注入
   for (const prefix of PROTOCOL_PREFIXES) {
     if (s.startsWith(prefix)) {
       return '(internal)'
     }
+  }
+  // Defense-in-depth: only allow known-safe labels through.
+  // This catches user message text that might leak via future regressions
+  // in the getObjective call chain.
+  if (!SAFE_LABELS.test(s.trim())) {
+    return '(active)'
   }
   return s.slice(0, 120)
 }

@@ -66,11 +66,11 @@ describe('companion-presence', () => {
 
     it('updates existing session entry', () => {
       const now = Date.now()
-      writePresence(TMP, { sessionId: 's1', starDomain: 'tianshu', objective: 'old', updatedAt: now - 10_000 })
-      writePresence(TMP, { sessionId: 's1', starDomain: 'tianshu', objective: 'updated', updatedAt: now })
+      writePresence(TMP, { sessionId: 's1', starDomain: 'tianshu', objective: '(active task)', updatedAt: now - 10_000 })
+      writePresence(TMP, { sessionId: 's1', starDomain: 'tianshu', objective: '(follow-up)', updatedAt: now })
       const loaded = loadPresence(TMP)
       assert.equal(loaded.length, 1)
-      assert.equal(loaded[0]!.objective, 'updated')
+      assert.equal(loaded[0]!.objective, '(follow-up)')
     })
 
     it('appends new session without overwriting others', () => {
@@ -103,7 +103,7 @@ describe('companion-presence', () => {
       assert.ok(!loaded[0]!.objective.includes('<'), 'angle brackets must be stripped at write time')
     })
 
-    it('preserves normal human-readable objectives at write time', () => {
+    it('redacts user message text at write time to prevent cross-session leakage', () => {
       writePresence(TMP, {
         sessionId: 's1',
         starDomain: '天枢',
@@ -111,7 +111,9 @@ describe('companion-presence', () => {
         updatedAt: Date.now(),
       })
       const loaded = loadPresence(TMP)
-      assert.equal(loaded[0]!.objective, '审查 loop.ts 的超时逻辑')
+      // User message text must never appear in presence.json — only safe labels.
+      assert.equal(loaded[0]!.objective, '(active)')
+      assert.ok(!loaded[0]!.objective.includes('审查'), 'user message text must not leak into presence store')
     })
   })
 
