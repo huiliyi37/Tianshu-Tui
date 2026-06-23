@@ -1474,7 +1474,8 @@ body {
 .task-item.st-completed .task-text { color: var(--muted); text-decoration: line-through; }
 .task-item.st-in_progress .task-check { color: var(--warning); }
 .task-item.st-completed .task-check { color: var(--success); }
-.source-item { display: flex; align-items: center; gap: var(--space-2); padding: 5px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); }
+.source-item { display: flex; align-items: center; gap: var(--space-2); padding: 5px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); cursor: pointer; transition: background var(--dur) var(--ease); }
+.source-item:hover { background: var(--panel-2); }
 .source-item .source-icon { flex: none; font-size: 12px; }
 .source-item .source-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

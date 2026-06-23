@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getArtifact,
+  openFile,
   sendArtifactFeedback,
   getRollbackPreview,
   rollbackSession,
@@ -124,7 +125,12 @@ export function ReviewPanel(props: {
             <h4>涉及文件 · {sources.length}</h4>
             {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
             {sources.map((path) => (
-              <div key={path} className="source-item">
+              <div
+                key={path}
+                className="source-item"
+                title={`在编辑器中打开 ${path}`}
+                onClick={() => { openFile(path).catch(() => {}) }}
+              >
                 <span className="source-icon" aria-hidden>📄</span>
                 <FilePath path={path} className="source-path" />
               </div>
