@@ -17,6 +17,12 @@ describe('deriveStableWorkOrderId', () => {
     assert.equal(deriveStableWorkOrderId('council:seat-fu'), 'council:seat-fu')
   })
 
+  it('batch: parentTurnId 稳定化（delegate_batch 跨任务 dependsOn 依赖此）', () => {
+    // delegate_batch 用 `${toolUseId}:batch:${i}`，dependsOn 解析为 batch:N。
+    assert.equal(deriveStableWorkOrderId('tu_x:batch:0'), 'batch:0')
+    assert.equal(deriveStableWorkOrderId('tu_x:batch:2'), 'batch:2')
+  })
+
   it('普通 parentTurnId 返回 undefined（调用方回退 wo_<uuid>）', () => {
     assert.equal(deriveStableWorkOrderId('turn-42'), undefined)
     assert.equal(deriveStableWorkOrderId('review:loop'), undefined)

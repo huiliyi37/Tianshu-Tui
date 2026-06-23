@@ -464,6 +464,31 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /Scoped commit created/)
   })
 
+  it('post-commit review cooldown reports an honest skip, not a false merge', async () => {
+    let routeCalls = 0
+    const { tool, params } = makeContext({
+      taskId: 't1',
+      ownedFiles: ['src/a.ts'],
+      dirtyFiles: ['src/a.ts'],
+      verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+      routeReviewWorkflow: async () => {
+        routeCalls++
+        return { tier: 'auto', verdict: 'verified', evidence: 'no blocking findings', rounds: 1 }
+      },
+      reviewDeps: {} as ReviewRouterDeps,
+      commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+    })
+
+    // First commit runs the review and arms the 30s cooldown.
+    await tool.execute({ ...params, input: { commit: true, message: 'feat: part 1' } })
+    // Second commit within the window hits the cooldown branch.
+    const second = await tool.execute({ ...params, input: { commit: true, message: 'feat: part 2' } })
+
+    assert.equal(routeCalls, 1, 'second review must be skipped by cooldown')
+    assert.match(second.content, /提交后审查跳过：距上轮审查/)
+    assert.doesNotMatch(second.content, /合并入上一轮/, 'must not claim a merge that never happens')
+  })
+
   it('commit succeeds when review deps are not wired — advisory skip, not block', async () => {
     let committed = false
     const { tool, params } = makeContext({

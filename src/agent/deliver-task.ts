@@ -636,7 +636,9 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           // Batch: skip if a review was already launched within the cooldown window.
           const now = Date.now()
           if (now - lastPostCommitReviewAt < POST_COMMIT_REVIEW_COOLDOWN_MS) {
-            lines.push('', '⏭ 提交后审查合并：上一轮审查仍在冷却窗口内，本轮合并入上一轮。')
+            const sinceSec = Math.round((now - lastPostCommitReviewAt) / 1000)
+            const windowSec = Math.round(POST_COMMIT_REVIEW_COOLDOWN_MS / 1000)
+            lines.push('', `⏭ 提交后审查跳过：距上轮审查仅 ${sinceSec}s（<${windowSec}s 冷却窗口）。本轮变更未被审查，必要时用 \`/review\` 手动覆盖。`)
           } else {
             const route = ctx.routeReviewWorkflow ?? (ctx.reviewDeps ? routeReviewWorkflow : undefined)
             if (!route || !ctx.reviewDeps) {

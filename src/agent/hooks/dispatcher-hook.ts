@@ -79,7 +79,7 @@ export function createDispatcherHook(deps: DispatcherHookDeps): AfterPerceptionR
         priority: 0.5,
         category: 'delegation',
         ttl: 2,
-        content: `【天梁】检测到可并行拆分为 ${subtasks.length} 个子任务（${depHint}）。如需并行推进，显式调 delegate_batch 并按箭头传 dependencies（被指向方先跑）；只读探查用 code_search profile。`,
+        content: `【天梁】检测到可并行拆分为 ${subtasks.length} 个子任务（${depHint}）。如需并行推进，显式调 delegate_batch，按上面顺序列 tasks，并用 dependsOn 传被依赖任务的 0-based 下标（被指向方先跑）；只读探查用 code_search profile。`,
       })
 
       advisedIds.add(contract.id)

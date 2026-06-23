@@ -59,4 +59,121 @@ describe('DELEGATE_BATCH_TOOL', () => {
     assert.equal(calls[0]?.requests[0]?.kind, 'verify')
     assert.equal(calls[0]?.requests[0]?.reviewDepth, 2)
   })
+
+  it('exposes dependsOn in the task schema', () => {
+    const tool = createDelegateBatchTool({ delegateBatch: async () => makeRun() })
+    const schema = tool.definition.input_schema as any
+    assert.equal(schema.properties.tasks.items.properties.dependsOn.type, 'array')
+    assert.equal(schema.properties.tasks.items.properties.dependsOn.items.type, 'integer')
+  })
+
+  it('maps dependsOn indices to stable batch:N dependency ids and stable parentTurnId', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests) => { calls.push({ requests }); return makeRun() },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_dep',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [
+          { objective: 'Refactor the source module under review.' },
+          { objective: 'Write tests for the refactored source module.', dependsOn: [0] },
+        ],
+      },
+    })
+
+    assert.equal(result.isError, false)
+    const reqs = calls[0]!.requests
+    assert.equal(reqs[0]?.parentTurnId, 'tu_dep:batch:0')
+    assert.equal(reqs[1]?.parentTurnId, 'tu_dep:batch:1')
+    assert.equal(reqs[0]?.dependencies, undefined)
+    assert.deepEqual(reqs[1]?.dependencies, ['batch:0'])
+  })
+
+  it('rejects out-of-range dependsOn indices', async () => {
+    const tool = createDelegateBatchTool({ delegateBatch: async () => makeRun() })
+    const result = await tool.execute({
+      toolUseId: 'tu_bad',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [
+          { objective: 'Only task in this batch, no upstream exists.', dependsOn: [3] },
+        ],
+      },
+    })
+    assert.equal(result.isError, true)
+    assert.match(String(result.content), /out-of-range/)
+  })
+
+  it('rejects self-referential dependsOn', async () => {
+    const tool = createDelegateBatchTool({ delegateBatch: async () => makeRun() })
+    const result = await tool.execute({
+      toolUseId: 'tu_self',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [
+          { objective: 'First task does standalone work here.' },
+          { objective: 'Second task incorrectly depends on itself here.', dependsOn: [1] },
+        ],
+      },
+    })
+    assert.equal(result.isError, true)
+    assert.match(String(result.content), /depends on itself/)
+  })
+
+  it('bypasses the progressive task cap when dependencies are declared', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests) => { calls.push({ requests }); return makeRun() },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    // sessionTurnCount 0 → progressiveTaskCap = 1; without deps this would trim
+    // to a single task. With a declared dependency the full chain must dispatch.
+    const result = await tool.execute({
+      toolUseId: 'tu_cap',
+      cwd: '/repo',
+      sessionTurnCount: 0,
+      input: {
+        tasks: [
+          { objective: 'Upstream task that produces the artifact for others.' },
+          { objective: 'Midstream task consuming the upstream artifact now.', dependsOn: [0] },
+          { objective: 'Downstream task consuming the midstream result now.', dependsOn: [1] },
+        ],
+      },
+    })
+
+    assert.equal(result.isError, false)
+    assert.equal(calls[0]?.requests.length, 3)
+  })
+
+  it('still applies the progressive task cap when no dependencies are declared', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests) => { calls.push({ requests }); return makeRun() },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    const result = await tool.execute({
+      toolUseId: 'tu_nocap',
+      cwd: '/repo',
+      sessionTurnCount: 0,
+      input: {
+        tasks: [
+          { objective: 'First independent scouting task to run now.' },
+          { objective: 'Second independent scouting task to run now.' },
+          { objective: 'Third independent scouting task to run now.' },
+        ],
+      },
+    })
+
+    assert.equal(result.isError, false)
+    assert.equal(calls[0]?.requests.length, 1)
+  })
 })

@@ -7,18 +7,25 @@ import { cleanupStaleWorkerSessionDirs } from '../bootstrap.js'
 
 describe('cleanupStaleWorkerSessionDirs', () => {
   let testCwd: string
+  let sessionsDir: string
+  let prevSessionDir: string | undefined
 
   before(() => {
     testCwd = mkdtempSync(join(tmpdir(), 'rivet-worker-cleanup-'))
+    sessionsDir = join(testCwd, '.rivet', 'sessions')
+    // getSessionDir(cwd) defaults to ~/.rivet/sessions/<slug>; pin it to the
+    // test's own sessions dir so cleanup operates on the dirs we create here.
+    prevSessionDir = process.env.RIVET_SESSION_DIR
+    process.env.RIVET_SESSION_DIR = sessionsDir
   })
 
   after(() => {
+    if (prevSessionDir === undefined) delete process.env.RIVET_SESSION_DIR
+    else process.env.RIVET_SESSION_DIR = prevSessionDir
     rmSync(testCwd, { recursive: true, force: true })
   })
 
   it('removes stale worker dirs but keeps fresh ones and non-worker dirs', () => {
-    const sessionsDir = join(testCwd, '.rivet', 'sessions')
-
     // Stale worker dir — backdate mtime to 2 hours ago
     const staleDir = join(sessionsDir, 'worker-old')
     mkdirSync(staleDir, { recursive: true })
@@ -45,8 +52,14 @@ describe('cleanupStaleWorkerSessionDirs', () => {
 
   it('returns 0 when sessions dir does not exist', () => {
     const emptyCwd = mkdtempSync(join(tmpdir(), 'rivet-worker-empty-'))
-    const cleaned = cleanupStaleWorkerSessionDirs(emptyCwd)
-    assert.equal(cleaned, 0)
-    rmSync(emptyCwd, { recursive: true, force: true })
+    const saved = process.env.RIVET_SESSION_DIR
+    process.env.RIVET_SESSION_DIR = join(emptyCwd, '.rivet', 'sessions')
+    try {
+      const cleaned = cleanupStaleWorkerSessionDirs(emptyCwd)
+      assert.equal(cleaned, 0)
+    } finally {
+      process.env.RIVET_SESSION_DIR = saved
+      rmSync(emptyCwd, { recursive: true, force: true })
+    }
   })
 })

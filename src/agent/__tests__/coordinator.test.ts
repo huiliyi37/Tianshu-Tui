@@ -1573,6 +1573,53 @@ describe('DelegationCoordinator', () => {
     assert.equal(modelsUsed.filter(m => m === 'cheap-flash').length, 4)
   })
 
+  it('T3: tierLock:cheap profiles (reviewer) are NOT escalated to a strong model', async () => {
+    // Review workers are deliberately pinned cheap so they don't evict the main
+    // session's prefix cache. A transient failure must stay on the cheap model,
+    // never escalate to the strong card (regression guard for cache isolation).
+    const escalateCards: ModelCapabilityCard[] = [
+      { model: 'cheap-flash', toolUseReliability: 0.7, jsonStability: 0.7, editSuccessRate: 0.5, testRepairRate: 0.5, contextWindow: 1_000_000, cacheEconomics: 'strong', recommendedTasks: ['code_search'] },
+      { model: 'deepseek-pro', toolUseReliability: 0.95, jsonStability: 0.95, editSuccessRate: 0.9, testRepairRate: 0.85, contextWindow: 128_000, cacheEconomics: 'medium', recommendedTasks: ['patch_proposal'] },
+    ]
+    const modelsUsed: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: makeRegistry(),
+      modelCards: escalateCards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        modelsUsed.push(card.model)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 4096, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 4,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async () => {
+        throw new Error('Flash reviewer transient failure')
+      },
+    })
+
+    const run = await coordinator.delegate({
+      parentTurnId: 'turn_reviewlock',
+      objective: 'Review the wiring of the recently changed delegation module thoroughly.',
+      kind: 'review',
+      profile: 'reviewer',
+      scope: { files: ['src/test.ts'] },
+      budget: { maxRetries: 1, maxTurns: 4, maxTokens: 4096, timeoutMs: 30000 },
+    })
+
+    // Only the cheap model ran — no Pro escalation despite maxRetries > 0.
+    assert.ok(!modelsUsed.includes('deepseek-pro'), `reviewer must not escalate to Pro, got: ${modelsUsed.join(',')}`)
+    assert.equal(modelsUsed.length, 1)
+    assert.equal(modelsUsed[0], 'cheap-flash')
+    assert.notEqual(run.selectedModel, 'deepseek-pro')
+  })
+
   it('blocks exploration worker when scope exceeds maxFiles budget without acquiring semantic locks', async () => {
     let runtimeCalled = false
     const coordinator = new DelegationCoordinator({

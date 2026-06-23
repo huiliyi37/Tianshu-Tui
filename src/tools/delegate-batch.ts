@@ -38,6 +38,10 @@ const taskSchema = z.object({
   authority: authorityStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
+  /** Indices (into this batch's tasks array) this task depends on — the
+   *  referenced tasks run first. Enforced by WorkOrderQueue via stable
+   *  `batch:N` ids. */
+  dependsOn: z.array(z.number().int().nonnegative()).optional(),
 })
 
 const inputSchema = z.object({
@@ -121,6 +125,7 @@ export function createDelegateBatchTool(
                 authority: { type: 'string', description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng).' },
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
+                dependsOn: { type: 'array', items: { type: 'integer' }, description: 'Indices of tasks in this batch that must finish first (the referenced tasks run before this one). E.g. a test task that depends on the source task it covers.' },
               },
               required: ['objective'],
             },
@@ -159,6 +164,30 @@ export function createDelegateBatchTool(
         }
       }
 
+      // Validate dependsOn indices: must point at another task in this batch.
+      // Out-of-range / self-reference is a malformed plan — fail loud rather than
+      // silently dropping the dependency (which would let a dependent run early).
+      const taskCount = parsed.data.tasks.length
+      const badDeps: string[] = []
+      for (let i = 0; i < taskCount; i++) {
+        const deps = parsed.data.tasks[i]!.dependsOn
+        if (!deps?.length) continue
+        for (const d of deps) {
+          if (d === i) badDeps.push(`task[${i}] depends on itself`)
+          else if (d >= taskCount) badDeps.push(`task[${i}] depends on out-of-range index ${d} (batch has ${taskCount} tasks)`)
+        }
+      }
+      if (badDeps.length > 0) {
+        return {
+          content: [
+            `delegate_batch blocked: invalid dependsOn references.`,
+            ...badDeps.map(b => `  ${b}`),
+            `dependsOn entries must be 0-based indices of OTHER tasks in the same batch.`,
+          ].join('\n'),
+          isError: true,
+        }
+      }
+
       // T9 P3: one shared streamer — events from all workers interleave with labels.
       // T4: also fan out structured per-worker updates for the subagent panel.
       const textStreamer = params.onOutput ? createActivityStreamer(params.onOutput) : undefined
@@ -179,13 +208,19 @@ export function createDelegateBatchTool(
         : undefined
       const requests: DelegationRequest[] = parsed.data.tasks.map((t, i) => {
         taskAuthorityMap.set(i, t.authority)
+        // `batch:${i}` is a stable work-order id (see deriveStableWorkOrderId);
+        // dependsOn indices resolve to those same ids so the queue can order them.
+        const dependencies = t.dependsOn?.length
+          ? t.dependsOn.map(d => `batch:${d}`)
+          : undefined
         return {
-        parentTurnId: `${params.toolUseId}:${i}`,
+        parentTurnId: `${params.toolUseId}:batch:${i}`,
         objective: t.objective,
         kind: t.kind ?? 'code_search',
         profile: (t.profile ?? DEFAULT_DELEGATE_PROFILE) as import('../agent/work-order.js').WorkerProfile,
         authority: t.authority,
         scope: { files: t.files, symbols: t.symbols },
+        dependencies,
         reviewDepth: params.reviewDepth,
         delegationDepth: params.delegationDepth ?? 0,
         sessionTurn: params.sessionTurnCount,
@@ -193,8 +228,12 @@ export function createDelegateBatchTool(
         }
       })
 
-      // Progressive task cap: trim to the allowed slice on early turns
-      const cap = progressiveTaskCap(params.sessionTurnCount)
+      // Progressive task cap: trim to the allowed slice on early turns.
+      // BUT when the batch declares dependencies, trimming could drop an upstream
+      // task and leave its dependents permanently blocked — so a dependency-aware
+      // batch bypasses the cap (the queue already serializes it into waves).
+      const hasDeps = requests.some(r => r.dependencies?.length)
+      const cap = hasDeps ? requests.length : progressiveTaskCap(params.sessionTurnCount)
       let trimmedNote = ''
       let dispatched = requests
       if (requests.length > cap) {
