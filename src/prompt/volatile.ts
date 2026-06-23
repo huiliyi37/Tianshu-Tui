@@ -272,7 +272,16 @@ function escapeXml(text: string): string {
     .replaceAll('"', '&quot;')
 }
 
-/** Build stable volatile block — excludes per-turn dynamic sections for exact-prefix cache stability. */
+/**
+ * Build stable volatile block — excludes per-turn dynamic sections for exact-prefix cache stability.
+ *
+ * This strip list is the SINGLE SOURCE OF TRUTH for what stays in the frozen
+ * prefix vs. what is dynamic. buildVolatileBlockInternal must only render the
+ * KEEP set (fields NOT stripped below); anything stripped here is rendered in
+ * buildDynamicAppendixParts (and, for habituated constants, the <consolidated>
+ * block). Re-adding a stripped field's rendering to buildVolatileBlockInternal
+ * would be dead code (it is always undefined by the time the internal runs).
+ */
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
@@ -343,9 +352,9 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Sections that rarely change go first so their bytes stay in cache;
   // sections that change every turn go last so only the tail is new.
 
-  // star-domain: rendered ONLY in frozen base (buildVolatileBlockInternal).
-  // Skip here — frozen already has it. Previously duplicated, causing the motto
-  // to appear twice per turn (once in <consolidated>, once in <context-update>).
+  // star-domain: NOT rendered here. As a session constant it is promoted into
+  // the <consolidated> block via habituation (engine.ts immediatePromote on
+  // DeepSeek), so emitting it in the per-turn appendix would duplicate the motto.
 
   // Historical lessons: rarely change after first few turns
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
@@ -687,10 +696,6 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push('<locus relation="world">你在一个外部项目中工作。遵循项目自身的约定（AGENTS.md + .rivet.md）。验证深度匹配任务复杂度：简单修改跑 related tests，跨模块改动跑 full suite。</locus>')
   }
 
-  if (ctx.activeDomain) {
-    parts.push(`<star-domain name="${escapeXml(ctx.activeDomain.name)}" motto="${escapeXml(ctx.activeDomain.motto)}">${escapeXml(ctx.activeDomain.volatileBlock)}</star-domain>`)
-  }
-
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
     // When codebase-index is present it already contains the module directory table
@@ -721,79 +726,23 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(truncateBlock(ctx.projectIndexBlock, 4_000, 'codebase-index'))
   }
 
-  // Only render git status if explicitly provided — no cache fallback here.
-  // buildStableVolatileBlock passes gitStatus: undefined to keep FROZEN prefix stable;
-  // buildDynamicAppendix has its own cache fallback for the fresh git status.
-  const git = ctx.gitStatus ? summarizeGitStatus(ctx.gitStatus) : undefined
-  if (git) {
-    const lines = git.split('\n')
-    const commitIdx = lines.findIndex(l => l.startsWith('Recent commits:'))
-    if (commitIdx >= 0) {
-      const statusPart = lines.slice(0, commitIdx).join('\n').trim()
-      const commitsPart = lines.slice(commitIdx + 1).join('\n').trim()
-      if (statusPart) parts.push(`<git-status>\n${escapeXml(statusPart)}\n</git-status>`)
-      if (commitsPart) parts.push(`<recent-commits>\n${escapeXml(commitsPart)}\n</recent-commits>`)
-    } else {
-      parts.push(`<git-status>\n${escapeXml(git)}\n</git-status>`)
-    }
-  }
-
   if (ctx.workingSet && ctx.workingSet.length > 0) {
     const files = ctx.workingSet.map(file => `<file>${escapeXml(file)}</file>`).join('\n')
     parts.push(`<working-set>\n${files}\n</working-set>`)
-  }
-
-  // Harness-only fields omitted from LLM context (direction A: hard separation)
-
-  if (ctx.toolHistory && ctx.toolHistory.length > 0) {
-    const entries = ctx.toolHistory.map(e => {
-      const attrs = [`tool="${escapeXml(e.tool)}"`, `target="${escapeXml(e.target)}"`, `status="${e.status}"`]
-      if (e.error) attrs.push(`error="${escapeXml(e.error)}"`)
-      return `  <tool-summary ${attrs.join(' ')} />`
-    }).join('\n')
-    parts.push(`<tool-history recent="${ctx.toolHistory.length}">\n${entries}\n</tool-history>`)
-  }
-
-  if (ctx.taskProgress && ctx.taskProgress.completed.length > 0) {
-    const done = ctx.taskProgress.completed.map(s => `    <done>${escapeXml(s)}</done>`).join('\n')
-    const remaining = ctx.taskProgress.remaining.length > 0
-      ? '\n' + ctx.taskProgress.remaining.map(s => `    <next>${escapeXml(s)}</next>`).join('\n')
-      : ''
-    parts.push(`<task-progress steps="${ctx.taskProgress.completed.length}" current="${escapeXml(ctx.taskProgress.current)}">\n${done}${remaining}\n  </task-progress>`)
-  }
-
-  // Repair hint: routed through A1 harness-advisory bus
-
-  if (ctx.decisions && ctx.decisions.length > 0) {
-    const entries = ctx.decisions.map(d => `  <decision>${escapeXml(d)}</decision>`).join('\n')
-    parts.push(`<decisions recent="${ctx.decisions.length}">\n${entries}\n</decisions>`)
   }
 
   if (ctx.sessionMemoryBlock) {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
   }
 
-  if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
-    const { selected } = scoreLessons(ctx.playbookLessons, {
-      query: ctx.recentQuery,
-      recentToolTargets: ctx.toolHistory?.map(t => t.target),
-    })
-    if (selected.length > 0) {
-      const lessons = selected
-        .map(b => {
-          const base = `- ${escapeXml(b.lesson)} (${escapeXml(b.context)})`
-          return b.details ? `${base}\n  details: ${escapeXml(b.details)}` : base
-        })
-        .join('\n')
-      parts.push(`<historical-lessons>\n${lessons}\n</historical-lessons>`)
-      ctx.onLessonsRendered?.(selected.map(b => b.id))
-    }
-  }
-
-
-  // NOTE: plan-mode block is rendered in buildDynamicAppendix (cache-safe),
-  // not here — buildStableVolatileBlock forces planModeState undefined for the
-  // frozen base, so rendering it here would be dead code.
+  // NOTE: per-turn dynamic fields (activeDomain, gitStatus, toolHistory,
+  // taskProgress, decisions, playbookLessons, planModeState, worktreeReality,
+  // …) are NOT rendered here. buildStableVolatileBlock — the sole caller — forces
+  // them undefined to keep the FROZEN prefix byte-stable; they are rendered in
+  // buildDynamicAppendixParts (appendix) and, for habituated session-constants
+  // like activeDomain, in the <consolidated> block (see engine.ts habituation).
+  // The single source of truth for what stays frozen vs. dynamic is the strip
+  // list in buildStableVolatileBlock.
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
 }
