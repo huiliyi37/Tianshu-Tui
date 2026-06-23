@@ -2,25 +2,33 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('cobalt') })
+afterEach(() => { setTheme('tianshu') })
 
 describe('getTheme', () => {
-  it('defaults to cobalt theme (钴蓝·冷调中性 — oklch 调和，antigravity 精炼继任者)', () => {
-    assert.equal(getActiveThemeName(), 'cobalt')
+  it('defaults to tianshu theme', () => {
+    assert.equal(getActiveThemeName(), 'tianshu')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#61aef4') // 钴蓝 — 唯一 accent
-    assert.equal(theme.success, '#58cbb4') // 青绿 ok
-    assert.equal(theme.error, '#ed7665')   // 珊瑚砖红
+    assert.equal(theme.primary, '#d4a574') // 星金 accent
+    assert.equal(theme.success, '#6f9b91') // 归航青
+    assert.equal(theme.error, '#c1655c')   // 朱砂赤
     assert.notEqual(theme.primary, '#d77757') // 不是 Claude 品牌橙
     assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
   })
 
-  it('cobalt uses cool-white user mark + cool gray body text', () => {
+  it('tianshu uses cinnabar user mark + neutral body text', () => {
     const theme = getTheme(3)
+    assert.equal(theme.userColor, '#d4453a')      // 朱砂印 ▌ mark
+    assert.equal(theme.assistantColor, '#c5c8d2') // 亮灰正文
+    assert.equal(theme.muted, '#9497a6')          // 元信息灰
+    assert.equal(theme.pulseActive, '#d4a574')    // 星金 active pulse
+  })
+
+  it('cobalt still available via explicit switch', () => {
+    setTheme('cobalt')
+    const theme = getTheme(3)
+    assert.equal(theme.primary, '#61aef4') // 钴蓝 — 唯一 accent
     assert.equal(theme.userColor, '#e6ecf2')      // 冷调亮白 ▌ mark
     assert.equal(theme.assistantColor, '#bdc3ca') // 冷中性灰正文
-    assert.equal(theme.muted, '#9ca5b3')          // 元信息灰 (提亮，深色背景不疲劳)
-    assert.equal(theme.pulseActive, '#61aef4')    // 钴蓝 active pulse
   })
 
   it('antigravity still available via explicit switch (cool azure accent)', () => {
@@ -57,6 +65,7 @@ describe('getTheme', () => {
   })
 
   it('returns 256-color fallback when colorLevel < 3 (cobalt → blue accent)', () => {
+    setTheme('cobalt')
     const theme = getTheme(1)
     assert.equal(theme.primary, 'blue')
     assert.equal(theme.error, 'red')

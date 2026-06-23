@@ -9,8 +9,14 @@
  *   │                           ·                     ·                      │
  *   │                                  ·                                     │
  *   │                                                                        │
- *   │                      ✦   Ｔ Ｉ Ａ Ｎ Ｓ Ｈ Ｕ   ✦                      │
- *   │                         天 枢  ·  Tiānshū                              │
+ *   │    ████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗██╗   ██╗             │
+ *   │    ╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║             │
+ *   │       ██║   ██║███████║██╔██╗ ██║███████╗███████║██║   ██║             │
+ *   │       ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██║   ██║             │
+ *   │       ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║╚██████╔╝             │
+ *   │       ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝              │
+ *   │                                                                        │
+ *   │                              天 枢  ·  #5569                            │
  *   │                                                                        │
  *   │               deepseek-v4  ·  opencode-tui/  ·  2fe31f42               │
  *   │                                                                        │
@@ -87,6 +93,16 @@ function renderDipperRow(rowIdx: number, theme: RivetTheme): string {
   return out
 }
 
+// TIANSHU 大字 Block ASCII 标识 (6行高，55列宽)
+const BRAND_LOGO = [
+  '████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗██╗   ██╗',
+  '╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║',
+  '   ██║   ██║███████║██╔██╗ ██║███████╗███████║██║   ██║',
+  '   ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██║   ██║',
+  '   ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║╚██████╔╝',
+  '   ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝'
+]
+
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
   const boxWidth = Math.min(80, cols)
@@ -117,20 +133,21 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     out.push(wrapLine(''))
 
     // 2. 大字品牌标识
-    const starGlyph = color('✦', theme.pulseAlert || theme.userColor)
-    const brandText = `${starGlyph}   ${color('Ｔ Ｉ Ａ Ｎ Ｓ Ｈ Ｕ', theme.primary, { bold: true })}   ${starGlyph}`
-    out.push(wrapLine(brandText))
+    for (const line of BRAND_LOGO) {
+      out.push(wrapLine(color(line, theme.primary, { bold: true })))
+    }
+    out.push(wrapLine(''))
 
-    // 3. 中文与拼音
-    const subText = `${color('天 枢', theme.primary, { bold: true })}  ${color('·', theme.dim)}  ${color('Tiānshū', theme.secondary || theme.muted)}`
+    // 3. 中文副标题
+    let subText = color('天 枢', theme.primary, { bold: true })
+    if (input.numericId) {
+      subText += `  ${color('·', theme.dim)}  ${color(`#${input.numericId}`, theme.primary, { bold: true })}`
+    }
     out.push(wrapLine(subText))
     out.push(wrapLine(''))
 
     // 4. 元信息
-    let metaText = `${color(input.modelName, theme.secondary || theme.muted)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}`
-    if (input.numericId) {
-      metaText = `${color(input.modelName, theme.secondary || theme.muted)}  ${color('·', theme.dim)}  ${color(`#${input.numericId}`, theme.primary, { bold: true })}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}`
-    }
+    const metaText = `${color(input.modelName, theme.secondary || theme.muted)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}`
     out.push(wrapLine(metaText))
     out.push(wrapLine(''))
 
@@ -154,7 +171,7 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
   const out: string[] = []
   const starGlyph = color('✦', theme.pulseAlert || theme.userColor)
   out.push(`${starGlyph}  ${color('T I A N S H U', theme.primary, { bold: true })}  ${starGlyph}`)
-  out.push(color(`Tiānshū · 天枢`, theme.secondary || theme.muted))
+  out.push(color(`天 枢`, theme.secondary || theme.muted))
   out.push(color(`${input.modelName} · ${dir}/ · ${session}`, theme.dim))
   out.push('')
   out.push(color('Ctrl+C interrupt    Ctrl+Esc palette    Ctrl+R history', theme.dim))

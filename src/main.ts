@@ -651,7 +651,7 @@ async function main() {
   // ── Clear screen ─────────────────────────────────────────────
   stdout.write('\x1B[2J\x1B[H')
 
-  // ── Welcome message（精简 ≤3 行，自适应终端宽） ───────────────
+  // ── Welcome message（带边框与大标识品牌设计） ─────────────────
   const existingMsgCount = ctx.session.getMessages().length
   const welcomeLines = formatWelcome({
     modelName,
@@ -664,12 +664,11 @@ async function main() {
   for (const line of welcomeLines) {
     stdout.write(line + '\n')
   }
-  // 欢迎与底部 chrome 之间留一空行
-  stdout.write('\n')
 
-  process.stderr.write('\n')
-
-  // 首屏渲染底部 chrome（GlanceBar + 输入框），不必等第一次按键
+  // 自然流：欢迎页写完后直接渲染底部 chrome（GlanceBar + 输入框），
+  // 输入框以 append 模式落在欢迎页正下方。不再用 padding 撑底——padding 会
+  // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
+  // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
 }
 
