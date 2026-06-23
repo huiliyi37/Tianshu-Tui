@@ -455,9 +455,12 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(ctx.crossSessionEvents)
   }
 
-  if (ctx.companionPresence) {
-    parts.push(ctx.companionPresence)
-  }
+  // Companion presence is NOT rendered into the model context — it is ambient
+  // cross-session metadata intended for the desktop sidecar UI, not the agent.
+  // Injecting it into the prompt creates a false multi-agent coordination
+  // signal and wastes context-window tokens with no task value. The heartbeat
+  // hook still writes .rivet/presence.json for UI consumption.
+  // (ctx.companionPresence rendering removed 2026-06-23)
 
   // Unified tool context: theta + EFE + top-3 ranking.
   // Replaces old separate affordance-hint + policy-guidance blocks.
@@ -631,7 +634,6 @@ export function assignSalience(blockContent: string): number {
   if (blockContent.startsWith('<tool-history>')) return 0.5
   if (blockContent.startsWith('<session-state>')) return 0.4 // legacy fallback
   if (blockContent.startsWith('<cross-session')) return 0.4
-  if (blockContent.startsWith('<companion-presence>')) return 0.4 // ambient presence, housekeeping tier
   if (blockContent.startsWith('<read-file-dedup-hint>')) return 0.3
   // Output-style nudge (Phase 2B): tiny + governs the whole reply's prose —
   // keep it above the drop line so budget pressure never silently removes it.

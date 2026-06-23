@@ -792,7 +792,6 @@ describe('GWT salience and Top-K selection', () => {
       assert.equal(assignSalience('<task-depth layer="system">…</task-depth>'), 0.7)
       assert.equal(assignSalience('<plan-methodology route="full">…</plan-methodology>'), 0.7)
       assert.equal(assignSalience('<available-skills note="…">…</available-skills>'), 0.6)
-      assert.equal(assignSalience('<companion-presence>\n…\n</companion-presence>'), 0.4)
     })
 
     it('mentions/task-depth survive Top-K when a tiny budget would drop a 0.5 default', () => {
