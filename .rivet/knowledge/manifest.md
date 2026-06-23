@@ -3,6 +3,21 @@
 This file is a retrieval map, not prompt content.
 Its purpose is to help agents find the right documents before modifying sensitive areas — prompt, identity, memory, recall, auto-writer, verification, or ownership.
 
+## Architecture
+
+### .rivet/knowledge/project-architecture.md
+- kind: architecture-canonical
+- contents: 双端架构（TUI + 桌面端）、目录职责、构建与测试、提交约定
+- load_when:
+  - 首次进入项目
+  - 不理解 src/tui/ 与 desktop/ 的关系
+  - 需要区分改动应落在哪一端
+  - 被问到项目整体架构
+- guardrail:
+  - 两套独立前端（Ink TUI / Tauri React），共享 src/agent/ 核心
+  - desktop/ 不参与根项目 tsconfig 和 tsup 构建
+  - 提交前缀 `feat(tui):` vs `feat(desktop):` 不可混淆
+
 ## Identity and clarity anchors
 
 ### CLAUDE.md
@@ -132,6 +147,19 @@ Its purpose is to help agents find the right documents before modifying sensitiv
 - load_when:
   - modifying test infrastructure
   - changing test patterns or conventions
+
+### .rivet/knowledge/pre-coding-checklist.md
+- kind: pre-coding-methodology
+- contents: four pre-coding scans derived from f13b0b82 defect analysis — temporal readiness, sentinel poisoning audit, worst-case numeric walk-through, test-fixture vs production-sequence alignment
+- load_when:
+  - writing new code that consumes multiple async-initialized fields
+  - introducing stateful parameters (α, threshold, window size) with "smooth/robust" claims
+  - using business-domain legal values as initialization sentinels (e.g. `ratio === 1`)
+  - writing tests whose setUp order may differ from production call sequence
+  - modifying agent behavior or prompt rules that could benefit from pre-coding rigor
+- guardrail:
+  - these scans must run BEFORE writing code, not after
+  - each scan takes ≤30 seconds; skip = accept f13b0b82-class defects
 
 ### .rivet/knowledge/sibling-test-coverage.md
 - kind: testing-methodology

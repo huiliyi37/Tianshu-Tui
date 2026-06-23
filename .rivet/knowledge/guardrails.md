@@ -27,6 +27,12 @@ Rule — 复杂 spec / 跨模块集成任务在实现前和提交前各做一轮
 
 没有能打红错误实现的测试，不能声称 spec 已验证；绿测试必须覆盖目标语义路径，而不是让输入退化到无效状态绕过语义。
 
+## Pre-coding scans（开发前四道扫描）
+
+Observed failure: f13b0b82 引入 contextCalibrationRatio 校准机制，五个表面 bug 根因同为"把运行时代码当纯函数推理"。实现者跳过了四道开发前检查：字段就绪时序、哨兵值审毒、极端值手推、测试 fixture 对齐。
+
+Rule — 引入多字段组合计算、有状态参数、或哨兵值判断的函数前，跑 `.rivet/knowledge/pre-coding-checklist.md` 中的四道扫描。每道 ≤30 秒。跳过 = 接受 f13b0b82 级缺陷。
+
 ### 强制机制（不靠自觉）
 
 **提交前必须让 ReviewRouter / adversarial_verifier 做 spec→dataflow 交叉核对。** 这不是可选建议，是交付流程的固定步骤：
