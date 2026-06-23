@@ -153,6 +153,32 @@ body {
 .review-file-viewer { margin-top: var(--space-3); }
 .review-file-header { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
 
+/* Diff viewer — hunk-aware */
+.diff-hunked { font-size: 12px; font-family: 'SF Mono', 'Fira Code', monospace; line-height: 1.5; }
+.diff-toolbar { display: flex; justify-content: flex-end; padding: var(--space-1) 0; }
+.diff-toggle {
+  padding: 2px 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text-dim); font-size: 11px; cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.diff-toggle.active { background: var(--accent); color: white; border-color: var(--accent); }
+.diff-hunk-group { margin-bottom: var(--space-2); }
+.diff-row { display: flex; align-items: flex-start; white-space: pre-wrap; word-break: break-all; }
+.diff-ln-old, .diff-ln-new, .diff-ln {
+  flex-shrink: 0; width: 36px; text-align: right; padding-right: 6px;
+  color: var(--text-faint); user-select: none; font-size: 11px;
+}
+.diff-sign { flex-shrink: 0; width: 14px; text-align: center; user-select: none; }
+.diff-text { flex: 1; min-width: 0; }
+.diff-row.diff-add { background: color-mix(in srgb, #22c55e 10%, transparent); }
+.diff-row.diff-del { background: color-mix(in srgb, #ef4444 10%, transparent); }
+.diff-row.diff-hunk { color: var(--text-faint); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 2px 0; }
+.diff-row.diff-meta { color: var(--text-faint); }
+/* Side-by-side */
+.diff-split-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+.diff-split-col { background: var(--panel); overflow-x: auto; }
+.diff-split-header { color: var(--text-faint); padding: 2px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+
 /* Terminal panel — placeholder. Height reserved for future PTY. */
 .terminal-panel {
   flex-shrink: 0;
