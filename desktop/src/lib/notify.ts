@@ -3,6 +3,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification'
+import type { NotifPref } from './persist'
 
 let permission: Promise<boolean> | null = null
 
@@ -22,16 +23,16 @@ async function ensurePermission(): Promise<boolean> {
 }
 
 /**
- * Fire an async OS notification — only when the window is NOT focused, so we
- * never nag during active use. No-ops gracefully outside Tauri (browser dev).
+ * Check whether the notification should fire given the user's preference and
+ * current window focus state. 'never' blocks all; 'background' blocks when the
+ * window is focused (no nag during active use); 'always' fires regardless.
  */
-export async function notify(title: string, body: string): Promise<void> {
-  if (typeof document !== 'undefined' && document.hasFocus()) return
-  try {
-    if (await ensurePermission()) sendNotification({ title, body })
-  } catch {
-    // not running under Tauri, or permission denied — silent
-  }
+export function shouldNotify(pref: NotifPref): boolean {
+  if (pref === 'never') return false
+  if (pref === 'always') return true
+  // 'background' — fire only when the window is NOT focused
+  if (typeof document !== 'undefined' && document.hasFocus()) return false
+  return true
 }
 
 // ── S: routed notifications (click → focus window + jump to session) ──
@@ -69,9 +70,15 @@ export function initNotificationRouting(onPick: (sessionId: string) => void): vo
   })()
 }
 
-/** Like notify(), but tags the notification so a click can jump to `sessionId`. */
-export async function notifyRouted(title: string, body: string, sessionId: string): Promise<void> {
-  if (typeof document !== 'undefined' && document.hasFocus()) return
+/** Like notify(), but tags the notification so a click can jump to `sessionId`.
+ *  Pass the user's notification preference to gate firing. */
+export async function notifyRouted(
+  title: string,
+  body: string,
+  sessionId: string,
+  pref: NotifPref = 'background',
+): Promise<void> {
+  if (!shouldNotify(pref)) return
   try {
     if (!(await ensurePermission())) return
     const id = nextId++

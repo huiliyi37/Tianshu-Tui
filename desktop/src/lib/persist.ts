@@ -12,6 +12,7 @@ const KEY_REVIEW = 'tianshu.reviewVisible'
 const KEY_TERMINAL = 'tianshu.terminalVisible'
 const KEY_TABS = 'tianshu.openTabs'
 const KEY_SPLIT_MODE = 'tianshu.splitMode'
+const KEY_NOTIF_PREF = 'tianshu.notifPref'
 
 // ── Split mode (Phase 3 preview, persisted now) ──
 
@@ -27,6 +28,22 @@ export function loadSplitMode(): SplitMode {
 
 export function saveSplitMode(mode: SplitMode): void {
   try { localStorage.setItem(KEY_SPLIT_MODE, mode) } catch { /* non-fatal */ }
+}
+
+// ── Notification preference ──
+
+export type NotifPref = 'never' | 'background' | 'always'
+
+export function loadNotifPref(): NotifPref {
+  try {
+    const v = localStorage.getItem(KEY_NOTIF_PREF)
+    if (v === 'never' || v === 'background' || v === 'always') return v
+  } catch { /* non-fatal */ }
+  return 'background'
+}
+
+export function saveNotifPref(pref: NotifPref): void {
+  try { localStorage.setItem(KEY_NOTIF_PREF, pref) } catch { /* non-fatal */ }
 }
 
 // ── Tool density ──

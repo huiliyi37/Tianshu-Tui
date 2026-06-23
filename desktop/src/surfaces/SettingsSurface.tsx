@@ -4,7 +4,7 @@ import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
-import { loadDefaultAutonomy, saveDefaultAutonomy, type ToolDensity } from '../lib/persist'
+import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
 import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
@@ -22,12 +22,19 @@ const DENSITY_LABEL: Record<ToolDensity, string> = {
   detailed: '详细',
 }
 
+const NOTIF_LABEL: Record<NotifPref, string> = {
+  never: '从不',
+  background: '仅后台',
+  always: '始终',
+}
+
 export function SettingsSurface() {
   const health = useHealth()
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
+  const [notifPref, setNotifPref] = useState<NotifPref>(() => loadNotifPref())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -41,6 +48,11 @@ export function SettingsSurface() {
 
   const pickDensity = (d: ToolDensity) => {
     dispatch({ type: 'setToolDensity', density: d })
+  }
+
+  const pickNotif = (n: NotifPref) => {
+    setNotifPref(n)
+    saveNotifPref(n)
   }
 
   return (
@@ -82,6 +94,22 @@ export function SettingsSurface() {
           ))}
         </div>
         <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。</div>
+      </section>
+
+      <section className="settings-group">
+        <h4>通知</h4>
+        <div className="seg">
+          {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
+            <button
+              key={n}
+              className={`seg-item ${notifPref === n ? 'active' : ''}`}
+              onClick={() => pickNotif(n)}
+            >
+              {NOTIF_LABEL[n]}
+            </button>
+          ))}
+        </div>
+        <div className="meta">控制何时收到系统通知：从不（完全静默）、仅后台（窗口失焦时提醒）、始终（全部提醒）。</div>
       </section>
 
       <section className="settings-group">

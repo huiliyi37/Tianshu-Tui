@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useSessions } from './queries'
-import { initNotificationRouting, notifyRouted } from '../lib/notify'
+import { initNotificationRouting, notifyRouted, shouldNotify } from '../lib/notify'
+import { loadNotifPref } from '../lib/persist'
 import { useUiDispatch } from './store'
 import { isAutonomous } from '../lib/autonomy'
 
@@ -29,6 +30,9 @@ export function useGlobalNotifications(): void {
     const list = sessions.data
     if (list === undefined) return
 
+    const pref = loadNotifPref()
+    if (!shouldNotify(pref)) return
+
     const snapshot = () =>
       new Map(list.map((s) => [s.id, { status: s.status, pendingApprovals: s.pendingApprovals }]))
 
@@ -48,13 +52,13 @@ export function useGlobalNotifications(): void {
         s.pendingApprovals > 0 &&
         (!was || was.pendingApprovals === 0)
       ) {
-        void notifyRouted('需要批准', `${label} 有 ${s.pendingApprovals} 项待你审批`, s.id)
+        void notifyRouted('需要批准', `${label} 有 ${s.pendingApprovals} 项待你审批`, s.id, pref)
       }
       if (was && was.status !== s.status) {
         if (s.status === 'completed') {
-          void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, s.id)
+          void notifyRouted('任务完成', `${label} 已完成，点击查看结果`, s.id, pref)
         } else if (s.status === 'failed') {
-          void notifyRouted('任务失败', `${label} 失败：${s.error || '未知错误'}`, s.id)
+          void notifyRouted('任务失败', `${label} 失败：${s.error || '未知错误'}`, s.id, pref)
         }
       }
     }
