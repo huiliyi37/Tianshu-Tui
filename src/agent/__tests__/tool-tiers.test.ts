@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import {
   CORE_TOOLS,
   EXTENDED_TOOLS,
@@ -106,6 +107,42 @@ describe('tool-tiers', () => {
         () => validateTierInvariant(['read_file', 'web_search'], ['read_file', 'bash']),
         /invariant violated/,
       )
+    })
+  })
+
+  describe('integration: real registry alignment', () => {
+    it('CORE_TOOLS names match tools actually registered in the kernel registry', () => {
+      const reg = createDefaultToolRegistry()
+      const kernelNames = new Set(reg.getAllNames())
+      const interactiveOnly = new Set([
+        'delegate_task', 'delegate_batch', 'team_orchestrate', 'council_convene',
+        'recall_capsule', 'ask_user_question', 'repo_graph', 'semantic_search',
+        'apply_patch', 'plan_task', 'deliver_task', 'undo', 'memory', 'plan',
+      ])
+      for (const name of CORE_TOOLS) {
+        assert.ok(
+          kernelNames.has(name) || interactiveOnly.has(name),
+          `CORE tool "${name}" not found in kernel registry or interactive set`,
+        )
+      }
+    })
+
+    it('resolveMainToolTier produces a list containing critical tools', () => {
+      const tier = resolveMainToolTier(null, true)
+      const mustHave = ['plan', 'skill', 'request_path_access', 'memory', 'deliver_task',
+        'read_file', 'edit_file', 'bash', 'grep', 'run_tests', 'delegate_task']
+      for (const name of mustHave) {
+        assert.ok(tier.includes(name as never), `"${name}" missing from resolved tier`)
+      }
+    })
+
+    it('EXTENDED tools are NOT in the default tier (would defeat gating)', () => {
+      const tier = new Set(resolveMainToolTier(null, true))
+      const mustExclude = ['web_search', 'web_fetch', 'browser', 'council_convene',
+        'team_orchestrate', 'apply_patch', 'undo']
+      for (const name of mustExclude) {
+        assert.ok(!tier.has(name), `"${name}" should NOT be in CORE tier`)
+      }
     })
   })
 })

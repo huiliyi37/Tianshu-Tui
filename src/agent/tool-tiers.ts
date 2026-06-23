@@ -36,8 +36,7 @@ export const CORE_TOOLS = [
   'git',
   'todo',
   // 规划与交付
-  'plan_submit',
-  'plan_close',
+  'plan',
   'plan_task',
   'deliver_task',
   'leave_mark',
@@ -48,6 +47,9 @@ export const CORE_TOOLS = [
   'memory',
   // 用户交互
   'ask_user_question',
+  // 路径与技能（首调澄清/路径授权/技能加载依赖，static prompt 直接引用）
+  'request_path_access',
+  'skill',
 ] as const
 
 /**
@@ -65,8 +67,6 @@ export const EXTENDED_TOOLS = [
   'recall_capsule',
   'apply_patch',
   'undo',
-  'request_path_access',
-  'skill',
   // desktop tools (create_document, create_spreadsheet, etc.)
   'create_document',
   'create_spreadsheet',
