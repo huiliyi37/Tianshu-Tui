@@ -1,5 +1,4 @@
 import type { TaskContract } from '../context/task-contract.js'
-import { isSocialOrTrivial } from '../context/task-contract.js'
 
 /**
  * Phantom continuation: detects the "model described an action but never emitted
@@ -51,7 +50,23 @@ const CONTINUE_HINT =
   '如果任务确实已完成，请明确给出结论而不是描述未执行的步骤。'
 
 /**
- * Pure decision function. Order: hard gates → contract signal → intent heuristic.
+ * Action-intent gate: the turn text must contain BOTH an action promise
+ * ("let me…", "接下来…") AND a tool verb (grep/read/edit/run…). This is the
+ * single source of truth shared by Layer 1 and Layer 2 — a pure-answer or
+ * social turn can never match both patterns simultaneously, so it serves as
+ * a stronger filter than isSocialOrTrivial on its own.
+ *
+ * Only the tail is inspected — the action promise (if any) sits at the end of
+ * the turn, and this keeps the match cheap on long outputs.
+ */
+function hasActionIntent(text: string): boolean {
+  const tail = text.length > 600 ? text.slice(-600) : text
+  return ACTION_PROMISE_PATTERN.test(tail) && TOOL_VERB_PATTERN.test(tail)
+}
+
+/**
+ * Pure decision function. Order: hard gates → contract signal (gated by
+ * action-intent) → standalone action-intent heuristic.
  */
 export function evaluatePhantomContinuation(
   input: PhantomContinuationInput,
@@ -68,8 +83,17 @@ export function evaluatePhantomContinuation(
   const text = streamedText.trim()
   if (text.length === 0) return NO_CONTINUE
 
+  // Action-intent gate is evaluated once and shared by both layers.
+  const intent = hasActionIntent(text)
+
   // ── Layer 1: task-contract signal (most reliable) ──
+  // An open contract warrants continuation, but ONLY when the turn text also
+  // shows action intent. Without this gate, pure-answer turns (user asks a
+  // question mid-task, agent answers correctly without a tool call) get
+  // force-continued because the contract is still open — producing phantom
+  // "continuation" noise after every conversational reply.
   if (
+    intent &&
     activeContract &&
     activeContract.isActionable &&
     activeContract.status !== 'ready_to_deliver' &&
@@ -79,13 +103,8 @@ export function evaluatePhantomContinuation(
   }
 
   // ── Layer 2: action-intent heuristic (fallback when no contract signal) ──
-  if (!isSocialOrTrivial(text)) {
-    // Only inspect the tail — the action promise (if any) is at the end of the
-    // turn, and this keeps the match cheap on long outputs.
-    const tail = text.length > 600 ? text.slice(-600) : text
-    if (ACTION_PROMISE_PATTERN.test(tail) && TOOL_VERB_PATTERN.test(tail)) {
-      return { shouldContinue: true, reason: 'action-intent', message: CONTINUE_HINT }
-    }
+  if (intent) {
+    return { shouldContinue: true, reason: 'action-intent', message: CONTINUE_HINT }
   }
 
   return NO_CONTINUE

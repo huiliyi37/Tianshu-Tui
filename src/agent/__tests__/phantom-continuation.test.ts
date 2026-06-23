@@ -50,15 +50,51 @@ describe('evaluatePhantomContinuation — hard gates', () => {
 })
 
 describe('evaluatePhantomContinuation — Layer 1 task-contract', () => {
-  it('continues when an actionable contract is still in progress', () => {
+  it('continues when an actionable contract is open AND text has action intent', () => {
     const d = evaluatePhantomContinuation({
       ...BASE,
-      streamedText: 'Here is a summary of the work so far.', // no action intent
+      streamedText: '让我 grep 一下相关代码，看看调用关系。',
       activeContract: contract({ status: 'executing' }),
     })
     assert.equal(d.shouldContinue, true)
     assert.equal(d.reason, 'contract-open')
     assert.ok(d.message.length > 0)
+  })
+
+  it('does NOT continue on pure-answer text even when contract is open', () => {
+    const d = evaluatePhantomContinuation({
+      ...BASE,
+      streamedText: '两者的主要区别在于缓存策略不同，Layer 1 不检查文本而 Layer 2 检查。',
+      activeContract: contract({ status: 'executing' }),
+    })
+    assert.equal(d.shouldContinue, false)
+  })
+
+  it('does NOT continue on social/trivial text even when contract is open', () => {
+    const d = evaluatePhantomContinuation({
+      ...BASE,
+      streamedText: '好的，了解了。',
+      activeContract: contract({ status: 'executing' }),
+    })
+    assert.equal(d.shouldContinue, false)
+  })
+
+  it('does NOT continue when contract open but action-promise without tool verb', () => {
+    const d = evaluatePhantomContinuation({
+      ...BASE,
+      streamedText: '让我来分析一下当前的情况。',
+      activeContract: contract({ status: 'executing' }),
+    })
+    assert.equal(d.shouldContinue, false)
+  })
+
+  it('does NOT continue when contract open but tool verb without action-promise', () => {
+    const d = evaluatePhantomContinuation({
+      ...BASE,
+      streamedText: '需要修改 src/tools/bash.ts 中的路径验证逻辑。',
+      activeContract: contract({ status: 'executing' }),
+    })
+    assert.equal(d.shouldContinue, false)
   })
 
   it('does not continue when the contract is ready_to_deliver', () => {
