@@ -13,6 +13,7 @@ import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router
 import type { AuthProvider } from '../auth/types.js'
 import type { PermissionConfig } from './permissions.js'
 import { getProviderProfile } from '../api/provider-profile.js'
+import { gateToolDefinitions } from './tool-tiers.js'
 
 export interface ModelSpec {
   id: string
@@ -44,6 +45,13 @@ export interface AgentConfigInput {
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
   permissions?: PermissionConfig
+  /** 主控工具门控。缺省 undefined → 全量（不门控）。 */
+  toolGating?: {
+    enabled: boolean
+    coreOverride?: readonly string[]
+    extraCore?: readonly string[]
+    domainTier?: readonly string[]
+  }
 }
 
 export interface MainAgentConfigInputParams {
@@ -83,12 +91,19 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
+    toolGating: params.config.agent.toolGating
+      ? {
+          enabled: params.config.agent.toolGating.enabled,
+          coreOverride: params.config.agent.toolGating.coreTools,
+          extraCore: params.config.agent.toolGating.extraCore,
+        }
+      : undefined,
  }
 }
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -108,10 +123,21 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
 
   const client = buildFallbackChain(primaryClient, provider, model, input)
 
+  // 工具门控：构造期与 updateTools() 共用同一过滤（gateToolDefinitions），
+  // 确保 MCP/LSP 异步注册后调用 updateTools 不会把 EXTENDED 工具整个还原。
+  const gatedTools = input.toolGating
+    ? gateToolDefinitions(input.toolDefinitions, {
+        enabled: input.toolGating.enabled,
+        coreOverride: input.toolGating.coreOverride,
+        extraCore: input.toolGating.extraCore,
+        domainTier: input.toolGating.domainTier,
+      })
+    : input.toolDefinitions
+
   const promptEngine = new PromptEngine({
     model: model.id,
     maxTokens: model.maxTokens,
-    staticCtx: { tools: input.toolDefinitions, modelFamily: detectModelFamily(model.id) },
+    staticCtx: { tools: gatedTools, modelFamily: detectModelFamily(model.id) },
     volatileCtx: createVolatileSnapshot({
       cwd,
       sessionMemoryBlock: input.sessionMemoryBlock,
@@ -143,6 +169,8 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     // to prevent reasoning_content accumulation and context window stalls.
     turnLevelThinking: provider.name === 'glm',
     permissions: input.permissions,
+    toolGating: input.toolGating,
+    prefixCacheStrategy: capabilities.prefixCacheStrategy,
  }
 }
 

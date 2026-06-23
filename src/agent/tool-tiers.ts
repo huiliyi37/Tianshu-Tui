@@ -50,6 +50,8 @@ export const CORE_TOOLS = [
   // 路径与技能（首调澄清/路径授权/技能加载依赖，static prompt 直接引用）
   'request_path_access',
   'skill',
+  // 换视角方法论：static prompt L80 直接指示使用，必须常驻（与 skill 同源）
+  'recall_capsule',
 ] as const
 
 /**
@@ -64,7 +66,6 @@ export const EXTENDED_TOOLS = [
   'council_convene',
   'team_orchestrate',
   'import_resource',
-  'recall_capsule',
   'apply_patch',
   'undo',
   // desktop tools (create_document, create_spreadsheet, etc.)
@@ -114,6 +115,61 @@ export function resolveMainToolTier(
 
   // 默认 CORE
   return CORE_TOOLS
+}
+
+/**
+ * 门控状态 — 描述一次 gateToolDefinitions 的全部输入。
+ *
+ * 语义分两档：
+ *  - allow-list（域级 mainToolTier 或 config coreOverride 显式给定时）：只保留清单内工具，
+ *    其余一律摘掉（用户显式接管，自负 MCP/LSP 被摘的后果）。
+ *  - deny-list（默认）：只摘 EXTENDED_SET 内的工具，CORE 与一切未分类工具
+ *    （MCP / LSP / 自定义注册）原样保留——避免误删用户显式装配的 MCP。
+ * 两档都对 exempt（extraCore ∪ mountedExtras）放行。
+ */
+export interface ToolGatingState {
+  /** config.toolGating.enabled。false → 不过滤，返回全集。 */
+  enabled: boolean
+  /** 域级 mainToolTier 覆盖（allow-list）。 */
+  domainTier?: readonly string[]
+  /** config.toolGating.coreTools 覆盖（allow-list）。 */
+  coreOverride?: readonly string[]
+  /** config.toolGating.extraCore — 永久挂回主控的 EXTENDED 工具。 */
+  extraCore?: readonly string[]
+  /** 运行时经 /tools enable 临时挂回的 EXTENDED 工具。 */
+  mountedExtras?: readonly string[]
+}
+
+/**
+ * 主控工具门控的唯一过滤入口（构造期与 updateTools 共用）。
+ *
+ * @param allDefs 全量工具定义（kernel + interactive + MCP/LSP）
+ * @param state   门控状态
+ * @returns 过滤后的工具定义（不修改入参）
+ */
+export function gateToolDefinitions<T extends { name: string }>(
+  allDefs: readonly T[],
+  state: ToolGatingState,
+): T[] {
+  if (!state.enabled) return [...allDefs]
+
+  const exempt = new Set<string>([...(state.extraCore ?? []), ...(state.mountedExtras ?? [])])
+
+  // allow-list 模式：域级 tier 优先，其次 config coreOverride
+  const allowList =
+    state.domainTier && state.domainTier.length > 0
+      ? state.domainTier
+      : state.coreOverride && state.coreOverride.length > 0
+        ? state.coreOverride
+        : null
+
+  if (allowList) {
+    const allow = new Set<string>([...allowList, ...exempt])
+    return allDefs.filter(d => allow.has(d.name))
+  }
+
+  // deny-list 模式（默认）：只摘 EXTENDED，保留 CORE + 未分类（MCP/LSP/自定义）
+  return allDefs.filter(d => !EXTENDED_SET.has(d.name) || exempt.has(d.name))
 }
 
 /** 判断工具是否在 CORE 层 */

@@ -140,6 +140,17 @@ export interface AgentConfig {
   coordinatorRef?: () => import('./coordinator.js').DelegationCoordinator | null
   /** Explicit opt-in for auto-delegation. Default false — workers cost API budget. */
   autoDelegateEnabled?: boolean
+  /** 主控工具门控配置。决定哪些 EXTENDED 工具从主控摘除（委派给 worker）。
+   *  updateTools() 复用此状态重新过滤，避免 MCP/LSP 异步注册后把门控整个还原。
+   *  缺省 undefined → 不门控（全量）。 */
+  toolGating?: {
+    enabled: boolean
+    coreOverride?: readonly string[]
+    extraCore?: readonly string[]
+    domainTier?: readonly string[]
+  }
+  /** 当前 provider 的前缀缓存策略 — 逃生口 /tools enable 用它量化挂载的缓存代价。 */
+  prefixCacheStrategy?: 'deepseek-native' | 'anthropic-cache-control' | 'none'
 }
 
 /**

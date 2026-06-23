@@ -129,7 +129,7 @@ describe('tool-tiers', () => {
 
     it('resolveMainToolTier produces a list containing critical tools', () => {
       const tier = resolveMainToolTier(null, true)
-      const mustHave = ['plan', 'skill', 'request_path_access', 'memory', 'deliver_task',
+      const mustHave = ['plan', 'skill', 'request_path_access', 'recall_capsule', 'memory', 'deliver_task',
         'read_file', 'edit_file', 'bash', 'grep', 'run_tests', 'delegate_task']
       for (const name of mustHave) {
         assert.ok(tier.includes(name as never), `"${name}" missing from resolved tier`)
