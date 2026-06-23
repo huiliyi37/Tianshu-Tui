@@ -19,6 +19,7 @@ import { rejectOnAbort } from './turn-boundary-abort.js'
 import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
 import { evaluateThinkingRetry } from './thinking-retry.js'
+import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import { debugLog } from '../utils/debug.js'
 import type { GoalTracker } from './goal-tracker.js'
 
@@ -181,6 +182,11 @@ export interface TurnOrchestratorDeps {
   setLatestFsWatcherState: (v: FsWatcherState) => void
   getConsecutiveNoToolTurns: () => number
   setConsecutiveNoToolTurns: (v: number) => void
+  getAutoContinueCount: () => number
+  setAutoContinueCount: (v: number) => void
+  getMaxAutoContinue: () => number
+  getActiveContract: () => import('../context/task-contract.js').TaskContract | undefined
+  getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
   getThinkingOnlyRetries: () => number
   setThinkingOnlyRetries: (v: number) => void
   getLastThinkingContent: () => string
@@ -756,6 +762,33 @@ export class TurnOrchestrator {
             `完成后输出 "GOAL ACHIEVED" 声明完成。`
           )
           continue  // re-enter the for loop for the next iteration
+        }
+
+        // ── Phantom continuation check ──
+        // The model produced a no-tool turn but its text describes an action it
+        // never actually took (emitted a tool call as prose), or an open task
+        // contract is still in progress. Auto-continue ONE bounded iteration
+        // instead of ending the turn and forcing the user to nudge. Skipped when
+        // /goal is active (handled above), when convergence/doom-loop already
+        // steers, or when the per-run budget is exhausted.
+        if (!tracker?.isActive()) {
+          const phantom = evaluatePhantomContinuation({
+            streamedText: this.deps.getStreamedText(),
+            activeContract: this.deps.getActiveContract(),
+            autoContinueCount: this.deps.getAutoContinueCount(),
+            maxAutoContinue: this.deps.getMaxAutoContinue(),
+            convergenceEscalated: this.deps.getDoomLoopLevel() !== 'none',
+          })
+          if (phantom.shouldContinue) {
+            this.deps.setAutoContinueCount(this.deps.getAutoContinueCount() + 1)
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+              signal!,
+              'phantom-continue-complete',
+            )
+            this.deps.appendSystemReminder(phantom.message)
+            continue  // re-enter the for loop for one more iteration
+          }
         }
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.

@@ -152,6 +152,11 @@ export const agentSchema = z.object({
   maxDelegationDepth: z.number().int().positive().default(2),
   /** Default max concurrent workers per team wave when input.maxParallel is unset. Clamped 1..5. */
   maxTeamParallel: z.number().int().min(1).max(5).default(3),
+  /**
+   * Max auto-continue iterations per run when a no-tool turn shows action intent
+   * or an open task contract (phantom tool-call recovery). 0 disables. Clamped 0..3.
+   */
+  maxAutoContinue: z.number().int().min(0).max(3).default(1),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */

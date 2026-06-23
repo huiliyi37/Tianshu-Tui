@@ -130,6 +130,7 @@ export class AgentLoop {
   thinkingOnlyRetries = 0
   lastThinkingContent = ''
   consecutiveNoToolTurns = 0
+  autoContinueCount = 0
   lastTurnTextFingerprint = ''
   lastTurnThinkingFingerprint = ''
   lastPrewarmAt = 0
@@ -412,6 +413,14 @@ export class AgentLoop {
             createdAt,
           })
         }
+        // P3: hot-refresh the session-memory volatile block so memories extracted
+        // during compaction are visible in THIS session's prompt — not just the
+        // next session. rebuildFrozenBase defers the actual volatileBlock swap to
+        // the next user message boundary, and compaction runs at turn 0, so this
+        // stays prefix-cache safe. Mirrors the /remember slash-command path.
+        try {
+          this.config.promptEngine.updateSessionMemory(persist.buildMemoryBlock())
+        } catch { /* non-critical: memories are already persisted to disk */ }
       },
       getAbortSignal: () => this.abortController?.signal,
       getActiveContract: () => this.taskContract,

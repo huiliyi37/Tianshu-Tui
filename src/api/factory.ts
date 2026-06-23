@@ -110,6 +110,7 @@ export function createProviderClient(
     useMaxCompletionTokens: provider.name === 'mimo' || provider.name === 'mimo-api' || provider.name === 'minimax',
     userAgent: provider.name === 'kimi' ? 'KimiCLI/1.0' : undefined,
     usageCalibrationFactor: provider.usageCalibrationFactor,
+    capabilities: { hasToolJsonInContentBug: capabilities.hasToolJsonInContentBug },
   })
 }
 

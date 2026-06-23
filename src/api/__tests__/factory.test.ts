@@ -265,6 +265,62 @@ describe('createProviderClient', () => {
     assert.equal(config.thinkingStallTimeoutMs, undefined, 'deepseek should not get thinkingStallTimeoutMs')
   })
 
+  it('forwards hasToolJsonInContentBug capability into OpenAIClient for deepseek', () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    const config = (client as unknown as { config: { capabilities?: { hasToolJsonInContentBug?: boolean } } }).config
+    assert.equal(
+      config.capabilities?.hasToolJsonInContentBug,
+      true,
+      'deepseek client must receive the tool-JSON-in-content recovery flag',
+    )
+  })
+
+  it('does NOT enable tool-JSON-in-content recovery for providers without the bug', () => {
+    const capabilities = resolveCapabilities('kimi')
+    const client = createProviderClient(kimiProvider, capabilities, runtimeParams)
+    const config = (client as unknown as { config: { capabilities?: { hasToolJsonInContentBug?: boolean } } }).config
+    assert.equal(config.capabilities?.hasToolJsonInContentBug, false)
+  })
+
+  it('recovers a tool call emitted as plain-text JSON for deepseek (end-to-end)', async () => {
+    const capabilities = resolveCapabilities('deepseek')
+    const client = createProviderClient(deepseekProvider, capabilities, runtimeParams)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mock.fn(async () => {
+      const stream = new ReadableStream({
+        start(controller) {
+          // DeepSeek bug: tool call comes back inside the text content, not tool_calls.
+          const toolJson = '{"name":"grep","arguments":{"pattern":"x"}}'
+          controller.enqueue(new TextEncoder().encode(
+            `data: {"choices":[{"delta":{"content":${JSON.stringify(toolJson)}},"finish_reason":"stop"}]}\n\n`,
+          ))
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(stream as unknown as ReadableStream, { status: 200 })
+    }) as unknown as typeof fetch
+
+    const blocks: Array<{ type: string; name?: string; input?: unknown }> = []
+    await client.stream(
+      { model: 'deepseek-r1', messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 },
+      {
+        onTextDelta: () => {},
+        onThinkingDelta: () => {},
+        onContentBlock: block => { blocks.push(block as { type: string; name?: string; input?: unknown }) },
+        onStopReason: () => {},
+        onError: error => { throw error },
+      },
+    )
+    globalThis.fetch = originalFetch
+
+    const toolUse = blocks.find(b => b.type === 'tool_use')
+    assert.ok(toolUse, 'plain-text tool JSON should be recovered into a tool_use block')
+    assert.equal(toolUse?.name, 'grep')
+    assert.deepEqual(toolUse?.input, { pattern: 'x' })
+  })
+
   it('provider config overrides default thinkingStallTimeoutMs for glm', () => {
     const glmProvider: ProviderConfig = {
       name: 'glm',

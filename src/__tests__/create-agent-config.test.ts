@@ -35,6 +35,7 @@ const testConfig = {
     autoDelegateEnabled: false,
     maxDelegationDepth: 2,
     maxTeamParallel: 3,
+    maxAutoContinue: 1,
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     teamSchedulerBanditEnabled: false,
     modelTierBanditEnabled: false,

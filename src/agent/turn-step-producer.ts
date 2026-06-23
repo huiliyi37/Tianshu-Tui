@@ -130,6 +130,7 @@ export class TurnStepProducer {
     this.self.thinkingOnlyRetries = 0
     this.self.lastThinkingContent = ''
     this.self.consecutiveNoToolTurns = 0
+    this.self.autoContinueCount = 0
     this.self.lastTurnTextFingerprint = ''
     this.self.evidence.reset()
     this.self.repairHintTracker = new RepairHintTracker()

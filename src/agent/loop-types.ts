@@ -28,6 +28,12 @@ export interface AgentConfig {
   promptEngine: PromptEngine
   toolRegistry: ToolRegistry
   maxTurns: number
+  /**
+   * Max auto-continue iterations per run when a no-tool turn shows action intent
+   * or an open task contract (phantom tool-call recovery). 0 disables. Default 0
+   * when unset (caller opts in via config.agent.maxAutoContinue).
+   */
+  maxAutoContinue?: number
   contextWindow: number
   compact: CompactionConfig
   providerProfile?: ProviderProfile
