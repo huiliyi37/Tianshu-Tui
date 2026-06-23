@@ -122,7 +122,6 @@ export class PromptEngine {
   private planMethodologyReason?: string
   /** Advisory text — only set when methodology changes, null otherwise to avoid noise. */
   private planMethodologyAdvisory: string | null = null
-  private planMethodologyReason?: string
   private skillAdvisoryBlock?: string | null
   private crossSessionMemoryBlock?: string | null
   private mentionContextBlock?: string | null
