@@ -179,39 +179,49 @@ body {
 .diff-split-col { background: var(--panel); overflow-x: auto; }
 .diff-split-header { color: var(--text-faint); padding: 2px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 
-/* Terminal panel — placeholder. Height reserved for future PTY. */
+/* Terminal panel — xterm.js + portable-pty 真实终端。 */
 .terminal-panel {
   flex-shrink: 0;
-  height: 200px;
+  height: 240px;
   border-top: 1px solid var(--border);
   background: var(--panel);
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.terminal-placeholder {
+.terminal-bar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-1) var(--space-3);
   border-bottom: 1px solid var(--border);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   color: var(--muted);
+  flex-shrink: 0;
 }
 .terminal-glyph { color: var(--accent); font-weight: var(--weight-semibold); }
-.terminal-path { color: var(--text-dim); font-family: var(--font-mono); font-size: var(--text-xs); }
-.terminal-hint { margin-left: auto; font-style: italic; }
-.terminal-output {
+.terminal-path { color: var(--text); font-family: var(--font-mono); }
+.terminal-hint { margin-left: auto; font-style: italic; color: var(--faint); }
+.terminal-host {
   flex: 1;
-  padding: var(--space-2) var(--space-3);
-  overflow-y: auto;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  color: var(--text-dim);
+  min-height: 0;
+  padding: var(--space-1) var(--space-2);
+  overflow: hidden;
 }
-.terminal-output[aria-disabled="true"] {
-  opacity: 0.4;
-  user-select: none;
+/* xterm 自身管理内部滚动；让其填满 host。 */
+.terminal-host .xterm,
+.terminal-host .xterm-viewport,
+.terminal-host .xterm-screen {
+  height: 100% !important;
+}
+.terminal-host .xterm-viewport { background: transparent !important; }
+.terminal-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: var(--text-sm);
+  color: var(--faint);
 }
 
 .artifacts { background: var(--panel); overflow-y: auto; border-left: 1px solid var(--border); }

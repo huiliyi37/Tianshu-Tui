@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import hljs from 'highlight.js/lib/core'
 
 // Register only the most common languages to keep the bundle small.
