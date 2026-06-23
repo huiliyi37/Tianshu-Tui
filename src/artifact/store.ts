@@ -1,8 +1,16 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, rmSync, createReadStream } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { join } from 'node:path'
 import type { Artifact, ArtifactSection } from './types.js'
+
+/**
+ * Hard cap on how many lines a single ranged read may return. Guards against a
+ * recall pulling a giant span back into context in one shot. Callers (and the
+ * model) should page with successive ranges instead.
+ */
+export const MAX_RANGE_LINES = 5000
 
 export interface SaveArtifactInput {
   tool: string
@@ -107,6 +115,56 @@ export class ArtifactStore {
     const start = Math.max(1, Math.trunc(startLine))
     const end = Math.max(start, Math.trunc(endLine))
     return raw.split('\n').slice(start - 1, end).join('\n')
+  }
+
+  /**
+   * Stream a line range out of an artifact WITHOUT loading the whole file into
+   * memory. This is the recall path for large `compact-history` archives, which
+   * routinely exceed the in-memory `readRaw` ceiling on long threads — the exact
+   * sessions this archival feature targets.
+   *
+   * Trade-off: a streamed range read cannot verify the file-level SHA-256 (that
+   * needs the full bytes), so integrity is NOT checked here. Cold archives favor
+   * readability over the corruption guard that `readRaw`/`readLines` keep.
+   *
+   * @returns the joined lines for [start, end] (1-based, inclusive), the total
+   *          line count, and whether the request hit the MAX_RANGE_LINES cap;
+   *          null when the artifact is unknown.
+   */
+  async readLineRange(
+    id: string,
+    startLine: number,
+    endLine: number,
+  ): Promise<{ content: string; totalLines: number; capped: boolean } | null> {
+    const artifact = this.artifacts.get(id)
+    if (!artifact) return null
+
+    const start = Math.max(1, Math.trunc(startLine))
+    const requestedEnd = Math.max(start, Math.trunc(endLine))
+    const capped = requestedEnd - start + 1 > MAX_RANGE_LINES
+    const end = capped ? start + MAX_RANGE_LINES - 1 : requestedEnd
+
+    const collected: string[] = []
+    let lineNo = 0
+
+    const stream = createReadStream(artifact.rawPath, { encoding: 'utf-8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    try {
+      for await (const line of rl) {
+        lineNo++
+        if (lineNo >= start && lineNo <= end) collected.push(line)
+        // Stop once past the window — no need to scan the rest of a multi-MB
+        // file. (totalLines is therefore a lower bound on the success path; it
+        // is exact only when the range is empty / out of range, since then we
+        // read to EOF without ever passing `end`.)
+        if (lineNo > end) break
+      }
+    } finally {
+      rl.close()
+      stream.destroy()
+    }
+
+    return { content: collected.join('\n'), totalLines: lineNo, capped }
   }
 
   private nextArtifactId(tool: string): string {

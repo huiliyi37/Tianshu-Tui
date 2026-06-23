@@ -2,8 +2,15 @@ import { join } from 'node:path'
 import { getSessionDir } from './session-persist.js'
 import type { PerceptionTelemetrySnapshot } from './perception.js'
 
+/**
+ * A telemetry line is either the per-turn perception snapshot or a lightweight
+ * tagged event (e.g. `{ kind: 'recall-summary', ... }`) sharing the same
+ * sensorium.jsonl channel. Both are just JSON-stringified on write.
+ */
+export type TelemetryRecord = PerceptionTelemetrySnapshot | ({ kind: string } & Record<string, unknown>)
+
 export interface TelemetryWriter {
-  write(snapshot: PerceptionTelemetrySnapshot): void
+  write(snapshot: TelemetryRecord): void
   flush(): Promise<void>
 }
 
@@ -27,7 +34,7 @@ export function createTelemetryWriter(cwd: string, sessionId?: string): Telemetr
   const pendingWrites: Promise<void>[] = []
   let writesSinceTrim = 0
   return {
-    write(snapshot) {
+    write(snapshot: TelemetryRecord) {
       const line = JSON.stringify(snapshot)
       const shouldTrim = ++writesSinceTrim >= TRIM_CHECK_EVERY
       if (shouldTrim) writesSinceTrim = 0

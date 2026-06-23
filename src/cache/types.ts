@@ -1,3 +1,5 @@
+import type { RecallMetricsSummary } from './recall-metrics.js'
+
 export interface GhostEntry {
   artifactId: string
   tool: string
@@ -38,4 +40,5 @@ export interface CacheAdvisorDiagnostic {
   currentThresholds: ThresholdState
   adaptiveStrategy: string
   recentHitRate: number | null
+  recall: RecallMetricsSummary
 }

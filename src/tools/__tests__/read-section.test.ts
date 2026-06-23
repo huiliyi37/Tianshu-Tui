@@ -366,6 +366,42 @@ describe('read_section recall of compact-history artifacts', () => {
     }
   })
 
+  it('recalls a line range from a >2MB compact-history archive (A1 regression)', async () => {
+    const tempDir = makeTempDir()
+    try {
+      const store = new ArtifactStore(tempDir, 'recall-session')
+      const { parseRecallMarker, COMPACT_HISTORY_TOOL } = await import('../../compact/recall-marker.js')
+
+      // >2MB raw: would be rejected by the in-memory 2MB gate. The
+      // compact-history line-range fast path must stream past it.
+      const total = 60_000
+      const rawContent = Array.from({ length: total }, (_, i) => `histline ${i + 1} ${'y'.repeat(40)}`).join('\n')
+      assert.ok(rawContent.length > 2 * 1024 * 1024)
+      const id = await store.save({
+        tool: COMPACT_HISTORY_TOOL,
+        target: 'session-history@turn0',
+        rawContent,
+        summary: 'huge history',
+        sections: [],
+      })
+
+      const result = await READ_SECTION_TOOL.execute({
+        input: { artifactId: id, section: 'L500-L502' },
+        toolUseId: 'recall-big',
+        cwd: tempDir,
+        artifactStore: store,
+      })
+
+      assert.ok(!result.isError, `expected success, got: ${result.content.slice(0, 120)}`)
+      assert.match(result.content, /histline 500/)
+      assert.match(result.content, /histline 502/)
+      assert.doesNotMatch(result.content, /too large/)
+      assert.ok(parseRecallMarker(result.content), 'big-archive recall must carry a marker')
+    } finally {
+      cleanup(tempDir)
+    }
+  })
+
   it('does NOT tag normal (non-history) artifacts with a recall marker', async () => {
     const tempDir = makeTempDir()
     try {

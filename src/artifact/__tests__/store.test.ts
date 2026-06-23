@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ArtifactCorruptionError, ArtifactStore } from '../store.js'
+import { ArtifactCorruptionError, ArtifactStore, MAX_RANGE_LINES } from '../store.js'
 import { formatArtifactRef } from '../types.js'
 
 async function withTempStore(fn: (store: ArtifactStore, dir: string) => Promise<void> | void): Promise<void> {
@@ -116,6 +116,62 @@ describe('ArtifactStore', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('readLineRange streams a line window from a multi-MB file without OOM', async () => {
+    await withTempStore(async (store) => {
+      // ~3MB of content: 60k lines of 50 chars — comfortably over the 2MB
+      // in-memory ceiling that readRaw/read_section enforce.
+      const total = 60_000
+      const rawContent = Array.from({ length: total }, (_, i) => `line ${i + 1} ${'x'.repeat(40)}`).join('\n')
+      assert.ok(rawContent.length > 2 * 1024 * 1024)
+      const id = await store.save({
+        tool: 'compact-history',
+        target: 'session',
+        rawContent,
+        summary: 'big',
+        sections: [],
+      })
+
+      const ranged = await store.readLineRange(id, 100, 102)
+      assert.ok(ranged)
+      assert.equal(ranged.content, 'line 100 ' + 'x'.repeat(40) + '\nline 101 ' + 'x'.repeat(40) + '\nline 102 ' + 'x'.repeat(40))
+      assert.equal(ranged.capped, false)
+    })
+  })
+
+  it('readLineRange caps oversized windows at MAX_RANGE_LINES', async () => {
+    await withTempStore(async (store) => {
+      const rawContent = Array.from({ length: MAX_RANGE_LINES + 500 }, (_, i) => `L${i + 1}`).join('\n')
+      const id = await store.save({
+        tool: 'compact-history', target: 'session', rawContent, summary: 'big', sections: [],
+      })
+
+      const ranged = await store.readLineRange(id, 1, MAX_RANGE_LINES + 500)
+      assert.ok(ranged)
+      assert.equal(ranged.capped, true)
+      assert.equal(ranged.content.split('\n').length, MAX_RANGE_LINES)
+      assert.equal(ranged.content.split('\n')[0], 'L1')
+      assert.equal(ranged.content.split('\n').at(-1), `L${MAX_RANGE_LINES}`)
+    })
+  })
+
+  it('readLineRange reports out-of-range with accurate total', async () => {
+    await withTempStore(async (store) => {
+      const id = await store.save({
+        tool: 'compact-history', target: 'session', rawContent: 'a\nb\nc', summary: '3', sections: [],
+      })
+      const ranged = await store.readLineRange(id, 10, 20)
+      assert.ok(ranged)
+      assert.equal(ranged.content, '')
+      assert.equal(ranged.totalLines, 3)
+    })
+  })
+
+  it('readLineRange returns null for unknown artifacts', async () => {
+    await withTempStore(async (store) => {
+      assert.equal(await store.readLineRange('nonexistent', 1, 2), null)
+    })
   })
 
   it('detects raw artifact corruption before returning content', async () => {

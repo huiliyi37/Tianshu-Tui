@@ -158,6 +158,7 @@ export class CacheAdvisor {
       currentThresholds: this.thresholdController.getState(),
       adaptiveStrategy: this.getCompactStrategy(),
       recentHitRate: this.recentHitRate,
+      recall: this.recallMetrics.getSummary(),
     }
   }
 }

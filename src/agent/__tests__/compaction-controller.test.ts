@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { CompactionController, findSafeSplitPoint } from '../compaction-controller.js'
+import { CompactionController, findSafeSplitPoint, foldAgedRecallBlocks, RECALL_KEEP_RECENT } from '../compaction-controller.js'
+import { buildRecallMarker } from '../../compact/recall-marker.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
 import { PressureMonitor } from '../../context/pressure-monitor.js'
@@ -1410,5 +1411,59 @@ describe('findSafeSplitPoint', () => {
     const result = findSafeSplitPoint(msgs, 8, 2)
     // Should adjust to 6 (before the assistant) to keep the group intact
     assert.equal(result, 6)
+  })
+})
+
+describe('foldAgedRecallBlocks (A3 recall eviction)', () => {
+  const recall = (artifactId: string, section: string, body: string): OaiMessage => ({
+    role: 'tool',
+    tool_call_id: `tc_${section}`,
+    content: `${buildRecallMarker(artifactId, section)}\n${body}`,
+  })
+
+  it('folds aged recall blocks to pointers but keeps the most recent K', () => {
+    const total = RECALL_KEEP_RECENT + 3
+    const zone: OaiMessage[] = Array.from({ length: total }, (_, i) =>
+      recall('compact-history:h1', `L${i + 1}-L${i + 2}`, `verbatim block ${i} ${'z'.repeat(100)}`))
+
+    const folded = foldAgedRecallBlocks(zone, RECALL_KEEP_RECENT)
+    assert.equal(folded.length, zone.length)
+
+    // First 3 (aged) are folded to a one-line pointer (no body).
+    for (let i = 0; i < 3; i++) {
+      assert.equal(folded[i]!.content, `[recalled compact-history:h1 L${i + 1}-L${i + 2}]`)
+      assert.doesNotMatch(folded[i]!.content as string, /verbatim block/)
+    }
+    // Last K keep their verbatim body.
+    for (let i = 3; i < total; i++) {
+      assert.match(folded[i]!.content as string, /verbatim block/)
+    }
+    // Tool metadata preserved on folded messages.
+    assert.equal(folded[0]!.role, 'tool')
+    assert.equal(folded[0]!.tool_call_id, 'tc_L1-L2')
+  })
+
+  it('leaves non-recall messages untouched', () => {
+    const zone: OaiMessage[] = [
+      { role: 'user', content: 'a normal user turn' },
+      { role: 'assistant', content: 'a normal assistant turn' },
+    ]
+    const folded = foldAgedRecallBlocks(zone, RECALL_KEEP_RECENT)
+    assert.deepEqual(folded, zone)
+  })
+
+  it('is a no-op when recall count is within keepRecent', () => {
+    const zone: OaiMessage[] = [recall('compact-history:h1', 'L1-L2', 'body one' + 'q'.repeat(80))]
+    const folded = foldAgedRecallBlocks(zone, RECALL_KEEP_RECENT)
+    assert.deepEqual(folded, zone)
+  })
+
+  it('is idempotent — folding a folded pointer changes nothing further', () => {
+    const total = RECALL_KEEP_RECENT + 2
+    const zone: OaiMessage[] = Array.from({ length: total }, (_, i) =>
+      recall('compact-history:h1', `L${i + 1}-L${i + 2}`, `body ${i} ${'w'.repeat(60)}`))
+    const once = foldAgedRecallBlocks(zone, RECALL_KEEP_RECENT)
+    const twice = foldAgedRecallBlocks(once, RECALL_KEEP_RECENT)
+    assert.deepEqual(twice, once)
   })
 })

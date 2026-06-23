@@ -19,6 +19,40 @@ import type { CacheAdvisor } from '../cache/advisor.js'
 import { extractSessionMemories, type ExtractedMemory } from './session-memory-extract.js'
 import type { ArtifactSection } from '../artifact/types.js'
 import { serializeMessagesForArchive, buildArchiveCatalog, buildRecallRefBlock } from './compact-archive.js'
+import { parseRecallMarker } from '../compact/recall-marker.js'
+
+/**
+ * How many of the most-recent compact-history recall blocks in the recent zone
+ * to keep verbatim. The model just pulled these back; folding them immediately
+ * would cancel out the recall it asked for. Older recalls are folded to
+ * pointers (A3).
+ */
+export const RECALL_KEEP_RECENT = 10
+
+/**
+ * Fold aged compact-history recall blocks sitting in the recent zone back into
+ * one-line pointers. The original content remains in the source artifact and
+ * stays re-recallable; this only reclaims the recalled bytes that have aged out
+ * of the last `keepRecent` recalls. Idempotent: a folded pointer still parses
+ * as a recall marker, so re-running fold is a no-op. Non-recall messages and
+ * the most recent `keepRecent` recalls are returned untouched.
+ */
+export function foldAgedRecallBlocks(recentZone: OaiMessage[], keepRecent: number): OaiMessage[] {
+  const recallIdxs: number[] = []
+  for (let i = 0; i < recentZone.length; i++) {
+    const c = recentZone[i]!.content
+    if (typeof c === 'string' && parseRecallMarker(c)) recallIdxs.push(i)
+  }
+  if (recallIdxs.length <= keepRecent) return recentZone
+
+  const foldUpTo = recallIdxs.length - keepRecent
+  const agedIdxs = new Set(recallIdxs.slice(0, foldUpTo))
+  return recentZone.map((msg, i) => {
+    if (!agedIdxs.has(i)) return msg
+    const parsed = parseRecallMarker(msg.content as string)!
+    return { ...msg, content: `[recalled ${parsed.artifactId} ${parsed.section}]` }
+  })
+}
 
 /**
  * Extract the user intent chain: all user messages in order,
@@ -1055,7 +1089,15 @@ export class CompactionController {
       // preserved recent zone may not contain the original constraint
       // declarations — without this anchor, partial compact has no deterministic
       // fallback for the task contract (issue 1 × issue 2 crossover gap).
-      const newMessages = [...anchor, summaryMessage, ...recentZone]
+      // A3: proactively evict aged compact-history recall blocks that are still
+      // sitting in the recent zone. A recall pulls a (potentially large) block
+      // back via read_section; once it has aged past the last RECALL_KEEP_RECENT
+      // recalls it can be folded back to a one-line pointer here — the original
+      // bytes remain in the artifact and stay re-recallable. The most recent
+      // recalls are kept verbatim: the model just asked for them.
+      const collapsedRecent = foldAgedRecallBlocks(recentZone, RECALL_KEEP_RECENT)
+
+      const newMessages = [...anchor, summaryMessage, ...collapsedRecent]
       const anchorAppendix = this.buildTaskAnchorAppendix()
       if (anchorAppendix) {
         newMessages.push({ role: 'user', content: anchorAppendix })

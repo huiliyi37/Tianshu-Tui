@@ -220,3 +220,23 @@ P0~P4 解决的是「压缩何时触发、触发时保不保缓存」。但本�
 **与 T7 的分层定位**（本文档第 3 节的收口）：存储层压缩（永久）归档 oldZone；请求层 T7（临时、不改存储）现也保留已有 `[artifact:id]`，使两层折叠都可召回。未在请求热路径做 `save()`（避免 `buildOaiRequest` 每轮异步写盘竞态）——无引用的小结果其存储原文完整，fillRatio 回落自然恢复，符合 T7 既有契约。
 
 验证：`compact-archive.test.ts` 13、`recall-metrics.test.ts`、controller 集成 4（归档+引用 / ceiling 归档 / fail-soft / 快照）、read-section 召回 2、context-collapse T7 保留引用 3；`src/compact` 全套 98 通过。
+
+---
+
+## 10. 收口：分层归档召回 A 期硬化（2026-06-23）
+
+第 9 节落地后留三处未闭合，使特性在目标场景（几百轮 `single_long`）名存实亡。A 期补完：
+
+**A1 — 召回"回不来"准 bug（最高优先）。** 双重失败：`read-section.ts` 对 raw `>2MB` 整体拒绝，且 `store.ts` 的 `readRaw` 把整文件读进内存再切。几百轮的 `compact-history` 必然超 2MB —— 摘要里嵌了目录，`read_section` 却拉不回原文，第 9 节的"召回"形同空头支票。修法：
+
+- `store.ts` 新增 `readLineRange(id, start, end)`：`createReadStream + readline` 逐行流式只读所需区间，越过窗口即 break，**不整文件入内存**；返回 `{ content, totalLines, capped }`。权衡：范围读无法做整文件 SHA-256，**冷归档跳过校验、以可读性优先**。
+- `read-section.ts` 加 compact-history 行区间快路径：`tool === COMPACT_HISTORY_TOOL` 且为 `L起-L止` 时走 `readLineRange`、**绕过 2MB 整文件 gate**，输出仍经 `computeModelReadCap` 截断 + 召回标记。char 区间 / 普通 artifact 维持原路径。
+- `MAX_RANGE_LINES = 5000` 防单次拉太多（命中返回 cap 提示让模型分页）。
+
+**A2 — 召回观测落地。** 第 9 节的 `recall-metrics` 只有自测调用、无生产消费点，"先观测"空转。`CacheAdvisorDiagnostic` 增 `recall` 字段，`getDiagnostic()` 带上汇总（经 `loop.getDebugInfo()` 可见）；`loop.runPostSession` 写一条 `{ kind:'recall-summary', ... }` 遥测（`RIVET_DEBUG_TELEMETRY` gated）。**只记录不调阈值**——召回率高义本身二义（"压太狠" vs "任务确实要回看早期决策"），攒数据后再议 adaptive-window。
+
+**A3 — recentZone 主动淘汰。** 第 9 节只在序列化 oldZone 时被动折召回块；刚召回、仍留在 recentZone 的大块长期累积会抵消压缩空间。`tryPartialCompact` 算出 recentZone 后，把其中除最近 `RECALL_KEEP_RECENT≈10` 条外的老化召回块（`parseRecallMarker` 命中）就地折成一行指针。保留最近 K 条不折（模型刚拉回的是它当前要的上下文）；原文仍在 artifact，指针可再召回；折叠幂等。
+
+**缓存安全**：A1 只读磁盘；A2 只读诊断/遥测；A3 改写的是压缩本就要替换的 recentZone（压缩已重写该区）—— 均不动 anchor 前缀，P2 的 cache-preserving 策略不变。
+
+验证：`store.test.ts` 范围读 4（>2MB 流式取行 / cap / 越界 total / 未知 null）、`read-section.test.ts` >2MB 召回回归、`recall-metrics.test.ts` `getDiagnostic().recall` 汇总、`compaction-controller.test.ts` `foldAgedRecallBlocks` 4（折老化保最近 K / 非召回不动 / K 内 no-op / 幂等）；4 文件 79 pass。涉及文件：`src/artifact/store.ts`、`src/tools/read-section.ts`、`src/cache/{types,advisor}.ts`、`src/agent/{telemetry-writer,loop,compaction-controller}.ts`。

@@ -985,6 +985,12 @@ export class AgentLoop {
         if (domainId) sp.updateMetadata({ domain: domainId })
       }
     } catch { /* ignore */ }
+    // Sink compact-history recall stats into the (gated) sensorium channel.
+    // Observe-only: collects turn-distance data for a future adaptive-window
+    // decision; it does NOT influence compaction thresholds today.
+    try {
+      this.telemetryWriter.write({ kind: 'recall-summary', ...this.cacheAdvisor.getRecallSummary() })
+    } catch { /* telemetry is best-effort */ }
   }
 
   async startFsWatcher(): Promise<void> {

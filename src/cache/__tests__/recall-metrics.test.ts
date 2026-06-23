@@ -51,4 +51,22 @@ describe('CacheAdvisor recall observability', () => {
     assert.equal(summary.uniqueArtifacts, 1)
     assert.equal(summary.maxTurnDistance, 5)
   })
+
+  it('surfaces the recall summary through getDiagnostic (A2)', () => {
+    const advisor = new CacheAdvisor({ providerProfile: { cacheType: 'exact-prefix', persistent: true } })
+    advisor.registerArchive('compact-history:h1', 2)
+    advisor.onTurnEnd({
+      turn: 9,
+      cacheRead: 50,
+      cacheCreation: 0,
+      prefixChanged: false,
+      artifactIdsEvicted: [],
+      artifactIdsAccessed: ['compact-history:h1'],
+    })
+
+    const diag = advisor.getDiagnostic()
+    assert.ok(diag.recall, 'diagnostic must carry a recall summary')
+    assert.equal(diag.recall.totalRecalls, 1)
+    assert.equal(diag.recall.maxTurnDistance, 7)
+  })
 })
