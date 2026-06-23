@@ -88,8 +88,10 @@ export function SkillsSurface() {
             </div>
             <button
               className={`skill-toggle ${s.enabled ? 'on' : ''}`}
-              onClick={() => toggle(s.name, !s.enabled)}
+              role="switch"
+              aria-checked={s.enabled}
               aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
+              onClick={() => toggle(s.name, !s.enabled)}
             >
               <span className="skill-toggle-knob" />
             </button>

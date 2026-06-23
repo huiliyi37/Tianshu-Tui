@@ -26,7 +26,15 @@ export function ThreadTabs() {
 
   const handleDrop = () => {
     if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
-      dispatch({ type: 'reorderTabs', from: dragIndex, to: overIndex })
+      // Resolve to session IDs to avoid tabSessions/openTabs index divergence
+      const fromId = tabSessions[dragIndex]?.id
+      const toId = tabSessions[overIndex]?.id
+      if (!fromId || !toId) return
+      // Map to openTabs indices
+      const fromTab = ui.openTabs.indexOf(fromId)
+      const toTab = ui.openTabs.indexOf(toId)
+      if (fromTab < 0 || toTab < 0) return
+      dispatch({ type: 'reorderTabs', from: fromTab, to: toTab })
     }
     setDragIndex(null)
     setOverIndex(null)

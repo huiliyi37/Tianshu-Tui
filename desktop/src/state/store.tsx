@@ -101,9 +101,10 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'reorderTabs': {
       const tabs = [...state.openTabs]
+      if (action.from < 0 || action.to < 0 || action.from >= tabs.length) return state
       const [moved] = tabs.splice(action.from, 1)
       if (!moved) return state
-      tabs.splice(action.to, 0, moved)
+      tabs.splice(Math.min(action.to, tabs.length), 0, moved)
       return { ...state, openTabs: tabs }
     }
     case 'setSplitMode':

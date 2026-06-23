@@ -35,6 +35,10 @@ function parseDiff(raw: string): { fileLines: string[]; hunks: Hunk[] } {
       if (match) {
         oldNo = parseInt(match[1]!, 10)
         newNo = parseInt(match[2]!, 10)
+      } else {
+        // Malformed @@ header — reset to avoid stale line numbers from previous hunk
+        oldNo = 0
+        newNo = 0
       }
       currentHunk = { header: line, lines: [] }
       hunks.push(currentHunk)
