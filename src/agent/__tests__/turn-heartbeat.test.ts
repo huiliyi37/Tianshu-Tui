@@ -195,4 +195,123 @@ describe('TurnHeartbeat', () => {
       assert.ok(beats >= 3, `heartbeats keep emitting while abort propagates, got ${beats}`)
     })
   })
+
+  describe('pause / resume', () => {
+    it('pause prevents heartbeats from firing', async () => {
+      let count = 0
+      const hb = new TurnHeartbeat({
+        silentMs: 30,
+        repeatMs: 30,
+        onHeartbeat: () => { count++ },
+      })
+      hb.start()
+      hb.pause()
+      await delay(120)
+      assert.equal(count, 0, 'pause must suppress heartbeats')
+      hb.stop()
+    })
+
+    it('resume restarts heartbeat after pause', async () => {
+      const events: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 40,
+        repeatMs: 40,
+        onHeartbeat: () => events.push(Date.now()),
+      })
+      hb.start()
+      hb.pause()
+      await delay(80)
+      // Still paused — no events
+      assert.equal(events.length, 0)
+      const t0 = Date.now()
+      hb.resume()
+      await delay(80)
+      hb.stop()
+      assert.ok(events.length >= 1, `expected at least 1 heartbeat after resume, got ${events.length}`)
+      assert.ok(events[0]! - t0 >= 35, 'first heartbeat after resume should respect silentMs')
+    })
+
+    it('tick exits pause and resets the clock', async () => {
+      const events: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 40,
+        repeatMs: 40,
+        onHeartbeat: () => events.push(Date.now()),
+      })
+      hb.start()
+      hb.pause()
+      await delay(80)
+      // tick while paused should exit pause and reset clock
+      const t0 = Date.now()
+      hb.tick('activity after pause')
+      await delay(80)
+      hb.stop()
+      assert.ok(events.length >= 1, `tick should resume and heartbeat fires after silentMs, got ${events.length}`)
+      assert.ok(events[0]! - t0 >= 35)
+    })
+
+    it('hard-stall watchdog does not fire while paused', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      hb.pause()
+      await delay(120)
+      assert.equal(stalls.length, 0, 'watchdog must not fire while paused')
+      hb.stop()
+    })
+
+    it('hard-stall watchdog re-arms after resume', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      hb.pause()
+      await delay(80)
+      hb.resume()
+      await delay(100)
+      hb.stop()
+      // After resume, the watchdog should fire after hardStallMs of silence
+      assert.equal(stalls.length, 1, 'watchdog must re-arm after resume')
+    })
+
+    it('double pause is a no-op', async () => {
+      let count = 0
+      const hb = new TurnHeartbeat({
+        silentMs: 30,
+        repeatMs: 30,
+        onHeartbeat: () => { count++ },
+      })
+      hb.start()
+      hb.pause()
+      hb.pause() // second pause — no-op
+      await delay(100)
+      assert.equal(count, 0, 'double pause should not restart timer')
+      hb.stop()
+    })
+
+    it('resume without pause is a no-op', async () => {
+      let count = 0
+      const hb = new TurnHeartbeat({
+        silentMs: 30,
+        repeatMs: 30,
+        onHeartbeat: () => { count++ },
+      })
+      hb.start()
+      hb.resume() // resume without pause — no-op, should not reset clock
+      await delay(60)
+      hb.stop()
+      assert.ok(count >= 1, 'resume without pause should not reset the clock')
+    })
+  })
 })

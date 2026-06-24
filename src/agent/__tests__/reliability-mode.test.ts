@@ -36,6 +36,23 @@ describe('modeForRecoveryTrigger', () => {
     assert.equal(decision.mode, 'degraded')
   })
 
+  it('stays at full for doom_loop_blocked when goal is active', () => {
+    const decision = modeForRecoveryTrigger(
+      trigger({ trigger: 'doom_loop_blocked', severity: 'error', summary: 'doom in goal' }),
+      true,
+    )
+    assert.equal(decision.mode, 'full')
+    assert.equal(decision.reason, 'doom in goal')
+  })
+
+  it('still degrades on resource pressure error even with goal active', () => {
+    const decision = modeForRecoveryTrigger(
+      trigger({ severity: 'error', summary: 'resource error' }),
+      true,
+    )
+    assert.equal(decision.mode, 'minimal')
+  })
+
   it('maps context thrashing error to minimal', () => {
     const decision = modeForRecoveryTrigger(trigger({ trigger: 'context_thrashing', severity: 'error', summary: 'thrash' }))
     assert.equal(decision.mode, 'minimal')
