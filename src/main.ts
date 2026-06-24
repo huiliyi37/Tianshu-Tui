@@ -164,6 +164,7 @@ async function main() {
     const { createVerificationAttribution } = await import('./agent/verification-attribution.js')
     const { createDeliveryGateV2 } = await import('./agent/delivery-gate-v2.js')
     const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
+    const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
 
     const parsed = parseCliArgs(args)
     // Goal mode drives the same AgentLoop + GoalTracker as the TUI /goal command;
@@ -249,9 +250,23 @@ async function main() {
           goalTrackerRef.current = tracker
           agent.setGoalTracker(tracker)
           // Side-path criteria extraction for the completion judge. Async + fail-open:
-          // criteria default to a generic template, and with no coordinator wired in
-          // headless the judge degrades to inconclusive (accept+warning), never blocking.
+          // criteria default to a generic template. With the headless coordinator
+          // wired, the judge actually runs; without it, it degrades to inconclusive.
           if (agent.config.goalJudge?.enabled !== false) {
+            // Wire a minimal DelegationCoordinator so the goal judge can spawn
+            // goal_judge workers. Without this, getGoalJudgeDeps returns empty
+            // deps and the judge is a permanent no-op in headless mode.
+            const coordinator = createHeadlessCoordinator({
+              toolRegistry,
+              provider: prov,
+              providerName: provider,
+              apiKey: key,
+              auth: undefined,
+              cwd: process.cwd(),
+              sessionId,
+            })
+            agent.config.coordinatorRef = () => coordinator
+
             const goal = parsed.goal
             void (async () => {
               try {
