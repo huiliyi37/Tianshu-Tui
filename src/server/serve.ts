@@ -41,6 +41,7 @@ import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
 import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
+import { loadProjectSkills } from '../skills/skill-loader.js'
 import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import { ProviderHealthTracker } from '../agent/provider-health.js'
@@ -229,6 +230,9 @@ function buildSessionStores(
   const claimStore = persist.createClaimStore()
   persist.injectDurableClaims(claimStore)
   for (const rule of loadProjectRules(cwd)) claimStore.propose(rule)
+  // Load skills into the shared registry (same as CLI bootstrap). Without this,
+  // skillRegistry.list() returns empty and the desktop PlusMenu shows no skills.
+  loadProjectSkills(cwd, { importFromClaude: ctx.config.skills?.importFromClaude })
   const fileHistory = new FileHistory(persist.getBackupDir(), sessionId)
   const session = new SessionContext()
 

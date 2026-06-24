@@ -13,7 +13,7 @@ import type { McpStatusResponse } from '../runtime/types'
 // Cursor 3.0-style "+" menu. Root popover consolidates mode / image / slash
 // commands; Models / Skills / 星域 / MCP open second-level panels (searchable list,
 // current item checked, keyboard nav, live SSE re-fetch) wired to the runtime.
-type Panel = 'root' | 'models' | 'skills' | 'domain' | 'mcp'
+type Panel = 'root' | 'models' | 'skills' | 'domain' | 'mcp' | 'commands'
 
 /** A normalized list row shared by all three sub-panels. */
 interface Row {
@@ -123,6 +123,26 @@ export function PlusMenu(props: {
     )
   }
 
+  if (panel === 'commands' && commands && commands.length > 0) {
+    return (
+      <SubPanel
+        title="命令 Commands"
+        sessionId={sessionId}
+        menuRev={menuRev}
+        mode="single"
+        emptyHint="无可用命令"
+        onBack={() => setPanel('root')}
+        load={async () => commands.map<Row>((cmd) => ({
+          key: cmd.name,
+          label: cmd.name,
+          desc: cmd.desc,
+          active: false,
+        }))}
+        apply={async (_id, row) => { onRunCommand(commands.find((c) => c.name === row.key)!) }}
+      />
+    )
+  }
+
   if (panel === 'mcp') {
     return (
       <McpPanel
@@ -161,14 +181,16 @@ export function PlusMenu(props: {
 
       {commands && commands.length > 0 && (
         <div className="plus-menu-section">
-          <div className="plus-menu-title">命令</div>
-          {commands.map((cmd) => (
-            <button key={cmd.name} className="plus-menu-item" role="menuitem" onClick={pick(() => onRunCommand(cmd))}>
-              <span className="pm-glyph mono" aria-hidden>/</span>
-              <span className="pm-label">{cmd.name.replace(/^\//, '')}</span>
-              <span className="pm-trailing pm-hint">{cmd.desc}</span>
-            </button>
-          ))}
+          <button
+            className="plus-menu-item"
+            role="menuitem"
+            aria-haspopup="menu"
+            onClick={() => setPanel('commands')}
+          >
+            <span className="pm-glyph mono" aria-hidden>/</span>
+            <span className="pm-label">命令</span>
+            <span className="pm-chev" aria-hidden>▸</span>
+          </button>
         </div>
       )}
 

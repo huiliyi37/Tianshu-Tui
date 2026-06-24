@@ -11,7 +11,7 @@ import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { RewindOverlay } from '../components/RewindOverlay'
 import type { ComposerCommand } from '../lib/composer-commands'
-import { isAutonomous, isWindows, levelToMode, modeToLevel } from '../lib/autonomy'
+import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { useUiState } from '../state/store'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl } from '../runtime/client'
@@ -256,6 +256,12 @@ export function ThreadView(props: {
             value={modeToLevel(session.approvalMode)}
             onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
           />
+          {autonomous && (
+            <span className="autonomy-badge" title="自治模式 · 项目内操作自动执行；项目外写入仍被沙箱拦截，可随时回滚">
+              <span className="ab-glyph" aria-hidden>✦</span>
+              自治
+            </span>
+          )}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
           <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
@@ -295,15 +301,6 @@ export function ThreadView(props: {
           {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
         </div>
       </header>
-      {autonomous && (
-        <div className="autonomy-banner">
-          <span className="ab-glyph" aria-hidden>✦</span>
-          自治模式 · 项目内操作自动执行
-          {isWindows()
-            ? '；⚠️ Windows 无写沙箱保护，仅靠回滚兜底'
-            : '；项目外写入仍被沙箱拦截，可随时回滚'}
-        </div>
-      )}
 
       <div className="messages" ref={msgRef} onScroll={onScroll}>
         {view.blocks.length === 0 && (
