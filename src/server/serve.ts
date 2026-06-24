@@ -490,6 +490,8 @@ export interface RunningServer {
   close: () => void
   sessions: RuntimeSessionManager
   scheduler?: CronScheduler
+  /** Shared runtime for the exit handler to access mcpManager. */
+  shared: SharedRuntime
 }
 
 /**
@@ -678,6 +680,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     port,
     sessions,
     scheduler,
+    shared: sharedRuntime,
     close: () => {
       for (const agent of activeAgents) agent.abort()
       sessions.abortAll()
@@ -718,6 +721,11 @@ export function serveCommand(args: string[]): void {
   }
   process.on('SIGINT', shutdownServer)
   process.on('SIGTERM', shutdownServer)
+
+  // Last-resort: SIGKILL MCP children even if shutdownServer threw.
+  process.on('exit', () => {
+    try { server.shared.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
+  })
 
   console.log(`Rivet Runtime API listening on http://localhost:${port}`)
   console.log('Endpoints: GET /status, POST /abort, POST /prompt, /sessions/*')

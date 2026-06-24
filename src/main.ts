@@ -93,6 +93,14 @@ function shutdown(code: number = 0) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
+// Last-resort sync hook: even if shutdown() threw or an uncaughtException
+// skipped it, the process-exit event still fires (unless SIGKILL). MCP child
+// processes (e.g. context7-mcp) are spawned via StdioClientTransport and would
+// otherwise orphan to PPID=1, accumulating across dev restarts.
+process.on('exit', () => {
+  try { ctx?.refs.mcpManager?.killChildrenSync?.() } catch { /* best-effort */ }
+})
+
 // ── Main ───────────────────────────────────────────────────────
 
 async function main() {
