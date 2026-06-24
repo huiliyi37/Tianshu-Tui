@@ -2,6 +2,8 @@
 
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
+> 📖 [中文文档](README.zh-CN.md)
+
 ## Quick Start
 
 ```bash
