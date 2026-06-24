@@ -1,5 +1,5 @@
-import { spawnSync } from 'node:child_process'
-import { parseDiagnosticOutput, formatDiagnostics, type Diagnostic } from './diagnostics.js'
+import { formatDiagnostics, type Diagnostic } from './diagnostics.js'
+import { isAbsolute, relative } from 'node:path'
 
 export interface LspCheckResult {
   diagnostics: Diagnostic[]
@@ -10,27 +10,87 @@ export interface LspCheckResult {
   ranOk: boolean
 }
 
+/**
+ * Run a real TypeScript type check using the project-local typescript compiler
+ * API (require('typescript')), bypassing npx/PATH entirely.
+ *
+ * The previous implementation used spawnSync('npx', ['tsc', ...]) which is
+ * vulnerable to PATH hijacking — a global tsc wrapper (e.g.
+ * /opt/homebrew/bin/tsc) can intercept the call and return a fake "passed"
+ * result with exit 0 and empty output, making the gate a no-op.
+ *
+ * Using the compiler API directly loads typescript from node_modules, immune to
+ * PATH interference, and runs in-process (no spawn overhead).
+ */
 export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
-  const result = spawnSync('npx', ['tsc', '--noEmit', '--pretty', 'false'], {
-    cwd,
-    encoding: 'utf-8',
-    timeout: 30_000,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  })
-  // status === null means the process was killed by a signal (e.g. SIGTERM on
-  // 30s timeout); result.error is set when spawn itself failed (npx missing,
-  // ENOENT…). Either way the typecheck did not run to completion.
-  const ranOk = result.error == null && result.status !== null && result.signal == null
-  const output = (result.stdout || '') + (result.stderr || '')
-
-  if (result.status === 0 && !output.trim()) {
-    return { diagnostics: [], formatted: '', ranOk }
+  let ts: typeof import('typescript')
+  try {
+    // require avoids bundler/esbuild trying to resolve the typescript module
+    // at build time — we only need it at runtime in the typecheck gate path.
+    ts = (require as any)('typescript')
+  } catch {
+    // typescript module not available — fail-open (no diagnostics, not trustworthy)
+    return { diagnostics: [], formatted: '', ranOk: false }
   }
 
-  const diagnostics = parseDiagnosticOutput(output, 'typescript').filter(
-    d => d.file.includes(filePath) || filePath === '*',
+  const configPath = ts.findConfigFile(cwd, ts.sys.fileExists, 'tsconfig.json')
+  if (!configPath) {
+    return { diagnostics: [], formatted: '', ranOk: false }
+  }
+
+  const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
+  if (configFile.error) {
+    return { diagnostics: [], formatted: '', ranOk: false }
+  }
+
+  const parsed = ts.parseJsonConfigFileContent(
+    configFile.config,
+    ts.sys,
+    cwd,
   )
-  return { diagnostics, formatted: formatDiagnostics(diagnostics), ranOk }
+
+  const program = ts.createProgram(parsed.fileNames, {
+    ...parsed.options,
+    noEmit: true,
+    pretty: false,
+  })
+
+  const allDiagnostics = ts.getPreEmitDiagnostics(program)
+
+  // Map TS API diagnostics to our Diagnostic interface.
+  const diagnostics: Diagnostic[] = []
+  for (const d of allDiagnostics) {
+    const category = ts.DiagnosticCategory
+    const severity: Diagnostic['severity'] =
+      d.category === category.Error ? 'error'
+      : d.category === category.Warning ? 'warning'
+      : 'info'
+    // Only 'error' severity matters for the gate, but we keep all for completeness.
+    const file = d.file
+    if (!file) continue
+    const absFile = file.fileName
+    // Normalize to repo-relative path for consistent filtering downstream.
+    const relFile = isAbsolute(absFile) ? relative(cwd, absFile) : absFile
+    const lineChar = ts.getLineAndCharacterOfPosition(file, d.start ?? 0)
+    diagnostics.push({
+      file: relFile,
+      line: lineChar.line + 1,
+      col: lineChar.character + 1,
+      severity,
+      message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
+    })
+  }
+
+  // Filter by filePath if not '*'
+  const filtered = filePath === '*'
+    ? diagnostics
+    : diagnostics.filter(d => d.file.includes(filePath))
+
+  return {
+    diagnostics: filtered,
+    formatted: formatDiagnostics(filtered),
+    ranOk: true,
+  }
 }
 
 export function shouldRunDiagnostics(toolName: string, filePath?: string): boolean {
