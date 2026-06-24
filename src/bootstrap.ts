@@ -45,6 +45,7 @@ import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
+import { createUpdateGoalTool } from './tools/update-goal.js'
 import { createTaskLedger } from './agent/task-ledger.js'
 import { createOwnershipLedger } from './agent/ownership-ledger.js'
 import { createVerificationAttribution } from './agent/verification-attribution.js'
@@ -529,6 +530,9 @@ export function createInteractiveToolRegistry(
     reviewConfig: config.agent.review,
     meridianIndexer: refs.meridianIndexer,
   })))
+
+  // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
+  reg.register(createUpdateGoalTool(() => refs.goalTrackerRef.current))
 
   return { registry: reg }
 }

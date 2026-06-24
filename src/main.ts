@@ -17,6 +17,7 @@ installEpermFilter()
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
+import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
@@ -236,6 +237,7 @@ async function main() {
           isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
           getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
+        toolRegistry.register(createUpdateGoalTool(() => goalTrackerRef.current))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
