@@ -213,6 +213,57 @@ describe('team orchestrator skeleton', () => {
     assert.ok(kinds.some(k => k === 'planner:plan'), `expected planner:plan in ${kinds}`)
     assert.ok(kinds.some(k => k === 'exec:patch_proposal'), `expected exec:patch_proposal in ${kinds}`)
   })
+
+  it('max first wave surfaces the council merge ledger and folds verification gates', async () => {
+    const plans: Record<string, unknown> = {
+      tianquan: {
+        perspective: 'tianquan', summary: 'base',
+        tasks: [{ id: 'T1', title: 'impl', objective: 'impl', files: ['src/x.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/x.ts'] }],
+        verification: [{ taskId: 'T1', command: 'npx tsc --noEmit', expected: 'exit 0' }],
+      },
+      tianfu: {
+        perspective: 'tianfu', summary: 'constraint',
+        risks: [{ taskId: 'T1', severity: 'high', claim: 'race condition', mitigation: 'add a lock' }],
+        verification: [{ taskId: 'T1', command: 'npm test', expected: 'pass' }],
+      },
+      tianxuan: {
+        perspective: 'tianxuan', summary: 'challenger',
+        // Different dependency set on the same task → dependency conflict.
+        tasks: [{ id: 'T1', title: 'impl', objective: 'impl', files: ['src/x.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: ['T0'], riskTier: 'low', touchSet: ['src/x.ts'] }],
+        alternatives: [{ title: 'Alternative approach', tradeoff: 'simpler but slower', recommendation: 'defer' }],
+      },
+    }
+    const summary = await runTeamSkeleton({ mode: 'max', objective: 'design the subsystem from scratch' }, {
+      delegateBatch: async (requests) => {
+        const isPlanner = requests.some(r => r.parentTurnId.includes('planner-'))
+        if (isPlanner) {
+          return {
+            status: 'completed', packet: 'planned',
+            results: requests.map(r => {
+              const persp = r.parentTurnId.includes('tianquan') ? 'tianquan'
+                : r.parentTurnId.includes('tianfu') ? 'tianfu'
+                : r.parentTurnId.includes('tianxuan') ? 'tianxuan' : 'other'
+              const plan = plans[persp]
+              return {
+                workOrderId: `team:planner-${persp}`,
+                status: 'passed' as const, summary: 'p', findings: [],
+                artifacts: plan ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify(plan) }] : [],
+                changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' as const,
+              }
+            }),
+          }
+        }
+        return { status: 'completed', results: [], packet: 'executed' }
+      },
+    })
+
+    assert.ok(summary.planMerge, 'first wave should carry planMerge')
+    assert.ok(summary.planMerge!.conflicts.some(c => c.description.includes('Dependency conflict on T1')), 'dependency conflict surfaced')
+    assert.ok(summary.planMerge!.risks.some(r => r.taskId === 'T1'), 'risk ledger surfaced')
+    assert.ok(summary.planMerge!.deferred.some(d => d.title === 'Alternative approach'), 'deferred alternative surfaced')
+    const t1 = summary.tasks.find(t => t.id === 'T1')!
+    assert.deepEqual(t1.verification, ['npx tsc --noEmit', 'npm test'], 'constraint gate folded into task')
+  })
 })
 
 describe('team orchestrator wave dispatch', () => {

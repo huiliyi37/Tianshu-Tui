@@ -8,7 +8,7 @@ import { createTeamSchedulerBandit, parallelismForTeamSchedulerArm, recommendTea
 import { applyTeamSchedulerInfluence, evaluateTeamSchedulerGate } from './team-scheduler-gate.js'
 import { buildTeamSchedulerShadowEvent, type TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
 import { buildGatedInfluenceAuditEvent, type GatedInfluenceAuditEvent } from './gated-influence-audit.js'
-import { buildPlannerObjective, mergePerspectivesByRole, normalizePerspective, parsePerspectiveResult, type TeamPerspectivePlan } from './team-perspectives.js'
+import { buildPlannerObjective, foldVerificationIntoTasks, mergePerspectivesByRole, normalizePerspective, parsePerspectiveResult, type MergedPlan, type TeamPerspectivePlan } from './team-perspectives.js'
 import { selectExpertSet } from './expert-router.js'
 import { loadTeamPlanSkeleton, saveTeamPlanSkeleton, type TeamPlanCacheStore } from './team-plan-cache.js'
 
@@ -65,6 +65,10 @@ export interface TeamRunSummary {
   run?: CoordinatorRun
   /** Track 2: true when the max-mode planner fanout was skipped via plan cache. */
   planCacheHit?: boolean
+  /** Council merge output (max mode, first wave only — absent on cache hits and
+   *  standard mode). Surfaces the perspective work that would otherwise be lost:
+   *  conflicts, risk ledger, deferred/rejected alternatives. Advisory only. */
+  planMerge?: Pick<MergedPlan, 'conflicts' | 'risks' | 'deferred' | 'rejected'>
 }
 
 function isFileScopedPatcher(task: TeamTaskDraft): boolean {
@@ -376,6 +380,7 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
     const cached = loadTeamPlanSkeleton(deps.planCacheStore, input.objective, 'max')
     let mergedTasks: TeamTask[]
     let plannerRun: CoordinatorRun | undefined
+    let planMerge: TeamRunSummary['planMerge']
     if (cached) {
       mergedTasks = cached.tasks
     } else {
@@ -399,7 +404,12 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
         return result ? parsePerspectiveResult(perspective, result) : normalizePerspective(perspective, {})
       }
       const merged = mergePerspectivesByRole(perspectives.map(planFor))
-      mergedTasks = merged.tasks
+      // Fold constraint-perspective verification gates into their tasks so the
+      // review focusHint (which reads TeamTask.verification) sees them on every
+      // wave, including waves resumed from the cached skeleton.
+      mergedTasks = foldVerificationIntoTasks(merged.tasks, merged.verification)
+      // Surface the council work that would otherwise be discarded.
+      planMerge = { conflicts: merged.conflicts, risks: merged.risks, deferred: merged.deferred, rejected: merged.rejected }
       if (mergedTasks.length > 0) {
         saveTeamPlanSkeleton(deps.planCacheStore, { objective: input.objective, mode: 'max', tasks: mergedTasks })
       }
@@ -418,6 +428,7 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
         packet: 'team max: planners returned no tasks to dispatch.',
         ...(plannerRun ? { run: plannerRun } : {}),
         ...(cached ? { planCacheHit: true } : {}),
+        ...(planMerge ? { planMerge } : {}),
       }
     }
 
@@ -428,7 +439,11 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       input,
       deps,
     })
-    return cached ? { ...summary, planCacheHit: true } : summary
+    return {
+      ...summary,
+      ...(cached ? { planCacheHit: true } : {}),
+      ...(planMerge ? { planMerge } : {}),
+    }
   }
 
   const waves = groupTeamTasks(enrichedTasks)

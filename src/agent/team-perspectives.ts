@@ -244,6 +244,41 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
 }
 
 /**
+ * Fold the merged verification ledger back into each task's `verification`.
+ *
+ * `mergePerspectivesByRole` returns merged tasks (base graph) plus a separate
+ * `verification` ledger that includes gates contributed by the constraint
+ * perspective (天府). Without folding, those constraint-added acceptance gates
+ * never reach the task — and therefore never reach the review focusHint that
+ * reads `TeamTask.verification`. This attaches each taskId-tagged gate to its
+ * task (deduped). Untagged gates (no taskId) are plan-level and left for the
+ * caller to surface separately; they are not folded into every task to avoid
+ * noise. Pure — returns new task objects, never mutates the input.
+ */
+export function foldVerificationIntoTasks(
+  tasks: TeamTask[],
+  verification: MergedPlan['verification'],
+): TeamTask[] {
+  if (verification.length === 0) return tasks
+  const gatesByTask = new Map<string, string[]>()
+  for (const gate of verification) {
+    if (!gate.taskId) continue
+    const command = gate.command.trim()
+    if (!command) continue
+    const arr = gatesByTask.get(gate.taskId) ?? []
+    arr.push(command)
+    gatesByTask.set(gate.taskId, arr)
+  }
+  if (gatesByTask.size === 0) return tasks
+  return tasks.map(task => {
+    const extra = gatesByTask.get(task.id)
+    if (!extra || extra.length === 0) return task
+    const merged = [...new Set([...task.verification, ...extra])]
+    return { ...task, verification: merged }
+  })
+}
+
+/**
  * Backward-compatible three-perspective merge. Delegates to the role-based
  * adjudicator with the historical 天权(base)/天府(constraint)/天璇(challenger) trio.
  */

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createTeamOrchestrateTool,
+  formatTeamSummary,
   teamReviewChangedFiles,
   teamReviewForceLevel,
   teamReviewFocusHint,
@@ -9,6 +10,7 @@ import {
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
 import type { ChangeSet } from '../../agent/review-discipline.js'
 import type { TeamTask } from '../../agent/team-plan.js'
+import type { TeamRunSummary } from '../../agent/team-orchestrator.js'
 import { decodeTeamPanelModel } from '../../tui/team-panel-model.js'
 
 function stubRun(packet = 'stub'): CoordinatorRun {
@@ -339,4 +341,151 @@ test('team_orchestrate review gate fires on honest diff even when worker self-re
   // Planned verification reaches the reviewer as a focus hint.
   assert.match(verifierObjective, /Planned acceptance gates/)
   assert.match(verifierObjective, /npm test/)
+})
+
+// ── formatTeamSummary: council merge ledger + whole-wave failure guard ──────
+
+function mkSummary(over: Partial<TeamRunSummary> = {}): TeamRunSummary {
+  return {
+    mode: 'max',
+    planned: [],
+    tasks: [],
+    waves: [
+      { id: 'w0', risk: 'low', taskIds: ['T1'], reason: 'first', parallelLimit: 1 },
+      { id: 'w1', risk: 'low', taskIds: ['T2'], reason: 'second', parallelLimit: 1 },
+    ],
+    dispatched: 1,
+    blocked: [],
+    packet: 'pkt',
+    ...over,
+  }
+}
+
+test('formatTeamSummary renders the council merge ledger when present', () => {
+  const out = formatTeamSummary(mkSummary({
+    planMerge: {
+      conflicts: [{ description: 'Dependency conflict on T1', tianquan: 'a', tianfu: 'b' }],
+      risks: [{ taskId: 'T1', severity: 'high', claim: 'race', mitigation: 'lock' }],
+      deferred: [{ source: 'tianxuan', title: 'Alt approach', reason: 'simpler' }],
+      rejected: [],
+    },
+  }), 0)
+
+  assert.match(out, /Plan conflicts/)
+  assert.match(out, /Dependency conflict on T1/)
+  assert.match(out, /Risk ledger/)
+  assert.match(out, /\[high\] T1: race/)
+  assert.match(out, /Deferred alternatives/)
+  assert.match(out, /Alt approach — simpler/)
+})
+
+test('formatTeamSummary omits the merge ledger on cache-hit waves (planMerge absent)', () => {
+  const out = formatTeamSummary(mkSummary({ planCacheHit: true }), 0)
+  assert.doesNotMatch(out, /Plan conflicts/)
+  assert.doesNotMatch(out, /Risk ledger/)
+})
+
+test('formatTeamSummary warns instead of advancing when the whole wave failed', () => {
+  const run: CoordinatorRun = {
+    status: 'completed',
+    packet: 'p',
+    results: [mkResult({ status: 'failed' }), mkResult({ status: 'blocked' })],
+  }
+  const out = formatTeamSummary(mkSummary({ run }), 0)
+
+  assert.match(out, /all 2 workers failed/)
+  assert.match(out, /do NOT dispatch fromWave 1/)
+  assert.doesNotMatch(out, /call team_orchestrate again with fromWave/)
+})
+
+test('formatTeamSummary keeps the normal next-wave hint when a worker passed', () => {
+  const run: CoordinatorRun = {
+    status: 'completed',
+    packet: 'p',
+    results: [mkResult({ status: 'failed' }), mkResult({ status: 'passed' })],
+  }
+  const out = formatTeamSummary(mkSummary({ run }), 0)
+
+  assert.match(out, /call team_orchestrate again with fromWave: 1/)
+  assert.doesNotMatch(out, /workers failed/)
+})
+
+test('formatTeamSummary does not warn on the onPlanReady pre-render (run absent)', () => {
+  const out = formatTeamSummary(mkSummary(), 0)
+  assert.match(out, /call team_orchestrate again with fromWave: 1/)
+  assert.doesNotMatch(out, /workers failed/)
+})
+
+// ── Scope-health wiring (advisory) ─────────────────────────────────────────
+
+test('team_orchestrate surfaces scope leak and folds leaked files into review focus', async () => {
+  let verifierObjective = ''
+  const persisted: Array<{ kind: string; json: string }> = []
+  const tool = createTeamOrchestrateTool({
+    delegate: async request => {
+      verifierObjective = request.objective
+      return {
+        status: 'completed',
+        packet: 'verified',
+        results: [mkResult({ workOrderId: 'verifier', evidenceStatus: 'verified' })],
+      }
+    },
+    delegateBatch: async () => ({
+      status: 'completed',
+      packet: 'executed',
+      results: [mkResult({
+        // worker touched a file OUTSIDE the planned scope (src/agent/x.ts)
+        changedFiles: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/agent/leak.ts b/src/agent/leak.ts\n--- a/src/agent/leak.ts\n+++ b/src/agent/leak.ts\n@@\n+x' }],
+        evidenceStatus: 'verified',
+      })],
+    }),
+    getTeamSchedulerRewardStore: () => ({
+      saveBanditState: (kind, json) => { persisted.push({ kind, json }) },
+    }),
+  })
+  const md = '### T1: tweak helper\n修改 `src/agent/x.ts`'
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-leak',
+  })
+
+  assert.equal(result.isError, false)
+  assert.match(result.content, /Scope health \[(medium|high)\]/)
+  assert.match(result.content, /src\/agent\/leak\.ts/)
+  // leaked file reaches the reviewer focus.
+  assert.match(verifierObjective, /Scope leak/)
+  assert.match(verifierObjective, /src\/agent\/leak\.ts/)
+  // scope-health is persisted to the reward store.
+  assert.ok(persisted.some(p => p.kind.startsWith('team_scope_health:')))
+})
+
+test('team_orchestrate emits no scope-health noise when changes stay in plan; survives missing store', async () => {
+  const tool = createTeamOrchestrateTool({
+    delegate: async () => ({
+      status: 'completed',
+      packet: 'verified',
+      results: [mkResult({ workOrderId: 'verifier', evidenceStatus: 'verified' })],
+    }),
+    delegateBatch: async () => ({
+      status: 'completed',
+      packet: 'executed',
+      results: [mkResult({
+        changedFiles: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/agent/x.ts b/src/agent/x.ts\n--- a/src/agent/x.ts\n+++ b/src/agent/x.ts\n@@\n+x' }],
+        evidenceStatus: 'verified',
+      })],
+    }),
+    // no getTeamSchedulerRewardStore → persist must no-op without throwing
+  })
+  const md = '### T1: tweak helper\n修改 `src/agent/x.ts`'
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-clean',
+  })
+
+  assert.equal(result.isError, false)
+  assert.doesNotMatch(result.content, /Scope health/)
 })

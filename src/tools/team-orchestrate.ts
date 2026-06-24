@@ -14,6 +14,7 @@ import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../ag
 import { buildTeamEpisodeFromStore, recordTeamEpisodeClosureFromStore } from '../agent/reward-loop.js'
 import { formatTeamDelivery } from '../agent/team-episode.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
+import { buildTeamWaveScopeHealth, persistTeamScopeHealth } from '../agent/team-scope-health.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
@@ -60,6 +61,39 @@ const inputSchema = z.object({
   fromWave: z.number().int().min(0).optional(),
 })
 
+/**
+ * Render the council merge ledger (max mode, first wave) so the perspective work
+ * isn't silently dropped: cross-perspective conflicts, deferred alternatives, and
+ * the risk ledger. Each section is capped to keep the panel readable; a trailing
+ * count signals how many were elided. Advisory — never blocks dispatch.
+ */
+function formatPlanMerge(planMerge: NonNullable<TeamRunSummary['planMerge']>): string[] {
+  const CAP = 3
+  const lines: string[] = []
+  const section = (
+    title: string,
+    items: string[],
+  ): void => {
+    if (items.length === 0) return
+    lines.push(title)
+    for (const item of items.slice(0, CAP)) lines.push(`  - ${item}`)
+    if (items.length > CAP) lines.push(`  … (+${items.length - CAP} more)`)
+  }
+  section(
+    'Plan conflicts (council disagreed — adjudicate):',
+    planMerge.conflicts.map(c => c.description),
+  )
+  section(
+    'Deferred alternatives (not in base plan):',
+    planMerge.deferred.map(d => `${d.title} — ${d.reason}`),
+  )
+  section(
+    'Risk ledger:',
+    planMerge.risks.map(r => `[${r.severity}]${r.taskId ? ` ${r.taskId}:` : ''} ${r.claim}`),
+  )
+  return lines
+}
+
 export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string {
   const lines: string[] = [
     `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked${summary.planCacheHit ? ' (plan cache hit — planner fanout skipped)' : ''}`,
@@ -72,9 +106,23 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
     lines.push('Blocked:')
     for (const b of summary.blocked) lines.push(`  - ${b}`)
   }
+  if (summary.planMerge) {
+    const mergeLines = formatPlanMerge(summary.planMerge)
+    if (mergeLines.length > 0) lines.push('', ...mergeLines)
+  }
   const nextWave = fromWave + 1
   if (summary.waves.length > nextWave) {
-    lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
+    // Whole-wave failure: every worker missed its bar. Advancing on top of a
+    // failed/stale wave compounds breakage, so replace the next-wave nudge with
+    // a stop warning. Only triggers when an actual run is present (post-dispatch),
+    // not for the onPlanReady pre-render where summary.run is absent.
+    const run = summary.run
+    const allFailed = !!run && run.results.length > 0 && run.results.every(r => r.status !== 'passed')
+    if (allFailed) {
+      lines.push('', `⚠ wave ${fromWave}: all ${run!.results.length} workers failed — integrate/retry before advancing; do NOT dispatch fromWave ${nextWave} until fixed.`)
+    } else {
+      lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
+    }
   }
   lines.push('', summary.packet)
   return lines.join('\n')
@@ -275,6 +323,34 @@ export function createTeamOrchestrateTool(
       let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
+
+      // Scope-health (advisory): the real diff is already in telemetry's
+      // observedChangedFiles. Compare it against planned.files to detect scope
+      // leak (worker touched files outside the plan) and missing coverage.
+      // Persist for learning, surface medium/high, and feed leaked files to the
+      // review focus so the squadron names unplanned changes. Never blocks.
+      let scopeHealthNote = ''
+      let scopeLeakedFiles: string[] = []
+      if (telemetryEvent) {
+        try {
+          const health = buildTeamWaveScopeHealth(telemetryEvent)
+          const rewardStore = coordinator.getTeamSchedulerRewardStore?.()
+          persistTeamScopeHealth(
+            rewardStore?.saveBanditState ? { saveBanditState: rewardStore.saveBanditState.bind(rewardStore) } : undefined,
+            health,
+          )
+          if (health.severity === 'medium' || health.severity === 'high') {
+            scopeLeakedFiles = health.leakedFiles
+            const parts: string[] = []
+            if (health.leakedFiles.length > 0) parts.push(`leaked (changed, not planned): ${health.leakedFiles.join(', ')}`)
+            if (health.missingFiles.length > 0) parts.push(`missing (planned, untouched): ${health.missingFiles.join(', ')}`)
+            scopeHealthNote = `\n\nScope health [${health.severity}]: ${parts.join('; ')}`
+          }
+        } catch {
+          // Scope health is advisory; never affect dispatch or review.
+        }
+      }
+
       // Authoritative changed files: union of real diff artifact + self-report,
       // so a worker that under-reports changedFiles can't skip the review gate.
       const changedFiles = teamReviewChangedFiles(summary.run)
@@ -293,7 +369,16 @@ export function createTeamOrchestrateTool(
           }
           // Inject the dense perspective layer flash execution lacks.
           change.forceLevel = teamReviewForceLevel(mode, change, waveTasks)
-          const focusHint = teamReviewFocusHint(waveTasks)
+          // Combine planned acceptance gates with scope-leak callouts so the
+          // reviewer scrutinizes both the criteria and any unplanned changes.
+          const baseFocus = teamReviewFocusHint(waveTasks)
+          const focusParts = [
+            baseFocus,
+            scopeLeakedFiles.length > 0
+              ? `Scope leak — files changed outside the plan, scrutinize these: ${scopeLeakedFiles.join(', ')}`
+              : undefined,
+          ].filter((s): s is string => Boolean(s))
+          const focusHint = focusParts.length > 0 ? focusParts.join(' | ') : undefined
           const reviewDeps = createCoordinatorReviewDeps(
             {
               delegate: (request, abortSignal) => delegate(request, abortSignal),
@@ -351,7 +436,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + deliverySynthesis,
+        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + scopeHealthNote + deliverySynthesis,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }
