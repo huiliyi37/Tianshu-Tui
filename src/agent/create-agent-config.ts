@@ -41,6 +41,7 @@ export interface AgentConfigInput {
   autoDelegateEnabled?: boolean
   autoReasoning?: boolean
   crossSessionEnabled?: boolean
+  goalJudge?: { enabled?: boolean; maxRuns?: number; browser?: boolean }
   auth?: AuthProvider
   habituationThreshold?: number
   /** Optional permission config — allowlists, bash command prefixes, etc. */
@@ -88,6 +89,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
     intentRetrievalRouter: params.config.agent.intentRetrievalRouter,
     autoDelegateEnabled: params.config.agent.autoDelegateEnabled,
     autoReasoning: params.config.agent.autoReasoning,
+    goalJudge: params.config.agent.goal?.judge,
     auth: params.auth,
     habituationThreshold: params.habituationThreshold,
     permissions: params.config.agent.permissions as PermissionConfig,
@@ -103,7 +105,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -163,6 +165,8 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     antiAnchoring: input.antiAnchoring,
     intentRetrievalRouter: input.intentRetrievalRouter,
     autoDelegateEnabled: input.autoDelegateEnabled,
+    goalJudge: input.goalJudge,
+    allProviders: input.allProviders,
     autoReasoning: input.autoReasoning ?? true,
     reasoningFloor: model.reasoningEffort,
     // GLM turn-level thinking: disable thinking on tool execution turns

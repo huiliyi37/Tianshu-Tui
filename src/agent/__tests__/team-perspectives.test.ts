@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPlannerObjective, normalizePerspective, mergePerspectives, mergePerspectivesByRole, parsePerspectiveResult } from '../team-perspectives.js'
+import { buildPlannerObjective, foldVerificationIntoTasks, normalizePerspective, mergePerspectives, mergePerspectivesByRole, parsePerspectiveResult } from '../team-perspectives.js'
 import type { TeamPerspectivePlan } from '../team-perspectives.js'
 import type { TeamTask } from '../team-plan.js'
 import type { WorkerResult } from '../work-order.js'
@@ -387,5 +387,49 @@ describe('mergePerspectivesByRole', () => {
     const viaRole = mergePerspectivesByRole([tianquan, tianfu, tianxuan])
 
     assert.deepEqual(viaWrapper, viaRole)
+  })
+})
+
+describe('foldVerificationIntoTasks', () => {
+  it('folds taskId-tagged gates into the matching task verification', () => {
+    const tasks = [makeTask('T1'), makeTask('T2')]
+    const folded = foldVerificationIntoTasks(tasks, [
+      { taskId: 'T1', command: 'npm run lint', expected: 'exit 0' },
+      { taskId: 'T2', command: 'npm test', expected: 'pass' },
+    ])
+
+    assert.deepEqual(folded[0]!.verification, ['npm run lint'])
+    assert.deepEqual(folded[1]!.verification, ['npm test'])
+  })
+
+  it('dedupes gates already present on the task', () => {
+    const tasks = [{ ...makeTask('T1'), verification: ['npm run lint'] }]
+    const folded = foldVerificationIntoTasks(tasks, [
+      { taskId: 'T1', command: 'npm run lint', expected: 'exit 0' },
+      { taskId: 'T1', command: 'npm test', expected: 'pass' },
+    ])
+
+    assert.deepEqual(folded[0]!.verification, ['npm run lint', 'npm test'])
+  })
+
+  it('ignores untagged (plan-level) gates and never folds them into every task', () => {
+    const tasks = [makeTask('T1'), makeTask('T2')]
+    const folded = foldVerificationIntoTasks(tasks, [
+      { command: 'npm run e2e', expected: 'green' },
+    ])
+
+    assert.deepEqual(folded[0]!.verification, [])
+    assert.deepEqual(folded[1]!.verification, [])
+  })
+
+  it('does not mutate input tasks; returns same array when there are no gates', () => {
+    const tasks = [makeTask('T1')]
+    const same = foldVerificationIntoTasks(tasks, [])
+    assert.equal(same, tasks)
+
+    // A gate for an unknown taskId folds into nothing — task content unchanged.
+    const noMatch = foldVerificationIntoTasks(tasks, [{ taskId: 'TX', command: 'x', expected: 'y' }])
+    assert.deepEqual(tasks[0]!.verification, [])
+    assert.deepEqual(noMatch[0]!.verification, [])
   })
 })

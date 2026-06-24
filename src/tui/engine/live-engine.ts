@@ -18,8 +18,8 @@
  */
 
 import type { WriteStream } from 'node:tty'
-import stringWidth from 'string-width'
 import { ANSI, cursorUp, cursorDown } from './ansi.js'
+import { displayWidth, ambiguousWideEnabled } from '../width.js'
 
 export interface LiveRegionLine {
   /** 该行的 ANSI 格式化文本（包含颜色码） */
@@ -62,7 +62,9 @@ export class LiveEngine {
   private rowsForLine(text: string): number {
     const width = this.stdout.columns || 80
     if (width <= 0) return 1
-    const dw = stringWidth(text)
+    // 行数估算必须与终端实际换行一致：CJK 终端把 ambiguous 符号按 2 列渲染，
+    // 用 ambiguousAsWide 度量（env 门控，默认 narrow=string-width）避免低估行数。
+    const dw = displayWidth(text, { ambiguousAsWide: ambiguousWideEnabled() })
     if (dw === 0) return 1
     return Math.ceil(dw / width)
   }

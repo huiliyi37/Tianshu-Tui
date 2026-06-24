@@ -110,22 +110,24 @@ describe('tool-history XML section', () => {
     assert.ok(!buildVolatileBlock(base).includes('<tool-history'))
   })
 
-  it('excludes active star domain from both stable and dynamic appendix (rendered in consolidated block by engine)', () => {
+  it('folds active star domain into the stable frozen prefix, not the dynamic appendix', () => {
     const ctx: VolatileContext = {
       ...base,
       activeDomain: {
-        name: '破军<域>',
+        name: '破军',
         motto: '好男儿当负三尺剑立不世之功',
-        volatileBlock: '你当前在破军域。突破 <边界> & 记录失败。',
+        volatileBlock: '你当前在破军域。突破边界，记录失败。',
       },
     }
 
-    const latest = buildLatestTurnVolatileBlock(ctx)
     const stable = buildStableVolatileBlock(ctx)
-    // star-domain is rendered in <consolidated> by engine.ts habituation,
-    // NOT in stable or dynamic appendix — avoids duplicate injection per turn.
-    assert.ok(!stable.includes('<star-domain'), 'stable must not contain star-domain')
-    assert.ok(!latest.includes('<star-domain'), 'dynamic appendix must not contain star-domain')
+    const appendix = buildDynamicAppendix(ctx)
+    // star-domain is a session constant: folded into the frozen prefix so it
+    // enters the exact-prefix cache from turn 1 — NOT re-emitted per turn in the
+    // dynamic appendix.
+    assert.ok(stable.includes('<star-domain name="破军"'), 'stable must contain star-domain')
+    assert.ok(stable.includes('好男儿当负三尺剑立不世之功'), 'stable must contain motto')
+    assert.ok(!appendix.includes('<star-domain'), 'dynamic appendix must not contain star-domain')
   })
 
   it('escapes XML special chars in targets', () => {

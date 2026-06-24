@@ -96,6 +96,10 @@ export const DEFAULT_CONFIG: Config = {
     desktopTools: false,
     crossSessionEnabled: true,
     hearthObserveEnabled: false,
+    toolGating: {
+      enabled: true,
+      extraCore: [],
+    },
     antiAnchoring: {
       enabled: false,
       blindExploration: true,
@@ -136,6 +140,18 @@ export const DEFAULT_CONFIG: Config = {
     permissions: {
       allow: [],
       bash: { allowlist: [] },
+    },
+    review: {
+      profiles: {},
+      skipAuto: false,
+      mechanicalFastPath: true,
+    },
+    goal: {
+      judge: {
+        enabled: true,
+        maxRuns: 3,
+        browser: false,
+      },
     },
   },
   compact: {

@@ -1,9 +1,10 @@
-import stringWidth from 'string-width'
+import { displayWidth, ambiguousWideEnabled } from './width.js'
 
 /** Display rows a single logical line occupies at the given width (wrapping-aware). */
 function rowsFor(line: string, width: number): number {
   if (width <= 0) return 1
-  return Math.max(1, Math.ceil(stringWidth(line) / width))
+  // 与 LiveEngine.rowsForLine 同口径：ambiguous 符号在 CJK 终端按 2 列换行。
+  return Math.max(1, Math.ceil(displayWidth(line, { ambiguousAsWide: ambiguousWideEnabled() }) / width))
 }
 
 export function displayRowsForText(text: string, width: number): number {
@@ -13,17 +14,21 @@ export function displayRowsForText(text: string, width: number): number {
 const OMITTED_PREFIX = '… '
 const OMITTED_PREFIX_NARROW = '…'
 
+function charWidth(ch: string): number {
+  return displayWidth(ch, { ambiguousAsWide: ambiguousWideEnabled() })
+}
+
 function takeTailByDisplayWidth(line: string, maxDisplayWidth: number): string {
   if (maxDisplayWidth <= 0) return ''
 
   const chars = Array.from(line)
-  let displayWidth = 0
+  let width = 0
   let start = chars.length
 
   for (let i = chars.length - 1; i >= 0; i--) {
-    const nextWidth = displayWidth + stringWidth(chars[i]!)
+    const nextWidth = width + charWidth(chars[i]!)
     if (nextWidth > maxDisplayWidth) break
-    displayWidth = nextWidth
+    width = nextWidth
     start = i
   }
 
@@ -39,8 +44,8 @@ function takeTailByDisplayRows(line: string, width: number, rows: number): strin
 function markOmittedHead(line: string, width: number): string {
   if (width <= 0) return `${OMITTED_PREFIX}${line}`
 
-  const prefix = width > stringWidth(OMITTED_PREFIX) ? OMITTED_PREFIX : OMITTED_PREFIX_NARROW
-  const available = Math.max(0, rowsFor(line, width) * width - stringWidth(prefix))
+  const prefix = width > charWidth(OMITTED_PREFIX) ? OMITTED_PREFIX : OMITTED_PREFIX_NARROW
+  const available = Math.max(0, rowsFor(line, width) * width - charWidth(prefix))
   return `${prefix}${takeTailByDisplayWidth(line, available)}`
 }
 

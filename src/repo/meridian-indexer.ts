@@ -59,7 +59,11 @@ export class MeridianIndexer {
 
     try {
       const result = await parseFile(rel, source)
-      this.db.upsertFile(result)
+      // Resolve raw import strings to repo-relative paths before storing, so
+      // reverse-dependency lookups (getReverseDependents) actually match. The
+      // 1-hop expansion below reuses the same resolved set to avoid re-resolving.
+      const resolvedImports = this.resolveImports(rel, result.imports)
+      this.db.upsertFile({ ...result, imports: resolvedImports })
       this.db.recordAccess(rel)
 
       // Build tested_by edges if this is a test file
@@ -67,10 +71,9 @@ export class MeridianIndexer {
         this.buildTestEdges(rel)
       }
 
-      // 1-hop expand: parse direct imports
-      for (const imp of result.imports) {
-        const resolved = this.resolveImport(rel, imp)
-        if (resolved && !this.indexing.has(resolved)) {
+      // 1-hop expand: parse direct imports (reuse resolved set)
+      for (const resolved of resolvedImports) {
+        if (!this.indexing.has(resolved)) {
           await this.indexFile(resolved)
         }
       }
@@ -89,7 +92,8 @@ export class MeridianIndexer {
     await this.ensureInit()
     const source = readFileSync(absPath, 'utf-8')
     const result = await parseFile(rel, source)
-    this.db.upsertFile(result)
+    const resolvedImports = this.resolveImports(rel, result.imports)
+    this.db.upsertFile({ ...result, imports: resolvedImports })
   }
 
   async query(seedFile: string, opts?: Partial<RepoMapOptions>): Promise<RepoMapResult> {
@@ -159,6 +163,18 @@ export class MeridianIndexer {
   private isTestFile(filePath: string): boolean {
     return filePath.includes('.test.') || filePath.includes('.spec.') ||
       filePath.includes('__tests__/') || filePath.includes('test/')
+  }
+
+  /** Resolve a list of raw import strings to deduped repo-relative paths.
+   *  External packages (zod, node:fs) and tsconfig path aliases (@/, ~) fail
+   *  resolution and are dropped — they carry no reverse-dependency value here. */
+  private resolveImports(fromFile: string, imports: string[]): string[] {
+    const seen = new Set<string>()
+    for (const imp of imports) {
+      const resolved = this.resolveImport(fromFile, imp)
+      if (resolved) seen.add(resolved)
+    }
+    return [...seen]
   }
 
   private resolveImport(fromFile: string, importPath: string): string | null {

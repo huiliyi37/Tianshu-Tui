@@ -16,6 +16,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
+import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
@@ -146,12 +147,14 @@ async function main() {
   }
 
   // rivet -p "prompt" / rivet --print "prompt" [--json] [--stream-json]
-  const isHeadless = args.includes('-p') || args.includes('--print')
+  // rivet --goal "task" [--budget N] [--json] [--stream-json] — headless goal autonomy
+  const isHeadless = args.includes('-p') || args.includes('--print') || args.includes('--goal')
 
   if (isHeadless) {
     const { parseCliArgs, runHeadless } = await import('./headless.js')
     const { loadConfig } = await import('./config/manager.js')
     const { AgentLoop } = await import('./agent/loop.js')
+    const { GoalTracker, buildGoalModePrompt } = await import('./agent/goal-tracker.js')
     const { SessionContext } = await import('./agent/context.js')
     const { createAgentConfig, createMainAgentConfigInput } = await import('./agent/create-agent-config.js')
     const { createDefaultToolRegistry } = await import('./tools/default-registry.js')
@@ -161,10 +164,15 @@ async function main() {
     const { createVerificationAttribution } = await import('./agent/verification-attribution.js')
     const { createDeliveryGateV2 } = await import('./agent/delivery-gate-v2.js')
     const { createWorktreeBaseline } = await import('./agent/worktree-baseline.js')
+    const { createHeadlessCoordinator } = await import('./agent/headless-coordinator.js')
 
     const parsed = parseCliArgs(args)
-    if (!parsed.prompt) {
-      process.stderr.write('Usage: rivet -p "<prompt>" [--json] [--stream-json]\n')
+    // Goal mode drives the same AgentLoop + GoalTracker as the TUI /goal command;
+    // the continuation loop runs entirely inside a single agent.run() (see
+    // TurnOrchestrator), so the headless path only has to attach the tracker.
+    const effectivePrompt = parsed.goal ? buildGoalModePrompt(parsed.goal) : parsed.prompt
+    if (!effectivePrompt) {
+      process.stderr.write('Usage: rivet -p "<prompt>" [--json] [--stream-json]\n   or: rivet --goal "<task>" [--budget N] [--json] [--stream-json]\n')
       process.exit(2)
     }
 
@@ -177,8 +185,19 @@ async function main() {
     const model = prov.models[0]!
     const sessionId = crypto.randomUUID()
 
+    // --budget N (default 100) is the hard turn cap for goal mode; it doubles as
+    // the GoalTracker iteration budget so the two limits coincide. Non-goal -p
+    // runs keep the original tight 15-turn cap.
+    const goalBudget = parsed.budget ?? 100
+    const headlessMaxTurns = parsed.goal ? goalBudget : 15
+    // Tracker is created inside createAgent (attached to the agent) but referenced
+    // here so we can read achievement state after the run completes. A ref object
+    // (not a bare let) is used so the opaque runHeadless() call invalidates CFA
+    // narrowing — a closure-only assignment would otherwise keep it typed as null.
+    const goalTrackerRef: { current: GoalTrackerInstance | null } = { current: null }
+
     const result = await runHeadless({
-      prompt: parsed.prompt,
+      prompt: effectivePrompt,
       json: parsed.json,
       streamJson: parsed.streamJson,
       createAgent: () => {
@@ -205,6 +224,9 @@ async function main() {
           taskLedger: b1TaskLedger,
           ownership: b1Ownership,
           gate: b1Gate,
+          isGoalActive: () => goalTrackerRef.current?.isActive() ?? false,
+          isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
+          getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
@@ -220,13 +242,80 @@ async function main() {
           auth: undefined,
         }))
         const session = new SessionContext()
-        return new AgentLoop({ ...agentCfg, toolRegistry, maxTurns: 15 }, session, process.cwd())
+        const agent = new AgentLoop({ ...agentCfg, toolRegistry, maxTurns: headlessMaxTurns }, session, process.cwd())
+        if (parsed.goal) {
+          const tracker = new GoalTracker({
+            goal: parsed.goal,
+            maxIterations: goalBudget,
+            contextWindow: model.contextWindow ?? 0,
+            maxJudgeRuns: agent.config.goalJudge?.maxRuns,
+          })
+          goalTrackerRef.current = tracker
+          agent.setGoalTracker(tracker)
+          // Side-path criteria extraction for the completion judge. Async + fail-open:
+          // criteria default to a generic template. With the headless coordinator
+          // wired, the judge actually runs; without it, it degrades to inconclusive.
+          if (agent.config.goalJudge?.enabled !== false) {
+            // Wire a minimal DelegationCoordinator so the goal judge can spawn
+            // goal_judge workers. Without this, getGoalJudgeDeps returns empty
+            // deps and the judge is a permanent no-op in headless mode.
+            const coordinator = createHeadlessCoordinator({
+              toolRegistry,
+              provider: prov,
+              providerName: cfg.provider.default,
+              apiKey: key,
+              auth: undefined,
+              cwd: process.cwd(),
+              sessionId,
+            })
+            agent.config.coordinatorRef = () => coordinator
+
+            // Fail-closed: browser verification requires interactive TUI approval
+            // (web_fetch/browser need permission prompts). Headless degrades to
+            // web_fetch-only read-only mode; full browser is disabled.
+            if (cfg.agent.goal?.judge?.browser === true) {
+              process.stderr.write('[goal] ⚠ goal-judge browser disabled in headless mode — web_fetch read-only only\n')
+            }
+
+            const goal = parsed.goal
+            void (async () => {
+              try {
+                const { extractGoalCriteria, completionFromClient, buildCheapClient } = await import('./agent/goal-criteria.js')
+                // Prefer dedicated cheap client to avoid sharing main session's client.
+                const cheapProfile = cfg.workers?.profiles?.cheap
+                const allProviders = agent.config.allProviders ?? {}
+                let completion
+                if (cheapProfile && allProviders[cheapProfile.provider]) {
+                  const cheap = buildCheapClient(cheapProfile, allProviders)
+                  completion = cheap
+                    ? completionFromClient(cheap.client, cheap.model)
+                    : completionFromClient(agent.config.client, model.id)
+                } else {
+                  completion = completionFromClient(agent.config.client, model.id)
+                }
+                const criteria = await extractGoalCriteria(goal, completion)
+                tracker.setSuccessCriteria(criteria)
+                process.stderr.write(`[goal] judge criteria:\n${criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`)
+              } catch {
+                // non-fatal — judge falls back to wide judgment
+                process.stderr.write('[goal] criteria extraction failed — judge will use wide judgment\n')
+              }
+            })()
+          }
+        }
+        return agent
       },
     })
 
     if (result.stdout) process.stdout.write(result.stdout + '\n')
     else if (result.json) process.stdout.write(JSON.stringify(result.json) + '\n')
-    process.exit(result.exitCode)
+    // In goal mode, success is "goal achieved", not merely "no API error". A run
+    // that exhausts the iteration/context budget without the completion marker
+    // exits non-zero so CI/scripts can detect incomplete goals.
+    const exitCode = parsed.goal
+      ? (goalTrackerRef.current?.isGoalAchieved() ? 0 : 1)
+      : result.exitCode
+    process.exit(exitCode)
   }
 
   // ── Interactive TUI (requires TTY) ──────────────────────────

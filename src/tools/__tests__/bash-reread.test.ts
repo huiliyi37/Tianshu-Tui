@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkBashReread } from '../bash.ts'
+import { checkBashReread } from '../bash.js'
 
 describe('checkBashReread', () => {
   // Reset tracker between tests by exploiting the toolUseId dedup

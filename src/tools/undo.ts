@@ -54,8 +54,13 @@ export function createUndoTool(getFileHistory: () => FileHistory | undefined): T
         if (restored.length === 0) {
           return { content: 'No files needed restoration.' }
         }
+        // Recovery-journal tracking is a best-effort audit side-effect; a write
+        // failure (e.g. an unwritable cwd) must not mask an already-successful
+        // restore by surfacing it as "Undo failed".
         for (const file of restored) {
-          trackFileRestore(params.cwd, file, 'undo tool restore')
+          try {
+            trackFileRestore(params.cwd, file, 'undo tool restore')
+          } catch { /* audit journal unavailable — restore already applied */ }
         }
         // B1: report if any restored files were not owned
         const unownedRestored = params.ownedFiles?.length

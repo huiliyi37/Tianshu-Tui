@@ -37,6 +37,7 @@ import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
 import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
+import { runTypeCheck } from './lsp/client.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
@@ -66,6 +67,7 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
+import { createRelatedTestsTool } from './tools/related-tests.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
 import { WEB_SEARCH_TOOL } from './tools/web-search.js'
 import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
@@ -89,7 +91,6 @@ import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from './age
 import { computeTeamWaveReward, deriveTeamWaveRewardInput } from './agent/team-reward.js'
 import { teamSchedulerArmForParallelism } from './agent/team-scheduler-bandit.js'
 import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
-import { debugLog } from './utils/debug.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -427,6 +428,8 @@ export function createInteractiveToolRegistry(
       store: refs.meridianIndexer?.getDb(),
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
+    getMeridianIndexer: () => refs.meridianIndexer,
+    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*'),
   }, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
@@ -448,6 +451,9 @@ export function createInteractiveToolRegistry(
 
   // repo_graph
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
+
+  // related_tests — override the no-indexer default with a meridian-aware factory
+  reg.register(createRelatedTestsTool(() => refs.meridianIndexer))
 
   reg.register(SEMANTIC_SEARCH_TOOL)
   // APPLY_PATCH: EXTENDED layer — overlap with hash_edit covers >90% of
@@ -519,7 +525,9 @@ export function createInteractiveToolRegistry(
     }, { reviewDepth: params?.reviewDepth ?? 0 }),
     isGoalActive: () => refs.goalTrackerRef.current?.isActive() ?? false,
     isGoalAchieved: () => refs.goalTrackerRef.current?.isGoalAchieved() ?? false,
+    getLastVerdict: () => refs.goalTrackerRef.current?.getLastVerdict() ?? null,
     reviewConfig: config.agent.review,
+    meridianIndexer: refs.meridianIndexer,
   })))
 
   return { registry: reg }

@@ -48,6 +48,8 @@ export class TurnHeartbeat {
   private lastActivity = 'starting'
   private firstFired = false
   private stopped = false
+  private paused = false
+  private watchdogDisarmed = false
   private readonly silentMs: number
   private readonly repeatMs: number
   private readonly hardStallMs: number
@@ -66,15 +68,18 @@ export class TurnHeartbeat {
   /** Start watching. Call once per turn. */
   start(): void {
     this.stopped = false
+    this.paused = false
+    this.watchdogDisarmed = false
     this.lastTick = Date.now()
     this.firstFired = false
     this.hardStallFired = false
     this.scheduleNext(this.silentMs)
   }
 
-  /** Reset the silence clock. Call on every UI-visible event. */
+  /** Reset the silence clock. Call on every UI-visible event. Exits pause. */
   tick(activity: string): void {
     if (this.stopped) return
+    this.paused = false
     this.lastTick = Date.now()
     this.lastActivity = activity
     this.firstFired = false
@@ -82,9 +87,54 @@ export class TurnHeartbeat {
     this.scheduleNext(this.silentMs)
   }
 
+  /**
+   * Suspend the watchdog timer. Use during long boundary operations
+   * (compaction, perception, cold-cache re-encode) that don't emit UI
+   * events but are legitimately busy. Call resume() after.
+   */
+  pause(): void {
+    if (this.stopped || this.paused) return
+    this.paused = true
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  /** Resume the watchdog timer after a pause(). */
+  resume(): void {
+    if (this.stopped || !this.paused) return
+    this.paused = false
+    this.firstFired = false
+    this.hardStallFired = false
+    this.scheduleNext(this.silentMs)
+  }
+
+  /**
+   * Suspend ONLY the hard-stall abort while keeping informational heartbeats
+   * alive. Unlike pause() (which freezes the whole timer), this lets the UI
+   * keep showing "still working — waiting for first token (Ns)" during a
+   * legitimately-long-but-busy gap — the cold prefix re-encode before the
+   * first stream token, which can exceed hardStallMs with zero deltas — while
+   * preventing that silence from being mistaken for a wedge. Unaffected by
+   * tick()/onPhaseChange (which re-arm the full timer), so it survives the
+   * onStreamStart phase change. Call rearmWatchdog() once the operation
+   * completes (or the first real delta arrives).
+   */
+  disarmWatchdog(): void {
+    this.watchdogDisarmed = true
+  }
+
+  /** Re-enable the hard-stall abort after disarmWatchdog(). */
+  rearmWatchdog(): void {
+    this.watchdogDisarmed = false
+    this.hardStallFired = false
+  }
+
   /** Stop firing. Call when the turn ends (success, abort, or error). */
   stop(): void {
     this.stopped = true
+    this.paused = false
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
@@ -97,7 +147,7 @@ export class TurnHeartbeat {
   }
 
   private fire(): void {
-    if (this.stopped) return
+    if (this.stopped || this.paused) return
     const elapsed = Date.now() - this.lastTick
     // Guard: if a tick happened during scheduling drift, skip and reschedule.
     if (elapsed < this.silentMs - 500) {
@@ -108,7 +158,7 @@ export class TurnHeartbeat {
     // wedged in a non-cooperative await (turn-boundary blind spot). Fire the
     // abort hook once so the loop can break out. Keep emitting heartbeats too,
     // so the UI still updates while the abort propagates.
-    if (this.hardStallMs > 0 && !this.hardStallFired && elapsed >= this.hardStallMs) {
+    if (this.hardStallMs > 0 && !this.hardStallFired && !this.watchdogDisarmed && elapsed >= this.hardStallMs) {
       this.hardStallFired = true
       try {
         this.onHardStall?.(elapsed, this.lastActivity)

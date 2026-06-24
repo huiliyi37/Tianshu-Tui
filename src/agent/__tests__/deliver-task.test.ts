@@ -32,6 +32,8 @@ function makeContext(opts: {
   sessionRegistry?: SessionRegistry
   sessionId?: string
   detectWroteButNeverRead?: (cwd: string, files: string[]) => Array<{ symbol: string; file: string; kind: 'export' | 'field' }>
+  meridianDb?: import('../../repo/meridian-db.js').MeridianDb
+  typecheckRunner?: import('../typecheck-gate.js').TypecheckRunner
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -63,6 +65,8 @@ function makeContext(opts: {
     reviewDeps: opts.disableReviewDeps ? undefined : (opts.reviewDeps ?? {} as ReviewRouterDeps),
     reviewDepth: opts.reviewDepth,
     detectWroteButNeverRead: opts.detectWroteButNeverRead ?? (() => []),
+    meridianIndexer: opts.meridianDb ? { getDb: () => opts.meridianDb! } as unknown as import('../../repo/meridian-indexer.js').MeridianIndexer : null,
+    typecheckRunner: opts.typecheckRunner,
   }))
 
   const params: ToolCallParams = {
@@ -1784,6 +1788,122 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'docs: guide' } })
       assert.equal(result.isError, true)
       assert.match(result.content, /Cannot commit/)
+    })
+  })
+
+  describe('meridian blast radius focusHint', () => {
+    function mockMeridianDb(reverse: Record<string, Array<{ file: string; kind: string; weight: number }>>, tests: Record<string, string[]> = {}): import('../../repo/meridian-db.js').MeridianDb {
+      return {
+        getReverseDependents: (f: string) => reverse[f] ?? [],
+        getTestsFor: (f: string) => tests[f] ?? [],
+        getCoEditNeighbors: () => [],
+      } as unknown as import('../../repo/meridian-db.js').MeridianDb
+    }
+
+    it('injects blast radius into focusHint when meridianDb has consumers', async () => {
+      const db = mockMeridianDb(
+        { 'src/foo.ts': [{ file: 'src/bar.ts', kind: 'import', weight: 1 }] },
+        { 'src/foo.ts': ['src/__tests__/foo.test.ts'] },
+      )
+      const { tool, params } = makeContext({
+        taskId: 't-br',
+        ownedFiles: ['src/foo.ts'],
+        dirtyFiles: ['src/foo.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+        meridianDb: db,
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'test: br' } })
+      assert.equal(result.isError ?? false, false)
+    })
+
+    it('does not crash when meridianDb is null', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't-no-db',
+        ownedFiles: ['src/baz.ts'],
+        dirtyFiles: ['src/baz.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'test: nodb' } })
+      assert.equal(result.isError ?? false, false)
+    })
+  })
+
+  describe('typecheck backstop gate', () => {
+    const brokenRunner: import('../typecheck-gate.js').TypecheckRunner = () => ({
+      diagnostics: [{ file: 'src/foo.ts', line: 12, col: 1, severity: 'error', message: 'TS1117: duplicate property' }],
+      formatted: '',
+      ranOk: true,
+    })
+    const cleanRunner: import('../typecheck-gate.js').TypecheckRunner = () => ({ diagnostics: [], formatted: '', ranOk: true })
+
+    it('escalates to L3 and prefixes focusHint with Typecheck on a type error', async () => {
+      let captured: ChangeSet | undefined
+      const { tool, params } = makeContext({
+        taskId: 't-tc-broken',
+        ownedFiles: ['src/foo.ts'],
+        dirtyFiles: ['src/foo.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+        typecheckRunner: brokenRunner,
+        routeReviewWorkflow: async (change) => {
+          captured = change
+          return { tier: 'L3', verdict: 'verified', evidence: 'shim', rounds: 1 }
+        },
+        reviewDeps: {} as ReviewRouterDeps,
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'test: tc' } })
+      assert.equal(result.isError ?? false, false)
+      assert.ok(captured, 'review workflow should run')
+      assert.equal(captured!.forceLevel, 'L3')
+      assert.match(captured!.focusHint ?? '', /^Typecheck —/)
+      assert.match(captured!.focusHint ?? '', /src\/foo\.ts/)
+    })
+
+    it('typecheck precedes meridian blast radius in focusHint', async () => {
+      const db = {
+        getReverseDependents: (f: string) => f === 'src/foo.ts' ? [{ file: 'src/bar.ts', kind: 'import', weight: 1 }] : [],
+        getTestsFor: () => [],
+        getCoEditNeighbors: () => [],
+      } as unknown as import('../../repo/meridian-db.js').MeridianDb
+      let captured: ChangeSet | undefined
+      const { tool, params } = makeContext({
+        taskId: 't-tc-order',
+        ownedFiles: ['src/foo.ts'],
+        dirtyFiles: ['src/foo.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+        meridianDb: db,
+        typecheckRunner: brokenRunner,
+        routeReviewWorkflow: async (change) => {
+          captured = change
+          return { tier: 'L3', verdict: 'verified', evidence: 'shim', rounds: 1 }
+        },
+        reviewDeps: {} as ReviewRouterDeps,
+      })
+      await tool.execute({ ...params, input: { commit: true, message: 'test: order' } })
+      const fh = captured!.focusHint ?? ''
+      assert.ok(fh.indexOf('Typecheck —') < fh.indexOf('Blast radius —'), `expected Typecheck before Blast radius, got: ${fh}`)
+    })
+
+    it('clean typecheck does not escalate or add a Typecheck note', async () => {
+      let captured: ChangeSet | undefined
+      const { tool, params } = makeContext({
+        taskId: 't-tc-clean',
+        ownedFiles: ['src/foo.ts'],
+        dirtyFiles: ['src/foo.ts'],
+        verifications: [{ command: 'npm test', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+        typecheckRunner: cleanRunner,
+        routeReviewWorkflow: async (change) => {
+          captured = change
+          return { tier: 'L2', verdict: 'verified', evidence: 'shim', rounds: 1 }
+        },
+        reviewDeps: {} as ReviewRouterDeps,
+      })
+      await tool.execute({ ...params, input: { commit: true, message: 'test: clean' } })
+      assert.doesNotMatch(captured!.focusHint ?? '', /Typecheck —/)
     })
   })
 })

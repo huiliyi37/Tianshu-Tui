@@ -52,6 +52,7 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
+import { truncateToDisplayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
@@ -137,7 +138,7 @@ export interface AgentCallbacks {
   onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
-  onAbort: () => void
+  onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
@@ -241,6 +242,12 @@ export class TuiApp {
    * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
    */
   private _runGen = 0
+  /** Consecutive watchdog auto-continues without intervening progress. Caps the
+   *  goal-mode "⟳ Auto-recovering → continue" loop so a genuinely-wedged turn
+   *  can't re-abort every hardStallMs and burn budget forever. Reset on any
+   *  real turn completion or user submit. */
+  private _watchdogAutoContinues = 0
+  private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
 
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
@@ -286,6 +293,12 @@ export class TuiApp {
       onTabComplete: () => this.handleTabComplete(),
       onSubmit: (text) => {
         const trimmed = text.trim()
+
+        // User-initiated submit is real progress: clear the goal-mode watchdog
+        // auto-continue counter so a later legitimate stall gets the full
+        // recovery budget again. (The auto-continue path resubmits via
+        // onSubmitCallback directly and does NOT pass through here.)
+        if (trimmed) this._watchdogAutoContinues = 0
 
         // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
         if (trimmed) {
@@ -630,7 +643,7 @@ export class TuiApp {
         this.handleToolResult(id, name, result, isError, rawPath, uiContent),
       onTurnComplete: (usage, turnNumber, isFinal) => { void this.handleTurnComplete(usage, turnNumber, isFinal ?? true) },
       onError: (error) => this.handleError(error),
-      onAbort: () => this.handleAbort(),
+      onAbort: (reason) => this.handleAbort(reason),
       onApprovalRequired: async (id, name, input) => this.handleApprovalRequired(id, name, input),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
       onPhaseChange: (phase, _detail) => {
@@ -1643,6 +1656,11 @@ export class TuiApp {
   private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
     this.state.turnNumber = turnNumber
 
+    // A completed turn (even intermediate) is forward progress: the stream
+    // produced output, so the prior boundary stall cleared. Reset the goal-mode
+    // watchdog auto-continue counter to restore the full recovery budget.
+    this._watchdogAutoContinues = 0
+
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
 
@@ -1766,7 +1784,7 @@ export class TuiApp {
     return this.agentBusy || this.state.isStreaming || this.state.isThinking || this.state.phase !== 'idle'
   }
 
-  private handleAbort(): void {
+  private handleAbort(reason?: string): void {
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
     // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
@@ -1789,14 +1807,34 @@ export class TuiApp {
     this.state.isThinking = false
     this.setPhase('idle')
     this.live.clear()
-    // 可见的中断提示：让用户确知 run 已被中止（而非无声卡死）
+    // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
+    const isWatchdog = reason?.startsWith('watchdog')
+    const isWatchdogGoal = reason === 'watchdog:goal'
+    // Goal-mode auto-continue is bounded: a turn that re-stalls every
+    // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
+    // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
+    // aborts with no intervening progress, stop auto-continuing and surface a
+    // plain interrupt so the user can intervene.
+    const autoContinueExhausted = isWatchdogGoal
+      && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
     this.commitAbove(() => {
       this.commit.write({
-        text: color('⏹ Interrupted', this.theme.muted),
+        text: isWatchdog && !autoContinueExhausted
+          ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
+          : autoContinueExhausted
+            ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
+            : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
     })
+    // Watchdog abort in goal mode: auto-resubmit so the agent continues
+    // without waiting for the user to type "continue" — but only while under
+    // the consecutive-stall cap.
+    if (isWatchdogGoal && !autoContinueExhausted) {
+      this._watchdogAutoContinues++
+      this.onSubmitCallback?.('continue')
+    }
     this.onAbortCallback?.()
   }
 
@@ -1829,6 +1867,21 @@ export class TuiApp {
     }, this.theme)
     this.thinkingLinesMemo = { key, lines: computed }
     return computed
+  }
+
+  /**
+   * 把「逻辑上应占单行」的动态 live 元素钳制到终端宽度内。
+   *
+   * 用 ambiguousAsWide 上界度量截断（box/block 仍按 1 列）：保证即便终端把
+   * `—`/`…`/`↑↓`/`·` 等 ambiguous 符号按 2 列渲染，该行也不会换行——否则
+   * LiveEngine.rowsForLine（按 string-width 窄计）低估行数 → 回顶欠擦 → 旧帧
+   * 顶框泄漏进 scrollback（输入框重影）。多行内容（流式 tail/思考/工具卡片）
+   * 是有意换行的，不走此钳制。
+   */
+  private clampLine(text: string): string {
+    // 留 1 列余量：吸收 get-east-asian-width 判为 neutral、但个别 CJK 终端仍按 2 列
+    // 渲染的几何符（如 ◧）带来的 +1 残余误差。
+    return truncateToDisplayWidth(text, Math.max(1, this.columns - 1), { ambiguousAsWide: true })
   }
 
   private renderLive(): void {
@@ -1864,7 +1917,7 @@ export class TuiApp {
       const last = pending[pending.length - 1]!
       const preview = last.length > 60 ? `${last.slice(0, 60)}…` : last
       const more = pending.length > 1 ? ` (+${pending.length - 1} more)` : ''
-      lines.push({ text: color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted) })
+      lines.push({ text: this.clampLine(color(`⏳ queued: "${preview}"${more} · ↑ to edit`, this.theme.muted)) })
     }
 
     // 2b2. 子代理可视化 —
@@ -1912,7 +1965,7 @@ export class TuiApp {
           const profile = delegationProfileFromInput(meta.name, meta.input)
           return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
         })
-        lines.push({ text: ` ${pills.join('  ')}` })
+        lines.push({ text: this.clampLine(` ${pills.join('  ')}`) })
       }
     }
     }
@@ -1951,19 +2004,19 @@ export class TuiApp {
       const p = this.approvalIntentController.approvalPending
       if (this.approvalIntentController.approvalEditMode) {
         // Edit mode: show edit header, InputLine contains the JSON
-        lines.push({ text: ` ╭─ Edit Tool Input ───────────────────────────────` })
-        lines.push({ text: ` │ Tool: ${p.name}` })
+        lines.push({ text: this.clampLine(` ╭─ Edit Tool Input ───────────────────────────────`) })
+        lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
         if (this.approvalIntentController.approvalEditError) {
-          lines.push({ text: ` │ ${color(`⚠ ${this.approvalIntentController.approvalEditError}`, this.theme.warning)}` })
+          lines.push({ text: this.clampLine(` │ ${color(`⚠ ${this.approvalIntentController.approvalEditError}`, this.theme.warning)}`) })
         }
-        lines.push({ text: ` │ Edit the JSON below, then Enter to confirm:` })
-        lines.push({ text: ` ╰─ Enter confirm  Esc back  Ctrl+C deny ─────────` })
+        lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
+        lines.push({ text: this.clampLine(` ╰─ Enter confirm  Esc back  Ctrl+C deny ─────────`) })
       } else {
         const inputSummary = JSON.stringify(p.input).slice(0, 80)
-        lines.push({ text: ` ╭─ Approval Required ──────────────────────────────` })
-        lines.push({ text: ` │ Tool: ${p.name}` })
-        lines.push({ text: ` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}` })
-        lines.push({ text: ` ╰─ [y] approve  [n] deny  [e] edit ───────────────` })
+        lines.push({ text: this.clampLine(` ╭─ Approval Required ──────────────────────────────`) })
+        lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
+        lines.push({ text: this.clampLine(` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}`) })
+        lines.push({ text: this.clampLine(` ╰─ [y] approve  [n] deny  [e] edit ───────────────`) })
       }
     }
 
@@ -1971,16 +2024,16 @@ export class TuiApp {
     if (this.approvalIntentController.intentPending) {
       const it = this.approvalIntentController.intentPending.intent
       const hasAlt = (it.alternatives?.length ?? 0) > 0
-      lines.push({ text: ` ╭─ Intent Preview ─────────────────────────────────` })
-      lines.push({ text: ` │ ${it.summary}` })
+      lines.push({ text: this.clampLine(` ╭─ Intent Preview ─────────────────────────────────`) })
+      lines.push({ text: this.clampLine(` │ ${it.summary}`) })
       for (const w of it.warnings ?? []) {
-        lines.push({ text: ` │ ⚠ ${w}` })
+        lines.push({ text: this.clampLine(` │ ⚠ ${w}`) })
       }
       for (const alt of it.alternatives ?? []) {
-        lines.push({ text: ` │ ↳ ${alt}` })
+        lines.push({ text: this.clampLine(` │ ↳ ${alt}`) })
       }
       const altKey = hasAlt ? '  [a] alternative' : ''
-      lines.push({ text: ` ╰─ [y] continue  [n] veto${altKey} ────────────────` })
+      lines.push({ text: this.clampLine(` ╰─ [y] continue  [n] veto${altKey} ────────────────`) })
     }
 
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
@@ -2123,7 +2176,7 @@ export class TuiApp {
       // 5b. slash 命令提示（输入以 / 开头且未含空格）
       if (isSlash && !inputVal.includes(' ')) {
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
-          lines.push({ text: hintLine })
+          lines.push({ text: this.clampLine(hintLine) })
         }
       }
 
@@ -2134,9 +2187,9 @@ export class TuiApp {
           const selected = i === fc.idx
           const marker = selected ? color('❯ ', this.theme.primary) : '  '
           const name = color(fc.candidates[i]!, selected ? this.theme.primary : this.theme.muted)
-          lines.push({ text: `${marker}${name}` })
+          lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
-        lines.push({ text: color('tab to cycle', this.theme.dim) })
+        lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
       }
     }
 

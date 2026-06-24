@@ -62,7 +62,7 @@ export function formatDiffArtifact(diff: string, _profile: string): WorkerArtifa
   }
 }
 
-function extractChangedFiles(diff: string): string[] {
+export function extractChangedFiles(diff: string): string[] {
   const re = /^\+\+\+ b\/(.+)$/gm
   const files: string[] = []
   let m: RegExpExecArray | null

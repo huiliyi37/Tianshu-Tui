@@ -59,7 +59,7 @@ describe('renderSidePanel', () => {
         profile: 'code_scout',
         authority: 'tianquan',
         status: 'running',
-        panelStatus: 'active',
+        panelStatus: 'running',
         terminal: false,
         activity: 'reading files...',
         elapsedMs: 5000,
@@ -119,7 +119,7 @@ describe('renderSidePanel', () => {
         workers: [{
           workerId: 'wo_01', shortLabel: 'T1', parentToolId: 'tool_01',
           profile: 'code_scout', authority: 'tianquan', status: 'running',
-          panelStatus: 'active', terminal: false,
+          panelStatus: 'running', terminal: false,
           activity: 'reading many files in the repository...',
           elapsedMs: 5000,
         }],

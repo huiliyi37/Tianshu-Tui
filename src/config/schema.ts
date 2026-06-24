@@ -191,6 +191,17 @@ export const agentSchema = z.object({
   permissions: permissionsSchema.default({}),
   /** Review worker model routing — see reviewConfigSchema. */
   review: reviewConfigSchema,
+  /** Goal autonomy (/goal & --goal) completion judge. */
+  goal: z.object({
+    judge: z.object({
+      /** Independently verify a self-declared completion before accepting. Default true. */
+      enabled: z.boolean().default(true),
+      /** Max judge runs before accepting unverified (anti reject-loop). Clamped 1..10. */
+      maxRuns: z.number().int().min(1).max(10).default(3),
+      /** Phase 2: allow the judge UI/API/DB browser verification. Default false. */
+      browser: z.boolean().default(false),
+    }).default({}),
+  }).default({}),
 })
 
 export const compactSchema = z.object({

@@ -57,11 +57,14 @@ export function wrapCallbacksWithTuiApp(
       app.callbacks.onError(error)
       original.onError?.(error)
     },
-    onAbort: () => {
+    onAbort: (reason) => {
       // 迟到的旧 run onAbort：新 run 已开始（gen 不符）→ 丢弃，否则会清掉新 run 的 busy
       if (!live()) return
-      app.callbacks.onAbort()
-      original.onAbort?.()
+      // 透传 reason（'watchdog' / 'watchdog:goal' / undefined）：handleAbort 据此
+      // 区分看门狗自动恢复 vs 用户中断，goal 模式下还要据此自动续跑。丢了 reason
+      // 整条 watchdog 自动恢复链就退化成普通 ⏹ Interrupted。
+      app.callbacks.onAbort(reason)
+      original.onAbort?.(reason)
     },
     onApprovalRequired: async (id, name, input) => {
       // 旧 run 的审批请求 → 自动拒绝，不为已死的 run 弹审批 UI

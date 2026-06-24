@@ -1,6 +1,9 @@
 import { stat } from 'node:fs/promises'
 import { join, dirname, basename, extname } from 'path'
+import { isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
+import type { MeridianIndexer } from '../repo/meridian-indexer.js'
+import { analyzeImpact } from '../repo/meridian-impact.js'
 
 async function fileExists(path: string): Promise<boolean> {
   try { await stat(path); return true } catch { return false }
@@ -80,10 +83,9 @@ async function findSourceForTest(file: string, cwd: string): Promise<string[]> {
   return withExists.filter(c => c.exists).map(c => c.path).sort()
 }
 
-export const RELATED_TESTS_TOOL: Tool = {
-  definition: {
-    name: 'related_tests',
-    description: `Find test files related to a given source file.
+const DEFINITION = {
+  name: 'related_tests' as const,
+  description: `Find test files related to a given source file.
 
 ### Usage
 - Use after editing a source file to find which tests to run
@@ -93,39 +95,66 @@ export const RELATED_TESTS_TOOL: Tool = {
 ### Examples
 Good: related_tests(file="src/tools/bash.ts") — find tests for bash tool
 Good: related_tests(file="src/api/client.ts") — find tests for API client`,
-    input_schema: {
-      type: 'object',
-      properties: {
-        file: { type: 'string', description: 'Source file path relative to cwd' },
-      },
-      required: ['file'],
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      file: { type: 'string', description: 'Source file path relative to cwd' },
     },
+    required: ['file'],
   },
-
-  async execute(params: ToolCallParams) {
-    let file = params.input.file as string
-
-    // Reject absolute paths — only relative paths within cwd allowed
-    if (file.startsWith('/') || file.includes('..')) {
-      return { content: 'Error: file path must be relative to project directory.', isError: true }
-    }
-
-    if (isTestFile(file)) {
-      const sources = await findSourceForTest(file, params.cwd)
-      if (sources.length === 0) {
-        return { content: 'No related source files found.' }
-      }
-      return { content: sources.join('\n') }
-    }
-
-    const tests = await findTestsForSource(file, params.cwd)
-    if (tests.length === 0) {
-      return { content: 'No related tests found.' }
-    }
-    return { content: tests.join('\n') }
-  },
-
-  requiresApproval: () => false,
-  isConcurrencySafe: () => true,
-  isEnabled: () => true,
 }
+
+/**
+ * Factory: creates a related_tests tool that prefers meridian SQL when an
+ * indexer is available, falling back to hardcoded path heuristics otherwise.
+ * Mirrors the createRepoGraphTool DI pattern.
+ */
+export function createRelatedTestsTool(
+  getIndexer: () => MeridianIndexer | null | undefined,
+): Tool {
+  return {
+    definition: DEFINITION,
+
+    async execute(params: ToolCallParams) {
+      let file = params.input.file as string
+
+      // Reject absolute paths — only relative paths within cwd allowed
+      if (file.startsWith('/') || file.includes('..')) {
+        return { content: 'Error: file path must be relative to project directory.', isError: true }
+      }
+
+      if (isTestFile(file)) {
+        const sources = await findSourceForTest(file, params.cwd)
+        if (sources.length === 0) {
+          return { content: 'No related source files found.' }
+        }
+        return { content: sources.join('\n') }
+      }
+
+      // Prefer meridian SQL (real import graph) over hardcoded path heuristics.
+      const db = getIndexer()?.getDb()
+      if (db && !isAbsolute(file)) {
+        const testedBy = db.getTestsFor(file)
+        const impact = analyzeImpact(db, [file])
+        const allTests = [...new Set([...testedBy, ...impact.tests])]
+        if (allTests.length > 0) {
+          return { content: allTests.sort().join('\n') }
+        }
+      }
+
+      // Fallback: hardcoded path heuristics
+      const tests = await findTestsForSource(file, params.cwd)
+      if (tests.length === 0) {
+        return { content: 'No related tests found.' }
+      }
+      return { content: tests.join('\n') }
+    },
+
+    requiresApproval: () => false,
+    isConcurrencySafe: () => true,
+    isEnabled: () => true,
+  }
+}
+
+/** Backward-compatible static tool — no indexer, always uses hardcoded heuristics. */
+export const RELATED_TESTS_TOOL: Tool = createRelatedTestsTool(() => null)

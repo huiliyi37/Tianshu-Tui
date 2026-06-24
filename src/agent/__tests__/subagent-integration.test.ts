@@ -9,6 +9,7 @@ import {
   PHASE1_DISALLOWED_WORKER_TOOLS,
   type WorkOrder,
 } from '../work-order.js'
+import { profileRegistry } from '../profile-registry.js'
 import { runWorkerSession } from '../worker-session.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
@@ -375,9 +376,13 @@ describe('Delegation Flow', () => {
   it('should handle delegate_task execution and claim injection', async () => {
     const claimStore = new MockClaimStore('flow-test-session')
 
-    // The base registry must contain the read-only tools so filterToolRegistry can find them
+    // The base registry must mirror production: every tool any built-in profile can
+    // allowlist, so filterToolRegistry never throws "Cannot allowlist unknown tool".
     const baseRegistry = new ToolRegistry()
     for (const name of READ_ONLY_WORKER_TOOLS) baseRegistry.register(fakeTool(name))
+    for (const pname of profileRegistry.getProfileNames()) {
+      for (const tool of profileRegistry.get(pname)!.allowedTools) baseRegistry.register(fakeTool(tool))
+    }
 
     const coordinator = new DelegationCoordinator({
       baseToolRegistry: baseRegistry,

@@ -108,8 +108,8 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(line(dim(header)))
     const shown = input.workers.slice(0, MAX_WORKERS)
     for (const wrk of shown) {
-      const statusIcon = wrk.terminal ? '✓' : wrk.status === 'error' ? '✗' : '●'
-      const statusColor = wrk.terminal ? theme.success : wrk.status === 'error' ? theme.error : theme.primary
+      const statusIcon = wrk.terminal ? '✓' : wrk.status === 'failed' ? '✗' : '●'
+      const statusColor = wrk.terminal ? theme.success : wrk.status === 'failed' ? theme.error : theme.primary
       const label = truncateStr(wrk.shortLabel, 8)
       const profile = truncateStr(wrk.profile, 8)
       const elapsed = formatElapsedShort(wrk.elapsedMs)

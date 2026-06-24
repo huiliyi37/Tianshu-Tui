@@ -190,6 +190,7 @@ export class ToolExecutionController {
           repairHintTracker: this.deps.repairHintTracker,
           repairPipeline: this.deps.repairPipeline,
           importGraph,
+          meridianIndexer: this.deps.config.meridianIndexer,
           lastConflictCheckCount,
           trajectory: this.deps.trajectory,
           getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
@@ -258,6 +259,7 @@ export class ToolExecutionController {
           repairHintTracker: this.deps.repairHintTracker,
           repairPipeline: this.deps.repairPipeline,
           importGraph,
+          meridianIndexer: this.deps.config.meridianIndexer,
           lastConflictCheckCount,
           trajectory: this.deps.trajectory,
           getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
@@ -514,6 +516,7 @@ export class ToolExecutionController {
           isError: result && 'is_error' in result ? result.is_error === true : false,
           target,
           input: tu.input,
+          resultContent: result && 'content' in result && typeof result.content === 'string' ? result.content : undefined,
           // Classify failure for vigor: environment issues (timeout, api_error)
           // get reduced phasic penalty vs semantic failures (type_error, assertion).
           failureClass: result && 'is_error' in result && result.is_error === true

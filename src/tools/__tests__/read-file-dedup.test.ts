@@ -19,14 +19,23 @@ describe('fileReadHistory dedup', () => {
     ...(useArtifact ? { artifactStore, contextWindow: CTX_WINDOW } : {}),
   })
 
+  // This block exercises the fileReadHistory dedup-warning + artifact fragment
+  // re-serving paths, which predate (and are orthogonal to) the read-ref feature.
+  // read-ref is now default-on (commit 1d55bd95) and would otherwise replace full
+  // repeat reads with a [read-ref] pointer — disable it here to isolate this concern.
+  const savedReadRef = process.env['RIVET_READ_REF']
+
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'rivet-read-dedup-'))
     artifactStore = new ArtifactStore(dir, 'test-session')
     __resetReadHistoryForTests()
+    process.env['RIVET_READ_REF'] = '0'
   })
 
   afterEach(() => {
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    if (savedReadRef === undefined) delete process.env['RIVET_READ_REF']
+    else process.env['RIVET_READ_REF'] = savedReadRef
   })
 
   function makeFile(name: string, lines: number, lineWidth = 80): string {
@@ -230,7 +239,9 @@ describe('read-ref compact reference (任务 B2)', () => {
   }
 
   function disableReadRef(): void {
-    delete process.env['RIVET_READ_REF']
+    // read-ref is default-on (opt-out with =0, commit 1d55bd95); deleting the var
+    // would leave it ENABLED. Must explicitly set '0' to disable.
+    process.env['RIVET_READ_REF'] = '0'
   }
 
   beforeEach(() => {

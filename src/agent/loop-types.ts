@@ -138,8 +138,20 @@ export interface AgentConfig {
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Lazy getter for DelegationCoordinator — wired by main.tsx for auto-delegation hooks. */
   coordinatorRef?: () => import('./coordinator.js').DelegationCoordinator | null
+  /** All configured providers, keyed by name. Used by goal-criteria's buildCheapClient
+   *  to construct a dedicated cheap StreamClient (and by the fallback chain). */
+  allProviders?: Record<string, import('../config/schema.js').ProviderConfig>
   /** Explicit opt-in for auto-delegation. Default false — workers cost API budget. */
   autoDelegateEnabled?: boolean
+  /** Goal completion judge config (gates /goal & --goal self-declared completion). */
+  goalJudge?: {
+    /** Default true. When false, the orchestrator accepts the GOAL ACHIEVED marker directly. */
+    enabled?: boolean
+    /** Max judge runs before accepting unverified (anti reject-loop). Default 3. */
+    maxRuns?: number
+    /** Phase 2: allow the judge UI/API/DB browser verification. Default false. */
+    browser?: boolean
+  }
   /** 主控工具门控配置。决定哪些 EXTENDED 工具从主控摘除（委派给 worker）。
    *  updateTools() 复用此状态重新过滤，避免 MCP/LSP 异步注册后把门控整个还原。
    *  缺省 undefined → 不门控（全量）。 */
@@ -180,7 +192,7 @@ export interface AgentCallbacks {
   onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
-  onAbort: () => void
+  onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void

@@ -94,10 +94,10 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
         const kind = typeof params.input.kind === 'string' ? params.input.kind as MemoryKind : undefined
         const limit = typeof params.input.limit === 'number' ? params.input.limit : 5
 
-        const entries = recallMemoryEntries(store, { query, kind, limit })
-
         // Also search .rivet/knowledge/ markdown files
         const cwd = ctx?.cwd ?? process.cwd()
+
+        const entries = recallMemoryEntries(cwd, query, limit, kind)
         const knowledgeMatches = await searchKnowledgeFiles(cwd, query)
 
         // Load project-level memory
@@ -137,23 +137,27 @@ export function createMemoryTool(store: ContextClaimStore, ctx?: MemoryContext):
       const turn = ctx?.getTurn() ?? 0
       const sessionId = ctx?.sessionId ?? 'unknown'
 
-      store.add({
+      const createdAt = Date.now()
+      const claim = store.propose({
         kind,
         text,
         scope,
         confidence,
-        tags,
-        turn,
-        sessionId,
+        fitness: confidence,
+        source: { actor: 'assistant', eventId: `memory:${sessionId}:turn${turn}`, sessionId, turn },
+        evidence: [],
+        createdAt,
+        tags: tags ?? [],
       })
 
       // Also persist to project memory if scope is project
       if (scope === 'project' && ctx?.cwd) {
         appendProjectMemory(ctx.cwd, {
+          id: claim.id,
           kind,
           text,
           confidence,
-          tags,
+          createdAt,
         })
         compactProjectMemory(ctx.cwd)
       }

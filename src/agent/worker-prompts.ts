@@ -1,4 +1,14 @@
-import { READ_ONLY_WORKER_TOOLS, type WorkOrder, type WorkerResult, type WorkerProfile } from './work-order.js'
+import { type WorkOrder, type WorkerResult, type WorkerProfile } from './work-order.js'
+
+/** Tools that mutate the workspace. A worker is "write-capable" iff its allowlist
+ *  contains at least one of these — NOT merely "any tool beyond the read-only
+ *  baseline". The previous check keyed on READ_ONLY_WORKER_TOOLS, which had
+ *  diverged from profile-registry's actual read-only set (file_info /
+ *  semantic_search / web_search / web_fetch are read-only but absent from
+ *  READ_ONLY_WORKER_TOOLS), misclassifying pure read-only workers as write-capable. */
+const WRITE_CAPABLE_TOOLS: ReadonlySet<string> = new Set([
+  'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'bash', 'run_tests', 'git',
+])
 import { buildMemoryKnowledgePacket, needsMemoryKnowledgePacket } from './worker-knowledge-packet.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
@@ -193,7 +203,7 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
   const domainDef = order.authority ? starDomainRegistry.get(order.authority) : undefined
   const effectiveSuffix = authoritySuffix ?? domainDef?.systemPromptSuffix
   const personaBlock = authoritySuffix ? undefined : domainDef?.volatileBlock
-  const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
+  const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
   const capability = hasWriteTools ? 'write-capable' : 'read-only'
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
@@ -272,7 +282,7 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
     ? previousText
     : previousText.slice(-4000)
 
-  const hasWriteTools = order.allowedTools.some(t => !(READ_ONLY_WORKER_TOOLS as readonly string[]).includes(t))
+  const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
   return [

@@ -119,6 +119,7 @@ export class TurnStepProducer {
     })
     callbacks = wrapCallbacksWithHeartbeat(callbacks, heartbeat)
     heartbeat.start()
+    this.self._turnHeartbeat = heartbeat
     this.self.turnStream = this.self.createTurnStreamController()
     this.self.turnCompletion = this.self.createTurnCompletionController(callbacks)
     this.self.trajectory.reset()
@@ -310,7 +311,7 @@ export class TurnStepProducer {
     // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
     if (this.self.abortController!.signal.aborted) {
       if (!assistantResponded && !userMessageConsumed) this.self.session.removeLastMessage()
-      callbacks.onAbort()
+      callbacks.onAbort(this.self.abortReason())
       return { action: 'abort' }
     }
     this.self.contextInjection.refreshActiveClaims()

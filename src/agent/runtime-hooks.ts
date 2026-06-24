@@ -18,6 +18,9 @@ export interface RuntimeToolEvent {
   /** Failure classification from failure-classifier.ts — enables vigor to distinguish
    *  semantic failures (type_error, assertion) from environment issues (timeout, api_error). */
   failureClass?: FailureClass
+  /** Tool result content string — enables hooks to inspect output for lossy markers
+   *  and other content-level signals without duplicating tool-pipeline logic. */
+  resultContent?: string
 }
 
 export interface RuntimeHookSnapshot {
@@ -36,6 +39,12 @@ export interface RuntimeHookSnapshot {
     lastTimedOut: boolean
     consecutiveTimeouts: number
   }
+  /** Component C (typecheck-reminder): a .ts/.tsx file was written this session.
+   *  Task-level, not windowed — survives a long turn where the edit scrolled out
+   *  of recentToolHistory. */
+  touchedTsFiles?: boolean
+  /** Component C: a real typecheck has run since the last TS edit. */
+  sawTypecheckThisTask?: boolean
 }
 
 export interface RuntimePhaseChangeDetail {

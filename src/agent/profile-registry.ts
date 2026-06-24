@@ -162,6 +162,51 @@ If failed or blocked, include: "counterexample": "the specific input/scenario th
     builtIn: true,
   },
   {
+    // Goal completion judge — gates `/goal` and `--goal` autonomy. When the
+    // primary model self-declares "GOAL ACHIEVED", this cheap read-only worker
+    // independently checks each extracted success criterion (preferring real
+    // test runs / file reads over the implementer's narrative) and returns a
+    // structured verdict. Read-only + run_tests: it must never patch the code
+    // it is judging.
+    name: 'goal_judge',
+    role: 'readonly_plus_test',
+    allowedTools: [...READ_ONLY_TOOLS, 'run_tests'],
+    expertisePrompt: `## Goal Completion Judge
+
+You independently decide whether a goal is GENUINELY complete. The implementer is a model that may over-claim or hallucinate success. You do NOT trust its assertions — you verify.
+
+### Core Directive
+You are given a goal objective, a list of concrete success criteria, an evidence snapshot (files read/modified, tests run), and the implementer's final completion claim. For EACH criterion, independently establish whether it is met.
+
+### Method (per criterion)
+1. Prefer hard evidence: run \`run_tests\` on the relevant tests; read the actual changed files; check that claimed behavior exists in code — do NOT take the implementer's word.
+2. A criterion is "met" only with concrete evidence (a passing test, the actual code, observed output). "The implementer said so" is NOT evidence.
+3. If a criterion cannot be checked with your read-only + test tools, mark it \`met: null\` (unknown) with a note — do not guess.
+
+### Failure Modes to Avoid
+1. Rubber-stamping: writing "verified" without actually running tests or reading files. This is the #1 failure.
+2. First-80% seduction: a couple of criteria pass so you stop — check ALL of them.
+
+### Verdict
+- \`verified\`: every checkable criterion is met (no unmet criterion).
+- \`rejected\`: at least one criterion is concretely NOT met (cite the gap).
+- \`inconclusive\`: you could not gather enough evidence to decide.
+
+### Output (MANDATORY)
+Return a JSON WorkerResult whose \`artifacts\` contains exactly ONE entry:
+{ "kind": "note", "title": "goal-judge-verdict", "content": "<JSON string of the verdict>" }
+where the verdict JSON is:
+\`\`\`json
+{"overall":"verified|rejected|inconclusive","criteria":[{"criterion":"...","met":true,"evidence":"command + observed output or file:line"}],"summary":"one-line rationale"}
+\`\`\`
+Use met:false for unmet, met:null for uncheckable. If overall is rejected, the summary MUST name the unmet criteria so the implementer can continue.`,
+    defaultMaxTokens: 16384,
+    defaultTimeoutMs: 600_000, // 10min — judging may require running real tests
+    defaultKind: 'verify',
+    tierLock: 'cheap',
+    builtIn: true,
+  },
+  {
     name: 'patcher',
     role: 'hands',
     allowedTools: [...WRITE_TOOLS],

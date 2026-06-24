@@ -84,6 +84,44 @@ test('abort 后旧 run 的迟到 onAbort 被世代守卫丢弃，不清掉新 ru
   assert.equal(app.busy, true, "旧 run A 的迟到 onAbort 不得清掉 run B 的 busy")
 })
 
+test('goal 模式 watchdog abort 自动续跑，但连续 stall 达上限后停手', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  // 连续 5 次 watchdog:goal abort（每次重新 wrap 以越过世代守卫——
+  // handleAbort 会自增 runGen）。前 3 次自动续跑，第 4/5 次到上限停手。
+  for (let i = 0; i < 5; i++) {
+    wrapCallbacksWithTuiApp(app).onAbort('watchdog:goal')
+    await tick()
+  }
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 3, `自动续跑应被 MAX_WATCHDOG_AUTO_CONTINUES 限制为 3 次，实得 ${continues}`)
+})
+
+test('用户提交重置 watchdog 自动续跑计数，恢复完整续跑预算', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  // 耗尽续跑预算
+  for (let i = 0; i < 4; i++) {
+    wrapCallbacksWithTuiApp(app).onAbort('watchdog:goal')
+    await tick()
+  }
+  assert.equal(runs.filter((r) => r === 'continue').length, 3, '先耗尽到 3 次')
+
+  // 用户手动提交 → 重置计数（真实进度）
+  app.setInput('manual progress')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  // 再来一次 watchdog:goal → 应重新获得续跑
+  wrapCallbacksWithTuiApp(app).onAbort('watchdog:goal')
+  await tick()
+  assert.equal(runs.filter((r) => r === 'continue').length, 4, '用户提交后应恢复续跑预算')
+})
+
 test('世代守卫：旧 run 的迟到 onApprovalRequired 自动拒绝', async () => {
   const { app, stdin } = makeApp()
   app.onSubmit(() => {})

@@ -113,6 +113,11 @@ export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
   abortController: AbortController | null = null
+  /** Turn heartbeat watchdog reference (set in initializeRun, cleared on stop). */
+  _turnHeartbeat: import('./turn-heartbeat.js').TurnHeartbeat | null = null
+  /** True when the current abort was triggered by the hard-stall watchdog
+   *  (not user Esc/Ctrl+C). Read by the UI to render a distinct message. */
+  _watchdogAborted = false
   /** Count of user interrupts within the current turn (中#5). */
   _turnInterruptCount = 0
   /**
@@ -125,6 +130,11 @@ export class AgentLoop {
   evidence: EvidenceTracker
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   recentToolHistory: ToolHistoryEntry[] = []
+  /** Component C (typecheck-reminder): a .ts/.tsx file was written this session. */
+  touchedTsFiles = false
+  /** Component C: a real typecheck (tsc/typecheck) has run since the last TS edit.
+   *  A new TS edit resets this to false so the reminder re-arms. */
+  sawTypecheckThisTask = false
   prewarm = new PrewarmCache(60_000, 50)
   private _running = false
   private physarumForWarmup?: PhysarumEngine
@@ -638,6 +648,7 @@ export class AgentLoop {
    * with a genuine earlier interrupt in the same run.
    */
   abortStalledTurn(): void {
+    this._watchdogAborted = true
     this.abortController?.abort()
   }
 
@@ -654,6 +665,19 @@ export class AgentLoop {
   /** Check if goal tracker is active (for doom-loop threshold selection). */
   isGoalActive(): boolean {
     return this.turnOrchestrator.goalTracker?.isActive() ?? false
+  }
+
+  /**
+   * Single source of truth for the abort reason passed to onAbort(). Encodes
+   * whether the current abort was a watchdog hard-stall (vs. a user Ctrl+C) and,
+   * for watchdog stalls during a goal run, tags `watchdog:goal` so the UI can
+   * auto-recover/continue instead of treating it as a user interrupt. Used by
+   * every onAbort emission site (turn-orchestrator deps + turn-step-producer)
+   * so the encoding stays consistent across abort paths.
+   */
+  abortReason(): string | undefined {
+    if (!this._watchdogAborted) return undefined
+    return this.isGoalActive() ? 'watchdog:goal' : 'watchdog'
   }
 
   /** Sync plan-mode state into config so tool-pipeline reads it */
@@ -869,7 +893,7 @@ export class AgentLoop {
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
       },
     })
-    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
+    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger, this.isGoalActive())
   }
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */
@@ -1097,6 +1121,7 @@ export class AgentLoop {
     // Esc/Ctrl+C during warmupMemories()/intent-routing aborts a live signal
     // instead of a no-op. Pending latch is cleared for this fresh run.
     this._pendingAbort = false
+    this._watchdogAborted = false
     this.abortController = new AbortController()
     try {
       await this._runInner(userInput, callbacks, images)

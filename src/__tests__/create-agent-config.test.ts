@@ -32,6 +32,7 @@ const testConfig = {
     hearthObserveEnabled: false,
     crossSessionEnabled: true,
     antiAnchoring: { enabled: true, blindExploration: true, mctsPlanning: true, branches: 2, planningTurn: 1, projectionThreshold: 0.4, seedMaxTokens: 256, anchorBreakScout: { enabled: false, complexityThreshold: 0.5, minTurn: 3, scoutBudgetMs: 60_000, scoutMaxTokens: 2048 } },
+    toolGating: { enabled: true, extraCore: [] },
     autoDelegateEnabled: false,
     maxDelegationDepth: 2,
     maxTeamParallel: 3,
@@ -42,8 +43,10 @@ const testConfig = {
     modelRoutingGatedEnabled: false,
     banditPromotion: { modelTier: 'shadow', teamScheduler: 'shadow', modelRouting: 'shadow', effort: 'shadow', killSwitch: false },
     permissions: { allow: [], bash: { allowlist: [] } },
+    review: { profiles: {}, skipAuto: false, mechanicalFastPath: true },
+    goal: { judge: { enabled: true, maxRuns: 3, browser: false } },
   },
-  compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+  compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash', qualityCompact: { perTokenThreshold: 0.55, subscriptionThreshold: 0.45, subscriptionCeiling: 0.6 } },
 } satisfies Pick<Config, 'agent' | 'compact'>
 
 describe('createAgentConfig', () => {
@@ -51,7 +54,7 @@ describe('createAgentConfig', () => {
     apiKey: 'test-key',
     model: { id: 'deepseek-r1', maxTokens: 8192, contextWindow: 128000, reasoningEffort: undefined },
     cwd: '/tmp/test',
-    compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+    compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash', qualityCompact: { perTokenThreshold: 0.55, subscriptionThreshold: 0.45, subscriptionCeiling: 0.6 } },
     sessionId: 'session-1',
     toolDefinitions: [],
     provider: testProvider,

@@ -308,34 +308,30 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeDomain: this.activeDomain, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
 
             if (this.tracker) {
+              // activeDomain is no longer habituation-tracked — it is a session
+              // constant folded into the frozen prefix (volatile.ts, after <locus>)
+              // via setActiveDomain → rebuildFrozenBase. Only playbookLessons still
+              // warms up through habituation into the <consolidated> block.
               const fieldValues: Record<string, string> = {}
-              if (dynamicCtx.activeDomain) fieldValues['activeDomain'] = JSON.stringify(dynamicCtx.activeDomain)
               if (dynamicCtx.playbookLessons && dynamicCtx.playbookLessons.length > 0) {
                 fieldValues['playbookLessons'] = dynamicCtx.playbookLessons.map(b => b.lesson).join('|')
               }
               this.tracker.recordTurn(fieldValues, this.phaseHint)
 
-              // Exact-prefix cache fast path: star-domain is a session constant
-              // on DeepSeek — skip habituation warm-up and promote immediately
-              // so it enters consolidatedBlock (before userContent) from turn 1.
-              if (this.config.prefixCache === 'deepseek-native' && fieldValues['activeDomain']) {
-                this.tracker.immediatePromote('activeDomain', fieldValues['activeDomain'])
-              }
-
               const habituatedContent = this.tracker.getHabituatedContent()
               const renderedHabituated = new Map<string, string>()
               for (const [name, content] of habituatedContent) {
-                if (name === 'activeDomain') {
-                  const d = JSON.parse(content) as { name: string; volatileBlock: string; motto: string }
-                  renderedHabituated.set(name, `<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
-                } else if (name === 'playbookLessons') {
+                if (name === 'playbookLessons') {
                   renderedHabituated.set(name, `<historical-lessons>\n${content.split('|').map((l: string) => `- ${l}`).join('\n')}\n</historical-lessons>`)
                 }
               }
 
+              // NOTE: with activeDomain removed from tracking, consolidatedBlock is
+              // empty until playbookLessons promotes (observable: consolidated length
+              // drops to 0 early-session — expected, not a regression).
               const newConsolidated = buildConsolidatedBlock(renderedHabituated)
               if (newConsolidated !== this.consolidatedBlock) {
                 this.consolidatedBlock = newConsolidated
@@ -346,7 +342,6 @@ export class PromptEngine {
 
               const activeCtx = { ...dynamicCtx }
               const habituated = this.tracker.getHabituated()
-              if (habituated.has('activeDomain')) activeCtx.activeDomain = undefined
               if (habituated.has('playbookLessons')) activeCtx.playbookLessons = undefined
 
               const activeAppendix = this.actionableTurn ? this.buildAppendixBody(activeCtx, appendixMaxChars) : ''
@@ -642,8 +637,23 @@ export class PromptEngine {
   }
 
   private rebuildFrozenBase(): void {
-    const ctx = { ...this.config.volatileCtx, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock }
+    const ctx = {
+      ...this.config.volatileCtx,
+      sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock,
+      // activeDomain folded into the frozen prefix (session constant). The ?? is
+      // explicit defense mirroring the appendix getter below: it allows a future
+      // volatileCtx-preset domain to survive a reset. Today config.volatileCtx
+      // .activeDomain is always undefined, so resetSessionDomain (this.activeDomain
+      // = undefined) correctly drops the domain from the frozen prefix.
+      activeDomain: this.activeDomain ?? this.config.volatileCtx.activeDomain,
+    }
     this.frozenBase = buildStableVolatileBlock(ctx)
+    // Rebuilding the frozen prefix is an intentional redefinition of the cache
+    // baseline (domain fold / session-memory update). Update the drift fingerprint
+    // accordingly — same contract as updateTools — so checkDrift() compares against
+    // the new intended prefix once the deferred volatileBlock swap lands, rather
+    // than flagging the deliberate change as drift.
+    this.fingerprint = computeFingerprint(this.systemPrompt, this.config.staticCtx.tools, this.frozenBase)
     // P1: Do NOT update volatileBlock or clear frozenUserMerged here.
     // Changing volatileBlock mid-tool-loop mutates the merged user message
     // content from byte 0 and breaks DeepSeek exact-prefix cache entirely
@@ -949,6 +959,18 @@ export class PromptEngine {
 
   setActiveDomain(domain: VolatileContext['activeDomain']): void {
     this.activeDomain = domain
+    // Fold the (session-constant) domain into the frozen prefix. Only rebuild —
+    // do NOT invalidateFreshCache(): domain switches can land mid-tool-loop
+    // (/domain, model switch) where clearing cachedFreshForUser would make the
+    // next same-message tool-call turn look like a new user boundary, forcing an
+    // early volatileBlock swap + appendix rebuild → mid-tool-loop prefix break
+    // (the exact failure invalidateFreshCache's diagnostic guards against). The
+    // frozenBase→volatileBlock swap is deferred to the next real user-message
+    // boundary in buildOaiRequest, which rebuilds fresh naturally. (Differs from
+    // updateSessionMemory, which is called at turn boundaries and can safely
+    // invalidate.) First-bind is safe too: cachedFreshForUser is '' at startup,
+    // so the first buildOaiRequest enters the boundary and applies the swap.
+    this.rebuildFrozenBase()
   }
 
   getVolatilePayloadReport(toolHistory?: ToolHistoryEntry[]): VolatilePayloadReport {

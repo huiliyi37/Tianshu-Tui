@@ -16,7 +16,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
     const bigPlan = '# My Plan\n\n'.repeat(100) // ~1200 chars
     const blocks: ContentBlock[] = [
       { type: 'text', text: 'Submitting plan' },
-      { type: 'tool_use', id: 'tc-plan-1', name: 'plan_submit', input: { title: 'Test Plan', plan: bigPlan } },
+      { type: 'tool_use', id: 'tc-plan-1', name: 'plan', input: { title: 'Test Plan', plan: bigPlan } },
     ]
 
     session.addUserMessage('create a plan')
@@ -25,7 +25,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
     const msgs = session.getMessages()
     const asst = findAssistantWithTools(msgs)
     const tc = asst.tool_calls![0]!
-    assert.equal(tc.function.name, 'plan_submit')
+    assert.equal(tc.function.name, 'plan')
     // Arguments should contain the file pointer, NOT the full plan
     assert.ok(tc.function.arguments.includes('[plan persisted to'), 'arguments should contain file pointer')
     assert.ok(tc.function.arguments.includes('.rivet/plans/test-plan.md'), 'should reference correct slug')
@@ -36,7 +36,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
   it('plan_submit tool_call_id is preserved after processing', () => {
     const session = new SessionContext()
     const blocks: ContentBlock[] = [
-      { type: 'tool_use', id: 'tc-preserve-id', name: 'plan_submit', input: { title: 'ID Test', plan: '# x\n'.repeat(50) } },
+      { type: 'tool_use', id: 'tc-preserve-id', name: 'plan', input: { title: 'ID Test', plan: '# x\n'.repeat(50) } },
     ]
 
     session.addUserMessage('test')
@@ -66,7 +66,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
     const block: ContentBlock & { type: 'tool_use' } = {
       type: 'tool_use',
       id: 'tc-mutation',
-      name: 'plan_submit',
+      name: 'plan',
       input: { title: 'Mutation Test', plan: bigPlan },
     }
 
@@ -83,7 +83,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
     const session = new SessionContext()
     const blocks: ContentBlock[] = [
       { type: 'tool_use', id: 'tc-a', name: 'read_file', input: { file_path: '/foo.ts' } },
-      { type: 'tool_use', id: 'tc-b', name: 'plan_submit', input: { title: 'Multi', plan: '# plan\n'.repeat(50) } },
+      { type: 'tool_use', id: 'tc-b', name: 'plan', input: { title: 'Multi', plan: '# plan\n'.repeat(50) } },
       { type: 'tool_use', id: 'tc-c', name: 'grep', input: { pattern: 'test' } },
     ]
 
@@ -108,7 +108,7 @@ describe('SessionContext + plan_submit arg processor integration', () => {
   it('persisted message also has pointer (byte-identical guarantee)', () => {
     const session = new SessionContext()
     const blocks: ContentBlock[] = [
-      { type: 'tool_use', id: 'tc-persist', name: 'plan_submit', input: { title: 'Persist', plan: '# p\n'.repeat(50) } },
+      { type: 'tool_use', id: 'tc-persist', name: 'plan', input: { title: 'Persist', plan: '# p\n'.repeat(50) } },
     ]
 
     session.addUserMessage('test')

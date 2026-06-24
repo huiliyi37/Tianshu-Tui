@@ -58,8 +58,8 @@ cron / 一次性定时任务。
 - 验收：建一个每日 cron 任务，到点自动 spawn 一个会话跑通并在 dashboard 出现；可暂停/删除。
 
 ### I3 — Dynamic subagents UI + slash 对齐（委派树部分 ✅ 已在 N3 交付）
-可视化委派树（谁派了谁、各自 phase/产出）；slash 对齐：`/goal`（已有 `--goal`，见
-[`src/goal-loop.ts`](../src/goal-loop.ts)）、`/grill-me`（≈ 现有 `/interview`）。
+可视化委派树（谁派了谁、各自 phase/产出）；slash 对齐：`/goal`（TUI `/goal` 与 headless `--goal`
+共用 [`src/agent/goal-tracker.ts`](../src/agent/goal-tracker.ts)）、`/grill-me`（≈ 现有 `/interview`）。
 - 验收：一个会话委派 2 个子代理，UI 实时画出树与状态；`/goal` 从前端可发起。
 
 ### I4 — JSON hooks 面板

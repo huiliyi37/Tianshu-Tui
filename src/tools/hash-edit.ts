@@ -157,15 +157,15 @@ Note: For large new_string, the message history keeps only a short pointer
     // verifies content after the first mutation.
     const currentMtime = fileStat.mtimeMs
     const posOnly = anchors.every(a => a.hash === null)
+    let positionDriftWarning = false
     if (posOnly) {
       const lastReadMtime = getFileReadMtime(filePath)
       if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
-        // Auto-refresh stale mtime instead of rejecting. Position-only anchors
-        // are verified by the line-existence check below — if line numbers
-        // shifted beyond file bounds, the verification loop catches it.
-        // This avoids the common self-interference case where a prior hash_edit
-        // in the same turn changes mtime, making the next position-only call
-        // stale even though its anchors point to a different part of the file.
+        // File was modified since last read_file (likely by a prior hash_edit
+        // in this turn). Position-only anchors may have drifted — flag for
+        // warning, but still attempt the edit (line-existence check below
+        // catches out-of-bounds).
+        positionDriftWarning = true
         refreshFileReadMtime(filePath, currentMtime)
       }
     }
@@ -247,7 +247,13 @@ Note: For large new_string, the message history keeps only a short pointer
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
               : ''
-            return { content: `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
+            const staleAdvice = recoveredCount > 0 && anchors.length >= 2
+              ? '\n\n⚠ Multiple anchors went stale — anchors are interdependent. Consider switching to edit_file for further edits to this file.'
+              : ''
+            const posDrift = positionDriftWarning
+              ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
+              : ''
+            return { content: `hash_edit${recoveredInfo} applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') + staleAdvice + posDrift }
           }
         }
       }
@@ -278,7 +284,10 @@ Note: For large new_string, the message history keeps only a short pointer
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)
-    return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') }
+    const posDrift = positionDriftWarning
+      ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'
+      : ''
+    return { content: `hash_edit applied to ${filePath}: replaced L${firstLine}-L${lastLine} (${lastLine - firstLine + 1} lines) with ${newLines.length} lines` + (warn ? '\n\n' + warn : '') + posDrift }
   },
 
   requiresApproval: () => true,

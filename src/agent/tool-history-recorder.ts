@@ -1,6 +1,7 @@
 import type { AgentLoop } from './loop.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { createHash } from 'node:crypto'
+import { TYPECHECK_CMD_RE } from './typecheck-gate.js'
 
 /**
  * Record tool execution history and trigger deferred post-tool processing.
@@ -32,6 +33,19 @@ const target = typeof input?.path === 'string'
     if (!isError && (name === 'edit_file' || name === 'write_file')) {
       self.p3.invalidatePlanCache(target)
       self.p3.invalidateJIT(target)
+    }
+
+    // Component C (typecheck-reminder) signals — robust task-level flags, NOT the
+    // 5-entry window. A TS write marks edits as unverified-by-typecheck; a real
+    // typecheck bash clears it. esbuild/tsx (run_tests) does NOT type-check.
+    if (!isError) {
+      if ((name === 'edit_file' || name === 'write_file' || name === 'hash_edit' || name === 'apply_patch')
+        && /\.(ts|tsx)$/.test(target)) {
+        self.touchedTsFiles = true
+        self.sawTypecheckThisTask = false
+      } else if (name === 'bash' && typeof input?.command === 'string' && TYPECHECK_CMD_RE.test(input.command)) {
+        self.sawTypecheckThisTask = true
+      }
     }
 
     // T2-02 P2: Record successful tool sequences to PlanCache on task delivery

@@ -42,7 +42,12 @@ export class ToolRegistry {
       // name from memory. Surfacing a did-you-mean hint + the full tool
       // catalog turns the failure into a learnable signal.
       const hint = didYouMeanHint(name, this.getAllNames())
-      throw new Error(`Unknown tool: ${name}. ${hint}If this is an EXTENDED-layer tool, use delegate_task to dispatch a worker, or /tools enable <name> to mount it on the primary agent.`)
+      // EXTENDED-layer guidance comes first so the did-you-mean hint — whose
+      // trailing "Available tools: a, b, c" is the model's positive anchor (and
+      // the prefix-cache-stable sorted catalog) — stays the final section. The
+      // previous order glued "…cIf this is an EXTENDED…" together, polluting both
+      // readability and the catalog parse.
+      throw new Error(`Unknown tool: ${name}. If this is an EXTENDED-layer tool, use delegate_task to dispatch a worker, or /tools enable <name> to mount it on the primary agent. ${hint}`)
     }
     if (!tool.isEnabled()) throw new Error(`Tool ${name} is disabled`)
     return tool.execute(params)

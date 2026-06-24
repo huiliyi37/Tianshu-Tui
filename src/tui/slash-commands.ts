@@ -514,20 +514,52 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
       // Dynamic import to avoid circular dependency
-      const { GoalTracker } = await import('../agent/goal-tracker.js')
+      const { GoalTracker, buildGoalModePrompt } = await import('../agent/goal-tracker.js')
       const maxIterations = Math.max(50, Math.floor(ctx.maxTokens / 4000))
       const tracker = new GoalTracker({
         goal: goalText,
         maxIterations,
         contextWindow: ctx.maxTokens,
+        maxJudgeRuns: ctx.agent.config.goalJudge?.maxRuns,
       })
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
       pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
+      // Side-path: extract concrete success criteria the completion judge will
+      // verify against. Async (never blocks goal start); criteria default to a
+      // generic template on failure, and the judge does wide judgment if empty.
+      // Uses a dedicated cheap client to avoid sharing the main session's
+      // StreamClient (lifecycle controller / socket pool contention).
+      if (ctx.agent.config.goalJudge?.enabled !== false) {
+        void (async () => {
+          try {
+            const { extractGoalCriteria, completionFromClient, buildCheapClient } = await import('../agent/goal-criteria.js')
+            const { loadConfig } = await import('../config/manager.js')
+            // Try dedicated cheap client first; fall back to main client.
+            const cfg = await loadConfig()
+            const cheapProfile = cfg.workers?.profiles?.cheap
+            const allProviders = ctx.agent.config.allProviders ?? {}
+            let completion
+            if (cheapProfile && allProviders[cheapProfile.provider]) {
+              const cheap = buildCheapClient(cheapProfile, allProviders)
+              completion = cheap
+                ? completionFromClient(cheap.client, cheap.model)
+                : completionFromClient(ctx.agent.config.client, ctx.agent.config.promptEngine.getModel())
+            } else {
+              completion = completionFromClient(ctx.agent.config.client, ctx.agent.config.promptEngine.getModel())
+            }
+            const criteria = await extractGoalCriteria(goalText, completion)
+            tracker.setSuccessCriteria(criteria)
+            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
+          } catch {
+            // extraction failure is non-fatal — judge falls back to wide judgment
+            pushStatic(createLogEntry({ type: 'system', content: '🔍 验收项提取已降级为宽判模式（extraction failed）。' }))
+          }
+        })()
+      }
       setIsStreaming(false)
       // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
-      const prompt = `[GOAL MODE] ${goalText}\n\nYou are now in goal-driven mode. Work toward this goal continuously. When fully complete, output "GOAL ACHIEVED" on its own line.`
-      ctx.submitToAgent?.(prompt)
+      ctx.submitToAgent?.(buildGoalModePrompt(goalText))
       return true
     }
 
@@ -535,6 +567,45 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       ctx.agent.setGoalTracker(null)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = null
       pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/goal-criteria': {
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No active goal. Use /goal <task> first.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const subCmd = parts[1]?.toLowerCase()
+      if (subCmd === 'set') {
+        // /goal-criteria set <json array>
+        const jsonText = parts.slice(2).join(' ').trim()
+        if (!jsonText) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal-criteria set \'["criterion 1", "criterion 2"]\'' }))
+          setIsStreaming(false)
+          return true
+        }
+        try {
+          const criteria = JSON.parse(jsonText)
+          if (!Array.isArray(criteria) || !criteria.every((c: unknown) => typeof c === 'string')) {
+            throw new Error('Expected a JSON array of strings')
+          }
+          tracker.setSuccessCriteria(criteria as string[])
+          pushStatic(createLogEntry({ type: 'system', content: `✅ 验收项已更新（${(criteria as string[]).length} 项）:\n${(criteria as string[]).map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
+        } catch (e) {
+          pushStatic(createLogEntry({ type: 'system', content: `❌ 解析失败: ${(e as Error).message}` }))
+        }
+      } else {
+        // Show current criteria
+        const criteria = tracker.getSuccessCriteria()
+        if (criteria.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: '当前无验收项（提取未完成或失败）。\n用 /goal-criteria set \'["..."]\' 手动设置。' }))
+        } else {
+          pushStatic(createLogEntry({ type: 'system', content: `📋 Judge 验收项（${criteria.length} 项）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n用 /goal-criteria set \'["..."]\' 覆盖。` }))
+        }
+      }
       setIsStreaming(false)
       return true
     }

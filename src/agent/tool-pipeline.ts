@@ -11,7 +11,7 @@ import { mkdir, appendFile } from 'node:fs/promises'
 import { createCheckpoint, recordAgentTouchedFile, recordBashSideEffects, makeOwnershipGuard, type OwnershipGuard, type ClaimLookup } from './checkpoint.js'
 import { validatePath, validatePathSafe } from '../tools/path-validate.js'
 import { grantPath } from '../tools/path-grants.js'
-import { dirname, join, resolve as resolvePath } from 'node:path'
+import { dirname, join, resolve as resolvePath, isAbsolute } from 'node:path'
 import { getSessionDir } from './session-persist.js'
 import { classifyFailure, classifyTestRun } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
@@ -20,6 +20,7 @@ import { detectConflicts } from '../context/conflict-detect.js'
 import { createAntibodyProposal } from '../context/antibody.js'
 import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
+import { analyzeImpact } from '../repo/meridian-impact.js'
 import { shouldRunDiagnostics } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
@@ -197,6 +198,9 @@ export interface ToolPipelineDeps {
   repairHintTracker: RepairHintTracker
   repairPipeline: import('./repair-pipeline.js').RepairPipeline
   importGraph: ImportGraph | null
+  /** Meridian indexer — when available, edit impact tracking prefers the
+   *  persisted SQLite reverse BFS over the in-memory import-graph. */
+  meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
   lastConflictCheckCount: number
   trajectory: { getEntries(): { tool: string; target: string; status: string; errorClass?: string }[] }
   getDoomLoopLevel(): import('./trace-store.js').DoomLoopLevel
@@ -1262,16 +1266,26 @@ export async function executeToolUse(
         tu.input.file_path as string,
         `file modified by ${tu.name}`,
       )
-      if (!importGraph) {
-        importGraph = buildImportGraph(deps.cwd)
-     }
-      if (importGraph) {
-        importGraph = invalidateFile(importGraph, deps.cwd, tu.input.file_path as string)
-        const hint = generateImpactHint(importGraph, tu.input.file_path as string, deps.cwd)
-        if (hint) {
-          deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
-       }
-     }
+      // Prefer meridian graph (persisted SQLite reverse BFS) over in-memory import-graph.
+      const filePath = tu.input.file_path as string
+      const db = deps.meridianIndexer?.getDb()
+      if (db && !isAbsolute(filePath)) {
+        const impact = analyzeImpact(db, [filePath])
+        if (impact.direct.length > 0 || impact.tests.length > 0) {
+          deps.evidence.trackImpact(impact.direct, impact.tests)
+        }
+      } else {
+        if (!importGraph) {
+          importGraph = buildImportGraph(deps.cwd)
+        }
+        if (importGraph) {
+          importGraph = invalidateFile(importGraph, deps.cwd, filePath)
+          const hint = generateImpactHint(importGraph, filePath, deps.cwd)
+          if (hint) {
+            deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
+          }
+        }
+      }
    } else if (tu.name === 'run_tests' && rawToolResult) {
       // Reconnect EvidenceTracker verification pipeline.
       // run_tests returns VerificationMetadata, but this was never fed into

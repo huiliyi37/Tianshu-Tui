@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
-import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
+import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from '../agent/review-discipline.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
+import { extractChangedFiles } from '../agent/diff-collector.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import type { TeamTask } from '../agent/team-plan.js'
 import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } from '../agent/unified-plan.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
@@ -12,12 +15,24 @@ import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../ag
 import { buildTeamEpisodeFromStore, recordTeamEpisodeClosureFromStore } from '../agent/reward-loop.js'
 import { formatTeamDelivery } from '../agent/team-episode.js'
 import type { TeamWaveTelemetry } from '../agent/team-wave-telemetry.js'
+import { buildTeamWaveScopeHealth, persistTeamScopeHealth } from '../agent/team-scope-health.js'
 import { buildTeamPanelModel, encodeTeamPanelModel } from '../tui/team-panel-model.js'
 import type { AggregationPolicy } from '../agent/work-order.js'
 import { validatePathSafe } from './path-validate.js'
 import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+// Cross-layer: the tool layer consumes the meridian data layer (independent
+// graph store) for advisory blast-radius hints. Same direction as
+// createRepoGraphTool(() => refs.meridianIndexer) in bootstrap.
+import type { ImpactResult } from '../repo/meridian-impact.js'
+import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from '../agent/typecheck-gate.js'
+
+/** Narrow surface for meridian structural impact analysis, so tests can mock it
+ *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
+export interface TeamImpactAnalyzer {
+  impact(changedFiles: string[], opts?: { maxHops?: number }): ImpactResult
+}
 
 /** Coordinator surface the team tool needs. `delegateBatch` drives planner
  *  fanout + wave dispatch. `delegate` is optional until the review gate is
@@ -40,6 +55,17 @@ export interface TeamOrchestrateCoordinator {
 
   isTeamSchedulerBanditEnabled?: () => boolean
   getSessionId?: () => string | undefined
+  /** Optional meridian indexer for advisory blast-radius hints in the review gate. */
+  getMeridianIndexer?: () => TeamImpactAnalyzer | null | undefined
+  /** Optional injectable typecheck runner for the review-gate backstop.
+   *  Absent → the real `tsc --noEmit` is used. Tests pass a mock. */
+  getTypecheckRunner?: () => import('../agent/typecheck-gate.js').TypecheckRunner | undefined
+}
+
+/** Join a list, truncating to `n` entries with a trailing elision count so a
+ *  large blast radius doesn't flood the review focus / returned content. */
+function capList(items: string[], n = 8): string {
+  return items.length <= n ? items.join(', ') : `${items.slice(0, n).join(', ')} (+${items.length - n} more)`
 }
 
 function requireDelegate(coordinator: TeamOrchestrateCoordinator): Required<Pick<TeamOrchestrateCoordinator, 'delegate'>>['delegate'] {
@@ -58,6 +84,39 @@ const inputSchema = z.object({
   fromWave: z.number().int().min(0).optional(),
 })
 
+/**
+ * Render the council merge ledger (max mode, first wave) so the perspective work
+ * isn't silently dropped: cross-perspective conflicts, deferred alternatives, and
+ * the risk ledger. Each section is capped to keep the panel readable; a trailing
+ * count signals how many were elided. Advisory — never blocks dispatch.
+ */
+function formatPlanMerge(planMerge: NonNullable<TeamRunSummary['planMerge']>): string[] {
+  const CAP = 3
+  const lines: string[] = []
+  const section = (
+    title: string,
+    items: string[],
+  ): void => {
+    if (items.length === 0) return
+    lines.push(title)
+    for (const item of items.slice(0, CAP)) lines.push(`  - ${item}`)
+    if (items.length > CAP) lines.push(`  … (+${items.length - CAP} more)`)
+  }
+  section(
+    'Plan conflicts (council disagreed — adjudicate):',
+    planMerge.conflicts.map(c => c.description),
+  )
+  section(
+    'Deferred alternatives (not in base plan):',
+    planMerge.deferred.map(d => `${d.title} — ${d.reason}`),
+  )
+  section(
+    'Risk ledger:',
+    planMerge.risks.map(r => `[${r.severity}]${r.taskId ? ` ${r.taskId}:` : ''} ${r.claim}`),
+  )
+  return lines
+}
+
 export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string {
   const lines: string[] = [
     `team ${summary.mode}: ${summary.dispatched} dispatched, ${summary.waves.length} waves, ${summary.blocked.length} blocked${summary.planCacheHit ? ' (plan cache hit — planner fanout skipped)' : ''}`,
@@ -70,12 +129,78 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
     lines.push('Blocked:')
     for (const b of summary.blocked) lines.push(`  - ${b}`)
   }
+  if (summary.planMerge) {
+    const mergeLines = formatPlanMerge(summary.planMerge)
+    if (mergeLines.length > 0) lines.push('', ...mergeLines)
+  }
   const nextWave = fromWave + 1
   if (summary.waves.length > nextWave) {
-    lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
+    // Whole-wave failure: every worker missed its bar. Advancing on top of a
+    // failed/stale wave compounds breakage, so replace the next-wave nudge with
+    // a stop warning. Only triggers when an actual run is present (post-dispatch),
+    // not for the onPlanReady pre-render where summary.run is absent.
+    const run = summary.run
+    const allFailed = !!run && run.results.length > 0 && run.results.every(r => r.status !== 'passed')
+    if (allFailed) {
+      lines.push('', `⚠ wave ${fromWave}: all ${run!.results.length} workers failed — integrate/retry before advancing; do NOT dispatch fromWave ${nextWave} until fixed.`)
+    } else {
+      lines.push('', `To run the next wave after integrating this wave's diffs: call team_orchestrate again with fromWave: ${nextWave}.`)
+    }
   }
   lines.push('', summary.packet)
   return lines.join('\n')
+}
+
+/**
+ * Authoritative changed-file list for the review gate. Worker `changedFiles` is
+ * model self-reported and can be empty even when real edits happened — a worker
+ * that under-reports would silently skip the whole review gate. The diff artifact
+ * (`kind:'diff'`, produced by hands-session collectDiff) carries the real file
+ * list, so we union diff-derived files with the self-report.
+ */
+export function teamReviewChangedFiles(run: TeamRunSummary['run']): string[] {
+  if (!run) return []
+  const files = new Set<string>()
+  for (const result of run.results) {
+    for (const file of result.changedFiles) files.add(file)
+    for (const artifact of result.artifacts) {
+      if (artifact.kind === 'diff') {
+        for (const file of extractChangedFiles(artifact.content)) files.add(file)
+      }
+    }
+  }
+  return [...files]
+}
+
+/**
+ * Force the perspective-layer density that flash execution lacks.
+ *  - max mode → always L3 (the full 5-inspector squadron), regardless of size.
+ *  - standard mode → raise the floor to ≥L2 (no silent L1 nudge), and upgrade
+ *    to L3 on structural risk signals (cross-module / ≥3 tasks in the wave /
+ *    any high-risk task). classifyChangeScale already returns L3 for
+ *    cross-module/≥5 files/security boundary; this only raises, never lowers.
+ */
+export function teamReviewForceLevel(
+  mode: 'standard' | 'max',
+  change: ChangeSet,
+  waveTasks: TeamTask[],
+): ReviewScale {
+  if (mode === 'max') return 'L3'
+  const base = classifyChangeScale(change)
+  const hasHighRisk = waveTasks.some(task => task.riskTier === 'high')
+  if (base === 'L3' || change.crossModule || waveTasks.length >= 3 || hasHighRisk) return 'L3'
+  return base === 'L1' ? 'L2' : base
+}
+
+/**
+ * Turn the merged plan's per-task verification gates into a reviewer focus hint,
+ * so the squadron/verifier checks the acceptance criteria the planners defined
+ * rather than guessing. Empty when no verification was planned.
+ */
+export function teamReviewFocusHint(waveTasks: TeamTask[]): string | undefined {
+  const gates = [...new Set(waveTasks.flatMap(task => task.verification).map(v => v.trim()).filter(Boolean))]
+  if (gates.length === 0) return undefined
+  return `Planned acceptance gates (verify these, do not just trust green): ${gates.join('; ')}`
 }
 
 export function createTeamOrchestrateTool(
@@ -218,20 +343,119 @@ export function createTeamOrchestrateTool(
 
       let reviewNote = ''
       let deliverySynthesis = ''
+      let impactNote = ''
       let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
-      const changedFiles = summary.run
-        ? [...new Set(summary.run.results.flatMap(result => result.changedFiles))]
-        : []
+
+      // Scope-health (advisory): the real diff is already in telemetry's
+      // observedChangedFiles. Compare it against planned.files to detect scope
+      // leak (worker touched files outside the plan) and missing coverage.
+      // Persist for learning, surface medium/high, and feed leaked files to the
+      // review focus so the squadron names unplanned changes. Never blocks.
+      let scopeHealthNote = ''
+      let scopeLeakedFiles: string[] = []
+      if (telemetryEvent) {
+        try {
+          const health = buildTeamWaveScopeHealth(telemetryEvent)
+          const rewardStore = coordinator.getTeamSchedulerRewardStore?.()
+          persistTeamScopeHealth(
+            rewardStore?.saveBanditState ? { saveBanditState: rewardStore.saveBanditState.bind(rewardStore) } : undefined,
+            health,
+          )
+          if (health.severity === 'medium' || health.severity === 'high') {
+            scopeLeakedFiles = health.leakedFiles
+            const parts: string[] = []
+            if (health.leakedFiles.length > 0) parts.push(`leaked (changed, not planned): ${health.leakedFiles.join(', ')}`)
+            if (health.missingFiles.length > 0) parts.push(`missing (planned, untouched): ${health.missingFiles.join(', ')}`)
+            scopeHealthNote = `\n\nScope health [${health.severity}]: ${parts.join('; ')}`
+          }
+        } catch {
+          // Scope health is advisory; never affect dispatch or review.
+        }
+      }
+
+      // Authoritative changed files: union of real diff artifact + self-report,
+      // so a worker that under-reports changedFiles can't skip the review gate.
+      const changedFiles = teamReviewChangedFiles(summary.run)
       if (isLastWave && changedFiles.length > 0) {
         try {
           const delegate = requireDelegate(coordinator)
+          // Resolve this wave's tasks to drive perspective density + focus.
+          const taskById = new Map(summary.tasks.map(task => [task.id, task]))
+          const waveTasks = (summary.waves[effectiveFromWave]?.taskIds ?? [])
+            .map(id => taskById.get(id))
+            .filter((task): task is TeamTask => Boolean(task))
           const change: ChangeSet = {
             files: changedFiles,
             crossModule: isCrossModule(changedFiles),
             isFix: isFixContext(objective),
           }
+          // Inject the dense perspective layer flash execution lacks.
+          change.forceLevel = teamReviewForceLevel(mode, change, waveTasks)
+          // Combine planned acceptance gates with scope-leak callouts so the
+          // reviewer scrutinizes both the criteria and any unplanned changes.
+          const baseFocus = teamReviewFocusHint(waveTasks)
+          // Advisory blast radius (meridian): pull structural downstream
+          // consumers + related tests for the changed files so the reviewer
+          // checks they aren't broken. Input is the diff-derived
+          // observedChangedFiles (guaranteed repo-relative, same field
+          // scope-health uses) — NOT worker self-report, which may be absolute
+          // and would silently miss the repo-relative LIKE match. Never blocks;
+          // any failure is swallowed. Only injected at the terminal-wave review
+          // (this branch only runs when isLastWave).
+          let impactFocus: string | undefined
+          try {
+            const analyzer = coordinator.getMeridianIndexer?.()
+            const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
+            if (analyzer && observed.length > 0) {
+              const impact = analyzer.impact(observed)
+              const consumers = [...impact.direct, ...impact.transitive]
+              const seg: string[] = []
+              if (consumers.length > 0) seg.push(`downstream consumers (verify not broken): ${capList(consumers)}`)
+              if (impact.tests.length > 0) seg.push(`related tests to run: ${capList(impact.tests)}`)
+              if (seg.length > 0) {
+                impactFocus = `Blast radius — ${seg.join('; ')}`
+                impactNote = `\n\nBlast radius [meridian]: ${seg.join('; ')}`
+              }
+            }
+          } catch {
+            // Impact hints are advisory; never affect dispatch or review.
+          }
+          // Typecheck backstop (Component B) — scoped tsc on the diff-derived
+          // changed files; a real type error that tests/esbuild missed escalates
+          // the review to L3 and is surfaced FIRST (more urgent than blast
+          // radius). Advisory: any failure is swallowed; never blocks dispatch.
+          // Covers both scoped errors (in changed files) and cross-file drift
+          // (new errors in non-changed files from definition changes).
+          let typecheckFocus: string | undefined
+          const typecheckRunner = coordinator.getTypecheckRunner?.()
+          // Require an explicitly-wired runner here (bootstrap injects the real
+          // tsc). Unlike deliver-task, the team gate runs in the coordinator
+          // session at process.cwd(), so we never fall back to a default that
+          // would spawn an unscoped tsc in tests / unwired contexts.
+          if (typecheckGateEnabled() && typecheckRunner) {
+            try {
+              const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
+              const tc = runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
+              if (tc) {
+                change.forceLevel = 'L3'
+                typecheckFocus = `Typecheck — ${tc.summary}`
+                impactNote = `\n\nTypecheck broken [tsc]: ${tc.summary}` + impactNote
+              }
+            } catch {
+              // Typecheck gate is advisory; never affect dispatch or review.
+            }
+          }
+          const focusParts = [
+            typecheckFocus,
+            baseFocus,
+            scopeLeakedFiles.length > 0
+              ? `Scope leak — files changed outside the plan, scrutinize these: ${scopeLeakedFiles.join(', ')}`
+              : undefined,
+            impactFocus,
+          ].filter((s): s is string => Boolean(s))
+          const focusHint = focusParts.length > 0 ? focusParts.join(' | ') : undefined
           const reviewDeps = createCoordinatorReviewDeps(
             {
               delegate: (request, abortSignal) => delegate(request, abortSignal),
@@ -240,7 +464,7 @@ export function createTeamOrchestrateTool(
             },
             { reviewDepth: params.reviewDepth ?? 0, abortSignal: params.abortSignal, parentTurnId: `${params.toolUseId}:review` },
           )
-          const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3 })
+          const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3, ...(focusHint ? { focusHint } : {}) })
           reviewVerdict = outcome.verdict
           reviewNote = `\n\nReview gate [${outcome.tier}]: ${outcome.verdict}${outcome.evidence ? ` — ${outcome.evidence}` : ''}`
         } catch (err) {
@@ -289,7 +513,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + deliverySynthesis,
+        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + scopeHealthNote + impactNote + deliverySynthesis,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

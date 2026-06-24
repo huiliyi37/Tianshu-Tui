@@ -22,6 +22,7 @@ import { evaluateThinkingRetry } from './thinking-retry.js'
 import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import { debugLog } from '../utils/debug.js'
 import type { GoalTracker } from './goal-tracker.js'
+import { runGoalJudge, type GoalJudgeDeps } from './goal-judge.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -162,7 +163,14 @@ export interface TurnOrchestratorDeps {
   resetEvidence: () => void
 
   // === Abort signal ===
+  // === Abort signal ===
   getAbortSignal: () => AbortSignal | undefined
+
+  // === Heartbeat (P7 watchdog) ===
+  getHeartbeat: () => import('./turn-heartbeat.js').TurnHeartbeat | null
+
+  // === Abort reason (watchdog vs user) ===
+  getAbortReason: () => string | undefined
 
   // === Resource sensor ===
   getLatestResourceSnapshot: () => ResourceSensorSnapshot | null
@@ -206,6 +214,12 @@ export interface TurnOrchestratorDeps {
   getLatestRisk: () => RiskAssessment
   setLatestRisk: (v: RiskAssessment) => void
   setThetaRequestsThisTurn: (v: number) => void
+
+  // === Goal completion judge (optional) ===
+  /** Provides judge spawn deps. Undefined → judge disabled (legacy accept-on-marker). */
+  getGoalJudgeDeps?: () => GoalJudgeDeps | undefined
+  /** Formatted evidence snapshot + modified files for scoping the judge worker. */
+  getGoalJudgeEvidence?: () => { text: string; modifiedFiles: string[] }
 }
 
 // ── Standalone: wrapCallbacksWithHeartbeat ──
@@ -254,6 +268,110 @@ export class TurnOrchestrator {
   constructor(private deps: TurnOrchestratorDeps) {}
 
   /**
+   * Gate a self-declared goal completion through the independent judge.
+   *
+   * Returns `accept` (with a closing reminder) when the judge verifies the goal,
+   * when the judge run cap is reached, or when the verdict is inconclusive
+   * (fail-open). Returns `continue` (with a tailored reminder listing the unmet
+   * criteria) only when the judge concretely rejects AND the cap is not yet hit.
+   *
+   * Backward-compatible: when no judge deps are wired the legacy accept-on-marker
+   * behavior is preserved exactly.
+   */
+  private async judgeGoalCompletion(
+    tracker: GoalTracker,
+    signal: AbortSignal | undefined,
+  ): Promise<{ action: 'accept' | 'continue'; reminder: string }> {
+    const achievedReminder = (suffix = ''): string =>
+      `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。${suffix}\n` +
+      `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
+
+    const judgeDeps = this.deps.getGoalJudgeDeps?.()
+    if (!judgeDeps) {
+      // Judge disabled (config off or not wired) — legacy accept-on-marker.
+      return { action: 'accept', reminder: achievedReminder() }
+    }
+
+    tracker.recordJudgeRun()
+    const evidence = this.deps.getGoalJudgeEvidence?.() ?? { text: '', modifiedFiles: [] }
+    const verdict = await rejectOnAbort(
+      runGoalJudge(judgeDeps, {
+        objective: tracker.getGoal(),
+        criteria: tracker.getSuccessCriteria(),
+        evidence: evidence.text,
+        finalClaim: this.deps.getStreamedText(),
+        scopeFiles: evidence.modifiedFiles,
+        signal,
+      }),
+      signal!,
+      'goal-judge',
+    )
+
+    // Single-exit: compute action + reminder, then emit telemetry on accept.
+    let action: 'accept' | 'continue'
+    let reminder: string
+    let acceptedUnverified = false
+
+    if (verdict.overall === 'verified') {
+      action = 'accept'
+      reminder = achievedReminder(' Judge 已独立核验全部验收项。')
+    } else if (verdict.overall === 'rejected') {
+      if (tracker.getJudgeRuns() < tracker.getMaxJudgeRuns()) {
+        const unmet = verdict.criteria
+          .filter(c => c.met === false)
+          .map(c => `- ${c.criterion}${c.evidence ? `（证据: ${c.evidence}）` : ''}`)
+        const iter = tracker.getIteration()
+        const maxIter = tracker.getMaxIterations()
+        action = 'continue'
+        reminder =
+          `[GOAL JUDGE 驳回 ${tracker.getJudgeRuns()}/${tracker.getMaxJudgeRuns()}] 完成声明未通过独立核验，继续执行。\n` +
+          `目标: ${tracker.getGoal()}\n` +
+          `未达成的验收项:\n${unmet.length > 0 ? unmet.join('\n') : `- ${verdict.summary || '判定未达成'}`}\n` +
+          `请修复后再次输出 "GOAL ACHIEVED"。（迭代 ${iter}/${maxIter}）`
+      } else {
+        // Cap reached: stop re-judging to avoid burning the budget in a reject loop.
+        action = 'accept'
+        reminder = achievedReminder(
+          ` ⚠️ Judge 仍判定未完全达成（已达 ${tracker.getMaxJudgeRuns()} 次核验上限，接受为未完全验证）。残留: ${verdict.summary || '见上轮判定'}。`,
+        )
+        acceptedUnverified = true
+      }
+    } else {
+      // inconclusive — fail-open: accept but flag as unverified.
+      action = 'accept'
+      reminder = achievedReminder(` ⚠️ Judge 未能独立验证（${verdict.summary || '原因未知'}），接受为未验证完成。`)
+      acceptedUnverified = true
+    }
+
+    // Emit telemetry on accept paths (continue = not a completion decision yet).
+    if (action === 'accept') {
+      const criteriaMet = verdict.criteria.filter(c => c.met === true).length
+      const criteriaUnmet = verdict.criteria.filter(c => c.met === false).length
+      // Store verdict on tracker for deliver_task to read as evidence.
+      tracker.setLastVerdict({
+        overall: verdict.overall,
+        criteriaMet,
+        criteriaUnmet,
+        criteriaTotal: verdict.criteria.length,
+        summary: verdict.summary,
+      })
+      this.deps.writeTelemetry({
+        kind: 'goal_judge_verdict',
+        overall: verdict.overall,
+        judgeRuns: tracker.getJudgeRuns(),
+        maxJudgeRuns: tracker.getMaxJudgeRuns(),
+        criteriaTotal: verdict.criteria.length,
+        criteriaMet,
+        criteriaUnmet,
+        acceptedUnverified,
+        iteration: tracker.getIteration(),
+      })
+    }
+
+    return { action, reminder }
+  }
+
+  /**
    * Execute the full turn loop for a single run() invocation.
    *
    * Previously AgentLoop._runInner — extracted verbatim with control flow
@@ -298,7 +416,7 @@ export class TurnOrchestrator {
         const signal = this.deps.getAbortSignal()
         if (signal?.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
-          callbacks.onAbort()
+          callbacks.onAbort(this.deps.getAbortReason())
           return
         }
 
@@ -312,6 +430,7 @@ export class TurnOrchestrator {
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
+          this.deps.getHeartbeat()?.tick('compaction')
           const compactionResult = await rejectOnAbort(
             this.deps.runCompaction(turn, snap),
             signal!,
@@ -319,7 +438,7 @@ export class TurnOrchestrator {
           )
           if (compactionResult.shouldAbort) {
             if (!assistantResponded && !compactionResult.userMessageConsumed) this.deps.removeLastMessage()
-            callbacks.onAbort()
+            callbacks.onAbort(this.deps.getAbortReason())
             return
           }
           if (compactionResult.userMessageConsumed) userMessageConsumed = true
@@ -328,6 +447,7 @@ export class TurnOrchestrator {
         this.deps.setStreamedText('')
         this.deps.setLastPrewarmAt(0)
         let _tb = Date.now()
+        this.deps.getHeartbeat()?.tick('prewarm')
         await rejectOnAbort(this.deps.prewarmRecentReads(), signal!, 'prewarm')
         debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
@@ -340,6 +460,7 @@ export class TurnOrchestrator {
         this.deps.setLatestFsWatcherState(this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false })
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
+        this.deps.getHeartbeat()?.tick('perception')
         const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await rejectOnAbort(
           this.deps.runPerception(turn, estTokens, actionable, callbacks),
           signal!,
@@ -367,6 +488,7 @@ export class TurnOrchestrator {
 
         _tb = Date.now()
         // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
+        this.deps.getHeartbeat()?.tick('build-request')
         const turnRequest = await rejectOnAbort(
           this.deps.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
           signal!,
@@ -458,41 +580,59 @@ export class TurnOrchestrator {
           },
         })
 
-        let streamResult = await streamOnce()
+        // Stream phase: disarm only the hard-stall abort, keep informational
+        // heartbeats alive. A long pre-first-token gap (cold prefix re-encode on
+        // a large context — the d53172f8 stall, where round 33's cache went to
+        // 0% and the next request silently re-encoded) would otherwise run out
+        // the 240s hard-stall clock and falsely abort a healthy in-flight
+        // request. Disarm (not pause) survives the onStreamStart phase change —
+        // which would re-arm a paused timer via tick() — and still lets the UI
+        // show "still working — waiting for first token (Ns)". The provider/SSE
+        // idle + thinking-stall timeouts are the authoritative guard for genuine
+        // in-stream hangs; the finally re-arms the watchdog for the next
+        // turn-boundary blind spot regardless of outcome.
+        const streamHeartbeat = this.deps.getHeartbeat()
+        streamHeartbeat?.disarmWatchdog()
+        let streamResult: Awaited<ReturnType<typeof streamOnce>>
+        try {
+          streamResult = await streamOnce()
 
-        // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
-        // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
-        // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
-        // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
-        const reconnectCfg = this.deps.getAgentReconnect()
-        const abortSignal = this.deps.getAbortSignal()
-        if (reconnectCfg?.enabled && abortSignal) {
-          const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
-          const backoffMs = reconnectCfg.backoffMs ?? 500
-          let attempt = 0
-          while (
-            attempt < maxAttempts &&
-            streamResult.streamError !== null &&
-            (streamResult.streamError as Error).name !== 'AbortError' &&
-            !abortSignal.aborted &&
-            classifyApiError(streamResult.streamError).shouldReconnect
-          ) {
-            attempt++
-            this.deps.setStreamedText('')
-            turnTextAccum = ''
-            turnThinkingAccum = ''
-            pendingFlush = ''
-            turnDedupState = 'tracking'
-            rateLimitOccurred = false
-            rateLimitRetryMs = 0
-            callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
-            try {
-              await abortableDelay(backoffMs, abortSignal)
-            } catch {
-              break // aborted during backoff
+          // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
+          // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
+          // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
+          // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
+          const reconnectCfg = this.deps.getAgentReconnect()
+          const abortSignal = this.deps.getAbortSignal()
+          if (reconnectCfg?.enabled && abortSignal) {
+            const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
+            const backoffMs = reconnectCfg.backoffMs ?? 500
+            let attempt = 0
+            while (
+              attempt < maxAttempts &&
+              streamResult.streamError !== null &&
+              (streamResult.streamError as Error).name !== 'AbortError' &&
+              !abortSignal.aborted &&
+              classifyApiError(streamResult.streamError).shouldReconnect
+            ) {
+              attempt++
+              this.deps.setStreamedText('')
+              turnTextAccum = ''
+              turnThinkingAccum = ''
+              pendingFlush = ''
+              turnDedupState = 'tracking'
+              rateLimitOccurred = false
+              rateLimitRetryMs = 0
+              callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
+              try {
+                await abortableDelay(backoffMs, abortSignal)
+              } catch {
+                break // aborted during backoff
+              }
+              streamResult = await streamOnce()
             }
-            streamResult = await streamOnce()
           }
+        } finally {
+          streamHeartbeat?.rearmWatchdog()
         }
 
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact
@@ -586,7 +726,7 @@ export class TurnOrchestrator {
           // runPostSession is best-effort cleanup — its failure must not cause
           // the outer catch to double-delete an unrelated message.
           try { await this.deps.runPostSession(callbacks) } catch { /* best-effort */ }
-          callbacks.onAbort()
+          callbacks.onAbort(this.deps.getAbortReason())
           return
         }
 
@@ -718,6 +858,10 @@ export class TurnOrchestrator {
         // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
         const tracker = this.goalTracker
         let shouldContinueGoal = false
+        // When the judge rejects a self-declared completion, it supplies a
+        // tailored continuation reminder (unmet criteria + evidence) that
+        // overrides the generic goal-continuation message below.
+        let judgeContinuationReminder: string | null = null
         if (tracker?.isActive()) {
           const goalResult = tracker.check(
             this.deps.getStreamedText(),
@@ -727,20 +871,23 @@ export class TurnOrchestrator {
           if (goalResult.shouldContinue) {
             shouldContinueGoal = true
             tracker.advanceIteration()
+          } else if (goalResult.reason === 'achieved') {
+            // Self-declared completion: gate it through the independent judge
+            // before accepting. The judge may reject and demand a continuation.
+            const decision = await this.judgeGoalCompletion(tracker, signal)
+            if (decision.action === 'continue') {
+              shouldContinueGoal = true
+              judgeContinuationReminder = decision.reminder
+              tracker.advanceIteration()
+            } else {
+              this.deps.appendSystemReminder(decision.reminder)
+              tracker.deactivate('achieved')
+            }
           } else {
-            // Any terminal reason: deactivate the tracker so subsequent turns
-            // aren't checked. Emit a closing message for achievement.
-            // Map check reason to deactivation reason for post-goal review gating.
-            const deactivationReason = goalResult.reason === 'achieved' ? 'achieved'
-              : goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
+            // budget/context/cancelled: deactivate so later turns aren't checked.
+            const deactivationReason = goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
               : goalResult.reason === 'context_limit' ? 'context_limit'
               : 'cancelled'
-            if (goalResult.reason === 'achieved') {
-              this.deps.appendSystemReminder(
-                `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。\n` +
-                `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
-              )
-            }
             tracker.deactivate(deactivationReason)
           }
         }
@@ -753,14 +900,18 @@ export class TurnOrchestrator {
             signal!,
             'goal-continue-complete',
           )
-          const iter = tracker!.getIteration()
-          const maxIter = tracker!.getMaxIterations()
-          this.deps.appendSystemReminder(
-            `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
-            `目标: ${tracker!.getGoal()}\n` +
-            `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
-            `完成后输出 "GOAL ACHIEVED" 声明完成。`
-          )
+          if (judgeContinuationReminder) {
+            this.deps.appendSystemReminder(judgeContinuationReminder)
+          } else {
+            const iter = tracker!.getIteration()
+            const maxIter = tracker!.getMaxIterations()
+            this.deps.appendSystemReminder(
+              `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
+              `目标: ${tracker!.getGoal()}\n` +
+              `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
+              `完成后输出 "GOAL ACHIEVED" 声明完成。`
+            )
+          }
           continue  // re-enter the for loop for the next iteration
         }
 
@@ -820,7 +971,7 @@ export class TurnOrchestrator {
       if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
       if ((err as Error).name === 'AbortError') {
         await this.deps.runPostSession(callbacks)
-        callbacks.onAbort()
+        callbacks.onAbort(this.deps.getAbortReason())
       } else {
         callbacks.onError(err as Error)
       }

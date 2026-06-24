@@ -33,8 +33,13 @@ function makeRegistry() {
   const registry = new ToolRegistry()
   for (const name of READ_ONLY_WORKER_TOOLS) registry.register(fakeTool(name))
   for (const name of ['edit_file', 'write_file', 'bash', 'run_tests']) registry.register(fakeTool(name))
-  // Register profile-registry tools that READ_ONLY_WORKER_TOOLS doesn't include
-  for (const name of ['read_section', 'repo_graph']) registry.register(fakeTool(name))
+  // Mirror the production base registry: register every tool any built-in profile
+  // can allowlist (file_info / semantic_search / web_search / web_fetch / hash_edit /
+  // apply_patch / git / delegate_* / lsp_* …) so filterToolRegistry (coordinator)
+  // never throws "Cannot allowlist unknown tool" on a stale hand-maintained set.
+  for (const pname of profileRegistry.getProfileNames()) {
+    for (const tool of profileRegistry.get(pname)!.allowedTools) registry.register(fakeTool(tool))
+  }
   return registry
 }
 

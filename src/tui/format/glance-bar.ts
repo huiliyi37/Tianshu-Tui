@@ -161,6 +161,20 @@ export function stripAnsiLen(s: string): number {
   return stringWidth(s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, ''))
 }
 
+/** token 用量进度条：0-1 比例 → 10 格填充条 + 百分比，按水位变色（≥90% error / ≥75% warning）。
+ *  侧边面板（side-panel.ts）的「Token 仪表」使用。曾随双行 GlanceBar 特性引入，后该特性
+ *  被 revert，但 side-panel 仍依赖此独立函数——此处单独保留它，不复活被 revert 的双行逻辑。 */
+export function formatTokenProgressBar(ratio: number, theme: RivetTheme): string {
+  const r = Math.max(0, Math.min(1, ratio))
+  const filled = Math.round(r * 10)
+  const empty = 10 - filled
+  const barColor = r >= 0.9 ? theme.error : r >= 0.75 ? theme.warning : theme.dim
+  const fillChar = r >= 0.9 ? '▇' : r >= 0.75 ? '▆' : '▅'
+  const bar = color(fillChar.repeat(filled), barColor) + color('░'.repeat(empty), theme.dim)
+  const pct = color(`${(r * 100).toFixed(0)}%`, barColor)
+  return `${bar} ${pct}`
+}
+
 /** token 计数压缩为可读单位：
  *  - < 1k   → 原值（"850"）
  *  - < 1M   → 取整 k（"12k"、"200k"）

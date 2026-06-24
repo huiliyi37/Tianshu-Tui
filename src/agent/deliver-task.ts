@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
@@ -39,6 +39,8 @@ import type { ReviewConfig } from '../config/schema.js'
 import { recordAutoReviewRun } from './review-health.js'
 import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
+import { analyzeImpact } from '../repo/meridian-impact.js'
+import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -78,10 +80,20 @@ export interface B1Context {
   /** True when the goal tracker deactivated with reason='achieved'.
    *  Signals deliver_task to auto-upgrade the final commit review to L3. */
   isGoalAchieved?: () => boolean
+  /** Last goal judge verdict stored on the tracker, for surfacing in the
+   *  delivery report. Null when the judge hasn't run (e.g. judge disabled
+   *  or goal completed before the judge had a chance to run). */
+  getLastVerdict?: () => import('./goal-tracker.js').StoredGoalJudgeVerdict | null
   /** Review configuration snapshot (subset of agent.review). Used for per-config
    *  gating of auto review (review.skipAuto) without re-reading the full Config.
    *  Optional: absent → no-skip (preserves current behavior). */
   reviewConfig?: ReviewConfig
+  /** Meridian indexer — when available, blast radius is injected into review
+   *  focusHint so verifier/inspector know which downstream consumers to check. */
+  meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
+  /** Injectable typecheck runner for the review-gate backstop. Absent → the
+   *  real `tsc --noEmit` is used (covers worker/headless). Tests pass a mock. */
+  typecheckRunner?: import('./typecheck-gate.js').TypecheckRunner
 }
 
 // ── Post-commit review batching ──
@@ -637,6 +649,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           || ctx.isGoalActive?.() === true
           || ctx.reviewConfig?.skipAuto === true
         const goalAchieved = ctx.isGoalAchieved?.() === true
+        const goalVerdict = ctx.getLastVerdict?.() ?? null
 
         // Goal-achieved commit: auto-upgrade to L3 for final review sweep.
         // Best-effort — if review deps are unavailable the commit still lands.
@@ -651,6 +664,59 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           goalActive: ctx.isGoalActive?.() === true,
           ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
           ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
+        }
+
+        // Typecheck backstop (Component B) — run a scoped tsc on the changed
+        // files; a real type error that tests/esbuild missed escalates review to
+        // L3 and is surfaced FIRST in focusHint (more urgent than blast radius).
+        // Advisory: wrapped so it never blocks the commit (already landed) or
+        // deliver_task. ctx.typecheckRunner is undefined in prod → real tsc.
+        // Covers both scoped errors (in changed files) and cross-file drift
+        // (new errors in non-changed files from definition changes) — the
+        // latter is the "24-error class" that scoped-only filtering missed.
+        if (typecheckGateEnabled()) {
+          try {
+            const tc = runChangedFilesTypecheckMemo(params.cwd, change.files, ctx.typecheckRunner)
+            if (tc) {
+              change.forceLevel = 'L3'
+              const note = `Typecheck — ${tc.summary}`
+              change.focusHint = change.focusHint ? `${note} | ${change.focusHint}` : note
+            }
+          } catch { /* advisory: typecheck gate must never fail delivery */ }
+        }
+
+        // Inject meridian blast radius into focusHint so verifier/inspector
+        // know which downstream consumers to verify. Absolute paths filtered
+        // (repo-relative LIKE silently returns empty on absolute paths).
+        const meridianDb = ctx.meridianIndexer?.getDb()
+        const relChangeFiles = change.files.filter(f => !isAbsolute(f))
+        if (meridianDb && relChangeFiles.length > 0) {
+          const impact = analyzeImpact(meridianDb, relChangeFiles)
+          const parts: string[] = []
+          if (impact.direct.length > 0)
+            parts.push(`downstream consumers: ${impact.direct.slice(0, 8).join(', ')}${impact.direct.length > 8 ? ` (+${impact.direct.length - 8} more)` : ''}`)
+          if (impact.tests.length > 0)
+            parts.push(`related tests: ${impact.tests.slice(0, 8).join(', ')}${impact.tests.length > 8 ? ` (+${impact.tests.length - 8} more)` : ''}`)
+          if (parts.length > 0) {
+            const blast = `Blast radius — ${parts.join('; ')}`
+            change.focusHint = change.focusHint ? `${change.focusHint} | ${blast}` : blast
+          }
+        }
+
+        // Surface the judge verdict alongside the delivery report so L3 review
+        // Surface the judge verdict alongside the delivery report so L3 review
+        // can focus on code quality — the judge already established functional
+        // completeness. When verdict is null, the judge didn't run (disabled,
+        // no coordinator, or goal completed before first judge invocation).
+        if (goalVerdict) {
+          const v = goalVerdict
+          if (v.overall === 'verified') {
+            lines.push('', `✅ Goal judge: verified (${v.criteriaMet}/${v.criteriaTotal} criteria met). L3 review can focus on code quality.`)
+          } else if (v.overall === 'rejected') {
+            lines.push('', `⚠️ Goal judge: rejected (${v.criteriaUnmet} unmet of ${v.criteriaTotal}). Accepted at judge cap — residual: ${v.summary}`)
+          } else {
+            lines.push('', `⚠️ Goal judge: inconclusive. Accepted unverified — ${v.summary}`)
+          }
         }
 
         // Suppress auto review when goal is active OR caller explicitly skips.

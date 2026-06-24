@@ -18,6 +18,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { WriteStream } from 'node:tty'
 import { LiveEngine, type LiveRegionLine } from '../live-engine.js'
+import { displayWidth } from '../../width.js'
 
 /**
  * screen-buffer 终端模拟器：追踪整屏内容（display rows × columns 网格）。
@@ -29,34 +30,45 @@ class ScreenTerminal {
   rows: number
   cursorRow = 0
   cursorCol = 0
+  /** 是否把非 box/block 的 ambiguous 符号（— … ↑↓ ·）按 2 列渲染（模拟 CJK 终端）。 */
+  ambiguousWide: boolean
 
   /** displayRows × columns 字符网格 */
   screen: string[][] = []
 
   writes: string[] = []
 
-  constructor(columns: number, rows: number) {
+  /** 宽字符尾随单元占位符（读屏时剔除），使宽字形只在网格里占 1 个可读字符。 */
+  private static readonly WIDE_PAD = '\u0000'
+
+  constructor(columns: number, rows: number, opts: { ambiguousWide?: boolean } = {}) {
     this.columns = columns
     this.rows = rows
+    this.ambiguousWide = opts.ambiguousWide ?? false
     this.clearScreen()
+  }
+
+  /** 单个字符的终端显示宽度（与生产 displayWidth 同口径，box/block 恒为 1）。 */
+  private charWidth(ch: string): number {
+    return displayWidth(ch, { ambiguousAsWide: this.ambiguousWide })
   }
 
   private clearScreen(): void {
     this.screen = Array.from({ length: this.rows }, () => Array(this.columns).fill(' '))
   }
 
-  /** 获取屏幕上某行的纯文本（去尾部空格，去 ANSI 转义序列）。 */
+  /** 获取屏幕上某行的纯文本（剔除宽字符占位符，去尾部空格，去 ANSI 转义序列）。 */
   getRow(row: number): string {
     if (row < 0 || row >= this.rows) return ''
-    const raw = this.screen[row]!.join('').replace(/ +$/, '')
+    const raw = this.screen[row]!.join('').split(ScreenTerminal.WIDE_PAD).join('').replace(/ +$/, '')
     return this.stripAnsi(raw)
   }
 
-  /** 获取从某行开始的所有非空行文本（已去 ANSI）。 */
+  /** 获取从某行开始的所有非空行文本（已去 ANSI 与宽字符占位符）。 */
   getRowsFrom(startRow: number): string[] {
     const result: string[] = []
     for (let r = startRow; r < this.rows; r++) {
-      const text = this.stripAnsi(this.screen[r]!.join(''))
+      const text = this.stripAnsi(this.screen[r]!.join('').split(ScreenTerminal.WIDE_PAD).join(''))
       if (text.trim() === '') continue
       result.push(text)
     }
@@ -68,18 +80,27 @@ class ScreenTerminal {
     return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
   }
 
-  /** 光标处写一个字符（仿真实终端行为：到达最后一列不立即 wrap，下一字符才 wrap）。 */
+  /** 光标处写一个字符（仿真实终端 pending-wrap：到达最后一列不立即 wrap，下一字符才
+   *  wrap，不丢字符）。宽字形（CJK / ambiguousWide 下的 — … ↑↓ ·）占 2 列：
+   *  首列写字形、次列写占位符；放不下行尾 1 列时整体折到下一行。 */
   private putChar(ch: string): void {
-    if (this.cursorRow >= this.rows) return
-    if (this.cursorCol < this.columns) {
-      this.screen[this.cursorRow]![this.cursorCol] = ch
-    }
-    this.cursorCol++
-    // 真实终端：只有在超出最后一列时才换行（col 达到 columns 表示已越界）
-    if (this.cursorCol > this.columns) {
-      this.cursorCol = 0
+    const w = Math.max(1, this.charWidth(ch))
+    // pending-wrap：光标已在/越过右边界 → 先折行再写。
+    if (this.cursorCol >= this.columns) {
       this.cursorRow++
+      this.cursorCol = 0
     }
+    // 宽字符放不下当前行最后 1 列 → 整体折到下一行（真实终端行为）。
+    if (w === 2 && this.cursorCol === this.columns - 1) {
+      this.cursorRow++
+      this.cursorCol = 0
+    }
+    if (this.cursorRow >= this.rows) return
+    this.screen[this.cursorRow]![this.cursorCol] = ch
+    if (w === 2 && this.cursorCol + 1 < this.columns) {
+      this.screen[this.cursorRow]![this.cursorCol + 1] = ScreenTerminal.WIDE_PAD
+    }
+    this.cursorCol += w
   }
 
   flush(): string {
@@ -389,4 +410,57 @@ test('slash 逐字符输入不产生 ghost 累积', () => {
 
   // 最后一帧是 /help 的 slash 态
   assert.ok(screen.includes('/help'), '最后一帧应含 /help hint')
+})
+
+// ── 场景：CJK/ambiguous-wide 终端 — 含 — … · 的提示行实际换行成 2 行 ──────
+// 这是用户报告的「交付后输入框换行重叠」的精确复现：动态行含 East-Asian
+// Ambiguous 符号（终端按 2 列渲染），string-width 按 1 列计 → rowsForLine 低估
+// → buildFullRewrite 回顶欠擦 → 旧帧顶框泄漏。修复后 rowsForLine 按 wide 度量
+// （RIVET_AMBIGUOUS_WIDTH=wide）与终端一致，重影消失。
+// 升级后的 ScreenTerminal 按显示宽度推进光标，故能复现该换行错位。
+
+test('ambiguous-wide 终端下含 — … · 的提示行（窄计=列宽/宽计>列宽）换行不残留旧顶框', () => {
+  const prev = process.env.RIVET_AMBIGUOUS_WIDTH
+  process.env.RIVET_AMBIGUOUS_WIDTH = 'wide'
+  try {
+    const cols = 40
+    const term = new ScreenTerminal(cols, 30, { ambiguousWide: true })
+    const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+    const color = (s: string, c: string): string => `\x1B[38;5;${c}m${s}\x1B[39m`
+
+    // 含 — … · 三个 ambiguous 符号：窄计 = cols（1 行），宽计 > cols（终端换行成 2 行）。
+    const filler = 'c'.repeat(cols - 15)
+    const widish = '  /x — a … b · ' + filler
+    assert.equal(displayWidth(widish), cols, '锚定：窄计应等于列宽')
+    assert.ok(displayWidth(widish, { ambiguousAsWide: true }) > cols, '锚定：宽计应超过列宽（终端换行）')
+
+    const top = color('╭──天枢──┬──glm──╮', '140')
+    const input = color('│ 〉 █ │', '140')
+    const bot = color('╰' + '─'.repeat(cols - 2) + '╯', '140')
+    const hint2 = color('  /y hint2', '100')
+    const hint3 = color('  /z hint3', '100')
+
+    // Frame A：2 行提示（widish 在终端占 2 显示行）
+    engine.render(lines(top, input, bot, widish, hint2))
+    term.flush()
+    // Frame B：3 行提示 → 行数变化 → buildFullRewrite，回顶量依赖 widish 被算作 2 行
+    engine.render(lines(top, input, bot, widish, hint2, hint3))
+
+    const screen = term.getRowsFrom(0).join('\n')
+    const tulCount = screen.split('╭').length - 1
+    assert.equal(tulCount, 1, `ambiguous 行换行后 ╭ 出现 ${tulCount} 次，预期 1 次 — rowsForLine 低估导致重影`)
+    assert.ok(screen.includes('hint3'), 'Frame B 的 hint3 应出现')
+  } finally {
+    if (prev === undefined) delete process.env.RIVET_AMBIGUOUS_WIDTH
+    else process.env.RIVET_AMBIGUOUS_WIDTH = prev
+  }
+})
+
+// ── 探针：升级后的 ScreenTerminal 确实把宽字符建模为 2 列、宽行折行 ───────
+test('探针: ScreenTerminal 按显示宽度推进光标（CJK 占 2 列、超宽行折行）', () => {
+  const term = new ScreenTerminal(10, 5, { ambiguousWide: true })
+  // 写 6 个 CJK（每个 2 列）= 12 列 > 10 → 折到第二行
+  term.write('天枢天枢天枢')
+  assert.equal(term.getRow(0), '天枢天枢天', '首行容纳 5 个 CJK（10 列）')
+  assert.equal(term.getRow(1), '枢', '第 6 个 CJK 折到第二行')
 })

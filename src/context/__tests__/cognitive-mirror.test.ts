@@ -154,7 +154,7 @@ describe('cognitive mirror — 认知镜面', () => {
 
   it('formats dimensions to 2 decimal places when evidence present', () => {
     const sensorium = makeSensorium({ confidence: 0.3333, complexity: 0.7777 })
-    const ledger = makeLedger({ sensorium, evidence: { filesModified: new Set(['src/x.ts']), toolResults: new Set() } })
+    const ledger = makeLedger({ sensorium, evidence: { filesModified: new Set(['src/x.ts']) } as any })
     const mirror = buildCognitiveMirror(ledger)
 
     assert.ok(mirror.includes('verification_coverage="0.33"'), `got: ${mirror}`)

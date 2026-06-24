@@ -30,6 +30,11 @@ import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-ho
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
+import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
+import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
+import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createContextPressureHook } from './hooks/context-pressure-hook.js'
+import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -168,6 +173,12 @@ export interface RuntimeHookDeps {
   onCcrTrigger?: (event: CcrTriggerEvent) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
+
+  // ── Context pressure advisory ──
+  /** Estimated token count (used by context-pressure-hook for ratio warning). */
+  getEstimatedTokens?: () => number
+  /** Context window size (used by context-pressure-hook for ratio warning). */
+  getContextWindow?: () => number
 
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
@@ -371,6 +382,46 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // to self-verify before building on the conclusions.
   if (deps.advisoryBus) {
     hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Edit-Tool Advisory: postTool hook — detects consecutive hash_edit calls
+  // on the same file (the #1 cause of bracket-mismatch debris). Uses a
+  // turn-scoped Map to avoid the 5-entry recentToolHistory window limit.
+  // Gated by RIVET_EDIT_SMART_ROUTING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_EDIT_SMART_ROUTING !== '0') {
+    hooks.push(createEditToolAdvisoryHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Lossy Observation: postTool hook — detects collapsed/truncated tool
+  // output and reinforces the discipline that lossy observations cannot
+  // support negative conclusions. Complements guardLossyToolResult's
+  // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
+  if (deps.advisoryBus) {
+    hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Context Pressure: afterPerception hook — warns when context window
+  // fill ratio exceeds 70%, suggesting the agent wrap up and hand off to
+  // a new session before the 86% split threshold triggers.
+  if (deps.advisoryBus && deps.getEstimatedTokens && deps.getContextWindow) {
+    hooks.push(createContextPressureHook({
+      advisoryBus: deps.advisoryBus,
+      getEstimatedTokens: deps.getEstimatedTokens,
+      getContextWindow: deps.getContextWindow,
+    }))
+  }
+
+  // Spec-Verify Gate: preTurn hook — detects "read spec → implement
+  // without verification" jumps and injects a constitutional advisory.
+  if (deps.advisoryBus) {
+    hooks.push(createSpecVerifyGateHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Typecheck-Reminder: postTurn hook — fills self-verify's blind spot. tsx
+  // tests pass without type-checking, so "tests green" can hide a broken tsc.
+  // Fires when TS files were edited + tests ran + no typecheck since.
+  if (deps.advisoryBus) {
+    hooks.push(createTypecheckReminderHook({ advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {

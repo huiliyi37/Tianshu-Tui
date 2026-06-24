@@ -101,7 +101,7 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   // Coarse-grain confidence and complexity to avoid false precision in early turns.
   // A 2-decimal float like "1.00" implies measurement granularity that doesn't exist
   // before any tools have run. Use low/mid/high bands until evidence accumulates.
-  const hasEvidence = (ledger.evidence?.filesModified?.size ?? 0) > 0 || (ledger.evidence?.toolResults?.size ?? 0) > 0
+  const hasEvidence = (ledger.evidence?.filesModified?.size ?? 0) > 0
   const confLabel = !hasEvidence ? coarseLabel(s.confidence) : formatDim(s.confidence)
   const parts: string[] = [`verification_coverage="${confLabel}"`]
 
