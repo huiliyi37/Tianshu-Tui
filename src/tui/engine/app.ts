@@ -1040,8 +1040,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1060,8 +1060,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1080,8 +1080,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1151,11 +1151,7 @@ export class TuiApp {
   forceRedraw(): void {
     // 主题/域/模型变更会改变颜色码，记忆化的 thinking 行需失效以用新主题重算。
     this.thinkingLinesMemo = null
-    // 不走 live.clear() + append 路径——clear 置 lastDisplayRows=0 后 renderLive
-    // 走 append 模式不擦除，若 clear 的 erase 因 lastDisplayRows 不准（domain
-    // 切换导致 wrap 行数变化）覆盖不全，旧帧残留在屏上 → ghost rendering。
-    // 改为直接 renderLive：lineCache 内容变了（颜色/domain），render 的 diff 路径
-    // 会检测到行不匹配 → 走 buildFullRewrite（回顶+erase+重写），原子覆盖旧帧。
+    this.live.clear()
     this.renderLive()
   }
 
