@@ -68,6 +68,11 @@ echo "=== 同步: .rivet/knowledge/ ==="
 rsync $RSYNC_FLAGS \
   "$DEV_DIR/.rivet/knowledge/" "$PUB_DIR/.rivet/knowledge/"
 
+echo "=== 同步: 中文 README ==="
+if [[ -f "$DEV_DIR/.rivet/Tianshu/README.zh-CN.md" ]]; then
+  rsync $RSYNC_FLAGS "$DEV_DIR/.rivet/Tianshu/README.zh-CN.md" "$PUB_DIR/README.zh-CN.md"
+fi
+
 echo "=== 同步: 配置文件 ==="
 for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json package.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
