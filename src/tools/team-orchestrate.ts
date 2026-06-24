@@ -207,6 +207,10 @@ export function createTeamOrchestrateTool(
   coordinator: TeamOrchestrateCoordinator,
   options?: { defaultMaxParallel?: number },
 ): Tool {
+  // Cache prior wave results for cross-wave failure propagation.
+  // Set after each dispatch; read when fromWave > 0.
+  let priorWaveResults: import('../agent/work-order.js').WorkerResult[] | undefined
+
   return {
     definition: {
       name: 'team_orchestrate',
@@ -285,6 +289,9 @@ export function createTeamOrchestrateTool(
             fromWave,
             parentTurnId: params.toolUseId,
             abortSignal: params.abortSignal,
+            // Cross-wave failure propagation: pass prior wave results so
+            // dispatchWaveAt can block tasks whose dependencies failed.
+            priorResults: fromWave > 0 ? priorWaveResults : undefined,
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
             // T9 P3: live worker token/tool stream into the team tool card.
             onActivity,
@@ -327,6 +334,12 @@ export function createTeamOrchestrateTool(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `team_orchestrate failed: ${msg}`, isError: true }
+      }
+
+      // Cache this wave's results for cross-wave failure propagation.
+      // The next call with fromWave+1 will pass these as priorResults.
+      if (summary.run?.results) {
+        priorWaveResults = summary.run.results
       }
 
       // T4: terminal per-worker status for the subagent panel.
