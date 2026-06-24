@@ -54,7 +54,7 @@ export interface TeamRunInput {
   onPlanReady?: (summary: TeamRunSummary, fromWave: number) => void
   /** Results from the immediately prior wave. Used by dispatchWaveAt to
    *  block tasks whose dependencies failed. Undefined for wave 0. */
-  priorResults?: import('../agent/coordinator.js').WorkerResult[]
+  priorResults?: import('../agent/work-order.js').WorkerResult[]
 }
 
 export interface TeamRunSummary {
