@@ -580,41 +580,59 @@ export class TurnOrchestrator {
           },
         })
 
-        let streamResult = await streamOnce()
+        // Stream phase: disarm only the hard-stall abort, keep informational
+        // heartbeats alive. A long pre-first-token gap (cold prefix re-encode on
+        // a large context — the d53172f8 stall, where round 33's cache went to
+        // 0% and the next request silently re-encoded) would otherwise run out
+        // the 240s hard-stall clock and falsely abort a healthy in-flight
+        // request. Disarm (not pause) survives the onStreamStart phase change —
+        // which would re-arm a paused timer via tick() — and still lets the UI
+        // show "still working — waiting for first token (Ns)". The provider/SSE
+        // idle + thinking-stall timeouts are the authoritative guard for genuine
+        // in-stream hangs; the finally re-arms the watchdog for the next
+        // turn-boundary blind spot regardless of outcome.
+        const streamHeartbeat = this.deps.getHeartbeat()
+        streamHeartbeat?.disarmWatchdog()
+        let streamResult: Awaited<ReturnType<typeof streamOnce>>
+        try {
+          streamResult = await streamOnce()
 
-        // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
-        // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
-        // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
-        // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
-        const reconnectCfg = this.deps.getAgentReconnect()
-        const abortSignal = this.deps.getAbortSignal()
-        if (reconnectCfg?.enabled && abortSignal) {
-          const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
-          const backoffMs = reconnectCfg.backoffMs ?? 500
-          let attempt = 0
-          while (
-            attempt < maxAttempts &&
-            streamResult.streamError !== null &&
-            (streamResult.streamError as Error).name !== 'AbortError' &&
-            !abortSignal.aborted &&
-            classifyApiError(streamResult.streamError).shouldReconnect
-          ) {
-            attempt++
-            this.deps.setStreamedText('')
-            turnTextAccum = ''
-            turnThinkingAccum = ''
-            pendingFlush = ''
-            turnDedupState = 'tracking'
-            rateLimitOccurred = false
-            rateLimitRetryMs = 0
-            callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
-            try {
-              await abortableDelay(backoffMs, abortSignal)
-            } catch {
-              break // aborted during backoff
+          // 2D（默认关）：客户端重试耗尽后，agent 层有界重连。仅当本轮 streamError 被
+          // classifyApiError 判为 shouldReconnect、非 AbortError、且未 abort 时触发。
+          // 守护 prefix cache：丢弃本轮 partial blocks（不入 session）与已累计 streamedText，
+          // 用**相同 request**（消息历史不变）重发，prefix 命中不受污染。
+          const reconnectCfg = this.deps.getAgentReconnect()
+          const abortSignal = this.deps.getAbortSignal()
+          if (reconnectCfg?.enabled && abortSignal) {
+            const maxAttempts = Math.max(0, reconnectCfg.maxAttempts ?? 1)
+            const backoffMs = reconnectCfg.backoffMs ?? 500
+            let attempt = 0
+            while (
+              attempt < maxAttempts &&
+              streamResult.streamError !== null &&
+              (streamResult.streamError as Error).name !== 'AbortError' &&
+              !abortSignal.aborted &&
+              classifyApiError(streamResult.streamError).shouldReconnect
+            ) {
+              attempt++
+              this.deps.setStreamedText('')
+              turnTextAccum = ''
+              turnThinkingAccum = ''
+              pendingFlush = ''
+              turnDedupState = 'tracking'
+              rateLimitOccurred = false
+              rateLimitRetryMs = 0
+              callbacks.onPhaseChange?.('working', { reason: `reconnecting (${attempt}/${maxAttempts})` })
+              try {
+                await abortableDelay(backoffMs, abortSignal)
+              } catch {
+                break // aborted during backoff
+              }
+              streamResult = await streamOnce()
             }
-            streamResult = await streamOnce()
           }
+        } finally {
+          streamHeartbeat?.rearmWatchdog()
         }
 
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact

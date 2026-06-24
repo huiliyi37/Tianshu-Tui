@@ -311,7 +311,7 @@ export class TurnStepProducer {
     // A2: enforceContextCeiling can trigger LLM compact (30s timeout).
     if (this.self.abortController!.signal.aborted) {
       if (!assistantResponded && !userMessageConsumed) this.self.session.removeLastMessage()
-      callbacks.onAbort(this.self._watchdogAborted ? 'watchdog' : undefined)
+      callbacks.onAbort(this.self.abortReason())
       return { action: 'abort' }
     }
     this.self.contextInjection.refreshActiveClaims()

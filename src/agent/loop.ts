@@ -662,6 +662,19 @@ export class AgentLoop {
     return this.turnOrchestrator.goalTracker?.isActive() ?? false
   }
 
+  /**
+   * Single source of truth for the abort reason passed to onAbort(). Encodes
+   * whether the current abort was a watchdog hard-stall (vs. a user Ctrl+C) and,
+   * for watchdog stalls during a goal run, tags `watchdog:goal` so the UI can
+   * auto-recover/continue instead of treating it as a user interrupt. Used by
+   * every onAbort emission site (turn-orchestrator deps + turn-step-producer)
+   * so the encoding stays consistent across abort paths.
+   */
+  abortReason(): string | undefined {
+    if (!this._watchdogAborted) return undefined
+    return this.isGoalActive() ? 'watchdog:goal' : 'watchdog'
+  }
+
   /** Sync plan-mode state into config so tool-pipeline reads it */
   syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState

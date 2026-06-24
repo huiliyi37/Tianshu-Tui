@@ -242,6 +242,12 @@ export class TuiApp {
    * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
    */
   private _runGen = 0
+  /** Consecutive watchdog auto-continues without intervening progress. Caps the
+   *  goal-mode "⟳ Auto-recovering → continue" loop so a genuinely-wedged turn
+   *  can't re-abort every hardStallMs and burn budget forever. Reset on any
+   *  real turn completion or user submit. */
+  private _watchdogAutoContinues = 0
+  private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
 
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
@@ -287,6 +293,12 @@ export class TuiApp {
       onTabComplete: () => this.handleTabComplete(),
       onSubmit: (text) => {
         const trimmed = text.trim()
+
+        // User-initiated submit is real progress: clear the goal-mode watchdog
+        // auto-continue counter so a later legitimate stall gets the full
+        // recovery budget again. (The auto-continue path resubmits via
+        // onSubmitCallback directly and does NOT pass through here.)
+        if (trimmed) this._watchdogAutoContinues = 0
 
         // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
         if (trimmed) {
@@ -1644,6 +1656,11 @@ export class TuiApp {
   private async handleTurnComplete(usage: Partial<Usage>, turnNumber: number, isFinal: boolean): Promise<void> {
     this.state.turnNumber = turnNumber
 
+    // A completed turn (even intermediate) is forward progress: the stream
+    // produced output, so the prior boundary stall cleared. Reset the goal-mode
+    // watchdog auto-continue counter to restore the full recovery budget.
+    this._watchdogAutoContinues = 0
+
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
 
@@ -1793,18 +1810,29 @@ export class TuiApp {
     // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
     const isWatchdog = reason?.startsWith('watchdog')
     const isWatchdogGoal = reason === 'watchdog:goal'
+    // Goal-mode auto-continue is bounded: a turn that re-stalls every
+    // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
+    // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
+    // aborts with no intervening progress, stop auto-continuing and surface a
+    // plain interrupt so the user can intervene.
+    const autoContinueExhausted = isWatchdogGoal
+      && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
     this.commitAbove(() => {
       this.commit.write({
-        text: isWatchdog
+        text: isWatchdog && !autoContinueExhausted
           ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
-          : color('⏹ Interrupted', this.theme.muted),
+          : autoContinueExhausted
+            ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
+            : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
     })
     // Watchdog abort in goal mode: auto-resubmit so the agent continues
-    // without waiting for the user to type "continue".
-    if (isWatchdogGoal) {
+    // without waiting for the user to type "continue" — but only while under
+    // the consecutive-stall cap.
+    if (isWatchdogGoal && !autoContinueExhausted) {
+      this._watchdogAutoContinues++
       this.onSubmitCallback?.('continue')
     }
     this.onAbortCallback?.()

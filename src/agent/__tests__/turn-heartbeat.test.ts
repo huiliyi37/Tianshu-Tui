@@ -314,4 +314,63 @@ describe('TurnHeartbeat', () => {
       assert.ok(count >= 1, 'resume without pause should not reset the clock')
     })
   })
+
+  describe('disarm / rearm watchdog (stream-phase cold TTFT)', () => {
+    it('suppresses the hard stall but KEEPS informational heartbeats', async () => {
+      let beats = 0
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => { beats++ },
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      hb.disarmWatchdog()
+      await delay(140)
+      hb.stop()
+      assert.equal(stalls.length, 0, 'disarmed watchdog must not abort during a long busy gap')
+      assert.ok(beats >= 3, `heartbeats must keep firing while disarmed (got ${beats}) — unlike pause()`)
+    })
+
+    it('rearm restores the hard stall', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      hb.disarmWatchdog()
+      await delay(90)
+      assert.equal(stalls.length, 0, 'still disarmed → no stall')
+      hb.rearmWatchdog()
+      await delay(100)
+      hb.stop()
+      assert.equal(stalls.length, 1, 'rearm must re-enable the hard stall')
+    })
+
+    it('phase-change tick does NOT re-arm a disarmed watchdog', async () => {
+      const stalls: number[] = []
+      const hb = new TurnHeartbeat({
+        silentMs: 20,
+        repeatMs: 20,
+        hardStallMs: 50,
+        onHeartbeat: () => {},
+        onHardStall: (elapsed) => stalls.push(elapsed),
+      })
+      hb.start()
+      hb.disarmWatchdog()
+      // Simulate onStreamStart's onPhaseChange('working') tick mid-gap — under
+      // pause() this would re-arm the timer; disarm must survive it.
+      await delay(30)
+      hb.tick('waiting for first token')
+      await delay(110)
+      hb.stop()
+      assert.equal(stalls.length, 0, 'a tick must not re-arm the hard stall while disarmed')
+    })
+  })
 })
