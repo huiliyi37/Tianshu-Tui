@@ -32,6 +32,7 @@ function makeContext(opts: {
   sessionRegistry?: SessionRegistry
   sessionId?: string
   detectWroteButNeverRead?: (cwd: string, files: string[]) => Array<{ symbol: string; file: string; kind: 'export' | 'field' }>
+  meridianDb?: import('../../repo/meridian-db.js').MeridianDb
 }) {
   const baseline = createWorktreeBaseline({
     branch: 'feat/b1',
@@ -63,6 +64,7 @@ function makeContext(opts: {
     reviewDeps: opts.disableReviewDeps ? undefined : (opts.reviewDeps ?? {} as ReviewRouterDeps),
     reviewDepth: opts.reviewDepth,
     detectWroteButNeverRead: opts.detectWroteButNeverRead ?? (() => []),
+    meridianIndexer: opts.meridianDb ? { getDb: () => opts.meridianDb! } as unknown as import('../../repo/meridian-indexer.js').MeridianIndexer : null,
   }))
 
   const params: ToolCallParams = {
@@ -1784,6 +1786,45 @@ Do not declare a streamed response duplicate in the middle of the stream.
       const result = await tool.execute({ ...params, cwd: dir, input: { commit: true, message: 'docs: guide' } })
       assert.equal(result.isError, true)
       assert.match(result.content, /Cannot commit/)
+    })
+  })
+
+  describe('meridian blast radius focusHint', () => {
+    function mockMeridianDb(reverse: Record<string, Array<{ file: string; kind: string; weight: number }>>, tests: Record<string, string[]> = {}): import('../../repo/meridian-db.js').MeridianDb {
+      return {
+        getReverseDependents: (f: string) => reverse[f] ?? [],
+        getTestsFor: (f: string) => tests[f] ?? [],
+        getCoEditNeighbors: () => [],
+      } as unknown as import('../../repo/meridian-db.js').MeridianDb
+    }
+
+    it('injects blast radius into focusHint when meridianDb has consumers', async () => {
+      const db = mockMeridianDb(
+        { 'src/foo.ts': [{ file: 'src/bar.ts', kind: 'import', weight: 1 }] },
+        { 'src/foo.ts': ['src/__tests__/foo.test.ts'] },
+      )
+      const { tool, params } = makeContext({
+        taskId: 't-br',
+        ownedFiles: ['src/foo.ts'],
+        dirtyFiles: ['src/foo.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+        meridianDb: db,
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'test: br' } })
+      assert.equal(result.isError ?? false, false)
+    })
+
+    it('does not crash when meridianDb is null', async () => {
+      const { tool, params } = makeContext({
+        taskId: 't-no-db',
+        ownedFiles: ['src/baz.ts'],
+        dirtyFiles: ['src/baz.ts'],
+        verifications: [{ command: 'npx tsc --noEmit', status: 'passed' }],
+        commitOwnedFiles: () => ({ ok: true, output: 'commit abc123' }),
+      })
+      const result = await tool.execute({ ...params, input: { commit: true, message: 'test: nodb' } })
+      assert.equal(result.isError ?? false, false)
     })
   })
 })

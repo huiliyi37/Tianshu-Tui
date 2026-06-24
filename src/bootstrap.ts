@@ -522,6 +522,7 @@ export function createInteractiveToolRegistry(
     isGoalAchieved: () => refs.goalTrackerRef.current?.isGoalAchieved() ?? false,
     getLastVerdict: () => refs.goalTrackerRef.current?.getLastVerdict() ?? null,
     reviewConfig: config.agent.review,
+    meridianIndexer: refs.meridianIndexer,
   })))
 
   return { registry: reg }

@@ -21,7 +21,7 @@
 
 import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { OwnershipLedger } from './ownership-ledger.js'
@@ -39,6 +39,7 @@ import type { ReviewConfig } from '../config/schema.js'
 import { recordAutoReviewRun } from './review-health.js'
 import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
+import { analyzeImpact } from '../repo/meridian-impact.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -86,6 +87,9 @@ export interface B1Context {
    *  gating of auto review (review.skipAuto) without re-reading the full Config.
    *  Optional: absent → no-skip (preserves current behavior). */
   reviewConfig?: ReviewConfig
+  /** Meridian indexer — when available, blast radius is injected into review
+   *  focusHint so verifier/inspector know which downstream consumers to check. */
+  meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
 }
 
 // ── Post-commit review batching ──
@@ -658,6 +662,25 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
         }
 
+        // Inject meridian blast radius into focusHint so verifier/inspector
+        // know which downstream consumers to verify. Absolute paths filtered
+        // (repo-relative LIKE silently returns empty on absolute paths).
+        const meridianDb = ctx.meridianIndexer?.getDb()
+        const relChangeFiles = change.files.filter(f => !isAbsolute(f))
+        if (meridianDb && relChangeFiles.length > 0) {
+          const impact = analyzeImpact(meridianDb, relChangeFiles)
+          const parts: string[] = []
+          if (impact.direct.length > 0)
+            parts.push(`downstream consumers: ${impact.direct.slice(0, 8).join(', ')}${impact.direct.length > 8 ? ` (+${impact.direct.length - 8} more)` : ''}`)
+          if (impact.tests.length > 0)
+            parts.push(`related tests: ${impact.tests.slice(0, 8).join(', ')}${impact.tests.length > 8 ? ` (+${impact.tests.length - 8} more)` : ''}`)
+          if (parts.length > 0) {
+            const blast = `Blast radius — ${parts.join('; ')}`
+            change.focusHint = change.focusHint ? `${change.focusHint} | ${blast}` : blast
+          }
+        }
+
+        // Surface the judge verdict alongside the delivery report so L3 review
         // Surface the judge verdict alongside the delivery report so L3 review
         // can focus on code quality — the judge already established functional
         // completeness. When verdict is null, the judge didn't run (disabled,
