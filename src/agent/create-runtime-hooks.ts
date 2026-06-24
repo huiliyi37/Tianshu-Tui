@@ -30,6 +30,7 @@ import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-ho
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
+import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
@@ -372,6 +373,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // to self-verify before building on the conclusions.
   if (deps.advisoryBus) {
     hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Edit-Tool Advisory: postTool hook — detects consecutive hash_edit calls
+  // on the same file (the #1 cause of bracket-mismatch debris). Uses a
+  // turn-scoped Map to avoid the 5-entry recentToolHistory window limit.
+  if (deps.advisoryBus) {
+    hooks.push(createEditToolAdvisoryHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Spec-Verify Gate: preTurn hook — detects "read spec → implement
