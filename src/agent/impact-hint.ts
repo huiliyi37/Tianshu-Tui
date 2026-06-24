@@ -1,3 +1,7 @@
+/**
+ * @deprecated 经络图（src/repo/meridian-*.ts）已提供持久化 SQLite 反向 BFS 影响分析。
+ * 本模块保留仅供 fallback（tool-pipeline 无 meridianIndexer 时），计划在确认全量迁移后移除。
+ */
 import type { ImportGraph } from './import-graph.js'
 import { getReverseDeps } from './import-graph.js'
 import { existsSync } from 'fs'
