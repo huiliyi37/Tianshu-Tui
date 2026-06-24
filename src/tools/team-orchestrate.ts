@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from '../agent/review-discipline.js'
+import { classifyOrchestrationScale } from '../agent/task-size-gate.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { extractChangedFiles } from '../agent/diff-collector.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
@@ -234,6 +235,15 @@ export function createTeamOrchestrateTool(
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
       const { mode, objective, planPath, planMarkdown, planJson, maxParallel, fromWave } = parsed.data
+
+      // Task-size gate: block small tasks from triggering heavy orchestration
+      const scale = classifyOrchestrationScale(objective)
+      if (scale.blocked) {
+        return {
+          content: `team_orchestrate blocked: ${scale.reason}\n\nDo this task inline instead — it doesn't need parallel orchestration.\n(To bypass: prefix the objective with "force:")`,
+          isError: true,
+        }
+      }
 
       // Pre-parsed tasks from plan_task UnifiedPlan JSON
       let tasks: ReturnType<typeof unifiedPlanToTeamTasks> | undefined
