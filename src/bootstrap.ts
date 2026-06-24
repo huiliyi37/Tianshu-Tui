@@ -37,6 +37,7 @@ import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
 import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
+import { runTypeCheck } from './lsp/client.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
 import { debugLog } from './utils/debug.js'
@@ -429,6 +430,7 @@ export function createInteractiveToolRegistry(
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
     getMeridianIndexer: () => refs.meridianIndexer,
+    getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*'),
   }, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。

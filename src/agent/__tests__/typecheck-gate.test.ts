@@ -1,0 +1,129 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import {
+  runChangedFilesTypecheck,
+  runChangedFilesTypecheckMemo,
+  typecheckGateEnabled,
+  __clearTypecheckMemo,
+  type TypecheckRunner,
+} from '../typecheck-gate.js'
+import type { Diagnostic } from '../../lsp/diagnostics.js'
+import type { LspCheckResult } from '../../lsp/client.js'
+
+const CWD = '/repo'
+
+function diag(file: string, line: number, message: string, severity: Diagnostic['severity'] = 'error'): Diagnostic {
+  return { file, line, col: 1, severity, message }
+}
+
+function runner(diagnostics: Diagnostic[], ranOk = true): TypecheckRunner {
+  const res: LspCheckResult = { diagnostics, formatted: '', ranOk }
+  return () => res
+}
+
+test('flags a changed file that has a type error', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 264, 'TS1117: duplicate property')]))
+  assert.ok(r)
+  assert.deepEqual(r.brokenFiles, ['src/x.ts'])
+  assert.match(r.summary, /Typecheck broken/)
+  assert.match(r.summary, /src\/x\.ts/)
+})
+
+test('point 1: matches when tsc reports an absolute path', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('/repo/src/x.ts', 10, 'TS2300: dup')]))
+  assert.ok(r)
+  assert.deepEqual(r.brokenFiles, ['src/x.ts'])
+})
+
+test('point 1: does not substring-misfire (src/xx.ts changed, error in src/x.ts)', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/xx.ts'], runner([diag('src/x.ts', 10, 'TS2300: dup')]))
+  assert.equal(r, null)
+})
+
+test('point 2: ranOk=false (crash/timeout) → null even with diagnostics', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 1, 'TS9999: x')], false))
+  assert.equal(r, null)
+})
+
+test('errors only in untouched files (repo noise) → null', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/other.ts', 5, 'TS1: noise')]))
+  assert.equal(r, null)
+})
+
+test('no .ts/.tsx among changed files → null and runner not called', () => {
+  let called = false
+  const spy: TypecheckRunner = () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
+  const r = runChangedFilesTypecheck(CWD, ['README.md', 'data.json'], spy)
+  assert.equal(r, null)
+  assert.equal(called, false)
+})
+
+test('absolute changed-file paths are filtered out before running', () => {
+  let called = false
+  const spy: TypecheckRunner = () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
+  const r = runChangedFilesTypecheck(CWD, ['/abs/src/x.ts'], spy)
+  assert.equal(r, null)
+  assert.equal(called, false)
+})
+
+test('warnings are ignored — only errors escalate', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 3, 'TS6133: unused', 'warning')]))
+  assert.equal(r, null)
+})
+
+test('caps errors per file and files in summary', () => {
+  const ds: Diagnostic[] = []
+  for (let i = 0; i < 12; i++) ds.push(diag(`src/f${i}.ts`, i, `TS${i}: e`))
+  const changed = ds.map(d => d.file)
+  const r = runChangedFilesTypecheck(CWD, changed, runner(ds))
+  assert.ok(r)
+  assert.equal(r.brokenFiles.length, 12)
+  assert.match(r.summary, /\+4 more files/)
+})
+
+test('typecheckGateEnabled: default on, off via 0/false/off/no', () => {
+  const prev = process.env.RIVET_TYPECHECK_GATE
+  try {
+    delete process.env.RIVET_TYPECHECK_GATE
+    assert.equal(typecheckGateEnabled(), true)
+    for (const v of ['0', 'false', 'off', 'no', 'OFF']) {
+      process.env.RIVET_TYPECHECK_GATE = v
+      assert.equal(typecheckGateEnabled(), false, `expected off for ${v}`)
+    }
+    process.env.RIVET_TYPECHECK_GATE = '1'
+    assert.equal(typecheckGateEnabled(), true)
+  } finally {
+    if (prev == null) delete process.env.RIVET_TYPECHECK_GATE
+    else process.env.RIVET_TYPECHECK_GATE = prev
+  }
+})
+
+test('memo: identical changed-file set with stable mtime runs tsc once', () => {
+  __clearTypecheckMemo()
+  let calls = 0
+  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  // Use a real, existing source file so statSync produces a stable signature.
+  const files = ['src/agent/typecheck-gate.ts']
+  runChangedFilesTypecheckMemo(process.cwd(), files, spy)
+  runChangedFilesTypecheckMemo(process.cwd(), files, spy)
+  assert.equal(calls, 1, 'second identical call should hit the memo')
+})
+
+test('memo: a different changed-file set bypasses the cache', () => {
+  __clearTypecheckMemo()
+  let calls = 0
+  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/typecheck-gate.ts'], spy)
+  runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/loop.ts'], spy)
+  assert.equal(calls, 2)
+})
+
+test('memo: unstattable (mock) paths fail open — no cache, runner runs each time', () => {
+  __clearTypecheckMemo()
+  let calls = 0
+  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  const files = ['src/does-not-exist-xyz.ts']
+  runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
+  runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
+  assert.equal(calls, 2)
+})

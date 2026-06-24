@@ -4,6 +4,10 @@ import { parseDiagnosticOutput, formatDiagnostics, type Diagnostic } from './dia
 export interface LspCheckResult {
   diagnostics: Diagnostic[]
   formatted: string
+  /** Whether tsc actually completed. false when killed by signal / timed out /
+   *  failed to spawn — in that case `diagnostics` is partial and untrustworthy,
+   *  so callers should treat the run as inconclusive (fail-open). */
+  ranOk: boolean
 }
 
 export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
@@ -13,16 +17,20 @@ export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
     timeout: 30_000,
     stdio: ['pipe', 'pipe', 'pipe'],
   })
+  // status === null means the process was killed by a signal (e.g. SIGTERM on
+  // 30s timeout); result.error is set when spawn itself failed (npx missing,
+  // ENOENT…). Either way the typecheck did not run to completion.
+  const ranOk = result.error == null && result.status !== null && result.signal == null
   const output = (result.stdout || '') + (result.stderr || '')
 
   if (result.status === 0 && !output.trim()) {
-    return { diagnostics: [], formatted: '' }
+    return { diagnostics: [], formatted: '', ranOk }
   }
 
   const diagnostics = parseDiagnosticOutput(output, 'typescript').filter(
     d => d.file.includes(filePath) || filePath === '*',
   )
-  return { diagnostics, formatted: formatDiagnostics(diagnostics) }
+  return { diagnostics, formatted: formatDiagnostics(diagnostics), ranOk }
 }
 
 export function shouldRunDiagnostics(toolName: string, filePath?: string): boolean {

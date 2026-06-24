@@ -26,6 +26,7 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 // graph store) for advisory blast-radius hints. Same direction as
 // createRepoGraphTool(() => refs.meridianIndexer) in bootstrap.
 import type { ImpactResult } from '../repo/meridian-impact.js'
+import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from '../agent/typecheck-gate.js'
 
 /** Narrow surface for meridian structural impact analysis, so tests can mock it
  *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
@@ -56,6 +57,9 @@ export interface TeamOrchestrateCoordinator {
   getSessionId?: () => string | undefined
   /** Optional meridian indexer for advisory blast-radius hints in the review gate. */
   getMeridianIndexer?: () => TeamImpactAnalyzer | null | undefined
+  /** Optional injectable typecheck runner for the review-gate backstop.
+   *  Absent → the real `tsc --noEmit` is used. Tests pass a mock. */
+  getTypecheckRunner?: () => import('../agent/typecheck-gate.js').TypecheckRunner | undefined
 }
 
 /** Join a list, truncating to `n` entries with a trailing elision count so a
@@ -418,7 +422,31 @@ export function createTeamOrchestrateTool(
           } catch {
             // Impact hints are advisory; never affect dispatch or review.
           }
+          // Typecheck backstop (Component B) — scoped tsc on the diff-derived
+          // changed files; a real type error that tests/esbuild missed escalates
+          // the review to L3 and is surfaced FIRST (more urgent than blast
+          // radius). Advisory: any failure is swallowed; never blocks dispatch.
+          let typecheckFocus: string | undefined
+          const typecheckRunner = coordinator.getTypecheckRunner?.()
+          // Require an explicitly-wired runner here (bootstrap injects the real
+          // tsc). Unlike deliver-task, the team gate runs in the coordinator
+          // session at process.cwd(), so we never fall back to a default that
+          // would spawn an unscoped tsc in tests / unwired contexts.
+          if (typecheckGateEnabled() && typecheckRunner) {
+            try {
+              const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
+              const tc = runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
+              if (tc) {
+                change.forceLevel = 'L3'
+                typecheckFocus = `Typecheck — ${tc.summary}`
+                impactNote = `\n\nTypecheck broken [tsc]: ${tc.summary}` + impactNote
+              }
+            } catch {
+              // Typecheck gate is advisory; never affect dispatch or review.
+            }
+          }
           const focusParts = [
+            typecheckFocus,
             baseFocus,
             scopeLeakedFiles.length > 0
               ? `Scope leak — files changed outside the plan, scrutinize these: ${scopeLeakedFiles.join(', ')}`

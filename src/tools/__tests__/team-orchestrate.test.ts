@@ -502,6 +502,7 @@ const NON_EMPTY_IMPACT = {
 function impactTool(over: {
   impact?: () => typeof NON_EMPTY_IMPACT
   getMeridianIndexer?: () => { impact: () => typeof NON_EMPTY_IMPACT } | null
+  getTypecheckRunner?: () => import('../../agent/typecheck-gate.js').TypecheckRunner | undefined
   capture?: (objective: string) => void
 } = {}) {
   return createTeamOrchestrateTool({
@@ -526,6 +527,7 @@ function impactTool(over: {
     ...(over.getMeridianIndexer !== undefined
       ? { getMeridianIndexer: over.getMeridianIndexer }
       : { getMeridianIndexer: () => ({ impact: over.impact ?? (() => NON_EMPTY_IMPACT) }) }),
+    ...(over.getTypecheckRunner ? { getTypecheckRunner: over.getTypecheckRunner } : {}),
   })
 }
 
@@ -577,6 +579,53 @@ test('team_orchestrate review survives a null/missing meridian indexer', async (
   assert.equal(result.isError, false)
   assert.match(result.content, /Review gate \[L2\]/)
   assert.doesNotMatch(result.content, /Blast radius/)
+})
+
+test('team_orchestrate injects typecheck breakage into review content, ahead of blast radius', async () => {
+  const brokenRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => ({
+    diagnostics: [{ file: 'src/agent/x.ts', line: 7, col: 1, severity: 'error', message: 'TS2300: duplicate identifier' }],
+    formatted: '',
+    ranOk: true,
+  })
+  const tool = impactTool({ getTypecheckRunner: () => brokenRunner })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-tc-broken',
+  })
+
+  assert.equal(result.isError, false)
+  assert.match(result.content, /Typecheck broken \[tsc\]/)
+  assert.match(result.content, /src\/agent\/x\.ts/)
+  // Typecheck note precedes the meridian blast-radius note in the content.
+  assert.ok(
+    result.content.indexOf('Typecheck broken [tsc]') < result.content.indexOf('Blast radius [meridian]'),
+    result.content,
+  )
+})
+
+test('team_orchestrate emits no typecheck noise when the runner is clean', async () => {
+  const cleanRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => ({ diagnostics: [], formatted: '', ranOk: true })
+  const tool = impactTool({ getTypecheckRunner: () => cleanRunner })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-tc-clean',
+  })
+  assert.equal(result.isError, false)
+  assert.doesNotMatch(result.content, /Typecheck broken/)
+})
+
+test('team_orchestrate review survives a throwing typecheck runner', async () => {
+  const throwingRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => { throw new Error('tsc boom') }
+  const tool = impactTool({ getTypecheckRunner: () => throwingRunner })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-tc-throw',
+  })
+  assert.equal(result.isError, false)
+  assert.doesNotMatch(result.content, /Typecheck broken/)
 })
 
 test('team_orchestrate review survives a throwing impact analyzer', async () => {

@@ -237,6 +237,8 @@ return {
         lastTimedOut: self.thetaTelemetry.lastTimedOut,
         consecutiveTimeouts: self.thetaTelemetry.consecutiveTimeouts,
       },
+      touchedTsFiles: self.touchedTsFiles,
+      sawTypecheckThisTask: self.sawTypecheckThisTask,
       ...extra,
     }
 }

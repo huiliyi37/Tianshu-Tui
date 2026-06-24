@@ -36,6 +36,12 @@ export interface RuntimeHookSnapshot {
     lastTimedOut: boolean
     consecutiveTimeouts: number
   }
+  /** Component C (typecheck-reminder): a .ts/.tsx file was written this session.
+   *  Task-level, not windowed — survives a long turn where the edit scrolled out
+   *  of recentToolHistory. */
+  touchedTsFiles?: boolean
+  /** Component C: a real typecheck has run since the last TS edit. */
+  sawTypecheckThisTask?: boolean
 }
 
 export interface RuntimePhaseChangeDetail {

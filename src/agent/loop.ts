@@ -130,6 +130,11 @@ export class AgentLoop {
   evidence: EvidenceTracker
   compactFailures: CompactCircuitBreakerState = { consecutiveFailures: 0 }
   recentToolHistory: ToolHistoryEntry[] = []
+  /** Component C (typecheck-reminder): a .ts/.tsx file was written this session. */
+  touchedTsFiles = false
+  /** Component C: a real typecheck (tsc/typecheck) has run since the last TS edit.
+   *  A new TS edit resets this to false so the reminder re-arms. */
+  sawTypecheckThisTask = false
   prewarm = new PrewarmCache(60_000, 50)
   private _running = false
   private physarumForWarmup?: PhysarumEngine

@@ -40,6 +40,7 @@ import { recordAutoReviewRun } from './review-health.js'
 import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverProduced, formatReadButNeverProduced } from './wiring-nudge.js'
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
+import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -90,6 +91,9 @@ export interface B1Context {
   /** Meridian indexer — when available, blast radius is injected into review
    *  focusHint so verifier/inspector know which downstream consumers to check. */
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
+  /** Injectable typecheck runner for the review-gate backstop. Absent → the
+   *  real `tsc --noEmit` is used (covers worker/headless). Tests pass a mock. */
+  typecheckRunner?: import('./typecheck-gate.js').TypecheckRunner
 }
 
 // ── Post-commit review batching ──
@@ -660,6 +664,22 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           goalActive: ctx.isGoalActive?.() === true,
           ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
           ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
+        }
+
+        // Typecheck backstop (Component B) — run a scoped tsc on the changed
+        // files; a real type error that tests/esbuild missed escalates review to
+        // L3 and is surfaced FIRST in focusHint (more urgent than blast radius).
+        // Advisory: wrapped so it never blocks the commit (already landed) or
+        // deliver_task. ctx.typecheckRunner is undefined in prod → real tsc.
+        if (typecheckGateEnabled()) {
+          try {
+            const tc = runChangedFilesTypecheckMemo(params.cwd, change.files, ctx.typecheckRunner)
+            if (tc) {
+              change.forceLevel = 'L3'
+              const note = `Typecheck — ${tc.summary}`
+              change.focusHint = change.focusHint ? `${note} | ${change.focusHint}` : note
+            }
+          } catch { /* advisory: typecheck gate must never fail delivery */ }
         }
 
         // Inject meridian blast radius into focusHint so verifier/inspector

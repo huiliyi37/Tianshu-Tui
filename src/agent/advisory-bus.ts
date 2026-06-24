@@ -42,6 +42,7 @@ export type AdvisoryCategory =
   | 'encouragement'
   | 'constitutional'
   | 'delegation'
+  | 'typecheck'
 
 /**
  * 宪法级优先级 — 构成性规则（不可违抗的行为底线）。

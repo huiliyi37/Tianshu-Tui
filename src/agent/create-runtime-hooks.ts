@@ -30,6 +30,7 @@ import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-ho
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
+import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
@@ -387,6 +388,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // without verification" jumps and injects a constitutional advisory.
   if (deps.advisoryBus) {
     hooks.push(createSpecVerifyGateHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Typecheck-Reminder: postTurn hook — fills self-verify's blind spot. tsx
+  // tests pass without type-checking, so "tests green" can hide a broken tsc.
+  // Fires when TS files were edited + tests ran + no typecheck since.
+  if (deps.advisoryBus) {
+    hooks.push(createTypecheckReminderHook({ advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {
