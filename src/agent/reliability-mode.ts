@@ -31,7 +31,10 @@ function decision(
   return { mode, reason, blockedTools, ...(evidence && evidence.length > 0 ? { evidence } : {}) }
 }
 
-export function modeForRecoveryTrigger(trigger: RecoveryTriggerResult | null | undefined): ReliabilityDecision {
+export function modeForRecoveryTrigger(
+  trigger: RecoveryTriggerResult | null | undefined,
+  goalActive?: boolean,
+): ReliabilityDecision {
   if (!trigger) return decision('full', 'no recovery trigger')
 
   if (trigger.trigger === 'resource_pressure') {
@@ -45,6 +48,12 @@ export function modeForRecoveryTrigger(trigger: RecoveryTriggerResult | null | u
   }
 
   if (trigger.trigger === 'doom_loop_blocked') {
+    // Goal mode already relaxes doom-loop thresholds (GOAL_DOOM_THRESHOLDS);
+    // if it still fires, the agent is genuinely stuck — but degrading tool access
+    // in a long autonomous task is more disruptive than a false positive.
+    // Stay full so the agent can self-correct; the relaxed thresholds already
+    // filter out most routine repetition.
+    if (goalActive) return decision('full', trigger.summary)
     return decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
   }
 

@@ -189,7 +189,7 @@ export interface AgentCallbacks {
   onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
   onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
   onError: (error: Error) => void
-  onAbort: () => void
+  onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void

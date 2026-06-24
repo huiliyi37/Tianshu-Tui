@@ -48,6 +48,7 @@ export class TurnHeartbeat {
   private lastActivity = 'starting'
   private firstFired = false
   private stopped = false
+  private paused = false
   private readonly silentMs: number
   private readonly repeatMs: number
   private readonly hardStallMs: number
@@ -66,17 +67,42 @@ export class TurnHeartbeat {
   /** Start watching. Call once per turn. */
   start(): void {
     this.stopped = false
+    this.paused = false
     this.lastTick = Date.now()
     this.firstFired = false
     this.hardStallFired = false
     this.scheduleNext(this.silentMs)
   }
 
-  /** Reset the silence clock. Call on every UI-visible event. */
+  /** Reset the silence clock. Call on every UI-visible event. Exits pause. */
   tick(activity: string): void {
     if (this.stopped) return
+    this.paused = false
     this.lastTick = Date.now()
     this.lastActivity = activity
+    this.firstFired = false
+    this.hardStallFired = false
+    this.scheduleNext(this.silentMs)
+  }
+
+  /**
+   * Suspend the watchdog timer. Use during long boundary operations
+   * (compaction, perception, cold-cache re-encode) that don't emit UI
+   * events but are legitimately busy. Call resume() after.
+   */
+  pause(): void {
+    if (this.stopped || this.paused) return
+    this.paused = true
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+
+  /** Resume the watchdog timer after a pause(). */
+  resume(): void {
+    if (this.stopped || !this.paused) return
+    this.paused = false
     this.firstFired = false
     this.hardStallFired = false
     this.scheduleNext(this.silentMs)
@@ -85,6 +111,7 @@ export class TurnHeartbeat {
   /** Stop firing. Call when the turn ends (success, abort, or error). */
   stop(): void {
     this.stopped = true
+    this.paused = false
     if (this.timer) {
       clearTimeout(this.timer)
       this.timer = null
@@ -97,7 +124,7 @@ export class TurnHeartbeat {
   }
 
   private fire(): void {
-    if (this.stopped) return
+    if (this.stopped || this.paused) return
     const elapsed = Date.now() - this.lastTick
     // Guard: if a tick happened during scheduling drift, skip and reschedule.
     if (elapsed < this.silentMs - 500) {

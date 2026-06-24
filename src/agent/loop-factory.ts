@@ -471,6 +471,15 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === Abort signal ===
     getAbortSignal: () => self.abortController?.signal,
 
+    // === Heartbeat (P7 watchdog) ===
+    getHeartbeat: () => self._turnHeartbeat,
+
+    // === Abort reason (watchdog vs user) ===
+    getAbortReason: () => {
+      if (!self._watchdogAborted) return undefined
+      return self.isGoalActive() ? 'watchdog:goal' : 'watchdog'
+    },
+
     // === Resource sensor ===
     getLatestResourceSnapshot: () => self.latestResourceSnapshot,
 

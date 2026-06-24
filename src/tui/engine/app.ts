@@ -631,7 +631,7 @@ export class TuiApp {
         this.handleToolResult(id, name, result, isError, rawPath, uiContent),
       onTurnComplete: (usage, turnNumber, isFinal) => { void this.handleTurnComplete(usage, turnNumber, isFinal ?? true) },
       onError: (error) => this.handleError(error),
-      onAbort: () => this.handleAbort(),
+      onAbort: (reason) => this.handleAbort(reason),
       onApprovalRequired: async (id, name, input) => this.handleApprovalRequired(id, name, input),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
       onPhaseChange: (phase, _detail) => {
@@ -1767,7 +1767,7 @@ export class TuiApp {
     return this.agentBusy || this.state.isStreaming || this.state.isThinking || this.state.phase !== 'idle'
   }
 
-  private handleAbort(): void {
+  private handleAbort(reason?: string): void {
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
     // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
@@ -1790,14 +1790,23 @@ export class TuiApp {
     this.state.isThinking = false
     this.setPhase('idle')
     this.live.clear()
-    // 可见的中断提示：让用户确知 run 已被中止（而非无声卡死）
+    // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
+    const isWatchdog = reason?.startsWith('watchdog')
+    const isWatchdogGoal = reason === 'watchdog:goal'
     this.commitAbove(() => {
       this.commit.write({
-        text: color('⏹ Interrupted', this.theme.muted),
+        text: isWatchdog
+          ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
+          : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
     })
+    // Watchdog abort in goal mode: auto-resubmit so the agent continues
+    // without waiting for the user to type "continue".
+    if (isWatchdogGoal) {
+      this.onSubmitCallback?.('continue')
+    }
     this.onAbortCallback?.()
   }
 

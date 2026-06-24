@@ -113,6 +113,11 @@ export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
   abortController: AbortController | null = null
+  /** Turn heartbeat watchdog reference (set in initializeRun, cleared on stop). */
+  _turnHeartbeat: import('./turn-heartbeat.js').TurnHeartbeat | null = null
+  /** True when the current abort was triggered by the hard-stall watchdog
+   *  (not user Esc/Ctrl+C). Read by the UI to render a distinct message. */
+  _watchdogAborted = false
   /** Count of user interrupts within the current turn (中#5). */
   _turnInterruptCount = 0
   /**
@@ -638,6 +643,7 @@ export class AgentLoop {
    * with a genuine earlier interrupt in the same run.
    */
   abortStalledTurn(): void {
+    this._watchdogAborted = true
     this.abortController?.abort()
   }
 
@@ -869,7 +875,7 @@ export class AgentLoop {
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
       },
     })
-    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger)
+    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger, this.isGoalActive())
   }
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */
@@ -1097,6 +1103,7 @@ export class AgentLoop {
     // Esc/Ctrl+C during warmupMemories()/intent-routing aborts a live signal
     // instead of a no-op. Pending latch is cleared for this fresh run.
     this._pendingAbort = false
+    this._watchdogAborted = false
     this.abortController = new AbortController()
     try {
       await this._runInner(userInput, callbacks, images)
