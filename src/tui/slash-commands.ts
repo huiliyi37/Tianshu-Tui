@@ -911,22 +911,22 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const nameInfo = branchName ? ` 分支名: ${branchName}` : ''
       pushStatic(createLogEntry({
         type: 'system',
-        content: `🌿 Fork 已创建: ${result.newSessionId.slice(0, 8)}${lineInfo}${nameInfo}\n正在切换到新会话...`,
+        content: `🌿 Fork 已创建\n  新会话 ID: ${result.newSessionId}${lineInfo}${nameInfo}\n  (短码: ${result.newSessionId.slice(0, 8)})\n正在切换到新会话...`,
       }))
 
       // Auto-switch to the new session
       if (ctx.onSessionSwitch) {
         const res = ctx.onSessionSwitch(result.newSessionId)
         if (!res.ok) {
-          pushStatic(createLogEntry({ type: 'system', content: `⚠ Fork 文件已创建但切换失败: ${res.error ?? '未知错误'}\n用 /resume ${result.newSessionId.slice(0, 8)} 手动切换。` }))
+          pushStatic(createLogEntry({ type: 'system', content: `⚠ Fork 文件已创建但切换失败: ${res.error ?? '未知错误'}\n用 /resume ${result.newSessionId.slice(0, 8)} 手动切换。\n完整 ID: ${result.newSessionId}` }))
         } else {
           pushStatic(createLogEntry({
             type: 'system',
-            content: `✅ 已切换到 fork 会话。原会话保持不变。`,
+            content: `✅ 已切换到 fork 会话 (${result.newSessionId.slice(0, 8)})。\n完整 ID: ${result.newSessionId}\n原会话保持不变，用 /branch back 回去。`,
           }))
         }
       } else {
-        pushStatic(createLogEntry({ type: 'system', content: `✅ Fork 已创建。用 /resume ${result.newSessionId.slice(0, 8)} 切换过去。` }))
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Fork 已创建。\n用 /resume ${result.newSessionId.slice(0, 8)} 切换过去。\n完整 ID: ${result.newSessionId}` }))
       }
       setIsStreaming(false)
       return true
@@ -959,10 +959,10 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
             if (!res.ok) {
               pushStatic(createLogEntry({ type: 'system', content: `切换回父会话失败: ${res.error ?? '未知错误'}` }))
             } else {
-              pushStatic(createLogEntry({ type: 'system', content: `↩️ 已切换回父会话 ${meta.parentSessionId.slice(0, 8)}。` }))
+              pushStatic(createLogEntry({ type: 'system', content: `↩️ 已切换回父会话 (${meta.parentSessionId.slice(0, 8)})。\n完整 ID: ${meta.parentSessionId}` }))
             }
           } else {
-            pushStatic(createLogEntry({ type: 'system', content: `父会话: ${meta.parentSessionId.slice(0, 8)}。用 /resume ${String(meta.parentSessionId).slice(0, 8)} 切换。` }))
+            pushStatic(createLogEntry({ type: 'system', content: `父会话: ${meta.parentSessionId}\n用 /resume ${meta.parentSessionId.slice(0, 8)} 切换。` }))
           }
         } catch {
           pushStatic(createLogEntry({ type: 'system', content: '无法读取当前会话的元数据。' }))
@@ -981,13 +981,13 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
           const meta = JSON.parse(readFileSync(currentMetaPath, 'utf-8'))
           if (meta.parentSessionId) {
             const parentMetaPath = join(sessionDir, `${meta.parentSessionId}.meta.json`)
-            let parentTitle = meta.parentSessionId.slice(0, 8)
+            let parentLabel = meta.parentSessionId
             if (existsSync(parentMetaPath)) {
               const parentMeta = JSON.parse(readFileSync(parentMetaPath, 'utf-8'))
-              if (parentMeta.title) parentTitle += ` "${parentMeta.title}"`
-              if (parentMeta.branchName) parentTitle += ` (${parentMeta.branchName})`
+              if (parentMeta.title) parentLabel += ` "${parentMeta.title}"`
+              if (parentMeta.branchName) parentLabel += ` (${parentMeta.branchName})`
             }
-            lines.push(`⬆️ 父会话: ${parentTitle}`)
+            lines.push(`⬆️ 父会话: ${parentLabel}`)
           } else {
             lines.push('⬆️ 父会话: 无 (根会话)')
           }
@@ -1013,7 +1013,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
                 } catch { return '' }
               })()
             : ''
-          lines.push(`  ├️ ${child.sessionId.slice(0, 8)} "${name}" ${time}`)
+          lines.push(`  ├️ ${child.sessionId} "${name}" ${time}`)
         }
       } else {
         lines.push('', '⬇️ 子分支: 无')
@@ -1027,9 +1027,29 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
 
     case '/sessions': {
       const list = SessionPersist.formatSessionList(ctx.agent.cwd, ctx.currentSessionId)
+      // Enhance with fork annotations: mark sessions that have a parentSessionId
+      const sessionDir = getSessionDir(ctx.agent.cwd)
+      const mainSessions = SessionPersist.listMainSessions(ctx.agent.cwd)
+      const forkAnnotations: string[] = []
+      for (const s of mainSessions) {
+        const metaPath = join(sessionDir, `${s.id}.meta.json`)
+        if (!existsSync(metaPath)) continue
+        try {
+          const meta = JSON.parse(readFileSync(metaPath, 'utf-8'))
+          if (meta.parentSessionId) {
+            const shortId = s.id.slice(0, 8)
+            const shortParent = String(meta.parentSessionId).slice(0, 8)
+            const name = meta.branchName ? ` "${meta.branchName}"` : ''
+            forkAnnotations.push(`  ${shortId} ← fork from ${shortParent}${name}`)
+          }
+        } catch { /* skip */ }
+      }
+      const forkSection = forkAnnotations.length > 0
+        ? `\n\n Fork 关系:\n${forkAnnotations.join('\n')}`
+        : ''
       pushStatic(createLogEntry({
         type: 'system',
-        content: `会话列表(按最近更新排序):\n${list}\n\n/resume <id前缀 或 序号> 切换会话`,
+        content: `会话列表(按最近更新排序):\n${list}\n\n/resume <id前缀 或 序号> 切换会话${forkSection}`,
       }))
       setIsStreaming(false)
       return true
