@@ -72,4 +72,18 @@ src/main.tsx`)
 
     assert.equal(resolveAppPromptInput('plain prompt', cwd), 'plain prompt')
   })
+
+  it('blocks /fork from reaching the agent pipeline', () => {
+    const cwd = makeProject()
+    assert.equal(resolveAppPromptInput('/fork', cwd), null)
+    assert.equal(resolveAppPromptInput('/fork experiment-A', cwd), null)
+    assert.equal(resolveAppPromptInput('/fork at 5', cwd), null)
+  })
+
+  it('blocks /branch from reaching the agent pipeline', () => {
+    const cwd = makeProject()
+    assert.equal(resolveAppPromptInput('/branch', cwd), null)
+    assert.equal(resolveAppPromptInput('/branch list', cwd), null)
+    assert.equal(resolveAppPromptInput('/branch back', cwd), null)
+  })
 })
