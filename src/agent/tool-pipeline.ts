@@ -204,8 +204,6 @@ export interface ToolPipelineDeps {
   lastConflictCheckCount: number
   trajectory: { getEntries(): { tool: string; target: string; status: string; errorClass?: string }[] }
   getDoomLoopLevel(): import('./trace-store.js').DoomLoopLevel
-  trajectory: { getEntries(): { tool: string; target: string; status: string; errorClass?: string }[] }
-  getDoomLoopLevel(): import('./trace-store.js').DoomLoopLevel
   /** Whether goal mode is active — relaxes doom-loop thresholds when true. */
   isGoalActive?: boolean
   latestRisk: import('./approval-risk.js').RiskAssessment
@@ -1285,10 +1283,9 @@ export async function executeToolUse(
           const hint = generateImpactHint(importGraph, filePath, deps.cwd)
           if (hint) {
             deps.evidence.trackImpact(hint.impactedFiles, hint.relatedTests)
+          }
+        }
       }
-   } else if (tu.name === 'run_tests' && rawToolResult) {
-       }
-     }
    } else if (tu.name === 'run_tests' && rawToolResult) {
       // Reconnect EvidenceTracker verification pipeline.
       // run_tests returns VerificationMetadata, but this was never fed into

@@ -261,7 +261,6 @@ export class ToolExecutionController {
           importGraph,
           meridianIndexer: this.deps.config.meridianIndexer,
           lastConflictCheckCount,
-          lastConflictCheckCount,
           trajectory: this.deps.trajectory,
           getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
           isGoalActive: this.deps.isGoalActive?.() ?? false,

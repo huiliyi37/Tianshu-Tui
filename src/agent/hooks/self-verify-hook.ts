@@ -44,10 +44,10 @@ const WRITE_TOOLS = new Set([
 ])
 
 /** bash commands that actually establish ground truth (vs. `cat`/`ls` reads). */
-const VERIFY_BASH_RE = /\b(test|tsc|type-?check|lint|eslint|build|vitest|jest|pytest|mocha|cargo\s+(test|check|build)|go\s+test|npm\s+(run\s+)?(test|build|typecheck)|make\s+(test|check))\b/i
+export const VERIFY_BASH_RE = /\b(test|tsc|type-?check|lint|eslint|build|vitest|jest|pytest|mocha|cargo\s+(test|check|build)|go\s+test|npm\s+(run\s+)?(test|build|typecheck)|make\s+(test|check))\b/i
 
 /** A tool call that produced independent ground-truth verification. */
-function isVerifyCall(h: { tool: string; target?: string }): boolean {
+export function isVerifyCall(h: { tool: string; target?: string }): boolean {
   if (h.tool === 'run_tests' || h.tool === 'deliver_task') return true
   if (h.tool === 'bash') return VERIFY_BASH_RE.test(h.target ?? '')
   return false
