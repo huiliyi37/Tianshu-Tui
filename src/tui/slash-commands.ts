@@ -524,7 +524,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       })
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
-      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /cancel-goal to abort.\nUse /goal-resume to resume a paused/blocked goal.` }))
       // Side-path: extract concrete success criteria the completion judge will
       // verify against. Async (never blocks goal start); criteria default to a
       // generic template on failure, and the judge does wide judgment if empty.
@@ -566,8 +566,36 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     case '/cancel-goal': {
       ctx.agent.setGoalTracker(null)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = null
+      // Clean up persisted goal state if session info is available
+      if (ctx.currentSessionId) {
+        try {
+          const { deleteGoalState } = await import('../agent/goal-persist.js')
+          const { getSessionDir } = await import('../agent/session-persist.js')
+          deleteGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId)
+        } catch { /* best-effort */ }
+      }
       pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
       setIsStreaming(false)
+      return true
+    }
+
+    case '/goal-resume': {
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No paused or blocked goal to resume. Use /goal <task> to start one.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const status = tracker.getStatus()
+      if (status !== 'paused' && status !== 'blocked') {
+        pushStatic(createLogEntry({ type: 'system', content: `Goal is ${status}, cannot resume.` }))
+        setIsStreaming(false)
+        return true
+      }
+      tracker.resume('user')
+      const wallElapsed = Math.round(tracker.getWallClockElapsedMs() / 1000)
+      pushStatic(createLogEntry({ type: 'system', content: `▶️ Goal resumed: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | ⏱ ${wallElapsed}s elapsed.` }))
+      ctx.submitToAgent?.(`[GOAL RESUME] 继续执行目标: ${tracker.getGoal()}`)
       return true
     }
 
