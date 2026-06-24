@@ -262,6 +262,8 @@ export interface ToolExecResult {
   lastConflictCheckCount: number
   checkpointCreated: boolean
   latestRisk: import('./approval-risk.js').RiskAssessment
+  /** True when the tool returned endTurn: true (e.g. ask_user_question). */
+  endTurn?: boolean
 }
 
 function truncateSuccessfulToolResult(content: string, config: AgentConfig): string {
@@ -1317,7 +1319,7 @@ export async function executeToolUse(
      }
    }
 
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined }
  } catch (err) {
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.

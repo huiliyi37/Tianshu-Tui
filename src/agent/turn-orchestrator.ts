@@ -74,6 +74,9 @@ export interface ExecuteBatchResult {
   latestRisk: RiskAssessment
   artifactIdsEvicted: string[]
   artifactIdsAccessed: string[]
+  /** True when any tool in the batch returned endTurn: true (e.g. ask_user_question).
+   *  The orchestrator uses this to end the turn as final. */
+  endTurn?: boolean
 }
 
 export interface CompleteTurnParams {
@@ -817,6 +820,19 @@ export class TurnOrchestrator {
             })
           }
           this.deps.flushMeridianTurn()
+
+          // endTurn signal: a tool (e.g. ask_user_question) requested turn termination.
+          // Complete as final and break instead of continuing the tool loop.
+          if (r.endTurn) {
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              signal!,
+              'post-turn-endTurn',
+            )
+            finalTurnCompleted = true
+            break
+          }
+
           await rejectOnAbort(
             this.deps.completeTurn({ turn, isFinal: false, callbacks }),
             signal!,

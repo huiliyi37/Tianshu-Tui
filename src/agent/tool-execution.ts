@@ -126,6 +126,8 @@ export interface ToolExecBatchResult {
   artifactIdsEvicted: string[]
   /** Artifact IDs accessed (read_section) this batch — for GhostRegistry */
   artifactIdsAccessed: string[]
+  /** True when any tool returned endTurn: true (e.g. ask_user_question). */
+  endTurn?: boolean
 }
 
 export class ToolExecutionController {
@@ -161,6 +163,7 @@ export class ToolExecutionController {
     let checkpointCreatedThisTurn = input.checkpointCreatedThisTurn
     let traceStore = input.traceStore
     let importGraph = input.importGraph
+    let endTurn = false
     let lastConflictCheckCount = input.lastConflictCheckCount
     let latestRisk = input.latestRisk
     const artifactIdsEvicted: string[] = []
@@ -242,6 +245,7 @@ export class ToolExecutionController {
           lastConflictCheckCount = result.lastConflictCheckCount
           latestRisk = result.latestRisk
           if (result.checkpointCreated) checkpointCreatedThisTurn = true
+          if (result.endTurn) endTurn = true
           toolResults.push(result.toolResult)
        }
      } else {
@@ -305,6 +309,7 @@ export class ToolExecutionController {
         lastConflictCheckCount = result.lastConflictCheckCount
         latestRisk = result.latestRisk
         if (result.checkpointCreated) checkpointCreatedThisTurn = true
+        if (result.endTurn) endTurn = true
         toolResults.push(result.toolResult)
      }
    }
@@ -558,6 +563,6 @@ export class ToolExecutionController {
       this.deps.setClientReasoningEffort(newEffort)
    }
 
-    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed }
+    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined }
  }
 }
