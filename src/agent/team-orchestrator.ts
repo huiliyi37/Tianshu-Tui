@@ -52,6 +52,9 @@ export interface TeamRunInput {
    *  and overlay running state from live worker activity. The summary carries
    *  waves+tasks but no `run`. */
   onPlanReady?: (summary: TeamRunSummary, fromWave: number) => void
+  /** Results from the immediately prior wave. Used by dispatchWaveAt to
+   *  block tasks whose dependencies failed. Undefined for wave 0. */
+  priorResults?: import('../agent/coordinator.js').WorkerResult[]
 }
 
 export interface TeamRunSummary {
@@ -281,6 +284,39 @@ async function dispatchWaveAt(
     ...scheduled.blocked,
     ...waves.slice(fromWave + 1).map(w => `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`),
   ]
+
+  // ── Cross-wave failure propagation ──────────────────────────────
+  // Block tasks whose dependencies failed in a prior wave.
+  const priorResults = input.priorResults
+  const crossWaveBlocked: string[] = []
+  if (priorResults && priorResults.length > 0) {
+    const failedIds = new Set(
+      priorResults
+        .filter(r => r.status !== 'passed')
+        .map(r => {
+          // workOrderId format: "team:T1" → extract task id "T1"
+          const woId = r.workOrderId
+          return woId.includes(':') ? woId.slice(woId.lastIndexOf(':') + 1) : woId
+        })
+    )
+    if (failedIds.size > 0) {
+      const filteredTaskIds: string[] = []
+      for (const taskId of dispatchWave.taskIds) {
+        const task = taskMap.get(taskId)
+        if (!task) { filteredTaskIds.push(taskId); continue }
+        // Check if any dependency matches a failed prior task
+        const failedDeps = (task.dependsOn ?? []).filter(depId => failedIds.has(depId))
+        if (failedDeps.length > 0) {
+          crossWaveBlocked.push(`${taskId}: blocked by prior wave failure (${failedDeps.join(', ')})`)
+        } else {
+          filteredTaskIds.push(taskId)
+        }
+      }
+      // Rewrite dispatchWave with only non-blocked tasks
+      dispatchWave.taskIds = filteredTaskIds
+    }
+  }
+
   const requests = waveToRequests(dispatchWave, taskMap, input.parentTurnId ?? 'team')
   if (input.onActivity) for (const r of requests) r.onActivity = input.onActivity
   if (requests.length === 0) {
@@ -290,7 +326,7 @@ async function dispatchWaveAt(
       tasks,
       waves,
       dispatched: 0,
-      blocked: remainingBlocked,
+      blocked: [...remainingBlocked, ...crossWaveBlocked],
       packet: `team: wave ${targetWave.id} produced no dispatchable requests.`,
     }
   }
@@ -332,7 +368,7 @@ async function dispatchWaveAt(
     tasks,
     waves,
     dispatched: requests.length,
-    blocked: remainingBlocked,
+    blocked: [...remainingBlocked, ...crossWaveBlocked],
     packet: `[wave ${fromWave + 1}/${waves.length}] ${run.packet}`,
     run,
   }
