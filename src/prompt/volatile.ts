@@ -292,8 +292,11 @@ function escapeXml(text: string): string {
 export function buildStableVolatileBlock(ctx: VolatileContext): string {
   return buildVolatileBlockInternal({
     ...ctx,
+    // activeDomain is a SESSION CONSTANT (bound once via bindSessionDomain),
+    // so it is KEPT in FROZEN — folded into the stable prefix below. Mid-session
+    // switches (rare: /domain, model switch) go through rebuildFrozenBase +
+    // deferred volatileBlock swap at the next user boundary (engine.ts).
     // Per-turn dynamic fields — strip from FROZEN
-    activeDomain: undefined,
     contextLedger: undefined,
     activeClaims: undefined,
     playbookLessons: undefined,
@@ -359,9 +362,10 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Sections that rarely change go first so their bytes stay in cache;
   // sections that change every turn go last so only the tail is new.
 
-  // star-domain: NOT rendered here. As a session constant it is promoted into
-  // the <consolidated> block via habituation (engine.ts immediatePromote on
-  // DeepSeek), so emitting it in the per-turn appendix would duplicate the motto.
+  // star-domain: NOT rendered in the appendix. As a session constant it is
+  // folded into the frozen prefix (buildVolatileBlockInternal, after <locus>) —
+  // provider-agnostic, in the exact-prefix cache from turn 1. Emitting it here
+  // would duplicate the motto and break prefix stability.
 
   // Historical lessons: rarely change after first few turns
   if (ctx.playbookLessons && ctx.playbookLessons.length > 0) {
@@ -632,6 +636,10 @@ function renderProgressBlock(ctx: VolatileContext, hasProjection?: boolean): str
 }
 
 export function assignSalience(blockContent: string): number {
+  // Dead path: star-domain is now folded into the frozen prefix, never the
+  // appendix, so this case is not exercised by buildDynamicAppendixParts.
+  // Kept for the assignSalience test contract and any future appendix-level
+  // domain rendering — identity-critical, highest salience.
   if (blockContent.startsWith('<star-domain')) return 1.0
   // Plan-mode block governs the entire planning turn — never drop under budget.
   if (blockContent.startsWith('<plan-mode>')) return 0.95
@@ -727,6 +735,15 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push('<locus relation="world">你在一个外部项目中工作。遵循项目自身的约定（AGENTS.md + .rivet.md）。验证深度匹配任务复杂度：简单修改跑 related tests，跨模块改动跑 full suite。</locus>')
   }
 
+  // star-domain: session-constant identity, folded into the frozen prefix (next
+  // to sober/locus) so it enters the exact-prefix cache from turn 1 — provider-
+  // agnostic, no habituation warm-up. name/motto are registry constants (not user
+  // input), rendered unescaped to match the established <star-domain name="..."> shape.
+  if (ctx.activeDomain) {
+    const d = ctx.activeDomain
+    parts.push(`<star-domain name="${d.name}" motto="${d.motto}">${d.volatileBlock}</star-domain>`)
+  }
+
   const md = ctx.rivetMd ?? readRivetMd(ctx.cwd)
   if (md) {
     // When codebase-index is present it already contains the module directory table
@@ -766,14 +783,15 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
     parts.push(`<session-memory>\n${escapeXml(ctx.sessionMemoryBlock)}\n</session-memory>`)
   }
 
-  // NOTE: per-turn dynamic fields (activeDomain, gitStatus, toolHistory,
-  // taskProgress, decisions, playbookLessons, planModeState, worktreeReality,
-  // …) are NOT rendered here. buildStableVolatileBlock — the sole caller — forces
-  // them undefined to keep the FROZEN prefix byte-stable; they are rendered in
-  // buildDynamicAppendixParts (appendix) and, for habituated session-constants
-  // like activeDomain, in the <consolidated> block (see engine.ts habituation).
-  // The single source of truth for what stays frozen vs. dynamic is the strip
-  // list in buildStableVolatileBlock.
+  // NOTE: activeDomain IS rendered here (above, after <locus>) — it is a session
+  // constant KEPT in FROZEN. The remaining per-turn dynamic fields (gitStatus,
+  // toolHistory, taskProgress, decisions, playbookLessons, planModeState,
+  // worktreeReality, …) are NOT rendered here. buildStableVolatileBlock — the
+  // sole caller — forces them undefined to keep the FROZEN prefix byte-stable;
+  // they are rendered in buildDynamicAppendixParts (appendix) and, for habituated
+  // session-constants like playbookLessons, in the <consolidated> block (see
+  // engine.ts habituation). The single source of truth for what stays frozen vs.
+  // dynamic is the strip list in buildStableVolatileBlock.
 
   return parts.length > 0 ? `<context>\n${parts.join('\n\n')}\n</context>` : ''
 }

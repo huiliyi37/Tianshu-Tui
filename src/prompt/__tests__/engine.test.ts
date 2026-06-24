@@ -250,15 +250,19 @@ describe('PromptEngine active claims projection', () => {
     )
 
     assert.equal(contextMessages.length, 2)
+    // star-domain is folded into the frozen prefix, swapped in at the user-message
+    // boundary. In this single multi-message call the boundary swap runs while
+    // processing lastUserIdx, AFTER firstUserIdx is emitted via the pre-swap
+    // fallback — so the historical message carries no domain, only the latest does.
     assert.doesNotMatch(contextMessages[0]!.content as string, /star-domain/)
-    // P1: active domain is in standalone appendix, not in user messages
+    assert.match(contextMessages[1]!.content as string, /<star-domain name="破军"/)
     const appendix = request.messages[request.messages.length - 1]!
     assert.match(typeof appendix.content === 'string' ? appendix.content : '', /<star-domain name="破军"/)
     assert.equal(engine.checkDrift(), null)
   })
 
-  // P1.1: consolidatedBlock must NOT mutate volatileBlock
-  it('P1.1a: volatileBlock unchanged after habituation promotion', () => {
+  // P1.1: folding the domain into frozenBase keeps volatileBlock in sync at boundaries
+  it('P1.1a: volatileBlock stays in sync with frozenBase after domain fold', () => {
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 8000,
@@ -267,23 +271,26 @@ describe('PromptEngine active claims projection', () => {
       habituationThreshold: 1, // tracker enabled
     })
 
-    const frozenBase = (engine as any).frozenBase as string
-    assert.equal((engine as any).volatileBlock, frozenBase, 'volatileBlock should equal frozenBase at startup')
+    const frozenBaseStart = (engine as any).frozenBase as string
+    assert.equal((engine as any).volatileBlock, frozenBaseStart, 'volatileBlock should equal frozenBase at startup')
+    assert.ok(!frozenBaseStart.includes('<star-domain'), 'no domain before setActiveDomain')
 
-    // Set execute phase (alpha=0.35, fastest habituation) and feed same domain
-    // 5 times. At turn 4+: confidence exceeds 0.8 → promotion fires.
+    // Feed the same domain 5 times. setActiveDomain folds it into frozenBase;
+    // the boundary swap brings volatileBlock in sync and it stays byte-stable
+    // across same-domain turns (no per-turn mutation).
     engine.setPhaseHint('execute')
     for (let i = 0; i < 5; i++) {
       engine.setActiveDomain({ name: 'test', volatileBlock: 'block', motto: 'motto' })
       engine.buildOaiRequest([{ role: 'user', content: `turn${i}` }])
     }
 
-    // volatileBlock MUST NOT change after habituation promotion
-    assert.equal((engine as any).volatileBlock, frozenBase,
-      'volatileBlock should remain at frozenBase after habituation promotion')
+    const frozenBaseEnd = (engine as any).frozenBase as string
+    assert.ok(frozenBaseEnd.includes('<star-domain name="test"'), 'frozenBase now contains the folded domain')
+    assert.equal((engine as any).volatileBlock, frozenBaseEnd,
+      'volatileBlock stays in sync with frozenBase after fold + boundary swap')
   })
 
-  it('P1.1b: consolidatedBlock injected into dynamic appendix, not frozen prefix', () => {
+  it('P1.1b: folded star-domain lives in frozen prefix and merged user message', () => {
     const engine = new PromptEngine({
       model: 'test',
       maxTokens: 8000,
@@ -294,30 +301,26 @@ describe('PromptEngine active claims projection', () => {
 
     engine.setPhaseHint('execute')
 
-    // Feed same star-domain across 5 turns (each calls buildOaiRequest so
-    // tracker records the turn). Execute phase alpha=0.35 → 4 turns to
-    // exceed 0.8 confidence → habituation fires on turn 5.
+    // Domain is a session constant — folded into the frozen prefix from the
+    // first turn, no habituation warm-up.
     for (let i = 1; i <= 5; i++) {
       engine.setActiveDomain({ name: 'orion', volatileBlock: 'star-data', motto: 'guide' })
       engine.buildOaiRequest([{ role: 'user', content: `turn${i}` }])
     }
 
-    // Build request for turn 6 — consolidatedBlock (with habituated domain)
-    // should be in the LAST injected user message (cachedFreshBlock), which is
-    // the second-to-last user message (original msg is appended after it)
     const req = engine.buildOaiRequest([{ role: 'user', content: 'final' }])
 
     const allUsers = req.messages.filter(m => m.role === 'user')
-    // Trailer mode: cachedFreshBlock is merged into the LAST user message
+    // Trailer mode: frozen volatileBlock (with domain) is merged into the LAST user message
     const injectedBlock = (allUsers[allUsers.length - 1]?.content as string) ?? ''
 
-    // consolidatedBlock with habituated domain should appear in merged message
     assert.ok(injectedBlock.includes('star-data'),
-      'Habituated domain content should appear in last user message (trailer mode)')
+      'folded domain content should appear in the merged user message (trailer mode)')
 
-    // frozenBase should NOT contain the habituated domain
-    assert.ok(!(engine as any).frozenBase.includes('star-data'),
-      'Frozen base should NOT contain habituated content')
+    // domain is now IN the frozen prefix (session constant), unlike the old
+    // habituation→consolidated path which kept it out of frozenBase.
+    assert.ok((engine as any).frozenBase.includes('star-data'),
+      'frozenBase should contain the folded domain')
   })
 
   it('getPhaseHint round-trips with setPhaseHint (wiring for TDD RED exemption)', () => {

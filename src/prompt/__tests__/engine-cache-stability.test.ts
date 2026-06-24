@@ -4,6 +4,24 @@ import { buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicApp
 import { PromptEngine } from '../engine.js'
 import { latestUserTrailer, userMessages, type LatestUserTrailer } from './helpers/message-selectors.js'
 import type { OaiMessage } from '../../api/oai-types.js'
+import type { PlaybookBullet } from '../../agent/playbook.js'
+
+/** Minimal habituation-tracked field for consolidation-machinery tests. Since
+ *  star-domain was folded into the frozen prefix (no longer habituation-tracked),
+ *  playbookLessons is the remaining field that promotes into <consolidated>. The
+ *  lesson text doubles as the identity marker the assertions grep for. */
+function mkLessons(text: string): PlaybookBullet[] {
+  return [{
+    id: text,
+    createdAt: 0,
+    keywords: [text],
+    lesson: text,
+    context: 'root-cause',
+    useCount: 1,
+    lastUsedAt: null,
+    importance: 1,
+  }]
+}
 
 function historicalUserContent(messages: readonly OaiMessage[], userContent: string): string {
   const msg = userMessages(messages)
@@ -226,22 +244,22 @@ describe('habituation: three-zone consolidation', () => {
     engine.setPhaseHint('explore')
 
     for (let t = 0; t < 3; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     const req = engine.buildOaiRequest([{ role: 'user', content: 'check' }])
     const vol = (req.messages[1] as { content: string }).content
     assert.ok(!vol.includes('<consolidated>'), 'No consolidated block before threshold')
   })
 
-  it('consolidated block appears after threshold turns with stable domain', () => {
+  it('consolidated block appears after threshold turns with stable lessons', () => {
     const engine = createEngineH(3)
     engine.setPhaseHint('execute')
 
     for (let t = 0; t < 5; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       const messages: OaiMessage[] = []
       for (let m = 0; m <= t; m++) {
         messages.push({ role: 'user', content: `msg ${m}` })
@@ -259,7 +277,7 @@ describe('habituation: three-zone consolidation', () => {
     )
     assert.ok(
       typeof trailer.content === 'string' && trailer.content.includes('tianshu'),
-      'Consolidated should contain domain name',
+      'Consolidated should contain the habituated lesson',
     )
   })
 
@@ -268,11 +286,11 @@ describe('habituation: three-zone consolidation', () => {
     engine.setPhaseHint('execute')
 
     for (let t = 0; t < 5; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     const req = engine.buildOaiRequest([
       { role: 'user', content: 'msg 0' },
       { role: 'assistant', content: 'resp 0' },
@@ -301,7 +319,7 @@ describe('habituation: three-zone consolidation', () => {
     engine.setPhaseHint('execute')
 
     for (let t = 0; t < 5; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
@@ -312,7 +330,7 @@ describe('habituation: three-zone consolidation', () => {
       typeof trailer.content === 'string' && trailer.content.includes('<consolidated>'),
     )
 
-    engine.setActiveDomain({ name: 'tianji', volatileBlock: 'other', motto: 'other-motto' })
+    engine.updatePlaybookLessons(mkLessons('tianji'))
     req = engine.buildOaiRequest([{ role: 'user', content: 'after change' }])
     trailer = req.messages[req.messages.length - 1]!
     // After domain change, consolidated may still be present; check it changed
@@ -327,11 +345,11 @@ describe('habituation: three-zone consolidation', () => {
     engine.setPhaseHint('execute')
 
     for (let t = 0; t < 5; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     const req = engine.buildOaiRequest([
       { role: 'user', content: 'hello' },
       { role: 'assistant', content: 'hi' },
@@ -361,17 +379,17 @@ describe('habituation: three-zone consolidation', () => {
 
     // Warm up: promote tracker until consolidatedBlock is non-empty.
     for (let t = 0; t < 5; t++) {
-      engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+      engine.updatePlaybookLessons(mkLessons('tianshu'))
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
 
     // Turn N: extract the prefix (volatileBlock + consolidatedBlock, before \n---\n).
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     const req1 = engine.buildOaiRequest([{ role: 'user', content: 'turn-n' }])
     const { fresh: prefix1 } = latestUserTrailer(req1.messages)
 
-    // Turn N+1: same domain, new user message — prefix must be byte-identical.
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    // Turn N+1: same lessons, new user message — prefix must be byte-identical.
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     const req2 = engine.buildOaiRequest([{ role: 'user', content: 'turn-n1' }])
     const { fresh: prefix2 } = latestUserTrailer(req2.messages)
 
@@ -389,7 +407,7 @@ describe('habituation: three-zone consolidation', () => {
       habituationThreshold: 0,
     })
 
-    engine.setActiveDomain({ name: 'tianshu', volatileBlock: 'block', motto: 'motto' })
+    engine.updatePlaybookLessons(mkLessons('tianshu'))
     for (let t = 0; t < 10; t++) {
       engine.buildOaiRequest([{ role: 'user', content: `msg ${t}` }])
     }
@@ -400,8 +418,8 @@ describe('habituation: three-zone consolidation', () => {
   })
 })
 
-describe('deepseek-native fast promotion: star-domain enters consolidated on turn 1', () => {
-  it('star-domain promoted to consolidated on first user message', () => {
+describe('star-domain folded into frozen prefix on turn 1 (provider-agnostic)', () => {
+  it('star-domain in frozen prefix on first user message (deepseek-native)', () => {
     const engine = new PromptEngine({
       model: 'deepseek-v4-pro',
       maxTokens: 4096,
@@ -414,11 +432,11 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     const trailer = req.messages[req.messages.length - 1]!
     const content = typeof trailer.content === 'string' ? trailer.content : ''
     const beforeSep = content.split('\n---\n')[0]!
-    assert.ok(beforeSep.includes('<consolidated>'), 'consolidated block must exist on turn 1')
-    assert.ok(beforeSep.includes('tianshu'), 'consolidated block must contain star-domain')
+    assert.ok(beforeSep.includes('<star-domain'), 'frozen prefix must contain star-domain on turn 1')
+    assert.ok(beforeSep.includes('tianshu'), 'frozen prefix must contain domain name')
   })
 
-  it('no-cache model does NOT fast-promote on turn 1', () => {
+  it('no-cache model ALSO gets star-domain in frozen prefix on turn 1 (no warm-up)', () => {
     const engine = new PromptEngine({
       model: 'minimax-m3',
       maxTokens: 4096,
@@ -431,10 +449,11 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     const trailer = req.messages[req.messages.length - 1]!
     const content = typeof trailer.content === 'string' ? trailer.content : ''
     const beforeSep = content.split('\n---\n')[0]!
-    assert.ok(!beforeSep.includes('<consolidated>'), 'no consolidated on turn 1 for no-cache provider')
+    assert.ok(beforeSep.includes('<star-domain'), 'folded domain is provider-agnostic — present even with prefixCache:none')
+    assert.ok(beforeSep.includes('tianshu'), 'frozen prefix must contain domain name')
   })
 
-  it('GLM (deepseek-native) fast-promotes star-domain on turn 1', () => {
+  it('GLM (deepseek-native) has star-domain in frozen prefix on turn 1', () => {
     const engine = new PromptEngine({
       model: 'glm-5.2',
       maxTokens: 4096,
@@ -447,11 +466,11 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     const trailer = req.messages[req.messages.length - 1]!
     const content = typeof trailer.content === 'string' ? trailer.content : ''
     const beforeSep = content.split('\n---\n')[0]!
-    assert.ok(beforeSep.includes('<consolidated>'), 'GLM implicit cache must fast-promote on turn 1')
-    assert.ok(beforeSep.includes('tianshu'), 'consolidated block must contain star-domain')
+    assert.ok(beforeSep.includes('<star-domain'), 'frozen prefix must contain star-domain on turn 1')
+    assert.ok(beforeSep.includes('tianshu'), 'frozen prefix must contain domain name')
   })
 
-  it('star-domain removed from appendix after fast promotion', () => {
+  it('star-domain not duplicated into the appendix', () => {
     const engine = new PromptEngine({
       model: 'deepseek-v4-pro',
       maxTokens: 4096,
@@ -465,7 +484,7 @@ describe('deepseek-native fast promotion: star-domain enters consolidated on tur
     const content = typeof trailer.content === 'string' ? trailer.content : ''
     const afterSep = content.split('\n---\n').slice(1).join('\n---\n')
     const domainInAppendix = afterSep.includes('<star-domain')
-    assert.ok(!domainInAppendix, 'star-domain must NOT appear in appendix (after ---) when fast-promoted')
+    assert.ok(!domainInAppendix, 'star-domain must NOT appear in appendix (after ---) — it lives in the frozen prefix')
   })
 })
 

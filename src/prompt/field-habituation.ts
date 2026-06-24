@@ -160,9 +160,14 @@ export class FieldHabituationTracker {
   /**
    * Immediately promote a field to habituated state, bypassing the
    * confidence accumulation period. Use for fields known to be session
-   * constants on exact-prefix-cache models (e.g. star-domain on DeepSeek).
+   * constants on exact-prefix-cache models.
    * If the field hasn't been recorded yet, creates it with the given content.
    * Returns true if the field was promoted (false if already habituated).
+   *
+   * NOTE: currently has no callers — star-domain (its original use) is now folded
+   * directly into the frozen prefix (volatile.ts / engine.setActiveDomain) rather
+   * than promoted through habituation. Kept as a general-purpose fast-path for any
+   * future session-constant field.
    */
   immediatePromote(name: string, content: string): boolean {
     const hash = sha256short(content)
