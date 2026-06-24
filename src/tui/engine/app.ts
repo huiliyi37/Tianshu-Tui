@@ -827,9 +827,14 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    // 退出覆盖层后，由于我们在激活时已经干净地清除了旧的 live region，
-    // 此时主屏幕底部是完全干净的，且光标也处于正确的起始行。
-    // 我们只需直接调用 renderLive()，它会以 append 模式在最底部重新绘制全新的 live region。
+    // Alt screen exit restores the pre-overlay main screen frame, but the
+    // cursor position is unreliable. cursorUp(lastDisplayRows) in clear()
+    // starts from the wrong row, leaving old border lines unerased.
+    // Fix: send a large cursorUp to guarantee reaching the top of the
+    // terminal, then ERASE_SCREEN_END wipes everything, then renderLive
+    // draws the live frame cleanly from the top.
+    this.stdout.write('\x1B[999A\r\x1B[0J')
+    this.live.reset()
     this.renderLive()
   }
 
