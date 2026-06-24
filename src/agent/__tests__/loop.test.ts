@@ -17,9 +17,9 @@ import type { ContentBlock, Message } from '../../api/types.js'
 import type { Tool } from '../../tools/types.js'
 
 // Writable cwd for AgentLoop: turn-cache telemetry does a fire-and-forget
-// mkdir under cwd/.rivet/sessions; an unwritable sentinel like TEST_CWD makes
-// that async write reject (ENOENT) after the test ends, leaking an
-// unhandledRejection onto the next test.
+// mkdir under ~/.rivet/sessions/<slug>/ (via getSessionDir); an unwritable
+// sentinel like TEST_CWD makes that async write reject (ENOENT) after the
+// test ends, leaking an unhandledRejection onto the next test.
 const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-loop-cwd-'))
 
 function makeTextBlock(text: string): ContentBlock {

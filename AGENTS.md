@@ -17,24 +17,24 @@
 
 ## Runtime Data Layout（排查必读）
 
-所有会话数据存项目内 `<cwd>/.rivet/sessions/`，不再使用全局 `~/.rivet/sessions/`。
+会话日志存储在项目外的 `~/.rivet/sessions/<project-slug>/`（`<project-slug>` = 目录名 + cwd 哈希前 6 位），项目内 `.rivet/` 只保留知识库、信息素等共享数据。可用 `RIVET_SESSION_DIR` 覆盖。
 
 | 路径 | 内容 |
 |------|------|
-| `<cwd>/.rivet/sessions/<id>.jsonl` | 会话对话记录（主体），`model_switch` 行含模型名 |
-| `<cwd>/.rivet/sessions/<id>.meta.json` | 元数据：model、cwd、turn 数、cleanExit |
-| `<cwd>/.rivet/sessions/<id>.memory.json` | 会话记忆（compact 蒸馏） |
-| `<cwd>/.rivet/sessions/<id>.claims.jsonl` | 文件归属声明 |
-| `<cwd>/.rivet/sessions/<id>/sensorium.jsonl` | 遥测快照（仅 `RIVET_DEBUG_TELEMETRY` 开启） |
-| `<cwd>/.rivet/sessions/<id>/pheromones.json` | 跨会话信息素 |
-| `<cwd>/.rivet/sessions/worker-*/` | worker 子会话目录（含遥测/信息素/对话 JSONL） |
+| `~/.rivet/sessions/<slug>/<id>.jsonl` | 会话对话记录（主体），`model_switch` 行含模型名 |
+| `~/.rivet/sessions/<slug>/<id>.meta.json` | 元数据：model、cwd、turn 数、cleanExit |
+| `~/.rivet/sessions/<slug>/<id>.memory.json` | 会话记忆（compact 蒸馏） |
+| `~/.rivet/sessions/<slug>/<id>.claims.jsonl` | 文件归属声明 |
+| `~/.rivet/sessions/<slug>/<id>/sensorium.jsonl` | 遥测快照（仅 `RIVET_DEBUG_TELEMETRY` 开启） |
+| `~/.rivet/sessions/<slug>/<id>/pheromones.json` | 跨会话信息素 |
+| `~/.rivet/sessions/<slug>/worker-*/` | worker 子会话目录（含遥测/信息素/对话 JSONL） |
 | `<cwd>/.rivet/knowledge/memory.jsonl` | 项目持久化知识（跨会话） |
 | `<cwd>/.rivet/playbook.jsonl` | 历史教训回放 |
 | `<cwd>/.rivet/artifacts/` | 大输出持久化 |
 
 **排查规则**：
-- 找"某个 agent 说了什么" → `<cwd>/.rivet/sessions/<id>.jsonl`
-- 找"worker 用了什么模型" → `<cwd>/.rivet/sessions/worker-<id>.jsonl`（看 `model_switch` 行）或同级 `.meta.json` 的 `model` 字段
+- 找"某个 agent 说了什么" → `~/.rivet/sessions/<slug>/<id>.jsonl`
+- 找"worker 用了什么模型" → `~/.rivet/sessions/<slug>/worker-<id>.jsonl`（看 `model_switch` 行）或同级 `.meta.json` 的 `model` 字段
 - 找"项目级知识/记忆" → `<cwd>/.rivet/knowledge/memory.jsonl`
 - worker 会话 ID 格式：`worker-<uuid>`，与主会话共享同一目录
 - 可通过 `RIVET_SESSION_DIR` 环境变量覆盖默认目录

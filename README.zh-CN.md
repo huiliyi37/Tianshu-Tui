@@ -317,7 +317,7 @@ $ARGUMENTS' > .rivet/commands/review.md
 
 ### 会话持久化
 
-会话保存到 `~/.rivet/sessions/`。重启后按 `r` 恢复,按任意键开始新会话。
+会话保存到 `~/.rivet/sessions/<project-slug>/`。重启后按 `r` 恢复,按任意键开始新会话。
 
 ### 自动检查点
 
@@ -439,17 +439,18 @@ src/
 
 ### 会话数据
 
-所有会话数据存项目内 `<cwd>/.rivet/`:
+会话日志存储在项目外的 `~/.rivet/sessions/<project-slug>/`（slug = 目录名 + cwd 哈希前缀）。这样 `glob`/`grep`（尊重 `.gitignore`）不会扫描到 agent 自身的运维数据，避免污染工作区。可用 `RIVET_SESSION_DIR` 覆盖。
 
 ```
-.rivet/
-├── sessions/<id>.jsonl          对话记录
-├── sessions/<id>.meta.json      元数据:model、回合数、退出状态
-├── sessions/<id>/cache-log.jsonl  每请求缓存遥测
-├── knowledge/memory.jsonl       跨会话蒸馏知识
-├── artifacts/                   大输出持久化
-└── config.json (在 ~/.rivet/)   全局配置
+~/.rivet/sessions/<slug>/
+├── <id>.jsonl                  对话记录
+├── <id>.meta.json              元数据:model、回合数、退出状态
+├── <id>/cache-log.jsonl        每请求缓存遥测
+├── knowledge/memory.jsonl      跨会话蒸馏知识
+└── artifacts/                   大输出持久化
 ```
+
+全局配置在 `~/.rivet/config.json`。
 
 ### 多会话隔离
 

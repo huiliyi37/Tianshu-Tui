@@ -358,17 +358,18 @@ User input → slash command router (built-in / custom / agent)
 
 ### Session Data
 
-All session data is stored in-project under `<cwd>/.rivet/`:
+Session logs are stored outside the project under `~/.rivet/sessions/<project-slug>/` (slug = dir name + cwd hash prefix). This keeps them invisible to `glob`/`grep` (which respect `.gitignore`) and avoids polluting the working tree. Override with `RIVET_SESSION_DIR`.
 
 ```
-.rivet/
-├── sessions/<id>.jsonl          Conversation log
-├── sessions/<id>.meta.json      Metadata: model, turn count, exit state
-├── sessions/<id>/cache-log.jsonl  Per-request cache telemetry
-├── knowledge/memory.jsonl       Cross-session distilled knowledge
-├── artifacts/                   Large output persistence
-└── config.json (at ~/.rivet/)   Global config
+~/.rivet/sessions/<slug>/
+├── <id>.jsonl                  Conversation log
+├── <id>.meta.json              Metadata: model, turn count, exit state
+├── <id>/cache-log.jsonl        Per-request cache telemetry
+├── knowledge/memory.jsonl      Cross-session distilled knowledge
+└── artifacts/                   Large output persistence
 ```
+
+Global config lives at `~/.rivet/config.json`.
 
 ### Multi-Session Isolation
 

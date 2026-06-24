@@ -317,7 +317,7 @@ export function getOrCreateSessionId(): string {
 }
 
 /**
- * Clean up stale worker session directories under <cwd>/.rivet/sessions/.
+ * Clean up stale worker session directories under ~/.rivet/sessions/<slug>/.
  * Worker sessions (worker-*) create per-session dirs here (pheromones.json,
  * sensorium.jsonl). Removes worker dirs older than STALE_THRESHOLD_MS to
  * avoid deleting dirs that might still be in use by a concurrent worker.
@@ -1289,9 +1289,8 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   // Evict old sessions
   evictOldSessions(sessionId, cwd)
 
-  // Clean up stale worker session directories under cwd/.rivet/sessions/.
-  // Worker sessions create <cwd>/.rivet/sessions/worker-xxx/ (pheromones,
-  // sensorium).
+  // Clean up stale worker session directories under ~/.rivet/sessions/<slug>/.
+  // Worker sessions create worker-xxx/ (pheromones, sensorium).
   cleanupStaleWorkerSessionDirs(cwd)
 
   // Clean up orphaned files
