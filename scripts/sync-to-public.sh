@@ -74,7 +74,7 @@ if [[ -f "$DEV_DIR/.rivet/Tianshu/README.zh-CN.md" ]]; then
 fi
 
 echo "=== 同步: 配置文件 ==="
-for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json package.json; do
+for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
     rsync $RSYNC_FLAGS "$DEV_DIR/$f" "$PUB_DIR/$f"
   fi
