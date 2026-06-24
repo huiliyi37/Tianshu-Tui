@@ -5,6 +5,7 @@ import {
   runChangedFilesTypecheckMemo,
   typecheckGateEnabled,
   repoWideEnabled,
+  errorSignature,
   __clearTypecheckMemo,
   type TypecheckRunner,
 } from '../typecheck-gate.js'
@@ -198,4 +199,31 @@ test('repoWideEnabled: default on, off via 0/false/off/no', () => {
     if (prev == null) delete process.env.RIVET_TYPECHECK_REPO_WIDE
     else process.env.RIVET_TYPECHECK_REPO_WIDE = prev
   }
+})
+
+// ── Signature consistency: baseline script ↔ runtime gate ───────────────────
+// The baseline script and the runtime gate must produce identical signatures
+// for the same diagnostic, including multi-line messages (TS2322/TS2345 which
+// are the primary drift error types). If they diverge, baseline suppression
+// silently fails and the escape hatch becomes useless for the exact errors
+// it's meant to handle.
+
+test('signature: single-line diagnostic matches expected format', () => {
+  const d = diag('src/x.ts', 42, 'TS2304: Cannot find name')
+  const sig = errorSignature(CWD, d)
+  assert.equal(sig, 'src/x.ts|42|TS2304: Cannot find name')
+})
+
+test('signature: multi-line diagnostic (TS2322 type mismatch) is preserved verbatim', () => {
+  // TS2322 produces multi-line messages via flattenDiagnosticMessageText with \n:
+  // "Type 'string' is not assignable to type 'number'.\n  Type 'string' is not assignable to type 'number'."
+  const multiLine = "Type 'string' is not assignable to type 'number'.\n  The expected type comes from property 'x' which is declared here"
+  const d = diag('src/consumer.ts', 10, multiLine)
+  const sig = errorSignature(CWD, d)
+  assert.equal(sig, `src/consumer.ts|10|${multiLine}`, 'multi-line message must be preserved as-is in signature')
+})
+
+test('signature: same diagnostic always produces same signature (determinism)', () => {
+  const d = diag('src/a.ts', 1, 'TS1: x')
+  assert.equal(errorSignature(CWD, d), errorSignature(CWD, d))
 })

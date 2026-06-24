@@ -81,8 +81,9 @@ function normalizeDiagFile(cwd: string, file: string): string {
 }
 
 /** Stable signature for a diagnostic, used to match against the baseline set.
- *  Format: `file|line|message` — file is normalized to repo-relative POSIX. */
-function errorSignature(cwd: string, d: Diagnostic): string {
+ *  Format: `file|line|message` — file is normalized to repo-relative POSIX.
+ *  Exported so the baseline script uses the exact same signing logic. */
+export function errorSignature(cwd: string, d: Diagnostic): string {
   return `${normalizeDiagFile(cwd, d.file)}|${d.line}|${d.message}`
 }
 

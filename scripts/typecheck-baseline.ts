@@ -14,42 +14,27 @@
  * Never run it to "silence" errors you just introduced — fix those instead.
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
-import { join, isAbsolute, relative } from 'node:path'
+import { join } from 'node:path'
+
+// Use the same diagnostics pipeline as the runtime gate — runTypeCheck +
+// errorSignature — so signatures are guaranteed to match at comparison time.
+// This eliminates the risk of divergence between how the script and the gate
+// format multi-line TS2322/TS2345 messages.
+import { runTypeCheck } from '../src/lsp/client.js'
+import { errorSignature } from '../src/agent/typecheck-gate.js'
 
 const cwd = process.cwd()
 
-// Load typescript from node_modules — same approach as runTypeCheck.
-const ts = require('typescript')
-
-const configPath = ts.findConfigFile(cwd, ts.sys.fileExists, 'tsconfig.json')
-if (!configPath) {
-  console.error('No tsconfig.json found')
+const res = runTypeCheck(cwd, '*')
+if (!res.ranOk) {
+  console.error('tsc did not run to completion — cannot generate a trustworthy baseline')
   process.exit(1)
 }
 
-const configFile = ts.readConfigFile(configPath, ts.sys.readFile)
-if (configFile.error) {
-  console.error('Failed to read tsconfig:', ts.flattenDiagnosticMessageText(configFile.error.messageText, '\n'))
-  process.exit(1)
-}
-
-const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, cwd)
-const program = ts.createProgram(parsed.fileNames, { ...parsed.options, noEmit: true, pretty: false })
-const diagnostics = ts.getPreEmitDiagnostics(program)
-
-const signatures: string[] = []
-for (const d of diagnostics) {
-  if (d.category !== ts.DiagnosticCategory.Error) continue
-  const file = d.file
-  if (!file) continue
-  const relFile = isAbsolute(file.fileName) ? relative(cwd, file.fileName) : file.fileName
-  const pos = ts.getLineAndCharacterOfPosition(file, d.start ?? 0)
-  const message = ts.flattenDiagnosticMessageText(d.messageText, '\n')
-  // Match the format used by errorSignature() in typecheck-gate.ts
-  signatures.push(`${relFile}|${pos.line + 1}|${message}`)
-}
-
-signatures.sort()
+const signatures = res.diagnostics
+  .filter(d => d.severity === 'error')
+  .map(d => errorSignature(cwd, d))
+  .sort()
 
 const outDir = join(cwd, '.rivet')
 mkdirSync(outDir, { recursive: true })
