@@ -1380,7 +1380,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     try {
       const { restoreGoalTracker } = await import('./agent/goal-persist.js')
       const restored = restoreGoalTracker(getSessionDir(cwd), sessionId, {
-        maxJudgeRuns: config.agent.goalJudge?.maxRuns,
+        maxJudgeRuns: config.agent.goal?.judge?.maxRuns,
       })
       if (restored) {
         agent.setGoalTracker(restored)

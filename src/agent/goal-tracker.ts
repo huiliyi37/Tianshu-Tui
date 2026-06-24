@@ -57,7 +57,7 @@ export class GoalTracker {
   private _judgeRuns = 0
   private _lastVerdict: StoredGoalJudgeVerdict | null = null
 
-  private readonly _goalId: string
+  private _goalId: string
   private readonly _wallClockBudgetMs?: number
   private _wallClockAccumMs = 0
   private _wallClockResumedAt: number
