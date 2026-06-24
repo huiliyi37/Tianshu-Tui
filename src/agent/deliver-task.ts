@@ -78,6 +78,10 @@ export interface B1Context {
   /** True when the goal tracker deactivated with reason='achieved'.
    *  Signals deliver_task to auto-upgrade the final commit review to L3. */
   isGoalAchieved?: () => boolean
+  /** Last goal judge verdict stored on the tracker, for surfacing in the
+   *  delivery report. Null when the judge hasn't run (e.g. judge disabled
+   *  or goal completed before the judge had a chance to run). */
+  getLastVerdict?: () => import('./goal-tracker.js').StoredGoalJudgeVerdict | null
   /** Review configuration snapshot (subset of agent.review). Used for per-config
    *  gating of auto review (review.skipAuto) without re-reading the full Config.
    *  Optional: absent → no-skip (preserves current behavior). */
@@ -637,6 +641,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           || ctx.isGoalActive?.() === true
           || ctx.reviewConfig?.skipAuto === true
         const goalAchieved = ctx.isGoalAchieved?.() === true
+        const goalVerdict = ctx.getLastVerdict?.() ?? null
 
         // Goal-achieved commit: auto-upgrade to L3 for final review sweep.
         // Best-effort — if review deps are unavailable the commit still lands.
@@ -651,6 +656,21 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           goalActive: ctx.isGoalActive?.() === true,
           ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
           ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
+        }
+
+        // Surface the judge verdict alongside the delivery report so L3 review
+        // can focus on code quality — the judge already established functional
+        // completeness. When verdict is null, the judge didn't run (disabled,
+        // no coordinator, or goal completed before first judge invocation).
+        if (goalVerdict) {
+          const v = goalVerdict
+          if (v.overall === 'verified') {
+            lines.push('', `✅ Goal judge: verified (${v.criteriaMet}/${v.criteriaTotal} criteria met). L3 review can focus on code quality.`)
+          } else if (v.overall === 'rejected') {
+            lines.push('', `⚠️ Goal judge: rejected (${v.criteriaUnmet} unmet of ${v.criteriaTotal}). Accepted at judge cap — residual: ${v.summary}`)
+          } else {
+            lines.push('', `⚠️ Goal judge: inconclusive. Accepted unverified — ${v.summary}`)
+          }
         }
 
         // Suppress auto review when goal is active OR caller explicitly skips.

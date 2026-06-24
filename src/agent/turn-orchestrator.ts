@@ -163,7 +163,14 @@ export interface TurnOrchestratorDeps {
   resetEvidence: () => void
 
   // === Abort signal ===
+  // === Abort signal ===
   getAbortSignal: () => AbortSignal | undefined
+
+  // === Heartbeat (P7 watchdog) ===
+  getHeartbeat: () => import('./turn-heartbeat.js').TurnHeartbeat | null
+
+  // === Abort reason (watchdog vs user) ===
+  getAbortReason: () => string | undefined
 
   // === Resource sensor ===
   getLatestResourceSnapshot: () => ResourceSensorSnapshot | null
@@ -338,14 +345,24 @@ export class TurnOrchestrator {
 
     // Emit telemetry on accept paths (continue = not a completion decision yet).
     if (action === 'accept') {
+      const criteriaMet = verdict.criteria.filter(c => c.met === true).length
+      const criteriaUnmet = verdict.criteria.filter(c => c.met === false).length
+      // Store verdict on tracker for deliver_task to read as evidence.
+      tracker.setLastVerdict({
+        overall: verdict.overall,
+        criteriaMet,
+        criteriaUnmet,
+        criteriaTotal: verdict.criteria.length,
+        summary: verdict.summary,
+      })
       this.deps.writeTelemetry({
         kind: 'goal_judge_verdict',
         overall: verdict.overall,
         judgeRuns: tracker.getJudgeRuns(),
         maxJudgeRuns: tracker.getMaxJudgeRuns(),
         criteriaTotal: verdict.criteria.length,
-        criteriaMet: verdict.criteria.filter(c => c.met === true).length,
-        criteriaUnmet: verdict.criteria.filter(c => c.met === false).length,
+        criteriaMet,
+        criteriaUnmet,
         acceptedUnverified,
         iteration: tracker.getIteration(),
       })
@@ -399,7 +416,7 @@ export class TurnOrchestrator {
         const signal = this.deps.getAbortSignal()
         if (signal?.aborted) {
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
-          callbacks.onAbort()
+          callbacks.onAbort(this.deps.getAbortReason())
           return
         }
 
@@ -413,6 +430,7 @@ export class TurnOrchestrator {
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
+          this.deps.getHeartbeat()?.tick('compaction')
           const compactionResult = await rejectOnAbort(
             this.deps.runCompaction(turn, snap),
             signal!,
@@ -420,7 +438,7 @@ export class TurnOrchestrator {
           )
           if (compactionResult.shouldAbort) {
             if (!assistantResponded && !compactionResult.userMessageConsumed) this.deps.removeLastMessage()
-            callbacks.onAbort()
+            callbacks.onAbort(this.deps.getAbortReason())
             return
           }
           if (compactionResult.userMessageConsumed) userMessageConsumed = true
@@ -429,6 +447,7 @@ export class TurnOrchestrator {
         this.deps.setStreamedText('')
         this.deps.setLastPrewarmAt(0)
         let _tb = Date.now()
+        this.deps.getHeartbeat()?.tick('prewarm')
         await rejectOnAbort(this.deps.prewarmRecentReads(), signal!, 'prewarm')
         debugLog(`[turn-boundary] turn=${turn} prewarmRecentReads: ${Date.now() - _tb}ms`)
 
@@ -441,6 +460,7 @@ export class TurnOrchestrator {
         this.deps.setLatestFsWatcherState(this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false })
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
+        this.deps.getHeartbeat()?.tick('perception')
         const { sensorium: currentSensorium, strategy: currentStrategy, phaseClass, pressureResult } = await rejectOnAbort(
           this.deps.runPerception(turn, estTokens, actionable, callbacks),
           signal!,
@@ -468,6 +488,7 @@ export class TurnOrchestrator {
 
         _tb = Date.now()
         // Step 6f: build turn request (intent, repair, context ceiling, cross-session, prompt)
+        this.deps.getHeartbeat()?.tick('build-request')
         const turnRequest = await rejectOnAbort(
           this.deps.buildTurnRequest(turn, currentStrategy, currentSensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
           signal!,
@@ -687,7 +708,7 @@ export class TurnOrchestrator {
           // runPostSession is best-effort cleanup — its failure must not cause
           // the outer catch to double-delete an unrelated message.
           try { await this.deps.runPostSession(callbacks) } catch { /* best-effort */ }
-          callbacks.onAbort()
+          callbacks.onAbort(this.deps.getAbortReason())
           return
         }
 
@@ -932,7 +953,7 @@ export class TurnOrchestrator {
       if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
       if ((err as Error).name === 'AbortError') {
         await this.deps.runPostSession(callbacks)
-        callbacks.onAbort()
+        callbacks.onAbort(this.deps.getAbortReason())
       } else {
         callbacks.onError(err as Error)
       }

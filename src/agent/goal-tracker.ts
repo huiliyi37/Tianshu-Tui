@@ -10,6 +10,16 @@ export interface GoalTrackerConfig {
 
 const DEFAULT_MAX_JUDGE_RUNS = 3
 
+/** Lightweight verdict shape stored on the tracker for deliver_task to read.
+ *  Mirrors the fields deliver_task needs — avoids importing the full type. */
+export interface StoredGoalJudgeVerdict {
+  overall: 'verified' | 'rejected' | 'inconclusive'
+  criteriaMet: number
+  criteriaUnmet: number
+  criteriaTotal: number
+  summary: string
+}
+
 /**
  * Build the goal-mode driver prompt. Single source of truth shared by the TUI
  * `/goal` slash command and the headless `--goal` CLI entry point, so the two
@@ -38,6 +48,7 @@ export class GoalTracker {
   private _successCriteria: string[]
   private readonly _maxJudgeRuns: number
   private _judgeRuns = 0
+  private _lastVerdict: StoredGoalJudgeVerdict | null = null
 
   constructor(config: GoalTrackerConfig) {
     this._goal = config.goal
@@ -128,6 +139,16 @@ export class GoalTracker {
   /** Record that the judge ran once (called on every judge invocation). */
   recordJudgeRun(): void {
     this._judgeRuns++
+  }
+
+  /** Store the last judge verdict for deliver_task to read as evidence. */
+  setLastVerdict(v: StoredGoalJudgeVerdict): void {
+    this._lastVerdict = v
+  }
+
+  /** Last judge verdict, or null if the judge hasn't run. */
+  getLastVerdict(): StoredGoalJudgeVerdict | null {
+    return this._lastVerdict
   }
 
   /** Deactivate the tracker (goal done, cancelled, or budget exhausted).

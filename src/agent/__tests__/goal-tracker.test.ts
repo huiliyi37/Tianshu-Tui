@@ -185,6 +185,21 @@ describe('GoalTracker judge fields', () => {
     assert.equal(t.check('GOAL ACHIEVED', 1000, false).reason, 'achieved')
     assert.equal(t.check('still working', 1000, false).reason, 'continue')
   })
+
+  it('setLastVerdict / getLastVerdict round-trips', () => {
+    const t = new GoalTracker(makeConfig())
+    assert.equal(t.getLastVerdict(), null)
+    t.setLastVerdict({ overall: 'verified', criteriaMet: 3, criteriaUnmet: 0, criteriaTotal: 3, summary: 'all good' })
+    const v = t.getLastVerdict()
+    assert.equal(v?.overall, 'verified')
+    assert.equal(v?.criteriaMet, 3)
+    assert.equal(v?.summary, 'all good')
+  })
+
+  it('getLastVerdict returns null when no verdict was set', () => {
+    const t = new GoalTracker(makeConfig())
+    assert.equal(t.getLastVerdict(), null)
+  })
 })
 
 describe('buildGoalModePrompt', () => {

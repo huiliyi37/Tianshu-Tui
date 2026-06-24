@@ -520,6 +520,7 @@ export function createInteractiveToolRegistry(
     }, { reviewDepth: params?.reviewDepth ?? 0 }),
     isGoalActive: () => refs.goalTrackerRef.current?.isActive() ?? false,
     isGoalAchieved: () => refs.goalTrackerRef.current?.isGoalAchieved() ?? false,
+    getLastVerdict: () => refs.goalTrackerRef.current?.getLastVerdict() ?? null,
     reviewConfig: config.agent.review,
   })))
 

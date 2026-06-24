@@ -224,6 +224,9 @@ async function main() {
           taskLedger: b1TaskLedger,
           ownership: b1Ownership,
           gate: b1Gate,
+          isGoalActive: () => goalTrackerRef.current?.isActive() ?? false,
+          isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
+          getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
