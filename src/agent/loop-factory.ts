@@ -9,7 +9,8 @@ import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
 import { recordToolNamedFingerprint } from './trace-store.js'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
+import { analyzeImpact } from '../repo/meridian-impact.js'
 import { getSessionDir } from './session-persist.js'
 import type { AgentCallbacks } from './loop-types.js'
 import { diagnoseCacheMiss } from '../prompt/cache-diagnostic.js'
@@ -416,6 +417,29 @@ export function createTurnStepProducer(self: AgentLoop): TurnStepProducer {
   return new TurnStepProducer(self)
 }
 
+/**
+ * Append meridian blast-radius (downstream consumers + related tests) to goal
+ * judge evidence text. Absolute paths are filtered — they silently return empty
+ * on repo-relative LIKE queries. When db is null/undefined the text is returned
+ * unchanged (headless / server / worker have no indexer).
+ */
+export function appendMeridianBlastRadius(
+  text: string,
+  modifiedFiles: string[],
+  db: import('../repo/meridian-db.js').MeridianDb | null | undefined,
+): string {
+  if (!db) return text
+  const relFiles = modifiedFiles.filter(f => !isAbsolute(f))
+  if (relFiles.length === 0) return text
+  const impact = analyzeImpact(db, relFiles)
+  const cap = (xs: string[]) => xs.length <= 10 ? xs.join(', ') : `${xs.slice(0, 10).join(', ')} (+${xs.length - 10} more)`
+  const parts: string[] = []
+  if (impact.direct.length > 0) parts.push(`Direct consumers (verify not broken): ${cap(impact.direct)}`)
+  if (impact.tests.length > 0)  parts.push(`Related tests: ${cap(impact.tests)}`)
+  if (parts.length === 0) return text
+  return text + '\n\nMeridian blast radius:\n' + parts.join('\n')
+}
+
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   return new TurnOrchestrator({
     // === Lifecycle ===
@@ -554,7 +578,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
         readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
         verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
       ].filter(Boolean).join('\n')
-      return { text, modifiedFiles }
+
+      // Meridian blast radius — let the judge verify downstream consumers too.
+      // Absolute paths silently return empty on repo-relative LIKE, so filter first.
+      const db = self.config.meridianIndexer?.getDb()
+      const fullText = appendMeridianBlastRadius(text, modifiedFiles, db)
+      return { text: fullText, modifiedFiles }
     },
   })
 }
