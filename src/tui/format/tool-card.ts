@@ -197,7 +197,7 @@ export interface FormatToolCardLiveInput {
  */
 export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetTheme): string[] {
   const title = toolCardTitle(input.toolName, input.toolInput)
-  let header = `${color('●', theme.dim)} ${color(title, theme.dim, { bold: true })}`
+  let header = `${color('●', theme.dim)} ${color(title, theme.toolColor(input.toolName), { bold: true })}`
   if (input.elapsedMs !== undefined && input.elapsedMs >= 1000) {
     header += ` ${color(`(${formatElapsed(input.elapsedMs)})`, theme.muted)}`
   }
@@ -208,7 +208,7 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
     const tailCount = input.tailLines ?? 3
     const maxWidth = Math.max(10, input.columns - 6)
     const shown = tail.split('\n').slice(-tailCount).map(l =>
-      color(l.length > maxWidth ? l.slice(0, maxWidth - 1) + '…' : l, theme.dim))
+      color(l.length > maxWidth ? l.slice(0, maxWidth - 1) + '…' : l, theme.muted))
     lines.push(...indentBody(shown, '', theme))
   }
   return lines

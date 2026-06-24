@@ -262,10 +262,10 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
         const previewLines = entry.content.split('\n').slice(0, 30)
         for (const pl of previewLines) {
           const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
-          lines.push(`     ${color(trimmed, theme.dim)}`)
+          lines.push(`     ${color(trimmed, theme.muted)}`)
         }
         if (lineCount > 30) {
-          lines.push(color(`     … +${lineCount - 30} more lines`, theme.dim))
+          lines.push(color(`     … +${lineCount - 30} more lines`, theme.muted))
         }
       }
     }
@@ -279,10 +279,10 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
         const previewLines = entry.content.split('\n').slice(0, 3)
         for (const pl of previewLines) {
           const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
-          lines.push(`     ${color(trimmed, theme.dim)}`)
+          lines.push(`     ${color(trimmed, theme.muted)}`)
         }
         if (lineCount > 3) {
-          lines.push(color(`     … +${lineCount - 3} more lines`, theme.dim))
+          lines.push(color(`     … +${lineCount - 3} more lines`, theme.muted))
         }
       }
     }
@@ -291,7 +291,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     const files = completed.map(e => e.displayName).join(', ')
     const preview = files.length > 80 ? files.slice(0, 79) + '…' : files
     lines.push(`  ⎿  ${color(preview, theme.muted)}`)
-    lines.push(color(`     … +${completed.length - 3} more files (ctrl+o to expand)`, theme.dim))
+    lines.push(color(`     … +${completed.length - 3} more files (ctrl+o to expand)`, theme.muted))
   }
 
   return lines
@@ -314,7 +314,7 @@ export function formatCollapsedGroupLive(
   const elapsed = Date.now() - group.startMs
   const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
 
-  lines.push(`● ${color(summary, theme.dim)} ${color(`· ${elapsedStr}`, theme.muted)}`)
+  lines.push(`● ${color(summary, theme.muted)} ${color(`· ${elapsedStr}`, theme.muted)}`)
 
   // 显示最近一条已完成 entry 的末 2 行作为进度预览
   const lastCompleted = [...group.entries].reverse().find(e => e.content && e.completed)
@@ -323,7 +323,7 @@ export function formatCollapsedGroupLive(
     const tailLines = lastCompleted.content.replace(/\n+$/, '').split('\n').slice(-2)
     for (const line of tailLines) {
       const trimmed = line.length > maxWidth ? line.slice(0, maxWidth - 1) + '…' : line
-      lines.push(`  ${color(trimmed, theme.dim)}`)
+      lines.push(`  ${color(trimmed, theme.muted)}`)
     }
   }
 

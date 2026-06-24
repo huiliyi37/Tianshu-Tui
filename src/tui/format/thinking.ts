@@ -48,12 +48,12 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
       const secs = Math.round(input.elapsedMs / 1000)
       const glyph = useAscii ? '*' : '✶'
       const lineInfo = textLines.length > 0 ? ` · ${textLines.length} 行` : ''
-      lines.push(color(`${glyph} 已推理 · ${secs}s${lineInfo}`, theme.dim))
+      lines.push(color(`${glyph} 已推理 · ${secs}s${lineInfo}`, theme.muted))
     } else {
       const statusLabel = getThinkingStatus(input.elapsedMs)
       const lineInfo = textLines.length > 0 ? ` (${textLines.length} lines)` : ''
       const glyph = useAscii ? '~' : '◐'
-      lines.push(color(`${glyph} ${statusLabel}${lineInfo}`, theme.dim))
+      lines.push(color(`${glyph} ${statusLabel}${lineInfo}`, theme.muted))
     }
   }
 
@@ -61,10 +61,10 @@ export function formatThinking(input: FormatThinkingInput, theme: RivetTheme): s
   if (input.expanded && textLines.length > 0) {
     const max = input.maxLines ?? DEFAULT_MAX_LINES
     if (textLines.length > max) {
-      lines.push(color(`  … 上方省略 ${textLines.length - max} 行`, theme.dim))
+      lines.push(color(`  … 上方省略 ${textLines.length - max} 行`, theme.muted))
     }
     for (const line of textLines.slice(-max)) {
-      lines.push(color(`  ${line}`, theme.dim))
+      lines.push(color(`  ${line}`, theme.muted))
     }
   }
 
