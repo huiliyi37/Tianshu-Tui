@@ -176,3 +176,39 @@ flowchart LR
 3. 事后方案的 tsc 只在收尾跑一次，scoped 到改动文件。
 4. 两方案的总开关独立：`RIVET_EDIT_SMART_ROUTING`（事前）、`RIVET_TYPECHECK_GATE`（事后），默认都 on。
 5. worker/headless 路径全覆盖：事前靠 RuntimeToolEvent（不依赖 LSP），事后靠确定性 tsc。
+
+## 审查补充（2026-06-24 交叉审查）
+
+以下为对原始设计的技术审查补充，应在实现前解决。
+
+### 1. Layer 1 的历史窗口与"同 turn"概念脱节
+
+`tool-history-recorder.ts` 只保留最近 **5 条**工具记录。若一个 turn 有 20 次工具调用，第 1 次和第 2 次 hash_edit 之间可能穿插了 10 次其他调用——等第 2 次触发 postTool hook 时，`recentToolHistory` 里已经没有第 1 次的记录。
+
+**修正**：不使用 `recentToolHistory`，改为在 `RuntimeHookContext` 外挂一个 turn 级 `Map<filePath, hashEditCount>`，由 postTool hook 直接维护。或降低判定条件为"连续 2 次 hash_edit"（5 条窗口够用），与"同 turn 内 2 次"做区分。
+
+### 2. Layer 2 同时增强 full-hash anchor stale 的错误信息
+
+当前 full-hash anchor 失败时，hash_edit 返回错误信息包含 "anchor L<n>:<hash> not found" + 实际行内容。可以在检测到 `anchors.length >= 2` 且 stale 时，在错误信息中追加："Consider switching to edit_file for this file — anchors are interdependent and stale."
+
+### 3. Layer 3 的提示词改动影响前缀缓存
+
+`static.ts` 属于 frozen base。修改 frozen base 内容会生成新 hash，导致增量 prefix cache 失效（一次 cache miss）。影响可控但需要在 plan 中标注。建议：在实现 Layer 3 的 commit message 中标注 `[cache-affecting]`。
+
+### 4. `RIVET_EDIT_SMART_ROUTING` 总开关注入路径
+
+文档只说"默认 on"，未指定在哪里读取。应以 `process.env.RIVET_EDIT_SMART_ROUTING !== '0'` 的形式在 `bootstrap.ts` 或 config 层读取，通过 `RuntimeHookDeps` 下发到各 hook 的 factory 函数。与 `RIVET_TYPECHECK_GATE` 共用同一注入模式。
+
+### 5. advisory tier 协调（与 typecheck gate 交叉）
+
+Layer 1 的 advisory key 和 tier 未定义。建议：
+
+| hook | key | tier | priority |
+|------|-----|------|----------|
+| edit-tool-advisory (L1) | `edit-tool-advisory` | discipline | 0.55 |
+
+与 typecheck gate 的 Component C（`typecheck-reminder`, discipline, ~0.5）共用 discipline tier。两个 discipline 条目不冲突（不同 key），在 3 槽限制内可共存。但如果同时与 self-verify（discipline, 0.58）+ discipline-reanchor（discipline, 0.55）触发，可能被挤出。当前约定：discipline tier 同一 category 最多 2 条（`MAX_PER_CATEGORY=2`），需确认四个 discipline 条目不会同时触发。
+
+### 6. 连续编辑检测与 spec-verify-gate 的交互
+
+刚交付的 `spec-verify-gate-hook.ts`（preTurn）检测"读 spec → 实现 → 零验证"。Layer 1（postTool）检测"连续 hash_edit"。两者不冲突——不同相位、不同检测模式。但如果两者同时触发（agent 读 handoff 后连续 hash_edit），agent 会收到两条 advisory：一条 constitutional（spec-verify-gate），一条 discipline（edit-tool-advisory）。需要确保两条 advisory 不矛盾——当前设计下两者语义互补（"先验证再动手"+"换更安全的工具"），不会造成指令冲突。
