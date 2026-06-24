@@ -4,6 +4,7 @@ import {
   runChangedFilesTypecheck,
   runChangedFilesTypecheckMemo,
   typecheckGateEnabled,
+  repoWideEnabled,
   __clearTypecheckMemo,
   type TypecheckRunner,
 } from '../typecheck-gate.js'
@@ -36,7 +37,10 @@ test('point 1: matches when tsc reports an absolute path', () => {
 })
 
 test('point 1: does not substring-misfire (src/xx.ts changed, error in src/x.ts)', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/xx.ts'], runner([diag('src/x.ts', 10, 'TS2300: dup')]))
+  // Error in src/x.ts is drift relative to changed src/xx.ts. With baseline
+  // suppressing it, scoped match must still not misfire onto src/xx.ts.
+  const baseline = new Set(['src/x.ts|10|TS2300: dup'])
+  const r = runChangedFilesTypecheck(CWD, ['src/xx.ts'], runner([diag('src/x.ts', 10, 'TS2300: dup')]), baseline)
   assert.equal(r, null)
 })
 
@@ -45,8 +49,8 @@ test('point 2: ranOk=false (crash/timeout) → null even with diagnostics', () =
   assert.equal(r, null)
 })
 
-test('errors only in untouched files (repo noise) → null', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/other.ts', 5, 'TS1: noise')]))
+test('errors only in untouched files with baseline suppression → null', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/other.ts', 5, 'TS1: noise')]), new Set(['src/other.ts|5|TS1: noise']))
   assert.equal(r, null)
 })
 
@@ -126,4 +130,72 @@ test('memo: unstattable (mock) paths fail open — no cache, runner runs each ti
   runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
   runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
   assert.equal(calls, 2)
+})
+
+// ── Cross-file drift detection (the 24-error class) ─────────────────────────
+
+test('drift: error in non-changed file + empty baseline → non-null with repoWide', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]))
+  assert.ok(r, 'must escalate when a new repo-wide error exists')
+  assert.deepEqual(r.brokenFiles, [], 'no scoped errors — brokenFiles is empty')
+  assert.ok(r.repoWide, 'repoWide segment must be populated')
+  assert.equal(r.repoWide!.count, 1)
+  assert.match(r.summary, /cross-file/)
+  assert.match(r.summary, /src\/default\.ts/)
+})
+
+test('drift: same error in baseline → null (accepted debt)', () => {
+  const sig = 'src/default.ts|10|TS2322: type mismatch'
+  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]), new Set([sig]))
+  assert.equal(r, null, 'baseline-suppressed error must not escalate')
+})
+
+test('drift: corrupted/missing baseline → treated as empty set → strict', () => {
+  // Pass no baseline (undefined) — defaults to loadTypecheckBaseline which returns empty Set
+  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS9999: boom')]))
+  assert.ok(r, 'missing baseline = strict = any error escalates')
+  assert.ok(r.repoWide)
+  assert.equal(r.repoWide!.count, 1)
+})
+
+test('drift: RIVET_TYPECHECK_REPO_WIDE=0 → only scoped, drift errors ignored', () => {
+  const prev = process.env.RIVET_TYPECHECK_REPO_WIDE
+  try {
+    process.env.RIVET_TYPECHECK_REPO_WIDE = '0'
+    const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS1: drift')]))
+    assert.equal(r, null, 'repo-wide disabled → drift error not escalated')
+  } finally {
+    if (prev == null) delete process.env.RIVET_TYPECHECK_REPO_WIDE
+    else process.env.RIVET_TYPECHECK_REPO_WIDE = prev
+  }
+})
+
+test('drift: scoped + drift both present → summary has both segments', () => {
+  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([
+    diag('src/x.ts', 1, 'TS1: scoped'),
+    diag('src/other.ts', 2, 'TS2: drift'),
+  ]))
+  assert.ok(r)
+  assert.deepEqual(r.brokenFiles, ['src/x.ts'])
+  assert.ok(r.repoWide)
+  assert.equal(r.repoWide!.count, 1)
+  assert.match(r.summary, /Typecheck broken in changed files/)
+  assert.match(r.summary, /cross-file/)
+})
+
+test('repoWideEnabled: default on, off via 0/false/off/no', () => {
+  const prev = process.env.RIVET_TYPECHECK_REPO_WIDE
+  try {
+    delete process.env.RIVET_TYPECHECK_REPO_WIDE
+    assert.equal(repoWideEnabled(), true)
+    for (const v of ['0', 'false', 'off', 'no', 'OFF']) {
+      process.env.RIVET_TYPECHECK_REPO_WIDE = v
+      assert.equal(repoWideEnabled(), false, `expected off for ${v}`)
+    }
+    process.env.RIVET_TYPECHECK_REPO_WIDE = '1'
+    assert.equal(repoWideEnabled(), true)
+  } finally {
+    if (prev == null) delete process.env.RIVET_TYPECHECK_REPO_WIDE
+    else process.env.RIVET_TYPECHECK_REPO_WIDE = prev
+  }
 })

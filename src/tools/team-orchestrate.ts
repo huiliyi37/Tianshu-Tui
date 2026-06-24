@@ -426,6 +426,8 @@ export function createTeamOrchestrateTool(
           // changed files; a real type error that tests/esbuild missed escalates
           // the review to L3 and is surfaced FIRST (more urgent than blast
           // radius). Advisory: any failure is swallowed; never blocks dispatch.
+          // Covers both scoped errors (in changed files) and cross-file drift
+          // (new errors in non-changed files from definition changes).
           let typecheckFocus: string | undefined
           const typecheckRunner = coordinator.getTypecheckRunner?.()
           // Require an explicitly-wired runner here (bootstrap injects the real

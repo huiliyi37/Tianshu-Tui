@@ -671,6 +671,9 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         // L3 and is surfaced FIRST in focusHint (more urgent than blast radius).
         // Advisory: wrapped so it never blocks the commit (already landed) or
         // deliver_task. ctx.typecheckRunner is undefined in prod → real tsc.
+        // Covers both scoped errors (in changed files) and cross-file drift
+        // (new errors in non-changed files from definition changes) — the
+        // latter is the "24-error class" that scoped-only filtering missed.
         if (typecheckGateEnabled()) {
           try {
             const tc = runChangedFilesTypecheckMemo(params.cwd, change.files, ctx.typecheckRunner)

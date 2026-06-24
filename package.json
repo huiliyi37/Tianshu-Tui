@@ -38,6 +38,7 @@
     "build": "tsup",
     "start": "node --expose-gc --max-old-space-size=1536 dist/main.js",
     "typecheck": "tsc --noEmit",
+    "typecheck:baseline": "tsx scripts/typecheck-baseline.ts",
     "test": "tsx scripts/run-node-tests.ts",
     "test:unit": "tsx scripts/run-node-tests.ts --unit",
     "test:integration": "tsx scripts/run-node-tests.ts --integration",
