@@ -14,6 +14,7 @@ import { DelegationCoordinator, type WorkerActivityEvent } from '../coordinator.
 import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_ONLY_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
+import { profileRegistry } from '../profile-registry.js'
 import type { StreamClient } from '../../api/stream-client.js'
 import type { ModelCapabilityCard } from '../../model/capability.js'
 import type { Tool, ToolCallParams } from '../../tools/types.js'
@@ -31,7 +32,11 @@ function fakeTool(name: string): Tool {
 function makeRegistry(): ToolRegistry {
   const registry = new ToolRegistry()
   for (const name of READ_ONLY_WORKER_TOOLS) registry.register(fakeTool(name))
-  for (const name of ['read_section', 'repo_graph']) registry.register(fakeTool(name))
+  // Mirror production: register every tool any built-in profile can allowlist so
+  // filterToolRegistry never throws "Cannot allowlist unknown tool" on a stale set.
+  for (const pname of profileRegistry.getProfileNames()) {
+    for (const tool of profileRegistry.get(pname)!.allowedTools) registry.register(fakeTool(tool))
+  }
   return registry
 }
 

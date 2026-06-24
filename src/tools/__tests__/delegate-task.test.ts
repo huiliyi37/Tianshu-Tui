@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createDelegateTaskTool, type DelegateTaskCoordinator } from '../delegate-task.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
 import { profileRegistry } from '../../agent/profile-registry.js'
+import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 
 function makeRun(): CoordinatorRun {
   return {
@@ -90,11 +91,18 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.ok(result.content.includes('Invalid delegate_task input'))
   })
 
-  it('exposes the authority enum from the star-domain registry', () => {
+  it('accepts authority values from the star-domain registry (schema slimmed to plain string)', () => {
+    // P0 schema slimming (commit 2b04fddd) dropped the inline `enum` on authority to
+    // save prefix-cache tokens; validation is now a dynamic refine against the
+    // star-domain registry (so user-loaded domains are accepted too). Assert the
+    // registry exposes the built-in domain ids and the schema stays a bare string.
     const tool = createDelegateTaskTool({ delegate: async () => makeRun() })
-    const authoritySchema = tool.definition.input_schema!.properties.authority as { enum: string[] }
-    assert.ok(authoritySchema.enum.includes('tianquan'))
-    assert.ok(authoritySchema.enum.includes('tianji'))
+    const authoritySchema = tool.definition.input_schema!.properties.authority as { type: string; enum?: string[] }
+    assert.equal(authoritySchema.type, 'string')
+    assert.equal(authoritySchema.enum, undefined, 'authority schema should be slimmed (no inline enum)')
+    const domainIds = starDomainRegistry.getDomainIds()
+    assert.ok(domainIds.includes('tianquan'))
+    assert.ok(domainIds.includes('tianji'))
   })
 
   it('exposes profile schema from the profile registry', () => {

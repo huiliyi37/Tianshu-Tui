@@ -24,7 +24,8 @@ describe('createDefaultToolRegistry', () => {
 
     assert.ok(names.includes('read_file'))
     assert.ok(names.includes('write_file'))
-    assert.ok(names.includes('plan_close'))
+    // plan_submit + plan_close 已合并为单个 'plan' 工具（commit 3a3ab07a）
+    assert.ok(names.includes('plan'))
     assert.ok(names.includes('bash'))
     assert.ok(names.includes('edit_file'))
     assert.ok(names.includes('grep'))

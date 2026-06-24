@@ -14,6 +14,7 @@ import { DomainKnowledgeStore } from '../domain-knowledge-store.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from '../worker-session.js'
 import type { ModelCapabilityCard } from '../../model/capability.js'
 import { READ_ONLY_WORKER_TOOLS, type WorkerResult } from '../work-order.js'
+import { profileRegistry } from '../profile-registry.js'
 
 const cards: ModelCapabilityCard[] = [{
   model: 'test-model',
@@ -43,6 +44,11 @@ function fakeTool(name: string): Tool {
 function makeRegistry(): ToolRegistry {
   const registry = new ToolRegistry()
   for (const name of READ_ONLY_WORKER_TOOLS) registry.register(fakeTool(name))
+  // Mirror production: register every tool any built-in profile can allowlist so
+  // filterToolRegistry never throws "Cannot allowlist unknown tool" on a stale set.
+  for (const pname of profileRegistry.getProfileNames()) {
+    for (const tool of profileRegistry.get(pname)!.allowedTools) registry.register(fakeTool(tool))
+  }
   return registry
 }
 
