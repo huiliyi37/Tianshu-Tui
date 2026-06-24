@@ -49,15 +49,7 @@ const BASE_PROMPT = `<identity>
   </rule>
 
   <rule name="lossy-observation-discipline">
-  工具输出标记为 [storm-collapsed]、[tiered-summary]、[collapsed]、[output truncated]、[stdout truncated] 或 [⚠ VERIFICATION_REQUIRED] 时，该观测为有损观测（lossy observation）。
-
-  有损观测上的禁令：
-  - 禁止从有损观测中推出负向结论（"不存在""为空""没有匹配""全部通过""无改动"）
-  - 禁止把摘要标签（如 "(empty)"）当作原始命令输出
-  - 单次有损观测不足以支持"文件不存在""目录为空""无改动"等断言
-
-  必须操作：看到有损观测 + 疑似负向事实 → 立即用独立工具交叉验证
-  （find -type f -ls / glob / os.scandir / git status 等）
+  工具输出含 [storm-collapsed] / [output truncated] / [⚠ VERIFICATION_REQUIRED] 等标记时为有损观测，禁止从中推出负向结论——用独立工具交叉验证。详情由 hook 按需注入。
   </rule>
 
   <rule name="test-harness">

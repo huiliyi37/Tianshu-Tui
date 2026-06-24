@@ -32,6 +32,7 @@ import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-r
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
+import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
@@ -382,6 +383,14 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_EDIT_SMART_ROUTING (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_EDIT_SMART_ROUTING !== '0') {
     hooks.push(createEditToolAdvisoryHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Lossy Observation: postTool hook — detects collapsed/truncated tool
+  // output and reinforces the discipline that lossy observations cannot
+  // support negative conclusions. Complements guardLossyToolResult's
+  // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
+  if (deps.advisoryBus) {
+    hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Spec-Verify Gate: preTurn hook — detects "read spec → implement

@@ -18,6 +18,9 @@ export interface RuntimeToolEvent {
   /** Failure classification from failure-classifier.ts — enables vigor to distinguish
    *  semantic failures (type_error, assertion) from environment issues (timeout, api_error). */
   failureClass?: FailureClass
+  /** Tool result content string — enables hooks to inspect output for lossy markers
+   *  and other content-level signals without duplicating tool-pipeline logic. */
+  resultContent?: string
 }
 
 export interface RuntimeHookSnapshot {
