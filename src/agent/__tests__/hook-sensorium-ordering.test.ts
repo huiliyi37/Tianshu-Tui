@@ -107,7 +107,7 @@ describe('hook sensorium dependency: phase contract + defensive no-op', () => {
   })
 
   it('vigor-post-tool leaves vigor untouched when sensorium is absent', async () => {
-    const hook = createVigorPostToolHook({ getPredictionAccumulator: () => ({ history: [] }) })
+    const hook = createVigorPostToolHook({ getPredictionAccumulator: () => ({ windowSize: 5, predictions: [], consecutiveCorrect: 0 }) })
     let vigorSet = false
     const ctx = createRuntimeHookContext(nullSensoriumSnapshot(), {
       setVigor: () => { vigorSet = true },

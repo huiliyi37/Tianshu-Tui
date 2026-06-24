@@ -1266,7 +1266,7 @@ describe('findSafeSplitPoint', () => {
         function: { name: 'test', arguments: '{}' },
       }))
     }
-    return msg as OaiMessage
+    return msg as unknown as OaiMessage
   }
 
   function makeTool(content: string, toolCallId: string): OaiMessage {

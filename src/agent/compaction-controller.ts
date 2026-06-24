@@ -99,13 +99,13 @@ export function findSafeSplitPoint(
   let iterations = 0
   while (sp > minSplit && sp < messages.length && messages[sp]?.role === 'tool') {
     if (++iterations > 100) break // safety valve
-    const toolCallId = (messages[sp] as Record<string, unknown>).tool_call_id as string | undefined
+    const toolCallId = (messages[sp] as unknown as Record<string, unknown>).tool_call_id as string | undefined
     if (!toolCallId) break
     let found = false
     for (let i = sp - 1; i >= 0; i--) {
       const msg = messages[i]
       if (msg?.role === 'assistant') {
-        const toolCalls = (msg as Record<string, unknown>).tool_calls as Array<{ id: string }> | undefined
+        const toolCalls = (msg as unknown as Record<string, unknown>).tool_calls as Array<{ id: string }> | undefined
         if (toolCalls?.some(tc => tc.id === toolCallId)) {
           sp = i // move split before the assistant that owns this tool
           found = true

@@ -91,7 +91,6 @@ import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from './age
 import { computeTeamWaveReward, deriveTeamWaveRewardInput } from './agent/team-reward.js'
 import { teamSchedulerArmForParallelism } from './agent/team-scheduler-bandit.js'
 import { recordTeamWaveRewardClosure } from './agent/reward-loop.js'
-import { debugLog } from './utils/debug.js'
 
 // ── Types ──────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { startServer } from './index.js'
+import { serverLogger } from './logger.js'
 import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
 import { FileSessionPersistence } from './session-persistence.js'
@@ -552,9 +553,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       const mgr = new McpManager(ctx.config.mcp)
       await mgr.initialize()
       sharedRuntime.mcpManager = mgr
-      serverLogger.info(`MCP: ${mgr.getStates().filter(s => s.status === 'connected').length} servers connected, ${mgr.getAllTools().length} tools`)
+      serverLogger.warn(`MCP: ${mgr.getStates().filter(s => s.status === 'connected').length} servers connected, ${mgr.getAllTools().length} tools`)
     } catch (err) {
-      serverLogger.warn('MCP initialization failed:', (err as Error)?.message ?? err)
+      serverLogger.warn('MCP initialization failed:', { error: (err as Error)?.message ?? String(err) })
     }
   })()
 
