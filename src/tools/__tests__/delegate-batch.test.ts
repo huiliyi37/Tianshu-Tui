@@ -127,6 +127,30 @@ describe('DELEGATE_BATCH_TOOL', () => {
     assert.match(String(result.content), /depends on itself/)
   })
 
+  it('passes resume param through to the coordinator for each task', async () => {
+    const calls: Array<{ requests: DelegationRequest[] }> = []
+    const coordinator: DelegateBatchCoordinator = {
+      delegateBatch: async (requests) => { calls.push({ requests }); return makeRun() },
+    }
+    const tool = createDelegateBatchTool(coordinator)
+
+    await tool.execute({
+      toolUseId: 'tu_resume',
+      cwd: '/repo',
+      sessionTurnCount: 5,
+      input: {
+        tasks: [
+          { objective: 'Continue the previous search task.', resume: 'wo_abc' },
+          { objective: 'Fresh task without resume.' },
+        ],
+      },
+    })
+
+    const reqs = calls[0]!.requests
+    assert.equal(reqs[0]?.resumeWorkOrderId, 'wo_abc', 'first task should have resume id')
+    assert.equal(reqs[1]?.resumeWorkOrderId, undefined, 'second task should not have resume')
+  })
+
   it('bypasses the progressive task cap when dependencies are declared', async () => {
     const calls: Array<{ requests: DelegationRequest[] }> = []
     const coordinator: DelegateBatchCoordinator = {

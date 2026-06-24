@@ -1205,6 +1205,8 @@ export class DelegationCoordinator {
 
           const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
           const cwd = this.config.cwd ?? workerConfig.cwd
+          // Capture session messages from the hands worker for resume persistence.
+          let handsSessionMessages: readonly OaiMessage[] | undefined
           // Write workers (patcher/verifier) execute in an isolated git worktree.
           // Worktree lifecycle is managed by runHands → runHandsSession: create
           // before agent runs, collect diff after, cleanup on exit.
@@ -1229,11 +1231,14 @@ export class DelegationCoordinator {
                 activeClaims,
                 domainKnowledgeStore: this.config.domainKnowledgeStore,
               })
+              if (typeof sessionRun.session?.getMessages === 'function') {
+                handsSessionMessages = sessionRun.session.getMessages()
+              }
               callbacks.onTurnComplete(sessionRun.usage, 1, true)
               return JSON.stringify(sessionRun.result)
             },
           }))
-          run = { result: handsRun.result }
+          run = { result: handsRun.result, sessionMessages: handsSessionMessages }
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1312,6 +1317,7 @@ export class DelegationCoordinator {
                 // P1-1: increment quota and write escalation shadow only after claim check passes
                 escalationShadows.push(this.recordEscalation(order, strongCard, msg))
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
+                let retryHandsMessages: readonly OaiMessage[] | undefined
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
                   maxTurns: upgradedConfig.maxTurns,
@@ -1321,11 +1327,14 @@ export class DelegationCoordinator {
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({ ...upgradedConfig, order, cwd: workerCwd, activeClaims: upgradedConfig.activeClaims ?? [], domainKnowledgeStore: this.config.domainKnowledgeStore })
+                    if (typeof sessionRun.session?.getMessages === 'function') {
+                      retryHandsMessages = sessionRun.session.getMessages()
+                    }
                     callbacks.onTurnComplete(sessionRun.usage, 1, true)
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: handsRun.result }
+                run = { result: handsRun.result, sessionMessages: retryHandsMessages }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId)
                   for (const f of retryClaimFiles)
@@ -1546,6 +1555,14 @@ export class DelegationCoordinator {
         orders.push(order)
         // T9 P3: callbacks don't survive zod parsing — stash by order id.
         if (r.onActivity) this.activityUpstream.set(order.id, r.onActivity)
+        // Session resume: load prior messages (same side-table pattern as delegate()).
+        if (r.resumeWorkOrderId) {
+          const record = loadWorkerSession(r.resumeWorkOrderId)
+          if (record) {
+            this.resumeMessages.set(order.id, record.messages)
+            debugLog(`[worker-resume] batch: loaded ${record.messages.length} messages from ${r.resumeWorkOrderId} for ${order.id}`)
+          }
+        }
       }
     }
 
