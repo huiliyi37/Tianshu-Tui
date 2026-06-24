@@ -36,11 +36,13 @@ function verdictRun(overall: string, summary = '', criteria: unknown[] = []): Co
 function makeOrchestrator(opts: {
   judgeDeps?: GoalJudgeDeps | undefined
   streamedText?: string
+  telemetrySink?: Array<Record<string, unknown>>
 }): TurnOrchestrator {
   const deps = {
     getStreamedText: () => opts.streamedText ?? 'GOAL ACHIEVED',
     getGoalJudgeDeps: () => opts.judgeDeps,
     getGoalJudgeEvidence: () => ({ text: 'modified: a.ts', modifiedFiles: ['a.ts'] }),
+    writeTelemetry: (entry: Record<string, unknown>) => { opts.telemetrySink?.push(entry) },
   } as unknown as TurnOrchestratorDeps
   return new TurnOrchestrator(deps)
 }
@@ -131,5 +133,70 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
     })
     const tracker = makeTracker()
     await assert.rejects(() => judge(orch, tracker, ac.signal))
+  })
+
+  it('emits goal_judge_verdict telemetry on accept (verified)', async () => {
+    const telemetry: Record<string, unknown>[] = []
+    const orch = makeOrchestrator({
+      judgeDeps: { spawnJudge: async () => verdictRun('verified', 'all good', [
+        { criterion: 'c1', met: true },
+        { criterion: 'c2', met: true },
+      ]) },
+      telemetrySink: telemetry,
+    })
+    const tracker = makeTracker()
+    const decision = await judge(orch, tracker, undefined)
+    assert.equal(decision.action, 'accept')
+    assert.equal(telemetry.length, 1)
+    const entry = telemetry[0]!
+    assert.equal(entry.kind, 'goal_judge_verdict')
+    assert.equal(entry.overall, 'verified')
+    assert.equal(entry.acceptedUnverified, false)
+    assert.equal(entry.criteriaTotal, 2)
+    assert.equal(entry.criteriaMet, 2)
+    assert.equal(entry.criteriaUnmet, 0)
+  })
+
+  it('emits goal_judge_verdict telemetry with acceptedUnverified=true on inconclusive', async () => {
+    const telemetry: Record<string, unknown>[] = []
+    const orch = makeOrchestrator({
+      judgeDeps: {}, // no spawnJudge → inconclusive
+      telemetrySink: telemetry,
+    })
+    const tracker = makeTracker()
+    await judge(orch, tracker, undefined)
+    assert.equal(telemetry.length, 1)
+    assert.equal(telemetry[0]!.kind, 'goal_judge_verdict')
+    assert.equal(telemetry[0]!.acceptedUnverified, true)
+  })
+
+  it('does NOT emit telemetry on continue (rejected under cap)', async () => {
+    const telemetry: Record<string, unknown>[] = []
+    const orch = makeOrchestrator({
+      judgeDeps: { spawnJudge: async () => verdictRun('rejected', 'c1 missing', [
+        { criterion: 'c1', met: false },
+      ]) },
+      telemetrySink: telemetry,
+    })
+    const tracker = makeTracker(3)
+    const decision = await judge(orch, tracker, undefined)
+    assert.equal(decision.action, 'continue')
+    assert.equal(telemetry.length, 0)
+  })
+
+  it('emits telemetry with acceptedUnverified=true when judge cap reached on rejected', async () => {
+    const telemetry: Record<string, unknown>[] = []
+    const orch = makeOrchestrator({
+      judgeDeps: { spawnJudge: async () => verdictRun('rejected', 'still broken', [
+        { criterion: 'c1', met: false },
+      ]) },
+      telemetrySink: telemetry,
+    })
+    const tracker = makeTracker(1)
+    const decision = await judge(orch, tracker, undefined)
+    assert.equal(decision.action, 'accept')
+    assert.equal(telemetry.length, 1)
+    assert.equal(telemetry[0]!.acceptedUnverified, true)
+    assert.equal(telemetry[0]!.overall, 'rejected')
   })
 })

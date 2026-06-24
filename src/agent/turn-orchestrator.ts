@@ -300,40 +300,58 @@ export class TurnOrchestrator {
       'goal-judge',
     )
 
-    if (verdict.overall === 'verified') {
-      return { action: 'accept', reminder: achievedReminder(' Judge 已独立核验全部验收项。') }
-    }
+    // Single-exit: compute action + reminder, then emit telemetry on accept.
+    let action: 'accept' | 'continue'
+    let reminder: string
+    let acceptedUnverified = false
 
-    if (verdict.overall === 'rejected') {
+    if (verdict.overall === 'verified') {
+      action = 'accept'
+      reminder = achievedReminder(' Judge 已独立核验全部验收项。')
+    } else if (verdict.overall === 'rejected') {
       if (tracker.getJudgeRuns() < tracker.getMaxJudgeRuns()) {
         const unmet = verdict.criteria
           .filter(c => c.met === false)
           .map(c => `- ${c.criterion}${c.evidence ? `（证据: ${c.evidence}）` : ''}`)
         const iter = tracker.getIteration()
         const maxIter = tracker.getMaxIterations()
-        return {
-          action: 'continue',
-          reminder:
-            `[GOAL JUDGE 驳回 ${tracker.getJudgeRuns()}/${tracker.getMaxJudgeRuns()}] 完成声明未通过独立核验，继续执行。\n` +
-            `目标: ${tracker.getGoal()}\n` +
-            `未达成的验收项:\n${unmet.length > 0 ? unmet.join('\n') : `- ${verdict.summary || '判定未达成'}`}\n` +
-            `请修复后再次输出 "GOAL ACHIEVED"。（迭代 ${iter}/${maxIter}）`,
-        }
-      }
-      // Cap reached: stop re-judging to avoid burning the budget in a reject loop.
-      return {
-        action: 'accept',
-        reminder: achievedReminder(
+        action = 'continue'
+        reminder =
+          `[GOAL JUDGE 驳回 ${tracker.getJudgeRuns()}/${tracker.getMaxJudgeRuns()}] 完成声明未通过独立核验，继续执行。\n` +
+          `目标: ${tracker.getGoal()}\n` +
+          `未达成的验收项:\n${unmet.length > 0 ? unmet.join('\n') : `- ${verdict.summary || '判定未达成'}`}\n` +
+          `请修复后再次输出 "GOAL ACHIEVED"。（迭代 ${iter}/${maxIter}）`
+      } else {
+        // Cap reached: stop re-judging to avoid burning the budget in a reject loop.
+        action = 'accept'
+        reminder = achievedReminder(
           ` ⚠️ Judge 仍判定未完全达成（已达 ${tracker.getMaxJudgeRuns()} 次核验上限，接受为未完全验证）。残留: ${verdict.summary || '见上轮判定'}。`,
-        ),
+        )
+        acceptedUnverified = true
       }
+    } else {
+      // inconclusive — fail-open: accept but flag as unverified.
+      action = 'accept'
+      reminder = achievedReminder(` ⚠️ Judge 未能独立验证（${verdict.summary || '原因未知'}），接受为未验证完成。`)
+      acceptedUnverified = true
     }
 
-    // inconclusive — fail-open: accept but flag as unverified.
-    return {
-      action: 'accept',
-      reminder: achievedReminder(` ⚠️ Judge 未能独立验证（${verdict.summary || '原因未知'}），接受为未验证完成。`),
+    // Emit telemetry on accept paths (continue = not a completion decision yet).
+    if (action === 'accept') {
+      this.deps.writeTelemetry({
+        kind: 'goal_judge_verdict',
+        overall: verdict.overall,
+        judgeRuns: tracker.getJudgeRuns(),
+        maxJudgeRuns: tracker.getMaxJudgeRuns(),
+        criteriaTotal: verdict.criteria.length,
+        criteriaMet: verdict.criteria.filter(c => c.met === true).length,
+        criteriaUnmet: verdict.criteria.filter(c => c.met === false).length,
+        acceptedUnverified,
+        iteration: tracker.getIteration(),
+      })
     }
+
+    return { action, reminder }
   }
 
   /**
