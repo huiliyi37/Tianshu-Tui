@@ -262,7 +262,7 @@ async function main() {
             const coordinator = createHeadlessCoordinator({
               toolRegistry,
               provider: prov,
-              providerName: provider,
+              providerName: cfg.provider.default,
               apiKey: key,
               auth: undefined,
               cwd: process.cwd(),
@@ -273,7 +273,7 @@ async function main() {
             // Fail-closed: browser verification requires interactive TUI approval
             // (web_fetch/browser need permission prompts). Headless degrades to
             // web_fetch-only read-only mode; full browser is disabled.
-            if (cfg.agent.goalJudge?.browser === true) {
+            if (cfg.agent.goal?.judge?.browser === true) {
               process.stderr.write('[goal] ⚠ goal-judge browser disabled in headless mode — web_fetch read-only only\n')
             }
 

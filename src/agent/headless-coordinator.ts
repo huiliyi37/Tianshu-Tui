@@ -21,7 +21,7 @@ import { createProviderClient } from '../api/factory.js'
 import { resolveCapabilities } from '../api/provider.js'
 import { PromptEngine } from '../prompt/engine.js'
 import { profileRegistry } from './profile-registry.js'
-import type { CompactionConfig } from './compact-config.js'
+import type { CompactionConfig } from '../compact/constants.js'
 
 export interface HeadlessCoordinatorInput {
   toolRegistry: ToolRegistry

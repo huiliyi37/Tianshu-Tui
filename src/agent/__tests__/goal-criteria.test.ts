@@ -88,7 +88,7 @@ describe('buildCheapClient', () => {
     const providers = {
       test: { name: 'test', type: 'openai', models: [{ id: 'm', maxTokens: 4096, contextWindow: 32000 }] },
     }
-    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as Record<string, ProviderConfig>)
+    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as unknown as Record<string, ProviderConfig>)
     assert.equal(result, null)
   })
 
@@ -97,7 +97,7 @@ describe('buildCheapClient', () => {
     const providers = {
       test: { name: 'test', type: 'openai', apiKey: '', models: [{ id: 'm', maxTokens: 4096, contextWindow: 32000 }] },
     }
-    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as Record<string, ProviderConfig>)
+    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as unknown as Record<string, ProviderConfig>)
     assert.equal(result, null)
   })
 })
