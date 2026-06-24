@@ -12,6 +12,10 @@
 
 import type { OaiMessage } from '../api/oai-types.js'
 import type { StreamClient } from '../api/stream-client.js'
+import type { ProviderConfig } from '../config/schema.js'
+import { createProviderClient } from '../api/factory.js'
+import { resolveCapabilities } from '../api/provider.js'
+import { resolveApiKey } from '../api/factory.js'
 
 /**
  * Generic completion: (system, user) → assistant text. Injectable so the
@@ -121,4 +125,40 @@ export function completionFromClient(
     if (err && !text) throw err
     return text
   }
+}
+
+/**
+ * Build a dedicated StreamClient from a cheap worker profile, so criteria
+ * extraction doesn't share the main session's client (avoiding lifecycle
+ * controller contention and socket-pool interference).
+ *
+ * Returns null when the profile's provider isn't configured or has no API key,
+ * so callers can fall back to the main client.
+ *
+ * Known limitation: even with a separate StreamClient, Node.js default HTTP
+ * agent shares connection pools — extreme concurrency may still queue at the
+ * socket layer. Non-blocking for typical criteria extraction (single short call).
+ */
+export function buildCheapClient(
+  profile: { provider: string; model: string },
+  providers: Record<string, ProviderConfig>,
+): { client: StreamClient; model: string } | null {
+  const prov = providers[profile.provider]
+  if (!prov) return null
+  let apiKey: string
+  try {
+    apiKey = resolveApiKey(prov)
+  } catch {
+    return null
+  }
+  if (!apiKey) return null
+  const modelSpec = prov.models.find(m => m.id === profile.model || m.alias === profile.model)
+  const model = modelSpec?.id ?? profile.model
+  const maxTokens = Math.min(1024, modelSpec?.maxTokens ?? 4096)
+  const client = createProviderClient(
+    prov,
+    resolveCapabilities(profile.provider, prov.capabilities),
+    { apiKey, model, maxTokens },
+  )
+  return { client, model }
 }

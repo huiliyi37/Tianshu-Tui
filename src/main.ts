@@ -270,12 +270,25 @@ async function main() {
             const goal = parsed.goal
             void (async () => {
               try {
-                const { extractGoalCriteria, completionFromClient } = await import('./agent/goal-criteria.js')
-                const criteria = await extractGoalCriteria(goal, completionFromClient(agent.config.client, model.id))
+                const { extractGoalCriteria, completionFromClient, buildCheapClient } = await import('./agent/goal-criteria.js')
+                // Prefer dedicated cheap client to avoid sharing main session's client.
+                const cheapProfile = cfg.workers?.profiles?.cheap
+                const allProviders = agent.config.allProviders ?? {}
+                let completion
+                if (cheapProfile && allProviders[cheapProfile.provider]) {
+                  const cheap = buildCheapClient(cheapProfile, allProviders)
+                  completion = cheap
+                    ? completionFromClient(cheap.client, cheap.model)
+                    : completionFromClient(agent.config.client, model.id)
+                } else {
+                  completion = completionFromClient(agent.config.client, model.id)
+                }
+                const criteria = await extractGoalCriteria(goal, completion)
                 tracker.setSuccessCriteria(criteria)
                 process.stderr.write(`[goal] judge criteria:\n${criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`)
               } catch {
                 // non-fatal — judge falls back to wide judgment
+                process.stderr.write('[goal] criteria extraction failed — judge will use wide judgment\n')
               }
             })()
           }

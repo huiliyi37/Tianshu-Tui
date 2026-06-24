@@ -6,8 +6,10 @@ import {
   extractGoalCriteria,
   GENERIC_SUCCESS_CRITERIA,
   parseCriteria,
+  buildCheapClient,
   type CompletionFn,
 } from '../goal-criteria.js'
+import type { ProviderConfig } from '../../config/schema.js'
 
 describe('parseCriteria', () => {
   it('parses a bare JSON array', () => {
@@ -73,5 +75,29 @@ describe('extractGoalCriteria', () => {
     }
     await extractGoalCriteria('goal', complete, ac.signal)
     assert.equal(seen, ac.signal)
+  })
+})
+
+describe('buildCheapClient', () => {
+  it('returns null when provider is not configured', () => {
+    const result = buildCheapClient({ provider: 'nonexistent', model: 'm' }, {})
+    assert.equal(result, null)
+  })
+
+  it('returns null when provider has no apiKey', () => {
+    const providers = {
+      test: { name: 'test', type: 'openai', models: [{ id: 'm', maxTokens: 4096, contextWindow: 32000 }] },
+    }
+    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as Record<string, ProviderConfig>)
+    assert.equal(result, null)
+  })
+
+  it('returns null when resolveApiKey throws', () => {
+    // Provider exists but apiKey is explicitly empty — resolveApiKey throws
+    const providers = {
+      test: { name: 'test', type: 'openai', apiKey: '', models: [{ id: 'm', maxTokens: 4096, contextWindow: 32000 }] },
+    }
+    const result = buildCheapClient({ provider: 'test', model: 'm' }, providers as Record<string, ProviderConfig>)
+    assert.equal(result, null)
   })
 })
