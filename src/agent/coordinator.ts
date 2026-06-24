@@ -236,11 +236,34 @@ export interface DelegationCoordinatorConfig {
   circuitBreaker?: CircuitBreakerManager
   /** Max nesting depth for delegation. Falls back to MAX_DELEGATION_DEPTH when unset. */
   maxDelegationDepth?: number
+  /** Injectable sleep function for backoff retry testing. Defaults to real setTimeout. */
+  retrySleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
   const words = objective.trim().split(/\s+/).filter(Boolean).length
   return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
+}
+
+/**
+ * Sleep with abort support. Resolves after `ms` or rejects immediately when
+ * the signal fires. Listener is cleaned up on resolve to prevent accumulation.
+ * In test environments (RIVET_TEST=1), delay is clamped to 0 for speed.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  const actualMs = process.env.RIVET_TEST ? 0 : ms
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Aborted during backoff: signal already fired'))
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new Error('Aborted during backoff'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, actualMs)
+  })
 }
 
 function workerFailureResult(order: WorkOrder, error: unknown, nextActions?: string[]): WorkerResult {
@@ -1259,6 +1282,100 @@ export class DelegationCoordinator {
       const msg = error instanceof Error ? error.message : String(error)
       const isAbort = (error instanceof Error && error.name === 'AbortError') || msg.includes('Delegation aborted')
       if (!isAbort) this.recordProviderOutcome(selected.model, false)
+
+      // ── Exponential backoff retry (same-model) ──────────────────────
+      // Transient errors (429, network blips) are not model-capability issues.
+      // Retry with the same model before attempting Flash→Pro escalation.
+      if (!isAbort && order.budget.maxRetries > 0 && !run) {
+        const retrySleep = this.config.retrySleepFn ?? sleep
+        for (let attempt = 1; attempt <= order.budget.maxRetries; attempt++) {
+          const delay = Math.min(
+            order.budget.retryBackoffMs * Math.pow(2, attempt - 1),
+            order.budget.maxRetryBackoffMs,
+          )
+          try {
+            await retrySleep(delay, mergedSignal)
+          } catch {
+            // sleep aborted — stop retrying, fall through to degraded return
+            break
+          }
+          // Re-register liveness for the retry attempt
+          this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))
+          this.orderControllers.set(order.id, orderController)
+          try {
+            if (role === 'hands') {
+              const retryClaimFiles: string[] = []
+              try {
+                if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
+                  const registry = this.config.sessionRegistry
+                  const sid = this.config.sessionId
+                  const conflicted: string[] = []
+                  for (const f of order.scope.files) {
+                    if (registry.acquireClaim(sid, f, 'exclusive')) retryClaimFiles.push(f)
+                    else conflicted.push(f)
+                  }
+                  if (conflicted.length > 0) {
+                    for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
+                    break // can't retry — claims blocked
+                  }
+                }
+                const retryCwd = this.config.cwd ?? workerConfig.cwd
+                let retryHandsMessages: readonly OaiMessage[] | undefined
+                const retryHandsRun = await wrapAbort(this.runHands({
+                  order,
+                  wtCoordinator: new WorktreeCoordinator(retryCwd),
+                  cwd: retryCwd,
+                  maxTurns: workerConfig.maxTurns,
+                  contextWindow: workerConfig.contextWindow,
+                  compact: workerConfig.compact,
+                  activeClaims: this.config.activeClaims?.() ?? workerConfig.activeClaims ?? [],
+                  domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  runAgent: async (prompt, callbacks, workerCwd) => {
+                    const sessionRun = await this.runWorker({
+                      ...workerConfig,
+                      order,
+                      cwd: workerCwd,
+                      activeClaims: workerConfig.activeClaims ?? [],
+                      domainKnowledgeStore: this.config.domainKnowledgeStore,
+                    })
+                    if (typeof sessionRun.session?.getMessages === 'function') {
+                      retryHandsMessages = sessionRun.session.getMessages()
+                    }
+                    callbacks.onTurnComplete(sessionRun.usage, 1, true)
+                    return JSON.stringify(sessionRun.result)
+                  },
+                }))
+                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages }
+              } finally {
+                if (this.config.sessionRegistry && this.config.sessionId) {
+                  for (const f of retryClaimFiles) this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
+                }
+              }
+            } else {
+              const workerRun = await wrapAbort(this.runWorker(workerConfig))
+              const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+                ? workerRun.session.getMessages()
+                : undefined
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+            }
+            // Retry succeeded — record provider health and exit loop
+            this.recordProviderOutcome(selected.model, true)
+            if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordSuccess(order.profile)
+            break
+          } catch (retryError) {
+            // This retry attempt failed — continue to next attempt (or fall through)
+            const retryMsg = retryError instanceof Error ? retryError.message : String(retryError)
+            const retryIsAbort = (retryError instanceof Error && retryError.name === 'AbortError') || retryMsg.includes('Delegation aborted')
+            if (retryIsAbort) break // abort stops all retries
+            if (attempt === order.budget.maxRetries) {
+              // All same-model retries exhausted — fall through to Flash→Pro
+            }
+          } finally {
+            this.liveness.unregister(order.id)
+            this.orderControllers.delete(order.id)
+          }
+        }
+      }
 
       // T3: Flash→Pro escalation — retry with strong-tier model if budget allows.
       // tierLock:'cheap' profiles (reviewer / adversarial_verifier) must NOT be
