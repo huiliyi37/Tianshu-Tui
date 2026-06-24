@@ -205,8 +205,7 @@
 | File | Lines | Purpose |
 |------|-------|---------|
 | main.tsx | 575 | Entry: CLI → config → agent → TUI |
-| headless.ts | 115 | Headless mode (-p/--print) |
-| goal-loop.ts | 107 | Goal-oriented loop |
+| headless.ts | 115 | Headless mode (-p/--print, --goal); goal autonomy reuses agent/goal-tracker.ts |
 | onboarding.ts | 25 | First-run state |
 | validation.ts | 9 | assertValidSessionId |
 

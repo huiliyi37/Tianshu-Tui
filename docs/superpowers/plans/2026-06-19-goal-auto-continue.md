@@ -543,4 +543,4 @@ node dist/main.js
 
 1. **GlanceBar 目标状态指示器**：显示 `🎯 3/50` 计数器，只需读 `turnOrchestrator.goalTracker` 的状态，~5 行 UI 代码。建议纳入 MVP 而非推迟。
 2. **`completeTurn({ isFinal: false })` 的 continuation 路径**：当前 plan 已修正——continuation 前调非终态 completeTurn，与 tool_use 路径一致。
-3. **`--goal` headless 与 TUI goal 共享 GoalTracker**：当前两者使用不同机制（`runGoalLoop` vs `GoalTracker`），后续可考虑统一——headless 模式也复用 `TurnOrchestrator.execute()` + `GoalTracker`。
+3. ~~**`--goal` headless 与 TUI goal 共享 GoalTracker**：当前两者使用不同机制（`runGoalLoop` vs `GoalTracker`），后续可考虑统一——headless 模式也复用 `TurnOrchestrator.execute()` + `GoalTracker`。~~ **✅ 已完成（2026-06-24）**：删除了 `runGoalLoop`（摘要驱动、从未接入 T9 `main.ts`），headless `--goal` 现复用同一套 `AgentLoop + GoalTracker`，续跑发生在单次 `agent.run()` 内（`TurnOrchestrator`）。一套机制，两个入口（TUI `/goal` + headless `--goal`），prompt 经 `buildGoalModePrompt` 共享单一源。

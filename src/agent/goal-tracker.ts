@@ -4,6 +4,16 @@ export interface GoalTrackerConfig {
   contextWindow: number
 }
 
+/**
+ * Build the goal-mode driver prompt. Single source of truth shared by the TUI
+ * `/goal` slash command and the headless `--goal` CLI entry point, so the two
+ * entry points can never drift in wording. The completion marker phrasing here
+ * MUST stay in sync with GoalTracker.check()'s detection regex.
+ */
+export function buildGoalModePrompt(goal: string): string {
+  return `[GOAL MODE] ${goal}\n\nYou are now in goal-driven mode. Work toward this goal continuously. When fully complete, output "GOAL ACHIEVED" on its own line.`
+}
+
 export interface GoalCheckResult {
   shouldContinue: boolean
   reason: 'achieved' | 'budget_exhausted' | 'context_limit' | 'continue' | 'no_goal'

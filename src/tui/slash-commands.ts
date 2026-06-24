@@ -514,7 +514,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
       // Dynamic import to avoid circular dependency
-      const { GoalTracker } = await import('../agent/goal-tracker.js')
+      const { GoalTracker, buildGoalModePrompt } = await import('../agent/goal-tracker.js')
       const maxIterations = Math.max(50, Math.floor(ctx.maxTokens / 4000))
       const tracker = new GoalTracker({
         goal: goalText,
@@ -526,8 +526,7 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
       setIsStreaming(false)
       // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
-      const prompt = `[GOAL MODE] ${goalText}\n\nYou are now in goal-driven mode. Work toward this goal continuously. When fully complete, output "GOAL ACHIEVED" on its own line.`
-      ctx.submitToAgent?.(prompt)
+      ctx.submitToAgent?.(buildGoalModePrompt(goalText))
       return true
     }
 

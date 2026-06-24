@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { GoalTracker } from '../goal-tracker.js'
+import { GoalTracker, buildGoalModePrompt } from '../goal-tracker.js'
 import type { GoalTrackerConfig } from '../goal-tracker.js'
 
 function makeConfig(overrides?: Partial<GoalTrackerConfig>): GoalTrackerConfig {
@@ -139,5 +139,26 @@ describe('GoalTracker', () => {
     const result = t.check('PRE_GOAL_ACHIEVED_CHECK done', 1000, false)
     assert.equal(result.shouldContinue, true)
     assert.equal(result.reason, 'continue')
+  })
+})
+
+describe('buildGoalModePrompt', () => {
+  it('embeds the goal text', () => {
+    assert.ok(buildGoalModePrompt('make all tests pass').includes('make all tests pass'))
+  })
+
+  it('carries the [GOAL MODE] marker', () => {
+    assert.ok(buildGoalModePrompt('x').startsWith('[GOAL MODE]'))
+  })
+
+  it('instructs the completion marker that GoalTracker.check detects', () => {
+    // The wording here is the single source of truth shared by TUI /goal and
+    // headless --goal; the marker MUST stay detectable by check().
+    const prompt = buildGoalModePrompt('refactor auth')
+    assert.ok(prompt.includes('GOAL ACHIEVED'))
+    const t = new GoalTracker(makeConfig())
+    // A model that follows the prompt and emits the marker must be detected.
+    const result = t.check('All done.\nGOAL ACHIEVED', 1000, false)
+    assert.equal(result.reason, 'achieved')
   })
 })
