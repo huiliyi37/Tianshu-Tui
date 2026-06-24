@@ -827,13 +827,12 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    // Alt screen exit restores the pre-overlay main screen frame, but the
-    // cursor position is unreliable. cursorUp(lastDisplayRows) in clear()
-    // starts from the wrong row, leaving old border lines unerased.
-    // Fix: send a large cursorUp to guarantee reaching the top of the
-    // terminal, then ERASE_SCREEN_END wipes everything, then renderLive
-    // draws the live frame cleanly from the top.
-    this.stdout.write('\x1B[999A\r\x1B[0J')
+    // Alt screen exit restores cursor to where it was before overlay activate.
+    // activateOverlay called live.clear() which: (1) moved cursor to live region
+    // top and erased it, (2) set lastDisplayRows=0. After alt screen exit,
+    // cursor is at that same cleared position (end of scrollback).
+    // Erase any residual chars on this line, reset render state, append fresh.
+    this.stdout.write('\r\x1B[0J')
     this.live.reset()
     this.renderLive()
   }
