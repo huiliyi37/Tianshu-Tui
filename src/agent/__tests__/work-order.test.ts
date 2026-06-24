@@ -330,4 +330,46 @@ describe('work-order contract', () => {
     })
     assert.ok(order.allowedTools.length > 0, 'valid authority should produce non-empty intersection')
   })
+
+  // ── Wave 1: retryBackoffMs / maxRetryBackoffMs ──────────────────
+
+  it('WorkerBudget defaults retryBackoffMs to 10000 and maxRetryBackoffMs to 300000', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_backoff',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Search something.',
+      scope: {},
+    })
+    assert.equal(order.budget.retryBackoffMs, 10000)
+    assert.equal(order.budget.maxRetryBackoffMs, 300000)
+  })
+
+  it('WorkerBudget allows overriding retryBackoffMs and maxRetryBackoffMs', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_backoff_custom',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Search something.',
+      scope: {},
+      budget: { retryBackoffMs: 5000, maxRetryBackoffMs: 60000 },
+    })
+    assert.equal(order.budget.retryBackoffMs, 5000)
+    assert.equal(order.budget.maxRetryBackoffMs, 60000)
+  })
+
+  it('write work order also gets backoff defaults', () => {
+    const order = createWriteWorkOrder({
+      id: 'wo_write_backoff',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      profile: 'patcher',
+      objective: 'Patch something.',
+      scope: {},
+    })
+    assert.equal(order.budget.retryBackoffMs, 10000)
+    assert.equal(order.budget.maxRetryBackoffMs, 300000)
+  })
 })
