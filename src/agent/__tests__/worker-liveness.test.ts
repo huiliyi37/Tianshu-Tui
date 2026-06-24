@@ -131,7 +131,7 @@ function makeCoordinator(over: {
 }
 
 describe('coordinator stall sweep (A4 integration)', () => {
-  it('aborts a silent worker via the stall sweep — delegate rejects with stall error', async () => {
+  it('aborts a silent worker via the stall sweep — delegate returns blocked result with stall error', async () => {
     const coordinator = makeCoordinator({
       workerStallMs: 150,
       // Wedged worker: never produces activity, never resolves on its own,
@@ -140,16 +140,22 @@ describe('coordinator stall sweep (A4 integration)', () => {
         config.abortSignal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
       }),
     })
-    await assert.rejects(
-      coordinator.delegate({
-        parentTurnId: 't-stall',
-        objective: 'trace the authentication flow across multiple coordinator modules',
-        kind: 'code_search',
-        profile: 'code_scout',
-        scope: { files: ['a.ts', 'b.ts'] },
-      }),
-      /stalled.*liveness/i,
-    )
+    // delegate() catches worker exceptions and returns a degraded CoordinatorRun
+    // (never throws) — the stall error surfaces in the result summary.
+    const run = await coordinator.delegate({
+      parentTurnId: 't-stall',
+      objective: 'trace the authentication flow across multiple coordinator modules',
+      kind: 'code_search',
+      profile: 'code_scout',
+      scope: { files: ['a.ts', 'b.ts'] },
+    })
+    assert.equal(run.status, 'completed')
+    assert.equal(run.results.length, 1)
+    const result = run.results[0]!
+    assert.ok(result.status === 'blocked' || result.status === 'failed',
+      `stalled worker should surface as blocked/failed, got ${result.status}`)
+    assert.match(result.summary, /stalled|abort|Worker failed/i,
+      `summary should mention stall/abort, got: ${result.summary}`)
   })
 
   it('a worker emitting activity is NOT stalled (ticks reset the clock)', async () => {
