@@ -159,6 +159,19 @@ function viewportAroundCursor(lines: string[], cursorLine: number, maxLines?: nu
   ]
 }
 
+/** 大段粘贴折叠为 marker 的阈值。短于此直接插入原文，不折叠。 */
+const PASTE_FOLD_MIN_LINES = 3
+const PASTE_FOLD_MIN_CHARS = 150
+
+/** marker 格式：[paste #N +M lines] 或 [paste #N L chars] */
+const PASTE_MARKER_RE = /\[paste #(\d+)(?: \+\d+ lines|\d+ chars)?\]/g
+
+function makePasteMarker(id: number, text: string): string {
+  const lines = text.split('\n').length
+  if (lines > 1) return `[paste #${id} +${lines - 1} lines]`
+  return `[paste #${id} ${text.length} chars]`
+}
+
 export class InputLine {
   private _value: string
   private _cursor: number
@@ -172,6 +185,10 @@ export class InputLine {
   private onChangeCallback?: (value: string, cursor: number) => void
   private onSubmitCallback?: (value: string) => void
   private onTabCompleteCallback?: () => boolean
+
+  /** 粘贴标记存储：id → 原始粘贴文本。提交时用 getResolvedValue() 还原。 */
+  private _pastes: Map<number, string> = new Map()
+  private _pasteIdCounter: number = 0
 
   constructor(options: InputLineOptions = {}) {
     this._value = options.value ?? ''
@@ -241,14 +258,74 @@ export class InputLine {
     this.setValue(this._value + text, this._value.length + text.length)
   }
 
-  /** 在光标处插入文本（用于 bracketed paste），光标移动到插入内容之后。 */
+  /**
+   * 在光标处插入文本（用于 bracketed paste），光标移动到插入内容之后。
+   * 大段粘贴（≥3行或≥150字符）折叠为 `[paste #N]` 标记，节省输入框空间。
+   */
   insertText(text: string): void {
     if (!text) return
+    const lineCount = text.split('\n').length
+    const shouldFold = lineCount >= PASTE_FOLD_MIN_LINES || text.length >= PASTE_FOLD_MIN_CHARS
+    if (shouldFold) {
+      const id = ++this._pasteIdCounter
+      this._pastes.set(id, text)
+      const marker = makePasteMarker(id, text)
+      const before = this._value.slice(0, this._cursor)
+      const after = this._value.slice(this._cursor)
+      const next = (before + marker + after).slice(0, this._maxLength)
+      const cursor = Math.min(before.length + marker.length, next.length)
+      this.setValue(next, cursor)
+      return
+    }
     const before = this._value.slice(0, this._cursor)
     const after = this._value.slice(this._cursor)
     const next = (before + text + after).slice(0, this._maxLength)
     const cursor = Math.min(before.length + text.length, next.length)
     this.setValue(next, cursor)
+  }
+
+  /**
+   * 光标位于 paste marker 上时，展开还原为原始文本。
+   * @returns true 如果展开了某个 marker；false 如果光标不在任何 marker 上。
+   */
+  expandPasteAtCursor(): boolean {
+    const { line, col } = this.getLineCol(this._cursor)
+    const currentLine = this._value.split('\n')[line] ?? ''
+    for (const match of currentLine.matchAll(PASTE_MARKER_RE)) {
+      const start = match.index
+      const end = start + match[0].length
+      if (col >= start && col <= end) {
+        const pasteId = Number(match[1])
+        const content = this._pastes.get(pasteId)
+        if (content === undefined) return false
+        // 在整行范围内替换 marker
+        const absoluteStart = this.posFromLineCol(line, start)
+        const absoluteEnd = this.posFromLineCol(line, end)
+        const before = this._value.slice(0, absoluteStart)
+        const after = this._value.slice(absoluteEnd)
+        this._value = before + content + after
+        this._cursor = before.length + content.length
+        this._pastes.delete(pasteId)
+        this.onChangeCallback?.(this._value, this._cursor)
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * 将值中所有未展开的 paste marker 替换为原始内容。
+   * 用于提交前确保发送给模型的文本是完整的。
+   */
+  getResolvedValue(): string {
+    let resolved = this._value
+    if (this._pastes.size === 0) return resolved
+    resolved = resolved.replace(PASTE_MARKER_RE, (full, idStr) => {
+      const id = Number(idStr)
+      const content = this._pastes.get(id)
+      return content !== undefined ? content : full
+    })
+    return resolved
   }
 
   /** 设置历史 */
@@ -364,6 +441,8 @@ export class InputLine {
     this._value = ''
     this._cursor = 0
     this._historyIdx = -1
+    this._pastes.clear()
+    this._pasteIdCounter = 0
   }
 
   private insertChar(ch: string): InputLineEvent | null {

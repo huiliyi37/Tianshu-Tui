@@ -292,6 +292,9 @@ export class TuiApp {
       placeholder: '询问任何事，或 / 唤起命令',
       onTabComplete: () => this.handleTabComplete(),
       onSubmit: (text) => {
+        // Resolve paste markers → original content before sending to agent
+        const resolved = this.inputLine.getResolvedValue()
+        text = resolved
         const trimmed = text.trim()
 
         // User-initiated submit is real progress: clear the goal-mode watchdog
@@ -409,6 +412,11 @@ export class TuiApp {
 
     // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
     this.input.onPaste((text) => {
+      // If cursor is on a paste marker, expand it instead of pasting new content
+      if (this.inputLine.expandPasteAtCursor()) {
+        this.writeBatcher.schedule()
+        return
+      }
       this.inputLine.insertText(text)
       this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
@@ -565,6 +573,13 @@ export class TuiApp {
       }
       if (key.name === 'ctrl_o') {
         this.expandLastTruncatedTool()
+        return
+      }
+      if (key.name === 'ctrl_v') {
+        // Ctrl+V on a paste marker → expand to original content
+        if (this.inputLine.expandPasteAtCursor()) {
+          this.writeBatcher.schedule()
+        }
         return
       }
       if (key.name === 'ctrl_t') {
@@ -2119,6 +2134,7 @@ export class TuiApp {
         cost: glanceCost,
         elapsedMs: Date.now() - this.state.turnStartMs,
         turnCount: this.state.turnNumber,
+        stalled,
       }, this.theme)
 
       const plainLeft = stripAnsiLen(leftStr)
