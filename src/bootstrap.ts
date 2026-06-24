@@ -427,6 +427,7 @@ export function createInteractiveToolRegistry(
       store: refs.meridianIndexer?.getDb(),
     }).enabled,
     getSessionId: () => refs.sessionId ?? undefined,
+    getMeridianIndexer: () => refs.meridianIndexer,
   }, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。

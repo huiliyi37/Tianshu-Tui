@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
@@ -21,6 +22,16 @@ import { validatePathSafe } from './path-validate.js'
 import { createActivityStreamer, activityProgressLine } from './worker-activity-stream.js'
 import type { WorkerActivityEvent } from '../agent/coordinator.js'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
+// Cross-layer: the tool layer consumes the meridian data layer (independent
+// graph store) for advisory blast-radius hints. Same direction as
+// createRepoGraphTool(() => refs.meridianIndexer) in bootstrap.
+import type { ImpactResult } from '../repo/meridian-impact.js'
+
+/** Narrow surface for meridian structural impact analysis, so tests can mock it
+ *  without the full MeridianIndexer. MeridianIndexer satisfies this structurally. */
+export interface TeamImpactAnalyzer {
+  impact(changedFiles: string[], opts?: { maxHops?: number }): ImpactResult
+}
 
 /** Coordinator surface the team tool needs. `delegateBatch` drives planner
  *  fanout + wave dispatch. `delegate` is optional until the review gate is
@@ -43,6 +54,14 @@ export interface TeamOrchestrateCoordinator {
 
   isTeamSchedulerBanditEnabled?: () => boolean
   getSessionId?: () => string | undefined
+  /** Optional meridian indexer for advisory blast-radius hints in the review gate. */
+  getMeridianIndexer?: () => TeamImpactAnalyzer | null | undefined
+}
+
+/** Join a list, truncating to `n` entries with a trailing elision count so a
+ *  large blast radius doesn't flood the review focus / returned content. */
+function capList(items: string[], n = 8): string {
+  return items.length <= n ? items.join(', ') : `${items.slice(0, n).join(', ')} (+${items.length - n} more)`
 }
 
 function requireDelegate(coordinator: TeamOrchestrateCoordinator): Required<Pick<TeamOrchestrateCoordinator, 'delegate'>>['delegate'] {
@@ -320,6 +339,7 @@ export function createTeamOrchestrateTool(
 
       let reviewNote = ''
       let deliverySynthesis = ''
+      let impactNote = ''
       let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
@@ -372,11 +392,38 @@ export function createTeamOrchestrateTool(
           // Combine planned acceptance gates with scope-leak callouts so the
           // reviewer scrutinizes both the criteria and any unplanned changes.
           const baseFocus = teamReviewFocusHint(waveTasks)
+          // Advisory blast radius (meridian): pull structural downstream
+          // consumers + related tests for the changed files so the reviewer
+          // checks they aren't broken. Input is the diff-derived
+          // observedChangedFiles (guaranteed repo-relative, same field
+          // scope-health uses) — NOT worker self-report, which may be absolute
+          // and would silently miss the repo-relative LIKE match. Never blocks;
+          // any failure is swallowed. Only injected at the terminal-wave review
+          // (this branch only runs when isLastWave).
+          let impactFocus: string | undefined
+          try {
+            const analyzer = coordinator.getMeridianIndexer?.()
+            const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
+            if (analyzer && observed.length > 0) {
+              const impact = analyzer.impact(observed)
+              const consumers = [...impact.direct, ...impact.transitive]
+              const seg: string[] = []
+              if (consumers.length > 0) seg.push(`downstream consumers (verify not broken): ${capList(consumers)}`)
+              if (impact.tests.length > 0) seg.push(`related tests to run: ${capList(impact.tests)}`)
+              if (seg.length > 0) {
+                impactFocus = `Blast radius — ${seg.join('; ')}`
+                impactNote = `\n\nBlast radius [meridian]: ${seg.join('; ')}`
+              }
+            }
+          } catch {
+            // Impact hints are advisory; never affect dispatch or review.
+          }
           const focusParts = [
             baseFocus,
             scopeLeakedFiles.length > 0
               ? `Scope leak — files changed outside the plan, scrutinize these: ${scopeLeakedFiles.join(', ')}`
               : undefined,
+            impactFocus,
           ].filter((s): s is string => Boolean(s))
           const focusHint = focusParts.length > 0 ? focusParts.join(' | ') : undefined
           const reviewDeps = createCoordinatorReviewDeps(
@@ -436,7 +483,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + scopeHealthNote + deliverySynthesis,
+        content: formatTeamSummary(summary, effectiveFromWave) + reviewNote + scopeHealthNote + impactNote + deliverySynthesis,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

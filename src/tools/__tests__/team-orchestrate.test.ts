@@ -489,3 +489,121 @@ test('team_orchestrate emits no scope-health noise when changes stay in plan; su
   assert.equal(result.isError, false)
   assert.doesNotMatch(result.content, /Scope health/)
 })
+
+// ── Meridian blast-radius wiring (advisory) ────────────────────────────────
+
+const NON_EMPTY_IMPACT = {
+  direct: ['src/consumer.ts'],
+  transitive: ['src/api/h.ts'],
+  tests: ['src/__tests__/consumer.test.ts'],
+  totalImpact: 2,
+}
+
+function impactTool(over: {
+  impact?: () => typeof NON_EMPTY_IMPACT
+  getMeridianIndexer?: () => { impact: () => typeof NON_EMPTY_IMPACT } | null
+  capture?: (objective: string) => void
+} = {}) {
+  return createTeamOrchestrateTool({
+    delegate: async request => {
+      over.capture?.(request.objective)
+      return {
+        status: 'completed',
+        packet: 'verified',
+        results: [mkResult({ workOrderId: 'verifier', evidenceStatus: 'verified' })],
+      }
+    },
+    delegateBatch: async () => ({
+      status: 'completed',
+      packet: 'executed',
+      results: [mkResult({
+        // diff targets the planned file → no scope leak; drives observedChangedFiles
+        changedFiles: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/agent/x.ts b/src/agent/x.ts\n--- a/src/agent/x.ts\n+++ b/src/agent/x.ts\n@@\n+x' }],
+        evidenceStatus: 'verified',
+      })],
+    }),
+    ...(over.getMeridianIndexer !== undefined
+      ? { getMeridianIndexer: over.getMeridianIndexer }
+      : { getMeridianIndexer: () => ({ impact: over.impact ?? (() => NON_EMPTY_IMPACT) }) }),
+  })
+}
+
+const impactPlan = '### T1: tweak helper\n修改 `src/agent/x.ts`'
+
+test('team_orchestrate injects meridian blast radius into review focus and content', async () => {
+  let verifierObjective = ''
+  const tool = impactTool({ capture: o => { verifierObjective = o } })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-impact',
+  })
+
+  assert.equal(result.isError, false)
+  // Reaches the reviewer focus.
+  assert.match(verifierObjective, /Blast radius/)
+  assert.match(verifierObjective, /src\/consumer\.ts/)
+  assert.match(verifierObjective, /src\/__tests__\/consumer\.test\.ts/)
+  // And the returned content.
+  assert.match(result.content, /Blast radius \[meridian\]/)
+})
+
+test('team_orchestrate emits no blast-radius noise when impact is empty', async () => {
+  let verifierObjective = ''
+  const tool = impactTool({
+    capture: o => { verifierObjective = o },
+    impact: () => ({ direct: [], transitive: [], tests: [], totalImpact: 0 }),
+  })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-impact-empty',
+  })
+
+  assert.equal(result.isError, false)
+  assert.doesNotMatch(verifierObjective, /Blast radius/)
+  assert.doesNotMatch(result.content, /Blast radius/)
+})
+
+test('team_orchestrate review survives a null/missing meridian indexer', async () => {
+  const tool = impactTool({ getMeridianIndexer: () => null })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-impact-none',
+  })
+
+  assert.equal(result.isError, false)
+  assert.match(result.content, /Review gate \[L2\]/)
+  assert.doesNotMatch(result.content, /Blast radius/)
+})
+
+test('team_orchestrate review survives a throwing impact analyzer', async () => {
+  const tool = createTeamOrchestrateTool({
+    delegate: async () => ({
+      status: 'completed',
+      packet: 'verified',
+      results: [mkResult({ workOrderId: 'verifier', evidenceStatus: 'verified' })],
+    }),
+    delegateBatch: async () => ({
+      status: 'completed',
+      packet: 'executed',
+      results: [mkResult({
+        changedFiles: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/agent/x.ts b/src/agent/x.ts\n--- a/src/agent/x.ts\n+++ b/src/agent/x.ts\n@@\n+x' }],
+        evidenceStatus: 'verified',
+      })],
+    }),
+    getMeridianIndexer: () => ({ impact: () => { throw new Error('boom') } }),
+  })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-impact-throw',
+  })
+
+  assert.equal(result.isError, false)
+  assert.match(result.content, /Review gate \[L2\]/)
+  assert.doesNotMatch(result.content, /Blast radius/)
+})

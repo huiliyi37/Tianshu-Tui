@@ -151,6 +151,39 @@ describe('MeridianIndexer attention indexing scope', () => {
     }
   })
 
+  it('stores resolved import edges so reverse-dependency lookup works end-to-end', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-revdep-'))
+    const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-revdep-state-'))
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'b.ts'), 'export const b = 1\n')
+    writeFileSync(
+      join(cwd, 'src', 'a.ts'),
+      "import { b } from './b.js'\nimport { z } from 'zod'\nexport const a = b\nexport const zz = z\n",
+    )
+    const indexer = new MeridianIndexer(cwd, stateDir)
+    try {
+      await indexer.indexFile('src/a.ts')
+      const db = indexer.getDb()
+
+      // a.ts imports b.ts → b.ts's reverse dependents include a.ts
+      const dependents = db.getReverseDependents('src/b.ts').map(d => d.file)
+      assert.ok(dependents.includes('src/a.ts'), `expected src/a.ts in reverse dependents, got ${JSON.stringify(dependents)}`)
+      assert.ok(indexer.impact(['src/b.ts']).direct.includes('src/a.ts'))
+
+      // External package import (zod) resolves to nothing → no edge created
+      assert.equal(db.getReverseDependents('zod').length, 0)
+
+      // invalidateFile re-parses and must keep import edges resolved (not raw)
+      await indexer.invalidateFile('src/a.ts')
+      const afterInvalidate = db.getReverseDependents('src/b.ts').map(d => d.file)
+      assert.ok(afterInvalidate.includes('src/a.ts'), `expected resolved edge after invalidate, got ${JSON.stringify(afterInvalidate)}`)
+    } finally {
+      indexer.close()
+      rmSync(cwd, { recursive: true, force: true })
+      rmSync(stateDir, { recursive: true, force: true })
+    }
+  })
+
   it('indexFile rejects absolute silent paths without creating DB entries', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'meridian-indexer-idx-'))
     const stateDir = mkdtempSync(join(tmpdir(), 'meridian-indexer-idx-state-'))
