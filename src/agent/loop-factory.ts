@@ -363,6 +363,8 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     },
     advisoryBus: self.advisoryBus,
     sycophancyTrap: self.sycophancyTrap,
+    getEstimatedTokens: () => self.session.getEstimatedTokens(),
+    getContextWindow: () => self.config.contextWindow ?? 128_000,
   }))
 }
 

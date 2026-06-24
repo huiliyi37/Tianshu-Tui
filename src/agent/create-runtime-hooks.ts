@@ -33,6 +33,7 @@ import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
@@ -172,6 +173,12 @@ export interface RuntimeHookDeps {
   onCcrTrigger?: (event: CcrTriggerEvent) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
+
+  // ── Context pressure advisory ──
+  /** Estimated token count (used by context-pressure-hook for ratio warning). */
+  getEstimatedTokens?: () => number
+  /** Context window size (used by context-pressure-hook for ratio warning). */
+  getContextWindow?: () => number
 
   // ── P2 break-anchor scout (preTurn, opt-in real intervention) ──
   /** Present only when antiAnchoring + anchorBreakScout are both enabled and a coordinator exists. */
@@ -391,6 +398,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Context Pressure: afterPerception hook — warns when context window
+  // fill ratio exceeds 70%, suggesting the agent wrap up and hand off to
+  // a new session before the 86% split threshold triggers.
+  if (deps.advisoryBus && deps.getEstimatedTokens && deps.getContextWindow) {
+    hooks.push(createContextPressureHook({
+      advisoryBus: deps.advisoryBus,
+      getEstimatedTokens: deps.getEstimatedTokens,
+      getContextWindow: deps.getContextWindow,
+    }))
   }
 
   // Spec-Verify Gate: preTurn hook — detects "read spec → implement

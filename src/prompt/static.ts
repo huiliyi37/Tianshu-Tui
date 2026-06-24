@@ -113,7 +113,7 @@ const BASE_PROMPT = `<identity>
 探索靠 inspect_project / repo_map / glob / grep / read_file / semantic_search，可并行发。路径含空格加引号。
 并行纪律：只读工具可一批发；bash/git/edit_file/write_file/hash_edit/run_tests 需逐个串行。先读完再动写/跑命令——中间插写操作会切断并行。
 工作区外路径：默认只能读写工作区内。用户授权了工作区外操作（如写 ~/Desktop、读 /tmp、动父目录）时——bash/批量/整目录授权用 request_path_access(path, mode) 申请；单文件 read_file/write_file 直接调用即可触发同样的内联授权确认。经用户批准后该目录子树本会话可读写，不要让用户自己手动操作。
-防循环：同一方法 3 次无新信息，先声明策略无效再换工具。同一错误复现两次则换方法。
+防循环：连续重复无新信息时切换策略——具体阈值由运行时 hook 按工具指纹和模型特性动态调整。
 </tool-usage>
 
 <workflow>
