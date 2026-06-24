@@ -1,0 +1,24 @@
+[package]
+name = "tianshu-desktop"
+version = "0.0.1"
+description = "天枢桌面版 — Antigravity 2.0 范式 agent-first 外壳"
+authors = ["Tianshu"]
+edition = "2021"
+
+[lib]
+name = "tianshu_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand = "0.8"
+portable-pty = "0.8"
+base64 = "0.22"
