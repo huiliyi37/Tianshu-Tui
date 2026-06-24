@@ -2,7 +2,13 @@ export interface GoalTrackerConfig {
   goal: string
   maxIterations: number
   contextWindow: number
+  /** Concrete success criteria the completion judge checks against. */
+  successCriteria?: string[]
+  /** Max judge runs before accepting a self-declared completion (anti judge-reject loop). Default 3. */
+  maxJudgeRuns?: number
 }
+
+const DEFAULT_MAX_JUDGE_RUNS = 3
 
 /**
  * Build the goal-mode driver prompt. Single source of truth shared by the TUI
@@ -29,11 +35,16 @@ export class GoalTracker {
   private readonly _maxIterations: number
   private readonly _contextWindow: number
   private _deactivationReason: GoalDeactivationReason | null = null
+  private _successCriteria: string[]
+  private readonly _maxJudgeRuns: number
+  private _judgeRuns = 0
 
   constructor(config: GoalTrackerConfig) {
     this._goal = config.goal
     this._maxIterations = config.maxIterations
     this._contextWindow = config.contextWindow
+    this._successCriteria = config.successCriteria ? [...config.successCriteria] : []
+    this._maxJudgeRuns = config.maxJudgeRuns ?? DEFAULT_MAX_JUDGE_RUNS
     this._active = true
   }
 
@@ -92,6 +103,31 @@ export class GoalTracker {
   /** Advance iteration counter. Called when a continuation is decided. */
   advanceIteration(): void {
     this._iteration++
+  }
+
+  /** Success criteria the judge verifies against (may be empty → wide judgment). */
+  getSuccessCriteria(): string[] {
+    return [...this._successCriteria]
+  }
+
+  /** Set the criteria extracted from the goal (called once at goal start). */
+  setSuccessCriteria(criteria: string[]): void {
+    this._successCriteria = [...criteria]
+  }
+
+  /** Number of times the completion judge has run for this goal. */
+  getJudgeRuns(): number {
+    return this._judgeRuns
+  }
+
+  /** Cap on judge runs; once reached a self-declared completion is accepted unverified. */
+  getMaxJudgeRuns(): number {
+    return this._maxJudgeRuns
+  }
+
+  /** Record that the judge ran once (called on every judge invocation). */
+  recordJudgeRun(): void {
+    this._judgeRuns++
   }
 
   /** Deactivate the tracker (goal done, cancelled, or budget exhausted).

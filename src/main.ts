@@ -240,12 +240,30 @@ async function main() {
         const session = new SessionContext()
         const agent = new AgentLoop({ ...agentCfg, toolRegistry, maxTurns: headlessMaxTurns }, session, process.cwd())
         if (parsed.goal) {
-          goalTrackerRef.current = new GoalTracker({
+          const tracker = new GoalTracker({
             goal: parsed.goal,
             maxIterations: goalBudget,
             contextWindow: model.contextWindow ?? 0,
+            maxJudgeRuns: agent.config.goalJudge?.maxRuns,
           })
-          agent.setGoalTracker(goalTrackerRef.current)
+          goalTrackerRef.current = tracker
+          agent.setGoalTracker(tracker)
+          // Side-path criteria extraction for the completion judge. Async + fail-open:
+          // criteria default to a generic template, and with no coordinator wired in
+          // headless the judge degrades to inconclusive (accept+warning), never blocking.
+          if (agent.config.goalJudge?.enabled !== false) {
+            const goal = parsed.goal
+            void (async () => {
+              try {
+                const { extractGoalCriteria, completionFromClient } = await import('./agent/goal-criteria.js')
+                const criteria = await extractGoalCriteria(goal, completionFromClient(agent.config.client, model.id))
+                tracker.setSuccessCriteria(criteria)
+                process.stderr.write(`[goal] judge criteria:\n${criteria.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}\n`)
+              } catch {
+                // non-fatal — judge falls back to wide judgment
+              }
+            })()
+          }
         }
         return agent
       },

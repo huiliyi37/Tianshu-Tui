@@ -142,6 +142,51 @@ describe('GoalTracker', () => {
   })
 })
 
+describe('GoalTracker judge fields', () => {
+  it('defaults to empty criteria and maxJudgeRuns=3', () => {
+    const t = new GoalTracker(makeConfig())
+    assert.deepEqual(t.getSuccessCriteria(), [])
+    assert.equal(t.getMaxJudgeRuns(), 3)
+    assert.equal(t.getJudgeRuns(), 0)
+  })
+
+  it('accepts criteria and maxJudgeRuns from config', () => {
+    const t = new GoalTracker(makeConfig({ successCriteria: ['a', 'b'], maxJudgeRuns: 5 }))
+    assert.deepEqual(t.getSuccessCriteria(), ['a', 'b'])
+    assert.equal(t.getMaxJudgeRuns(), 5)
+  })
+
+  it('setSuccessCriteria replaces criteria with a defensive copy', () => {
+    const t = new GoalTracker(makeConfig())
+    const src = ['c1']
+    t.setSuccessCriteria(src)
+    src.push('mutated')
+    assert.deepEqual(t.getSuccessCriteria(), ['c1'])
+  })
+
+  it('getSuccessCriteria returns a copy (caller cannot mutate internal state)', () => {
+    const t = new GoalTracker(makeConfig({ successCriteria: ['x'] }))
+    t.getSuccessCriteria().push('y')
+    assert.deepEqual(t.getSuccessCriteria(), ['x'])
+  })
+
+  it('recordJudgeRun increments toward the cap', () => {
+    const t = new GoalTracker(makeConfig({ maxJudgeRuns: 2 }))
+    assert.equal(t.getJudgeRuns(), 0)
+    t.recordJudgeRun()
+    assert.equal(t.getJudgeRuns(), 1)
+    t.recordJudgeRun()
+    assert.equal(t.getJudgeRuns(), 2)
+    assert.equal(t.getJudgeRuns() >= t.getMaxJudgeRuns(), true)
+  })
+
+  it('check() regex behavior is unchanged by judge fields', () => {
+    const t = new GoalTracker(makeConfig({ successCriteria: ['a'], maxJudgeRuns: 1 }))
+    assert.equal(t.check('GOAL ACHIEVED', 1000, false).reason, 'achieved')
+    assert.equal(t.check('still working', 1000, false).reason, 'continue')
+  })
+})
+
 describe('buildGoalModePrompt', () => {
   it('embeds the goal text', () => {
     assert.ok(buildGoalModePrompt('make all tests pass').includes('make all tests pass'))

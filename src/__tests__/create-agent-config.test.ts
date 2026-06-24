@@ -42,6 +42,7 @@ const testConfig = {
     modelRoutingGatedEnabled: false,
     banditPromotion: { modelTier: 'shadow', teamScheduler: 'shadow', modelRouting: 'shadow', effort: 'shadow', killSwitch: false },
     permissions: { allow: [], bash: { allowlist: [] } },
+    goal: { judge: { enabled: true, maxRuns: 3, browser: false } },
   },
   compact: { enabled: true, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
 } satisfies Pick<Config, 'agent' | 'compact'>

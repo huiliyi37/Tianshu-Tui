@@ -520,10 +520,27 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         goal: goalText,
         maxIterations,
         contextWindow: ctx.maxTokens,
+        maxJudgeRuns: ctx.agent.config.goalJudge?.maxRuns,
       })
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
       pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
+      // Side-path: extract concrete success criteria the completion judge will
+      // verify against. Async (never blocks goal start); criteria default to a
+      // generic template on failure, and the judge does wide judgment if empty.
+      if (ctx.agent.config.goalJudge?.enabled !== false) {
+        void (async () => {
+          try {
+            const { extractGoalCriteria, completionFromClient } = await import('../agent/goal-criteria.js')
+            const model = ctx.agent.config.promptEngine.getModel()
+            const criteria = await extractGoalCriteria(goalText, completionFromClient(ctx.agent.config.client, model))
+            tracker.setSuccessCriteria(criteria)
+            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
+          } catch {
+            // extraction failure is non-fatal — judge falls back to wide judgment
+          }
+        })()
+      }
       setIsStreaming(false)
       // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
       ctx.submitToAgent?.(buildGoalModePrompt(goalText))

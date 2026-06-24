@@ -20,8 +20,8 @@ describe('ProfileRegistry', () => {
     registry = new ProfileRegistry()
   })
 
-  it('has 17 built-in profiles (9 core + 6 flash-army + designer + council_expert)', async () => {
-    assert.equal(registry.list().length, 17)
+  it('has 18 built-in profiles (9 core + 6 flash-army + designer + council_expert + goal_judge)', async () => {
+    assert.equal(registry.list().length, 18)
   })
 
   it('maps code_scout as readonly', async () => {
@@ -83,9 +83,9 @@ describe('ProfileRegistry', () => {
     assert.deepEqual(ro.sort(), ['architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'format_checker', 'reviewer', 'troubleshooter'])
   })
 
-  it('getProfileNames returns all 17 names', async () => {
+  it('getProfileNames returns all 18 names', async () => {
     const names = registry.getProfileNames().sort()
-    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
+    assert.deepEqual(names, ['adversarial_verifier', 'architect', 'code_scout', 'council_expert', 'designer', 'doc_scout', 'doc_syncer', 'format_checker', 'goal_judge', 'import_organizer', 'lint_fixer', 'patcher', 'planner', 'reviewer', 'test_scaffolder', 'troubleshooter', 'type_fixer', 'verifier'])
   })
 
   it('rejects overriding built-in profiles', async () => {

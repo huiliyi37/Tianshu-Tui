@@ -513,6 +513,38 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getLatestRisk: () => self.latestRisk,
     setLatestRisk: (v) => { self.latestRisk = v },
     setThetaRequestsThisTurn: (v) => { self.thetaRequestsThisTurn = v },
+
+    // === Goal completion judge ===
+    getGoalJudgeDeps: () => {
+      // Disabled explicitly → undefined → orchestrator keeps legacy accept-on-marker.
+      if (self.config.goalJudge?.enabled === false) return undefined
+      const coordinator = self.config.coordinatorRef?.()
+      // Enabled but no coordinator to spawn the judge → empty deps → runGoalJudge
+      // returns inconclusive (fail-open accept+warning), never blocking the loop.
+      if (!coordinator) return {}
+      return {
+        spawnJudge: (objective, scope, signal) => coordinator.delegate({
+          parentTurnId: 'goal:judge',
+          objective,
+          kind: 'verify',
+          profile: 'goal_judge',
+          scope,
+        }, signal),
+      }
+    },
+    getGoalJudgeEvidence: () => {
+      const state = self.evidence.getState()
+      const modifiedFiles = [...state.filesModified]
+      const readFiles = [...state.filesRead]
+      const verifications = state.verifications.map(v =>
+        `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`)
+      const text = [
+        modifiedFiles.length > 0 ? `Modified files: ${modifiedFiles.join(', ')}` : '',
+        readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
+        verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
+      ].filter(Boolean).join('\n')
+      return { text, modifiedFiles }
+    },
   })
 }
 

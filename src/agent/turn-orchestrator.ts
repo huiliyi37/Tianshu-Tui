@@ -22,6 +22,7 @@ import { evaluateThinkingRetry } from './thinking-retry.js'
 import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import { debugLog } from '../utils/debug.js'
 import type { GoalTracker } from './goal-tracker.js'
+import { runGoalJudge, type GoalJudgeDeps } from './goal-judge.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -206,6 +207,12 @@ export interface TurnOrchestratorDeps {
   getLatestRisk: () => RiskAssessment
   setLatestRisk: (v: RiskAssessment) => void
   setThetaRequestsThisTurn: (v: number) => void
+
+  // === Goal completion judge (optional) ===
+  /** Provides judge spawn deps. Undefined → judge disabled (legacy accept-on-marker). */
+  getGoalJudgeDeps?: () => GoalJudgeDeps | undefined
+  /** Formatted evidence snapshot + modified files for scoping the judge worker. */
+  getGoalJudgeEvidence?: () => { text: string; modifiedFiles: string[] }
 }
 
 // ── Standalone: wrapCallbacksWithHeartbeat ──
@@ -252,6 +259,82 @@ export class TurnOrchestrator {
   }
 
   constructor(private deps: TurnOrchestratorDeps) {}
+
+  /**
+   * Gate a self-declared goal completion through the independent judge.
+   *
+   * Returns `accept` (with a closing reminder) when the judge verifies the goal,
+   * when the judge run cap is reached, or when the verdict is inconclusive
+   * (fail-open). Returns `continue` (with a tailored reminder listing the unmet
+   * criteria) only when the judge concretely rejects AND the cap is not yet hit.
+   *
+   * Backward-compatible: when no judge deps are wired the legacy accept-on-marker
+   * behavior is preserved exactly.
+   */
+  private async judgeGoalCompletion(
+    tracker: GoalTracker,
+    signal: AbortSignal | undefined,
+  ): Promise<{ action: 'accept' | 'continue'; reminder: string }> {
+    const achievedReminder = (suffix = ''): string =>
+      `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。${suffix}\n` +
+      `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
+
+    const judgeDeps = this.deps.getGoalJudgeDeps?.()
+    if (!judgeDeps) {
+      // Judge disabled (config off or not wired) — legacy accept-on-marker.
+      return { action: 'accept', reminder: achievedReminder() }
+    }
+
+    tracker.recordJudgeRun()
+    const evidence = this.deps.getGoalJudgeEvidence?.() ?? { text: '', modifiedFiles: [] }
+    const verdict = await rejectOnAbort(
+      runGoalJudge(judgeDeps, {
+        objective: tracker.getGoal(),
+        criteria: tracker.getSuccessCriteria(),
+        evidence: evidence.text,
+        finalClaim: this.deps.getStreamedText(),
+        scopeFiles: evidence.modifiedFiles,
+        signal,
+      }),
+      signal!,
+      'goal-judge',
+    )
+
+    if (verdict.overall === 'verified') {
+      return { action: 'accept', reminder: achievedReminder(' Judge 已独立核验全部验收项。') }
+    }
+
+    if (verdict.overall === 'rejected') {
+      if (tracker.getJudgeRuns() < tracker.getMaxJudgeRuns()) {
+        const unmet = verdict.criteria
+          .filter(c => c.met === false)
+          .map(c => `- ${c.criterion}${c.evidence ? `（证据: ${c.evidence}）` : ''}`)
+        const iter = tracker.getIteration()
+        const maxIter = tracker.getMaxIterations()
+        return {
+          action: 'continue',
+          reminder:
+            `[GOAL JUDGE 驳回 ${tracker.getJudgeRuns()}/${tracker.getMaxJudgeRuns()}] 完成声明未通过独立核验，继续执行。\n` +
+            `目标: ${tracker.getGoal()}\n` +
+            `未达成的验收项:\n${unmet.length > 0 ? unmet.join('\n') : `- ${verdict.summary || '判定未达成'}`}\n` +
+            `请修复后再次输出 "GOAL ACHIEVED"。（迭代 ${iter}/${maxIter}）`,
+        }
+      }
+      // Cap reached: stop re-judging to avoid burning the budget in a reject loop.
+      return {
+        action: 'accept',
+        reminder: achievedReminder(
+          ` ⚠️ Judge 仍判定未完全达成（已达 ${tracker.getMaxJudgeRuns()} 次核验上限，接受为未完全验证）。残留: ${verdict.summary || '见上轮判定'}。`,
+        ),
+      }
+    }
+
+    // inconclusive — fail-open: accept but flag as unverified.
+    return {
+      action: 'accept',
+      reminder: achievedReminder(` ⚠️ Judge 未能独立验证（${verdict.summary || '原因未知'}），接受为未验证完成。`),
+    }
+  }
 
   /**
    * Execute the full turn loop for a single run() invocation.
@@ -718,6 +801,10 @@ export class TurnOrchestrator {
         // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
         const tracker = this.goalTracker
         let shouldContinueGoal = false
+        // When the judge rejects a self-declared completion, it supplies a
+        // tailored continuation reminder (unmet criteria + evidence) that
+        // overrides the generic goal-continuation message below.
+        let judgeContinuationReminder: string | null = null
         if (tracker?.isActive()) {
           const goalResult = tracker.check(
             this.deps.getStreamedText(),
@@ -727,20 +814,23 @@ export class TurnOrchestrator {
           if (goalResult.shouldContinue) {
             shouldContinueGoal = true
             tracker.advanceIteration()
+          } else if (goalResult.reason === 'achieved') {
+            // Self-declared completion: gate it through the independent judge
+            // before accepting. The judge may reject and demand a continuation.
+            const decision = await this.judgeGoalCompletion(tracker, signal)
+            if (decision.action === 'continue') {
+              shouldContinueGoal = true
+              judgeContinuationReminder = decision.reminder
+              tracker.advanceIteration()
+            } else {
+              this.deps.appendSystemReminder(decision.reminder)
+              tracker.deactivate('achieved')
+            }
           } else {
-            // Any terminal reason: deactivate the tracker so subsequent turns
-            // aren't checked. Emit a closing message for achievement.
-            // Map check reason to deactivation reason for post-goal review gating.
-            const deactivationReason = goalResult.reason === 'achieved' ? 'achieved'
-              : goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
+            // budget/context/cancelled: deactivate so later turns aren't checked.
+            const deactivationReason = goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
               : goalResult.reason === 'context_limit' ? 'context_limit'
               : 'cancelled'
-            if (goalResult.reason === 'achieved') {
-              this.deps.appendSystemReminder(
-                `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。\n` +
-                `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
-              )
-            }
             tracker.deactivate(deactivationReason)
           }
         }
@@ -753,14 +843,18 @@ export class TurnOrchestrator {
             signal!,
             'goal-continue-complete',
           )
-          const iter = tracker!.getIteration()
-          const maxIter = tracker!.getMaxIterations()
-          this.deps.appendSystemReminder(
-            `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
-            `目标: ${tracker!.getGoal()}\n` +
-            `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
-            `完成后输出 "GOAL ACHIEVED" 声明完成。`
-          )
+          if (judgeContinuationReminder) {
+            this.deps.appendSystemReminder(judgeContinuationReminder)
+          } else {
+            const iter = tracker!.getIteration()
+            const maxIter = tracker!.getMaxIterations()
+            this.deps.appendSystemReminder(
+              `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
+              `目标: ${tracker!.getGoal()}\n` +
+              `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
+              `完成后输出 "GOAL ACHIEVED" 声明完成。`
+            )
+          }
           continue  // re-enter the for loop for the next iteration
         }
 

@@ -137,6 +137,13 @@ export const DEFAULT_CONFIG: Config = {
       allow: [],
       bash: { allowlist: [] },
     },
+    goal: {
+      judge: {
+        enabled: true,
+        maxRuns: 3,
+        browser: false,
+      },
+    },
   },
   compact: {
     enabled: true,
