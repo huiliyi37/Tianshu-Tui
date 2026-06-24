@@ -139,6 +139,51 @@ describe('DELEGATE_TASK_TOOL', () => {
     assert.equal(tool.isEnabled(), true)
   })
 
+  it('passes resume param through to the coordinator', async () => {
+    const calls: DelegationRequest[] = []
+    const coordinator: DelegateTaskCoordinator = {
+      delegate: async request => {
+        calls.push(request)
+        return makeRun()
+      },
+    }
+    const tool = createDelegateTaskTool(coordinator)
+
+    await tool.execute({
+      toolUseId: 'tu_delegate',
+      cwd: '/repo',
+      input: {
+        objective: 'Continue the previous search with a different angle.',
+        resume: 'wo_abc123',
+      },
+    })
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]!.resumeWorkOrderId, 'wo_abc123')
+  })
+
+  it('resume is optional — not passing it yields undefined resumeWorkOrderId', async () => {
+    const calls: DelegationRequest[] = []
+    const coordinator: DelegateTaskCoordinator = {
+      delegate: async request => {
+        calls.push(request)
+        return makeRun()
+      },
+    }
+    const tool = createDelegateTaskTool(coordinator)
+
+    await tool.execute({
+      toolUseId: 'tu_delegate',
+      cwd: '/repo',
+      input: {
+        objective: 'Find routing seams across the runtime modules.',
+      },
+    })
+
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]!.resumeWorkOrderId, undefined)
+  })
+
   describe('progressive timeout', () => {
     const base = { input: {}, toolUseId: 'tu', cwd: '/tmp' }
     // P0: tool-level timeout = ladder/profile budget + 30s exit grace, so the

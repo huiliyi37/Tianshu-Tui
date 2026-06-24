@@ -34,6 +34,9 @@ const delegateTaskInputSchema = z.object({
   authority: authorityStringSchema.optional(),
   files: z.array(z.string()).optional(),
   symbols: z.array(z.string()).optional(),
+  resume: z.string().optional().describe(
+    'Optional worker ID to resume instead of creating a new worker. When provided, the worker continues from its previous session history. The objective should describe the continuation task.',
+  ),
 })
 
 function formatUiContent(run: CoordinatorRun): string {
@@ -63,6 +66,7 @@ export function createDelegateTaskTool(
           authority: { type: 'string', description: 'Optional star-domain persona (e.g. tianquan, tianji, yuheng). Injects that expert\'s perspective + methodology and restricts tools to its whitelist.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional file paths to focus on.' },
           symbols: { type: 'array', items: { type: 'string' }, description: 'Optional symbols to focus on.' },
+          resume: { type: 'string', description: 'Worker ID to resume. The worker continues from its previous session context instead of starting fresh. Use the workOrderId from a previous delegate_task result.' },
         },
         required: ['objective'],
       },
@@ -126,6 +130,7 @@ export function createDelegateTaskTool(
         delegationDepth: params.delegationDepth ?? 0,
         sessionTurn: params.sessionTurnCount,
         onActivity,
+        resumeWorkOrderId: parsed.data.resume,
       }, params.abortSignal)
 
       // T4: terminal per-worker status for the subagent panel.

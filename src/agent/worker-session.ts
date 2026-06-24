@@ -65,6 +65,11 @@ export interface WorkerSessionConfig {
    *  progress, findings, and escalations through this channel. The coordinator
    *  drains the mailbox after the wave completes. */
   mailbox?: WorkerMailbox
+  /** Prior conversation history to resume from. When provided, the session is
+   *  pre-seeded with these messages before the first agent.run(), so the worker
+   *  sees its previous context. The current objective is appended as a new user
+   *  message on top of the history. */
+  priorMessages?: readonly import('../api/oai-types.js').OaiMessage[]
 }
 
 export type WorkerActivityKind = 'text' | 'thinking' | 'tool_use' | 'tool_result'
@@ -206,6 +211,12 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
   const prompt = baseParts.join('\n\n')
 
   const session = new SessionContext()
+  // Session resume: pre-seed the conversation history so the worker continues
+  // from its previous context. The new objective is then appended as a fresh
+  // user message by agent.run() below.
+  if (config.priorMessages && config.priorMessages.length > 0) {
+    session.replaceMessages([...config.priorMessages])
+  }
   const agent = new AgentLoop({
     client: config.client,
     promptEngine: config.promptEngine,

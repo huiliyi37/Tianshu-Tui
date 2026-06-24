@@ -29,6 +29,7 @@ import {
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
+import { saveWorkerSession, loadWorkerSession } from './worker-session-persist.js'
 import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liveness.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
@@ -60,6 +61,7 @@ import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-se
 import { buildHistoricalModelRewards } from './model-reward-summary.js'
 import type { EFEComponents } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
+import type { OaiMessage } from '../api/oai-types.js'
 
 /** Per-turn free-energy signals pulled from the primary loop at delegation time. */
 export interface EFERoutingSignals {
@@ -134,6 +136,11 @@ export interface DelegationRequest {
    *  precedence over profile defaults — used e.g. by the auto wiring review
    *  to run a reviewer-profile worker on a short, non-blocking budget. */
   budget?: Partial<WorkerBudget>
+  /** Resume a previous worker session by work order id. When provided, the
+   *  coordinator loads the prior session's messages and the worker continues
+   *  from that context instead of starting fresh. The objective should
+   *  describe the continuation task. */
+  resumeWorkOrderId?: string
 }
 
 export interface CoordinatorRun {
@@ -278,6 +285,13 @@ function blockedDependencyResult(order: WorkOrder, unmetDeps: string[], failedDe
  *  TTL/cap this write-mostly sink grew unbounded (one+ file per worker, forever). */
 export const MAX_SUBAGENT_RESULTS = 500
 
+/** Minimum acceptable summary length. When a worker's summary is shorter, the
+ *  coordinator auto-triggers a follow-up expansion turn so the parent agent
+ *  receives a technically complete handoff. */
+export const SUMMARY_MIN_LENGTH = 200
+/** Max follow-up attempts for brief summaries. 1 = single retry, then accept. */
+export const SUMMARY_CONTINUATION_ATTEMPTS = 1
+
 /** LRU-evict ~/.rivet/subagents/ down to `limit` files (oldest mtime first).
  *  Best-effort and exported for testing. Returns the basenames evicted. */
 export function evictOldSubagentResults(dir: string, limit = MAX_SUBAGENT_RESULTS): string[] {
@@ -392,6 +406,10 @@ export class DelegationCoordinator {
   /** T9 P3: per-order real-time activity upstream (request callback survives
    *  the zod request→order conversion via this side table). */
   private readonly activityUpstream = new Map<string, (event: WorkerActivityEvent) => void>()
+  /** Per-order prior messages for session resume. Set by delegate() when
+   *  resumeWorkOrderId is provided; consumed by delegateOrder() when building
+   *  the worker config. Side-table pattern (same as activityUpstream). */
+  private readonly resumeMessages = new Map<string, readonly OaiMessage[]>()
   private stallSweep: ReturnType<typeof setInterval> | null = null
   /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
   private proUpgradeCount = 0
@@ -460,6 +478,7 @@ export class DelegationCoordinator {
     }
     this.orderControllers.clear()
     this.activityUpstream.clear()
+    this.resumeMessages.clear()
     this.backgroundRuns.clear()
     this.backgroundPromises.clear()
   }
@@ -871,11 +890,70 @@ export class DelegationCoordinator {
 
       // T9 P3: callbacks don't survive zod parsing — stash by order id.
       if (request.onActivity) this.activityUpstream.set(order.id, request.onActivity)
+      // Session resume: load prior messages from disk so the worker continues
+      // from its previous context. Degrades to a fresh worker if no history.
+      if (request.resumeWorkOrderId) {
+        const record = loadWorkerSession(request.resumeWorkOrderId)
+        if (record) {
+          this.resumeMessages.set(order.id, record.messages)
+          debugLog(`[worker-resume] loaded ${record.messages.length} messages from ${request.resumeWorkOrderId} for ${order.id}`)
+        } else {
+          debugLog(`[worker-resume] no prior session for ${request.resumeWorkOrderId} — starting fresh`)
+        }
+      }
       const run = await this.delegateOrder(order)
       return this.drainMailboxIntoRun(run)
     } finally {
       this.config.abortSignal = savedSignal
     }
+  }
+
+  /**
+   * Summary quality gate: when the worker returns a brief summary, trigger a
+   * follow-up expansion turn so the parent agent receives a technically complete
+   * handoff. The expansion reuses the worker's session messages as priorMessages
+   * so it continues from the same context. Returns the (possibly expanded) result
+   * and updated sessionMessages.
+   */
+  private async maybeExpandSummary(
+    order: WorkOrder,
+    workerConfig: WorkerSessionConfig,
+    mergedSignal: AbortSignal,
+    currentResult: WorkerResult,
+    sessionMessages: readonly OaiMessage[],
+  ): Promise<{ result: WorkerResult; sessionMessages: readonly OaiMessage[] }> {
+    let result = currentResult
+    let messages = sessionMessages
+
+    for (let attempt = 0; attempt < SUMMARY_CONTINUATION_ATTEMPTS; attempt++) {
+      if (result.summary.length >= SUMMARY_MIN_LENGTH) break
+      // Only expand passed results — blocked/failed results are inherently terse
+      if (result.status !== 'passed') break
+
+      const expansionOrder: WorkOrder = {
+        ...order,
+        objective: `Your previous summary was too brief (${result.summary.length} chars). Expand it to at least ${SUMMARY_MIN_LENGTH} characters. Include: what you found, what you changed, what remains open. Previous summary: "${result.summary}"`,
+      }
+      const expansionConfig: WorkerSessionConfig = {
+        ...workerConfig,
+        order: expansionOrder,
+        priorMessages: messages,
+      }
+      try {
+        const expansionRun = await this.runWorker(expansionConfig)
+        const expandedResult = expansionRun.result
+        // Only accept the expansion if it's actually longer
+        if (expandedResult.summary.length > result.summary.length) {
+          result = expandedResult
+          messages = expansionRun.session.getMessages()
+        }
+      } catch {
+        // Expansion failure is not critical — keep the original result
+        break
+      }
+    }
+
+    return { result, sessionMessages: messages }
   }
 
   private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
@@ -969,6 +1047,12 @@ export class DelegationCoordinator {
     workerConfig.reviewDepth = order.reviewDepth
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
+    // Session resume: inject prior messages so the worker continues from its
+    // previous context. Side-table pattern (same as activityUpstream).
+    const priorMessages = this.resumeMessages.get(order.id)
+    if (priorMessages && priorMessages.length > 0) {
+      workerConfig.priorMessages = priorMessages
+    }
 
     // A4: per-order AbortController merged with the parent signal — the stall
     // sweep can abort ONLY this worker without touching its batch siblings,
@@ -996,7 +1080,7 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] } | undefined
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[] } | undefined
 
     // T3: escalation shadow events collected during retry
     const escalationShadows: ModelTierShadowEvent[] = []
@@ -1159,7 +1243,10 @@ export class DelegationCoordinator {
         }
       } else {
         const workerRun = await wrapAbort(this.runWorker(workerConfig))
-        run = { result: workerRun.result, transcript: workerRun.transcript }
+        const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+          ? workerRun.session.getMessages()
+          : undefined
+        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
       }
     } catch (error) {
       // Physarum health: worker run threw (API/runtime fault, not task outcome).
@@ -1248,7 +1335,10 @@ export class DelegationCoordinator {
               // P1-1: increment quota and write escalation shadow for read-only retry
               escalationShadows.push(this.recordEscalation(order, strongCard, msg))
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
-              run = { result: workerRun.result, transcript: workerRun.transcript }
+              const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+                ? workerRun.session.getMessages()
+                : undefined
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
             }
             // Upgrade succeeded — record provider outcome; circuit recovery for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, true)
@@ -1298,6 +1388,7 @@ export class DelegationCoordinator {
       this.liveness.unregister(order.id)
       this.orderControllers.delete(order.id)
       this.activityUpstream.delete(order.id)
+      this.resumeMessages.delete(order.id)
       if (this.liveness.size() === 0) this.stopStallSweep()
       if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
         this.collaboration.releaseLocks(this.config.sessionId)
@@ -1335,6 +1426,13 @@ export class DelegationCoordinator {
 
     const profileMap = new Map([[order.id, order.profile]])
     const transcriptMap = run.transcript ? new Map([[order.id, run.transcript]]) : undefined
+
+    // Summary quality gate: expand brief summaries before persisting/returning.
+    if (run.sessionMessages && run.sessionMessages.length > 0 && run.result.status === 'passed' && run.result.summary.length < SUMMARY_MIN_LENGTH) {
+      const expanded = await this.maybeExpandSummary(order, workerConfig, mergedSignal, run.result, run.sessionMessages)
+      run = { ...run, result: expanded.result, sessionMessages: expanded.sessionMessages }
+    }
+
     const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
 
     // V3 Component B-loop: precipitate domain lessons from results
@@ -1350,6 +1448,11 @@ export class DelegationCoordinator {
     const fp = fingerprintRequest(order.objective, order.scope.files, order.profile)
     for (const r of results) {
       persistWorkerResult(r, fp)
+    }
+
+    // Save worker session history for resume support. Best-effort: never blocks.
+    if (run.sessionMessages && run.sessionMessages.length > 0) {
+      saveWorkerSession(order.id, order.profile, order.objective, run.sessionMessages)
     }
 
     return {
