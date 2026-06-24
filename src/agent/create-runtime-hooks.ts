@@ -30,6 +30,7 @@ import { createUserHooksBridge, type UserHooksBridgeDeps } from './hooks/user-ho
 import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.js'
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
+import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { AnchorGraph } from '../prompt/anchor-graph.js'
@@ -371,6 +372,12 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // to self-verify before building on the conclusions.
   if (deps.advisoryBus) {
     hooks.push(createSelfVerifyHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Spec-Verify Gate: preTurn hook — detects "read spec → implement
+  // without verification" jumps and injects a constitutional advisory.
+  if (deps.advisoryBus) {
+    hooks.push(createSpecVerifyGateHook({ advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {
