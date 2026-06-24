@@ -378,7 +378,8 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Edit-Tool Advisory: postTool hook — detects consecutive hash_edit calls
   // on the same file (the #1 cause of bracket-mismatch debris). Uses a
   // turn-scoped Map to avoid the 5-entry recentToolHistory window limit.
-  if (deps.advisoryBus) {
+  // Gated by RIVET_EDIT_SMART_ROUTING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_EDIT_SMART_ROUTING !== '0') {
     hooks.push(createEditToolAdvisoryHook({ advisoryBus: deps.advisoryBus }))
   }
 
