@@ -51,6 +51,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "diff": "^9.0.0",
+    "get-east-asian-width": "^1.6.0",
     "ink": "^6.8.0",
     "react": "^19.2.6",
     "string-width": "^8.2.1",
