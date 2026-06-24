@@ -51,3 +51,17 @@ docs/sessions/
 .tmp-abort-*
 .tmp-test-fixture
 .test-tmp/
+
+# === Agent / tool 运行态（生成物，非源码）===
+# .rivet: 策展子目录(knowledge/skills/plans/agents/...)保持跟踪，仅忽略纯运行态
+.rivet/backups/
+.rivet/vsw/
+.rivet/semantic-index.json
+.rivet/recovery-journal.jsonl
+.rivet/presence.json
+.rivet/constellation.json
+# 其它无策展内容的工具目录，整目录忽略
+.cursor/
+.od-skills/
+# 误产生的空文件
+/js
