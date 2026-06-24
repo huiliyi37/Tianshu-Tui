@@ -85,21 +85,21 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const narrow = input.narrow ?? input.width < 60
   const parts: string[] = []
   if (input.modelName) {
-    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
   }
   if (input.cacheHitRate !== undefined) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)
-    const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.dim
+    const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted
     parts.push(color(`⚡${cachePct}%`, cacheColor))
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
   if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
-    const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.dim
+    const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.muted
     parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
-    parts.push(color(`$${input.cost.toFixed(2)}`, theme.dim))
+    parts.push(color(`${input.cost.toFixed(2)}`, theme.muted))
   }
   const zone3 = parts.join('  ')
 
@@ -107,7 +107,7 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   if (input.elapsedMs !== undefined) {
     zone4 = formatElapsed(input.elapsedMs)
   }
-  const elapsedPart = color(zone4, theme.dim)
+  const elapsedPart = color(zone4, theme.muted)
 
   return [zone3, elapsedPart].filter(Boolean).join('  ')
 }
@@ -132,7 +132,7 @@ export function formatGlanceBar(input: GlanceBarInput, theme: RivetTheme): strin
     const narrow = input.narrow ?? input.width < 60
     const parts: string[] = []
     if (input.modelName) {
-      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
+      parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
     }
     const rightSep = '  '
     let accumulated = 0

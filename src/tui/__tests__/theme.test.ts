@@ -15,11 +15,12 @@ describe('getTheme', () => {
     assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
   })
 
-  it('tianshu uses cinnabar user mark + neutral body text', () => {
+  it('tianshu uses cinnabar user mark + bright neutral body + readable muted', () => {
     const theme = getTheme(3)
     assert.equal(theme.userColor, '#d4453a')      // 朱砂印 ▌ mark
-    assert.equal(theme.assistantColor, '#c5c8d2') // 亮灰正文
-    assert.equal(theme.muted, '#9497a6')          // 元信息灰
+    assert.equal(theme.assistantColor, '#d2d5dd') // 亮灰正文 (提亮至 #d2d5dd)
+    assert.equal(theme.muted, '#adb2bf')          // 元信息灰 (提亮 ~6.5:1)
+    assert.equal(theme.systemColor, '#adb2bf')    // 与 muted 对齐
     assert.equal(theme.pulseActive, '#d4a574')    // 星金 active pulse
   })
 
@@ -61,7 +62,7 @@ describe('getTheme', () => {
     const theme = getTheme(3)
     assert.equal(theme.userColor, '#d4453a')   // 朱砂印 — user ▌ mark
     assert.equal(theme.pulseAlert, '#d4453a')  // vivid seal, distinct from desaturated error
-    assert.equal(theme.assistantColor, '#c5c8d2') // brightened neutral body
+    assert.equal(theme.assistantColor, '#d2d5dd') // brightened neutral body
   })
 
   it('returns 256-color fallback when colorLevel < 3 (cobalt → blue accent)', () => {
@@ -71,18 +72,18 @@ describe('getTheme', () => {
     assert.equal(theme.error, 'red')
   })
 
-  it('maps tool names to colors (ziwei: multi-color per HTML design)', () => {
+  it('maps tool names to colors (ziwei: multi-color per HTML design, read_file→toolShell)', () => {
     setTheme('ziwei')
     const theme = getTheme(3)
-    assert.equal(theme.toolColor('bash'), '#8ab4ff')        // 天枢蓝白 (shell grey in tianshu)
+    assert.equal(theme.toolColor('bash'), '#8ab4ff')        // 天枢蓝白 (toolShell)
     assert.equal(theme.toolColor('grep'), '#8ab4ff')        // same as bash
     assert.equal(theme.toolColor('glob'), '#8ab4ff')        // same as bash
+    assert.equal(theme.toolColor('read_file'), '#8ab4ff')   // exploration → toolShell (was dim)
     assert.equal(theme.toolColor('edit_file'), '#c9b8ff')   // 紫微紫 (design --tc-edit)
     assert.equal(theme.toolColor('write_file'), '#c9b8ff')  // same as edit
     assert.equal(theme.toolColor('run_tests'), '#7ee7c7')   // 归航青 (design --tc-test)
     assert.equal(theme.toolColor('delegate_task'), '#ffd479') // 星金 (design --tc-delegate)
-    assert.equal(theme.toolColor('read_file'), theme.dim)
-    assert.equal(theme.toolColor('unknown_tool'), theme.dim)
+    assert.equal(theme.toolColor('unknown_tool'), theme.toolColor('read_file')) // default → toolShell
   })
 
   it('returns context bar color — dim for normal, warning/error for high', () => {

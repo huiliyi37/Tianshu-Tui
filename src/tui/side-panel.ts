@@ -78,7 +78,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(line(`${glyph} ${name}`))
   }
   if (input.modelName) {
-    lines.push(line(dim(`model: ${truncateStr(input.modelName, contentW - 7)}`)))
+    lines.push(line(muted(`model: ${truncateStr(input.modelName, contentW - 7)}`)))
   }
 
   // ── 区块 2：Token 仪表 ──
@@ -105,7 +105,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   if (input.workers.length > 0) {
     lines.push(line(muted('─'.repeat(contentW))))
     const header = input.workers.length === 1 ? 'worker' : `workers (${input.workers.length})`
-    lines.push(line(dim(header)))
+    lines.push(line(muted(header)))
     const shown = input.workers.slice(0, MAX_WORKERS)
     for (const wrk of shown) {
       const statusIcon = wrk.terminal ? '✓' : wrk.status === 'failed' ? '✗' : '●'
@@ -125,7 +125,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   const activeTodos = input.todos.filter(t => t.status !== 'completed')
   if (activeTodos.length > 0) {
     lines.push(line(muted('─'.repeat(contentW))))
-    lines.push(line(dim(`tasks (${activeTodos.length})`)))
+    lines.push(line(muted(`tasks (${activeTodos.length})`)))
     const shown = activeTodos.slice(0, MAX_TODOS)
     for (const todo of shown) {
       const icon = todo.status === 'in_progress' ? color('▸', theme.primary) : color('○', theme.muted)
@@ -140,7 +140,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   // 缓存命中率指示
   if (input.cacheHitRate !== undefined) {
     const cp = (input.cacheHitRate * 100).toFixed(0)
-    const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.dim
+    const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted
     lines.push(line(muted('─'.repeat(contentW))))
     lines.push(line(`${color(`cache ${cp}%`, cacheColor)}`))
   }

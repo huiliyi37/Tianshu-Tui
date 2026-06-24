@@ -176,7 +176,7 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
       : color(entry.name.padEnd(nameWidth), theme.dim)
     const desc = entry.active
       ? entry.description.slice(0, descWidth).padEnd(descWidth)
-      : color(entry.description.slice(0, descWidth).padEnd(descWidth), theme.dim)
+      : color(entry.description.slice(0, descWidth).padEnd(descWidth), theme.muted)
 
     lines.push(padLine(`${glyph}${name}${desc}`, width, theme))
   }
@@ -316,7 +316,7 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
     const idx = color(`#${String(entry.index)}`.padEnd(idxWidth - 1), idxColor, entry.current ? { bold: true } : undefined)
     const time = color(entry.time.padEnd(timeWidth), entry.current ? theme.primary : theme.dim)
     const summaryText = entry.summary.slice(0, summaryWidth).padEnd(summaryWidth)
-    const summary = selected || entry.current ? summaryText : color(summaryText, theme.dim)
+    const summary = selected || entry.current ? summaryText : color(summaryText, theme.muted)
 
     lines.push(padLine(`${cursor}${idx}${time}${summary}`, width, theme))
   }

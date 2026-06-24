@@ -420,7 +420,7 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
     }
     case 'paragraph':
     default:
-      result.push(formatInlineToAnsi(parseInline(block.content), theme))
+      result.push(color(formatInlineToAnsi(parseInline(block.content), theme), theme.assistantColor))
       break
   }
 

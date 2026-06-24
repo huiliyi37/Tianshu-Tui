@@ -1295,7 +1295,7 @@ export class TuiApp {
   /** Commit `▍ Rivet` 标签行（每段 assistant 流式输出一次） */
   private commitAssistantHeader(): void {
     this.commit.write({
-      text: `${color('▍', this.theme.assistantColor, { bold: true })} ${color('Rivet', this.theme.assistantColor, { dim: true })}`,
+      text: `${color('▍', this.theme.assistantColor, { bold: true })} ${color('Rivet', this.theme.assistantColor)}`,
     })
     this.streamRenderController.assistantHeaderDone = true
   }

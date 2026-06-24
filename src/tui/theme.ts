@@ -185,11 +185,11 @@ const TIANSHU_TRUECOLOR: ColorSet = {
   success: '#6f9b91',   // 归航青 — tests/done (design --qing, desaturated)
   warning: '#b09155',   // 星金 — delegation/attention (design --jin, desaturated)
   error: '#c1655c',     // 朱砂赤 — errors (design --chi, desaturated)
-  dim: '#545868',       // 暗墨 — separators/shortcuts (design --dim, +slight for terminal)
+  dim: '#666a78',       // 暗墨 — separators/shortcuts (design --dim, +slight for terminal)
   pulseQuiet: '#3a3d4a', // 墨线 — quiet pulse
   pulseActive: '#d4a574', // 星金 — active pulse (matches primary)
   pulseAlert: '#d4453a',  // 朱砂印 — alert pulse
-  toolShell: '#8c8f9d',   // shell grey — bash/grep/glob (design --tc-shell)
+  toolShell: '#a0a3b0',   // shell grey — bash/grep/glob (design --tc-shell, brightened)
   toolEdit: '#9a90c2',    // 墨紫灰 — edit_file/write_file (design --tc-edit)
   toolTest: '#9c8a63',    // 金褐 — run_tests (design --tc-test)
   toolDelegate: '#b09155', // 星金 — delegate (design --tc-delegate = warning)
@@ -393,11 +393,17 @@ const GEMINI_FALLBACK: ColorSet = {
 function makeToolColor(c: ColorSet) {
   return (name: string): string => {
     switch (name) {
-      case 'bash': case 'grep': case 'glob': return c.toolShell ?? c.primary
-      case 'edit_file': case 'write_file': return c.toolEdit ?? c.secondary
+      // 探索族（shell）：bash / grep / glob / read / semantic / repo 等
+      case 'bash': case 'grep': case 'glob':
+      case 'read_file': case 'read_section': case 'read_policy':
+      case 'semantic_search': case 'repo_map': case 'repo_graph':
+      case 'inspect_project': case 'related_tests': case 'file_info': case 'ls':
+        return c.toolShell ?? c.primary
+      case 'edit_file': case 'write_file': case 'hash_edit': case 'apply_patch':
+        return c.toolEdit ?? c.secondary
       case 'run_tests': return c.toolTest ?? c.success
       case 'delegate_task': case 'delegate_batch': return c.toolDelegate ?? c.warning
-      default: return c.dim
+      default: return c.toolShell ?? c.dim
     }
   }
 }
@@ -410,13 +416,13 @@ function makeContextColor(c: Pick<ColorSet, 'dim' | 'warning' | 'error'>) {
   }
 }
 
-function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string; muted?: string }): RivetTheme {
+function buildTheme(colors: ColorSet, overrides?: { userColor?: string; assistantColor?: string; muted?: string; systemColor?: string }): RivetTheme {
   return {
     ...colors,
     muted: overrides?.muted ?? '#9aa2b1',
     userColor: overrides?.userColor ?? colors.primary,
     assistantColor: overrides?.assistantColor ?? colors.secondary,
-    systemColor: '#9aa2b1',
+    systemColor: overrides?.systemColor ?? '#9aa2b1',
     toolColor: makeToolColor(colors),
     contextColor: makeContextColor(colors),
   }
@@ -445,9 +451,10 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
   },
   tianshu: {
     // userColor = 朱砂印 cinnabar (the user ▌ mark, the one warm point);
-    // assistantColor = bright neutral body text (was #a7aab6, now readable);
-    // muted = brightened 元信息灰 (was #6c6f7e, too dim).
-    truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#c5c8d2', muted: '#9497a6' }),
+    // assistantColor = bright neutral body text (贴近设计稿 --fg-hi #d8dae2);
+    // muted = 元信息灰 (提亮 ~6.5:1，深色背景可读);
+    // systemColor = 与 muted 对齐 (系统消息/元信息一致性).
+    truecolor: buildTheme(TIANSHU_TRUECOLOR, { userColor: '#d4453a', assistantColor: '#d2d5dd', muted: '#adb2bf', systemColor: '#adb2bf' }),
     fallback: buildTheme(TIANSHU_FALLBACK, { userColor: 'red', assistantColor: 'white' }),
   },
   claude: {

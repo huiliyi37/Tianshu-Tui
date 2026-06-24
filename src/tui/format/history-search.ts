@@ -26,7 +26,7 @@ export function renderHistorySearch(data: HistorySearchData, width: number, heig
 
   if (data.entries.length === 0) {
     if (data.query) {
-      lines.push(`  ${color('No matches found.', theme.dim)}`)
+      lines.push(`  ${color('No matches found.', theme.muted)}`)
     }
   } else {
     const maxVisible = height - 7

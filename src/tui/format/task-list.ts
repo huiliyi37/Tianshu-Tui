@@ -41,7 +41,7 @@ function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): st
   if (t.status === 'in_progress') {
     return `${color(glyph, theme.primary, { bold: true })} ${color(content, theme.primary, { bold: true })}`
   } else if (t.status === 'completed') {
-    return `${color(glyph, theme.dim)} ${color(content, theme.dim)}`
+    return `${color(glyph, theme.muted)} ${color(content, theme.muted)}`
   } else {
     return `${color(glyph, theme.muted)} ${color(content, theme.muted)}`
   }
@@ -97,7 +97,7 @@ export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskL
 
   if (hasOverflow) {
     const remaining = unfinished.length - visibleCount
-    lines.push(color(`  +${remaining} more`, theme.dim))
+    lines.push(color(`  +${remaining} more`, theme.muted))
   }
 
   // 完成项折叠摘要（不逐条显示，节省行数给活跃任务）
@@ -107,9 +107,9 @@ export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskL
       ? `${sample.slice(0, maxContentWidth - 9)}…`
       : sample
     if (done === 1) {
-      lines.push(color(`  ✓ ${sampleText}`, theme.dim))
+      lines.push(color(`  ✓ ${sampleText}`, theme.muted))
     } else {
-      lines.push(color(`  ✓ ${done} done`, theme.dim))
+      lines.push(color(`  ✓ ${done} done`, theme.muted))
     }
   }
 
