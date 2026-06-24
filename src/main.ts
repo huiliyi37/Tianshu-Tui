@@ -267,6 +267,13 @@ async function main() {
             })
             agent.config.coordinatorRef = () => coordinator
 
+            // Fail-closed: browser verification requires interactive TUI approval
+            // (web_fetch/browser need permission prompts). Headless degrades to
+            // web_fetch-only read-only mode; full browser is disabled.
+            if (cfg.agent.goalJudge?.browser === true) {
+              process.stderr.write('[goal] ⚠ goal-judge browser disabled in headless mode — web_fetch read-only only\n')
+            }
+
             const goal = parsed.goal
             void (async () => {
               try {

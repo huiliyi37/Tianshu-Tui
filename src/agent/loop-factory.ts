@@ -522,6 +522,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       // Enabled but no coordinator to spawn the judge → empty deps → runGoalJudge
       // returns inconclusive (fail-open accept+warning), never blocking the loop.
       if (!coordinator) return {}
+      const browserMode = self.config.goalJudge?.browser === true
       return {
         spawnJudge: (objective, scope, signal) => coordinator.delegate({
           parentTurnId: 'goal:judge',
@@ -530,6 +531,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
           profile: 'goal_judge',
           scope,
         }, signal),
+        browserMode,
       }
     },
     getGoalJudgeEvidence: () => {

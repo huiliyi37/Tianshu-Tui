@@ -86,6 +86,28 @@ describe('buildJudgeObjective', () => {
     const obj = buildJudgeObjective({ objective: 'x', criteria: [], evidence: '', finalClaim: '' })
     assert.match(obj, /none extracted/)
   })
+
+  it('includes browser verification instructions when browserMode is true', () => {
+    const obj = buildJudgeObjective({
+      objective: 'page shows correct data',
+      criteria: ['page renders table'],
+      evidence: 'modified: App.tsx',
+      finalClaim: 'GOAL ACHIEVED',
+      browserMode: true,
+    })
+    assert.match(obj, /Browser\/API verification is ENABLED/)
+    assert.match(obj, /web_fetch/)
+  })
+
+  it('does NOT include browser instructions when browserMode is absent', () => {
+    const obj = buildJudgeObjective({
+      objective: 'add unit tests',
+      criteria: ['tests pass'],
+      evidence: '',
+      finalClaim: '',
+    })
+    assert.doesNotMatch(obj, /Browser\/API verification/)
+  })
 })
 
 describe('runGoalJudge', () => {
@@ -148,5 +170,18 @@ describe('runGoalJudge', () => {
     }
     const v = await runGoalJudge(deps, input)
     assert.equal(v.overall, 'verified')
+  })
+
+  it('passes deps.browserMode into the objective when input.browserMode is unset', async () => {
+    let capturedObjective = ''
+    const deps: GoalJudgeDeps = {
+      spawnJudge: async (objective) => {
+        capturedObjective = objective
+        return runWith([workerResult([verdictArtifact('{"overall":"verified","criteria":[],"summary":"ok"}')])])
+      },
+      browserMode: true,
+    }
+    await runGoalJudge(deps, input)
+    assert.match(capturedObjective, /Browser\/API verification is ENABLED/)
   })
 })

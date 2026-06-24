@@ -41,6 +41,8 @@ export interface GoalJudgeInput {
   finalClaim: string
   /** Files to scope the judge to (typically the modified files). */
   scopeFiles?: string[]
+  /** When true, instruct the judge to use web_fetch/browser tools for UI/API criteria. */
+  browserMode?: boolean
   signal?: AbortSignal
 }
 
@@ -54,6 +56,8 @@ export interface GoalJudgeDeps {
     scope: { files: string[] },
     signal?: AbortSignal,
   ) => Promise<CoordinatorRun>
+  /** When true, the judge should use browser/web tools for verification. */
+  browserMode?: boolean
 }
 
 function inconclusive(summary: string, criteria: string[]): GoalJudgeVerdict {
@@ -66,24 +70,33 @@ function inconclusive(summary: string, criteria: string[]): GoalJudgeVerdict {
 
 /** Build the judge worker objective from the goal, criteria, evidence, and claim. */
 export function buildJudgeObjective(input: GoalJudgeInput): string {
-  return [
+  const lines: string[] = [
     'Independently judge whether this goal is GENUINELY complete. Do not trust the implementer — verify each criterion with real tests / file reads.',
-    '',
-    `Goal: ${input.objective}`,
-    '',
-    'Success criteria to check (each must be independently established):',
-    ...(input.criteria.length > 0
-      ? input.criteria.map((c, i) => `${i + 1}. ${c}`)
-      : ['(none extracted — judge whether the objective itself was genuinely handled)']),
-    '',
-    'Implementer evidence snapshot:',
-    input.evidence.trim() || '(none recorded)',
-    '',
-    "Implementer's final completion claim:",
-    input.finalClaim.trim() || '(none)',
-    '',
-    'Return the goal-judge-verdict artifact exactly as specified in your profile.',
-  ].join('\n')
+  ]
+  if (input.browserMode) {
+    lines.push('')
+    lines.push('⚠ Browser/API verification is ENABLED. For UI or API criteria, use `web_fetch` to independently verify observable behavior (HTTP responses, page content). Do NOT rely solely on the implementer\'s assertion that a page or endpoint works.')
+  }
+  lines.push('')
+  lines.push(`Goal: ${input.objective}`)
+  lines.push('')
+  lines.push('Success criteria to check (each must be independently established):')
+  if (input.criteria.length > 0) {
+    for (let i = 0; i < input.criteria.length; i++) {
+      lines.push(`${i + 1}. ${input.criteria[i]}`)
+    }
+  } else {
+    lines.push('(none extracted — judge whether the objective itself was genuinely handled)')
+  }
+  lines.push('')
+  lines.push('Implementer evidence snapshot:')
+  lines.push(input.evidence.trim() || '(none recorded)')
+  lines.push('')
+  lines.push("Implementer's final completion claim:")
+  lines.push(input.finalClaim.trim() || '(none)')
+  lines.push('')
+  lines.push('Return the goal-judge-verdict artifact exactly as specified in your profile.')
+  return lines.join('\n')
 }
 
 /**
@@ -170,7 +183,7 @@ export async function runGoalJudge(
   let run: CoordinatorRun
   try {
     run = await deps.spawnJudge(
-      buildJudgeObjective(input),
+      buildJudgeObjective({ ...input, browserMode: input.browserMode ?? deps.browserMode }),
       { files: input.scopeFiles ?? [] },
       input.signal,
     )
