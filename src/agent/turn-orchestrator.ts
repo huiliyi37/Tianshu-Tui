@@ -884,9 +884,10 @@ export class TurnOrchestrator {
               tracker.deactivate('achieved')
             }
           } else {
-            // budget/context/cancelled: deactivate so later turns aren't checked.
+            // budget/context/wall-clock/cancelled: deactivate so later turns aren't checked.
             const deactivationReason = goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
               : goalResult.reason === 'context_limit' ? 'context_limit'
+              : goalResult.reason === 'wall_clock_exhausted' ? 'budget_exhausted'
               : 'cancelled'
             tracker.deactivate(deactivationReason)
           }
@@ -905,11 +906,16 @@ export class TurnOrchestrator {
           } else {
             const iter = tracker!.getIteration()
             const maxIter = tracker!.getMaxIterations()
+            const wallElapsed = Math.round(tracker!.getWallClockElapsedMs() / 1000)
+            const wallBudget = tracker!.getWallClockBudgetMs()
+            const wallInfo = wallBudget
+              ? ` ⏱${wallElapsed}s/${Math.round(wallBudget / 1000)}s`
+              : ` ⏱${wallElapsed}s`
             this.deps.appendSystemReminder(
-              `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
+              `[GOAL CONTINUATION ${iter}/${maxIter}${wallInfo}] 目标尚未达成。继续执行。\n` +
               `目标: ${tracker!.getGoal()}\n` +
               `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
-              `完成后输出 "GOAL ACHIEVED" 声明完成。`
+              `完成后输出 "GOAL ACHIEVED" 声明完成。遇到无法解决的阻塞时输出 "GOAL BLOCKED"。`
             )
           }
           continue  // re-enter the for loop for the next iteration
