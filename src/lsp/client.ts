@@ -25,14 +25,24 @@ export interface LspCheckResult {
  * Using the compiler API directly loads typescript from node_modules, immune to
  * PATH interference, and runs in-process (no spawn overhead).
  */
+let tsLoadWarned = false
+
 export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
   let ts: typeof import('typescript')
   try {
     // createRequire(import.meta.url) works in both ESM (tsx, dist bundle) and
     // CJS environments — unlike bare require which is undefined in ESM.
     ts = require('typescript')
-  } catch {
-    // typescript module not available — fail-open (no diagnostics, not trustworthy)
+  } catch (e) {
+    // typescript module not available — fail-open (no diagnostics, not trustworthy).
+    // Warn once so silent degradation is discoverable instead of looking like GREEN.
+    if (!tsLoadWarned) {
+      tsLoadWarned = true
+      process.stderr.write(
+        `[rivet] typecheck gate disabled: typescript module not found (${e instanceof Error ? e.message : e}). ` +
+        `Install typescript (npm i typescript) to enable type-error detection.\n`,
+      )
+    }
     return { diagnostics: [], formatted: '', ranOk: false }
   }
 
