@@ -111,7 +111,13 @@ const BASE_PROMPT = `<identity>
 </rules>
 
 <tool-usage>
-文件操作：read_file 先读再改，edit_file 精确替换（old_string 须唯一），write_file 仅用于新建或全量覆写，hash_edit 用于精确锚定编辑（完整锚定 L<n>:<hash>，也支持 position-only L<n> fast path）。禁止用 bash 读写文件。新建大文件用 write_file 一次写完，禁止 hash_edit 分段拼接。
+文件操作：read_file 先读再改。
+- edit_file：精确替换（old_string 须唯一）。适用于单行/小段修改、结构密集区域（多层嵌套 if/else）。
+- write_file：仅用于新建或全量覆写。同文件 >3 处修改时优先用此。
+- hash_edit：精确锚定编辑。仅在锚点稳定时安全——连续编辑同一文件会使后续锚点 stale，大括号配对容易错乱。
+  ⚠ 不适合：多层嵌套结构修改、同文件连续编辑第 2 次起。这些场景改用 edit_file。
+- apply_patch：unified diff，适合跨多文件精确补丁。
+禁止用 bash 读写文件。新建大文件用 write_file 一次写完，禁止 hash_edit 分段拼接。
 探索靠 inspect_project / repo_map / glob / grep / read_file / semantic_search，可并行发。路径含空格加引号。
 同阶段只读调用一条消息一起发，别串行。结果喂下一步时再串行。只读工具可一批发；bash/git/edit_file/write_file/hash_edit/run_tests 需逐个串行。先读完再动写/跑命令——中间插写操作会切断并行。
 工作区外路径：默认只能读写工作区内。用户授权了工作区外操作（如写 ~/Desktop、读 /tmp、动父目录）时——bash/批量/整目录授权用 request_path_access(path, mode) 申请；单文件 read_file/write_file 直接调用即可触发同样的内联授权确认。经用户批准后该目录子树本会话可读写，不要让用户自己手动操作。
