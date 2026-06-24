@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { RELATED_TESTS_TOOL } from '../related-tests.js'
+import { RELATED_TESTS_TOOL, createRelatedTestsTool } from '../related-tests.js'
+import type { MeridianDb } from '../../repo/meridian-db.js'
 
 describe('RELATED_TESTS_TOOL', () => {
   let testDir: string
@@ -77,5 +78,67 @@ describe('RELATED_TESTS_TOOL', () => {
     )
     assert.equal(result.isError, undefined)
     assert.ok(result.content.includes('src/foo.ts'))
+  })
+})
+
+describe('createRelatedTestsTool (meridian factory)', () => {
+  function mockDb(tests: Record<string, string[]>): MeridianDb {
+    return {
+      getTestsFor: (f: string) => tests[f] ?? [],
+      getReverseDependents: () => [],
+      getCoEditNeighbors: () => [],
+    } as unknown as MeridianDb
+  }
+
+  it('returns meridian SQL results when indexer is available', async () => {
+    const db = mockDb({ 'src/foo.ts': ['src/__tests__/foo.test.ts', 'src/__tests__/foo-extra.test.ts'] })
+    const tool = createRelatedTestsTool(() => ({ getDb: () => db }) as never)
+    const result = await tool.execute({
+      input: { file: 'src/foo.ts' },
+      toolUseId: 'test',
+      cwd: '/fake',
+    })
+    assert.equal(result.isError, undefined)
+    assert.ok(result.content.includes('foo.test.ts'))
+    assert.ok(result.content.includes('foo-extra.test.ts'))
+  })
+
+  it('falls back to hardcoded heuristics when indexer returns no tests', async () => {
+    const testDir = mkdtempSync(join(tmpdir(), 'rt-fallback-'))
+    try {
+      mkdirSync(join(testDir, 'src', '__tests__'), { recursive: true })
+      writeFileSync(join(testDir, 'src', 'foo.ts'), '')
+      writeFileSync(join(testDir, 'src', '__tests__', 'foo.test.ts'), '')
+
+      const db = mockDb({}) // empty → no meridian results
+      const tool = createRelatedTestsTool(() => ({ getDb: () => db }) as never)
+      const result = await tool.execute({
+        input: { file: 'src/foo.ts' },
+        toolUseId: 'test',
+        cwd: testDir,
+      })
+      assert.ok(result.content.includes('foo.test.ts'))
+    } finally {
+      rmSync(testDir, { recursive: true, force: true })
+    }
+  })
+
+  it('falls back to hardcoded heuristics when indexer is null', async () => {
+    const testDir = mkdtempSync(join(tmpdir(), 'rt-null-'))
+    try {
+      mkdirSync(join(testDir, 'src', '__tests__'), { recursive: true })
+      writeFileSync(join(testDir, 'src', 'bar.ts'), '')
+      writeFileSync(join(testDir, 'src', '__tests__', 'bar.test.ts'), '')
+
+      const tool = createRelatedTestsTool(() => null)
+      const result = await tool.execute({
+        input: { file: 'src/bar.ts' },
+        toolUseId: 'test',
+        cwd: testDir,
+      })
+      assert.ok(result.content.includes('bar.test.ts'))
+    } finally {
+      rmSync(testDir, { recursive: true, force: true })
+    }
   })
 })

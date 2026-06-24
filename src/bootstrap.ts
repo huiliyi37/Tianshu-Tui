@@ -66,6 +66,7 @@ import { mapWorkOrderKindToCapabilityTask } from './agent/work-order.js'
 import { PlaybookStore } from './agent/playbook-store.js'
 import { ASK_USER_QUESTION_TOOL } from './tools/ask-user-question.js'
 import { createRepoGraphTool } from './tools/repo-graph.js'
+import { createRelatedTestsTool } from './tools/related-tests.js'
 import { SEMANTIC_SEARCH_TOOL } from './tools/semantic-search.js'
 import { WEB_SEARCH_TOOL } from './tools/web-search.js'
 import { APPLY_PATCH_TOOL } from './tools/apply-patch.js'
@@ -449,6 +450,9 @@ export function createInteractiveToolRegistry(
 
   // repo_graph
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
+
+  // related_tests — override the no-indexer default with a meridian-aware factory
+  reg.register(createRelatedTestsTool(() => refs.meridianIndexer))
 
   reg.register(SEMANTIC_SEARCH_TOOL)
   // APPLY_PATCH: EXTENDED layer — overlap with hash_edit covers >90% of
