@@ -22,6 +22,8 @@ import { evaluateThinkingRetry } from './thinking-retry.js'
 import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import { debugLog } from '../utils/debug.js'
 import type { GoalTracker } from './goal-tracker.js'
+import { saveGoalState } from './goal-persist.js'
+import { getSessionDir } from './session-persist.js'
 import { runGoalJudge, type GoalJudgeDeps } from './goal-judge.js'
 
 // ── Types re-exported for deps interface ──
@@ -114,6 +116,7 @@ export interface TurnOrchestratorDeps {
   getStreamRules: () => StreamRule[] | undefined
   getAgentReconnect: () => { enabled?: boolean; maxAttempts?: number; backoffMs?: number } | undefined
   getCwd: () => string
+  getSessionId: () => string | undefined
   setClientThinking: (mode: 'enabled' | 'disabled') => void
   flushMeridianTurn: () => void
   syncPlanModeToConfig: () => void
@@ -906,6 +909,14 @@ export class TurnOrchestrator {
               : goalResult.reason === 'wall_clock_exhausted' ? 'budget_exhausted'
               : 'cancelled'
             tracker.deactivate(deactivationReason)
+          }
+        }
+
+        // Persist goal state after any status/iteration change (best-effort).
+        if (tracker) {
+          const sid = this.deps.getSessionId()
+          if (sid) {
+            try { saveGoalState(getSessionDir(this.deps.getCwd()), sid, tracker) } catch { /* best-effort */ }
           }
         }
 

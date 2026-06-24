@@ -1374,6 +1374,22 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
   })
   refs.promptEngine = agent.config.promptEngine
 
+  // 12b. Restore goal tracker from persisted state (if session was resumed).
+  // normalizeAfterResume: active → paused (the process that wrote active is gone).
+  if (wasSessionResumed()) {
+    try {
+      const { restoreGoalTracker } = await import('./agent/goal-persist.js')
+      const restored = restoreGoalTracker(getSessionDir(cwd), sessionId, {
+        maxJudgeRuns: config.agent.goalJudge?.maxRuns,
+      })
+      if (restored) {
+        agent.setGoalTracker(restored)
+        refs.goalTrackerRef.current = restored
+        console.error(`🎯 已恢复目标（暂停状态）: ${restored.getGoal().slice(0, 60)}…  使用 /goal-resume 继续。`)
+      }
+    } catch { /* best-effort: goal restore failure is non-fatal */ }
+  }
+
   // 13. MCP + LSP initialization
   // asyncExtras (default true): fire-and-forget, non-blocking for faster startup
   // asyncExtras=false: synchronous await, completes before bootstrap returns

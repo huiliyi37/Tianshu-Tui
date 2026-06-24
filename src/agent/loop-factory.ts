@@ -457,6 +457,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getStreamRules: () => self.config.streamRules,
     getAgentReconnect: () => self.config.agentReconnect,
     getCwd: () => self.cwd,
+    getSessionId: () => self.config.sessionId,
     setClientThinking: (mode) => { self.config.client.setThinking?.(mode) },
     flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
     syncPlanModeToConfig: () => { self.syncPlanModeToConfig() },

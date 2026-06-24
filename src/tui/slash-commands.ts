@@ -529,6 +529,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       })
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
+      // Persist initial goal state so it survives session restart.
+      if (ctx.currentSessionId) {
+        try {
+          const { saveGoalState } = await import('../agent/goal-persist.js')
+          const { getSessionDir } = await import('../agent/session-persist.js')
+          saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
+        } catch { /* best-effort */ }
+      }
       pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /cancel-goal to abort.\nUse /goal-resume to resume a paused/blocked goal.` }))
       // Side-path: extract concrete success criteria the completion judge will
       // verify against. Async (never blocks goal start); criteria default to a
