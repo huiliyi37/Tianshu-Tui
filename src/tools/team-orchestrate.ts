@@ -2,9 +2,11 @@ import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
-import { isCrossModule, isFixContext, type ChangeSet } from '../agent/review-discipline.js'
+import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from '../agent/review-discipline.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
+import { extractChangedFiles } from '../agent/diff-collector.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
+import type { TeamTask } from '../agent/team-plan.js'
 import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } from '../agent/unified-plan.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
@@ -76,6 +78,58 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
   }
   lines.push('', summary.packet)
   return lines.join('\n')
+}
+
+/**
+ * Authoritative changed-file list for the review gate. Worker `changedFiles` is
+ * model self-reported and can be empty even when real edits happened — a worker
+ * that under-reports would silently skip the whole review gate. The diff artifact
+ * (`kind:'diff'`, produced by hands-session collectDiff) carries the real file
+ * list, so we union diff-derived files with the self-report.
+ */
+export function teamReviewChangedFiles(run: TeamRunSummary['run']): string[] {
+  if (!run) return []
+  const files = new Set<string>()
+  for (const result of run.results) {
+    for (const file of result.changedFiles) files.add(file)
+    for (const artifact of result.artifacts) {
+      if (artifact.kind === 'diff') {
+        for (const file of extractChangedFiles(artifact.content)) files.add(file)
+      }
+    }
+  }
+  return [...files]
+}
+
+/**
+ * Force the perspective-layer density that flash execution lacks.
+ *  - max mode → always L3 (the full 5-inspector squadron), regardless of size.
+ *  - standard mode → raise the floor to ≥L2 (no silent L1 nudge), and upgrade
+ *    to L3 on structural risk signals (cross-module / ≥3 tasks in the wave /
+ *    any high-risk task). classifyChangeScale already returns L3 for
+ *    cross-module/≥5 files/security boundary; this only raises, never lowers.
+ */
+export function teamReviewForceLevel(
+  mode: 'standard' | 'max',
+  change: ChangeSet,
+  waveTasks: TeamTask[],
+): ReviewScale {
+  if (mode === 'max') return 'L3'
+  const base = classifyChangeScale(change)
+  const hasHighRisk = waveTasks.some(task => task.riskTier === 'high')
+  if (base === 'L3' || change.crossModule || waveTasks.length >= 3 || hasHighRisk) return 'L3'
+  return base === 'L1' ? 'L2' : base
+}
+
+/**
+ * Turn the merged plan's per-task verification gates into a reviewer focus hint,
+ * so the squadron/verifier checks the acceptance criteria the planners defined
+ * rather than guessing. Empty when no verification was planned.
+ */
+export function teamReviewFocusHint(waveTasks: TeamTask[]): string | undefined {
+  const gates = [...new Set(waveTasks.flatMap(task => task.verification).map(v => v.trim()).filter(Boolean))]
+  if (gates.length === 0) return undefined
+  return `Planned acceptance gates (verify these, do not just trust green): ${gates.join('; ')}`
 }
 
 export function createTeamOrchestrateTool(
@@ -221,17 +275,25 @@ export function createTeamOrchestrateTool(
       let reviewVerdict: string | undefined
       const effectiveFromWave = fromWave ?? 0
       const isLastWave = summary.waves.length > 0 && effectiveFromWave >= summary.waves.length - 1
-      const changedFiles = summary.run
-        ? [...new Set(summary.run.results.flatMap(result => result.changedFiles))]
-        : []
+      // Authoritative changed files: union of real diff artifact + self-report,
+      // so a worker that under-reports changedFiles can't skip the review gate.
+      const changedFiles = teamReviewChangedFiles(summary.run)
       if (isLastWave && changedFiles.length > 0) {
         try {
           const delegate = requireDelegate(coordinator)
+          // Resolve this wave's tasks to drive perspective density + focus.
+          const taskById = new Map(summary.tasks.map(task => [task.id, task]))
+          const waveTasks = (summary.waves[effectiveFromWave]?.taskIds ?? [])
+            .map(id => taskById.get(id))
+            .filter((task): task is TeamTask => Boolean(task))
           const change: ChangeSet = {
             files: changedFiles,
             crossModule: isCrossModule(changedFiles),
             isFix: isFixContext(objective),
           }
+          // Inject the dense perspective layer flash execution lacks.
+          change.forceLevel = teamReviewForceLevel(mode, change, waveTasks)
+          const focusHint = teamReviewFocusHint(waveTasks)
           const reviewDeps = createCoordinatorReviewDeps(
             {
               delegate: (request, abortSignal) => delegate(request, abortSignal),
@@ -240,7 +302,7 @@ export function createTeamOrchestrateTool(
             },
             { reviewDepth: params.reviewDepth ?? 0, abortSignal: params.abortSignal, parentTurnId: `${params.toolUseId}:review` },
           )
-          const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3 })
+          const outcome = await routeReviewWorkflow(change, reviewDeps, { maxRounds: 3, ...(focusHint ? { focusHint } : {}) })
           reviewVerdict = outcome.verdict
           reviewNote = `\n\nReview gate [${outcome.tier}]: ${outcome.verdict}${outcome.evidence ? ` — ${outcome.evidence}` : ''}`
         } catch (err) {

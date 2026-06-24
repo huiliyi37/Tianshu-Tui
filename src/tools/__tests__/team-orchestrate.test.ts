@@ -1,12 +1,54 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createTeamOrchestrateTool } from '../team-orchestrate.js'
+import {
+  createTeamOrchestrateTool,
+  teamReviewChangedFiles,
+  teamReviewForceLevel,
+  teamReviewFocusHint,
+} from '../team-orchestrate.js'
 import type { CoordinatorRun, DelegationRequest } from '../../agent/coordinator.js'
+import type { ChangeSet } from '../../agent/review-discipline.js'
+import type { TeamTask } from '../../agent/team-plan.js'
 import { decodeTeamPanelModel } from '../../tui/team-panel-model.js'
 
 function stubRun(packet = 'stub'): CoordinatorRun {
   return { status: 'completed', results: [], packet }
 }
+
+function mkTask(over: Partial<TeamTask> = {}): TeamTask {
+  return {
+    id: 'T1',
+    title: 'task',
+    objective: 'objective',
+    files: [],
+    profile: 'patcher',
+    kind: 'patch_proposal',
+    verification: [],
+    dependsOn: [],
+    riskTier: 'low',
+    touchSet: [],
+    ...over,
+  }
+}
+
+type RunResult = CoordinatorRun['results'][number]
+
+function mkResult(over: Partial<RunResult> = {}): RunResult {
+  return {
+    workOrderId: 'w',
+    status: 'passed',
+    summary: 's',
+    findings: [],
+    artifacts: [],
+    changedFiles: [],
+    risks: [],
+    nextActions: [],
+    evidenceStatus: 'verified',
+    ...over,
+  }
+}
+
+const singleFileChange: ChangeSet = { files: ['src/agent/x.ts'], crossModule: false, isFix: false }
 
 test('team_orchestrate dispatches a standard plan first wave', async () => {
   let captured: DelegationRequest[] = []
@@ -192,4 +234,109 @@ test('team_orchestrate runs the review gate on a cross-module final wave', async
   assert.equal(squadronInvoked, true)
   assert.equal(rewardClosures.length, 1)
   assert.equal((rewardClosures[0] as any).outcome.reviewVerdict, 'verified')
+})
+
+// ── Perspective-density review gate helpers (unit) ──────────────────────────
+
+test('teamReviewForceLevel: max mode always forces L3 squadron', () => {
+  assert.equal(teamReviewForceLevel('max', singleFileChange, []), 'L3')
+  assert.equal(teamReviewForceLevel('max', singleFileChange, [mkTask()]), 'L3')
+})
+
+test('teamReviewForceLevel: standard single-module change raises floor to L2 (no silent L1)', () => {
+  assert.equal(teamReviewForceLevel('standard', singleFileChange, [mkTask()]), 'L2')
+})
+
+test('teamReviewForceLevel: standard upgrades to L3 on structural signals', () => {
+  // cross-module
+  assert.equal(
+    teamReviewForceLevel('standard', { files: ['src/a/x.ts', 'src/b/y.ts'], crossModule: true, isFix: false }, [mkTask()]),
+    'L3',
+  )
+  // >=3 tasks in the wave
+  assert.equal(
+    teamReviewForceLevel('standard', singleFileChange, [mkTask({ id: 'a' }), mkTask({ id: 'b' }), mkTask({ id: 'c' })]),
+    'L3',
+  )
+  // any high-risk task
+  assert.equal(
+    teamReviewForceLevel('standard', singleFileChange, [mkTask({ riskTier: 'high' })]),
+    'L3',
+  )
+})
+
+test('teamReviewChangedFiles: derives authoritative files from diff artifact, union with self-report', () => {
+  // self-report empty but diff artifact carries the real file → still detected
+  const fromDiffOnly = teamReviewChangedFiles({
+    status: 'completed',
+    packet: 'p',
+    results: [mkResult({
+      changedFiles: [],
+      artifacts: [{ kind: 'diff', title: 'Patch', content: '--- a/src/agent/x.ts\n+++ b/src/agent/x.ts\n@@\n+x' }],
+    })],
+  })
+  assert.deepEqual(fromDiffOnly, ['src/agent/x.ts'])
+
+  // union of self-report + diff
+  const union = teamReviewChangedFiles({
+    status: 'completed',
+    packet: 'p',
+    results: [mkResult({
+      changedFiles: ['src/agent/y.ts'],
+      artifacts: [{ kind: 'diff', title: 'Patch', content: '+++ b/src/agent/x.ts' }],
+    })],
+  })
+  assert.deepEqual([...union].sort(), ['src/agent/x.ts', 'src/agent/y.ts'])
+
+  assert.deepEqual(teamReviewChangedFiles(undefined), [])
+})
+
+test('teamReviewFocusHint: builds a hint from planned verification, undefined when none', () => {
+  const hint = teamReviewFocusHint([mkTask({ verification: ['npm test', 'tsc --noEmit'] })])
+  assert.ok(hint)
+  assert.match(hint!, /Planned acceptance gates/)
+  assert.match(hint!, /npm test/)
+  assert.equal(teamReviewFocusHint([mkTask()]), undefined)
+})
+
+// ── Perspective-density review gate (integration, standard mode) ────────────
+
+test('team_orchestrate review gate fires on honest diff even when worker self-reports no changedFiles', async () => {
+  let verifierObjective = ''
+  let verifyKind = ''
+  const tool = createTeamOrchestrateTool({
+    delegate: async (request) => {
+      verifierObjective = request.objective
+      verifyKind = request.kind
+      return {
+        status: 'completed',
+        packet: 'verified',
+        results: [mkResult({ workOrderId: 'verifier', summary: 'ran: npm test → pass', evidenceStatus: 'verified' })],
+      }
+    },
+    delegateBatch: async () => ({
+      status: 'completed',
+      packet: 'executed',
+      results: [mkResult({
+        // self-report empty, but the diff artifact carries the real edit
+        changedFiles: [],
+        artifacts: [{ kind: 'diff', title: 'Patch', content: 'diff --git a/src/agent/x.ts b/src/agent/x.ts\n--- a/src/agent/x.ts\n+++ b/src/agent/x.ts\n@@\n+x' }],
+        evidenceStatus: 'verified',
+      })],
+    }),
+  })
+  const md = '### T1: tweak helper\n修改 `src/agent/x.ts`，运行 `npm test` 验证'
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    cwd: process.cwd(),
+    toolUseId: 'tu-honest',
+  })
+
+  assert.equal(result.isError, false)
+  // L2 floor (single-module, non-structural) — review still runs, not skipped.
+  assert.match(result.content, /Review gate \[L2\]/)
+  assert.equal(verifyKind, 'verify')
+  // Planned verification reaches the reviewer as a focus hint.
+  assert.match(verifierObjective, /Planned acceptance gates/)
+  assert.match(verifierObjective, /npm test/)
 })
