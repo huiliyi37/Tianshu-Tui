@@ -1,5 +1,8 @@
 import { formatDiagnostics, type Diagnostic } from './diagnostics.js'
 import { isAbsolute, relative } from 'node:path'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
 
 export interface LspCheckResult {
   diagnostics: Diagnostic[]
@@ -25,9 +28,9 @@ export interface LspCheckResult {
 export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
   let ts: typeof import('typescript')
   try {
-    // require avoids bundler/esbuild trying to resolve the typescript module
-    // at build time — we only need it at runtime in the typecheck gate path.
-    ts = (require as any)('typescript')
+    // createRequire(import.meta.url) works in both ESM (tsx, dist bundle) and
+    // CJS environments — unlike bare require which is undefined in ESM.
+    ts = require('typescript')
   } catch {
     // typescript module not available — fail-open (no diagnostics, not trustworthy)
     return { diagnostics: [], formatted: '', ranOk: false }
