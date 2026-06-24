@@ -13,7 +13,7 @@
 ### 1. 读 session 日志重建时间线
 
 ```bash
-f=<cwd>/.rivet/sessions/<session-id>.jsonl
+f=~/.rivet/sessions/<project-slug>/<session-id>.jsonl
 # 找关键事件: delegate_task failed, user "继续", todo 状态变化
 ```
 
