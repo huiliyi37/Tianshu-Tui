@@ -40,4 +40,21 @@ describe('decideStreamHardCap (Track 4)', () => {
     const action = decideStreamHardCap({ now, startedAt: 0, lastDataEventAt: now - 5_000, baseStreamMs: BASE })
     assert.deepEqual(action, { kind: 'rearm', rearmMs: 20_000, extended: true })
   })
+
+  // GLM reasoning fix: 30s default window aborts streams where model pauses
+  // 30-60s between reasoning deltas (normal GLM behavior).
+  it('with default 30s window: aborts when last data was 50s ago (GLM scenario)', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 50_000, baseStreamMs: BASE })
+    assert.deepEqual(action, { kind: 'abort' })
+  })
+
+  it('with 120s window: extends (not aborts) when last data was 50s ago (GLM safe)', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 50_000, baseStreamMs: BASE }, 120_000)
+    assert.deepEqual(action, { kind: 'rearm', rearmMs: 60_000, extended: true })
+  })
+
+  it('with 120s window: still aborts when last data exceeds extended window', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 130_000, baseStreamMs: BASE }, 120_000)
+    assert.deepEqual(action, { kind: 'abort' })
+  })
 })
