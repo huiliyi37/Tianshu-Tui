@@ -5,6 +5,7 @@ import {
   runTeamSkeleton,
   selectDispatchableTeamTasks,
   teamTasksToDelegationRequests,
+  extractTaskIdFromWorkOrderId,
 } from '../team-orchestrator.js'
 import type { TeamRunSummary } from '../team-orchestrator.js'
 import type { TeamTaskDraft } from '../team-plan.js'
@@ -521,6 +522,23 @@ depends: T1
       })
 
       assert.ok(captured.length > 0, 'tasks dispatched without priorResults')
+    })
+  })
+
+  describe('extractTaskIdFromWorkOrderId', () => {
+    it('extracts task ID from standard team: prefix format', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('team:T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('team:planner-tianquan'), 'planner-tianquan')
+    })
+
+    it('extracts last segment when multiple colons present', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('team:wave2:T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('team:planner:tianfu'), 'tianfu')
+    })
+
+    it('returns the whole string when no colon present', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('bare-id'), 'bare-id')
     })
   })
 })

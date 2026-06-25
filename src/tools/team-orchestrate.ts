@@ -401,7 +401,9 @@ export function createTeamOrchestrateTool(
       // Authoritative changed files: union of real diff artifact + self-report,
       // so a worker that under-reports changedFiles can't skip the review gate.
       const changedFiles = teamReviewChangedFiles(summary.run)
-      if (isLastWave && changedFiles.length > 0) {
+      // reviewDepth guard: prevent review workers from recursively triggering
+      // team_orchestrate's own review path. Matches deliver-task.ts convention.
+      if (isLastWave && changedFiles.length > 0 && (params.reviewDepth ?? 0) === 0) {
         try {
           const delegate = requireDelegate(coordinator)
           // Resolve this wave's tasks to drive perspective density + focus.
