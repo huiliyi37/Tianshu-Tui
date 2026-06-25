@@ -861,3 +861,46 @@ describe('prefix evolution integration: multi-round + injection (cache-break rep
     }
   })
 })
+
+describe('PromptEngine advisory deduplication', () => {
+  function lastAppendixContent(request: OaiChatRequest): string {
+    const last = request.messages[request.messages.length - 1]
+    return typeof last?.content === 'string' ? last.content : ''
+  }
+
+  it('injects task-depth advisory only when layer changes', () => {
+    const engine = makeEngine()
+
+    engine.setTaskDepthLayer('system')
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'a' }])
+    assert.match(lastAppendixContent(req1), /<task-depth layer="system">/)
+
+    // Same layer on a new user message → no advisory
+    engine.setTaskDepthLayer('system')
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'b' }])
+    assert.doesNotMatch(lastAppendixContent(req2), /<task-depth/)
+
+    // Layer change → advisory reappears
+    engine.setTaskDepthLayer('wiring')
+    const req3 = engine.buildOaiRequest([{ role: 'user', content: 'c' }])
+    assert.match(lastAppendixContent(req3), /<task-depth layer="wiring">/)
+  })
+
+  it('injects plan-methodology advisory only when methodology changes', () => {
+    const engine = makeEngine()
+
+    engine.setPlanMethodology('lightweight')
+    const req1 = engine.buildOaiRequest([{ role: 'user', content: 'a' }])
+    assert.match(lastAppendixContent(req1), /<plan-methodology route="lightweight">/)
+
+    // Same methodology on a new user message → no advisory
+    engine.setPlanMethodology('lightweight')
+    const req2 = engine.buildOaiRequest([{ role: 'user', content: 'b' }])
+    assert.doesNotMatch(lastAppendixContent(req2), /<plan-methodology/)
+
+    // Methodology change → advisory reappears
+    engine.setPlanMethodology('full')
+    const req3 = engine.buildOaiRequest([{ role: 'user', content: 'c' }])
+    assert.match(lastAppendixContent(req3), /<plan-methodology route="full">/)
+  })
+})
