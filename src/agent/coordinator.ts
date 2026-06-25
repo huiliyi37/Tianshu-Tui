@@ -124,8 +124,9 @@ export interface DelegationRequest {
   /** Logical group identifier for related tasks (e.g. team wave). */
   groupId?: string
   /** Star domain authority for cognitive injection (V3 Component A).
-   *  When set, the domain's systemPromptSuffix is injected into the worker prompt
-   *  and allowedTools are intersected with the domain's toolWhitelist.
+   *  When set, the domain's systemPromptSuffix and volatileBlock are injected
+   *  into the worker prompt (see buildWorkerPrompt). Tool access is governed
+   *  solely by the profile's allowedTools — authority does NOT restrict tools.
    *  Custom domains are loaded at startup, so this must remain an open string. */
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */

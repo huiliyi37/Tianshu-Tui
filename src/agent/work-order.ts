@@ -226,6 +226,10 @@ function toolsForAuthority(tools: string[], authority?: string): string[] {
     // Fail closed: an authority layer is an extra restriction. If the domain
     // id is misspelled or not loaded, do not silently fall back to the profile
     // tool set — that makes the restriction disappear without a signal.
+    console.warn(
+      `[work-order] Unknown authority "${authority}" — worker gets zero tools (fail-closed). ` +
+      `Known domains: ${starDomainRegistry.getDomainIds().join(', ')}.`,
+    )
     return []
   }
 

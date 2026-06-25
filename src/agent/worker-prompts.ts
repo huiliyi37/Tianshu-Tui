@@ -201,6 +201,13 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
   // volatileBlock = "你是谁" (frames identity, goes first); systemPromptSuffix = "你怎么做"
   // (methodology, goes last for highest attention weight).
   const domainDef = order.authority ? starDomainRegistry.get(order.authority) : undefined
+  if (order.authority && !domainDef) {
+    const known = starDomainRegistry.getDomainIds()
+    console.warn(
+      `[coordinator] Unknown authority "${order.authority}" — cognitive injection skipped. ` +
+      `Known domains: ${known.join(', ')}. Worker will run without domain persona/methodology.`,
+    )
+  }
   const effectiveSuffix = authoritySuffix ?? domainDef?.systemPromptSuffix
   const personaBlock = authoritySuffix ? undefined : domainDef?.volatileBlock
   const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
