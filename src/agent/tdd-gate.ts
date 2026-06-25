@@ -1,8 +1,9 @@
 /**
  * TDD Gate
  *
- * Soft gate that injects a one-shot hint when the agent transitions from
- * planning to executing without having touched any test files.
+ * Injects a hint when the agent is in executing phase without having
+ * touched any test files. Fires on every executing turn (not one-shot)
+ * so the agent is continuously reminded until it writes a test.
  *
  * Consumed via the existing immune hint pipeline (_lastImmuneHint → formatImmuneContext),
  * so it does not pollute message history.
@@ -34,6 +35,6 @@ export function checkTddGate(input: TddGateInput): ImmuneContextHint | null {
     level: 'warning',
     signalKinds: ['tdd_violation' as DangerSignalKind],
     matchedMistakes: [],
-    suggestion: `No test file touched yet. Write tests before implementation. Expected test path: src/**/__tests__/*.test.ts`,
+    suggestion: `⚠ 你即将写/改实现代码但还没碰过测试文件。先写测试——Bugfix 必须先构造能复现原缺陷的 RED 测试（诊断循环），新功能必须先写测试定义行为契约。测试路径：src/**/__tests__/*.test.ts。跳过此步骤的交付将不被认可。`,
   }
 }

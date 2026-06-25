@@ -31,7 +31,7 @@ describe('checkTddGate', () => {
     assert.ok(result)
     assert.equal(result.level, 'warning')
     assert.deepEqual(result.signalKinds, ['tdd_violation'])
-    assert.ok(result.suggestion.includes('test'))
+    assert.ok(result.suggestion.includes('测试'), `suggestion should mention tests in Chinese, got: ${result.suggestion}`)
   })
 
   it('returns soft hint when only reading source files (no new files created)', () => {
