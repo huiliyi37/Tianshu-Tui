@@ -301,16 +301,15 @@ describe('worker prompts', () => {
   // ── Truncation transparency tests ──────────────────────────────
 
   it('marks progressive field drop with _truncated flag so primary agent knows info was lost', async () => {
-    // Large enough to trigger progressive field drop (>32K after stringify).
-    // findings + examinedFiles + risks together push past the 32K budget,
-    // but findings alone stay under so the hard truncation doesn't kick in.
-    const manyFindings = Array.from({ length: 120 }, (_, i) => ({
+    // Tuned: full packet > 32K (triggers progressive drop), but after dropping
+    // examinedFiles+risks+nextActions+verification → ~25K (under hard truncation).
+    const manyFindings = Array.from({ length: 70 }, (_, i) => ({
       claim: `Finding ${i}: ${'detail '.repeat(40)}`,
       evidence: `src/file-${i}.ts`,
       confidence: 'high' as const,
     }))
-    const manyExamined = Array.from({ length: 60 }, (_, i) => `src/other-${i}.ts`)
-    const manyRisks = Array.from({ length: 30 }, (_, i) => `risk-${i}: ${'word '.repeat(20)}`)
+    const manyExamined = Array.from({ length: 100 }, (_, i) => `src/other-${i}.ts`)
+    const manyRisks = Array.from({ length: 50 }, (_, i) => `risk-${i}: ${'word '.repeat(20)}`)
 
     const packet = await buildPrimaryWorkerPacket([
       {
