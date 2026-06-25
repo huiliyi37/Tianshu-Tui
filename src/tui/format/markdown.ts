@@ -136,15 +136,18 @@ export function keywordsForLang(lang: string): LangConfig | null {
 }
 
 // ── Syntax token colors ───────────────────────────────────────
+// 颜色跟随当前主题，保证切换主题时代码块风格一致；无 theme 时回退到原硬编码色。
 
-const SYN = {
-  keyword: '#d7dce3',
-  type: '#b0b8c4',
-  func: '#b0b8c4',
-  string: '#9aa2b1',
-  number: '#9aa2b1',
-  punct: '#6e7681',
-  comment: '#6e7681',
+function getSynColors(theme?: RivetTheme) {
+  return {
+    keyword: theme?.primary ?? '#d7dce3',
+    type: theme?.secondary ?? '#b0b8c4',
+    func: theme?.secondary ?? '#b0b8c4',
+    string: theme?.muted ?? '#9aa2b1',
+    number: theme?.muted ?? '#9aa2b1',
+    punct: theme?.dim ?? '#6e7681',
+    comment: theme?.dim ?? '#6e7681',
+  }
 }
 
 // ── Inline tokenizer ───────────────────────────────────────────
@@ -265,9 +268,10 @@ export function parseBlocks(text: string): Block[] {
 
 // ── Syntax highlighting ───────────────────────────────────────
 
-export function highlightLine(line: string, keywords: Set<string> | null, caseInsensitive = false): Segment[] {
+export function highlightLine(line: string, keywords: Set<string> | null, caseInsensitive = false, theme?: RivetTheme): Segment[] {
   if (!keywords) return [{ text: line }]
 
+  const SYN = getSynColors(theme)
   const segments: Segment[] = []
   const commentIdx = line.indexOf('//')
   const hashCommentIdx = line.indexOf('#')
@@ -363,7 +367,7 @@ function formatCodeBlock(language: string | undefined, content: string, columns:
 
   // Code lines with left border
   for (const line of visible) {
-    const segs = highlightLine(line, keywords, caseInsensitive)
+    const segs = highlightLine(line, keywords, caseInsensitive, theme)
     const rendered = formatInlineToAnsi(segs, theme)
     result.push(`${color('│ ', theme.dim)}${rendered}`)
   }
@@ -460,7 +464,7 @@ export function formatMarkdown(input: FormatMarkdownInput, theme: RivetTheme): s
       if (pipeIdx === -1) { result.push(line); continue }
       const gutter = line.slice(0, pipeIdx + 1)
       const code = line.slice(pipeIdx + 1)
-      const segs = highlightLine(code, keywords, caseInsensitive)
+      const segs = highlightLine(code, keywords, caseInsensitive, theme)
       result.push(`${color(gutter, theme.dim)}${formatInlineToAnsi(segs, theme)}`)
     }
     return result

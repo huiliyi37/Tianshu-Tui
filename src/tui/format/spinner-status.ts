@@ -35,12 +35,29 @@ export interface SpinnerStatusInput {
   stalled?: boolean
 }
 
+const PHASE_LABELS: Record<SpinnerPhase, string> = {
+  idle: '',
+  thinking: 'thinking…',
+  streaming: 'streaming…',
+  analyzing: 'analyzing…',
+  waiting: 'waiting…',
+}
+
 export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme): string | null {
   if (input.phase === 'idle') return null
   const useAscii = chalk.level < 3
   const frame = spinnerFrame(input.tick, useAscii)
-  const text = `${frame} thinking… ${formatElapsedHuman(input.elapsedMs)}`
-  return color(text, input.stalled ? theme.warning : theme.muted)
+  const label = PHASE_LABELS[input.phase] ?? 'thinking…'
+  const text = `${frame} ${label} ${formatElapsedHuman(input.elapsedMs)}`
+  const phaseColor: Record<SpinnerPhase, string> = {
+    idle: theme.muted,
+    thinking: theme.muted,
+    streaming: theme.primary,
+    analyzing: theme.muted,
+    waiting: theme.warning,
+  }
+  // stall 优先级最高，覆盖 phase 颜色以提示用户
+  return color(text, input.stalled ? theme.warning : phaseColor[input.phase])
 }
 
 export function formatTokenCount(n: number): string {

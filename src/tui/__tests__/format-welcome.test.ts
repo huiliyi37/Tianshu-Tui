@@ -46,6 +46,23 @@ test('priorMsgCount>0 shows prior count', () => {
   assert.ok(lines.join('\n').includes('7 prior'), 'should show prior message count')
 })
 
+test('compact mode renders single line with essentials', () => {
+  const lines = formatWelcome({
+    modelName: 'glm-5.1',
+    cwd: '/tmp/x',
+    sessionId: 'deadbeef1234',
+    priorMsgCount: 7,
+    columns: 80,
+    compact: true,
+  }, theme)
+  assert.equal(lines.length, 1, 'compact welcome is a single line')
+  const joined = lines[0]!
+  assert.ok(joined.includes('天枢'), 'should show branding')
+  assert.ok(joined.includes('glm-5.1'), 'should show model')
+  assert.ok(joined.includes('deadbeef'), 'should show session prefix')
+  assert.ok(joined.includes('/help'), 'should hint /help')
+})
+
 test('shortcut hints match real keybindings (no Ctrl+K / Alt+Enter drift)', () => {
   const lines = formatWelcome({
     modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 120,

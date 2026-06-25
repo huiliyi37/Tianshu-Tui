@@ -195,10 +195,10 @@ export function ProjectSidebar() {
       {threads.map((s) => (
         <div
           key={s.id}
-          className={`thread-card ${s.id === ui.activeSessionId ? 'active' : ''}`}
+          className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
           onClick={() => dispatch({ type: 'setActive', id: s.id })}
         >
-          <div className="thread-card-main">
+          <div className="thread-row-main">
             <div className="title">
               <span className={`status-dot status-${s.status}`} />
               {s.title ?? s.id.slice(0, 8)}
@@ -212,7 +212,7 @@ export function ProjectSidebar() {
             </div>
           </div>
           <button
-            className="thread-card-close"
+            className="thread-row-close"
             title="关闭"
             aria-label="关闭会话"
             onClick={(e) => {
@@ -245,8 +245,8 @@ export function ProjectSidebar() {
         {showArchived && archivedSessions.length > 0 && (
           <div className="archived-section">
             {archivedSessions.map(s => (
-              <div key={s.id} className="thread-card archived">
-                <div className="thread-card-main">
+              <div key={s.id} className="thread-row archived">
+                <div className="thread-row-main">
                   <div className="title">
                     <span className="status-dot status-archived" />
                     {s.title ?? s.id.slice(0, 8)}

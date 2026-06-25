@@ -305,40 +305,14 @@ export function ThreadView(props: {
       <div className="messages" ref={msgRef} onScroll={onScroll}>
         {view.blocks.length === 0 && (
           <div className="empty welcome">
-            <div className="welcome-icon">
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
-              </svg>
-            </div>
             <p className="welcome-title">开始对话</p>
-            <p className="welcome-hint">输入消息或使用下方快捷命令</p>
-            <div className="welcome-cards">
-              <button className="welcome-card" onClick={() => runCommand('/plan')}>
-                <span className="wc-glyph" aria-hidden>📋</span>
-                <span className="wc-label">创建方案</span>
-                <span className="wc-desc">调研代码库后输出实施计划</span>
-              </button>
-              <button className="welcome-card" onClick={() => runCommand('/review')}>
-                <span className="wc-glyph" aria-hidden>🔍</span>
-                <span className="wc-label">审查变更</span>
-                <span className="wc-desc">对未提交改动进行代码审查</span>
-              </button>
-              <button className="welcome-card" onClick={() => runCommand('/autonomous')}>
-                <span className="wc-glyph" aria-hidden>✦</span>
-                <span className="wc-label">自治模式</span>
-                <span className="wc-desc">项目内操作自动执行，无需逐条审批</span>
-              </button>
-            </div>
+            <p className="welcome-hint">输入消息或选择一个快捷命令</p>
             <div className="welcome-pills">
-              <span className="welcome-pill" onClick={() => runCommand('/review')}>/review</span>
-              <span className="welcome-pill" onClick={() => runCommand('/plan')}>/plan</span>
-              <span className="welcome-pill" onClick={() => runCommand('/autonomous')}>/autonomous</span>
-              <span className="welcome-pill" onClick={() => runCommand('/team')}>/team</span>
-              <span className="welcome-pill" onClick={() => runCommand('/compact')}>/compact</span>
-              <span className="welcome-pill" onClick={() => runCommand('/context')}>/context</span>
-              <span className="welcome-pill" onClick={() => runCommand('/verify')}>/verify</span>
-              <span className="welcome-pill" onClick={() => runCommand('/constellation')}>/constellation</span>
+              <span className="welcome-pill" onClick={() => runCommand('/plan')}>创建方案</span>
+              <span className="welcome-pill" onClick={() => runCommand('/review')}>审查变更</span>
+              <span className="welcome-pill" onClick={() => runCommand('/autonomous')}>自治模式</span>
+              <span className="welcome-pill" onClick={() => runCommand('/team')}>组队</span>
+              <span className="welcome-pill" onClick={() => runCommand('/context')}>上下文</span>
             </div>
           </div>
         )}

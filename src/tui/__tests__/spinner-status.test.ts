@@ -33,10 +33,15 @@ describe('formatSpinnerStatus', () => {
     assert.ok(!plain.includes('esc'), 'no interrupt hint appended')
   })
 
-  it('spinner frame is phase-agnostic (same frame regardless of phase)', () => {
-    const a = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'thinking', elapsedMs: 0 }, theme)!)
-    const b = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'streaming', elapsedMs: 0 }, theme)!)
-    assert.equal(a, b, 'thinking and streaming render identically')
+  it('spinner label reflects phase', () => {
+    const thinking = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'thinking', elapsedMs: 0 }, theme)!)
+    const streaming = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'streaming', elapsedMs: 0 }, theme)!)
+    const analyzing = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'analyzing', elapsedMs: 0 }, theme)!)
+    const waiting = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'waiting', elapsedMs: 0 }, theme)!)
+    assert.ok(thinking.includes('thinking'))
+    assert.ok(streaming.includes('streaming'))
+    assert.ok(analyzing.includes('analyzing'))
+    assert.ok(waiting.includes('waiting'))
   })
 
   it('word is static (does not rotate with elapsed)', () => {
