@@ -129,7 +129,7 @@ describe('routeReviewWorkflow', () => {
       {
         ...okDeps,
         spawnVerifier: async () => { verifierCalls++; return { verdict: 'verified', evidence: 'ran: should not matter' } },
-        spawnSquadron: async () => ({ findings: [{ severity: 'HIGH', claim: 'race' }], infraFailures: [] }),
+        spawnSquadron: async () => ({ findings: [{ severity: 'HIGH', claim: 'race condition in foo.ts:42', evidence: 'grep shows async setState without lock at foo.ts:42' }], infraFailures: [] }),
       },
     )
 
@@ -138,6 +138,24 @@ describe('routeReviewWorkflow', () => {
     assert.equal(outcome.escalated, true)
     assert.match(outcome.evidence ?? '', /squadron/i)
     assert.equal(verifierCalls, 0)
+  })
+
+  it('L3 squadron HIGH finding without evidence is downgraded to non-blocking (verified)', async () => {
+    const outcome = await routeReviewWorkflow(
+      { files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'], crossModule: false, isFix: false },
+      {
+        ...okDeps,
+        spawnSquadron: async () => ({
+          findings: [{ severity: 'HIGH', claim: 'fromWave possibly undefined' }],
+          infraFailures: [],
+        }),
+      },
+    )
+
+    assert.equal(outcome.tier, 'L3')
+    // No evidence → finding downgraded → squadron passes → verified
+    assert.equal(outcome.verdict, 'verified')
+    assert.match(outcome.evidence ?? '', /no blocking findings/i)
   })
 
   it('L3 squadron with infra-only failures returns verified (no L2 fallthrough)', async () => {
@@ -222,7 +240,7 @@ describe('routeReviewWorkflow', () => {
       const outcome = await routeReviewWorkflow(codeChange, {
         ...okDeps,
         spawnWiringReviewer: async () => ({
-          findings: [{ severity: 'HIGH', claim: 'dead param: activeTaskIds has zero callers' }],
+          findings: [{ severity: 'HIGH', claim: 'dead param: activeTaskIds has zero callers', evidence: 'grep -rn activeTaskIds src/ → 0 call sites outside declaration' }],
         }),
       }, { mode: 'auto' })
 

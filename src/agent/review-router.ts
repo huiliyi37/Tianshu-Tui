@@ -18,6 +18,11 @@ export type ReviewFindingSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
 export interface ReviewFinding {
   severity?: ReviewFindingSeverity | Lowercase<ReviewFindingSeverity> | string
   claim?: string
+  /** Required for blocking severity (CRITICAL/HIGH). A finding without evidence
+   *  is downgraded to non-blocking — this prevents hallucinated claims from
+   *  blocking delivery. Evidence = file:line reference, command output, or
+   *  other ground truth the reviewer used to substantiate the claim. */
+  evidence?: string
 }
 
 export type ReviewInfraFailureKind = 'worker' | 'json' | 'timeout' | 'skip'
@@ -106,20 +111,35 @@ function normalizeVerifierResult(result: VerifierResult): VerifierResult {
   return result
 }
 
+function isBlockingSeverity(severity: string | undefined): boolean {
+  const upper = severity?.toUpperCase()
+  return upper === 'CRITICAL' || upper === 'HIGH'
+}
+
+function findingHasEvidence(finding: ReviewFinding): boolean {
+  return Boolean(finding.evidence && finding.evidence.trim().length > 0)
+}
+
 function hasBlockingSquadronFinding(result: SquadronResult): boolean {
   return result.findings.some(finding => {
-    const severity = finding.severity?.toUpperCase()
-    return severity === 'CRITICAL' || severity === 'HIGH'
+    if (!isBlockingSeverity(finding.severity)) return false
+    // A HIGH/CRITICAL finding without evidence cannot block — it may be a
+    // hallucinated claim (e.g. referencing a file:line that doesn't exist).
+    // Downgrade to non-blocking; surface it as a caveat in the summary.
+    return findingHasEvidence(finding)
   })
 }
 
 function summarizeSquadronFindings(result: SquadronResult): string {
-  const blocking = result.findings.filter(finding => {
-    const severity = finding.severity?.toUpperCase()
-    return severity === 'CRITICAL' || severity === 'HIGH'
-  })
+  const blocking = result.findings.filter(finding => isBlockingSeverity(finding.severity))
   const summary = blocking
-    .map(finding => `${finding.severity ?? 'UNKNOWN'}: ${finding.claim ?? 'review finding'}`)
+    .map(finding => {
+      const label = `${finding.severity ?? 'UNKNOWN'}: ${finding.claim ?? 'review finding'}`
+      if (!findingHasEvidence(finding)) {
+        return `${label} [NO EVIDENCE — downgraded to non-blocking]`
+      }
+      return label
+    })
     .join('; ')
   return summary.length > 0 ? `squadron blocking findings: ${summary}` : 'squadron blocking findings'
 }

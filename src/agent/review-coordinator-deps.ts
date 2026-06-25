@@ -145,6 +145,7 @@ function mapWorkerFinding(result: WorkerResult, finding: WorkerFinding): ReviewF
   return {
     severity: extractSeverity(text),
     claim: finding.claim,
+    evidence: finding.evidence,
   }
 }
 
