@@ -129,7 +129,7 @@ describe('buildSystemPrompt', () => {
   it('preserves core prompt semantics', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('有理有据'))
-    assert.ok(prompt.includes('改代码前先读'))
+    assert.ok(prompt.includes('先读现有代码理解上下文'))
     assert.ok(prompt.includes('read_file'))
     assert.ok(prompt.includes('edit_file'))
     assert.ok(prompt.includes('write_file'))
