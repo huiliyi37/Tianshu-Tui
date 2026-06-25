@@ -156,6 +156,7 @@ describe('worker prompts', () => {
       },
     ])
 
+    assert.ok(packet.includes('<worker_results_hint>'), 'packet must include trust hint')
     assert.ok(packet.includes('<worker_results>'))
     assert.ok(packet.includes('Found the seam.'))
     assert.ok(packet.includes('main constructs AgentLoop'))
@@ -329,12 +330,13 @@ describe('worker prompts', () => {
     // Extract JSON from <worker_results>...</worker_results>
     const jsonMatch = packet.match(/<worker_results>([\s\S]*?)<\/worker_results>/)
     assert.ok(jsonMatch, 'packet must contain <worker_results> tags')
-    const parsed = JSON.parse(jsonMatch![1])
+    const parsed = JSON.parse(jsonMatch[1]!)
 
     // The primary agent must be able to detect that fields were dropped.
     // Without this flag, evidenceStatus:'verified' is misleading when
     // verification metadata was silently removed.
     assert.ok(parsed[0]._truncated === true, 'progressive field drop must set _truncated:true')
+    assert.equal(parsed[0].evidenceStatus, 'unverified', 'truncated verified claims must be downgraded')
   })
 
   it('produces valid JSON when progressive field drop is insufficient and hard truncation fires', async () => {
@@ -366,7 +368,7 @@ describe('worker prompts', () => {
     // The JSON inside must be parseable — hard truncation must not break
     // the JSON structure by slicing in the middle of a value.
     assert.doesNotThrow(
-      () => JSON.parse(jsonMatch![1]),
+      () => JSON.parse(jsonMatch[1]!),
       'hard-truncated packet JSON must be parseable',
     )
   })

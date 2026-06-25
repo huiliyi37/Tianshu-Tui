@@ -117,7 +117,7 @@ test('passes through read-only worker with examinedFiles and empty changedFiles'
   assert.deepEqual(checked.examinedFiles, ['src/auth.ts', 'src/login.ts'])
 })
 
-test('passes through read-only worker with examinedFiles even when evidenceStatus is verified', () => {
+test('downgrades read-only worker self-reported verified to unverified', () => {
   const checked = verifyWorkerEvidence(result({
     changedFiles: [],
     examinedFiles: ['src/config.ts'],
@@ -125,7 +125,8 @@ test('passes through read-only worker with examinedFiles even when evidenceStatu
   }))
 
   assert.equal(checked.status, 'passed')
-  assert.equal(checked.evidenceStatus, 'verified')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('scan-level only')))
 })
 
 test('patcher profile gets advisory risk instead of blocked', () => {
@@ -193,6 +194,37 @@ test('adversarial_verifier with unchanged evidenceStatus still passes through', 
 
   assert.equal(checked.status, 'passed')
   assert.equal(checked.evidenceStatus, 'unverified')
+})
+
+test('goal_judge keeps verified verdict when verification metadata passed', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+    verification: {
+      command: 'npm test',
+      status: 'passed',
+      scope: 'targeted',
+      exitCode: 0,
+      passed: 5,
+      failed: 0,
+      skipped: 0,
+      durationMs: 100,
+    },
+  }), 'goal_judge')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'verified')
+})
+
+test('goal_judge downgrades verified verdict without passing verification metadata', () => {
+  const checked = verifyWorkerEvidence(result({
+    changedFiles: [],
+    evidenceStatus: 'verified',
+  }), 'goal_judge')
+
+  assert.equal(checked.status, 'passed')
+  assert.equal(checked.evidenceStatus, 'unverified')
+  assert.ok(checked.risks.some(r => r.includes('without passing verification metadata')))
 })
 
 test('adversarial_verifier downgrades verified when run_tests errored', () => {

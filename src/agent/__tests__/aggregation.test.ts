@@ -19,10 +19,15 @@ function result(id: string, status: WorkerResult['status'], confidence?: 'low' |
 }
 
 describe('aggregateResults', () => {
-  it('primary_decides: returns all results as-is', () => {
+  it('primary_decides: returns all results after evidence verification', () => {
     const results = [result('a', 'passed'), result('b', 'failed')]
     const aggregated = aggregateResults(results, 'primary_decides')
-    assert.deepEqual(aggregated, results)
+    // Read-only passed workers cannot self-report verified; they are downgraded.
+    assert.equal(aggregated[0]!.status, 'passed')
+    assert.equal(aggregated[0]!.evidenceStatus, 'unverified')
+    assert.ok(aggregated[0]!.risks.some(r => r.includes('scan-level only')))
+    assert.equal(aggregated[1]!.status, 'failed')
+    assert.equal(aggregated[1]!.evidenceStatus, 'unverified')
   })
 
   it('all_required: fails if any result is not passed', () => {
