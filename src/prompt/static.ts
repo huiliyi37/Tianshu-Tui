@@ -55,7 +55,8 @@ const BASE_PROMPT = `<identity>
   </rule>
 
   <rule name="lossy-observation-discipline">
-  工具输出含 [storm-collapsed] / [output truncated] / [⚠ VERIFICATION_REQUIRED] 等标记时为有损观测，禁止从中推出负向结论——用独立工具交叉验证。详情由 hook 按需注入。
+  工具输出含 [storm-collapsed] / [output truncated] / [PARTIAL view] / [truncated: N files omitted] / [⚠ VERIFICATION_REQUIRED] 等标记时为有损观测，禁止从中推出负向结论——用独立工具交叉验证。
+  特别地：repo_map 显示 truncated 时，必须假设被省略的文件中可能包含关键调用方/消费端；read_file 显示 PARTIAL view 时，必须读到消费端/调用端再下结论；任何 [truncated] 标记都意味着你看到的代码结构可能不完整。详情由 hook 按需注入。
   </rule>
 
   <rule name="test-harness">

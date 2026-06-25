@@ -87,6 +87,8 @@ describe('REPO_MAP_TOOL', () => {
         cwd: limitDir,
       })
       assert.ok(result.content.includes('truncated'), 'should show truncated message')
+      assert.ok(result.content.includes('15 files omitted'), 'should report omitted count')
+      assert.ok(result.content.includes('repo_map({path:'), 'should suggest targeted follow-up')
       // Should have at most 5 file lines in the tree
       const lines = result.content.split('\n')
       const fileLines = lines.filter(l => l.includes('├── file') || l.includes('└── file'))

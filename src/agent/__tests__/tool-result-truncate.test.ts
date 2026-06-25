@@ -16,12 +16,14 @@ describe('truncateToolResult', () => {
     assert.match(result, /\.\.\.\[truncated \d+ chars\]\.\.\./)
   })
 
-  it('preserves head and tail', () => {
+  it('preserves head and tail and appends truncation warning', () => {
     const content = 'HEAD_MARKER' + 'x'.repeat(500_000) + 'TAIL_MARKER'
     const result = truncateToolResult(content, 1_000)
 
     assert.ok(result.startsWith('HEAD_MARKER'))
-    assert.ok(result.endsWith('TAIL_MARKER'))
+    assert.ok(result.includes('TAIL_MARKER'))
+    assert.ok(result.includes('[WARNING: this result was truncated'))
+    assert.ok(result.includes('Do not draw architectural conclusions'))
   })
 
   it('handles empty content', () => {
