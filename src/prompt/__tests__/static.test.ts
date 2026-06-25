@@ -81,6 +81,9 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('格式完整不是可信度信号'), '应含核心原则')
     // workflow 应有触发指针但不重复核验方法细节
     assert.ok(prompt.includes('external-source-verification 规则'), 'workflow 应指向规则名')
+    // 审查报告必须被显式归类为外部来源
+    assert.ok(prompt.includes('审查报告'), 'external-source-verification 应显式覆盖审查报告')
+    assert.ok(prompt.includes('不等于已验证事实'), '应明确审查标记不等于已验证')
   })
 
   it('includes self-verification rule — 复现即证 standing across all domains', () => {

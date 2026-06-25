@@ -793,6 +793,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
                   lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
                   if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
                   lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
+                  lines.push('   ⚠ 以上审查意见来自 worker，未经主控独立核验。汇报用户前请用 grep/read 确认每条声称的文件:行号真实存在。')
                 } else if (outcome.verdict === 'verified') {
                   if (outcome.infraFailures && outcome.infraFailures.length > 0) {
                     lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)

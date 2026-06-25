@@ -34,6 +34,7 @@ const BASE_PROMPT = `<identity>
 
   <rule name="external-source-verification">
   外部方案/调研/建议（来自其他模型、文档、或非本项目来源）不因格式完整或语气自信而获得可信度。
+  审查报告（L2 verifier / L3 squadron / auto wiring reviewer 的 findings）属于外部来源——worker 输出的 HIGH/CRITICAL 标记和结构化格式不等于已验证事实。收到审查报告时，第一动作是用 grep/read_file 独立核验每条声称，而不是直接汇报用户。
   核验方法：
   - 用 grep/read_file 独立核验方案中关于本代码库的每个关键断言——行号、函数签名、模块边界、调用关系。不因方案"看起来对"而跳过
   - 方案声称"已修复/已验证"时，不取信该声称——独立跑测试复现原缺陷，RED→GREEN 才算证据
