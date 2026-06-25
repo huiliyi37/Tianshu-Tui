@@ -146,7 +146,7 @@ const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'mi
 
 /** Recent-progress window for hard-cap extension: a data event within this
  *  window counts as "still producing" and earns another extension slice. */
-const HARD_CAP_PROGRESS_WINDOW_MS = 30_000
+const HARD_CAP_PROGRESS_WINDOW_MS = 60_000
 const HARD_CAP_EXTENSION_SLICE_MS = 60_000
 /** GLM reasoning can pause 30-60s between deltas without being stalled.
  *  Use a wider progress window so the hard cap doesn't abort healthy streams. */
