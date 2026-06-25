@@ -47,7 +47,7 @@ export function resolveApiKey(provider: ProviderConfig): string {
  *  取值依据：基于「chunk 空闲窗」而非「总时长」的语义——120s 远小于 300s read 兜底、
  *  远大于合法 reasoning delta 间隙，仅命中 reasoning 完全停流的真卡死。 */
 const SLOW_THINKING_STALL_DEFAULT_MS: Record<string, number> = {
-  glm: 210_000,
+  glm: 420_000,
 }
 
 export function createProviderClient(

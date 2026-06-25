@@ -254,7 +254,7 @@ describe('createProviderClient', () => {
     assert.ok(client instanceof OpenAIClient)
     // config is private but accessible at runtime
     const config = (client as unknown as { config: { thinkingStallTimeoutMs?: number } }).config
-    assert.equal(config.thinkingStallTimeoutMs, 210_000, 'glm should get default 210s thinking stall')
+    assert.equal(config.thinkingStallTimeoutMs, 420_000, 'glm should get default 420s thinking stall')
   })
 
   it('does NOT inject thinkingStallTimeoutMs for non-glm providers', () => {
