@@ -334,19 +334,19 @@ const ANTIGRAVITY_FALLBACK: ColorSet = {
 // （青绿 ok / 珊瑚 err / 冷琥珀 warn），不刺眼但仍可语义辨识。是 antigravity 的精炼继任者：
 // 同源冷 azure，但语义色去糖果化、明度梯度更清晰。可与桌面端 tokens.css 对照移植。
 const COBALT_TRUECOLOR: ColorSet = {
-  primary: '#61aef4',   // 钴蓝 accent — 唯一 accent：链接/选中/相位字形/流式指示 (--tui-accent)
-  secondary: '#8db5e0', // 钢青 — 正文结构强调 / edit·write 头
+  primary: '#6ab8ff',   // 钴蓝 accent — 流式指示/链接 (--tui-accent)
+  secondary: '#7dacbf', // 雾青灰 — 结构头/编辑头/非选中项 (偏青灰，拉开与 primary 蓝的层次)
   success: '#58cbb4',   // 青绿 — 测试通过/完成 (--tui-ok, teal-green 偏冷)
-  warning: '#e0c071',   // 冷琥珀 — 注意/委派 (--tui-warn)
+  warning: '#d4b44c',   // 琥珀金 — 注意/委派/stall (偏金有光泽感，深色背景不泥)
   error: '#ed7665',     // 珊瑚砖红 — 错误/高风险 (--tui-err, 去糖果感)
-  dim: '#8590a0',       // 冷板岩灰 — 分隔/快捷键 (提亮 ~6:1，深色背景不疲劳)
+  dim: '#8693a0',       // 冷板岩灰 — 分隔/快捷键 (提亮一档，5.8→6.4:1 对比度)
   pulseQuiet: '#30363d', // 冷边框灰 — quiet pulse (--tui-border)
-  pulseActive: '#61aef4', // 钴蓝 — active pulse (= primary)
+  pulseActive: '#6ab8ff', // 钴蓝 — active pulse (= primary)
   pulseAlert: '#ed7665',  // 珊瑚 — alert pulse (= error)
-  toolShell: '#78a3cf',   // 钢蓝 — bash/grep/glob
+  toolShell: '#5f97c5',   // 壳蓝 — bash/grep/glob (加深加饱和，与亮钴蓝 primary 形成层次)
   toolEdit: '#65b9ca',    // 冷青 — edit_file/write_file (区别于 shell 蓝与 success 青绿)
   toolTest: '#58cbb4',    // 青绿 — run_tests (= success)
-  toolDelegate: '#e0c071', // 冷琥珀 — delegate (= warning)
+  toolDelegate: '#d4b44c', // 琥珀金 — delegate (= warning)
 }
 
 const COBALT_FALLBACK: ColorSet = {
@@ -491,7 +491,7 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
     // userColor = 冷调亮白 ▌ 标记 (--tui-bright)，不抢 accent 钴蓝
     // assistantColor = 冷中性灰正文 (--tui-fg)，降眩光不疲劳
     // muted = 元信息灰 (--tui-label)
-    truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#bdc3ca', muted: '#9ca5b3' }),
+    truecolor: buildTheme(COBALT_TRUECOLOR, { userColor: '#e6ecf2', assistantColor: '#c9cfd6', muted: '#9ca5b3' }),
     fallback: buildTheme(COBALT_FALLBACK, { userColor: 'white', assistantColor: 'white', muted: 'gray' }),
   },
   gemini: {
@@ -503,7 +503,7 @@ export const THEMES: Record<ThemeName, { truecolor: RivetTheme; fallback: RivetT
   },
 }
 
-let activeTheme: ThemeName = 'tianshu'
+let activeTheme: ThemeName = 'cobalt'
 
 export function setTheme(name: ThemeName): void {
   activeTheme = name

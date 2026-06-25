@@ -101,7 +101,7 @@ export function renderPager(data: PagerData, width: number, height: number, them
   }
 
   // Footer + bottom border
-  lines.push(formatFooter('↑↓ scroll  q quit', width, theme))
+  lines.push(formatFooter('↑↓/j/k scroll  PgUp/PgDn  q/Esc close', width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -149,7 +149,7 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
   lines.push(formatTitleBar(data.title ?? '❂ 星域总览 Starmap', width, theme))
 
   // Column widths
-  const glyphWidth = 4
+  const glyphWidth = 5
   const nameWidth = Math.min(20, Math.floor(width * 0.25))
   const descWidth = width - 2 - glyphWidth - nameWidth - 8 // 8 for padding/spacing
 
@@ -197,7 +197,7 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
     lines.push(padLine(color(recognition.slice(0, width - 2), theme.primary), width, theme))
   }
 
-  lines.push(formatFooter('← → select  Enter activate  q quit', width, theme))
+  lines.push(formatFooter('↑↓/j/k select  Enter activate  q/Esc close', width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -262,7 +262,7 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  Enter run  q quit', width, theme))
+  lines.push(formatFooter('Esc cancel  ↑↓ select  Enter run', width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -325,7 +325,7 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  Enter → resume  q quit', width, theme))
+  lines.push(formatFooter('↑↓ select  Enter → resume  Esc close', width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -527,7 +527,7 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -579,7 +579,7 @@ export function renderTasks(data: TasksData, width: number, height: number, them
   }
 
   const summary = totalActive === 1 ? '1 worker running' : `${totalActive} workers running`
-  lines.push(formatFooter(`${summary}  ·  q quit`, width, theme))
+  lines.push(formatFooter(`${summary}  ·  q/Esc close`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -644,7 +644,7 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -703,7 +703,7 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  ←→/Tab switch  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
