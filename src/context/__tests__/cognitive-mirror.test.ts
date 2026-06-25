@@ -66,7 +66,7 @@ describe('cognitive mirror — 认知镜面', () => {
 
     assert.ok(mirror.startsWith('<cognitive-mirror '))
     assert.ok(mirror.endsWith(' />'))
-    assert.ok(mirror.includes('verification_coverage="low"'), `expected coarse label, got: ${mirror}`)
+    assert.ok(mirror.includes('verification_coverage="none"'), `expected "none" when no verification run, got: ${mirror}`)
     assert.ok(mirror.includes('complexity="high"'), `expected coarse label, got: ${mirror}`)
     assert.ok(mirror.includes('files_modified="0"'))
   })
@@ -154,11 +154,29 @@ describe('cognitive mirror — 认知镜面', () => {
 
   it('formats dimensions to 2 decimal places when evidence present', () => {
     const sensorium = makeSensorium({ confidence: 0.3333, complexity: 0.7777 })
-    const ledger = makeLedger({ sensorium, evidence: { filesModified: new Set(['src/x.ts']) } as any })
+    const ledger = makeLedger({
+      sensorium,
+      evidence: {
+        filesModified: new Set(['src/x.ts']),
+        verifications: [{ status: 'passed' }],
+      } as any,
+    })
     const mirror = buildCognitiveMirror(ledger)
 
     assert.ok(mirror.includes('verification_coverage="0.33"'), `got: ${mirror}`)
     assert.ok(mirror.includes('complexity="0.78"'), `got: ${mirror}`)
+  })
+
+  it('shows verification_coverage="0.00" when files modified but no verification run', () => {
+    const sensorium = makeSensorium({ confidence: 1.0 })
+    const ledger = makeLedger({
+      sensorium,
+      evidence: { filesModified: new Set(['src/x.ts']) } as any,
+    })
+    const mirror = buildCognitiveMirror(ledger)
+
+    assert.ok(mirror.includes('verification_coverage="0.00"'), `got: ${mirror}`)
+    assert.ok(mirror.includes('files_modified="1"'), `got: ${mirror}`)
   })
 
   it('returns concise mirror — no commentary, pure reflection', () => {
