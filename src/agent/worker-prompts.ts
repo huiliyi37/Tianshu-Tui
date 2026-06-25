@@ -396,19 +396,49 @@ export async function buildPrimaryWorkerPacket(results: WorkerResult[], artifact
       // artifact save failed → fall through to progressive field drop
     }
 
-    // No artifact store or save failed: progressive field drop (fallback)
+    // No artifact store or save failed: progressive field drop (fallback).
+    // Mark each result so the primary agent knows fields were removed —
+    // without this, evidenceStatus:'verified' is misleading when the
+    // verification metadata backing that claim was silently deleted.
     for (const result of compact) {
       delete result.examinedFiles
       delete result.risks
       delete result.nextActions
       delete result.verification
+      ;(result as Record<string, unknown>)._truncated = true
     }
     json = JSON.stringify(compact)
   }
 
-  // Final safety: truncate raw JSON if still over budget (shouldn't happen normally)
+  // Final safety: if still over budget, truncate to the largest prefix whose
+  // JSON array is still valid. We must not emit unparseable JSON — the primary
+  // agent has no error recovery for a broken <worker_results> payload.
   if (json.length > MAX_WORKER_PACKET_CHARS) {
-    json = json.slice(0, MAX_WORKER_PACKET_CHARS) + '…"'
+    // Strategy: try removing findings from the tail (keep earliest results
+    // intact), then hard-limit the remaining JSON. This is more principled
+    // than slicing a string at an arbitrary byte offset.
+    for (let i = compact.length - 1; i >= 0 && json.length > MAX_WORKER_PACKET_CHARS; i--) {
+      delete compact[i]!.findings
+      ;(compact[i]! as Record<string, unknown>)._truncated = true
+      json = JSON.stringify(compact)
+    }
+    // Last resort: truncate the array itself, keeping valid JSON structure.
+    while (json.length > MAX_WORKER_PACKET_CHARS && compact.length > 1) {
+      compact.pop()
+      json = JSON.stringify(compact)
+    }
+    // If a single result is still too large, keep only its core identifiers.
+    if (json.length > MAX_WORKER_PACKET_CHARS && compact.length === 1) {
+      const only = compact[0]!
+      const minimal = {
+        workOrderId: only.workOrderId,
+        status: only.status,
+        summary: typeof only.summary === 'string' ? only.summary.slice(0, 200) : '',
+        _truncated: true,
+        _truncationNote: 'Result too large for inline packet — core fields only retained.',
+      }
+      json = JSON.stringify([minimal])
+    }
   }
 
   return `<worker_results>${json}</worker_results>`

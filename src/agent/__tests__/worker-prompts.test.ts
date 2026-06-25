@@ -297,4 +297,78 @@ describe('worker prompts', () => {
     assert.ok(raw, `referenced artifact id "${referencedId}" must resolve in the store`)
     assert.ok(raw.includes('wo_offload'))
   })
+
+  // ── Truncation transparency tests ──────────────────────────────
+
+  it('marks progressive field drop with _truncated flag so primary agent knows info was lost', async () => {
+    // Large enough to trigger progressive field drop (>32K after stringify).
+    // findings + examinedFiles + risks together push past the 32K budget,
+    // but findings alone stay under so the hard truncation doesn't kick in.
+    const manyFindings = Array.from({ length: 120 }, (_, i) => ({
+      claim: `Finding ${i}: ${'detail '.repeat(40)}`,
+      evidence: `src/file-${i}.ts`,
+      confidence: 'high' as const,
+    }))
+    const manyExamined = Array.from({ length: 60 }, (_, i) => `src/other-${i}.ts`)
+    const manyRisks = Array.from({ length: 30 }, (_, i) => `risk-${i}: ${'word '.repeat(20)}`)
+
+    const packet = await buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_trunc',
+        status: 'passed',
+        summary: 'Result with many fields that will be dropped.',
+        findings: manyFindings,
+        artifacts: [],
+        changedFiles: Array.from({ length: 20 }, (_, i) => `src/changed-${i}.ts`),
+        examinedFiles: manyExamined,
+        risks: manyRisks,
+        nextActions: ['action1', 'action2'],
+        evidenceStatus: 'verified',
+      },
+    ])
+
+    // Extract JSON from <worker_results>...</worker_results>
+    const jsonMatch = packet.match(/<worker_results>([\s\S]*?)<\/worker_results>/)
+    assert.ok(jsonMatch, 'packet must contain <worker_results> tags')
+    const parsed = JSON.parse(jsonMatch![1])
+
+    // The primary agent must be able to detect that fields were dropped.
+    // Without this flag, evidenceStatus:'verified' is misleading when
+    // verification metadata was silently removed.
+    assert.ok(parsed[0]._truncated === true, 'progressive field drop must set _truncated:true')
+  })
+
+  it('produces valid JSON when progressive field drop is insufficient and hard truncation fires', async () => {
+    // Extreme case: findings so large that even after dropping all non-core
+    // fields the JSON still exceeds 32K. The hard truncation must still
+    // produce parseable JSON so the primary agent doesn't get a broken packet.
+    const hugeFindings = Array.from({ length: 200 }, (_, i) => ({
+      claim: `Finding ${i}: ${'detail '.repeat(50)}`,
+      evidence: `src/file-${i}.ts:${i}`,
+      confidence: 'high' as const,
+    }))
+
+    const packet = await buildPrimaryWorkerPacket([
+      {
+        workOrderId: 'wo_huge',
+        status: 'passed',
+        summary: 'Massive result that will hit hard truncation.',
+        findings: hugeFindings,
+        artifacts: [],
+        changedFiles: [],
+        risks: [],
+        nextActions: [],
+        evidenceStatus: 'verified',
+      },
+    ])
+
+    const jsonMatch = packet.match(/<worker_results>([\s\S]*?)<\/worker_results>/)
+    assert.ok(jsonMatch, 'packet must contain <worker_results> tags')
+    // The JSON inside must be parseable — hard truncation must not break
+    // the JSON structure by slicing in the middle of a value.
+    assert.doesNotThrow(
+      () => JSON.parse(jsonMatch![1]),
+      'hard-truncated packet JSON must be parseable',
+    )
+  })
 })
