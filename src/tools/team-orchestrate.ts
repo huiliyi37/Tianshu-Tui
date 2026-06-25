@@ -301,7 +301,7 @@ export function createTeamOrchestrateTool(
             abortSignal: params.abortSignal,
             // Cross-wave failure propagation: pass prior wave results so
             // dispatchWaveAt can block tasks whose dependencies failed.
-            priorResults: fromWave > 0 ? priorWaveResults : undefined,
+            priorResults: (fromWave ?? 0) > 0 ? priorWaveResults : undefined,
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
             // T9 P3: live worker token/tool stream into the team tool card.
             onActivity,
