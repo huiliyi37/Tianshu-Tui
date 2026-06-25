@@ -64,7 +64,7 @@ test('team_orchestrate dispatches a standard plan first wave', async () => {
     'Modify `src/agent/bar.ts`',
   ].join('\n')
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'execute the plan deliberately', planMarkdown: md },
+    input: { mode: 'standard', objective: 'force: execute the plan deliberately', planMarkdown: md },
     cwd: process.cwd(),
     toolUseId: 'tu-1',
   })
@@ -92,7 +92,7 @@ test('team_orchestrate forwards telemetry sink, reward closure sink, and session
   ].join('\n')
 
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'execute with telemetry', planMarkdown: md },
+    input: { mode: 'standard', objective: 'force: execute with telemetry', planMarkdown: md },
     cwd: process.cwd(),
     toolUseId: 'tu-telemetry',
   })
@@ -123,7 +123,7 @@ test('team_orchestrate streams worker progress through onOutput', async () => {
   ].join('\n')
 
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'execute with progress', planMarkdown: md },
+    input: { mode: 'standard', objective: 'force: execute with progress', planMarkdown: md },
     cwd: process.cwd(),
     toolUseId: 'tu-progress',
     onOutput: chunk => { progress.push(chunk) },
@@ -171,7 +171,7 @@ test('team_orchestrate passes fromWave through and reports the next wave value',
   ].join('\n')
 
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'continue', planMarkdown: md, fromWave: 1 },
+    input: { mode: 'standard', objective: 'force: continue wave execution', planMarkdown: md, fromWave: 1 },
     cwd: process.cwd(),
     toolUseId: 'tu-3',
   })
@@ -226,7 +226,7 @@ test('team_orchestrate runs the review gate on a cross-module final wave', async
   })
   const md = '### T1: change\n修改 `src/agent/a.ts`'
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'feature work', planMarkdown: md, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: feature work across modules', planMarkdown: md, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-rev',
   })
@@ -329,7 +329,7 @@ test('team_orchestrate review gate fires on honest diff even when worker self-re
   })
   const md = '### T1: tweak helper\n修改 `src/agent/x.ts`，运行 `npm test` 验证'
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: md, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-honest',
   })
@@ -446,7 +446,7 @@ test('team_orchestrate surfaces scope leak and folds leaked files into review fo
   })
   const md = '### T1: tweak helper\n修改 `src/agent/x.ts`'
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: md, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-leak',
   })
@@ -481,7 +481,7 @@ test('team_orchestrate emits no scope-health noise when changes stay in plan; su
   })
   const md = '### T1: tweak helper\n修改 `src/agent/x.ts`'
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: md, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: md, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-clean',
   })
@@ -537,7 +537,7 @@ test('team_orchestrate injects meridian blast radius into review focus and conte
   let verifierObjective = ''
   const tool = impactTool({ capture: o => { verifierObjective = o } })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-impact',
   })
@@ -558,7 +558,7 @@ test('team_orchestrate emits no blast-radius noise when impact is empty', async 
     impact: () => ({ direct: [], transitive: [], tests: [], totalImpact: 0 }),
   })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-impact-empty',
   })
@@ -571,7 +571,7 @@ test('team_orchestrate emits no blast-radius noise when impact is empty', async 
 test('team_orchestrate review survives a null/missing meridian indexer', async () => {
   const tool = impactTool({ getMeridianIndexer: () => null })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-impact-none',
   })
@@ -589,7 +589,7 @@ test('team_orchestrate injects typecheck breakage into review content, ahead of 
   })
   const tool = impactTool({ getTypecheckRunner: () => brokenRunner })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-tc-broken',
   })
@@ -608,7 +608,7 @@ test('team_orchestrate emits no typecheck noise when the runner is clean', async
   const cleanRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => ({ diagnostics: [], formatted: '', ranOk: true })
   const tool = impactTool({ getTypecheckRunner: () => cleanRunner })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-tc-clean',
   })
@@ -620,7 +620,7 @@ test('team_orchestrate review survives a throwing typecheck runner', async () =>
   const throwingRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => { throw new Error('tsc boom') }
   const tool = impactTool({ getTypecheckRunner: () => throwingRunner })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-tc-throw',
   })
@@ -647,7 +647,7 @@ test('team_orchestrate review survives a throwing impact analyzer', async () => 
     getMeridianIndexer: () => ({ impact: () => { throw new Error('boom') } }),
   })
   const result = await tool.execute({
-    input: { mode: 'standard', objective: 'small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
+    input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
     cwd: process.cwd(),
     toolUseId: 'tu-impact-throw',
   })
