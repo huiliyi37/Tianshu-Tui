@@ -104,6 +104,34 @@ function emptyTranscript(): WorkerTranscript {
   }
 }
 
+/**
+ * Detect streaming-layer tool-call argument pollution from the worker transcript.
+ *
+ * Signature of the cross-tool pollution bug (openai-client.ts resolveToolCallIndex):
+ * a read tool (grep/glob) repeatedly fails with a "required argument missing"
+ * error that also names a FOREIGN field — e.g. grep reporting
+ * `Received input keys: file_path, path` (file_path belongs to read_section),
+ * or the explicit "streaming tool_call argument pollution" marker grep emits.
+ * When the model did the real work but got stuck retrying these poisoned calls,
+ * it never reaches the final JSON → the worker is reported as "Parse failed" /
+ * "aborted", masking the upstream streaming root cause.
+ *
+ * Returns a diagnostic hint to surface in the blocked result so the operator
+ * does not chase "model can't output JSON" when the real cause is streaming.
+ */
+function detectPollutionFailure(transcript: WorkerTranscript): string | null {
+  const errs = transcript.errors
+  if (errs.length === 0) return null
+  // Either the explicit pollution marker (grep.ts), or a "required" error that
+  // also names a foreign key (file_path on a non-file tool, etc.).
+  const hits = errs.filter(e =>
+    e.includes('argument pollution')
+    || (/\brequired\b/i.test(e) && /file_path|section|command\b/.test(e) && /pattern|path|glob\b/.test(e)),
+  )
+  if (hits.length < 2) return null  // a single transient blip is not a pattern
+  return `Worker stalled on ${hits.length} streaming-polluted tool calls (foreign arguments grafted onto read tools). The review work above is likely real; the missing JSON is a symptom of the upstream OpenAIClient parallel-tool_call parsing bug, not a model failure. See .rivet/tool-stream-*.jsonl.`
+}
+
 /** Minimal agent surface needed by the retry layer — injectable so tests can
  *  exercise the real retry→blocked path without constructing a full AgentLoop. */
 export interface RunnableAgent {
@@ -280,9 +308,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           partialResult: latestText.slice(0, 8000),
           completedTools: [...transcript.toolUses],
         }
+        const pollutionHint = detectPollutionFailure(transcript)
         return {
           result: {
-            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}`),
+            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
             artifacts: [
               { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
             ],
@@ -316,9 +345,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         mbox?.escalate(`Parse failed (attempt ${attempt + 1}): ${message.slice(0, 100)}`)
         if (attempt === config.order.budget.maxRetries) {
           const partialSummary = latestText.slice(0, 300)
+          const pollutionHint = detectPollutionFailure(transcript)
           return {
             result: {
-              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}`),
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],
