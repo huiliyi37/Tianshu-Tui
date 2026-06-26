@@ -21,6 +21,25 @@ const GLM_CONFIG: OpenAIClientConfig = {
   thinking: 'enabled',
 }
 
+// DeepSeek (deepseek-v4-flash) shares the same OpenAIClient tool-call parsing
+// path as GLM — the cross-tool pollution fix must hold for both. This was the
+// provider that 100%-reproduced in oh-my-pi/384919c7's reviewer workers.
+const DEEPSEEK_CONFIG: OpenAIClientConfig = {
+  baseUrl: 'https://api.deepseek.com',
+  apiKey: 'sk-test',
+  model: 'deepseek-v4-flash',
+  maxTokens: 4096,
+  providerName: 'deepseek',
+  thinking: 'enabled',
+}
+
+// Both providers route through OpenAIClient (factory.ts:92), so the streaming
+// parser is shared. Run the cross-tool pollution regression under each.
+const POLLUTION_CONFIGS: Array<{ label: string; config: OpenAIClientConfig }> = [
+  { label: 'GLM', config: GLM_CONFIG },
+  { label: 'DeepSeek', config: DEEPSEEK_CONFIG },
+]
+
 function sseStream(frames: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   return new ReadableStream({
@@ -109,3 +128,80 @@ describe('GLM-5.2 tool-call streaming — grep empty pattern regression', () => 
     assert.deepEqual(tools[0].input, {})
   })
 })
+
+// ── Cross-tool parallel pollution regression (oh-my-pi/384919c7) ──────────────
+// Run under every provider that shares the OpenAIClient streaming parser. The
+// 100%-reproducing session used deepseek-v4-flash; GLM hits the same path.
+for (const { label, config } of POLLUTION_CONFIGS) {
+  describe(`cross-tool tool_call argument pollution [${label}]`, () => {
+    // Root cause: a trailing-arguments chunk after finish_reason omitted `index`,
+    // and `tc.index ?? 0` grafted it onto a DIFFERENT tool's buffer. With
+    // read_section at index 0 and grep at index 1, grep's trailing args landed on
+    // read_section's buffer → grep got `{}` and failed "pattern is required" in a
+    // loop, draining the reviewer worker before it could emit JSON.
+
+    it('read_section[0] + grep[1], grep trailing args omit index — grep keeps pattern', async () => {
+      const tools = await collectToolUses(new OpenAIClient(config), [
+        frame({ choices: [{ delta: { tool_calls: [
+          { index: 0, id: 'c0', type: 'function', function: { name: 'read_section', arguments: '{"file_path":"agent-session.ts","section":"L1-L10"}' } },
+        ] }, finish_reason: null }] }),
+        frame({ choices: [{ delta: { tool_calls: [
+          { index: 1, id: 'c1', type: 'function', function: { name: 'grep', arguments: '{"path":"src",' } },
+        ] }, finish_reason: null }] }),
+        frame({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+        // Trailing args chunk, NO index — must reattach to grep (c1), NOT pollute
+        // read_section at index 0.
+        frame({ choices: [{ delta: { tool_calls: [
+          { function: { arguments: '"pattern":"checkCompaction"}' } },
+        ] }, finish_reason: null }] }),
+      ])
+      const gr = tools.find(t => t.name === 'grep')
+      assert.ok(gr, 'grep tool_use must be emitted')
+      assert.equal(typeof gr!.input.pattern, 'string', `grep pattern lost to pollution: ${JSON.stringify(gr!.input)}`)
+      assert.equal(gr!.input.pattern, 'checkCompaction')
+      assert.equal(gr!.input.file_path, undefined, 'grep must not inherit read_section file_path')
+      const rs = tools.find(t => t.name === 'read_section')
+      if (rs) assert.equal(rs!.input.pattern, undefined, 'read_section must not inherit grep pattern')
+    })
+
+    it('trailing args omit index when only ONE buffer open — completes that call', async () => {
+      // Single-call stream: finish_reason fires, then the tail of the arguments
+      // arrives without an index. Must reattach to the sole open buffer.
+      const tools = await collectToolUses(new OpenAIClient(config), [
+        frame({ choices: [{ delta: { tool_calls: [
+          { index: 0, id: 'c0', type: 'function', function: { name: 'grep', arguments: '{"path":"src","pattern":"export function ' } },
+        ] }, finish_reason: null }] }),
+        frame({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+        frame({ choices: [{ delta: { tool_calls: [
+          { function: { arguments: 'switchAgentRuntime"}' } },
+        ] }, finish_reason: null }] }),
+      ])
+      assert.equal(tools.length, 1)
+      assert.equal(tools[0].input.pattern, 'export function switchAgentRuntime')
+    })
+
+    it('ambiguous trailing args (no index, multiple open buffers) — no pollution block', async () => {
+      // Two calls open, neither complete. A trailing fragment arrives with no
+      // index and no id — we cannot know which it belongs to. The fix must DROP
+      // it rather than graft onto index 0. The already-parseable call still emits
+      // cleanly; the orphaned fragment does not corrupt the other tool.
+      const tools = await collectToolUses(new OpenAIClient(config), [
+        frame({ choices: [{ delta: { tool_calls: [
+          { index: 0, id: 'c0', type: 'function', function: { name: 'read_section', arguments: '{"file_path":"a.ts","section":"L1-L10"}' } },
+          { index: 1, id: 'c1', type: 'function', function: { name: 'grep', arguments: '{"path":"src","pattern":"foo"}' } },
+        ] }, finish_reason: null }] }),
+        // Ambiguous trailing fragment, no index/id, both buffers still open.
+        frame({ choices: [{ delta: { tool_calls: [
+          { function: { arguments: ',"extra":"should-not-merge-anywhere"}' } },
+        ] }, finish_reason: 'tool_calls' }] }),
+      ])
+      const rs = tools.find(t => t.name === 'read_section')
+      const gr = tools.find(t => t.name === 'grep')
+      assert.ok(rs, 'read_section must still emit')
+      assert.ok(gr, 'grep must still emit')
+      assert.equal(gr!.input.pattern, 'foo', `grep polluted: ${JSON.stringify(gr!.input)}`)
+      assert.equal(rs!.input.extra, undefined, 'read_section must not absorb the orphan fragment')
+      assert.equal(gr!.input.extra, undefined, 'grep must not absorb the orphan fragment')
+    })
+  })
+}

@@ -722,6 +722,37 @@ export class OpenAIClient implements StreamClient {
     }
   }
 
+  /**
+   * Resolve which toolCallBuffer slot a streaming chunk belongs to.
+   *
+   * Returns the slot index, or null to DROP the chunk. Dropping is the
+   * fail-safe choice when a continuation chunk carries no `index`/`id` and more
+   * than one buffer is open — misgrafting it onto another tool's arguments
+   * corrupts both (the parallel tool_call pollution bug). A dropped trailing
+   * fragment at worst leaves one call's JSON incomplete, which the existing
+   * final-flush + salvageFirstJsonObject path already handles.
+   */
+  private resolveToolCallIndex(tc: ToolCallChunk): number | null {
+    if (tc.index !== undefined) return tc.index
+    // Continuation chunk (typically a trailing-arguments delta after
+    // finish_reason). Providers omit index here; reattach by identity.
+    if (tc.id !== undefined) {
+      for (const [idx, buf] of this.toolCallBuffer) {
+        if (buf.id === tc.id) return idx
+      }
+    }
+    // No identity on the chunk: if exactly one buffer is open, it must be the
+    // target (the common single-call trailing-args case). With multiple open we
+    // cannot know — drop rather than guess and pollute.
+    if (this.toolCallBuffer.size === 1) {
+      return this.toolCallBuffer.keys().next().value!
+    }
+    // Fallback: preserve historical behavior for the degenerate "no buffer open
+    // yet" case (a first chunk with no index) by seeding slot 0; otherwise drop.
+    if (this.toolCallBuffer.size === 0) return 0
+    return null
+  }
+
   /** Process a single SSE delta chunk — exposed for testing */
   processDelta(
     chunk: {
@@ -771,7 +802,19 @@ export class OpenAIClient implements StreamClient {
 
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
-        const idx = tc.index ?? 0
+        // Resolve the buffer slot for this chunk. Naive `tc.index ?? 0` was the
+        // root cause of cross-tool argument pollution (oh-my-pi/384919c7): when a
+        // provider (DeepSeek/GLM) streams trailing argument deltas AFTER
+        // finish_reason, those continuation chunks frequently omit `index`. `?? 0`
+        // routed them onto index 0's buffer — a DIFFERENT tool (e.g. read_section),
+        // grafting `{"path":...,"pattern":...}` onto its `{"file_path":...}`. grep
+        // then received `{file_path}` or `{}` and failed "pattern is required" in a
+        // tight loop, draining the reviewer worker's budget before it could emit
+        // JSON. resolveToolCallIndex attaches index-less continuation chunks to the
+        // correct slot by id / single-open-buffer, and drops them rather than
+        // misgrafting when ambiguous (fail-safe beats fail-loud pollution).
+        const idx = this.resolveToolCallIndex(tc)
+        if (idx === null) continue
         const buf = this.toolCallBuffer.get(idx) ?? { function: { arguments: '' } }
         if (tc.id) buf.id = tc.id
         if (tc.type) buf.type = tc.type
