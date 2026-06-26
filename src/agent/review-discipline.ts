@@ -159,7 +159,16 @@ export interface ChangeSet {
   /** Mechanical-change classification from deliver_task. When present with
    *  skipReview=true, auto review skips workers (nudge only). */
   changeClass?: ChangeClassification
+  /** Files whose size exceeds {@link LARGE_FILE_WARN_THRESHOLD}. Review workers
+   *  use this to avoid reading entire large files (use offset/limit instead).
+   *  Set by deliver_task before spawning review; absent in test / slash-review paths. */
+  largeFiles?: ReadonlyArray<{ path: string; sizeBytes: number }>
 }
+
+/** File size (bytes) above which review workers receive a "use offset/limit, do not
+ *  read whole file" advisory.  200 KB catches the 501 KB agent-session.ts class
+ *  without false-positive on typical source files (most are 10-80 KB). */
+export const LARGE_FILE_WARN_THRESHOLD = 200_000
 
 const TRIVIAL_FILE_PATTERN = /(?:^|\/)README|CHANGELOG(?:\.[^/]*)?$|\.(?:md|mdx|txt|json)$/i
 const DEPENDENCY_OR_COMPILER_CONFIG_PATTERN = /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|deno\.lock|tsconfig(?:\.[^/]*)?\.json|[^/]+\.lock)$/i
