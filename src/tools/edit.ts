@@ -192,7 +192,15 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
         markSessionFileEdit(filePath)
         const warn = syntaxCheck(filePath, recovered)
-        return { content: `Applied edit to ${filePath} (whitespace-tolerant match: old_string differed only in indentation/whitespace)` + (warn ? '\n\n' + warn : '') }
+        // Surface the whitespace drift so the model can self-correct in
+        // subsequent edits — without this, error accumulates across calls.
+        const diff = diffBlock(oldString, fuzzy.matchedText)
+        const fuzzyReport = [
+          `Applied edit to ${filePath} (whitespace-tolerant match)`,
+          `[fuzzy] your old_string had whitespace/indentation drift from the file:`,
+          `[fuzzy] diff:\n${diff}`,
+        ].join('\n')
+        return { content: fuzzyReport + (warn ? '\n\n' + warn : '') }
       }
       return {
         content: buildNotFoundError(filePath, oldString, content),
@@ -344,6 +352,45 @@ function formatDiffError(filePath: string, oldString: string, actualWindow: stri
   }
 
   return `Error: old_string not found in ${filePath}. Closest match found at line ${startLine}:\n\n${diffLines.join('\n')}\n\nFix old_string to match the actual file content (check whitespace, indentation, and line endings) and retry.`
+}
+
+/**
+ * Compact line-by-line diff between `expected` (model's old_string) and
+ * `actual` (file's real matched text). Used in the fuzzy-match success
+ * path so the model sees WHERE its old_string differed from the file —
+ * preventing error accumulation in subsequent edits.
+ *
+ * Compares raw lines (not normalized) so whitespace/indentation drift
+ * is surfaced even when fuzzy match proved normalized equality.
+ * maxDiffs limits the number of differing lines shown.
+ */
+function diffBlock(expected: string, actual: string, maxDiffs = 5): string {
+  const expLines = expected.split('\n')
+  const actLines = actual.split('\n')
+  const maxLen = Math.max(expLines.length, actLines.length)
+  const diffs: string[] = []
+  let diffCount = 0
+  let i = 0
+
+  for (; i < maxLen; i++) {
+    const exp = expLines[i] ?? '<eof>'
+    const act = actLines[i] ?? '<eof>'
+    // Compare raw — fuzzy match proved normalized equality, so any raw
+    // difference is exactly the whitespace drift we want to surface.
+    if (exp !== act) {
+      const expShow = JSON.stringify(exp.slice(0, 60))
+      const actShow = JSON.stringify(act.slice(0, 60))
+      diffs.push(`  L${i + 1}: exp ${expShow}`)
+      diffs.push(`  L${i + 1}: act ${actShow}`)
+      if (++diffCount >= maxDiffs) break
+    }
+  }
+
+  if (diffs.length === 0) {
+    return '  (lines identical — no diff)'
+  }
+  const truncated = i + 1 < maxLen ? `\n  … (+${maxLen - i - 1} more lines)` : ''
+  return diffs.join('\n') + truncated
 }
 
 /** Length of common prefix between two strings. Used as a cheap similarity score. */

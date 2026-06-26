@@ -26,7 +26,7 @@ describe('decideStreamHardCap (Track 4)', () => {
   })
 
   it('at the base cap without recent progress: aborts', () => {
-    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 31_000, baseStreamMs: BASE })
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 61_000, baseStreamMs: BASE })
     assert.deepEqual(action, { kind: 'abort' })
   })
 
@@ -39,5 +39,21 @@ describe('decideStreamHardCap (Track 4)', () => {
     const now = 3 * BASE - 20_000
     const action = decideStreamHardCap({ now, startedAt: 0, lastDataEventAt: now - 5_000, baseStreamMs: BASE })
     assert.deepEqual(action, { kind: 'rearm', rearmMs: 20_000, extended: true })
+  })
+
+  // Default 60s window: aborts when last data was ≥61s ago.
+  it('with default 60s window: aborts when last data was 70s ago', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 70_000, baseStreamMs: BASE })
+    assert.deepEqual(action, { kind: 'abort' })
+  })
+
+  it('with 120s window: extends (not aborts) when last data was 50s ago (GLM safe)', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 50_000, baseStreamMs: BASE }, 120_000)
+    assert.deepEqual(action, { kind: 'rearm', rearmMs: 60_000, extended: true })
+  })
+
+  it('with 120s window: still aborts when last data exceeds extended window', () => {
+    const action = decideStreamHardCap({ now: BASE, startedAt: 0, lastDataEventAt: BASE - 130_000, baseStreamMs: BASE }, 120_000)
+    assert.deepEqual(action, { kind: 'abort' })
   })
 })

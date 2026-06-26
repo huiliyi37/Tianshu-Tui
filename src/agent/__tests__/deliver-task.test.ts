@@ -360,6 +360,7 @@ describe('deliver-task — semantic task delivery tool', () => {
     assert.match(result.content, /审查门发现问题 \(L2\)/)
     assert.match(result.content, /still broken/)
     assert.match(result.content, /提交已落地/)
+    assert.match(result.content, /未经主控独立核验/, 'rejected review must carry independent-verification nudge')
   })
 
   it('renders auto-review infra failure as INCONCLUSIVE, never as verified (B-fix)', async () => {

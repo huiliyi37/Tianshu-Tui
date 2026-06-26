@@ -122,4 +122,17 @@ describe('V3 Component A — authority injection', () => {
     const patchOrder = writeOrder({ authority: 'nonexistent_domain' })
     assert.deepEqual(patchOrder.allowedTools, [])
   })
+
+  test('unknown authority logs warning (fail-loud signal)', () => {
+    const warnings: string[] = []
+    const origWarn = console.warn
+    console.warn = (msg: string) => warnings.push(msg)
+    try {
+      readOnlyOrder({ authority: 'misspelled_domain' })
+      const matched = warnings.some(w => w.includes('Unknown authority "misspelled_domain"'))
+      assert.ok(matched, `expected warning about unknown authority, got: ${warnings.join('; ')}`)
+    } finally {
+      console.warn = origWarn
+    }
+  })
 })

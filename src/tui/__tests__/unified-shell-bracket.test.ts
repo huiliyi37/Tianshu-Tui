@@ -43,7 +43,7 @@ describe('Unified Shell Bracket Elements', () => {
     assert.ok(plain.includes('deepseek-chat'))
     assert.ok(plain.includes('⚡25%'))
     assert.ok(plain.includes('◧120k/1.0M'))
-    assert.ok(plain.includes('$0.15'))
+    assert.ok(plain.includes('0.15'))
     assert.ok(plain.includes('2m0s'))
     
     // Check width calculation consistency

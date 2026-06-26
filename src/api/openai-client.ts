@@ -146,8 +146,11 @@ const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'mi
 
 /** Recent-progress window for hard-cap extension: a data event within this
  *  window counts as "still producing" and earns another extension slice. */
-const HARD_CAP_PROGRESS_WINDOW_MS = 30_000
+const HARD_CAP_PROGRESS_WINDOW_MS = 60_000
 const HARD_CAP_EXTENSION_SLICE_MS = 60_000
+/** GLM reasoning can pause 30-60s between deltas without being stalled.
+ *  Use a wider progress window so the hard cap doesn't abort healthy streams. */
+const GLM_HARD_CAP_PROGRESS_WINDOW_MS = 120_000
 
 export type StreamHardCapAction =
   | { kind: 'abort' }
@@ -155,21 +158,24 @@ export type StreamHardCapAction =
 
 /**
  * Track 4 自适应流硬顶：固定 10min 硬顶会误杀 1M+max-reasoning 的健康长输出
- * （死流早被 idle/stall 计时器拦截）。到达基础硬顶后，只要最近 30s 内仍有
- * data 事件就按 60s 一档续期，绝对上限 3×基础时长兜底 runaway。纯函数，
+ * （死流早被 idle/stall 计时器拦截）。到达基础硬顶后，只要最近 progressWindowMs
+ * 内仍有 data 事件就按 60s 一档续期，绝对上限 3×基础时长兜底 runaway。纯函数，
  * 由 openai-client 的硬顶计时器驱动。
+ *
+ * @param progressWindowMs 进度窗口（ms），默认 30s。GLM reasoning 模式传 120s
+ *   以防止深度推理中 30-60s 的无 delta 停顿被误判为卡死。
  */
 export function decideStreamHardCap(input: {
   now: number
   startedAt: number
   lastDataEventAt: number
   baseStreamMs: number
-}): StreamHardCapAction {
+}, progressWindowMs = HARD_CAP_PROGRESS_WINDOW_MS): StreamHardCapAction {
   const absoluteMaxMs = input.baseStreamMs * 3
   const elapsed = input.now - input.startedAt
   if (elapsed >= absoluteMaxMs) return { kind: 'abort' }
   if (elapsed >= input.baseStreamMs) {
-    if (input.now - input.lastDataEventAt > HARD_CAP_PROGRESS_WINDOW_MS) return { kind: 'abort' }
+    if (input.now - input.lastDataEventAt > progressWindowMs) return { kind: 'abort' }
     return { kind: 'rearm', rearmMs: Math.min(HARD_CAP_EXTENSION_SLICE_MS, absoluteMaxMs - elapsed), extended: true }
   }
   return { kind: 'rearm', rearmMs: input.baseStreamMs - elapsed, extended: false }
@@ -510,13 +516,15 @@ export class OpenAIClient implements StreamClient {
     const streamStartedAt = Date.now()
     let lastDataEventAt = streamStartedAt
     let hardCapExtended = false
+    const isGlm = this.config.providerName === 'glm'
+    const progressWindowMs = isGlm ? GLM_HARD_CAP_PROGRESS_WINDOW_MS : HARD_CAP_PROGRESS_WINDOW_MS
     const checkHardCap = (): void => {
       const action = decideStreamHardCap({
         now: Date.now(),
         startedAt: streamStartedAt,
         lastDataEventAt,
         baseStreamMs,
-      })
+      }, progressWindowMs)
       if (action.kind === 'abort') {
         timeoutController.abort()
         return

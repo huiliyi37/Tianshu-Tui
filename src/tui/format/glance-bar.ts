@@ -66,6 +66,8 @@ export interface GlanceBarInput {
   narrow?: boolean
   /** 会话序号 */
   turnCount?: number
+  /** 是否处于 stall（无 token 超过阈值） */
+  stalled?: boolean
 }
 
 export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
@@ -85,12 +87,16 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const narrow = input.narrow ?? input.width < 60
   const parts: string[] = []
   if (input.modelName) {
-    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.muted))
+    // 模型名属于最低层级元信息，用 dim 而不是 muted
+    parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
   }
   if (input.cacheHitRate !== undefined) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)
     const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted
     parts.push(color(`⚡${cachePct}%`, cacheColor))
+  } else {
+    // 无缓存数据时显示占位，避免右侧空洞或误导
+    parts.push(color('⚡-', theme.dim))
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
@@ -99,7 +105,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
-    parts.push(color(`${input.cost.toFixed(2)}`, theme.muted))
+    // cost > 0 用 secondary 高亮，让用户感知到花费
+    parts.push(color(`${input.cost.toFixed(2)}`, theme.secondary))
   }
   const zone3 = parts.join('  ')
 
@@ -107,7 +114,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   if (input.elapsedMs !== undefined) {
     zone4 = formatElapsed(input.elapsedMs)
   }
-  const elapsedPart = color(zone4, theme.muted)
+  // elapsed 是基础元信息用 dim；stall 时提升到 warning 作为提示
+  const elapsedPart = color(zone4, input.stalled ? theme.warning : theme.dim)
 
   return [zone3, elapsedPart].filter(Boolean).join('  ')
 }

@@ -156,6 +156,10 @@ export interface ToolResult {
   exitCode?: number
   /** Executed command (bash) — used by ToolAccumulator for per-command collapse summaries. */
   command?: string
+  /** Signal the turn loop to end after this tool result (e.g. ask_user_question
+   *  needs the user's next message as the answer). When true, the orchestrator
+   *  completes the turn as final instead of continuing the tool loop. */
+  endTurn?: boolean
 }
 
 export interface Tool {

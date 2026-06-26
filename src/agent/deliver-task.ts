@@ -19,7 +19,7 @@
  * @task B1-8
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, isAbsolute } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult } from '../tools/types.js'
@@ -32,7 +32,7 @@ import { classifyChange, createGitDiffProvider, isMechanicalFastPathEnabled } fr
 import { commitScopedFiles, type ScopedCommitResult } from './scoped-git-commit.js'
 import { buildReviewPrincipleChecklist } from './review-principle-checklist.js'
 import { checkCommitCohesion } from './commit-cohesion.js'
-import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, GENERAL_DEV_DISCIPLINES, type ChangeSet, type ReviewScale } from './review-discipline.js'
+import { isCrossModule, isFixContext, shouldRouteReviewWorkflow, GENERAL_DEV_DISCIPLINES, LARGE_FILE_WARN_THRESHOLD, type ChangeSet, type ReviewScale } from './review-discipline.js'
 import { routeReviewWorkflow, reviewWorkflowBudgetMs, type ReviewRouterDeps, type ReviewOutcome, type ReviewMode } from './review-router.js'
 import { isReviewDisciplineEnabled } from '../config/review-discipline-config.js'
 import type { ReviewConfig } from '../config/schema.js'
@@ -115,6 +115,22 @@ function parseNulFileList(output: string): string[] {
 
 function readProjectMemory(cwd: string): string | undefined {
   try { return readFileSync(join(cwd, '.rivet', 'knowledge', 'project-memory.md'), 'utf-8') } catch { return undefined }
+}
+
+/** Collect files exceeding the large-file threshold so review workers can avoid
+ *  reading them in full (use offset/limit instead). Best-effort — stat failures
+ *  are silently skipped. */
+function collectLargeFiles(cwd: string, filePaths: readonly string[]): Array<{ path: string; sizeBytes: number }> | undefined {
+  const large: Array<{ path: string; sizeBytes: number }> = []
+  for (const p of filePaths) {
+    try {
+      const st = statSync(join(cwd, p))
+      if (st.size >= LARGE_FILE_WARN_THRESHOLD) {
+        large.push({ path: p, sizeBytes: st.size })
+      }
+    } catch { /* best-effort: missing / broken symlink / permission denied → skip */ }
+  }
+  return large.length > 0 ? large : undefined
 }
 
 function gitNameList(cwd: string, args: string[]): string[] | null {
@@ -662,6 +678,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           crossModule: isCrossModule(filesToCommit),
           isFix: isFixContext(message),
           goalActive: ctx.isGoalActive?.() === true,
+          largeFiles: collectLargeFiles(params.cwd, filesToCommit),
           ...(effectiveReviewLevel ? { forceLevel: effectiveReviewLevel } : {}),
           ...(mechanicalClass ? { changeClass: mechanicalClass } : {}),
         }
@@ -793,6 +810,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
                   lines.push('', `⚠️ 审查门发现问题 (${outcome.tier})：${outcome.evidence ?? '对抗性审查未验证此交付'}`)
                   if (typeof outcome.rounds === 'number') lines.push(`   轮次：${outcome.rounds}`)
                   lines.push('   → 提交已落地。请在后续提交中处理审查发现。')
+                  lines.push('   ⚠ 以上审查意见来自 worker，未经主控独立核验。汇报用户前请用 grep/read 确认每条声称的文件:行号真实存在。')
                 } else if (outcome.verdict === 'verified') {
                   if (outcome.infraFailures && outcome.infraFailures.length > 0) {
                     lines.push('', `⚠️ 审查门 YELLOW (${outcome.tier})：审查基础设施有注意事项，交付已通过可用证据验证。`)

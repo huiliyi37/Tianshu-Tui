@@ -13,7 +13,7 @@ import { validatePath, validatePathSafe } from '../tools/path-validate.js'
 import { grantPath } from '../tools/path-grants.js'
 import { dirname, join, resolve as resolvePath, isAbsolute } from 'node:path'
 import { getSessionDir } from './session-persist.js'
-import { classifyFailure, classifyTestRun } from './failure-classifier.js'
+import { classifyFailure, classifyTestRun, isTransient } from './failure-classifier.js'
 import { extractClaimsFromToolResult } from '../context/claim-extractor.js'
 import { appendProjectMemory, compactProjectMemory } from '../context/project-memory-writer.js'
 import { detectConflicts } from '../context/conflict-detect.js'
@@ -262,6 +262,8 @@ export interface ToolExecResult {
   lastConflictCheckCount: number
   checkpointCreated: boolean
   latestRisk: import('./approval-risk.js').RiskAssessment
+  /** True when the tool returned endTurn: true (e.g. ask_user_question). */
+  endTurn?: boolean
 }
 
 function truncateSuccessfulToolResult(content: string, config: AgentConfig): string {
@@ -631,18 +633,24 @@ export async function executeToolUse(
       const exactOffenders = offendingFingerprints(traceStore.toolFingerprints, thresholds.exact.window, thresholds.exact.blockFreq, thresholds.exact.blockConsec)
       const classOffenders = offendingFingerprints(traceStore.bashClassFingerprints ?? [], thresholds.class.window, thresholds.class.blockFreq, thresholds.class.blockConsec)
       const curExactFp = fingerprintToolCall(tu.name, tu.input, 'error')
+      const curExactFpTransient = fingerprintToolCall(tu.name, tu.input, 'error-transient')
       const curClassFp = fingerprintToolClass(tu.name, tu.input, 'error')
-      const isOffendingCall = exactOffenders.has(curExactFp) || (curClassFp != null && classOffenders.has(curClassFp))
+      const isOffendingCall = exactOffenders.has(curExactFp) || exactOffenders.has(curExactFpTransient) || (curClassFp != null && classOffenders.has(curClassFp))
 
       if (isOffendingCall) {
         const fps = traceStore.toolFingerprints
         const lastFp = fps.at(-1)
         const maxCount = lastFp ? fps.filter(f => f === lastFp).length : 0
-        const baseMsg = hint ?? 'Repeated identical failures detected.'
+        const isTransientLoop = !exactOffenders.has(curExactFp) && exactOffenders.has(curExactFpTransient)
+        const baseMsg = hint ?? (isTransientLoop
+          ? 'Repeated transient failures (timeout/api error). The operation keeps failing for infra reasons — try a different approach instead of retrying.'
+          : 'Repeated identical failures detected.')
         const msg = [
           baseMsg,
           `Tool: ${tu.name} | Consecutive same-pattern failures: ${maxCount} | Fingerprint: ${curExactFp.slice(0, 8)}`,
-          'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
+          isTransientLoop
+            ? 'Recovery: the target may be too large or the infra overloaded. Try splitting the task, using a different tool, or reducing scope.'
+            : 'Recovery: try a different tool (e.g. read_file, todo), change the input, or modify the target path.',
         ].join('\n')
         callbacks.onToolResult(tu.id, tu.name, msg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
@@ -1026,7 +1034,13 @@ export async function executeToolUse(
     if (!isTddRed) {
       deps.recordPrediction?.(!harnessResult.isError)
    }
-    const outputClass = harnessResult.isError ? 'error' : 'success'
+    let outputClass: string
+    if (!harnessResult.isError) {
+      outputClass = 'success'
+    } else {
+      const fc = classifyFailure(harnessResult.content)
+      outputClass = isTransient(fc.class) ? 'error-transient' : 'error'
+    }
     const fp = fingerprintToolCall(tu.name, tu.input, outputClass)
     // bash 类指纹：sed/head/python/tee 变体归并为同一命令类，堵 doom-loop 漏检
     const classFp = fingerprintToolClass(tu.name, tu.input, outputClass)
@@ -1317,7 +1331,7 @@ export async function executeToolUse(
      }
    }
 
-    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? finalContent + starSig : finalContent, is_error: harnessResult.isError }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk, endTurn: rawToolResult?.endTurn === true ? true : undefined }
  } catch (err) {
     // AbortError: user cancelled — not a tool failure.
     // Skip failure recording so immune/doom-loop signals aren't polluted.

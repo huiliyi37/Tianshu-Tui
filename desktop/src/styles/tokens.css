@@ -68,6 +68,14 @@
   --text-strong: #f6f6f9;
   --muted: #989aa6;
   --faint: #6c6e7a;
+  --text-dim: #7c7e89;
+  --text-secondary: #a6a8b2;
+  --hover: rgba(255, 255, 255, 0.06);
+  --bg-elevated: #1c1c22;
+  --surface-2: rgba(127, 127, 127, 0.12);
+  --link: var(--accent);
+  --link-hover: var(--accent-hover);
+  --green: var(--success);
 
   /* Antigravity 2.0 / Codex cool azure — restrained, not periwinkle-purple. */
   --accent: #5aa9ff;
@@ -105,6 +113,14 @@
   --text-strong: #0c0c10;
   --muted: #6a6a76;
   --faint: #9a9aa6;
+  --text-dim: #8a8a96;
+  --text-secondary: #5c5c68;
+  --hover: rgba(0, 0, 0, 0.05);
+  --bg-elevated: #f0f0f2;
+  --surface-2: rgba(127, 127, 127, 0.12);
+  --link: var(--accent);
+  --link-hover: var(--accent-hover);
+  --green: var(--success);
 
   /* Antigravity 2.0 / Codex cool azure — restrained, not indigo-purple. */
   --accent: #1f6feb;

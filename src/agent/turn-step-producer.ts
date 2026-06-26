@@ -540,8 +540,10 @@ export class TurnStepProducer {
       const prevStatus = this.self.taskContract.status
       this.self.taskContract = advanceContractStatus(this.self.taskContract, contractStatus, this.self.session.getTurnCount())
 
-      // TDD Gate: one-shot check on planning→executing transition
-      if (prevStatus === 'planning' && this.self.taskContract.status === 'executing' && !this.self._lastImmuneHint) {
+      // TDD Gate: check on every executing turn — keeps reminding until
+      // the agent touches a test file. Not one-shot: skipping TDD once
+      // should not silence the gate for the rest of the task.
+      if (this.self.taskContract.status === 'executing') {
         const es = this.self.evidence.getState()
         const tddHint = checkTddGate({
           filesRead: es.filesRead,

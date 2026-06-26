@@ -52,6 +52,9 @@ export interface TeamRunInput {
    *  and overlay running state from live worker activity. The summary carries
    *  waves+tasks but no `run`. */
   onPlanReady?: (summary: TeamRunSummary, fromWave: number) => void
+  /** Results from the immediately prior wave. Used by dispatchWaveAt to
+   *  block tasks whose dependencies failed. Undefined for wave 0. */
+  priorResults?: import('../agent/work-order.js').WorkerResult[]
 }
 
 export interface TeamRunSummary {
@@ -171,6 +174,20 @@ function taskFiles(task: TeamTask): string[] {
   return task.touchSet.length > 0 ? task.touchSet : task.files
 }
 
+/**
+ * Extract the task ID from a work order ID.
+ *
+ * workOrderId format is `prefix:taskId` (e.g. `"team:T1"`). The task ID is the
+ * last segment after `:`. If there is no colon, the whole string is returned
+ * as-is (graceful fallback for edge-case formats).
+ *
+ * This replaces the inline `lastIndexOf(':')` extraction that was an implicit
+ * contract — now the format is explicit and testable.
+ */
+export function extractTaskIdFromWorkOrderId(woId: string): string {
+  return woId.includes(':') ? woId.slice(woId.lastIndexOf(':') + 1) : woId
+}
+
 function buildSchedulerContext(wave: TeamWave, waves: TeamWave[], taskMap: Map<string, TeamTask>): TeamSchedulerContext {
   const waveTasks = wave.taskIds.map(id => taskMap.get(id)).filter((task): task is TeamTask => Boolean(task))
   const writeTasks = waveTasks.filter(task => !(task.profile === 'code_scout' || task.profile === 'doc_scout' || (task.profile === 'reviewer' && task.kind === 'review')))
@@ -276,11 +293,40 @@ async function dispatchWaveAt(
 
   const targetWave = waves[fromWave]!
   const scheduled = applySchedulerToWave(targetWave, waves, ctx)
-  const dispatchWave = scheduled.wave
+  let dispatchWave = scheduled.wave
   const remainingBlocked = [
     ...scheduled.blocked,
     ...waves.slice(fromWave + 1).map(w => `${w.taskIds.join(', ')}: waiting for wave ${w.id} to complete`),
   ]
+
+  // ── Cross-wave failure propagation ──────────────────────────────
+  // Block tasks whose dependencies failed in a prior wave.
+  const priorResults = input.priorResults
+  const crossWaveBlocked: string[] = []
+  if (priorResults && priorResults.length > 0) {
+    const failedIds = new Set(
+      priorResults
+        .filter(r => r.status !== 'passed')
+        .map(r => extractTaskIdFromWorkOrderId(r.workOrderId))
+    )
+    if (failedIds.size > 0) {
+      // Return a new wave object with only non-blocked task IDs — never mutates
+      // the original wave, guarding against future wave caching scenarios.
+      const filteredTaskIds: string[] = []
+      for (const taskId of dispatchWave.taskIds) {
+        const task = taskMap.get(taskId)
+        if (!task) { filteredTaskIds.push(taskId); continue }
+        const failedDeps = (task.dependsOn ?? []).filter(depId => failedIds.has(depId))
+        if (failedDeps.length > 0) {
+          crossWaveBlocked.push(`${taskId}: blocked by prior wave failure (${failedDeps.join(', ')})`)
+        } else {
+          filteredTaskIds.push(taskId)
+        }
+      }
+      dispatchWave = { ...dispatchWave, taskIds: filteredTaskIds }
+    }
+  }
+
   const requests = waveToRequests(dispatchWave, taskMap, input.parentTurnId ?? 'team')
   if (input.onActivity) for (const r of requests) r.onActivity = input.onActivity
   if (requests.length === 0) {
@@ -290,7 +336,7 @@ async function dispatchWaveAt(
       tasks,
       waves,
       dispatched: 0,
-      blocked: remainingBlocked,
+      blocked: [...remainingBlocked, ...crossWaveBlocked],
       packet: `team: wave ${targetWave.id} produced no dispatchable requests.`,
     }
   }
@@ -332,7 +378,7 @@ async function dispatchWaveAt(
     tasks,
     waves,
     dispatched: requests.length,
-    blocked: remainingBlocked,
+    blocked: [...remainingBlocked, ...crossWaveBlocked],
     packet: `[wave ${fromWave + 1}/${waves.length}] ${run.packet}`,
     run,
   }

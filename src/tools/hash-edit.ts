@@ -4,7 +4,7 @@ import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit } from './read-file.js'
+import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 
@@ -167,6 +167,20 @@ Note: For large new_string, the message history keeps only a short pointer
         // catches out-of-bounds).
         positionDriftWarning = true
         refreshFileReadMtime(filePath, currentMtime)
+      }
+    }
+
+    // Hard reject: position-only anchors are unsafe after any session file edit.
+    // The first edit shifts line numbers; subsequent L<num> anchors point to
+    // wrong content. Force the model to re-read and use full-hash anchors.
+    if (posOnly && wasFileEditedBySession(filePath)) {
+      return {
+        content: [
+          `Error: position-only anchors blocked on ${filePath}`,
+          `This file has been edited in the current session, so line numbers have shifted.`,
+          `Re-read the file and use L<num>:<hash> anchors, or use edit_file instead.`,
+        ].join('\n'),
+        isError: true,
       }
     }
 

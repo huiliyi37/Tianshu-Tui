@@ -2,11 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useHealth, useSessions, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
 import { useGlobalNotifications } from './state/use-global-notifications'
-import { deriveAttention } from './lib/attention'
 import { deriveProjects, loadKnownProjects } from './lib/projects'
 import { loadThemePref, setThemePref, type ThemePref } from './lib/theme'
 import type { Command } from './lib/commands'
-import { Rail } from './components/Rail'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -50,10 +48,6 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
 
   const sidecarDown = health.isError
-  const attentionCount = deriveAttention(
-    sessions.data ?? [],
-    new Set(ui.attentionSeen),
-  ).unseenCount
 
   // Global shortcuts. All desktop shortcuts register here, in a single
   // handler, to avoid N component-level window.addEventListener calls.
@@ -163,17 +157,29 @@ export function App() {
 
   return (
     <div className="shell">
-      <Rail
-        surface={ui.surface}
-        onSurface={(s) => dispatch({ type: 'setSurface', surface: s })}
-        attentionCount={attentionCount}
-      />
-
       <div className="main">
         {sidecarDown && (
           <div className="banner error">sidecar 离线，重连中…</div>
         )}
         {ui.error && <div className="banner error">{ui.error}</div>}
+
+        {ui.surface !== 'workspace' && (
+          <header className="surface-topbar">
+            <button
+              className="surface-back"
+              onClick={() => dispatch({ type: 'setSurface', surface: 'workspace' })}
+              title="返回工作台"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              工作台
+            </button>
+            <span className="surface-title">{SURFACE_LABEL[ui.surface]}</span>
+            <span />
+          </header>
+        )}
 
         <div className="surface">
           <ErrorBoundary label="工作台">

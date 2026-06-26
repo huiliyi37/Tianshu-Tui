@@ -30,9 +30,9 @@ describe('renderPager', () => {
     assert.ok(lines.some(l => stripAnsi(l).includes('line1')))
   })
 
-  it('has quit hint in footer', () => {
+  it('has close hint in footer', () => {
     const lines = renderPager({ content: 'x', page: 0 }, 40, 20, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('quit')))
+    assert.ok(lines.some(l => stripAnsi(l).includes('q/Esc close')))
   })
 })
 

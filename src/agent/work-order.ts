@@ -77,6 +77,8 @@ const workerBudgetSchema = z.object({
   maxTokens: z.number().int().positive(),
   timeoutMs: z.number().int().positive(),
   maxRetries: z.number().int().min(0),
+  retryBackoffMs: z.number().int().positive(),
+  maxRetryBackoffMs: z.number().int().positive(),
 })
 
 export type WorkerBudget = z.infer<typeof workerBudgetSchema>
@@ -224,6 +226,10 @@ function toolsForAuthority(tools: string[], authority?: string): string[] {
     // Fail closed: an authority layer is an extra restriction. If the domain
     // id is misspelled or not loaded, do not silently fall back to the profile
     // tool set — that makes the restriction disappear without a signal.
+    console.warn(
+      `[work-order] Unknown authority "${authority}" — worker gets zero tools (fail-closed). ` +
+      `Known domains: ${starDomainRegistry.getDomainIds().join(', ')}.`,
+    )
     return []
   }
 
@@ -268,6 +274,8 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile)?.defaultMaxTokens ?? 4096,
       timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile)?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 2,
+      retryBackoffMs: input.budget?.retryBackoffMs ?? 10000,
+      maxRetryBackoffMs: input.budget?.maxRetryBackoffMs ?? 300000,
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,
@@ -310,6 +318,8 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
       timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 1,
+      retryBackoffMs: input.budget?.retryBackoffMs ?? 10000,
+      maxRetryBackoffMs: input.budget?.maxRetryBackoffMs ?? 300000,
     },
     domain: input.domain,
     reviewDepth: input.reviewDepth,

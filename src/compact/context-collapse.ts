@@ -48,6 +48,10 @@ export function collapseToolResult(
     result = collapseBashResult(content, originalTokens)
   } else if (toolName === 'write_file' || toolName === 'edit_file') {
     result = collapseWriteResult(toolName, content, originalTokens)
+  } else if (toolName === 'run_tests') {
+    result = collapseRunTestsResult(content, originalTokens)
+  } else if (toolName === 'delegate_task' || toolName === 'delegate_batch') {
+    result = collapseDelegateResult(toolName, content, originalTokens)
   } else {
     result = collapseGenericResult(toolName, content, originalTokens)
   }
@@ -157,6 +161,52 @@ export function collapseBashResult(content: string, originalTokens: number): Col
 
 function collapseWriteResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
   const summary = `[collapsed ${toolName}: ${content.length} chars written]`
+  return { toolName, summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
+}
+
+export function collapseRunTestsResult(content: string, originalTokens: number): CollapsedResult {
+  // run_tests formatOutput produces "Exit code: N" and "N passed, N failed, N skipped"
+  const passedMatch = content.match(/(\d+)\s+passed/)
+  const failedMatch = content.match(/(\d+)\s+failed/)
+  const exitMatch = content.match(/exit code:\s*(\d+)/i)
+
+  const passed = passedMatch ? parseInt(passedMatch[1]!, 10) : null
+  const failed = failedMatch ? parseInt(failedMatch[1]!, 10) : null
+  const exitCode = exitMatch?.[1] ?? null
+
+  // Extract failed test names (match "✗ name", "FAIL name", or indented failure lines)
+  const failureLines = content.split('\n')
+    .filter(l => /^\s*[✗✘❌]|^\s*FAIL\s/i.test(l))
+    .map(l => l.replace(/^\s*[✗✘❌]\s*/, '').replace(/^\s*FAIL\s+/i, '').trim().slice(0, 80))
+    .filter(l => l.length > 0)
+    .slice(0, 5)
+
+  const parts: string[] = []
+  if (passed !== null || failed !== null) {
+    const total = (passed ?? 0) + (failed ?? 0)
+    parts.push(`${passed ?? '?'}/${total} passed`)
+  }
+  if (failed !== null && failed > 0) parts.push(`${failed} failed`)
+  if (exitCode !== null) parts.push(`exit ${exitCode}`)
+  if (failureLines.length > 0) {
+    parts.push(`failures: ${failureLines.join(', ')}`)
+  }
+
+  const summary = `[collapsed run_tests: ${parts.join(' · ')}]`
+  return { toolName: 'run_tests', summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
+}
+
+export function collapseDelegateResult(toolName: string, content: string, originalTokens: number): CollapsedResult {
+  // delegate_task returns typically start with worker profile info
+  const firstLine = content.split('\n').find(l => l.trim().length > 0) ?? content.slice(0, 200)
+  const profileMatch = firstLine.match(/(?:profile|worker)[:\s]*(\w+)/i)
+  const profile = profileMatch?.[1] ?? 'worker'
+
+  // Extract the first meaningful sentence as snippet
+  const summaryMatch = content.match(/summary[:\s]+(.{20,150}?)(?:\.|$)/is)
+  const snippet = (summaryMatch?.[1] ?? firstLine).trim().slice(0, 150)
+
+  const summary = `[collapsed ${toolName}: ${profile} — ${snippet}${snippet.length >= 150 ? '…' : ''}]`
   return { toolName, summary, originalTokens, collapsedTokens: Math.ceil(summary.length / CHARS_PER_TOKEN) }
 }
 

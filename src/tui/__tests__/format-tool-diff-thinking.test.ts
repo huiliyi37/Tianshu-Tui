@@ -66,7 +66,7 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     const long = Array.from({ length: 50 }, (_, i) => `line ${i}`).join('\n')
     const lines = formatToolCard({ toolName: 'bash', content: long, maxLines: 4 }, theme)
     const plain = lines.map(stripAnsi)
-    assert.ok(plain.some(l => l.includes('… +46 lines (ctrl+o to expand)')), plain.join('|'))
+    assert.ok(plain.some(l => l.includes('… +46 lines [Ctrl+O]')), plain.join('|'))
     // 头 4 行保留
     assert.ok(plain.some(l => l.includes('line 0')))
     assert.ok(plain.some(l => l.includes('line 3')))
@@ -79,7 +79,7 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     const plain = lines.map(stripAnsi)
     assert.ok(plain.some(l => l.includes('row 0')), 'head shown')
     assert.ok(plain.some(l => l.includes('row 59')), 'tail shown')
-    assert.ok(plain.some(l => l.includes('ctrl+o to expand')), 'mid marker')
+    assert.ok(plain.some(l => l.includes('[Ctrl+O]')), 'mid marker')
   })
 
   it('expanded renders all lines without marker', () => {
@@ -87,7 +87,7 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     const lines = formatToolCard({ toolName: 'bash', content: long, expanded: true }, theme)
     const plain = lines.map(stripAnsi)
     assert.ok(plain.some(l => l.includes('line 29')))
-    assert.ok(!plain.some(l => l.includes('ctrl+o')))
+    assert.ok(!plain.some(l => l.includes('Ctrl+O')))
   })
 
   it('edit/write diff content renders via formatDiff (red/green)', () => {

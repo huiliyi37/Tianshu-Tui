@@ -14,5 +14,5 @@ export function truncateToolResult(content: string, maxTokens: number): string {
   const head = content.slice(0, headChars)
   const tail = content.slice(-tailChars)
   const removed = content.length - headChars - tailChars
-  return `${head}\n\n...[truncated ${removed} chars]...\n\n${tail}`
+  return `${head}\n\n...[truncated ${removed} chars]...\n\n${tail}\n\n[WARNING: this result was truncated. Do not draw architectural conclusions or infer API existence from partial output.]`
 }

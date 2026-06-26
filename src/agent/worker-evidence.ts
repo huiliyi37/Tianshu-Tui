@@ -16,9 +16,10 @@ const WRITE_PROFILES_ADVISORY = ['patcher']
  * When a `profile` is provided and it's a read-only profile, the gate is skipped
  * entirely if `changedFiles` is empty — read-only workers don't need verification metadata.
  *
- * This distinction is critical for read-only workers (code_scout, reviewer, etc.)
- * that examine files without modifying them — they should use `examinedFiles` and
- * leave `changedFiles` empty to pass through without verification metadata.
+ * However, read-only workers MUST NOT self-report `evidenceStatus: 'verified'`.
+ * Only test-capable profiles (adversarial_verifier, goal_judge) can claim verified,
+ * and only when they can prove tests actually ran. This prevents scan-level findings
+ * from being treated as ground truth by the primary agent.
  *
  * @param result - The worker result to verify
  * @param profile - Optional worker profile for profile-aware verification
@@ -53,6 +54,25 @@ export function verifyWorkerEvidence(result: WorkerResult, profile?: string, tra
         ...result,
         evidenceStatus: 'unverified',
         risks: addRisk(result.risks, 'adversarial_verifier ran run_tests but it errored — verdict not trustworthy'),
+      }
+    }
+  }
+
+  // Read-only workers (no changed files) cannot claim verified unless they are
+  // test-capable profiles with proven execution evidence.
+  if (result.changedFiles.length === 0 && result.evidenceStatus === 'verified') {
+    if (profile === 'goal_judge' && result.verification?.status !== 'passed') {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'goal_judge reported verified without passing verification metadata'),
+      }
+    }
+    if (profile !== 'adversarial_verifier' && profile !== 'goal_judge') {
+      return {
+        ...result,
+        evidenceStatus: 'unverified',
+        risks: addRisk(result.risks, 'read-only worker cannot claim verified; findings are scan-level only'),
       }
     }
   }

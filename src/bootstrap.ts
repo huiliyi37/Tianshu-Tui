@@ -45,6 +45,7 @@ import { persistCouncilRoutingShadow } from './agent/council/council-routing.js'
 import { recordCouncilSession } from './agent/council/council-telemetry.js'
 import { createRecallCapsuleTool } from './tools/recall-capsule.js'
 import { createDeliverTaskTool } from './agent/deliver-task.js'
+import { createUpdateGoalTool } from './tools/update-goal.js'
 import { createTaskLedger } from './agent/task-ledger.js'
 import { createOwnershipLedger } from './agent/ownership-ledger.js'
 import { createVerificationAttribution } from './agent/verification-attribution.js'
@@ -529,6 +530,9 @@ export function createInteractiveToolRegistry(
     reviewConfig: config.agent.review,
     meridianIndexer: refs.meridianIndexer,
   })))
+
+  // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
+  reg.register(createUpdateGoalTool(() => refs.goalTrackerRef.current))
 
   return { registry: reg }
 }
@@ -1369,6 +1373,22 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     session,
   })
   refs.promptEngine = agent.config.promptEngine
+
+  // 12b. Restore goal tracker from persisted state (if session was resumed).
+  // normalizeAfterResume: active → paused (the process that wrote active is gone).
+  if (wasSessionResumed()) {
+    try {
+      const { restoreGoalTracker } = await import('./agent/goal-persist.js')
+      const restored = restoreGoalTracker(getSessionDir(cwd), sessionId, {
+        maxJudgeRuns: config.agent.goal?.judge?.maxRuns,
+      })
+      if (restored) {
+        agent.setGoalTracker(restored)
+        refs.goalTrackerRef.current = restored
+        console.error(`🎯 已恢复目标（暂停状态）: ${restored.getGoal().slice(0, 60)}…  使用 /goal-resume 继续。`)
+      }
+    } catch { /* best-effort: goal restore failure is non-fatal */ }
+  }
 
   // 13. MCP + LSP initialization
   // asyncExtras (default true): fire-and-forget, non-blocking for faster startup

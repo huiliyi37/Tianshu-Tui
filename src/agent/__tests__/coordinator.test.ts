@@ -820,7 +820,9 @@ describe('DelegationCoordinator', () => {
       }),
       runWorker: async config => {
         calls++
-        if (calls === 1) throw new Error('worker transport failed')
+        // First worker (code_scout) always fails; reviewer succeeds.
+        // code_scout gets retried via exponential backoff but keeps failing.
+        if (config.order.profile === 'code_scout') throw new Error('worker transport failed')
         return {
           result: resultFor(config.order.id),
           transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
@@ -1957,6 +1959,130 @@ describe('DelegationCoordinator', () => {
       assert.equal(efeAudit.applied, true)
       assert.equal(efeAudit.evidenceWindow.selectedModel, 'fast-json')
       assert.equal(efeAudit.evidenceWindow.coldExcluded, 1)
+    })
+  })
+
+  // ── Wave 2: exponential backoff retry ───────────────────────────
+
+  describe('exponential backoff retry', () => {
+    it('retries same-model worker on failure and succeeds on second attempt', async () => {
+      let calls = 0
+      const sleepCalls: number[] = []
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 1,
+        retrySleepFn: async (ms) => { sleepCalls.push(ms) },
+        runtimeFactory: (order, card, workerRegistry) => ({
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }),
+        runWorker: async config => {
+          calls++
+          if (calls === 1) throw new Error('transient 429')
+          return {
+            result: { ...resultFor(config.order.id), status: 'passed' as const },
+            transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+            session: { getTurnCount: () => 1 } as never,
+            usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+          }
+        },
+      })
+
+      const run = await coordinator.delegateBatch([{
+        parentTurnId: 'turn_retry',
+        objective: 'Analyze the routing seams and model selection logic across the delegation coordinator module boundary.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/agent/coordinator.ts'] },
+      }])
+
+      assert.equal(run.status, 'completed')
+      assert.equal(calls, 2, 'runWorker should be called twice (initial + 1 retry)')
+      assert.equal(sleepCalls.length, 1, 'sleep should be called once for first retry')
+      assert.equal(sleepCalls[0], 10000, 'first backoff delay should be 10s (base * 2^0)')
+    })
+
+    it('respects maxRetries=0 — no retry, immediate failure', async () => {
+      let calls = 0
+      const sleepCalls: number[] = []
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 1,
+        retrySleepFn: async (ms) => { sleepCalls.push(ms) },
+        runtimeFactory: (order, card, workerRegistry) => ({
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }),
+        runWorker: async () => {
+          calls++
+          throw new Error('persistent error')
+        },
+      })
+
+      const run = await coordinator.delegateBatch([{
+        parentTurnId: 'turn_noretry',
+        objective: 'Analyze the routing seams and model selection logic across the delegation coordinator module boundary.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/agent/coordinator.ts'] },
+        budget: { maxRetries: 0 },
+      }])
+
+      assert.equal(run.status, 'completed')
+      assert.equal(calls, 1, 'runWorker called once — no retry')
+      assert.equal(sleepCalls.length, 0, 'no sleep calls — retry disabled')
+    })
+
+    it('uses exponential delay formula: base * 2^(attempt-1)', async () => {
+      let calls = 0
+      const sleepCalls: number[] = []
+      const coordinator = new DelegationCoordinator({
+        baseToolRegistry: makeRegistry(),
+        modelCards: cards,
+        maxWorkers: 1,
+        retrySleepFn: async (ms) => { sleepCalls.push(ms) },
+        runtimeFactory: (order, card, workerRegistry) => ({
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }),
+        runWorker: async () => {
+          calls++
+          throw new Error('persistent error')
+        },
+      })
+
+      await coordinator.delegateBatch([{
+        parentTurnId: 'turn_formula',
+        objective: 'Analyze the routing seams and model selection logic across the delegation coordinator module boundary.',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/agent/coordinator.ts'] },
+        budget: { maxRetries: 2, retryBackoffMs: 5000, maxRetryBackoffMs: 60000 },
+      }])
+
+      assert.equal(sleepCalls.length, 2, 'two sleep calls for maxRetries=2')
+      assert.equal(sleepCalls[0], 5000, 'first delay: 5000 * 2^0 = 5000')
+      assert.equal(sleepCalls[1], 10000, 'second delay: 5000 * 2^1 = 10000')
     })
   })
 })

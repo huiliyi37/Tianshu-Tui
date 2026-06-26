@@ -118,6 +118,8 @@ export class PromptEngine {
   private activePlanPointer?: string
   private intentRetrievalRoute?: string | null
   private taskDepthLayer?: import('../context/task-contract.js').TaskDepthLayer
+  /** Advisory text — only set when task depth layer changes, null otherwise to avoid noise. */
+  private taskDepthAdvisory: string | null = null
   private planMethodology?: import('../context/task-contract.js').PlanMethodology
   private planMethodologyReason?: string
   /** Advisory text — only set when methodology changes, null otherwise to avoid noise. */
@@ -308,7 +310,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer), planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
 
             if (this.tracker) {
               // activeDomain is no longer habituation-tracked — it is a session
@@ -757,7 +759,13 @@ export class PromptEngine {
   }
 
   setTaskDepthLayer(layer: import('../context/task-contract.js').TaskDepthLayer | undefined): void {
+    const changed = this.taskDepthLayer !== layer
     this.taskDepthLayer = layer
+    // Only inject the advisory when task depth changes or is first set.
+    // Repeated identical advisory every user message is pure noise.
+    this.taskDepthAdvisory = changed
+      ? renderTaskDepthAdvisory(layer)
+      : null
   }
 
   setPlanMethodology(methodology: import('../context/task-contract.js').PlanMethodology | undefined, reason?: string): void {
@@ -982,7 +990,7 @@ export class PromptEngine {
       planCacheAdvisory: this.planCacheAdvisory,
       planTraceAppendix: this.planTraceAppendix,
       intentRetrievalRoute: this.intentRetrievalRoute,
-      taskDepthAdvisory: renderTaskDepthAdvisory(this.taskDepthLayer),
+      taskDepthAdvisory: this.taskDepthAdvisory,
       planMethodologyAdvisory: this.planMethodologyAdvisory,
       harnessAdvisoryBlock: this.harnessAdvisoryBlock,
       decisions: this.decisions,

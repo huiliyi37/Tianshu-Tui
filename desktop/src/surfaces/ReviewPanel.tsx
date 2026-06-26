@@ -19,6 +19,13 @@ import { isAutonomous } from '../lib/autonomy'
 
 type ReviewTab = 'review' | 'plan' | 'task' | 'github'
 
+interface TabDef {
+  id: ReviewTab
+  label: string
+  glyph: string
+  badge?: () => number | null
+}
+
 // Review panel (P3/Q3) — Codex's third pane. Aggregates the trust-layer surfaces
 // of the active thread: pending approvals/intents handled INLINE (no blocking
 // modal) + artifacts/diff/screenshots. The tab bar reserves slots for future CVM
@@ -100,22 +107,38 @@ export function ReviewPanel(props: {
   }, [sessionId, open, comment, onFeedbackSent])
 
   const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
+  const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
+
+  const tabs: TabDef[] = [
+    { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
+    { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
+    { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
+    { id: 'github', label: 'PR', glyph: '🔀' },
+  ]
 
   return (
     <div className="review">
-      <div className="review-tabs">
-        <button className={`review-tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>
-          审查{pendingCount > 0 && <span className="tab-badge">{pendingCount}</span>}
-        </button>
-        <button className={`review-tab ${tab === 'plan' ? 'active' : ''}`} onClick={() => setTab('plan')}>
-          方案{planMode === 'planning' && <span className="tab-badge dot" aria-label="规划中" />}
-        </button>
-        <button className={`review-tab ${tab === 'task' ? 'active' : ''}`} onClick={() => setTab('task')}>
-          任务{todos.length > 0 && <span className="tab-badge">{todos.filter(t => t.status !== 'completed').length || ''}</span>}
-        </button>
-        <button className={`review-tab ${tab === 'github' ? 'active' : ''}`} onClick={() => setTab('github')}>
-          PR
-        </button>
+      <div className="open-tabs-head">Open Tabs</div>
+      <div className="open-tabs">
+        {tabs.map((t) => {
+          const badge = t.badge?.()
+          return (
+            <button
+              key={t.id}
+              className={`open-tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              <span className="open-tab-glyph" aria-hidden>{t.glyph}</span>
+              <span className="open-tab-label">{t.label}</span>
+              {badge != null && badge > 0 && (
+                <span className="open-tab-badge">{badge}</span>
+              )}
+              {badge === -1 && (
+                <span className="open-tab-dot" aria-label="进行中" />
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {tab === 'github' ? (

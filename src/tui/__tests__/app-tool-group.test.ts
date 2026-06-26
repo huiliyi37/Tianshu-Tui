@@ -208,7 +208,7 @@ test('flush 后 scrollback 中折叠组渲染正确，含 ctrl+o 提示', () => 
   const text = scrollbackPlain(app)
   assert.ok(text.includes('Read 4 files'), 'collapsed group summary')
   // 超过 3 条 entry 时显示 ctrl+o 提示 + 紧凑路径列表
-  assert.ok(text.includes('ctrl+o to expand'), 'should hint ctrl+o for >3 entries')
+  assert.ok(text.includes('[Ctrl+O]'), 'should hint Ctrl+O for >3 entries')
   // 紧凑模式下显示文件路径（逗号分隔）
   assert.ok(text.includes('a.ts'), 'a.ts in collapsed group')
   assert.ok(text.includes('b.ts'), 'b.ts in collapsed group')

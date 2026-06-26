@@ -291,7 +291,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     const files = completed.map(e => e.displayName).join(', ')
     const preview = files.length > 80 ? files.slice(0, 79) + '…' : files
     lines.push(`  ⎿  ${color(preview, theme.muted)}`)
-    lines.push(color(`     … +${completed.length - 3} more files (ctrl+o to expand)`, theme.muted))
+    lines.push(color(`     … +${completed.length - 3} more files [Ctrl+O]`, theme.secondary))
   }
 
   return lines

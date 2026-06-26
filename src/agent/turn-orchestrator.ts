@@ -22,6 +22,8 @@ import { evaluateThinkingRetry } from './thinking-retry.js'
 import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import { debugLog } from '../utils/debug.js'
 import type { GoalTracker } from './goal-tracker.js'
+import { saveGoalState } from './goal-persist.js'
+import { getSessionDir } from './session-persist.js'
 import { runGoalJudge, type GoalJudgeDeps } from './goal-judge.js'
 
 // ── Types re-exported for deps interface ──
@@ -74,6 +76,9 @@ export interface ExecuteBatchResult {
   latestRisk: RiskAssessment
   artifactIdsEvicted: string[]
   artifactIdsAccessed: string[]
+  /** True when any tool in the batch returned endTurn: true (e.g. ask_user_question).
+   *  The orchestrator uses this to end the turn as final. */
+  endTurn?: boolean
 }
 
 export interface CompleteTurnParams {
@@ -111,6 +116,7 @@ export interface TurnOrchestratorDeps {
   getStreamRules: () => StreamRule[] | undefined
   getAgentReconnect: () => { enabled?: boolean; maxAttempts?: number; backoffMs?: number } | undefined
   getCwd: () => string
+  getSessionId: () => string | undefined
   setClientThinking: (mode: 'enabled' | 'disabled') => void
   flushMeridianTurn: () => void
   syncPlanModeToConfig: () => void
@@ -817,6 +823,19 @@ export class TurnOrchestrator {
             })
           }
           this.deps.flushMeridianTurn()
+
+          // endTurn signal: a tool (e.g. ask_user_question) requested turn termination.
+          // Complete as final and break instead of continuing the tool loop.
+          if (r.endTurn) {
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              signal!,
+              'post-turn-endTurn',
+            )
+            finalTurnCompleted = true
+            break
+          }
+
           await rejectOnAbort(
             this.deps.completeTurn({ turn, isFinal: false, callbacks }),
             signal!,
@@ -884,11 +903,20 @@ export class TurnOrchestrator {
               tracker.deactivate('achieved')
             }
           } else {
-            // budget/context/cancelled: deactivate so later turns aren't checked.
+            // budget/context/wall-clock/cancelled: deactivate so later turns aren't checked.
             const deactivationReason = goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
               : goalResult.reason === 'context_limit' ? 'context_limit'
+              : goalResult.reason === 'wall_clock_exhausted' ? 'budget_exhausted'
               : 'cancelled'
             tracker.deactivate(deactivationReason)
+          }
+        }
+
+        // Persist goal state after any status/iteration change (best-effort).
+        if (tracker) {
+          const sid = this.deps.getSessionId()
+          if (sid) {
+            try { saveGoalState(getSessionDir(this.deps.getCwd()), sid, tracker) } catch { /* best-effort */ }
           }
         }
 
@@ -905,11 +933,16 @@ export class TurnOrchestrator {
           } else {
             const iter = tracker!.getIteration()
             const maxIter = tracker!.getMaxIterations()
+            const wallElapsed = Math.round(tracker!.getWallClockElapsedMs() / 1000)
+            const wallBudget = tracker!.getWallClockBudgetMs()
+            const wallInfo = wallBudget
+              ? ` ⏱${wallElapsed}s/${Math.round(wallBudget / 1000)}s`
+              : ` ⏱${wallElapsed}s`
             this.deps.appendSystemReminder(
-              `[GOAL CONTINUATION ${iter}/${maxIter}] 目标尚未达成。继续执行。\n` +
+              `[GOAL CONTINUATION ${iter}/${maxIter}${wallInfo}] 目标尚未达成。继续执行。\n` +
               `目标: ${tracker!.getGoal()}\n` +
               `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
-              `完成后输出 "GOAL ACHIEVED" 声明完成。`
+              `完成后输出 "GOAL ACHIEVED" 声明完成。遇到无法解决的阻塞时输出 "GOAL BLOCKED"。`
             )
           }
           continue  // re-enter the for loop for the next iteration

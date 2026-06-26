@@ -1,5 +1,5 @@
 import type { CoordinatorRun, DelegationRequest } from './coordinator.js'
-import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, formatWiringEffectivenessReviewStance, formatMethodologyVerificationStance, type ChangeSet } from './review-discipline.js'
+import { formatObjectiveReviewStance, formatPathBoundaryReviewStance, formatWeighingReviewStance, formatWiringEffectivenessReviewStance, formatMethodologyVerificationStance, LARGE_FILE_WARN_THRESHOLD, type ChangeSet } from './review-discipline.js'
 import type { PatcherResult, ReviewFinding, ReviewInfraFailure, ReviewRouterDeps, SquadronResult, VerifierResult } from './review-router.js'
 import type { AggregationPolicy, WorkerProfile, WorkerResult, WorkOrderKind } from './work-order.js'
 
@@ -145,6 +145,7 @@ function mapWorkerFinding(result: WorkerResult, finding: WorkerFinding): ReviewF
   return {
     severity: extractSeverity(text),
     claim: finding.claim,
+    evidence: finding.evidence,
   }
 }
 
@@ -196,6 +197,7 @@ function patcherResult(run: CoordinatorRun): PatcherResult {
 }
 
 function verifierObjective(change: ChangeSet): string {
+  const largeWarn = formatLargeFileWarnings(change)
   return [
     'Independently adversarially verify this change before delivery.',
     objectiveReviewStanceBlock(),
@@ -206,6 +208,7 @@ function verifierObjective(change: ChangeSet): string {
     methodologyVerificationBlock(),
     `Files: ${files(change).join(', ') || '(none)'}`,
     ...(change.focusHint ? [`**Reviewer focus**: ${change.focusHint}`] : []),
+    ...(largeWarn ? [largeWarn] : []),
     'Run targeted existing tests when possible and return command + observed output evidence.',
     'Do not stop at green tests: try at least one counterexample or boundary/error-path probe relevant to the changed files.',
     'For spec/integration changes, explicitly report fact-flow closure, condition-matrix coverage, and the counterexample that would fail a checklist-only implementation.',
@@ -281,7 +284,32 @@ function stanceBlocks(stances: InspectorStance[]): string[] {
 
 const FINDING_CONTRACT = 'Report each finding with severity CRITICAL/HIGH/MEDIUM/LOW, claim, evidence (file:line), and minimal fix suggestion. Report "no findings" explicitly if the axis is clean — silence is not a verdict.'
 
+/**
+ * Generate advisory warnings for files that exceed the large-file threshold.
+ * Review workers MUST use read_file with offset/limit for these files instead
+ * of reading them in full — full reads risk worker timeout on multi-megabyte files.
+ */
+function formatLargeFileWarnings(change: ChangeSet): string | null {
+  if (!change.largeFiles || change.largeFiles.length === 0) return null
+  const lines: string[] = [
+    `⚠️  ${change.largeFiles.length} file(s) exceed the ${Math.round(LARGE_FILE_WARN_THRESHOLD / 1000)}KB review threshold:`,
+  ]
+  for (const lf of change.largeFiles) {
+    const kb = Math.round(lf.sizeBytes / 1000)
+    lines.push(`  - ${lf.path} (${kb}KB)`)
+  }
+  lines.push(
+    '',
+    'DO NOT read these files in full — use read_file with offset/limit to read only the',
+    'changed regions (infer ranges from the git diff). Use grep to search for specific',
+    'symbols referenced in the diff. If you need context beyond the diff, read only the',
+    'relevant sections around changed lines.',
+  )
+  return lines.join('\n')
+}
+
 function inspectorObjective(inspector: typeof INSPECTORS[number], change: ChangeSet): string {
+  const largeWarn = formatLargeFileWarnings(change)
   return [
     `${inspector.name} Inspector: ${inspector.objective}`,
     objectiveReviewStanceBlock(),
@@ -289,6 +317,7 @@ function inspectorObjective(inspector: typeof INSPECTORS[number], change: Change
     ...(inspector.method ? [inspector.method] : []),
     `Files: ${files(change).join(', ') || '(none)'}`,
     ...(change.focusHint ? [`**Reviewer focus**: ${change.focusHint}`] : []),
+    ...(largeWarn ? [largeWarn] : []),
     ...(inspector.stances.includes('dataflow')
       ? ['For spec/integration changes, review the fact-flow graph, condition matrix, and counterexample tests before accepting checklist-style coverage.']
       : []),

@@ -42,6 +42,10 @@ const taskSchema = z.object({
    *  referenced tasks run first. Enforced by WorkOrderQueue via stable
    *  `batch:N` ids. */
   dependsOn: z.array(z.number().int().nonnegative()).optional(),
+  /** Worker ID to resume. The worker continues from its previous session
+   *  context instead of starting fresh. Use the workOrderId from a previous
+   *  delegate_task/delegate_batch result. */
+  resume: z.string().optional(),
 })
 
 const inputSchema = z.object({
@@ -126,6 +130,7 @@ export function createDelegateBatchTool(
                 files: { type: 'array', items: { type: 'string' } },
                 symbols: { type: 'array', items: { type: 'string' } },
                 dependsOn: { type: 'array', items: { type: 'integer' }, description: 'Indices of tasks in this batch that must finish first (the referenced tasks run before this one). E.g. a test task that depends on the source task it covers.' },
+                resume: { type: 'string', description: 'Worker ID to resume. The worker continues from its previous session context instead of starting fresh.' },
               },
               required: ['objective'],
             },
@@ -225,6 +230,7 @@ export function createDelegateBatchTool(
         delegationDepth: params.delegationDepth ?? 0,
         sessionTurn: params.sessionTurnCount,
         onActivity: streamActivity,
+        resumeWorkOrderId: t.resume,
         }
       })
 

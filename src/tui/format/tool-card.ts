@@ -18,6 +18,8 @@ import { getToolFamily } from '../tool-family.js'
 import { toolArgSummary } from '../tool-label.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import { formatDiff, isDiffContent } from './diff.js'
+import { brailleSpinnerFrame } from '../braille-spinner.js'
+import chalk from 'chalk'
 
 export interface FormatToolCardInput {
   /** 工具名称 */
@@ -116,7 +118,7 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
     }, theme)
     lines.push(...indentBody(diffLines, indent, theme))
     if (!expanded && trimmed.split('\n').length > DIFF_MAX_LINES) {
-      lines.push(`${indent}${BODY_CONT_PREFIX}${color('(ctrl+o to expand)', theme.muted)}`)
+      lines.push(`${indent}${BODY_CONT_PREFIX}${color('… [Ctrl+O]', theme.secondary)}`)
     }
     return lines
   }
@@ -147,7 +149,7 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
     const omitted = totalLines - READ_HEAD_LINES - READ_TAIL_LINES
     const body = [
       ...head.map(renderLine),
-      color(`… +${omitted} lines (ctrl+o to expand)`, theme.muted),
+      color(`… +${omitted} lines [Ctrl+O]`, theme.secondary),
       ...tail.map(renderLine),
     ]
     lines.push(...indentBody(body, indent, theme))
@@ -158,7 +160,7 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   const omitted = totalLines - maxLines
   const body = [
     ...head.map(renderLine),
-    color(`… +${omitted} lines (ctrl+o to expand)`, theme.muted),
+    color(`… +${omitted} lines [Ctrl+O]`, theme.secondary),
   ]
   lines.push(...indentBody(body, indent, theme))
   return lines
@@ -190,6 +192,8 @@ export interface FormatToolCardLiveInput {
   tailLines?: number
   /** 终端列数 */
   columns: number
+  /** 动画帧序号；提供时用 spinner 替代静态 bullet */
+  tick?: number
 }
 
 /**
@@ -197,7 +201,11 @@ export interface FormatToolCardLiveInput {
  */
 export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetTheme): string[] {
   const title = toolCardTitle(input.toolName, input.toolInput)
-  let header = `${color('●', theme.dim)} ${color(title, theme.toolColor(input.toolName), { bold: true })}`
+  const useAscii = chalk.level < 3
+  const bullet = input.tick !== undefined
+    ? (useAscii ? ['-', '\\', '|', '/'][((input.tick % 4) + 4) % 4]! : brailleSpinnerFrame(input.tick))
+    : '●'
+  let header = `${color(bullet, theme.dim)} ${color(title, theme.toolColor(input.toolName), { bold: true })}`
   if (input.elapsedMs !== undefined && input.elapsedMs >= 1000) {
     header += ` ${color(`(${formatElapsed(input.elapsedMs)})`, theme.muted)}`
   }

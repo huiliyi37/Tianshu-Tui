@@ -5,6 +5,8 @@
  * information from agent trajectories for 39-59% token reduction.
  */
 
+import { parseOptionalInt, rangeContains } from './shared-range.js'
+
 export interface OaiMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
@@ -39,26 +41,6 @@ interface ReadEntry {
   limit?: number
   /** True when the tool result was truncated (PARTIAL view, head+tail, or memory-trimmed). */
   wasTruncated: boolean
-}
-
-/** Parse an optional integer from tool call args (handles both number and string). */
-function parseOptionalInt(val: unknown): number | undefined {
-  if (val === undefined || val === null) return undefined
-  const n = Number(val)
-  if (Number.isNaN(n) || n <= 0) return undefined
-  return Math.floor(n)
-}
-
-/** Check whether outer read range fully contains inner read range. */
-function rangeContains(
-  outer: { offset?: number; limit?: number },
-  inner: { offset?: number; limit?: number },
-): boolean {
-  const outerStart = outer.offset ?? 1
-  const outerEnd = outer.limit !== undefined ? outerStart + outer.limit - 1 : Infinity
-  const innerStart = inner.offset ?? 1
-  const innerEnd = inner.limit !== undefined ? innerStart + inner.limit - 1 : Infinity
-  return outerStart <= innerStart && outerEnd >= innerEnd
 }
 
 export function applyAgentDiet(messages: OaiMessage[], options: DietOptions = {}): DietResult {

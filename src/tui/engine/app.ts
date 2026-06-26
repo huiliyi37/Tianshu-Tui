@@ -26,7 +26,7 @@ import { ApprovalIntentController } from './approval-intent-controller.js'
 import { MetricsGlanceController } from './metrics-glance-controller.js'
 import { StreamRenderController } from './stream-render-controller.js'
 import { InputController } from './input-controller.js'
-import { color } from './ansi.js'
+import { color, fg, bg } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
 import { getTheme, type RivetTheme } from '../theme.js'
@@ -827,9 +827,13 @@ export class TuiApp {
   /** 停用 overlay */
   deactivateOverlay(): void {
     this.overlay.deactivate()
-    // 退出覆盖层后，由于我们在激活时已经干净地清除了旧的 live region，
-    // 此时主屏幕底部是完全干净的，且光标也处于正确的起始行。
-    // 我们只需直接调用 renderLive()，它会以 append 模式在最底部重新绘制全新的 live region。
+    // Alt screen exit restores cursor to where it was before overlay activate.
+    // activateOverlay called live.clear() which: (1) moved cursor to live region
+    // top and erased it, (2) set lastDisplayRows=0. After alt screen exit,
+    // cursor is at that same cleared position (end of scrollback).
+    // Erase any residual chars on this line, reset render state, append fresh.
+    this.stdout.write('\r\x1B[0J')
+    this.live.reset()
     this.renderLive()
   }
 
@@ -1040,8 +1044,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.domainPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getDomainPickerExec()) this.overlayController.getDomainPickerExec()?.(entry.key)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1060,8 +1064,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.modelPickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getModelPickerExec()) this.overlayController.getModelPickerExec()?.(entry.id)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1080,8 +1084,8 @@ export class TuiApp {
       }
       if (key.name === 'return') {
         const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
-        this.deactivateOverlay()
         if (entry && this.overlayController.getThemePickerExec()) this.overlayController.getThemePickerExec()?.(entry.name)
+        this.deactivateOverlay()
         return true
       }
       return false
@@ -1884,6 +1888,15 @@ export class TuiApp {
     return truncateToDisplayWidth(text, Math.max(1, this.columns - 1), { ambiguousAsWide: true })
   }
 
+  /** 渲染一条全宽反色提示条（用于审批/意图框顶部隔离）。 */
+  private renderBanner(text: string, bgColor: string, fgColor: string = '#000000'): string {
+    const label = ` ${text} `
+    const labelWidth = stringWidth(label)
+    const maxWidth = Math.max(1, this.columns - 1)
+    const padWidth = Math.max(0, maxWidth - labelWidth)
+    return `${bg(bgColor)}${fg(fgColor)}${label}${' '.repeat(padWidth)}\x1B[0m`
+  }
+
   private renderLive(): void {
     const lines: LiveRegionLine[] = []
 
@@ -1992,6 +2005,7 @@ export class TuiApp {
           outputTail: this.toolGroupController.getAccumulated(id),
           elapsedMs: Date.now() - meta.startMs,
           columns: this.columns,
+          tick: this.streamRenderController.tick,
         }, this.theme)
         for (const line of toolLines) {
           lines.push({ text: line })
@@ -2002,21 +2016,25 @@ export class TuiApp {
     // 3. Approval prompt (when pending)
     if (this.approvalIntentController.approvalPending) {
       const p = this.approvalIntentController.approvalPending
+      const keyHint = (key: string, label: string) =>
+        `${color('[', this.theme.secondary)}${color(key, this.theme.secondary, { bold: true })}${color(`] ${label}`, this.theme.secondary)}`
       if (this.approvalIntentController.approvalEditMode) {
         // Edit mode: show edit header, InputLine contains the JSON
-        lines.push({ text: this.clampLine(` ╭─ Edit Tool Input ───────────────────────────────`) })
+        lines.push({ text: '' })
+        lines.push({ text: this.clampLine(this.renderBanner('EDIT TOOL INPUT', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
         if (this.approvalIntentController.approvalEditError) {
           lines.push({ text: this.clampLine(` │ ${color(`⚠ ${this.approvalIntentController.approvalEditError}`, this.theme.warning)}`) })
         }
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
-        lines.push({ text: this.clampLine(` ╰─ Enter confirm  Esc back  Ctrl+C deny ─────────`) })
+        lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
         const inputSummary = JSON.stringify(p.input).slice(0, 80)
-        lines.push({ text: this.clampLine(` ╭─ Approval Required ──────────────────────────────`) })
+        lines.push({ text: '' })
+        lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
         lines.push({ text: this.clampLine(` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}`) })
-        lines.push({ text: this.clampLine(` ╰─ [y] approve  [n] deny  [e] edit ───────────────`) })
+        lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'approve')}  ${keyHint('n', 'deny')}  ${keyHint('e', 'edit')} ───────────────`) })
       }
     }
 
@@ -2024,16 +2042,19 @@ export class TuiApp {
     if (this.approvalIntentController.intentPending) {
       const it = this.approvalIntentController.intentPending.intent
       const hasAlt = (it.alternatives?.length ?? 0) > 0
-      lines.push({ text: this.clampLine(` ╭─ Intent Preview ─────────────────────────────────`) })
+      const keyHint = (key: string, label: string) =>
+        `${color('[', this.theme.secondary)}${color(key, this.theme.secondary, { bold: true })}${color(`] ${label}`, this.theme.secondary)}`
+      lines.push({ text: '' })
+      lines.push({ text: this.clampLine(this.renderBanner('INTENT PREVIEW', this.theme.primary)) })
       lines.push({ text: this.clampLine(` │ ${it.summary}`) })
       for (const w of it.warnings ?? []) {
-        lines.push({ text: this.clampLine(` │ ⚠ ${w}`) })
+        lines.push({ text: this.clampLine(` │ ${color(`⚠ ${w}`, this.theme.warning)}`) })
       }
       for (const alt of it.alternatives ?? []) {
         lines.push({ text: this.clampLine(` │ ↳ ${alt}`) })
       }
-      const altKey = hasAlt ? '  [a] alternative' : ''
-      lines.push({ text: this.clampLine(` ╰─ [y] continue  [n] veto${altKey} ────────────────`) })
+      const altHint = hasAlt ? `  ${keyHint('a', 'alternative')}` : ''
+      lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'continue')}  ${keyHint('n', 'veto')}${altHint} ────────────────`) })
     }
 
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是

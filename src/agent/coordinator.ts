@@ -29,6 +29,7 @@ import {
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
 import { runWorkerSession, type WorkerSessionConfig, type WorkerSessionRun } from './worker-session.js'
+import { saveWorkerSession, loadWorkerSession } from './worker-session-persist.js'
 import { WorkerLiveness, EXPLORE_STALL_MS, WRITE_STALL_MS } from './worker-liveness.js'
 import { runHandsSession, type HandsSessionConfig, type HandsSessionRun } from './hands-session.js'
 import { WorktreeCoordinator } from './worktree-coordinator.js'
@@ -60,6 +61,7 @@ import { buildModelPolicyCandidates, selectModelPolicy } from './model-policy-se
 import { buildHistoricalModelRewards } from './model-reward-summary.js'
 import type { EFEComponents } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
+import type { OaiMessage } from '../api/oai-types.js'
 
 /** Per-turn free-energy signals pulled from the primary loop at delegation time. */
 export interface EFERoutingSignals {
@@ -122,8 +124,9 @@ export interface DelegationRequest {
   /** Logical group identifier for related tasks (e.g. team wave). */
   groupId?: string
   /** Star domain authority for cognitive injection (V3 Component A).
-   *  When set, the domain's systemPromptSuffix is injected into the worker prompt
-   *  and allowedTools are intersected with the domain's toolWhitelist.
+   *  When set, the domain's systemPromptSuffix and volatileBlock are injected
+   *  into the worker prompt (see buildWorkerPrompt). Tool access is governed
+   *  solely by the profile's allowedTools — authority does NOT restrict tools.
    *  Custom domains are loaded at startup, so this must remain an open string. */
   authority?: string
   /** Team planner risk tier for shadow-only model tier recommendation. */
@@ -134,6 +137,11 @@ export interface DelegationRequest {
    *  precedence over profile defaults — used e.g. by the auto wiring review
    *  to run a reviewer-profile worker on a short, non-blocking budget. */
   budget?: Partial<WorkerBudget>
+  /** Resume a previous worker session by work order id. When provided, the
+   *  coordinator loads the prior session's messages and the worker continues
+   *  from that context instead of starting fresh. The objective should
+   *  describe the continuation task. */
+  resumeWorkOrderId?: string
 }
 
 export interface CoordinatorRun {
@@ -229,11 +237,34 @@ export interface DelegationCoordinatorConfig {
   circuitBreaker?: CircuitBreakerManager
   /** Max nesting depth for delegation. Falls back to MAX_DELEGATION_DEPTH when unset. */
   maxDelegationDepth?: number
+  /** Injectable sleep function for backoff retry testing. Defaults to real setTimeout. */
+  retrySleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
   const words = objective.trim().split(/\s+/).filter(Boolean).length
   return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
+}
+
+/**
+ * Sleep with abort support. Resolves after `ms` or rejects immediately when
+ * the signal fires. Listener is cleaned up on resolve to prevent accumulation.
+ * In test environments (RIVET_TEST=1), delay is clamped to 0 for speed.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  const actualMs = process.env.RIVET_TEST ? 0 : ms
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Aborted during backoff: signal already fired'))
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new Error('Aborted during backoff'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, actualMs)
+  })
 }
 
 function workerFailureResult(order: WorkOrder, error: unknown, nextActions?: string[]): WorkerResult {
@@ -277,6 +308,13 @@ function blockedDependencyResult(order: WorkOrder, unmetDeps: string[], failedDe
 /** Cap on persisted worker-result files under ~/.rivet/subagents/. Without a
  *  TTL/cap this write-mostly sink grew unbounded (one+ file per worker, forever). */
 export const MAX_SUBAGENT_RESULTS = 500
+
+/** Minimum acceptable summary length. When a worker's summary is shorter, the
+ *  coordinator auto-triggers a follow-up expansion turn so the parent agent
+ *  receives a technically complete handoff. */
+export const SUMMARY_MIN_LENGTH = 200
+/** Max follow-up attempts for brief summaries. 1 = single retry, then accept. */
+export const SUMMARY_CONTINUATION_ATTEMPTS = 1
 
 /** LRU-evict ~/.rivet/subagents/ down to `limit` files (oldest mtime first).
  *  Best-effort and exported for testing. Returns the basenames evicted. */
@@ -392,6 +430,10 @@ export class DelegationCoordinator {
   /** T9 P3: per-order real-time activity upstream (request callback survives
    *  the zod request→order conversion via this side table). */
   private readonly activityUpstream = new Map<string, (event: WorkerActivityEvent) => void>()
+  /** Per-order prior messages for session resume. Set by delegate() when
+   *  resumeWorkOrderId is provided; consumed by delegateOrder() when building
+   *  the worker config. Side-table pattern (same as activityUpstream). */
+  private readonly resumeMessages = new Map<string, readonly OaiMessage[]>()
   private stallSweep: ReturnType<typeof setInterval> | null = null
   /** T3: Flash→Pro escalation counter per session. Max 3 Pro upgrades. */
   private proUpgradeCount = 0
@@ -460,6 +502,7 @@ export class DelegationCoordinator {
     }
     this.orderControllers.clear()
     this.activityUpstream.clear()
+    this.resumeMessages.clear()
     this.backgroundRuns.clear()
     this.backgroundPromises.clear()
   }
@@ -871,11 +914,70 @@ export class DelegationCoordinator {
 
       // T9 P3: callbacks don't survive zod parsing — stash by order id.
       if (request.onActivity) this.activityUpstream.set(order.id, request.onActivity)
+      // Session resume: load prior messages from disk so the worker continues
+      // from its previous context. Degrades to a fresh worker if no history.
+      if (request.resumeWorkOrderId) {
+        const record = loadWorkerSession(request.resumeWorkOrderId)
+        if (record) {
+          this.resumeMessages.set(order.id, record.messages)
+          debugLog(`[worker-resume] loaded ${record.messages.length} messages from ${request.resumeWorkOrderId} for ${order.id}`)
+        } else {
+          debugLog(`[worker-resume] no prior session for ${request.resumeWorkOrderId} — starting fresh`)
+        }
+      }
       const run = await this.delegateOrder(order)
       return this.drainMailboxIntoRun(run)
     } finally {
       this.config.abortSignal = savedSignal
     }
+  }
+
+  /**
+   * Summary quality gate: when the worker returns a brief summary, trigger a
+   * follow-up expansion turn so the parent agent receives a technically complete
+   * handoff. The expansion reuses the worker's session messages as priorMessages
+   * so it continues from the same context. Returns the (possibly expanded) result
+   * and updated sessionMessages.
+   */
+  private async maybeExpandSummary(
+    order: WorkOrder,
+    workerConfig: WorkerSessionConfig,
+    mergedSignal: AbortSignal,
+    currentResult: WorkerResult,
+    sessionMessages: readonly OaiMessage[],
+  ): Promise<{ result: WorkerResult; sessionMessages: readonly OaiMessage[] }> {
+    let result = currentResult
+    let messages = sessionMessages
+
+    for (let attempt = 0; attempt < SUMMARY_CONTINUATION_ATTEMPTS; attempt++) {
+      if (result.summary.length >= SUMMARY_MIN_LENGTH) break
+      // Only expand passed results — blocked/failed results are inherently terse
+      if (result.status !== 'passed') break
+
+      const expansionOrder: WorkOrder = {
+        ...order,
+        objective: `Your previous summary was too brief (${result.summary.length} chars). Expand it to at least ${SUMMARY_MIN_LENGTH} characters. Include: what you found, what you changed, what remains open. Previous summary: "${result.summary}"`,
+      }
+      const expansionConfig: WorkerSessionConfig = {
+        ...workerConfig,
+        order: expansionOrder,
+        priorMessages: messages,
+      }
+      try {
+        const expansionRun = await this.runWorker(expansionConfig)
+        const expandedResult = expansionRun.result
+        // Only accept the expansion if it's actually longer
+        if (expandedResult.summary.length > result.summary.length) {
+          result = expandedResult
+          messages = expansionRun.session.getMessages()
+        }
+      } catch {
+        // Expansion failure is not critical — keep the original result
+        break
+      }
+    }
+
+    return { result, sessionMessages: messages }
   }
 
   private async delegateOrder(order: WorkOrder): Promise<CoordinatorRun> {
@@ -969,6 +1071,12 @@ export class DelegationCoordinator {
     workerConfig.reviewDepth = order.reviewDepth
     workerConfig.domainKnowledgeStore = this.config.domainKnowledgeStore
     workerConfig.mailbox = this.mailbox
+    // Session resume: inject prior messages so the worker continues from its
+    // previous context. Side-table pattern (same as activityUpstream).
+    const priorMessages = this.resumeMessages.get(order.id)
+    if (priorMessages && priorMessages.length > 0) {
+      workerConfig.priorMessages = priorMessages
+    }
 
     // A4: per-order AbortController merged with the parent signal — the stall
     // sweep can abort ONLY this worker without touching its batch siblings,
@@ -996,7 +1104,7 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript'] } | undefined
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[] } | undefined
 
     // T3: escalation shadow events collected during retry
     const escalationShadows: ModelTierShadowEvent[] = []
@@ -1121,6 +1229,8 @@ export class DelegationCoordinator {
 
           const activeClaims = this.config.activeClaims?.() ?? workerConfig.activeClaims ?? []
           const cwd = this.config.cwd ?? workerConfig.cwd
+          // Capture session messages from the hands worker for resume persistence.
+          let handsSessionMessages: readonly OaiMessage[] | undefined
           // Write workers (patcher/verifier) execute in an isolated git worktree.
           // Worktree lifecycle is managed by runHands → runHandsSession: create
           // before agent runs, collect diff after, cleanup on exit.
@@ -1145,11 +1255,14 @@ export class DelegationCoordinator {
                 activeClaims,
                 domainKnowledgeStore: this.config.domainKnowledgeStore,
               })
+              if (typeof sessionRun.session?.getMessages === 'function') {
+                handsSessionMessages = sessionRun.session.getMessages()
+              }
               callbacks.onTurnComplete(sessionRun.usage, 1, true)
               return JSON.stringify(sessionRun.result)
             },
           }))
-          run = { result: handsRun.result }
+          run = { result: handsRun.result, sessionMessages: handsSessionMessages }
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1159,7 +1272,10 @@ export class DelegationCoordinator {
         }
       } else {
         const workerRun = await wrapAbort(this.runWorker(workerConfig))
-        run = { result: workerRun.result, transcript: workerRun.transcript }
+        const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+          ? workerRun.session.getMessages()
+          : undefined
+        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
       }
     } catch (error) {
       // Physarum health: worker run threw (API/runtime fault, not task outcome).
@@ -1167,6 +1283,100 @@ export class DelegationCoordinator {
       const msg = error instanceof Error ? error.message : String(error)
       const isAbort = (error instanceof Error && error.name === 'AbortError') || msg.includes('Delegation aborted')
       if (!isAbort) this.recordProviderOutcome(selected.model, false)
+
+      // ── Exponential backoff retry (same-model) ──────────────────────
+      // Transient errors (429, network blips) are not model-capability issues.
+      // Retry with the same model before attempting Flash→Pro escalation.
+      if (!isAbort && order.budget.maxRetries > 0 && !run) {
+        const retrySleep = this.config.retrySleepFn ?? sleep
+        for (let attempt = 1; attempt <= order.budget.maxRetries; attempt++) {
+          const delay = Math.min(
+            order.budget.retryBackoffMs * Math.pow(2, attempt - 1),
+            order.budget.maxRetryBackoffMs,
+          )
+          try {
+            await retrySleep(delay, mergedSignal)
+          } catch {
+            // sleep aborted — stop retrying, fall through to degraded return
+            break
+          }
+          // Re-register liveness for the retry attempt
+          this.liveness.register(order.id, this.config.workerStallMs ?? (isWrite ? WRITE_STALL_MS : EXPLORE_STALL_MS))
+          this.orderControllers.set(order.id, orderController)
+          try {
+            if (role === 'hands') {
+              const retryClaimFiles: string[] = []
+              try {
+                if (this.config.sessionRegistry && this.config.sessionId && order.scope.files?.length) {
+                  const registry = this.config.sessionRegistry
+                  const sid = this.config.sessionId
+                  const conflicted: string[] = []
+                  for (const f of order.scope.files) {
+                    if (registry.acquireClaim(sid, f, 'exclusive')) retryClaimFiles.push(f)
+                    else conflicted.push(f)
+                  }
+                  if (conflicted.length > 0) {
+                    for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
+                    break // can't retry — claims blocked
+                  }
+                }
+                const retryCwd = this.config.cwd ?? workerConfig.cwd
+                let retryHandsMessages: readonly OaiMessage[] | undefined
+                const retryHandsRun = await wrapAbort(this.runHands({
+                  order,
+                  wtCoordinator: new WorktreeCoordinator(retryCwd),
+                  cwd: retryCwd,
+                  maxTurns: workerConfig.maxTurns,
+                  contextWindow: workerConfig.contextWindow,
+                  compact: workerConfig.compact,
+                  activeClaims: this.config.activeClaims?.() ?? workerConfig.activeClaims ?? [],
+                  domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  runAgent: async (prompt, callbacks, workerCwd) => {
+                    const sessionRun = await this.runWorker({
+                      ...workerConfig,
+                      order,
+                      cwd: workerCwd,
+                      activeClaims: workerConfig.activeClaims ?? [],
+                      domainKnowledgeStore: this.config.domainKnowledgeStore,
+                    })
+                    if (typeof sessionRun.session?.getMessages === 'function') {
+                      retryHandsMessages = sessionRun.session.getMessages()
+                    }
+                    callbacks.onTurnComplete(sessionRun.usage, 1, true)
+                    return JSON.stringify(sessionRun.result)
+                  },
+                }))
+                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages }
+              } finally {
+                if (this.config.sessionRegistry && this.config.sessionId) {
+                  for (const f of retryClaimFiles) this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
+                }
+              }
+            } else {
+              const workerRun = await wrapAbort(this.runWorker(workerConfig))
+              const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+                ? workerRun.session.getMessages()
+                : undefined
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+            }
+            // Retry succeeded — record provider health and exit loop
+            this.recordProviderOutcome(selected.model, true)
+            if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordSuccess(order.profile)
+            break
+          } catch (retryError) {
+            // This retry attempt failed — continue to next attempt (or fall through)
+            const retryMsg = retryError instanceof Error ? retryError.message : String(retryError)
+            const retryIsAbort = (retryError instanceof Error && retryError.name === 'AbortError') || retryMsg.includes('Delegation aborted')
+            if (retryIsAbort) break // abort stops all retries
+            if (attempt === order.budget.maxRetries) {
+              // All same-model retries exhausted — fall through to Flash→Pro
+            }
+          } finally {
+            this.liveness.unregister(order.id)
+            this.orderControllers.delete(order.id)
+          }
+        }
+      }
 
       // T3: Flash→Pro escalation — retry with strong-tier model if budget allows.
       // tierLock:'cheap' profiles (reviewer / adversarial_verifier) must NOT be
@@ -1225,6 +1435,7 @@ export class DelegationCoordinator {
                 // P1-1: increment quota and write escalation shadow only after claim check passes
                 escalationShadows.push(this.recordEscalation(order, strongCard, msg))
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
+                let retryHandsMessages: readonly OaiMessage[] | undefined
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
                   maxTurns: upgradedConfig.maxTurns,
@@ -1234,11 +1445,14 @@ export class DelegationCoordinator {
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({ ...upgradedConfig, order, cwd: workerCwd, activeClaims: upgradedConfig.activeClaims ?? [], domainKnowledgeStore: this.config.domainKnowledgeStore })
+                    if (typeof sessionRun.session?.getMessages === 'function') {
+                      retryHandsMessages = sessionRun.session.getMessages()
+                    }
                     callbacks.onTurnComplete(sessionRun.usage, 1, true)
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: handsRun.result }
+                run = { result: handsRun.result, sessionMessages: retryHandsMessages }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId)
                   for (const f of retryClaimFiles)
@@ -1248,7 +1462,10 @@ export class DelegationCoordinator {
               // P1-1: increment quota and write escalation shadow for read-only retry
               escalationShadows.push(this.recordEscalation(order, strongCard, msg))
               const workerRun = await wrapAbort(this.runWorker(upgradedConfig))
-              run = { result: workerRun.result, transcript: workerRun.transcript }
+              const sessionMessages = typeof workerRun.session?.getMessages === 'function'
+                ? workerRun.session.getMessages()
+                : undefined
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
             }
             // Upgrade succeeded — record provider outcome; circuit recovery for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, true)
@@ -1298,6 +1515,7 @@ export class DelegationCoordinator {
       this.liveness.unregister(order.id)
       this.orderControllers.delete(order.id)
       this.activityUpstream.delete(order.id)
+      this.resumeMessages.delete(order.id)
       if (this.liveness.size() === 0) this.stopStallSweep()
       if (semanticLockAcquired && this.collaboration && this.config.sessionId) {
         this.collaboration.releaseLocks(this.config.sessionId)
@@ -1335,6 +1553,13 @@ export class DelegationCoordinator {
 
     const profileMap = new Map([[order.id, order.profile]])
     const transcriptMap = run.transcript ? new Map([[order.id, run.transcript]]) : undefined
+
+    // Summary quality gate: expand brief summaries before persisting/returning.
+    if (run.sessionMessages && run.sessionMessages.length > 0 && run.result.status === 'passed' && run.result.summary.length < SUMMARY_MIN_LENGTH) {
+      const expanded = await this.maybeExpandSummary(order, workerConfig, mergedSignal, run.result, run.sessionMessages)
+      run = { ...run, result: expanded.result, sessionMessages: expanded.sessionMessages }
+    }
+
     const results = aggregateResults([run.result], 'primary_decides', profileMap, transcriptMap)
 
     // V3 Component B-loop: precipitate domain lessons from results
@@ -1350,6 +1575,11 @@ export class DelegationCoordinator {
     const fp = fingerprintRequest(order.objective, order.scope.files, order.profile)
     for (const r of results) {
       persistWorkerResult(r, fp)
+    }
+
+    // Save worker session history for resume support. Best-effort: never blocks.
+    if (run.sessionMessages && run.sessionMessages.length > 0) {
+      saveWorkerSession(order.id, order.profile, order.objective, run.sessionMessages)
     }
 
     return {
@@ -1443,6 +1673,14 @@ export class DelegationCoordinator {
         orders.push(order)
         // T9 P3: callbacks don't survive zod parsing — stash by order id.
         if (r.onActivity) this.activityUpstream.set(order.id, r.onActivity)
+        // Session resume: load prior messages (same side-table pattern as delegate()).
+        if (r.resumeWorkOrderId) {
+          const record = loadWorkerSession(r.resumeWorkOrderId)
+          if (record) {
+            this.resumeMessages.set(order.id, record.messages)
+            debugLog(`[worker-resume] batch: loaded ${record.messages.length} messages from ${r.resumeWorkOrderId} for ${order.id}`)
+          }
+        }
       }
     }
 

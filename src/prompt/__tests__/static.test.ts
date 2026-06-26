@@ -81,6 +81,9 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('格式完整不是可信度信号'), '应含核心原则')
     // workflow 应有触发指针但不重复核验方法细节
     assert.ok(prompt.includes('external-source-verification 规则'), 'workflow 应指向规则名')
+    // 审查报告必须被显式归类为外部来源
+    assert.ok(prompt.includes('审查报告'), 'external-source-verification 应显式覆盖审查报告')
+    assert.ok(prompt.includes('不等于已验证事实'), '应明确审查标记不等于已验证')
   })
 
   it('includes self-verification rule — 复现即证 standing across all domains', () => {
@@ -126,7 +129,7 @@ describe('buildSystemPrompt', () => {
   it('preserves core prompt semantics', () => {
     const prompt = buildSystemPrompt({ tools: [] })
     assert.ok(prompt.includes('有理有据'))
-    assert.ok(prompt.includes('改代码前先读'))
+    assert.ok(prompt.includes('先读现有代码理解上下文'))
     assert.ok(prompt.includes('read_file'))
     assert.ok(prompt.includes('edit_file'))
     assert.ok(prompt.includes('write_file'))
@@ -156,10 +159,10 @@ describe('buildSystemPrompt', () => {
 
   it('includes delegation discipline guardrails', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('委派不是默认推进方式'))
-    assert.ok(prompt.includes('3+ 独立探索前线'))
-    assert.ok(prompt.includes('用户说不要委派时'))
-    assert.ok(prompt.includes('继续内联执行'))
+    assert.ok(prompt.includes('不是默认推进方式'), '应声明委派非默认推进方式')
+    assert.ok(prompt.includes('用户说不要委派时'), '应含禁用委派条件')
+    assert.ok(prompt.includes('继续内联执行'), '应含降级内联执行')
+    assert.ok(prompt.includes('delegate_task 委派——前者是上下文压力下的协作建议'), '应区分建议新会话与 delegate_task')
   })
 
   it('applies behavioral calibration without exposing model identity', () => {

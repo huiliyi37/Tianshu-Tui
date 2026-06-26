@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { listFiles } from '../runtime/client'
+import { listFiles, listModels, switchModel } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import type { PlanModeState } from '../runtime/types'
+import type { ModelEntry } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
 
@@ -359,10 +360,10 @@ export function Composer(props: {
           ref={taRef}
           value={value}
           placeholder={planning
-            ? '描述你的目标，天枢将只读探索并产出方案（不改文件）…'
+            ? '描述你的目标…'
             : busy
-            ? '运行中 · Enter 插入引导（下一步生效）· @ 引用文件'
-            : '和天枢对话…  (Enter 发送, Shift+Enter 换行, 粘贴/拖入图片)'}
+            ? '运行中 · Enter 插入引导'
+            : 'Ask anything…'}
           onChange={handleChange}
           onKeyDown={onKeyDown}
           onClick={(e) => onAfterCaret(value, e.currentTarget.selectionStart ?? value.length)}
@@ -411,6 +412,7 @@ export function Composer(props: {
             />
           )}
         </div>
+        <ModelPicker sessionId={sessionId} disabled={busy} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -433,6 +435,73 @@ export function Composer(props: {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Inline model selector in the composer bar (Codex-style). */
+function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [models, setModels] = useState<ModelEntry[]>([])
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    listModels(sessionId).then((ms) => { if (alive) setModels(ms) })
+    return () => { alive = false }
+  }, [open, sessionId])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const current = models.find((m) => m.current)
+  const label = current?.alias || current?.id || 'Model'
+
+  const select = async (m: ModelEntry) => {
+    setOpen(false)
+    if (disabled || m.current) return
+    await switchModel(sessionId, m.id)
+  }
+
+  return (
+    <div className="model-picker" ref={ref}>
+      <button
+        className="model-picker-trigger"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        title={disabled ? '运行中不可切换模型' : '切换模型'}
+        aria-label="切换模型"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span aria-hidden>◇</span>
+        <span className="model-picker-label">{label}</span>
+      </button>
+      {open && (
+        <div className="model-picker-menu" role="listbox">
+          {models.map((m) => (
+            <button
+              key={m.id}
+              role="option"
+              aria-selected={m.current}
+              className={`model-picker-item ${m.current ? 'active' : ''}`}
+              onClick={() => void select(m)}
+            >
+              <span className="model-picker-name">{m.alias || m.id}</span>
+              {m.contextWindow ? (
+                <span className="model-picker-desc">{Math.round(m.contextWindow / 1000)}K</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

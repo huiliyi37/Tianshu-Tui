@@ -201,6 +201,13 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
   // volatileBlock = "你是谁" (frames identity, goes first); systemPromptSuffix = "你怎么做"
   // (methodology, goes last for highest attention weight).
   const domainDef = order.authority ? starDomainRegistry.get(order.authority) : undefined
+  if (order.authority && !domainDef) {
+    const known = starDomainRegistry.getDomainIds()
+    console.warn(
+      `[coordinator] Unknown authority "${order.authority}" — cognitive injection skipped. ` +
+      `Known domains: ${known.join(', ')}. Worker will run without domain persona/methodology.`,
+    )
+  }
   const effectiveSuffix = authoritySuffix ?? domainDef?.systemPromptSuffix
   const personaBlock = authoritySuffix ? undefined : domainDef?.volatileBlock
   const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
@@ -305,6 +312,24 @@ const MAX_WORKER_PACKET_CHARS = 32_000
 /** Maximum characters for a single non-diff artifact content field. */
 const MAX_ARTIFACT_CONTENT_CHARS = 2_000
 
+const WORKER_RESULTS_HINT = `<worker_results_hint>
+以下 worker 返回来自只读扫描或子代理摘要。除非某个 result 的 verification.status 为 "passed"，否则这些发现属于“待核验假设”，不是已验证事实。引用到具体文件前，请用 read_file/grep 独立确认。
+</worker_results_hint>`
+
+function wrapWorkerResults(body: string): string {
+  return `${WORKER_RESULTS_HINT}\n${body}`
+}
+
+/** Mark a compact result as truncated and downgrade any verified claim,
+ *  because the metadata backing that claim may have been omitted. */
+function markTruncated(result: Record<string, unknown>): void {
+  result._truncated = true
+  result._truncationNote = 'Inline packet truncated; verification metadata may have been omitted.'
+  if (result.evidenceStatus === 'verified') {
+    result.evidenceStatus = 'unverified'
+  }
+}
+
 /** Strip empty arrays/strings/undefined from an object to reduce JSON size. */
 function stripEmpty<T extends Record<string, unknown>>(obj: T): Partial<T> {
   const result: Record<string, unknown> = {}
@@ -378,31 +403,62 @@ export async function buildPrimaryWorkerPacket(results: WorkerResult[], artifact
           delete result.nextActions
           delete result.verification
           delete result.artifacts
+          markTruncated(result)
         }
         json = JSON.stringify(compact)
         // Append artifact reference so primary agent can read_section if needed
         if (json.length > MAX_WORKER_PACKET_CHARS) {
           json = json.slice(0, MAX_WORKER_PACKET_CHARS - 100) + '…"'
         }
-        return `<worker_results>${json}\n[artifact:${artifactId}] — full worker results saved to artifact store, use read_section to retrieve</worker_results>`
+        return wrapWorkerResults(`<worker_results>${json}\n[artifact:${artifactId}] — full worker results saved to artifact store, use read_section to retrieve</worker_results>`)
       }
       // artifact save failed → fall through to progressive field drop
     }
 
-    // No artifact store or save failed: progressive field drop (fallback)
+    // No artifact store or save failed: progressive field drop (fallback).
+    // Mark each result so the primary agent knows fields were removed —
+    // without this, evidenceStatus:'verified' is misleading when the
+    // verification metadata backing that claim was silently deleted.
     for (const result of compact) {
       delete result.examinedFiles
       delete result.risks
       delete result.nextActions
       delete result.verification
+      markTruncated(result)
     }
     json = JSON.stringify(compact)
   }
 
-  // Final safety: truncate raw JSON if still over budget (shouldn't happen normally)
+  // Final safety: if still over budget, truncate to the largest prefix whose
+  // JSON array is still valid. We must not emit unparseable JSON — the primary
+  // agent has no error recovery for a broken <worker_results> payload.
   if (json.length > MAX_WORKER_PACKET_CHARS) {
-    json = json.slice(0, MAX_WORKER_PACKET_CHARS) + '…"'
+    // Strategy: try removing findings from the tail (keep earliest results
+    // intact), then hard-limit the remaining JSON. This is more principled
+    // than slicing a string at an arbitrary byte offset.
+    for (let i = compact.length - 1; i >= 0 && json.length > MAX_WORKER_PACKET_CHARS; i--) {
+      delete compact[i]!.findings
+      ;(compact[i]! as Record<string, unknown>)._truncated = true
+      json = JSON.stringify(compact)
+    }
+    // Last resort: truncate the array itself, keeping valid JSON structure.
+    while (json.length > MAX_WORKER_PACKET_CHARS && compact.length > 1) {
+      const dropped = compact.pop()
+      if (dropped) markTruncated(dropped)
+      json = JSON.stringify(compact)
+    }
+    // If a single result is still too large, keep only its core identifiers.
+    if (json.length > MAX_WORKER_PACKET_CHARS && compact.length === 1) {
+      const only = compact[0]!
+      const minimal: Record<string, unknown> = {
+        workOrderId: only.workOrderId,
+        status: only.status,
+        summary: typeof only.summary === 'string' ? only.summary.slice(0, 200) : '',
+      }
+      markTruncated(minimal)
+      json = JSON.stringify([minimal])
+    }
   }
 
-  return `<worker_results>${json}</worker_results>`
+  return wrapWorkerResults(`<worker_results>${json}</worker_results>`)
 }

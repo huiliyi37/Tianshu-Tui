@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { HASH_EDIT_TOOL } from '../hash-edit.js'
+import { markSessionFileEdit, wasFileEditedBySession, __resetSessionFileEditsForTests } from '../read-file.js'
 import type { ToolCallParams } from '../types.js'
 
 // Use a directory inside the project tree so validatePath() doesn't reject
@@ -21,6 +22,7 @@ function setup(files: Record<string, string>): string {
 
 afterEach(() => {
   try { rmSync(dir, { recursive: true }) } catch { /* ok */ }
+  __resetSessionFileEditsForTests()
 })
 
 function params(overrides: Partial<Record<string, unknown>> = {}): ToolCallParams {
@@ -192,6 +194,61 @@ describe('hash_edit', () => {
 
     const newContent = readFileSync(join(cwd, 'test.ts'), 'utf-8')
     assert.equal(newContent, 'new one\nnew two\nline three\n')
+  })
+
+  // ── P0: position-only hard reject after session file edit ──
+
+  it('rejects position-only anchors after session file edit', async () => {
+    const cwd = setup({ 'test.ts': 'line one\nline two\nline three\n' })
+    const filePath = join(cwd, 'test.ts')
+    markSessionFileEdit(filePath)
+    assert.equal(wasFileEditedBySession(filePath), true)
+
+    const p = params({
+      file_path: filePath,
+      anchors: ['L1', 'L2'],
+      new_string: 'new one\nnew two',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('position-only anchors blocked'))
+    const content = readFileSync(filePath, 'utf-8')
+    assert.equal(content, 'line one\nline two\nline three\n')
+  })
+
+  it('full-hash anchors NOT blocked even after session file edit', async () => {
+    const cwd = setup({ 'test.ts': 'line one\nline two\nline three\n' })
+    const filePath = join(cwd, 'test.ts')
+    markSessionFileEdit(filePath)
+
+    const { createHash } = await import('crypto')
+    function h(line: string): string {
+      return createHash('sha256').update(line).digest('hex').slice(0, 8)
+    }
+    const lines = readFileSync(filePath, 'utf-8').split('\n')
+    const p = params({
+      file_path: filePath,
+      anchors: [`L1:${h(lines[0]!)}`, `L2:${h(lines[1]!)}`],
+      new_string: 'new one\nnew two',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, undefined)
+    const newContent = readFileSync(filePath, 'utf-8')
+    assert.equal(newContent, 'new one\nnew two\nline three\n')
+  })
+
+  it('position-only succeeds on a file NOT previously edited this session', async () => {
+    const cwd = setup({ 'test.ts': 'a\nb\nc\n' })
+    const filePath = join(cwd, 'test.ts')
+    assert.equal(wasFileEditedBySession(filePath), false)
+
+    const p = params({
+      file_path: filePath,
+      anchors: ['L1'],
+      new_string: 'replaced a',
+    })
+    const result = await HASH_EDIT_TOOL.execute(p)
+    assert.equal(result.isError, undefined)
   })
 
   // ── stale recovery: anchors auto-recover when content shifted by prior edit ──

@@ -52,7 +52,7 @@ interface TreeNode {
   sizeBytes?: number
 }
 
-async function buildTree(dir: string, depth: number, fileCount: { n: number }, maxFiles: number, maxDepth: number, projectRoot: string, includeSilent: boolean): Promise<TreeNode[]> {
+async function buildTree(dir: string, depth: number, fileCount: { n: number; total: number }, maxFiles: number, maxDepth: number, projectRoot: string, includeSilent: boolean): Promise<TreeNode[]> {
   if (depth > maxDepth) return []
   let names: string[]
   try {
@@ -97,6 +97,7 @@ async function buildTree(dir: string, depth: number, fileCount: { n: number }, m
         nodes.push({ name: entry.name, isDir: true, children, annotation })
       }
     } else {
+      fileCount.total++
       if (fileCount.n >= maxFiles) continue
       fileCount.n++
       const annotation = annotateFile(entry.name)
@@ -186,7 +187,7 @@ Start shallow: repo_map({ depth: 2 }), then drill into areas: repo_map({ path: "
     }
 
     const includeSilent = Boolean(subPath && classifyPath(relativePosix(params.cwd, root)).silent)
-    const fileCount = { n: 0 }
+    const fileCount = { n: 0, total: 0 }
     const tree = await buildTree(root, 0, fileCount, maxFiles, maxDepth, params.cwd, includeSilent)
 
     // Header: show relative path when focused on subdirectory
@@ -208,7 +209,10 @@ Start shallow: repo_map({ depth: 2 }), then drill into areas: repo_map({ path: "
     }
     countDirs(tree)
 
-    const truncated = fileCount.n >= maxFiles ? '\n... (truncated)' : ''
+    const omitted = fileCount.total > maxFiles ? fileCount.total - maxFiles : 0
+    const truncated = omitted > 0
+      ? `\n... (truncated: ${omitted} files omitted; use repo_map({path: "..."}) or glob/grep for targeted ranges)`
+      : ''
     const summary = `${fileCount.n} files in tree, ${dirCount} directories`
 
     return {

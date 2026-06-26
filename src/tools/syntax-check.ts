@@ -73,7 +73,6 @@ export function syntaxCheck(filePath: string, content: string): string | null {
 
   // ── HTML: basic tag balance ──
   if (ext === '.html' || ext === '.htm') {
-    // Tags that don't need closing
     const voids = new Set([
       'area','base','br','col','embed','hr','img','input','link','meta',
       'param','source','track','wbr',

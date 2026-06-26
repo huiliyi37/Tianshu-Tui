@@ -93,8 +93,8 @@ test('gemini theme preserves toolColor/contextColor semantic mapping', () => {
     // delegate → toolDelegate/warning (#fbbf24)
     assert.equal(t.toolColor('delegate_task'), '#fbbf24')
     assert.equal(t.toolColor('delegate_batch'), '#fbbf24')
-    // unknown → dim
-    assert.equal(t.toolColor('unknown_tool'), t.dim)
+    // unknown → falls back to toolShell (shared shell/exploration color, same as bash/grep/glob)
+    assert.equal(t.toolColor('unknown_tool'), t.toolColor('bash'))
   } finally {
     setTheme(prev)
   }

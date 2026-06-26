@@ -17,6 +17,7 @@ installEpermFilter()
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
+import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { SlashRouter } from './tui/engine/slash-router.js'
@@ -58,6 +59,7 @@ const resumeArgValue = resumeArgIdx >= 0 ? args[resumeArgIdx + 1] : undefined
 const requestedResumeId = resumeArgValue && !resumeArgValue.startsWith('-') ? resumeArgValue : undefined
 const wantResume = resumeArgIdx >= 0 || args.includes('--continue')
 const wantNewSession = args.includes('--new')
+const skipWelcome = args.includes('--skip-welcome')
 
 // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -236,6 +238,7 @@ async function main() {
           isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
           getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
+        toolRegistry.register(createUpdateGoalTool(() => goalTrackerRef.current))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
@@ -750,16 +753,19 @@ async function main() {
 
   // ── Welcome message（带边框与大标识品牌设计） ─────────────────
   const existingMsgCount = ctx.session.getMessages().length
-  const welcomeLines = formatWelcome({
-    modelName,
-    cwd: process.cwd(),
-    sessionId: ctx.sessionId,
-    priorMsgCount: existingMsgCount,
-    columns: stdout.columns || 80,
-    numericId: ctx.agent.sessionNumericId,
-  }, theme)
-  for (const line of welcomeLines) {
-    stdout.write(line + '\n')
+  if (!skipWelcome) {
+    const welcomeLines = formatWelcome({
+      modelName,
+      cwd: process.cwd(),
+      sessionId: ctx.sessionId,
+      priorMsgCount: existingMsgCount,
+      columns: stdout.columns || 80,
+      numericId: ctx.agent.sessionNumericId,
+      compact: existingMsgCount > 0,
+    }, theme)
+    for (const line of welcomeLines) {
+      stdout.write(line + '\n')
+    }
   }
 
   // 自然流：欢迎页写完后直接渲染底部 chrome（GlanceBar + 输入框），

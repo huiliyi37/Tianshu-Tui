@@ -1,6 +1,7 @@
 import type { AgentLoop } from '../agent/loop.js'
 import type { SessionContext } from '../agent/context.js'
-import { SessionPersist } from '../agent/session-persist.js'
+import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
+import { forkSession, listBranches, countMessageLines } from '../agent/session-fork.js'
 import { type StarDomainId } from '../agent/star-domain.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
@@ -58,6 +59,10 @@ const HELP_TEXT = `Available commands:
 /clear — Clear screen
 /sessions — List all saved sessions
 /resume <number> — Restore a saved session
+/fork [name] — Fork current session into a new copy and switch to it
+/fork at <N> [name] — Fork from message line N (truncate after)
+/branch — Show branch tree (parent + children)
+/branch back — Switch back to parent session
 /memory [text|add|search|forget] — Session memory entries
 /mission — Show current task contract
 /constellation [view|init|update <summary>|history|shift <summary>] — Project blueprint & milestone chronicle
@@ -524,7 +529,15 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       })
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
-      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, or /cancel-goal to abort.\n\n目标达成后运行 /review max 做最终审查。` }))
+      // Persist initial goal state so it survives session restart.
+      if (ctx.currentSessionId) {
+        try {
+          const { saveGoalState } = await import('../agent/goal-persist.js')
+          const { getSessionDir } = await import('../agent/session-persist.js')
+          saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
+        } catch { /* best-effort */ }
+      }
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /cancel-goal to abort.\nUse /goal-resume to resume a paused/blocked goal.` }))
       // Side-path: extract concrete success criteria the completion judge will
       // verify against. Async (never blocks goal start); criteria default to a
       // generic template on failure, and the judge does wide judgment if empty.
@@ -566,8 +579,36 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
     case '/cancel-goal': {
       ctx.agent.setGoalTracker(null)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = null
+      // Clean up persisted goal state if session info is available
+      if (ctx.currentSessionId) {
+        try {
+          const { deleteGoalState } = await import('../agent/goal-persist.js')
+          const { getSessionDir } = await import('../agent/session-persist.js')
+          deleteGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId)
+        } catch { /* best-effort */ }
+      }
       pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
       setIsStreaming(false)
+      return true
+    }
+
+    case '/goal-resume': {
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No paused or blocked goal to resume. Use /goal <task> to start one.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const status = tracker.getStatus()
+      if (status !== 'paused' && status !== 'blocked') {
+        pushStatic(createLogEntry({ type: 'system', content: `Goal is ${status}, cannot resume.` }))
+        setIsStreaming(false)
+        return true
+      }
+      tracker.resume('user')
+      const wallElapsed = Math.round(tracker.getWallClockElapsedMs() / 1000)
+      pushStatic(createLogEntry({ type: 'system', content: `▶️ Goal resumed: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | ⏱ ${wallElapsed}s elapsed.` }))
+      ctx.submitToAgent?.(`[GOAL RESUME] 继续执行目标: ${tracker.getGoal()}`)
       return true
     }
 
@@ -826,11 +867,197 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: 'Screen cleared.' }))
       return true
 
-    case '/sessions': {
-      const list = SessionPersist.formatSessionList(ctx.agent.cwd, ctx.currentSessionId)
+    case '/fork': {
+      // /fork [name]       — fork current session, auto-switch to the copy
+      // /fork at <N>       — fork from message line N (truncate after)
+      // /fork at <N> <name>— fork from line N with a branch name
+      const sessionDir = getSessionDir(ctx.agent.cwd)
+      const sourceJsonl = join(sessionDir, `${ctx.currentSessionId}.jsonl`)
+      const arg1 = parts[1]?.toLowerCase()
+
+      let upToLine: number | undefined
+      let branchName: string | undefined
+
+      if (arg1 === 'at') {
+        const n = parseInt(parts[2] ?? '', 10)
+        if (!Number.isFinite(n) || n < 1) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /fork at <行号> [分支名]。行号必须 ≥ 1。' }))
+          setIsStreaming(false)
+          return true
+        }
+        upToLine = n
+        branchName = parts.slice(3).join(' ').trim() || undefined
+      } else if (arg1) {
+        branchName = parts.slice(1).join(' ').trim() || undefined
+      }
+
+      if (!existsSync(sourceJsonl)) {
+        pushStatic(createLogEntry({ type: 'system', content: `找不到当前会话日志: ${sourceJsonl}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // Validate upToLine against actual message count
+      if (upToLine !== undefined) {
+        const total = countMessageLines(sourceJsonl)
+        if (upToLine > total) {
+          pushStatic(createLogEntry({ type: 'system', content: `行号 ${upToLine} 超出当前消息总数 (${total})。` }))
+          setIsStreaming(false)
+          return true
+        }
+      }
+
+      const result = forkSession({
+        sourceJsonlPath: sourceJsonl,
+        targetDir: sessionDir,
+        upToLine,
+        parentSessionId: ctx.currentSessionId,
+        branchName,
+      })
+
+      const lineInfo = upToLine ? ` (截取前 ${upToLine} 行)` : ' (完整历史)'
+      const nameInfo = branchName ? ` 分支名: ${branchName}` : ''
       pushStatic(createLogEntry({
         type: 'system',
-        content: `会话列表(按最近更新排序):\n${list}\n\n/resume <id前缀 或 序号> 切换会话`,
+        content: `🌿 Fork 已创建\n  新会话 ID: ${result.newSessionId}${lineInfo}${nameInfo}\n  (短码: ${result.newSessionId.slice(0, 8)})\n正在切换到新会话...`,
+      }))
+
+      // Auto-switch to the new session
+      if (ctx.onSessionSwitch) {
+        const res = ctx.onSessionSwitch(result.newSessionId)
+        if (!res.ok) {
+          pushStatic(createLogEntry({ type: 'system', content: `⚠ Fork 文件已创建但切换失败: ${res.error ?? '未知错误'}\n用 /resume ${result.newSessionId.slice(0, 8)} 手动切换。\n完整 ID: ${result.newSessionId}` }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `✅ 已切换到 fork 会话 (${result.newSessionId.slice(0, 8)})。\n完整 ID: ${result.newSessionId}\n原会话保持不变，用 /branch back 回去。`,
+          }))
+        }
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Fork 已创建。\n用 /resume ${result.newSessionId.slice(0, 8)} 切换过去。\n完整 ID: ${result.newSessionId}` }))
+      }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/branch': {
+      // /branch            — show branch tree for current session
+      // /branch list       — same
+      // /branch back       — switch back to parent session
+      const sub = parts[1]?.toLowerCase()
+      const sessionDir = getSessionDir(ctx.agent.cwd)
+
+      if (sub === 'back') {
+        // Read current session's parentSessionId from meta.json
+        const metaPath = join(sessionDir, `${ctx.currentSessionId}.meta.json`)
+        if (!existsSync(metaPath)) {
+          pushStatic(createLogEntry({ type: 'system', content: '当前会话没有父会话（这是一个根会话）。' }))
+          setIsStreaming(false)
+          return true
+        }
+        try {
+          const meta = JSON.parse(readFileSync(metaPath, 'utf-8'))
+          if (!meta.parentSessionId) {
+            pushStatic(createLogEntry({ type: 'system', content: '当前会话没有父会话。' }))
+            setIsStreaming(false)
+            return true
+          }
+          if (ctx.onSessionSwitch) {
+            const res = ctx.onSessionSwitch(meta.parentSessionId)
+            if (!res.ok) {
+              pushStatic(createLogEntry({ type: 'system', content: `切换回父会话失败: ${res.error ?? '未知错误'}` }))
+            } else {
+              pushStatic(createLogEntry({ type: 'system', content: `↩️ 已切换回父会话 (${meta.parentSessionId.slice(0, 8)})。\n完整 ID: ${meta.parentSessionId}` }))
+            }
+          } else {
+            pushStatic(createLogEntry({ type: 'system', content: `父会话: ${meta.parentSessionId}\n用 /resume ${meta.parentSessionId.slice(0, 8)} 切换。` }))
+          }
+        } catch {
+          pushStatic(createLogEntry({ type: 'system', content: '无法读取当前会话的元数据。' }))
+        }
+        setIsStreaming(false)
+        return true
+      }
+
+      // Default: /branch or /branch list — show branch tree
+      const lines: string[] = ['分支树', '════════']
+
+      // Check if current session has a parent
+      const currentMetaPath = join(sessionDir, `${ctx.currentSessionId}.meta.json`)
+      if (existsSync(currentMetaPath)) {
+        try {
+          const meta = JSON.parse(readFileSync(currentMetaPath, 'utf-8'))
+          if (meta.parentSessionId) {
+            const parentMetaPath = join(sessionDir, `${meta.parentSessionId}.meta.json`)
+            let parentLabel = meta.parentSessionId
+            if (existsSync(parentMetaPath)) {
+              const parentMeta = JSON.parse(readFileSync(parentMetaPath, 'utf-8'))
+              if (parentMeta.title) parentLabel += ` "${parentMeta.title}"`
+              if (parentMeta.branchName) parentLabel += ` (${parentMeta.branchName})`
+            }
+            lines.push(`⬆️ 父会话: ${parentLabel}`)
+          } else {
+            lines.push('⬆️ 父会话: 无 (根会话)')
+          }
+          if (meta.branchName) {
+            lines.push(`🏷️ 当前分支名: ${meta.branchName}`)
+          }
+        } catch { /* meta corrupted */ }
+      } else {
+        lines.push('⬆️ 父会话: 无 (根会话)')
+      }
+
+      // List child branches
+      const children = listBranches(sessionDir, ctx.currentSessionId)
+      if (children.length > 0) {
+        lines.push('', `⬇️ 子分支 (${children.length}):`)
+        for (const child of children) {
+          const name = child.branchName ?? '(unnamed)'
+          const time = existsSync(join(sessionDir, `${child.sessionId}.meta.json`))
+            ? (() => {
+                try {
+                  const m = JSON.parse(readFileSync(join(sessionDir, `${child.sessionId}.meta.json`), 'utf-8'))
+                  return m.createdAt ? new Date(m.createdAt).toLocaleString() : ''
+                } catch { return '' }
+              })()
+            : ''
+          lines.push(`  ├️ ${child.sessionId} "${name}" ${time}`)
+        }
+      } else {
+        lines.push('', '⬇️ 子分支: 无')
+      }
+
+      lines.push('', '提示: /fork [名称] 创建新分支, /branch back 回到父会话')
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/sessions': {
+      const list = SessionPersist.formatSessionList(ctx.agent.cwd, ctx.currentSessionId)
+      // Enhance with fork annotations: mark sessions that have a parentSessionId
+      const sessionDir = getSessionDir(ctx.agent.cwd)
+      const mainSessions = SessionPersist.listMainSessions(ctx.agent.cwd)
+      const forkAnnotations: string[] = []
+      for (const s of mainSessions) {
+        const metaPath = join(sessionDir, `${s.id}.meta.json`)
+        if (!existsSync(metaPath)) continue
+        try {
+          const meta = JSON.parse(readFileSync(metaPath, 'utf-8'))
+          if (meta.parentSessionId) {
+            const shortId = s.id.slice(0, 8)
+            const shortParent = String(meta.parentSessionId).slice(0, 8)
+            const name = meta.branchName ? ` "${meta.branchName}"` : ''
+            forkAnnotations.push(`  ${shortId} ← fork from ${shortParent}${name}`)
+          }
+        } catch { /* skip */ }
+      }
+      const forkSection = forkAnnotations.length > 0
+        ? `\n\n Fork 关系:\n${forkAnnotations.join('\n')}`
+        : ''
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `会话列表(按最近更新排序):\n${list}\n\n/resume <id前缀 或 序号> 切换会话${forkSection}`,
       }))
       setIsStreaming(false)
       return true

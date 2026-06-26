@@ -4,6 +4,7 @@ import { z } from 'zod'
 import type { CoordinatorRun, DelegationRequest } from '../agent/coordinator.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { classifyChangeScale, isCrossModule, isFixContext, type ChangeSet, type ReviewScale } from '../agent/review-discipline.js'
+import { classifyOrchestrationScale } from '../agent/task-size-gate.js'
 import { routeReviewWorkflow } from '../agent/review-router.js'
 import { extractChangedFiles } from '../agent/diff-collector.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
@@ -207,6 +208,10 @@ export function createTeamOrchestrateTool(
   coordinator: TeamOrchestrateCoordinator,
   options?: { defaultMaxParallel?: number },
 ): Tool {
+  // Cache prior wave results for cross-wave failure propagation.
+  // Set after each dispatch; read when fromWave > 0.
+  let priorWaveResults: import('../agent/work-order.js').WorkerResult[] | undefined
+
   return {
     definition: {
       name: 'team_orchestrate',
@@ -230,6 +235,15 @@ export function createTeamOrchestrateTool(
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
       const { mode, objective, planPath, planMarkdown, planJson, maxParallel, fromWave } = parsed.data
+
+      // Task-size gate: block small tasks from triggering heavy orchestration
+      const scale = classifyOrchestrationScale(objective)
+      if (scale.blocked) {
+        return {
+          content: `team_orchestrate blocked: ${scale.reason}\n\nDo this task inline instead — it doesn't need parallel orchestration.\n(To bypass: prefix the objective with "force:")`,
+          isError: true,
+        }
+      }
 
       // Pre-parsed tasks from plan_task UnifiedPlan JSON
       let tasks: ReturnType<typeof unifiedPlanToTeamTasks> | undefined
@@ -285,6 +299,9 @@ export function createTeamOrchestrateTool(
             fromWave,
             parentTurnId: params.toolUseId,
             abortSignal: params.abortSignal,
+            // Cross-wave failure propagation: pass prior wave results so
+            // dispatchWaveAt can block tasks whose dependencies failed.
+            priorResults: (fromWave ?? 0) > 0 ? priorWaveResults : undefined,
             teamSchedulerBanditEnabled: coordinator.isTeamSchedulerBanditEnabled?.() === true,
             // T9 P3: live worker token/tool stream into the team tool card.
             onActivity,
@@ -327,6 +344,12 @@ export function createTeamOrchestrateTool(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `team_orchestrate failed: ${msg}`, isError: true }
+      }
+
+      // Cache this wave's results for cross-wave failure propagation.
+      // The next call with fromWave+1 will pass these as priorResults.
+      if (summary.run?.results) {
+        priorWaveResults = summary.run.results
       }
 
       // T4: terminal per-worker status for the subagent panel.
@@ -378,7 +401,9 @@ export function createTeamOrchestrateTool(
       // Authoritative changed files: union of real diff artifact + self-report,
       // so a worker that under-reports changedFiles can't skip the review gate.
       const changedFiles = teamReviewChangedFiles(summary.run)
-      if (isLastWave && changedFiles.length > 0) {
+      // reviewDepth guard: prevent review workers from recursively triggering
+      // team_orchestrate's own review path. Matches deliver-task.ts convention.
+      if (isLastWave && changedFiles.length > 0 && (params.reviewDepth ?? 0) === 0) {
         try {
           const delegate = requireDelegate(coordinator)
           // Resolve this wave's tasks to drive perspective density + focus.

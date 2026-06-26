@@ -104,4 +104,62 @@ describe('collapseToolResult', () => {
     const occurrences = (result!.summary.match(/bash:dup99/g) ?? []).length
     assert.equal(occurrences, 1, 'reference must not be appended twice')
   })
+
+  // ── run_tests collapse ──
+
+  it('collapses run_tests with passed/failed counts and exit code', () => {
+    const content = [
+      'Exit code: 1',
+      '18 passed, 2 failed, 0 skipped',
+      '',
+      '✗ test at src/foo.test.ts:42 — should handle edge case',
+      '✗ test at src/bar.test.ts:88 — timeout exceeded',
+      ...Array.from({ length: 20 }, (_, i) => `detail line ${i}`),
+    ].join('\n')
+    const result = collapseToolResult('run_tests', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.ok(result!.summary.includes('collapsed run_tests'), `got: ${result!.summary}`)
+    assert.ok(result!.summary.includes('18/20 passed'), `should show passed count, got: ${result!.summary}`)
+    assert.ok(result!.summary.includes('2 failed'), `should show failed count, got: ${result!.summary}`)
+    assert.ok(result!.summary.includes('exit 1'), `should show exit code, got: ${result!.summary}`)
+  })
+
+  it('run_tests collapse: all-pass result does NOT report failures', () => {
+    const content = [
+      'Exit code: 0',
+      '20 passed, 0 failed, 0 skipped',
+      ...Array.from({ length: 20 }, (_, i) => `detail line ${i}`),
+    ].join('\n')
+    const result = collapseToolResult('run_tests', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.ok(result!.summary.includes('20/20 passed'), `got: ${result!.summary}`)
+    assert.ok(!result!.summary.includes('failed'), `should not mention failed when 0, got: ${result!.summary}`)
+  })
+
+  // ── delegate_task collapse ──
+
+  it('collapses delegate_task with worker profile', () => {
+    const content = [
+      'profile: code_scout',
+      '',
+      'Found 3 matches for the query "authentication middleware" across the codebase.',
+      'The auth middleware is implemented in src/auth/middleware.ts and handles',
+      ...Array.from({ length: 20 }, (_, i) => `detail ${i}`),
+    ].join('\n')
+    const result = collapseToolResult('delegate_task', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.ok(result!.summary.includes('collapsed delegate_task'), `got: ${result!.summary}`)
+    assert.ok(result!.summary.includes('code_scout'), `should include profile, got: ${result!.summary}`)
+  })
+
+  it('collapses delegate_batch same as delegate_task', () => {
+    const content = [
+      'worker: reviewer completed analysis',
+      ...Array.from({ length: 30 }, (_, i) => `finding ${i}`),
+    ].join('\n')
+    const result = collapseToolResult('delegate_batch', content, 5, 200_000)
+    assert.notEqual(result, null)
+    assert.ok(result!.summary.includes('collapsed delegate_batch'), `got: ${result!.summary}`)
+    assert.ok(result!.summary.includes('reviewer'), `should include profile, got: ${result!.summary}`)
+  })
 })

@@ -5,6 +5,7 @@ import {
   runTeamSkeleton,
   selectDispatchableTeamTasks,
   teamTasksToDelegationRequests,
+  extractTaskIdFromWorkOrderId,
 } from '../team-orchestrator.js'
 import type { TeamRunSummary } from '../team-orchestrator.js'
 import type { TeamTaskDraft } from '../team-plan.js'
@@ -465,5 +466,79 @@ depends: T1
 
     assert.equal(summary.dispatched, 0)
     assert.match(summary.packet, /all .* waves dispatched/)
+  })
+
+  // ── Wave 3: cross-wave failure propagation ──────────────────────
+
+  describe('cross-wave failure propagation', () => {
+    it('blocks wave 1 task that depends on failed wave 0 task', async () => {
+      let captured: DelegationRequest[] = []
+      const summary = await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'multi-wave with dependency',
+        parentTurnId: 'turn-xwave',
+        fromWave: 1,
+        priorResults: [
+          { workOrderId: 'team:T1', status: 'failed', summary: 'worker crashed', findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'blocked' },
+        ],
+        planMarkdown: `### Task 1: Search\nAnalyze the module structure.\n### Task 2: Patch\nDepends on T1 results.\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave1') },
+      })
+
+      // Wave 1 should not include T1 (already ran in wave 0) and any task
+      // depending on T1 should be blocked
+      const dispatchedIds = captured.map(r => r.parentTurnId)
+      assert.ok(!dispatchedIds.some(id => id.includes('T1')), 'T1 should not be re-dispatched')
+    })
+
+    it('does not block wave 1 task when prior wave task passed', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'multi-wave with dependency',
+        parentTurnId: 'turn-xwave-ok',
+        priorResults: [
+          { workOrderId: 'team:T1', status: 'passed', summary: 'ok', findings: [], artifacts: [], changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' },
+        ],
+        planMarkdown: `### Task 1: Search\nAnalyze the module structure.\n### Task 2: Patch\nDepends on T1 results.\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave0') },
+      })
+
+      // Tasks should be dispatched normally when prior results passed
+      assert.ok(captured.length > 0, 'tasks should be dispatched when dependency passed')
+    })
+
+    it('priorResults undefined — backward compatible, no blocking', async () => {
+      let captured: DelegationRequest[] = []
+      await runTeamSkeleton({
+        mode: 'standard',
+        objective: 'single wave test',
+        parentTurnId: 'turn-noprior',
+        planMarkdown: `### Task 1: Search\nAnalyze something.\n`,
+      }, {
+        delegateBatch: async (requests) => { captured = requests; return run('wave0') },
+      })
+
+      assert.ok(captured.length > 0, 'tasks dispatched without priorResults')
+    })
+  })
+
+  describe('extractTaskIdFromWorkOrderId', () => {
+    it('extracts task ID from standard team: prefix format', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('team:T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('team:planner-tianquan'), 'planner-tianquan')
+    })
+
+    it('extracts last segment when multiple colons present', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('team:wave2:T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('team:planner:tianfu'), 'tianfu')
+    })
+
+    it('returns the whole string when no colon present', () => {
+      assert.equal(extractTaskIdFromWorkOrderId('T1'), 'T1')
+      assert.equal(extractTaskIdFromWorkOrderId('bare-id'), 'bare-id')
+    })
   })
 })

@@ -98,12 +98,23 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
   const s = ledger.sensorium
   if (!s) return ''
 
-  // Coarse-grain confidence and complexity to avoid false precision in early turns.
+  // verification_coverage must be semantically honest: it reports the ratio of
+  // modified files that have been verified. When no verification command has
+  // actually run, showing "high" or "1.00" gives a false sense of safety.
+  const filesModifiedCount = ledger.evidence?.filesModified?.size ?? 0
+  const verificationRuns = ledger.evidence?.verifications?.length ?? 0
+  let confLabel: string
+  if (verificationRuns === 0) {
+    confLabel = filesModifiedCount === 0 ? 'none' : '0.00'
+  } else {
+    confLabel = filesModifiedCount === 0 ? '1.00' : formatDim(s.confidence)
+  }
+  const parts: string[] = [`verification_coverage="${confLabel}"`]
+
+  // Coarse-grain complexity to avoid false precision in early turns.
   // A 2-decimal float like "1.00" implies measurement granularity that doesn't exist
   // before any tools have run. Use low/mid/high bands until evidence accumulates.
-  const hasEvidence = (ledger.evidence?.filesModified?.size ?? 0) > 0
-  const confLabel = !hasEvidence ? coarseLabel(s.confidence) : formatDim(s.confidence)
-  const parts: string[] = [`verification_coverage="${confLabel}"`]
+  const hasEvidence = filesModifiedCount > 0
 
   parts.push(`files_modified="${ledger.evidence.filesModified.size}"`)
 

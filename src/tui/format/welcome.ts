@@ -39,6 +39,8 @@ export interface FormatWelcomeInput {
   columns: number
   /** Ephemeral per-session numeric id (e.g. 7281). When present, shown in the title. */
   numericId?: number
+  /** 折叠为单行极简版（用于非首次启动/恢复会话）。 */
+  compact?: boolean
 }
 
 function truncateToWidth(text: string, maxWidth: number): string {
@@ -105,12 +107,20 @@ const BRAND_LOGO = [
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
-  const boxWidth = Math.min(80, cols)
 
   const dir = input.cwd.replace(/^.*\//, '')
   const session = input.priorMsgCount > 0
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
+
+  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
+  if (input.compact) {
+    const numeric = input.numericId ? ` · #${input.numericId}` : ''
+    const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
+    return [truncateToWidth(line, cols)]
+  }
+
+  const boxWidth = Math.min(80, cols)
 
   // 如果列宽足够，渲染精致的带边框卡片
   if (boxWidth >= 60) {

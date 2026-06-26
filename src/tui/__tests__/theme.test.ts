@@ -2,20 +2,21 @@ import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
 
-afterEach(() => { setTheme('tianshu') })
+afterEach(() => { setTheme('cobalt') })
 
 describe('getTheme', () => {
-  it('defaults to tianshu theme', () => {
-    assert.equal(getActiveThemeName(), 'tianshu')
+  it('defaults to cobalt theme', () => {
+    assert.equal(getActiveThemeName(), 'cobalt')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#d4a574') // 星金 accent
-    assert.equal(theme.success, '#6f9b91') // 归航青
-    assert.equal(theme.error, '#c1655c')   // 朱砂赤
+    assert.equal(theme.primary, '#6ab8ff') // 钴蓝 accent（提亮）
+    assert.equal(theme.success, '#58cbb4') // 青绿
+    assert.equal(theme.error, '#ed7665')   // 珊瑚砖红
     assert.notEqual(theme.primary, '#d77757') // 不是 Claude 品牌橙
     assert.notEqual(theme.primary, '#c9b8ff') // 不是紫微紫
   })
 
   it('tianshu uses cinnabar user mark + bright neutral body + readable muted', () => {
+    setTheme('tianshu')
     const theme = getTheme(3)
     assert.equal(theme.userColor, '#d4453a')      // 朱砂印 ▌ mark
     assert.equal(theme.assistantColor, '#d2d5dd') // 亮灰正文 (提亮至 #d2d5dd)
@@ -27,9 +28,9 @@ describe('getTheme', () => {
   it('cobalt still available via explicit switch', () => {
     setTheme('cobalt')
     const theme = getTheme(3)
-    assert.equal(theme.primary, '#61aef4') // 钴蓝 — 唯一 accent
+    assert.equal(theme.primary, '#6ab8ff') // 钴蓝 — 唯一 accent（提亮）
     assert.equal(theme.userColor, '#e6ecf2')      // 冷调亮白 ▌ mark
-    assert.equal(theme.assistantColor, '#bdc3ca') // 冷中性灰正文
+    assert.equal(theme.assistantColor, '#c9cfd6') // 冷中性灰正文（提亮）
   })
 
   it('antigravity still available via explicit switch (cool azure accent)', () => {

@@ -109,6 +109,38 @@ describe('edit_file tool', () => {
     assert.ok(content.includes('return 2'), `edit should have landed, got: ${content}`)
   })
 
+  it('[fuzzy visibility] includes [fuzzy] diff block when whitespace-tolerant match fires', async () => {
+    const file = join(TEST_DIR, 'fuzzy-diff.txt')
+    // File uses tabs; model's old_string uses 4 spaces — fuzzy fires.
+    writeFileSync(file, 'line one\n\tindented line\nline three\n')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'line one\n    indented line\nline three',
+      new_string: 'line one\n    REPLACED\nline three',
+    }))
+    assert.ok(!result.isError, `Expected fuzzy success, got: ${result.content}`)
+    // The content MUST contain the [fuzzy] diff visibility markers.
+    assert.ok(result.content.includes('[fuzzy]'), `content should contain [fuzzy] marker, got: ${result.content}`)
+    assert.ok(result.content.includes('[fuzzy] diff:'), `content should contain [fuzzy] diff:, got: ${result.content}`)
+    // The diff should surface the raw whitespace difference (tab vs spaces).
+    // JSON.stringify makes tabs visible as \t in the diff output.
+    assert.match(result.content, /exp.*\\t|act.*\\t|exp.*    |act.*    /,
+      `diff should show the tab/space difference, got: ${result.content}`)
+  })
+
+  it('[fuzzy visibility] precise match does NOT contain [fuzzy] markers', async () => {
+    const file = join(TEST_DIR, 'precise.txt')
+    writeFileSync(file, 'hello world\n')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'hello world',
+      new_string: 'goodbye world',
+    }))
+    assert.ok(!result.isError)
+    // Precise match path must not emit [fuzzy] markers.
+    assert.ok(!result.content.includes('[fuzzy]'), `precise match should not have [fuzzy], got: ${result.content}`)
+  })
+
   it('still reports a not-found error when the block is genuinely absent (no false fuzzy match)', async () => {
     const file = join(TEST_DIR, 'no-fuzzy.txt')
     writeFileSync(file, 'function foo() {\n\treturn 1\n}\n')

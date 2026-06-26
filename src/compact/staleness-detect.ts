@@ -10,6 +10,7 @@
  */
 import type { OaiMessage, OaiAssistantMessage, OaiToolCall } from '../api/oai-types.js'
 import { CACHE_ANCHOR_MESSAGES } from './constants.js'
+import { parseOptionalInt, rangeContains } from './shared-range.js'
 
 const LAG_STEPS = 3 // only evaluate tool results at least 3 assistant turns old
 const MIN_CONTENT_CHARS = 500 // skip short results
@@ -19,26 +20,6 @@ export interface StalenessResult {
   supersededCount: number
   unreferencedCount: number
   freedChars: number
-}
-
-/** Parse an optional integer from tool call args (handles both number and string). */
-function parseOptionalInt(val: unknown): number | undefined {
-  if (val === undefined || val === null) return undefined
-  const n = Number(val)
-  if (Number.isNaN(n) || n <= 0) return undefined
-  return Math.floor(n)
-}
-
-/** Check whether outer read range fully contains inner read range. */
-function rangeContains(
-  outer: { offset?: number; limit?: number },
-  inner: { offset?: number; limit?: number },
-): boolean {
-  const outerStart = outer.offset ?? 1
-  const outerEnd = outer.limit !== undefined ? outerStart + outer.limit - 1 : Infinity
-  const innerStart = inner.offset ?? 1
-  const innerEnd = inner.limit !== undefined ? innerStart + inner.limit - 1 : Infinity
-  return outerStart <= innerStart && outerEnd >= innerEnd
 }
 
 /** Extract file path and optional range from tool call arguments. */

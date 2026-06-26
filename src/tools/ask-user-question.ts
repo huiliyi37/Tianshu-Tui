@@ -59,6 +59,7 @@ Do NOT use this to bounce a decision back when the user asked for YOUR analysis,
     return {
       content: '[Awaiting your response…]',
       uiContent,
+      endTurn: true,
     }
   },
 

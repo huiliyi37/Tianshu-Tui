@@ -51,6 +51,6 @@ export function renderHistorySearch(data: HistorySearchData, width: number, heig
     lines.push('')
   }
 
-  lines.push(`  ${color('↑↓ select  Enter paste  Esc cancel', theme.dim)}`)
+  lines.push(`  ${color('Esc cancel  ↑↓ select  Enter paste', theme.dim)}`)
   return lines
 }
