@@ -75,31 +75,28 @@ Pi 的做法：这些是 config hook（`onTurnEnd` 触发 convergence），loop 
 **当前"提取一半"是最差状态**——改 turn 流程要动两个文件、两处都改不全。
 **风险**：中（动了状态归属，需仔细测）
 
-### 优化点 3：认知层接入方式——在已有钩子基础设施上扩展 ⭐ 架构级
+### 优化点 3：认知层接入方式——经核实，已完成 ~70%，Pi 方案不适用 ⚠️ 不建议做
 
-**证据**：天枢 loop.ts **直接 import** sensorium/convergence/traceStore 等认知模块，耦合在 loop 层。Pi 的 agent-loop.ts **零 import 认知模块**——全部通过 `CognitiveController.hooks` 注入到 `AgentLoopConfig`。
+> **更新（两轮深挖核实后）**：本节原建议"在已有钩子基础设施上扩展认知层解耦"。经三个探索 agent 完整测绘 + 代码核实，**结论推翻**——认知解耦已完成约 70%，Pi 方案不适用，无高性价比可做项。详见下方核实记录。
 
-**校正——天枢已有钩子基础设施，无需从头建**：
+**核实结论**：
 
-天枢已经有一套 partial 的注入通道，认知层解耦应在这之上扩展：
+1. **天枢认知解耦已完成 ~70%**——loop.ts 对认知模块的 import 大多是 **type-only**（`import type { Sensorium }`）或 **LIFECYCLE 构造**（`new EvidenceTracker()`），不是 turn-step 耦合。真正的 turn-step 调用（traceStore/convergence/perception/getDoomLoopLevel/latestConvergenceResult）**都已经走 deps**（loop-factory 注入）。
 
-| 已有通道 | 位置 | 性质 | 当前用途 |
-|---|---|---|---|
-| `advisoryBus` | loop.ts:300（`AdvisoryBus`）| **ephemeral**——provider 可见、不持久、每 user-boundary 重建 | 73cd8713 刚把 signal-consumer 的 search-breadth/task-decomposition 迁移到这里 |
-| `appendSystemReminder` | context.ts:166 | **持久**——写入 oaiMessages 尾部 | discipline-reanchor、thinking retry 等 |
-| `volatileSwap` / `harnessAdvisoryBlock` | engine.ts:300、VolatileContext | **每 user-boundary 重建**，缓存友好 | advisoryBus 渲染成 `<星域-advisory>` 块落在这里 |
+2. **Pi 的 CognitiveController 方案不适用天枢——三个结构性阻断**：
+   - **trace-store 是函数式不可变**（`recordToolFingerprint(store, fp): TraceStore` 返回新 store），不是 Pi 的 `traceStore.record()` OOP 可变类。照搬 Pi 要重写 trace-store + 6 个 pipeline 重赋值点。
+   - **perception 已有独立 controller**（`TurnPerceptionController` + 18 字段 deps bag），再套一层 aggregator 是冗余。
+   - **convergence 需要 split/abort 控制流**，advisoryBus 是 fire-and-forget 文本，承载不了控制流。
 
-73cd8713 的迁移已经证明这条路走得通：把"直接 injectUserMessage"的认知信号改成"advisoryBus.submit() → harnessAdvisoryBlock"，既 provider 可见又不污染持久消息、不破坏前缀缓存。
+3. **73cd8713 迁移模板有效但范围窄**——它适用于"advisory 类信号"（文本提示），不适用于需控制流的 convergence 反应。而且 convergence 的 kick **已经走 advisoryBus 了**（loop.ts:1210/1227），通道是对的。
 
-**建议**：认知层解耦 = 把 loop.ts 对 sensorium/convergence/traceStore 的直接 import，逐步迁移到通过这三条通道注入：
-- convergence 的干预建议（kick/abort）→ 已适配 advisoryBus，扩展更多信号进同一条
-- sensorium 的 reasoningEffort → 已有 `getReasoning` 类的钩子模式（create-runtime-hooks 里），抽成认知层注入
-- traceStore 的工具指纹记录 → 已有 `recordToolHistory`（tool-pipeline.ts:1086），可抽成 traceStore hook
+4. **已知债务：5 个僵尸状态字段**（`vigorState`/`currentSeason`/`currentSeasonIntensity`/`sensoriumSnapshots`/`thetaState`）——loop.ts 声明但内部零读写，真正读写者是 turn-step-producer.ts（通过 `this.self.X`）。但单独迁移无收益，应等 producer 整体 deps 化时一起做。
 
-**这不是另起炉灶，是把已有的迁移模式（73cd8713）推广到更多认知模块**。
+5. **不值得做的大重构：TurnStepProducer deps 化**——producer 通过 `this.self.X` 访问 60+ 个不同字段，是所有 controller 里唯一持有 god-object 引用的离群点。改成 deps bag 是数千行改动、高风险、无运行时收益。agent 报告："这不是缺陷，是权衡——它需要 60+ 字段，deps bag 会比 this.self 更冗长。"
 
-**收益**：架构级，让认知层修复更安全、loop.ts 瘦下来、认知模块可独立测试
-**风险**：中（接口设计要稳）；**改动大但路径已验证（73cd8713 是模板），建议单独立项**
+**为什么不做**：为了凑"完成清单"而硬做 producer deps 化或僵尸字段归位都是负优化。Pi 的 CognitiveController 对 Pi 有效是因为 Pi 的架构不同，天枢走了 deps 注入的路且已走 70%。**剩余耦合要么合理（convergence 反应需 loop 服务），要么规模过大不值得（producer 60 字段 deps 化）。**
+
+**未来触发条件**：当 producer deps 化有独立驱动力（多 producer 实例、producer 独立测试）时，连同僵尸字段一起做，才是对的时机。
 
 ### 优化点 4：loop-factory.ts 的 DI 适配器成本
 
@@ -138,18 +135,20 @@ Pi 的扁平化有值得学的，也有不该学的：
 - abort/budget 散落各处（Pi 的 `softEscalations`/`harmonyRetryAttempt`/`pausedTurnContinuations` 等共享状态让边缘 case 难追踪）
 - 认知层对 loop 不可见（改认知行为要跨文件追 hook，发现性差）
 
-**结论**：天枢的分层方向没错，但**层与层之间的边界没切干净**（优化点 1/2），且**认知层耦合在 loop**（优化点 3）。优化不是"变扁"，是"把层切干净 + 把耦合解开"。
+**结论（核实后修订）**：天枢的分层方向没错，层与层之间的边界已基本切干净（优化点 1/2 已完成）。认知层耦合经核实**已通过 deps 注入解决 ~70%**，Pi 方案不适用——见优化点 3 的核实记录。优化不是"变扁"，是"把层切干净"，而天枢已经走了大部分这条路。
 
-## 实施优先级
+## 实施优先级（核实后修订）
 
-| 优化点 | 价值 | 改动 | 风险 | 建议 |
-|--------|------|------|------|------|
-| 1 tool-execution 折叠 | 中（去冗余层+50行重复）| 小 | 低 | **先做** |
-| 2 loop/orchestrator 边界 | 高（消除怪圈）| 中 | 中 | 第二做 |
-| 3 认知层 hook 解耦 | 高（架构级，认知层修复受益）| 大 | 中 | **单独立项** |
-| 4 loop-factory DI | 低 | 小 | 低 | 配合 1/2 顺手 |
+| 优化点 | 价值 | 改动 | 风险 | 建议 | 状态 |
+|--------|------|------|------|------|------|
+| 1 tool-execution 去重 | 中（去 50 行重复）| 小 | 低 | 做 | ✅ 完成（cb240549）|
+| 2 loop/orchestrator 边界 | 高（消除怪圈）| 中 | 中 | 做阶段 1+2 | ✅ 阶段 1+2 完成，阶段 3 待评估 |
+| 3 认知层 hook 解耦 | ~~高~~→**经核实无高性价比项** | ~~大~~ | ~~中~~ | **不做**（已解耦 70%，Pi 方案不适用）| ⚠️ 标记完成（核实结论）|
+| 4 loop-factory DI | 低 | 小 | 低 | 配合 1/2 顺手 | ✅ 随阶段 1+2 完成 |
 
-**总计**：优化点 1 是确定性收益、改动可控，建议立即做。优化点 3 是架构级，但和前面认知层修复（defect 1-5）强相关，值得排期。优化点 2 介于两者之间。优化点 4 顺手。
+**修订总结**：优化点 1 已完成；优化点 2 阶段 1+2 完成（断 goalTracker 循环 + 删 trivial forwarder），阶段 3（runConvergenceCheck 迁移）待评估；优化点 3 经两轮深挖核实，认知解耦已通过 deps 注入完成 70%，剩余耦合合理或规模过大不值得，**不做**；优化点 4 随 1/2 顺手完成。
+
+工作流层的可优化项已基本落地。剩余的 runConvergenceCheck 迁移（优化点 2 阶段 3）和 TurnStepProducer deps 化是已知债务，等有独立驱动力时再做。
 
 ## 关键文件索引
 
