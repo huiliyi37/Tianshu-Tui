@@ -11,6 +11,7 @@ import { TerminalTabs } from '../components/TerminalTabs'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
+import { UpdateBanner } from '../components/UpdateBanner'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -132,6 +133,7 @@ export function WorkspaceSurface() {
 
   return (
     <div ref={wsRef} className="workspace-resizable">
+      <UpdateBanner />
       <button
         className="layout-reset-btn"
         title="重置布局"

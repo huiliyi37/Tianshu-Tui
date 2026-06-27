@@ -6,3 +6,5 @@ src-tauri/gen
 src-tauri/resources/node/*
 !src-tauri/resources/node/.gitkeep
 .tmp-node-runtime
+# 签名私钥绝不入库（含 TAURI_SIGNING_PRIVATE_KEY）
+.env

@@ -25,6 +25,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": ["app", "dmg", "nsis", "msi"],
     "resources": {
       "../../dist": "rivet-runtime",
@@ -53,8 +54,8 @@
   "plugins": {
     "updater": {
       "active": true,
-      "endpoints": ["https://example.com/tianshu-updates.json"],
-      "pubkey": "",
+      "endpoints": ["https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/latest.json"],
+      "pubkey": "REPLACE_WITH_PUBLIC_KEY_FROM_NPX_TAURI_SIGNER_GENERATE",
       "windows": {
         "installMode": "basicUi"
       }

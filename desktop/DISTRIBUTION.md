@@ -90,44 +90,89 @@ cd desktop && npm run tauri:build
 - `WINDOWS_CERTIFICATE`：Base64 编码的 `.pfx` 证书内容。
 - `WINDOWS_CERTIFICATE_PASSWORD`：证书密码。
 
-## 自动更新
+## 自动更新（GitHub Releases 托管）
 
-天枢已接入 `tauri-plugin-updater`，但更新服务器 endpoint 与签名密钥需自行配置。
+天枢已接入 `tauri-plugin-updater`，采用 **GitHub Releases 托管** 方案：endpoint 指向
+`https://github.com/<owner>/<repo>/releases/latest/download/latest.json`，安装包 + `.sig` 签名 +
+`latest.json` 清单都作为 Release asset 上传，零额外运维。
 
-### 1. 生成更新签名密钥对
+### 1. 生成更新签名密钥对（仅首次）
 
 ```bash
 cd desktop
-npx tauri signer generate
+npx tauri signer generate -w ~/.tauri/tianshu.key
 ```
 
-私钥用于 CI 对更新包签名，公钥配置到 `tauri.conf.json` 的 `plugins.updater.pubKey`。
+输出：公钥（base64）+ 私钥（base64）+ 密码。
 
-### 2. 配置更新端点
+- **公钥** → 填进 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`
+  （替换占位 `REPLACE_WITH_PUBLIC_KEY_FROM_NPX_TAURI_SIGNER_GENERATE`）。
+- **私钥 + 密码** → 写入本地 `desktop/.env`（已 gitignore，绝不入库），格式见 `.env.example`。
+- CI 用 Repository Secrets：`TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 
-修改 `src-tauri/tauri.conf.json`：
+### 2. 配置（已完成的部分）
+
+- `tauri.conf.json`：`bundle.createUpdaterArtifacts: true`（构建时产出 `.sig`）、
+  `updater.endpoints` 指向 GitHub Releases、`updater.pubkey` 待填公钥。
+- `capabilities/default.json`：已加 `updater:default` + `process:default` 权限
+  （否则前端 `check()` / `relaunch()` 被拒）。
+- 前端：`UpdaterSection`（设置页）支持下载安装 + 进度 + 重启；
+  `UpdateBanner`（启动时静默检查，有新版顶部弹横幅一键更新）。
+
+### 3. 本地签名构建
+
+```bash
+cd desktop
+bash scripts/sign-and-build.sh
+```
+
+脚本会 source `.env` 读私钥/密码，构建带 `.sig` 的安装包。
+
+### 4. 发布到 GitHub Release（CI 自动）
+
+标签推送 `v*` 触发 `build-macos.yml` / `build-windows.yml`：
+1. 注入签名密钥 → `tauri build` 产出安装包 + `.sig`。
+2. `softprops/action-gh-release` 上传 `.dmg` / `.exe` + `.sig` 到草稿 Release。
+3. 合并产物后用 `gen-latest-json.js` 生成 `latest.json`：
+
+```bash
+node desktop/scripts/gen-latest-json.js \
+  --version 0.1.0 \
+  --notes "release notes" \
+  --bundle-dir desktop/src-tauri/target/release/bundle \
+  --download-base https://github.com/<owner>/<repo>/releases/download/v0.1.0 \
+  > latest.json
+```
+
+4. 把 `latest.json` 上传到同一 Release，发布草稿。客户端即能拉到更新。
+
+### latest.json 格式（Tauri v2）
 
 ```json
-"plugins": {
-  "updater": {
-    "active": true,
-    "endpoints": ["https://your-cdn.com/tianshu-updates.json"],
-    "pubKey": "YOUR_BASE64_ED25519_PUBLIC_KEY",
-    "windows": { "installMode": "basicUi" }
+{
+  "version": "0.1.0",
+  "notes": "...",
+  "pub_date": "2026-06-28T00:00:00.000Z",
+  "platforms": {
+    "darwin-aarch64": { "url": ".../天枢_0.1.0_aarch64.dmg", "signature": "..." },
+    "darwin-x86_64":  { "url": ".../天枢_0.1.0_x64.dmg",    "signature": "..." },
+    "windows-x86_64": { "url": ".../天枢_0.1.0_x64-setup.exe", "signature": "..." }
   }
 }
 ```
 
-更新 JSON 格式参考 Tauri 官方文档。未配置时，设置里的「检查更新」会提示服务器未配置。
+> 注意：updater 的 `.sig` 是 Tauri 自己的更新签名（Ed25519），与 macOS notarization /
+> Windows 代码签名是两回事。OS 签名见上文的签名配置段。
 
 ## CI 构建
 
 仓库已配置两个 workflow：
 
-- `.github/workflows/build-macos.yml`：标签推送 `v*` 时触发，产出 `.dmg` 与 `.app`。
-- `.github/workflows/build-windows.yml`：标签推送 `v*` 时触发，产出 `.exe`、NSIS、MSI。
+- `.github/workflows/build-macos.yml`：标签推送 `v*` 时触发，产出 `.dmg` 与 `.app` + `.sig`，并发布到 GitHub Release。
+- `.github/workflows/build-windows.yml`：标签推送 `v*` 时触发，产出 `.exe`、NSIS、MSI + `.sig`，并发布到 GitHub Release。
 
-配置对应的 Repository Secrets 后即可自动签名与更新。
+配置 Repository Secrets（`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`）
+后即可自动签名与发布更新。
 
 ## 注意事项
 

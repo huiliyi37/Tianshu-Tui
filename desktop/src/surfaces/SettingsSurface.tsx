@@ -4,6 +4,8 @@ import { Palette, SlidersHorizontal, Plug, Cpu, type LucideIcon } from 'lucide-r
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { check, type Update } from '@tauri-apps/plugin-updater'
+import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
@@ -53,6 +55,7 @@ export function SettingsSurface() {
   const ui = useUiState()
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [notifPref, setNotifPref] = useState<NotifPref>(() => loadNotifPref())
+  const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -186,31 +189,84 @@ export function SettingsSurface() {
 
 function UpdaterSection() {
   const [checking, setChecking] = useState(false)
+  const [installing, setInstalling] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [update, setUpdate] = useState<Update | null>(null)
+  const [progress, setProgress] = useState<number | null>(null)
 
   const handleCheck = async () => {
     setChecking(true)
     setMessage(null)
+    setUpdate(null)
+    setProgress(null)
     try {
       const result = await check()
       if (result) {
-        setMessage(`发现新版本 ${result.version}，请前往发布页下载。`)
+        setUpdate(result)
+        setMessage(`发现新版本 ${result.version}。`)
       } else {
-        setMessage('当前已是最新版本（或更新服务器未配置）。')
+        setMessage('当前已是最新版本。')
       }
     } catch (err) {
-      setMessage(`检查更新失败：${(err as Error).message}（更新服务器尚未配置）`)
+      setMessage(`检查更新失败：${(err as Error).message}（若刚配置签名，请确认 pubkey 与 endpoint 已填实）`)
     } finally {
       setChecking(false)
+    }
+  }
+
+  const handleInstall = async () => {
+    if (!update) return
+    setInstalling(true)
+    setProgress(0)
+    setMessage(null)
+    try {
+      let total = 0
+      let downloaded = 0
+      // downloadAndInstall streams progress events; on completion resolves and
+      // relaunch must run after the install finishes writing.
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            total = event.data.contentLength ?? 0
+            break
+          case 'Progress':
+            downloaded += event.data.chunkLength ?? 0
+            setProgress(total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null)
+            break
+          case 'Finished':
+            setProgress(100)
+            break
+        }
+      })
+      setMessage('安装完成，正在重启…')
+      await relaunch()
+    } catch (err) {
+      setMessage(`安装失败：${(err as Error).message}`)
+    } finally {
+      setInstalling(false)
     }
   }
 
   return (
     <section className="settings-group">
       <h4>更新</h4>
-      <button className="btn" onClick={handleCheck} disabled={checking}>
+      <button className="btn" onClick={handleCheck} disabled={checking || installing}>
         {checking ? '检查中…' : '检查更新'}
       </button>
+      {update && (
+        <div className="updater-actions">
+          <div className="meta">新版本 {update.version} 可用。</div>
+          {update.body && <div className="meta">{update.body}</div>}
+          <button className="btn" onClick={handleInstall} disabled={installing}>
+            {installing ? (progress != null ? `下载中 ${progress}%` : '安装中…') : '下载并安装'}
+          </button>
+        </div>
+      )}
+      {installing && progress != null && (
+        <div className="updater-progress">
+          <div className="updater-progress-bar" style={{ width: `${progress}%` }} />
+        </div>
+      )}
       {message && <div className="meta">{message}</div>}
     </section>
   )
