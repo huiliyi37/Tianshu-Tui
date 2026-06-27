@@ -34,7 +34,7 @@ describe('computeSensorium', () => {
     assert.equal(s.momentum, 0)
   })
 
-  it('computes complexity from tool diversity in sliding window', () => {
+  it('computes complexity via Shannon entropy from tool diversity', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
@@ -57,7 +57,34 @@ describe('computeSensorium', () => {
       doomLevel: 'none',
     }
     const s = computeSensorium(input)
-    assert.equal(s.complexity, 0.2) // 1 unique / 5 total
+    assert.equal(s.complexity, 0) // all same → entropy zero
+  })
+
+  it('distinguishes distribution skew (Shannon entropy)', () => {
+    // With the old unique/total formula, both would be 2/5 = 0.4.
+    // Shannon entropy gives different values for different distributions.
+    const skewed: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['A', 'A', 'A', 'A', 'B'], // 4×A, 1×B
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const balanced: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['A', 'A', 'A', 'B', 'B'], // 3×A, 2×B
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s1 = computeSensorium(skewed)
+    const s2 = computeSensorium(balanced)
+    assert.ok(s1.complexity < s2.complexity,
+      `skewed ${s1.complexity.toFixed(3)} should be < balanced ${s2.complexity.toFixed(3)}`)
+    assert.ok(s1.complexity > 0 && s2.complexity < 1,
+      `skewed=${s1.complexity.toFixed(3)}, balanced=${s2.complexity.toFixed(3)}`)
   })
 
   it('computes continuous stability from blended signals', () => {

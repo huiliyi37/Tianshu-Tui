@@ -146,8 +146,19 @@ function computeConfidence(evidence: SensoriumInput['evidenceState']): number {
 
 function computeComplexity(toolHistory: string[]): number {
   if (toolHistory.length === 0) return 0
-  const unique = new Set(toolHistory).size
-  return clamp(unique / toolHistory.length)
+  const counts = new Map<string, number>()
+  for (const name of toolHistory) {
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  if (counts.size <= 1) return 0
+  const n = toolHistory.length
+  let entropy = 0
+  for (const count of counts.values()) {
+    const p = count / n
+    entropy -= p * Math.log2(p)
+  }
+  const maxEntropy = Math.log2(counts.size)
+  return clamp(entropy / maxEntropy)
 }
 
 function computeFreshness(
