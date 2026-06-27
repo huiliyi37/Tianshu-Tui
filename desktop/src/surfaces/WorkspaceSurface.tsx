@@ -9,6 +9,7 @@ import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { ThreadTabs } from '../components/ThreadTabs'
+import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -103,61 +104,92 @@ export function WorkspaceSurface() {
     closeSession.mutate(activeId)
     dispatch({ type: 'closeTab', id: activeId })
   }, [activeId, closeSession, dispatch])
+  const sidebarRef = usePanelRef()
+  const reviewRef = usePanelRef()
 
-  const sidebarW = ui.sidebarVisible ? '264px' : '0px'
-  const reviewW = ui.reviewVisible ? '360px' : '0px'
+  // Sync panel collapse/expand with the ui state (Cmd+\, Cmd+Shift+B).
+  useEffect(() => {
+    const p = sidebarRef.current
+    if (!p) return
+    if (ui.sidebarVisible) p.expand()
+    else p.collapse()
+  }, [ui.sidebarVisible])
+  useEffect(() => {
+    const p = reviewRef.current
+    if (!p) return
+    if (ui.reviewVisible) p.expand()
+    else p.collapse()
+  }, [ui.reviewVisible])
 
+  const sidebarSize = parseInt(localStorage.getItem('rivet:sidebar-w') ?? '18', 10)
+  const reviewSize = parseInt(localStorage.getItem('rivet:review-w') ?? '27', 10)
   return (
-    <div
-      ref={wsRef}
-      className={`workspace${!ui.sidebarVisible ? ' sidebar-collapsed' : ''}${!ui.reviewVisible ? ' review-collapsed' : ''}`}
-      style={{ gridTemplateColumns: `${sidebarW} minmax(0, 1fr) ${reviewW}` }}
-    >
-      {ui.sidebarVisible && <ProjectSidebar />}
-
-      <div className="conversation">
-        <div className="conversation-body">
-          <ThreadTabs />
-          {active ? (
-            <ThreadView
-              session={active}
-              view={view}
-              onSend={handleSend}
-              onSteer={handleSteer}
-              onAbort={() => abortSession.mutate(active.id)}
-              onSetApprovalMode={handleSetApprovalMode}
-              onSetPlanMode={handleSetPlanMode}
-              onClose={handleClose}
-            />
-          ) : (
-            <div className="empty thread-empty">
-              <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
-              <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                + 新线程
-              </button>
+    <div ref={wsRef} className="workspace-resizable">
+      <Group orientation="horizontal" style={{ height: '100%' }}>
+        <Panel
+          panelRef={sidebarRef}
+          collapsible
+          defaultSize={`${sidebarSize}%`}
+          minSize="12%"
+          maxSize="35%"
+          onResize={({ asPercentage }) => localStorage.setItem('rivet:sidebar-w', String(Math.round(asPercentage)))}
+        >
+          <ProjectSidebar />
+        </Panel>
+        <Separator className="panel-resize-handle" />
+        <Panel minSize="30%">
+          <div className="conversation">
+            <div className="conversation-body">
+              <ThreadTabs />
+              {active ? (
+                <ThreadView
+                  session={active}
+                  view={view}
+                  onSend={handleSend}
+                  onSteer={handleSteer}
+                  onAbort={() => abortSession.mutate(active.id)}
+                  onSetApprovalMode={handleSetApprovalMode}
+                  onSetPlanMode={handleSetPlanMode}
+                  onClose={handleClose}
+                />
+              ) : (
+                <div className="empty thread-empty">
+                  <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
+                  <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                    + 新线程
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
-      </div>
-
-      {ui.reviewVisible && (
-      <ReviewPanel
-        sessionId={activeId}
-        artifacts={artifacts.data ?? []}
-        pendingApproval={view.pendingApproval}
-        pendingIntent={view.pendingIntent}
-        approvalMode={active?.approvalMode}
-        planMode={view.planMode}
-        planRev={view.planRev}
-        latestPlanSlug={view.latestPlanSlug}
-        onApproval={handleApproval}
-        onIntent={handleIntent}
-        onFeedbackSent={() => sessions.refetch()}
-        todos={view.todos}
-        sources={view.sources}
-      />
-      )}
+            {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
+          </div>
+        </Panel>
+        <Separator className="panel-resize-handle" />
+        <Panel
+          panelRef={reviewRef}
+          collapsible
+          defaultSize={`${reviewSize}%`}
+          minSize="15%"
+          maxSize="45%"
+          onResize={({ asPercentage }) => localStorage.setItem('rivet:review-w', String(Math.round(asPercentage)))}
+        >
+          <ReviewPanel
+            sessionId={activeId}
+            artifacts={artifacts.data ?? []}
+            pendingApproval={view.pendingApproval}
+            pendingIntent={view.pendingIntent}
+            approvalMode={active?.approvalMode}
+            planMode={view.planMode}
+            planRev={view.planRev}
+            latestPlanSlug={view.latestPlanSlug}
+            onApproval={handleApproval}
+            onIntent={handleIntent}
+            onFeedbackSent={() => sessions.refetch()}
+            todos={view.todos}
+            sources={view.sources}
+          />
+        </Panel>
+      </Group>
 
       {!ui.reviewVisible && (
         <button

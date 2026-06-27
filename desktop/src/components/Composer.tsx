@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { listFiles, listModels, switchModel } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
-import type { PlanModeState } from '../runtime/types'
-import type { ModelEntry } from '../runtime/types'
+import { toast } from 'sonner'
+import type { ModelEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
 
@@ -118,7 +118,6 @@ export function Composer(props: {
   const [dragOver, setDragOver] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
-  const [slashError, setSlashError] = useState<string | null>(null)
   const [speechSupported, setSpeechSupported] = useState(false)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
 
@@ -213,7 +212,6 @@ export function Composer(props: {
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const next = e.target.value
     onChange(next)
-    if (slashError) setSlashError(null)
     onAfterCaret(next, e.target.selectionStart ?? next.length)
   }
 
@@ -250,10 +248,9 @@ export function Composer(props: {
     // (which would misinterpret the /token as a literal request). Mirrors TUI
     // resolveAppPromptInput returning null for unrecognized slashes.
     if (commands && commands.length > 0 && !isKnownSlashCommand(text, commands)) {
-      setSlashError(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
+      toast.error(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
       return
     }
-    setSlashError(null)
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
   }
@@ -449,7 +446,6 @@ export function Composer(props: {
         </div>
       )}
       {imageError && <div className="composer-error">{imageError}</div>}
-      {slashError && <div className="composer-error slash-error">{slashError}</div>}
       <div className="composer-row">
         <textarea
           ref={taRef}

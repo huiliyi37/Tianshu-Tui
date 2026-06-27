@@ -9,7 +9,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
-
+import { Toaster } from 'sonner'
 // L1 #10: 非首屏 Surface 懒加载，减小首屏 chunk
 const InboxSurface = lazy(() =>
   import('./surfaces/InboxSurface').then((m) => ({ default: m.InboxSurface })),
@@ -230,6 +230,7 @@ export function App() {
           onClose={() => dispatch({ type: 'openNew', open: false })}
         />
       )}
+      <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
   )
 }

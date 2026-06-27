@@ -98,6 +98,15 @@ body {
   height: 100%;
   transition: grid-template-columns 200ms var(--ease);
 }
+
+/* Resizable workspace — react-resizable-panels container. */
+.workspace-resizable { display: flex; height: 100%; width: 100%; position: relative; overflow: hidden; }
+.workspace-resizable > [data-panel-group] { width: 100%; height: 100%; }
+.panel-resize-handle {
+  width: 5px; background: transparent; cursor: col-resize; flex-shrink: 0;
+  transition: background var(--dur) var(--ease);
+}
+.panel-resize-handle:hover, .panel-resize-handle[data-resize-handle-active] { background: var(--border-strong); }
 /* Collapsed panels: overflow hidden so content doesn't bleed during transition. */
 .workspace.sidebar-collapsed > :first-child { overflow: hidden; }
 .workspace.review-collapsed > :last-child { overflow: hidden; }
