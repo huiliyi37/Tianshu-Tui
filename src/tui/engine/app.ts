@@ -88,6 +88,51 @@ export function truncateToWidth(text: string, maxWidth: number): string {
   return out
 }
 
+/**
+ * Format a human-readable preview of what a tool will do, for the approval prompt.
+ * Tool-aware: shows file path+diffstat for write/edit, command for bash, objective for delegate.
+ * Falls back to truncated JSON for unknown tools.
+ */
+function formatApprovalPreview(toolName: string, input: Record<string, unknown>, maxWidth: number): string[] {
+  const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max - 1) + '…' : s
+  const lines: string[] = []
+  // bash / shell — show the command
+  if (toolName === 'bash' || toolName === 'shell' || toolName === 'sandbox_exec') {
+    const cmd = typeof input.command === 'string' ? input.command : JSON.stringify(input)
+    lines.push(`→ ${truncate(cmd, maxWidth - 3)}`)
+    return lines
+  }
+  // write_file / edit_file — show path + line count
+  if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'hash_edit' || toolName === 'apply_patch') {
+    const path = typeof input.path === 'string' ? input.path : typeof input.file_path === 'string' ? input.file_path : '?'
+    const content = typeof input.content === 'string' ? input.content : typeof input.new_string === 'string' ? input.new_string : ''
+    const lineCount = content ? content.split('\n').length : 0
+    lines.push(`→ ${path} (${lineCount} lines)`)
+    return lines
+  }
+  // delegate_task — show objective
+  if (toolName === 'delegate_task') {
+    const obj = typeof input.objective === 'string' ? input.objective : ''
+    if (obj) lines.push(`→ ${truncate(obj, maxWidth - 3)}`)
+    return lines
+  }
+  // delegate_batch — show task count
+  if (toolName === 'delegate_batch') {
+    const tasks = Array.isArray(input.tasks) ? input.tasks : []
+    lines.push(`→ ${tasks.length} tasks`)
+    return lines
+  }
+  // web operations
+  if (toolName === 'web_fetch' || toolName === 'web_search') {
+    const url = typeof input.url === 'string' ? input.url : typeof input.query === 'string' ? input.query : ''
+    if (url) lines.push(`→ ${truncate(url, maxWidth - 3)}`)
+    return lines
+  }
+  // fallback: truncated JSON (max 2 lines)
+  const raw = JSON.stringify(input)
+  lines.push(`→ ${truncate(raw, maxWidth - 3)}`)
+  return lines
+}
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -2060,11 +2105,13 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const inputSummary = JSON.stringify(p.input).slice(0, 80)
+        const preview = formatApprovalPreview(p.name, p.input, this.columns - 4)
         lines.push({ text: '' })
         lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
-        lines.push({ text: this.clampLine(` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}`) })
+        for (const pv of preview) {
+          lines.push({ text: this.clampLine(` │ ${pv}`) })
+        }
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'approve')}  ${keyHint('n', 'deny')}  ${keyHint('e', 'edit')} ───────────────`) })
       }
     }

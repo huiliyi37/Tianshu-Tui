@@ -145,4 +145,50 @@ describe('formatTaskList', () => {
     // Old impl would show "completed 0..4" + "+3 more" — in_progress invisible
     assert.ok(!body.includes('+3 more'), `no overflow when budget suffices: ${body}`)
   })
+
+  // ── P0: Progress bar + in_progress prefix ──
+
+  it('header includes 8-cell progress bar', () => {
+    const items = [
+      mk('1', 'task A', 'completed'),
+      mk('2', 'task B', 'completed'),
+      mk('3', 'task C', 'pending'),
+      mk('4', 'task D', 'pending'),
+    ]
+    const lines = formatTaskList(items, theme, { width: 80 })
+    const header = stripAnsi(lines[0]!)
+    // 2/4 = 50% → 4 filled cells out of 8
+    assert.ok(header.includes('█'), 'progress bar has filled cells')
+    assert.ok(header.includes('░'), 'progress bar has empty cells')
+    assert.ok(header.includes('2/4'), 'count preserved')
+  })
+
+  it('progress bar all empty when nothing done', () => {
+    const items = [mk('1', 'task A', 'pending'), mk('2', 'task B', 'in_progress')]
+    const lines = formatTaskList(items, theme, { width: 80 })
+    const header = stripAnsi(lines[0]!)
+    assert.ok(header.includes('░'), 'all empty cells')
+    assert.ok(!header.includes('█'), 'no filled cells when 0 done')
+  })
+
+  it('progress bar all filled when all done', () => {
+    const items = [mk('1', 'task A', 'completed'), mk('2', 'task B', 'completed')]
+    const lines = formatTaskList(items, theme, { width: 80 })
+    const header = stripAnsi(lines[0]!)
+    assert.ok(header.includes('█'), 'all filled cells')
+    assert.ok(!header.includes('░'), 'no empty cells when all done')
+  })
+
+  it('in_progress line has ▸ prefix for visual focus', () => {
+    const items = [
+      mk('1', 'done task', 'completed'),
+      mk('2', 'active task', 'in_progress'),
+      mk('3', 'pending task', 'pending'),
+    ]
+    const lines = formatTaskList(items, theme, { width: 80 })
+    const activeLine = lines.find(l => stripAnsi(l).includes('active task'))
+    const pendingLine = lines.find(l => stripAnsi(l).includes('pending task'))
+    assert.ok(activeLine && stripAnsi(activeLine).includes('▸'), 'in_progress has ▸ prefix')
+    assert.ok(pendingLine && !stripAnsi(pendingLine).includes('▸'), 'pending does NOT have ▸ prefix')
+  })
 })
