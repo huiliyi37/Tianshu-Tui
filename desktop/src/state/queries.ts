@@ -9,6 +9,8 @@ import {
   getHealth,
   getGithubPr,
   getPlan,
+  getFileDiff,
+  getWorkingTree,
   listArtifacts,
   listConfigProviders,
   listGithubPrs,
@@ -38,6 +40,8 @@ export const qk = {
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
   configProviders: ['config', 'providers'] as const,
+  workingTree: ['git', 'working-tree'] as const,
+  fileDiff: (path: string) => ['git', 'diff', path] as const,
 }
 
 export function useHealth() {
@@ -216,5 +220,30 @@ export function useConfigProviders() {
     queryKey: qk.configProviders,
     queryFn: listConfigProviders,
     staleTime: 10_000,
+  })
+}
+
+// ── Git: Working Tree (changes tab) ─────────────────────────────────
+
+/** Poll the working-tree change list. Diff changes less often than session
+ *  state, so 5s (vs sessions' 2s) is a reasonable cadence. Disabled when no
+ *  active session, since the cwd is session-scoped. */
+export function useWorkingTree(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.workingTree,
+    queryFn: getWorkingTree,
+    refetchInterval: enabled ? 5000 : false,
+    enabled,
+    staleTime: 2000,
+  })
+}
+
+/** Fetch a single file's unified diff on demand (when the user selects it). */
+export function useFileDiff(path: string | null) {
+  return useQuery({
+    queryKey: qk.fileDiff(path ?? ''),
+    queryFn: () => getFileDiff(path!),
+    enabled: path !== null,
+    staleTime: 3000,
   })
 }

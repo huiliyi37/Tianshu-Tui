@@ -39,7 +39,8 @@ import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
-import { getGitGraph } from '../tools/git.js'
+import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
+import type { WorkingTreeFile } from '../tools/git.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -1082,6 +1083,16 @@ export class RuntimeSessionManager {
   /** ASCII branch/merge graph for a given cwd (defaults to the manager's default cwd). */
   async getGitGraph(cwd?: string, maxCount?: number): Promise<string> {
     return getGitGraph(cwd ?? this.defaultCwd, maxCount)
+  }
+
+  /** Working-tree changes relative to HEAD for the desktop "changes" tab. */
+  async getWorkingTreeFiles(cwd?: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+    return getWorkingTreeFiles(cwd ?? this.defaultCwd)
+  }
+
+  /** Unified diff of a single file relative to HEAD (on-demand). */
+  async getFileDiff(path: string, cwd?: string): Promise<string> {
+    return getFileDiff(cwd ?? this.defaultCwd, path)
   }
 
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */

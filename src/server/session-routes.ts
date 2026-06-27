@@ -31,7 +31,7 @@ import type { PlanDocument } from '../plan/plan-store.js'
 import type { Config } from '../config/schema.js'
 import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
-import { listProjectFiles, rankFiles } from './file-list.js'
+import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
 import { validatePath } from '../tools/path-validate.js'
@@ -604,6 +604,23 @@ export function buildSessionRoutes(
       }
     }, apiToken),
 
+    // Gap 1 — directory listing for the read-only file browser. Returns direct
+    // children of a sub-directory within cwd (one level, not recursive).
+    // ?path=src/components (empty/omitted = cwd root). Bearer-gated.
+    'GET /sessions/:id/list-dir': withAuth(async (_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const relPath = typeof params?.path === 'string' ? params.path : ''
+      let absDir: string
+      try {
+        absDir = relPath ? validatePath(rec.cwd, relPath, 'read') : rec.cwd
+      } catch {
+        return { status: 403, body: { error: 'Path outside session cwd' } }
+      }
+      const entries = await listDirEntries(absDir)
+      return { status: 200, body: { path: relPath, entries } }
+    }, apiToken),
+
     'GET /sessions/:id/stream': withAuth((_body, params, _headers, res) => {
       if (!res) return { status: 500, body: { error: 'SSE response stream is unavailable' } }
       const id = params!.id!
@@ -744,6 +761,21 @@ export function buildSessionRoutes(
       const maxCount = params?.maxCount ? Number(params.maxCount) : undefined
       const graph = await manager.getGitGraph(undefined, maxCount)
       return { status: 200, body: { graph: graph.split('\n') } }
+    }, apiToken),
+
+    // Working-tree changes relative to HEAD (file list only; per-file diff fetched on demand).
+    // Used by the desktop "changes" tab — lightweight file list, no diff body.
+    'GET /git/working-tree': withAuth(async () => {
+      const result = await manager.getWorkingTreeFiles()
+      return { status: 200, body: result }
+    }, apiToken),
+
+    // Unified diff of a single file relative to HEAD (on-demand, for the changes tab).
+    'GET /git/diff': withAuth(async (_body, params) => {
+      const path = params?.path
+      if (!path || typeof path !== 'string') return { status: 400, body: { error: 'Missing path param' } }
+      const diff = await manager.getFileDiff(path)
+      return { status: 200, body: { diff } }
     }, apiToken),
 
     // GitHub PR integration — list open PRs for the repo. Requires `gh` CLI.

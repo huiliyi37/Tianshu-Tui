@@ -82,6 +82,12 @@ export interface FileContent {
   endLine: number
 }
 
+/** Gap 1 — directory entry for the read-only file browser. */
+export interface DirEntry {
+  name: string
+  isDirectory: boolean
+}
+
 /** Plan list entry (no markdown body). createdAt/approvedAt are epoch ms. */
 export interface PlanSummary {
   slug: string
@@ -258,6 +264,20 @@ export interface InsightsResponse {
 /** Git branch graph response from `GET /git/graph`. */
 export interface GitGraphResponse {
   graph: string[]
+}
+
+/** A single file's working-tree change relative to HEAD (mirrors backend WorkingTreeFile). */
+export interface WorkingTreeFile {
+  path: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  additions: number
+  deletions: number
+}
+
+/** Working-tree change list for the desktop "changes" tab. */
+export interface WorkingTreeResponse {
+  files: WorkingTreeFile[]
+  isRepo: boolean
 }
 
 /** T2 — structured active task list item (mirrors backend `todo` write). */
