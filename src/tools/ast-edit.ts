@@ -223,6 +223,7 @@ export const AST_EDIT_TOOL: Tool = {
         fileResults.push({ file: filePath, changes })
         if (!dryRun) {
           try {
+            params.onFileWrite?.(filePath)
             await writeFileAtomicAsync(filePath, currentSource)
           } catch {
             errors.push(`${filePath}: failed to write changes`)

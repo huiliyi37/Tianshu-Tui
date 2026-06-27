@@ -57,6 +57,9 @@ export interface ToolCallParams {
   toolUseId: string
   cwd: string
   onOutput?: (chunk: string) => void
+  /** Register a file written internally by a tool (e.g. ast-edit via writeFileAtomicAsync).
+   *  Ensures evidence/filesModified and cerebellar gate are aware of the write. */
+  onFileWrite?: (filePath: string) => void
   /** Capture an agent's departure mark for 主控 to record at session close. */
   onLeaveMark?: (mark: LeaveMarkInput) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */

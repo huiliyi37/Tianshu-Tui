@@ -523,6 +523,9 @@ export async function executeToolUse(
     onOutput: (chunk) => {
       callbacks.onToolResult(tu.id, tu.name, chunk)
    },
+    // P6 follow-up: let tools (e.g. ast-edit) register internal file writes
+    // so evidence/filesModified and cerebellar gate are aware.
+    onFileWrite: (filePath) => deps.evidence.trackFileModified(filePath),
     // T4: structured per-worker delegation updates → subagent panel. Optional;
     // forwarded to the session layer alongside the text progress stream.
     onWorkerActivity: callbacks.onDelegationActivity

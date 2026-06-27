@@ -158,3 +158,49 @@ describe('ast-edit multi-file', () => {
     )
   })
 })
+
+// ── onFileWrite callback ──────────────────────────────────────────
+
+describe('ast-edit onFileWrite', () => {
+  it('calls onFileWrite with file path when dryRun is false', async () => {
+    // fresh file to avoid pollution from prior dryRun:false test
+    const fixtureFile = join(testDir, 'onfilewrite-test.ts')
+    await writeFile(fixtureFile, 'var x = 1\nvar y = 2')
+
+    const written: string[] = []
+    const result = await astEdit.execute({
+      input: {
+        ops: [{ find: 'var $NAME = $VAL', replace: 'const $NAME = $VAL' }],
+        paths: ['onfilewrite-test.ts'],
+        lang: 'TypeScript',
+        dryRun: false,
+      },
+      cwd: testDir,
+      toolUseId: 'test-onfilewrite',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+      onFileWrite: (path: string) => written.push(path),
+    } as unknown as ToolCallParams)
+    assert.ok(!result.isError, `unexpected error: ${result.content}`)
+    assert.ok(written.length >= 1, `expected at least 1 onFileWrite call, got ${written.length}`)
+    assert.ok(written.some(p => p.includes('onfilewrite-test.ts')), `expected onfilewrite-test.ts in ${written.join(', ')}`)
+  })
+
+  it('does NOT call onFileWrite when dryRun is true', async () => {
+    const written: string[] = []
+    await astEdit.execute({
+      input: {
+        ops: [{ find: 'var $NAME = $VAL', replace: 'const $NAME = $VAL' }],
+        paths: ['sample.ts'],
+        lang: 'TypeScript',
+        dryRun: true,
+      },
+      cwd: testDir,
+      toolUseId: 'test-onfilewrite-dry',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+      onFileWrite: (path: string) => written.push(path),
+    } as unknown as ToolCallParams)
+    assert.equal(written.length, 0, `expected 0 onFileWrite calls in dryRun mode, got ${written.length}`)
+  })
+})
