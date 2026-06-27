@@ -8,7 +8,7 @@
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { color } from '../engine/ansi.js'
-import stringWidth from 'string-width'
+import { displayWidth } from '../width.js'
 import { getActiveThemeName, type RivetTheme } from '../theme.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
@@ -169,7 +169,9 @@ export function stripAnsiLen(s: string): number {
   // 必须用 display width（非 .length）：CJK(天枢)/全角符号每字符占 2 列但 .length 计 1。
   // 用 .length 会让 padding/截断欠估 → 状态行被撑到 ≥ 终端宽度 → 末列自动换行 →
   // LiveEngine 行数计算与终端实际换行错位 → clear() 欠擦 → chrome 残留进 scrollback(重复渲染)。
-  return stringWidth(s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, ''))
+  // 口径须与 rowsForLine 一致（ambiguousAsWide）：星域 glyph(◇☆)/· 等在 CJK 终端按
+  // 2 列渲染，narrow(stringWidth) 会欠估 → gap 偏大 → 状态行仍可能溢出折行。
+  return displayWidth(s, { ambiguousAsWide: true })
 }
 
 /** token 用量进度条：0-1 比例 → 10 格填充条 + 百分比，按水位变色（≥90% error / ≥75% warning）。

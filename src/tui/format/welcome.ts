@@ -27,9 +27,14 @@
  *   └────────────────────────────────────────────────────────────────────────┘
  */
 
-import stringWidth from 'string-width'
 import { color } from '../engine/ansi.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import type { RivetTheme } from '../theme.js'
+
+/** 宽度口径：与终端一致（CJK 终端把 `·` 等 ambiguous 符号按 2 列渲染）。欢迎屏
+ *  含"天枢"(CJK) 与大量 `·` 分隔符，narrow(stringWidth) 居中 padding 会偏 → CJK
+ *  终端下右侧边框不齐。…/· 恒按 2 列参与截断与居中预算。 */
+const WIDE = { ambiguousAsWide: true }
 
 export interface FormatWelcomeInput {
   modelName: string
@@ -44,21 +49,15 @@ export interface FormatWelcomeInput {
 }
 
 function truncateToWidth(text: string, maxWidth: number): string {
-  if (maxWidth <= 0) return ''
-  if (stringWidth(text) <= maxWidth) return text
-  let out = ''
-  let w = 0
-  for (const ch of text) {
-    const cw = stringWidth(ch)
-    if (w + cw > maxWidth - 1) break
-    out += ch
-    w += cw
-  }
-  return out + '…'
+  // … 自身按 2 列计，预留其宽度后截断剩余文本。
+  const ellW = displayWidth('…', WIDE)
+  return displayWidth(text, WIDE) > maxWidth
+    ? `${truncateToDisplayWidth(text, Math.max(0, maxWidth - ellW), WIDE)}…`
+    : text
 }
 
 function centerLine(text: string, width: number): string {
-  const w = stringWidth(text)
+  const w = displayWidth(text, WIDE)
   if (w >= width) return text
   const left = Math.floor((width - w) / 2)
   const right = width - w - left

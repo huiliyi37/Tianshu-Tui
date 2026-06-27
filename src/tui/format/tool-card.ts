@@ -19,7 +19,13 @@ import { toolArgSummary } from '../tool-label.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import { formatDiff, isDiffContent } from './diff.js'
 import { brailleSpinnerFrame } from '../braille-spinner.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import chalk from 'chalk'
+
+/** 宽度口径：与 LiveEngine.rowsForLine 一致。工具输出（git diff/代码/日志）常含
+ *  `— … │ →` 等 ambiguous 符号 + CJK，按 .length/stringWidth(narrow) 截断会低估
+ *  实际列宽 → 尾行溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。 */
+const WIDE = { ambiguousAsWide: true }
 
 export interface FormatToolCardInput {
   /** 工具名称 */
@@ -215,8 +221,14 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
   if (tail) {
     const tailCount = input.tailLines ?? 3
     const maxWidth = Math.max(10, input.columns - 6)
-    const shown = tail.split('\n').slice(-tailCount).map(l =>
-      color(l.length > maxWidth ? l.slice(0, maxWidth - 1) + '…' : l, theme.muted))
+    const shown = tail.split('\n').slice(-tailCount).map(l => {
+      // 按显示宽度截断（CJK 2 列、ambiguous 2 列）。… 自身 2 列，预算留给它。
+      const ellW = displayWidth('…', WIDE)
+      const clipped = displayWidth(l, WIDE) > maxWidth
+        ? `${truncateToDisplayWidth(l, maxWidth - ellW, WIDE)}…`
+        : l
+      return color(clipped, theme.muted)
+    })
     lines.push(...indentBody(shown, '', theme))
   }
   return lines

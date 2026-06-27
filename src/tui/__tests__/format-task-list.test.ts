@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { formatTaskList } from '../format/task-list.js'
 import { getTheme } from '../theme.js'
+import { displayWidth } from '../width.js'
 import type { TodoItem } from '../../tools/todo-store.js'
 
 const theme = getTheme()
@@ -94,6 +95,29 @@ describe('formatTaskList', () => {
     const plain = stripAnsi(lines[1]!)
     assert.ok(plain.includes('…'), 'has ellipsis')
     assert.ok(plain.length <= 42, `truncated to width: ${plain.length}`)
+  })
+
+  it('truncates CJK content by display width, not code-unit length', () => {
+    // 旧实现用 .length 截断：30 个 CJK 字符 length=30 但实际占 60 列，width=40 时不触发
+    // 截断 → 单行任务溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。
+    // 新实现按显示宽度截断：每 CJK 字符 2 列，30 字 = 60 列 > 36（width-4）→ 截断。
+    const long = '重构'.repeat(15) // 30 个 CJK 字符
+    const lines = formatTaskList([mk('1', long, 'pending')], theme, { width: 40 })
+    const plain = stripAnsi(lines[1]!)
+    assert.ok(plain.includes('…'), 'CJK 超宽应截断带省略号')
+    // 去掉 glyph(1) + 空格(1) 后，内容显示宽度应 ≤ width-4（maxContentWidth）
+    assert.ok(displayWidth(plain, { ambiguousAsWide: true }) <= 40,
+      `CJK 任务行显示宽度应 ≤ 40: ${displayWidth(plain, { ambiguousAsWide: true })}`)
+  })
+
+  it('truncates content containing ambiguous symbols by wide width', () => {
+    // 任务含 — … → ·（CJK 终端按 2 列渲染）：旧 narrow 实现低估，新 wide 实现正确截断。
+    const content = '边界处理——注意并发…以及重试→策略' + '·'.repeat(20)
+    const lines = formatTaskList([mk('1', content, 'in_progress')], theme, { width: 40 })
+    const plain = stripAnsi(lines[1]!)
+    assert.ok(plain.includes('…'), '含 ambiguous 符号超宽应截断')
+    assert.ok(displayWidth(plain, { ambiguousAsWide: true }) <= 40,
+      `含 ambiguous 任务行显示宽度应 ≤ 40: ${displayWidth(plain, { ambiguousAsWide: true })}`)
   })
 
   it('overflows pending when too many unfinished items', () => {

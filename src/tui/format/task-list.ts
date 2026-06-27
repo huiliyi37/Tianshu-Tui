@@ -15,6 +15,12 @@
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import type { TodoItem } from '../../tools/todo-store.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
+
+/** 宽度口径：与 LiveEngine.rowsForLine 一致（CJK 终端把 ambiguous 符号按 2 列渲染）。
+ *  task content 多为 CJK，按 narrow(.length/stringWidth) 截断会严重低估实际列宽 →
+ *  单行任务溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。box/glyph 恒 1 列。 */
+const WIDE = { ambiguousAsWide: true }
 
 export interface TaskListOptions {
   /** 终端宽度（内容超宽截断） */
@@ -34,10 +40,10 @@ function glyphFor(status: TodoItem['status']): string {
 
 function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): string {
   const glyph = glyphFor(t.status)
-  let content = t.content
-  if (content.length > maxContentWidth) {
-    content = `${content.slice(0, maxContentWidth - 1)}…`
-  }
+  // 按显示宽度截断（CJK/全角占 2 列）。… 自身按 2 列计，故总宽 = maxContentWidth。
+  const content = displayWidth(t.content, WIDE) > maxContentWidth
+    ? `${truncateToDisplayWidth(t.content, maxContentWidth - displayWidth('…', WIDE), WIDE)}…`
+    : t.content
   if (t.status === 'in_progress') {
     return `${color(glyph, theme.primary, { bold: true })} ${color(content, theme.primary, { bold: true })}`
   } else if (t.status === 'completed') {
@@ -103,8 +109,9 @@ export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskL
   // 完成项折叠摘要（不逐条显示，节省行数给活跃任务）
   if (done > 0) {
     const sample = completed[0]!.content
-    const sampleText = sample.length > maxContentWidth - 8
-      ? `${sample.slice(0, maxContentWidth - 9)}…`
+    const sampleBudget = maxContentWidth - 8
+    const sampleText = displayWidth(sample, WIDE) > sampleBudget
+      ? `${truncateToDisplayWidth(sample, sampleBudget - displayWidth('…', WIDE), WIDE)}…`
       : sample
     if (done === 1) {
       lines.push(color(`  ✓ ${sampleText}`, theme.muted))
