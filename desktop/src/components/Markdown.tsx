@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import hljs from 'highlight.js/lib/common'
 
 // Conversation Markdown renderer (D1). Renders assistant/user/steer prose as
@@ -86,6 +89,22 @@ export function closeUnterminatedFence(source: string): string {
   return source
 }
 
+// remark-math v6 only recognizes `$...$` (inline) and `$$\n...\n$$` (block with
+// internal newlines). LaTeX-standard `\[...\]` / `\(...\)` and single-line
+// `$$...$$` are NOT parsed. This normalizes all common forms so model output
+// renders regardless of which delimiter style the model uses.
+// Pure + exported for unit tests.
+export function normalizeMathDelimiters(source: string): string {
+  return source
+    // Block math: \[...\]  →  $$\n...\n$$ (newlines ensure remark-math sees block)
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_, body: string) => `$$\n${body.trim()}\n$$`)
+    // Inline math: \(...\)  →  $...$
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_, body: string) => `$${body.trim()}$`)
+    // Single-line block $$...$$ on its own line  →  multiline $$ for block detection
+    // (remark-math needs newlines inside $$ to classify as block, not inline)
+    .replace(/^(\s*)\$\$([^\n$]+)\$\$\s*$/gm, (_, indent: string, body: string) => `${indent}$$\n${indent}${body}\n${indent}$$`)
+}
+
 function MarkdownImpl({ source, highlight = true }: { source: string; highlight?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const huge = source.length > MD_RENDER_MAX
@@ -104,10 +123,15 @@ function MarkdownImpl({ source, highlight = true }: { source: string; highlight?
     return <div className="md md-streaming" ref={ref}>{source}</div>
   }
 
+  const normalized = normalizeMathDelimiters(source)
   return (
     <div className="md" ref={ref}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
-        {source}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={COMPONENTS}
+      >
+        {normalized}
       </ReactMarkdown>
     </div>
   )

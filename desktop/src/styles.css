@@ -1232,6 +1232,13 @@ body {
 .md .hljs-emphasis { font-style: italic; }
 .md .hljs-strong { font-weight: var(--weight-semibold); }
 
+/* KaTeX math rendering — inherits text color so formulas match light/dark theme.
+   KaTeX defaults to black text, which is invisible on dark backgrounds. */
+.md .katex { color: inherit; font-size: 1.05em; }
+.md .katex-display { margin: var(--md-gap) 0; overflow-x: auto; overflow-y: hidden; padding: var(--space-1) 0; }
+/* Match the accent color for better visual integration with prose. */
+.md .katex .mord, .md .katex .mbin, .md .katex .mrel, .md .katex .mopen, .md .katex .mclose { color: inherit; }
+
 /* Star-domain course-correction card (R5) — selective externalization of
    "stuck → nudge → re-route". Deliberately quiet: distinct but not alarming. */
 .decision-shift {
