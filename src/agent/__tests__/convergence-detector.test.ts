@@ -820,4 +820,125 @@ describe('evaluateConvergence', () => {
         `expected level 0 for short window, got ${result.level}`)
     })
   })
+
+  // ── targetNovelty formula + editRatio novelty-gating regression ────────
+  // Regression for the "原地打转 (editing the same file) scored as progress"
+  // doom-loop misjudgment. Before the fix: targetNovelty used distinct/total
+  // (N identical → 1/N ≈ 0.17, not 0), and editRatio entered the score
+  // independently — so 10 successful edits to ONE file got the full 0.40
+  // execute weight AND a non-zero novelty residual. Both fixed together:
+  // novelty now (unique-1)/(total-1), and editRatio is gated by max(novelty,0.1).
+
+  describe('targetNovelty formula (defect 1)', () => {
+    it('all-identical targets → novelty exactly 0', () => {
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 0,
+        `5 identical targets must give novelty 0, got ${result.signals.targetNovelty}`)
+    })
+
+    it('all-distinct targets → novelty 1', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 1,
+        `5 distinct targets must give novelty 1, got ${result.signals.targetNovelty}`)
+    })
+
+    it('single-element window → novelty 1.0 (fully novel)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 2, phaseClass: 'explore', contextWindow: 200_000,
+        recentToolHistory: makeHistory([{ tool: 'read_file', target: 'a.ts' }]),
+      }))
+      assert.equal(result.signals.targetNovelty, 1.0)
+    })
+
+    it('empty window → novelty 1.0 (open frontier)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 0, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: [],
+      }))
+      assert.equal(result.signals.targetNovelty, 1.0)
+    })
+
+    it('partial overlap is continuous, not the old 1/N residual', () => {
+      // 5 calls: 3 distinct + 2 repeats. Old formula: 3/5 = 0.6.
+      // New formula: (3-1)/(5-1) = 0.5. The repeat fraction is now fully counted.
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'a.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 0.5,
+        `3 unique of 5 must give (3-1)/(5-1)=0.5, got ${result.signals.targetNovelty}`)
+    })
+  })
+
+  describe('editRatio novelty-gating (defect 2)', () => {
+    it('editing the SAME file repeatedly scores far lower than editing DISTINCT files', () => {
+      // Both windows: 6 successful edit_file calls, identical editRatio=1.0.
+      // Difference: targets. Same-file → novelty 0 → editRatio gated to ~0.
+      // Distinct-file → novelty 1 → editRatio contributes fully.
+      const sameFile = makeHistory(
+        Array.from({ length: 6 }, () => ({ tool: 'edit_file', target: 'a.ts' })),
+      )
+      const distinctFiles = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'edit_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'edit_file', target: 'e.ts' },
+        { tool: 'edit_file', target: 'f.ts' },
+      ])
+      const sameResult = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: sameFile,
+      }))
+      const distinctResult = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: distinctFiles,
+      }))
+      assert.ok(
+        distinctResult.score > sameResult.score,
+        `distinct edits (score=${distinctResult.score.toFixed(2)}) must out-score same-file edits (score=${sameResult.score.toFixed(2)})`,
+      )
+      // Same-file edits should be flagged as stuck (the doom-loop signal),
+      // not rewarded as high progress.
+      assert.ok(sameResult.level >= distinctResult.level,
+        `same-file edits (level=${sameResult.level}) should be >= distinct edits (level=${distinctResult.level})`)
+    })
+
+    it('0.1 floor keeps a baseline for legitimately iterative single-file edits', () => {
+      // Editing one file 6 times is not ALWAYS a doom-loop — e.g. building up
+      // a large module. The floor ensures editRatio contributes 0.40×0.1=0.04,
+      // not zero. Combined with other signals (no errors, some entropy) the
+      // score should not collapse to near-zero the way all-failures would.
+      const iterative = makeHistory(
+        Array.from({ length: 6 }, () => ({ tool: 'edit_file', target: 'a.ts' })),
+      )
+      const result = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: iterative,
+      }))
+      // Not rewarded as strong progress, but not catastrophically low either.
+      assert.ok(result.score > 0.0 && result.score < 0.6,
+        `iterative single-file edit score should be in a middling range, got ${result.score.toFixed(2)}`)
+    })
+  })
 })

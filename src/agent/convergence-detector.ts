@@ -184,6 +184,11 @@ function computeEditRatio(
 /**
  * targetNovelty: fraction of tool targets that are new (not seen before in the window).
  * High novelty in explore phase is good. Declining novelty over time signals convergence.
+ *
+ * Formula: (unique − 1) / (total − 1), so that N identical targets yield 0.0
+ * (zero novelty) — not 1/N as a naive distinct/total would. A single target is
+ * fully novel (1.0); an empty window is treated as fully novel (1.0) to match
+ * the explore-phase early-game expectation that no history = open frontier.
  */
 function computeTargetNovelty(
   windowSize: number,
@@ -192,16 +197,9 @@ function computeTargetNovelty(
   const window = history.slice(-windowSize)
   if (window.length === 0) return 1.0
   const seen = new Set<string>()
-  let novelCount = 0
-  for (const entry of window) {
-    const target = entry.target
-    if (!seen.has(target)) {
-      novelCount++
-      seen.add(target)
-    }
-  }
-  // novelCount / windowSize: 1.0 = all unique, 0.0 = all repeats
-  return novelCount / window.length
+  for (const entry of window) seen.add(entry.target)
+  if (seen.size === 1) return window.length === 1 ? 1.0 : 0.0
+  return (seen.size - 1) / (window.length - 1)
 }
 
 /**
@@ -374,8 +372,14 @@ function computeConvergenceScore(
   recentToolHistory: ConvergenceInput['recentToolHistory'],
   providerName?: string,
 ): number {
+  // editRatio is gated by targetNovelty: editing the same file repeatedly
+  // (novelty collapses to 0) is原地打转, not progress — regardless of how many
+  // successful edits happened. The 0.1 floor preserves a small baseline so a
+  // legitimately iterative edit on one file (e.g. building up a large module)
+  // is not zeroed out entirely.
+  const effectiveEditRatio = signals.editRatio * Math.max(signals.targetNovelty, 0.1)
   const raw =
-    weights.editRatio * signals.editRatio +
+    weights.editRatio * effectiveEditRatio +
     weights.targetNovelty * signals.targetNovelty +
     weights.toolEntropy * signals.toolEntropy +
     weights.errorPenalty * signals.errorPenalty +
