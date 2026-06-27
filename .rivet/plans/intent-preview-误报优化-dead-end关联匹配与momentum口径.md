@@ -38,12 +38,22 @@ turn-step-producer.ts:155  stigmergyStore.query()   ← 不带参数 → 返回�
 intent-preview 把「库里存在任意一条 dead-end」当作触发条件，**与当前目标零关联性检查**。
 
 **dead-end 的 path 字段语义错位**：`turn-intent.ts:60` 存的是 `preview.summary`
-（= `处理 ${target}`，意图摘要字符串），不是文件路径。于是：
-- 三个月前某个无关任务里 veto 过一次
-- 该 dead-end 半衰期 7 天，只要没衰减到 0
-- 今天开**任何**新任务都强弹
+（= `处理 ${target}`，意图摘要字符串），不是文件路径。
+
+**作用域澄清（修正早期误判）**：pheromones 按 **项目 + 会话** 双重隔离——路径为
+`~/.rivet/sessions/<目录名>-<cwd哈希>/<sessionId>/pheromones.json`（loop.ts:338-339）。
+不同项目、甚至同项目不同会话都不共享 pheromones 文件（实测同项目 19 个会话各有独立文件，
+无项目级共享文件）。因此早期「三个月前/跨会话残留」的判断**不准确**——新会话是空库。
+
+真实路径是「**当前会话内**早先 turn 沉积的 dead-end」：会话里 veto 过一次后，
+后续每个 turn 的 `query()` 全量返回这条 dead-end，且不检查是否与当前目标相关。
+一个会话跑久一点、中间 veto 过几次，后续所有 turn 都会被这些会话内 dead-end 反复触发：
+- 当前会话里针对目标 A veto 过一次
+- 该 dead-end 半衰期 7 天，会话内不会衰减到 0
+- 会话后续转向目标 B/C/D 时仍强弹
 
 = 「5% 上下文、什么坏事都没发生、却弹 high commit threshold + 历史 dead-end」的直接原因。
+（关联匹配修复后，只有当后续目标与已沉积 dead-end 的 target 重合时才触发。）
 
 ## 根因 2：momentum 把探索性报错当停滞
 
@@ -76,8 +86,8 @@ line 1038 仅豁免了 `run_tests` verify 阶段的 RED，**其余探索性报�
 朴素的 `de.path.includes(t) || t.includes(de.path)` 正向可工作，但反向有两个死区：
 
 1. **`summarizeTarget` 的 fallback**：`recentTargets` 为空或全以 `<` 开头时，
-   `path = "继续执行当前计划"`。该字符串永不匹配任何 target → 成为**永久噪声**
-   （只能靠 7 天半衰期清除）。**建议**：`recentTargets` 为空时跳过 dead-end 沉积——
+   `path = "继续执行当前计划"`。该字符串永不匹配任何 target → 成为**会话内永久噪声**
+   （7 天半衰期在单会话生命周期内衰减不到 0）。**建议**：`recentTargets` 为空时跳过 dead-end 沉积——
    没有具体目标的 veto 不产生可复用的死路标记。
 
 2. **多目标信息丢失**：`summarizeTarget` 只取 `recentTargets[0]`，但 agent 同轮可能
