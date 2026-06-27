@@ -456,11 +456,73 @@ test('ambiguous-wide 终端下含 — … · 的提示行（窄计=列宽/宽计
   }
 })
 
-// ── 探针：升级后的 ScreenTerminal 确实把宽字符建模为 2 列、宽行折行 ───────
-test('探针: ScreenTerminal 按显示宽度推进光标（CJK 占 2 列、超宽行折行）', () => {
+// ── 探针: ScreenTerminal 按显示宽度推进光标（CJK 占 2 列、超宽行折行）──────────
+test('探针: ScreenTerminal 按显示宽度推进光标（CJK 占 2 列、宽行折行）', () => {
   const term = new ScreenTerminal(10, 5, { ambiguousWide: true })
   // 写 6 个 CJK（每个 2 列）= 12 列 > 10 → 折到第二行
   term.write('天枢天枢天枢')
   assert.equal(term.getRow(0), '天枢天枢天', '首行容纳 5 个 CJK（10 列）')
   assert.equal(term.getRow(1), '枢', '第 6 个 CJK 折到第二行')
+})
+
+// ── forceRedraw 反模式回归：clear()+render() 走 append 路径残留旧帧 ──────
+// 这是 app.ts forceRedraw 输入框重影的底层根因。forceRedraw 曾用 live.clear()
+// 再 render()，clear 置 lastDisplayRows=0 → render 走 append 分支（无擦除）。
+// 当 clear 的 erase 因 lastDisplayRows 与屏上实际行数不符（域/主题切换改了
+// wrap 宽度）而覆盖不全时，旧输入框帧残留，新帧叠上去 = 重影。
+// 正确做法：直接 render()，保留 lastDisplayRows>0 → 走 fullRewrite（真实
+// prevDisplayRows 原子擦写）。本测试锁定这个不变量。
+
+test('forceRedraw 反模式: clear()+render() 在行数变化后残留旧帧', () => {
+  const term = new ScreenTerminal(120, 40)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+  const color = (s: string, c: string): string => `\x1B[38;5;${c}m${s}\x1B[39m`
+
+  // Frame 1: 一个域名的顶框（"天枢" 2 字）
+  const top1 = color('╭──天枢──┬──v4-pro──╮', '140')
+  const input1 = color('│ 〉 █placeholder', '140')
+  const bot1 = color('╰' + '─'.repeat(116) + '╯', '140')
+  engine.render(lines(top1, input1, bot1))
+  term.flush()
+
+  // 模拟域切换：新域名更长，wrap 行数变化 → lastDisplayRows 与新帧不符。
+  // forceRedraw 错误路径：clear() + render()。
+  engine.clear()
+  const top2 = color('╭──天玑域（长域名）──┬──v4-pro──╮', '140')
+  const input2 = color('│ 〉 █placeholder', '140')
+  const bot2 = color('╰' + '─'.repeat(110) + '╯', '140')
+  engine.render(lines(top2, input2, bot2))
+
+  const screenWrong = term.getRowsFrom(0).join('\n')
+  const tulWrong = screenWrong.split('╭').length - 1
+  // 反模式会残留旧顶框（append 路径无擦除）— 记录现象，不在此断言为错
+  // （ScreenTerminal 的 clear 精确建模，故这里可能擦干净；真实终端 reflow 才漏）。
+  // 本用例的价值在于与下面的正确路径对比。
+  term.flush()
+})
+
+test('forceRedraw 正确路径: 无 clear 的 render() 走 fullRewrite，绝不残留旧帧', () => {
+  const term = new ScreenTerminal(120, 40)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+  const color = (s: string, c: string): string => `\x1B[38;5;${c}m${s}\x1B[39m`
+
+  // Frame 1
+  const top1 = color('╭──天枢──┬──v4-pro──╮', '140')
+  const input1 = color('│ 〉 █placeholder', '140')
+  const bot1 = color('╰' + '─'.repeat(116) + '╯', '140')
+  engine.render(lines(top1, input1, bot1))
+  term.flush()
+
+  // 正确路径：直接 render（保留 lastDisplayRows>0）。域切换致内容变化 →
+  // canDiff=false（行文本不同）→ buildFullRewrite（moveToTop+ERASE+重写）。
+  const top2 = color('╭──天玑域──┬──v4-pro──╮', '140')
+  const input2 = color('│ 〉 █placeholder', '140')
+  const bot2 = color('╰' + '─'.repeat(116) + '╯', '140')
+  engine.render(lines(top2, input2, bot2))
+
+  const screen = term.getRowsFrom(0).join('\n')
+  const tulCount = screen.split('╭').length - 1
+  assert.equal(tulCount, 1, `fullRewrite 后 ╭ 出现 ${tulCount} 次，预期 1 — forceRedraw 残留旧帧`)
+  assert.ok(!screen.includes('天枢'), '旧域名"天枢"不应残留在新帧中')
+  assert.ok(screen.includes('天玑域'), '新域名应出现')
 })

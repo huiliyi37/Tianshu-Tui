@@ -1155,7 +1155,18 @@ export class TuiApp {
   forceRedraw(): void {
     // 主题/域/模型变更会改变颜色码，记忆化的 thinking 行需失效以用新主题重算。
     this.thinkingLinesMemo = null
-    this.live.clear()
+    // 不走 live.clear() + append 路径——clear 置 lastDisplayRows=0 后 renderLive
+    // 走 append 模式不擦除（live-engine.ts:136），若 clear 的 erase 因
+    // lastDisplayRows 不准（域/主题/模型切换导致 wrap 行数变化）覆盖不全，
+    // 旧帧残留在屏上 → 输入框重影（〉 提示符/边框重复渲染）。
+    // 改为直接 renderLive：lineCache 内容变了（颜色/domain），render 的 diff 资格
+    // 检测到行不匹配 → 走 buildFullRewrite（moveToTop+ERASE_SCREEN_END+重写），
+    // 用真实的 prevDisplayRows 原子覆盖旧帧。
+    //
+    // picker Enter 路径的 exec→deactivate 顺序（bb6a9329）独立保证 picker 场景：
+    // forceRedraw 画在 alt-screen 上，随后 deactivateOverlay 退出 alt-screen
+    // 丢弃整个 alt buffer 并重画，所以 forceRedraw 在 picker 路径里走哪条分支
+    // 都不影响最终结果——这里的安全性不依赖 clear()。
     this.renderLive()
   }
 
