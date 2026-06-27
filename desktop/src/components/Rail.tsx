@@ -41,7 +41,8 @@ export function Rail(props: {
   attentionCount: number
 }) {
   const { surface, onSurface, attentionCount } = props
-  const { t: tr } = useTranslation()
+  const { t: tNav } = useTranslation('nav')
+  const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
   const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
@@ -60,7 +61,7 @@ export function Rail(props: {
           <button
             key={s}
             className={`rail-item ${surface === s ? 'active' : ''}`}
-            title={tr(`nav.${s}`)}
+            title={tNav(s)}
             onClick={() => onSurface(s)}
           >
             <Icon icon={ICONS[s]} />
@@ -73,7 +74,7 @@ export function Rail(props: {
       <div className="rail-foot">
         <button
           className="rail-item"
-          title={`${tr('theme.label')}：${tr(`theme.${theme}`)}`}
+          title={`${tTheme('label')}：${tTheme(theme)}`}
           onClick={cycleTheme}
         >
           <Icon icon={THEME_ICON[theme]} />

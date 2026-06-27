@@ -1,0 +1,23 @@
+{
+  "title": "Settings",
+  "appearance": "Appearance",
+  "autonomy": "Default autonomy level for new threads",
+  "autonomyHint": "Autonomous execution within project scope; writes outside the project are still sandboxed and rollbackable.",
+  "toolDensity": "Tool group density",
+  "toolDensityHint": "Controls read/search tool group collapse: compact (always collapsed), balanced (collapsed, expandable), detailed (expanded).",
+  "notifications": "Notifications",
+  "wallpaper": "Wallpaper & Frosted Glass",
+  "wallpaperHint": "Setting a wallpaper activates translucent frosted glass (similar to macOS vibrancy). Stored locally only.",
+  "wallpaperEmpty": "No wallpaper",
+  "selectImage": "Choose image",
+  "clearWallpaper": "Clear wallpaper",
+  "wallpaperFitCover": "Cover",
+  "wallpaperFitContain": "Fit",
+  "wallpaperFitCenter": "Center",
+  "densityCompact": "Compact",
+  "densityBalanced": "Balanced",
+  "densityDetailed": "Detailed",
+  "notifNever": "Never",
+  "notifBackground": "Background only",
+  "notifAlways": "Always"
+}

@@ -1,0 +1,5 @@
+{
+  "boundary": "{{label}} crashed",
+  "boundaryGeneric": "UI crashed",
+  "retry": "Retry"
+}

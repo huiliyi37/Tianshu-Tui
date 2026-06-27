@@ -1,0 +1,8 @@
+{
+  "supervised": "Supervised",
+  "supervisedHint": "Every risky action requires your confirmation",
+  "default": "Default",
+  "defaultHint": "Auto low-risk within project, confirm high-risk",
+  "autonomous": "Autonomous",
+  "autonomousHint": "Full auto within project; outside writes are sandboxed, rollbackable"
+}

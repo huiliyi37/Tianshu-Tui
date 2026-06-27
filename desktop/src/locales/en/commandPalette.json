@@ -1,0 +1,15 @@
+{
+  "placeholder": "Type a command or thread…",
+  "noMatch": "No matches",
+  "shortcuts": "Shortcuts",
+  "newThread": "New thread",
+  "switchTheme": "Switch theme",
+  "goTo": "Go to {{label}}",
+  "project": "Project: {{name}}",
+  "thread": "Thread: {{name}}",
+  "hintNavigate": "Navigate",
+  "hintAction": "Action",
+  "hintAppearance": "Appearance",
+  "hintProject": "Project",
+  "hintJump": "Jump"
+}

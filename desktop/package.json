@@ -15,7 +15,8 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test-force-exit --test 'src/**/__tests__/*.test.ts'"
+    "test": "node --import tsx --test-force-exit --test 'src/**/__tests__/*.test.ts'",
+    "check:i18n": "node scripts/check-i18n.js"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

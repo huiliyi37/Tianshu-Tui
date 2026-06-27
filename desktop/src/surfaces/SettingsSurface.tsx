@@ -308,11 +308,12 @@ function WallpaperSection() {
 
 /** Language selector — switches i18next locale, persisted to localStorage. */
 function LanguageSection() {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation('language')
+  const { i18n } = useTranslation()
   const langs = ['zh-CN', 'en'] as const
   return (
     <section className="settings-group">
-      <h4>{t('language.label')}</h4>
+      <h4>{t('label')}</h4>
       <div className="seg">
         {langs.map((l) => (
           <button
@@ -320,7 +321,7 @@ function LanguageSection() {
             className={`seg-item ${i18n.language === l ? 'active' : ''}`}
             onClick={() => i18n.changeLanguage(l)}
           >
-            {t(`language.${l}`)}
+            {t(l)}
           </button>
         ))}
       </div>

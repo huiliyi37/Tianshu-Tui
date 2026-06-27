@@ -1,0 +1,18 @@
+{
+  "placeholderPlan": "描述你的目标…",
+  "placeholderBusy": "运行中 · Enter 插入引导",
+  "placeholderIdle": "Ask anything…",
+  "steer": "引导",
+  "stop": "停止",
+  "generate": "生成方案",
+  "selectImage": "选择图片",
+  "voiceStart": "语音输入",
+  "voiceStop": "停止录音",
+  "addMode": "添加模式 / 图片 / 命令",
+  "imageErrorFormat": "不支持的格式（仅 PNG/JPEG/WebP/GIF/BMP）",
+  "imageErrorSize": "{{name}} 超过 5MB 限制",
+  "imageErrorProcess": "图片处理失败，请重试",
+  "switchModel": "切换模型",
+  "modelDisabled": "运行中不可切换模型",
+  "removeImage": "移除图片"
+}

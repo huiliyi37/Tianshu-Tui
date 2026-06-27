@@ -1,0 +1,17 @@
+{
+  "empty": "Select a thread on the left, or create a new one in the current project.",
+  "newThread": "+ New thread",
+  "tabs": "Conversation tabs",
+  "titleNew": "New thread",
+  "titleLabel": "Title",
+  "titleOptional": "Optional",
+  "cwd": "Project directory (cwd)",
+  "cwdPlaceholder": "Empty = sidecar launch dir",
+  "browse": "Browse…",
+  "firstTask": "First task",
+  "firstTaskPlaceholder": "Optional; empty creates an idle thread",
+  "autonomyLevel": "Autonomy level",
+  "worktree": "Isolated worktree",
+  "worktreeHint": "Separate git branch, parallel work without conflicts",
+  "returnToWorkspace": "Back to workspace"
+}

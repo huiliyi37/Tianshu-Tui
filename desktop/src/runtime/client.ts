@@ -16,6 +16,7 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  WorkingTreeResponse,
 } from './types'
 
 export interface RuntimeInfo {
@@ -529,4 +530,14 @@ export async function listMcpServerTools(serverId: string): Promise<McpServerToo
 export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {
   const qs = maxCount !== undefined ? `?maxCount=${maxCount}` : ''
   return apiGet<GitGraphResponse>(`/git/graph${qs}`)
+}
+
+/** Working-tree changes relative to HEAD (file list only — per-file diff is on-demand). */
+export function getWorkingTree(): Promise<WorkingTreeResponse> {
+  return apiGet<WorkingTreeResponse>('/git/working-tree')
+}
+
+/** Unified diff of a single file relative to HEAD. Empty string = no textual diff (binary/untracked). */
+export function getFileDiff(path: string): Promise<{ diff: string }> {
+  return apiGet<{ diff: string }>(`/git/diff?path=${encodeURIComponent(path)}`)
 }

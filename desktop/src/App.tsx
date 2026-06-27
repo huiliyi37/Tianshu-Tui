@@ -42,7 +42,8 @@ function nextTheme(p: ThemePref): ThemePref {
 }
 
 export function App() {
-  const { t } = useTranslation()
+  const { t: tNav } = useTranslation('nav')
+  const { t: tCmd } = useTranslation('commandPalette')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
@@ -143,7 +144,7 @@ export function App() {
       { id: 'theme', label: '切换主题', hint: '外观', run: () => setThemePref(nextTheme(loadThemePref())) },
     ]
     for (const s of SURFACE_ORDER) {
-      cmds.push({ id: `surface-${s}`, label: t('commandPalette.goTo', { label: t(`nav.${s}`) }), hint: t('commandPalette.hintNavigate'), run: () => dispatch({ type: 'setSurface', surface: s }) })
+      cmds.push({ id: `surface-${s}`, label: tCmd('goTo', { label: tNav(s) }), hint: tCmd('hintNavigate'), run: () => dispatch({ type: 'setSurface', surface: s }) })
     }
     for (const p of deriveProjects(list, loadKnownProjects())) {
       cmds.push({ id: `proj-${p.cwd}`, label: `项目：${p.name}`, hint: '项目', run: () => dispatch({ type: 'setProject', cwd: p.cwd }) })
@@ -158,7 +159,7 @@ export function App() {
     }
     return cmds
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions.data, dispatch, t])
+  }, [sessions.data, dispatch, tNav, tCmd])
 
   return (
     <div className="shell">
@@ -182,7 +183,7 @@ export function App() {
               </svg>
               工作台
             </button>
-            <span className="surface-title">{t(`nav.${ui.surface}`)}</span>
+            <span className="surface-title">{tNav(ui.surface)}</span>
             <span />
           </header>
         )}
