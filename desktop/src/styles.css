@@ -1256,9 +1256,13 @@ body {
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .scroll-bottom-btn:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
-.msg { white-space: pre-wrap; word-break: break-word; }
+.msg { white-space: pre-wrap; word-break: break-word; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); transition: background var(--dur) var(--ease); }
 .msg-role { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1); }
 .msg-body { position: relative; }
+/* Message cards: user messages get a subtle background, assistant stays clean */
+.msg.user { background: var(--panel-2); border: 1px solid var(--border); }
+.msg.assistant { background: transparent; border: 1px solid transparent; }
+.msg.error { background: var(--error-soft, var(--panel-2)); border: 1px solid var(--error); border-radius: var(--radius-md); }
 .msg-copy-btn {
   position: absolute; top: 0; right: 0;
   width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
@@ -1278,7 +1282,6 @@ body {
 .msg.user .msg-role { color: var(--accent); }
 .msg.assistant .msg-body { color: var(--text); }
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
-.msg.error { color: var(--error); }
 
 /* ── Conversation Markdown (D1) ───────────────────────────────────── */
 /* .msg sets pre-wrap for plain blocks; Markdown subtree resets to normal flow
@@ -2086,3 +2089,23 @@ body {
     @apply font-sans;
   }
 }
+
+/* Settings dual-pane (category nav + content) */
+.settings-dual { display: flex; height: 100%; min-height: 0; }
+.settings-nav {
+  width: 200px; flex: none; border-right: 1px solid var(--border);
+  padding: var(--space-3) var(--space-2); display: flex; flex-direction: column; gap: 2px;
+  background: var(--sidebar-surface-bg);
+  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+}
+.settings-nav-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+  font-size: var(--text-sm); color: var(--muted); cursor: pointer;
+  border: none; background: none; text-align: left; width: 100%;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.settings-nav-item:hover { background: var(--panel-2); color: var(--text-secondary); }
+.settings-nav-item.active { background: var(--accent-soft, var(--panel-2)); color: var(--accent); font-weight: var(--weight-medium); }
+.settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-4); max-width: 700px; }

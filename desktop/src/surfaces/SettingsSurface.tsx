@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useHealth } from '../state/queries'
+import { Palette, SlidersHorizontal, Plug, Cpu, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
+import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
-import { check } from '@tauri-apps/plugin-updater'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
@@ -19,6 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system'
+
+const SETTINGS_CATS: { id: SettingsCat; label: string; icon: LucideIcon }[] = [
+  { id: 'appearance', label: '外观', icon: Palette },
+  { id: 'behavior', label: '行为', icon: SlidersHorizontal },
+  { id: 'integrations', label: '集成', icon: Plug },
+  { id: 'system', label: '系统', icon: Cpu },
+]
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -39,10 +47,10 @@ const NOTIF_LABEL: Record<NotifPref, string> = {
 }
 
 export function SettingsSurface() {
+  const [activeCat, setActiveCat] = useState<SettingsCat>('appearance')
   const health = useHealth()
-  const ui = useUiState()
   const dispatch = useUiDispatch()
-  const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
+  const ui = useUiState()
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [notifPref, setNotifPref] = useState<NotifPref>(() => loadNotifPref())
 
@@ -66,90 +74,112 @@ export function SettingsSurface() {
   }
 
   return (
-    <div className="single-pane settings">
-      <div className="panel-header"><span>设置</span></div>
+    <div className="settings-dual">
+      {/* Left: category nav */}
+      <nav className="settings-nav">
+        {SETTINGS_CATS.map((c) => (
+          <button
+            key={c.id}
+            className={`settings-nav-item ${activeCat === c.id ? 'active' : ''}`}
+            onClick={() => setActiveCat(c.id)}
+          >
+            <c.icon size={16} strokeWidth={1.7} />
+            <span>{c.label}</span>
+          </button>
+        ))}
+      </nav>
 
-      <section className="settings-group">
-        <h4>外观</h4>
-        <Select value={theme} onValueChange={(v) => pick(v as ThemePref)}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="选择主题" />
-          </SelectTrigger>
-          <SelectContent>
-            {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
-              <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </section>
-
-      <LanguageSection />
-
-      <WallpaperSection />
-
-      <section className="settings-group">
-        <h4>新线程默认自治档位</h4>
-        <AutonomyControl value={autonomy} onChange={pickAutonomy} />
-        <div className="meta">自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。</div>
-      </section>
-
-      <section className="settings-group">
-        <h4>工具组密度</h4>
-        <Select value={ui.toolDensity} onValueChange={(v) => pickDensity(v as ToolDensity)}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="选择密度" />
-          </SelectTrigger>
-          <SelectContent>
-            {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
-              <SelectItem key={d} value={d}>{DENSITY_LABEL[d]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。</div>
-      </section>
-
-      <section className="settings-group">
-        <h4>通知</h4>
-        <Select value={notifPref} onValueChange={(v) => pickNotif(v as NotifPref)}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="选择通知策略" />
-          </SelectTrigger>
-          <SelectContent>
-            {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
-              <SelectItem key={n} value={n}>{NOTIF_LABEL[n]}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="meta">控制何时收到系统通知：从不（完全静默）、仅后台（窗口失焦时提醒）、始终（全部提醒）。</div>
-      </section>
-
-      <section className="settings-group">
-        <h4>模型 Provider</h4>
-        <ProviderSettings />
-      </section>
-
-      <section className="settings-group">
-        <McpSettingsManager />
-      </section>
-
-      <section className="settings-group">
-        <h4>运行时 (sidecar)</h4>
-        {health.isError ? (
-          <div className="meta warn">sidecar 离线，重连中…</div>
-        ) : (
-          <dl className="kv">
-            <div><dt>版本</dt><dd>{health.data?.version ?? '—'}</dd></div>
-            <div><dt>会话数</dt><dd>{health.data?.sessionCount ?? 0}</dd></div>
-            <div><dt>运行中</dt><dd>{health.data?.runningCount ?? 0}</dd></div>
-            <div>
-              <dt>运行时长</dt>
-              <dd>{health.data ? `${Math.round(health.data.uptimeMs / 1000)}s` : '—'}</dd>
-            </div>
-          </dl>
+      {/* Right: content */}
+      <div className="settings-content">
+        {activeCat === 'appearance' && (
+          <>
+            <section className="settings-group">
+              <h4>主题</h4>
+              <Select value={theme} onValueChange={(v) => pick(v as ThemePref)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择主题" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+                    <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </section>
+            <LanguageSection />
+            <WallpaperSection />
+          </>
         )}
-      </section>
-
-      <UpdaterSection />
+        {activeCat === 'behavior' && (
+          <>
+            <section className="settings-group">
+              <h4>新线程默认自治档位</h4>
+              <AutonomyControl value={autonomy} onChange={pickAutonomy} />
+              <div className="meta">自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。</div>
+            </section>
+            <section className="settings-group">
+              <h4>工具组密度</h4>
+              <Select value={ui.toolDensity} onValueChange={(v) => pickDensity(v as ToolDensity)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择密度" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
+                    <SelectItem key={d} value={d}>{DENSITY_LABEL[d]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="meta">控制 read/search 工具组的折叠行为。</div>
+            </section>
+            <section className="settings-group">
+              <h4>通知</h4>
+              <Select value={notifPref} onValueChange={(v) => pickNotif(v as NotifPref)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择通知策略" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
+                    <SelectItem key={n} value={n}>{NOTIF_LABEL[n]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="meta">控制何时收到系统通知。</div>
+            </section>
+          </>
+        )}
+        {activeCat === 'integrations' && (
+          <>
+            <section className="settings-group">
+              <h4>模型 Provider</h4>
+              <ProviderSettings />
+            </section>
+            <section className="settings-group">
+              <McpSettingsManager />
+            </section>
+          </>
+        )}
+        {activeCat === 'system' && (
+          <>
+            <section className="settings-group">
+              <h4>运行时 (sidecar)</h4>
+              {health.isError ? (
+                <div className="meta warn">sidecar 离线，重连中…</div>
+              ) : (
+                <dl className="kv">
+                  <div><dt>版本</dt><dd>{health.data?.version ?? '—'}</dd></div>
+                  <div><dt>会话数</dt><dd>{health.data?.sessionCount ?? 0}</dd></div>
+                  <div><dt>运行中</dt><dd>{health.data?.runningCount ?? 0}</dd></div>
+                  <div>
+                    <dt>运行时长</dt>
+                    <dd>{health.data ? `${Math.round(health.data.uptimeMs / 1000)}s` : '—'}</dd>
+                  </div>
+                </dl>
+              )}
+            </section>
+            <UpdaterSection />
+          </>
+        )}
+      </div>
     </div>
   )
 }

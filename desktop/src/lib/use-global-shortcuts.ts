@@ -96,6 +96,12 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
         e.preventDefault()
         if (ui.activeSessionId) dispatch({ type: 'closeTab', id: ui.activeSessionId })
       }
+      // Cmd+. → toggle Zen mode (hide sidebar + review for distraction-free focus)
+      if (mod && e.key === '.') {
+        e.preventDefault()
+        dispatch({ type: 'toggleZen' })
+        return
+      }
     }
 
     window.addEventListener('keydown', onKey)
