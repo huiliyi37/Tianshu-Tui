@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useHealth } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -10,6 +10,7 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
+import { useWallpaperControl, type WallpaperFit } from '../components/WallpaperLayer'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -74,6 +75,8 @@ export function SettingsSurface() {
           ))}
         </div>
       </section>
+
+      <WallpaperSection />
 
       <section className="settings-group">
         <h4>新线程默认自治档位</h4>
@@ -220,5 +223,69 @@ function McpSettingsManager() {
       onRemove={handleRemove}
       onRestart={handleRestart}
     />
+  )
+}
+
+/** Wallpaper & frosted glass settings section. */
+function WallpaperSection() {
+  const { wallpaper, fit, pick, clear, changeFit } = useWallpaperControl()
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const FIT_LABEL: Record<WallpaperFit, string> = {
+    cover: '填充',
+    contain: '适应',
+    center: '居中',
+  }
+
+  return (
+    <section className="settings-group">
+      <h4>壁纸与毛玻璃</h4>
+      <div className="wallpaper-row">
+        <div
+          className="wallpaper-preview"
+          style={wallpaper ? { backgroundImage: `url("${wallpaper}")` } : undefined}
+        >
+          {!wallpaper && <span className="wallpaper-empty">无壁纸</span>}
+        </div>
+        <div className="wallpaper-controls">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden-file-input"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) pick(f)
+              e.target.value = ''
+            }}
+          />
+          <button className="btn" onClick={() => fileRef.current?.click()}>
+            选择图片
+          </button>
+          {wallpaper && (
+            <button className="btn btn-danger" onClick={clear}>
+              清除壁纸
+            </button>
+          )}
+          {wallpaper && (
+            <div className="seg">
+              {(['cover', 'contain', 'center'] as WallpaperFit[]).map((f) => (
+                <button
+                  key={f}
+                  className={`seg-item ${fit === f ? 'active' : ''}`}
+                  onClick={() => changeFit(f)}
+                >
+                  {FIT_LABEL[f]}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="meta">
+        设置壁纸后，界面自动切换为半透明毛玻璃效果（类似 macOS vibrancy）。
+        壁纸仅存储在本地，不会上传。
+      </div>
+    </section>
   )
 }

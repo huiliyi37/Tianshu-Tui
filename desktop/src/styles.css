@@ -1465,7 +1465,7 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { position: relative; border-top: 1px solid var(--border); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.composer { position: relative; border-top: 1px solid var(--border); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); }
 .composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); }
 .composer-row { display: flex; gap: var(--space-2); align-items: flex-end; }
 .composer-row textarea { flex: 1; }
@@ -1631,7 +1631,7 @@ body {
   position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px);
   margin: 0; padding: var(--space-1); list-style: none;
   max-height: 260px; overflow-y: auto; z-index: var(--z-modal);
-  background: var(--panel); border: 1px solid var(--border-strong);
+  background: var(--popup-surface-bg); backdrop-filter: blur(var(--popup-surface-blur)) saturate(var(--popup-surface-saturation)); -webkit-backdrop-filter: blur(var(--popup-surface-blur)) saturate(var(--popup-surface-saturation)); border: 1px solid var(--border-strong);
   border-radius: var(--radius-md); box-shadow: var(--shadow-md);
 }
 .composer-suggest .suggest-item {
@@ -1934,3 +1934,17 @@ body {
 .insights-table th { background: var(--panel-2); color: var(--muted); font-weight: 500; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; }
 .insights-table tr:last-child td { border-bottom: none; }
 .insights-table td { color: var(--text); }
+
+/* ── Wallpaper settings UI ─────────────────────────────────────── */
+.wallpaper-row { display: flex; gap: var(--space-3); align-items: flex-start; }
+.wallpaper-preview {
+  width: 160px; height: 90px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: var(--panel-2);
+  background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; overflow: hidden;
+}
+.wallpaper-empty { color: var(--faint); font-size: var(--text-xs); }
+.wallpaper-controls { display: flex; flex-direction: column; gap: var(--space-2); }
+.wallpaper-controls .seg { margin-top: var(--space-1); }
+.hidden-file-input { display: none; }
