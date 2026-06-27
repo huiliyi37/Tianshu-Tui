@@ -1346,7 +1346,7 @@ body {
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
 }
 
-.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); position: relative; }
+.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-5); position: relative; }
 /* P2 virtualization: .vlist is the total-height spacer; each .vrow is absolutely
    positioned by the virtualizer. padding-bottom restores the inter-message gap
    that the flex `gap` provided before windowing, and is included in measureElement. */
@@ -1365,9 +1365,9 @@ body {
 .msg { white-space: pre-wrap; word-break: break-word; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); transition: background var(--dur) var(--ease); }
 .msg-role { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1); }
 .msg-body { position: relative; }
-/* Message cards: user messages get a subtle background, assistant stays clean */
-.msg.user { background: var(--panel-2); border: 1px solid var(--border); }
-.msg.assistant { background: transparent; border: 1px solid transparent; }
+/* Message cards: borderless, content breathes via background tint and spacing. */
+.msg.user { background: var(--panel-2); border: none; }
+.msg.assistant { background: transparent; border: none; }
 .msg.error { background: var(--error-soft, var(--panel-2)); border: 1px solid var(--error); border-radius: var(--radius-md); }
 .msg-copy-btn {
   position: absolute; top: 0; right: 0;
@@ -1388,6 +1388,7 @@ body {
 .msg.user .msg-role { color: var(--accent); }
 .msg.assistant .msg-body { color: var(--text); }
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
+.msg-role { color: var(--faint); margin-bottom: 2px; }
 
 /* ── Conversation Markdown (D1) ───────────────────────────────────── */
 /* .msg sets pre-wrap for plain blocks; Markdown subtree resets to normal flow
@@ -1589,19 +1590,19 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { position: relative; border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); }
+.composer { position: relative; border-top: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); box-shadow: 0 -1px 0 var(--border); }
 .composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); }
 .composer-row { display: flex; gap: var(--space-2); align-items: flex-end; }
 .composer-row textarea { flex: 1; }
 .composer textarea {
   background: var(--panel); color: var(--text);
-  border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px 12px;
+  border: 1px solid transparent; border-radius: var(--radius-lg); padding: 10px 12px;
   resize: none; font-family: inherit; font-size: var(--text-md); line-height: 1.45;
   min-height: 44px; max-height: min(32vh, 220px); overflow-y: hidden;
-  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .composer textarea:hover { background: var(--panel-2); }
-.composer textarea:focus { outline: none; border-color: var(--border-strong); background: var(--panel-2); }
+.composer textarea:focus { outline: none; border-color: transparent; background: var(--panel-2); box-shadow: 0 0 0 1px var(--accent); }
 .composer-images { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .composer-thumb { position: relative; width: 64px; height: 64px; }
 .composer-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
