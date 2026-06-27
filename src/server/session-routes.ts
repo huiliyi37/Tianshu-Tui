@@ -28,6 +28,8 @@ import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
 import type { PlanDocument } from '../plan/plan-store.js'
+import type { Config } from '../config/schema.js'
+import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 import { listProjectFiles, rankFiles } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
@@ -36,7 +38,7 @@ import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync } from 'node:fs'
 import { extname, relative } from 'node:path'
 
-export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
+export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result' | 'markdown' | 'html'
 
 /** Vision upload guards — provider-safe formats and a per-image byte ceiling. */
 const MAX_IMAGES = 4
@@ -66,6 +68,8 @@ export function classifyArtifact(a: Artifact): ArtifactKind {
   if (tool.includes('plan') || target.includes('plan')) return 'plan'
   if (tool.includes('todo') || tool.includes('task')) return 'task-list'
   if (/\.(png|jpe?g|gif|webp)$/.test(target) || tool.includes('screenshot')) return 'screenshot'
+  if (/\.(md|markdown|mdx)$/.test(target) || tool === 'render_markdown') return 'markdown'
+  if (/\.(html?)$/.test(target) || tool === 'render_html') return 'html'
   if (
     tool === 'edit_file' ||
     tool === 'write_file' ||
@@ -121,6 +125,7 @@ export function buildSessionRoutes(
   manager: RuntimeSessionManager,
   apiToken?: string,
   getRegistry?: () => SessionRegistry | undefined,
+  config?: Config,
 ): Record<string, RouteHandler> {
   // R3 — build an OwnershipGuard scoped to one session so rollback never
   // restores files a *different* live session exclusively owns. Returns
@@ -383,6 +388,157 @@ export function buildSessionRoutes(
       return { status: 200, body: result }
     }, apiToken),
 
+    // Insights — aggregated token usage, cost, and per-worker/model/provider
+    // breakdowns derived from delegation events. Bearer-gated.
+    'GET /sessions/:id/insights': withAuth((_body, params) => {
+      const id = params!.id!
+      const rec = manager.getSession(id)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const events = manager.getEvents(id, 0)
+      if (!events) return { status: 404, body: { error: 'Session not found' } }
+
+      const providers = config?.provider.providers ?? {}
+      const workers = new Map<string, {
+        workerId: string
+        parentId?: string
+        profile?: string
+        status?: string
+        model?: string
+        provider?: string
+        objective?: string
+        elapsedMs?: number
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        cacheWriteTokens: number
+        reasoningTokens: number
+        totalTokens: number
+        cost: number
+      }>()
+      const modelTotals = new Map<string, { model: string; provider?: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
+      const providerTotals = new Map<string, { provider: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
+
+      for (const ev of events.events) {
+        if (ev.type !== 'delegation') continue
+        const data = ev.data as {
+          workerId?: string
+          parentId?: string
+          profile?: string
+          status?: string
+          objective?: string
+          elapsedMs?: number
+          model?: string
+          provider?: string
+          usage?: {
+            input_tokens?: number
+            output_tokens?: number
+            cache_read_input_tokens?: number
+            cache_creation_input_tokens?: number
+            reasoning_tokens?: number
+            total_tokens?: number
+          }
+        }
+        const workerId = data.workerId
+        if (!workerId) continue
+
+        const usage = data.usage
+        const model = data.model
+        const provider = data.provider
+        const pricing = findModelPricing(providers, provider, model)
+        const costBreakdown = computeUsageCost(
+          usage
+            ? {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+              }
+            : undefined,
+          pricing,
+        )
+
+        const inputTokens = usage?.input_tokens ?? 0
+        const outputTokens = usage?.output_tokens ?? 0
+        const cacheReadTokens = usage?.cache_read_input_tokens ?? 0
+        const cacheWriteTokens = usage?.cache_creation_input_tokens ?? 0
+        const reasoningTokens = usage?.reasoning_tokens ?? 0
+        const totalTokens = usage?.total_tokens ?? inputTokens + outputTokens
+
+        const existing = workers.get(workerId)
+        const worker = {
+          workerId,
+          parentId: data.parentId ?? existing?.parentId,
+          profile: data.profile ?? existing?.profile,
+          status: data.status ?? existing?.status,
+          model: model ?? existing?.model,
+          provider: provider ?? existing?.provider,
+          objective: data.objective ?? existing?.objective,
+          elapsedMs: data.elapsedMs ?? existing?.elapsedMs,
+          inputTokens: (existing?.inputTokens ?? 0) + inputTokens,
+          outputTokens: (existing?.outputTokens ?? 0) + outputTokens,
+          cacheReadTokens: (existing?.cacheReadTokens ?? 0) + cacheReadTokens,
+          cacheWriteTokens: (existing?.cacheWriteTokens ?? 0) + cacheWriteTokens,
+          reasoningTokens: (existing?.reasoningTokens ?? 0) + reasoningTokens,
+          totalTokens: (existing?.totalTokens ?? 0) + totalTokens,
+          cost: (existing?.cost ?? 0) + costBreakdown.total,
+        }
+        workers.set(workerId, worker)
+
+        if (model) {
+          const mt = modelTotals.get(model) ?? { model, provider, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0, count: 0 }
+          mt.inputTokens += inputTokens
+          mt.outputTokens += outputTokens
+          mt.totalTokens += totalTokens
+          mt.cost += costBreakdown.total
+          mt.count += 1
+          if (provider && !mt.provider) mt.provider = provider
+          modelTotals.set(model, mt)
+        }
+        if (provider) {
+          const pt = providerTotals.get(provider) ?? { provider, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0, count: 0 }
+          pt.inputTokens += inputTokens
+          pt.outputTokens += outputTokens
+          pt.totalTokens += totalTokens
+          pt.cost += costBreakdown.total
+          pt.count += 1
+          providerTotals.set(provider, pt)
+        }
+      }
+
+      const workerList = [...workers.values()]
+      const totalInput = workerList.reduce((sum, w) => sum + w.inputTokens, 0)
+      const totalOutput = workerList.reduce((sum, w) => sum + w.outputTokens, 0)
+      const totalCacheRead = workerList.reduce((sum, w) => sum + w.cacheReadTokens, 0)
+      const totalCacheWrite = workerList.reduce((sum, w) => sum + w.cacheWriteTokens, 0)
+      const totalReasoning = workerList.reduce((sum, w) => sum + w.reasoningTokens, 0)
+      const totalTokens = workerList.reduce((sum, w) => sum + w.totalTokens, 0)
+      const totalCost = workerList.reduce((sum, w) => sum + w.cost, 0)
+      const cacheHitRate = totalCacheRead + totalCacheWrite > 0
+        ? Math.round((totalCacheRead / (totalCacheRead + totalCacheWrite)) * 100)
+        : null
+
+      return {
+        status: 200,
+        body: {
+          totals: {
+            workers: workers.size,
+            inputTokens: totalInput,
+            outputTokens: totalOutput,
+            cacheReadTokens: totalCacheRead,
+            cacheWriteTokens: totalCacheWrite,
+            reasoningTokens: totalReasoning,
+            totalTokens,
+            cost: totalCost,
+          },
+          cacheHitRate,
+          workers: workerList,
+          modelBreakdown: [...modelTotals.values()],
+          providerBreakdown: [...providerTotals.values()],
+        },
+      }
+    }, apiToken),
+
     // @file mention picker (D2) — enumerate project files under the session's
     // cwd, ranked by an optional ?q substring/fuzzy query. Scoped to cwd, never
     // follows symlinks, honors gitignore + silent-layer filters. Bearer-gated.
@@ -582,6 +738,13 @@ export function buildSessionRoutes(
       status: 200,
       body: { worktrees: manager.getWorktrees() },
     }), apiToken),
+
+    // Git branch graph — ASCII graph for the repo root.
+    'GET /git/graph': withAuth(async (_body, params) => {
+      const maxCount = params?.maxCount ? Number(params.maxCount) : undefined
+      const graph = await manager.getGitGraph(undefined, maxCount)
+      return { status: 200, body: { graph: graph.split('\n') } }
+    }, apiToken),
 
     // GitHub PR integration — list open PRs for the repo. Requires `gh` CLI.
     'GET /github/prs': withAuth(async () => {

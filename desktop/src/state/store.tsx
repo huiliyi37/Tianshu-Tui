@@ -23,8 +23,8 @@ import {
 } from '../lib/persist'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
-// automations (was schedule), attention (was inbox), settings.
-export type Surface = 'workspace' | 'automations' | 'attention' | 'settings' | 'skills'
+// automations (was schedule), attention (was inbox), settings, git.
+export type Surface = 'workspace' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights'
 
 export interface UiState {
   activeSessionId: string | null

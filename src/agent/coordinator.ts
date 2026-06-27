@@ -62,6 +62,7 @@ import { buildHistoricalModelRewards } from './model-reward-summary.js'
 import type { EFEComponents } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { OaiMessage } from '../api/oai-types.js'
+import type { Usage } from '../api/types.js'
 
 /** Per-turn free-energy signals pulled from the primary loop at delegation time. */
 export interface EFERoutingSignals {
@@ -731,6 +732,29 @@ export class DelegationCoordinator {
     else health.recordFailure(providerId)
   }
 
+  /** Attach runtime model/provider/usage metadata to a worker result so that
+   *  downstream insights panels can render per-delegation costs and routing. */
+  private enrichResult(
+    result: WorkerResult,
+    model: string,
+    provider: string | undefined,
+    usage?: Usage | Partial<Usage>,
+  ): WorkerResult {
+    return {
+      ...result,
+      model: result.model ?? model,
+      provider: result.provider ?? provider,
+      usage: result.usage ?? (usage ? {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+      } : undefined),
+    }
+  }
+
   private buildTierRecommendation(order: WorkOrder): ModelTierRecommendation {
     return recommendModelTier({
       authority: order.authority,
@@ -1104,7 +1128,7 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[] } | undefined
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[]; usage?: Usage | Partial<Usage>; providerName?: string } | undefined
 
     // T3: escalation shadow events collected during retry
     const escalationShadows: ModelTierShadowEvent[] = []
@@ -1262,7 +1286,7 @@ export class DelegationCoordinator {
               return JSON.stringify(sessionRun.result)
             },
           }))
-          run = { result: handsRun.result, sessionMessages: handsSessionMessages }
+          run = { result: handsRun.result, sessionMessages: handsSessionMessages, usage: handsRun.usage, providerName: workerConfig.providerName }
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1275,7 +1299,7 @@ export class DelegationCoordinator {
         const sessionMessages = typeof workerRun.session?.getMessages === 'function'
           ? workerRun.session.getMessages()
           : undefined
-        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: workerConfig.providerName }
       }
     } catch (error) {
       // Physarum health: worker run threw (API/runtime fault, not task outcome).
@@ -1346,7 +1370,7 @@ export class DelegationCoordinator {
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages }
+                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages, usage: retryHandsRun.usage, providerName: workerConfig.providerName }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId) {
                   for (const f of retryClaimFiles) this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
@@ -1357,7 +1381,7 @@ export class DelegationCoordinator {
               const sessionMessages = typeof workerRun.session?.getMessages === 'function'
                 ? workerRun.session.getMessages()
                 : undefined
-              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: workerConfig.providerName }
             }
             // Retry succeeded — record provider health and exit loop
             this.recordProviderOutcome(selected.model, true)
@@ -1427,7 +1451,11 @@ export class DelegationCoordinator {
                   }
                   if (conflictedFiles.length > 0) {
                     for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
-                    const degraded = workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`))
+                    const degraded = this.enrichResult(
+                      workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`)),
+                      strongCard.model,
+                      upgradedConfig.providerName,
+                    )
                     return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded]) }
                   }
                 }
@@ -1452,7 +1480,7 @@ export class DelegationCoordinator {
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: handsRun.result, sessionMessages: retryHandsMessages }
+                run = { result: handsRun.result, sessionMessages: retryHandsMessages, usage: handsRun.usage, providerName: upgradedConfig.providerName }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId)
                   for (const f of retryClaimFiles)
@@ -1465,7 +1493,7 @@ export class DelegationCoordinator {
               const sessionMessages = typeof workerRun.session?.getMessages === 'function'
                 ? workerRun.session.getMessages()
                 : undefined
-              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: upgradedConfig.providerName }
             }
             // Upgrade succeeded — record provider outcome; circuit recovery for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, true)
@@ -1480,7 +1508,7 @@ export class DelegationCoordinator {
             // Pro upgrade also failed — record provider outcome; circuit failure for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, false)
             if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-            const degraded = workerFailureResult(order, error)
+            const degraded = this.enrichResult(workerFailureResult(order, error), strongCard.model, upgradedConfig.providerName)
             return {
               status: 'completed' as const,
               order,
@@ -1498,7 +1526,7 @@ export class DelegationCoordinator {
       // If retry didn't happen, return degraded — circuit records failure for tier-locked profiles
       if (!run) {
         if (!isAbort && profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-        const degraded = workerFailureResult(order, error)
+        const degraded = this.enrichResult(workerFailureResult(order, error), selected.model, workerConfig.providerName)
         return {
           status: 'completed' as const,
           order,
@@ -1523,6 +1551,7 @@ export class DelegationCoordinator {
     }
 
     // Run completed — regardless of task verdict, the provider's API delivered.
+    run.result = this.enrichResult(run.result, selected.model, run.providerName ?? workerConfig.providerName, run.usage)
     this.recordProviderOutcome(selected.model, true)
 
     // Circuit breaker: record outcome for tier-locked profiles (Flash army)

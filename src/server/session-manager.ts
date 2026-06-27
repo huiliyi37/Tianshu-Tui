@@ -39,6 +39,7 @@ import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
+import { getGitGraph } from '../tools/git.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -1078,6 +1079,11 @@ export class RuntimeSessionManager {
     return listWorktrees(cwd ?? this.defaultCwd)
   }
 
+  /** ASCII branch/merge graph for a given cwd (defaults to the manager's default cwd). */
+  async getGitGraph(cwd?: string, maxCount?: number): Promise<string> {
+    return getGitGraph(cwd ?? this.defaultCwd, maxCount)
+  }
+
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
   getDefaultCwd(): string {
     return this.defaultCwd
@@ -1357,6 +1363,9 @@ export class RuntimeSessionManager {
           phase: a.status === 'running' ? 'running' : a.status,
           progressLine: a.progressLine ? redactText(a.progressLine) : undefined,
           elapsedMs: this.now() - started,
+          model: a.model,
+          provider: a.provider,
+          usage: a.usage,
         })
       },
     }

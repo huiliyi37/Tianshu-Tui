@@ -386,6 +386,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         profile: ev.data.profile != null ? String(ev.data.profile) : prev?.profile,
         progressLine: ev.data.progressLine != null ? String(ev.data.progressLine) : prev?.progressLine,
         elapsedMs: ev.data.elapsedMs != null ? Number(ev.data.elapsedMs) : prev?.elapsedMs,
+        model: ev.data.model != null ? String(ev.data.model) : prev?.model,
+        provider: ev.data.provider != null ? String(ev.data.provider) : prev?.provider,
+        usage: ev.data.usage != null && typeof ev.data.usage === 'object' ? (ev.data.usage as DelegationNode['usage']) : prev?.usage,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }

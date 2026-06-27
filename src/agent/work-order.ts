@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
+import type { Usage } from '../api/types.js'
 import type { VerificationMetadata } from '../tools/types.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
@@ -159,6 +160,19 @@ export const workerResultSchema = z.object({
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
+  /** Runtime metadata: actual model used by the worker. */
+  model: z.string().optional(),
+  /** Runtime metadata: provider used by the worker. */
+  provider: z.string().optional(),
+  /** Runtime metadata: cumulative token usage for this worker run. */
+  usage: z.object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+    reasoning_tokens: z.number().optional(),
+    total_tokens: z.number().optional(),
+  }).optional(),
 })
 
 const workerResultIngestSchema = z.object({

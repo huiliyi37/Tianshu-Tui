@@ -761,6 +761,7 @@ export function createAgentRuntime(deps: {
 
     return {
       order: _order,
+      providerName: workerProvider.name,
       client: createProviderClient(workerProvider, resolveCapabilities(workerProvider.name, workerProvider.capabilities), {
         apiKey: workerApiKey,
         model: workerModel,

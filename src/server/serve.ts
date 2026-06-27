@@ -622,7 +622,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Multi-session routes (M0.5 → M3): /sessions/*. R3 rollback routes consult
   // the live registry to build an OwnershipGuard, so thread it in via getter.
-  Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry))
+  Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry, ctx.config))
 
   // Config routes: provider + API key management for the desktop settings UI.
   Object.assign(routes, buildConfigRoutes(apiToken))

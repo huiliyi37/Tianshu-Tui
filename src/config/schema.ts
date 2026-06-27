@@ -7,6 +7,14 @@ export const modelConfigSchema = z.object({
   contextWindow: z.number().int().positive(),
   maxTokens: z.number().int().positive(),
   reasoningEffort: z.enum(['off', 'low', 'medium', 'high', 'max']).optional(),
+  /** Pricing per 1M tokens (USD). Optional — used by insights / cost visualization. */
+  pricing: z.object({
+    input: z.number().min(0).optional(),
+    output: z.number().min(0).optional(),
+    cacheRead: z.number().min(0).optional(),
+    cacheWrite: z.number().min(0).optional(),
+    reasoning: z.number().min(0).optional(),
+  }).optional(),
 })
 
 export const authConfigSchema = z.discriminatedUnion('type', [

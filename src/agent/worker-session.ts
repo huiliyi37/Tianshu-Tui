@@ -45,6 +45,8 @@ export interface WorkerSessionConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  /** Provider key used for this worker run (e.g. 'deepseek', 'openai'). */
+  providerName?: string
   activeClaims?: import('../context/claims.js').ContextClaim[]
   /** Review-router re-entrancy depth propagated to worker tool calls. */
   reviewDepth?: number

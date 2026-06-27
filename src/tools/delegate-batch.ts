@@ -297,6 +297,9 @@ export function createDelegateBatchTool(
             parentToolId: params.toolUseId,
             status: r.status,
             progressLine: r.summary.slice(0, 80),
+            model: r.model,
+            provider: r.provider,
+            usage: r.usage,
           })
         }
       }
