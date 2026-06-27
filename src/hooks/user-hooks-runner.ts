@@ -38,7 +38,13 @@ export interface HookContext {
   error?: string
 }
 
-const VALID_EVENTS = new Set<HookEvent>(['preTurn', 'postTurn', 'postTool', 'postSession', 'onError'])
+export interface HookResult {
+  script: string
+  ok: boolean
+  output: string
+}
+
+export const VALID_EVENTS = new Set<HookEvent>(['preTurn', 'postTurn', 'postTool', 'postSession', 'onError'])
 
 export function loadHooksConfig(cwd: string): HooksConfig {
   const path = join(cwd, '.rivet', 'hooks.json')
@@ -53,9 +59,9 @@ export function loadHooksConfig(cwd: string): HooksConfig {
   }
 }
 
-export function runHooksForEvent(cwd: string, ctx: HookContext): Array<{ script: string; ok: boolean; output: string }> {
+export function runHooksForEvent(cwd: string, ctx: HookContext): HookResult[] {
   const config = loadHooksConfig(cwd)
-  const results: Array<{ script: string; ok: boolean; output: string }> = []
+  const results: HookResult[] = []
 
   for (const entry of config.hooks.filter(h => h.event === ctx.event)) {
     const scriptPath = entry.script.startsWith('/')

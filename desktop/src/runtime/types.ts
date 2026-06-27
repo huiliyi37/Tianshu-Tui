@@ -31,6 +31,10 @@ export interface SessionRecord {
   model?: string
   /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
   domain?: string
+  /** Visual glyph for the current star-domain selection (for badges). */
+  domainGlyph?: string
+  /** Semantic accent color key for the current star-domain selection. */
+  domainAccent?: string
   /** Estimated token count for the current conversation (from live agent). */
   contextTokens?: number
   /** Model context window size in tokens. */
@@ -62,6 +66,12 @@ export interface DomainEntry {
   essence: string
   /** Whether this is the session's current selection. */
   current: boolean
+  /** Full UI persona (separator + accent + glyph). */
+  uiPersona?: {
+    separator: 'thin' | 'thick' | 'dots'
+    accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim'
+    glyph: string
+  }
 }
 
 /** PlusMenu — a skill with its per-session enablement status. */
@@ -135,6 +145,8 @@ export type SessionEventType =
   | 'model_switched'
   | 'domain_changed'
   | 'skills_changed'
+  // I4 — user-defined .rivet/hooks.json script results.
+  | 'hook_result'
   | 'done'
 
 export interface SessionEvent {
@@ -348,4 +360,26 @@ export interface McpServerToolsResponse {
     description: string
     inputSchema: Record<string, unknown>
   }>
+}
+
+/** I4 — user-defined hook event kinds. Mirrors backend HookEvent. */
+export type HookEvent = 'preTurn' | 'postTurn' | 'postTool' | 'postSession' | 'onError'
+
+/** I4 — a single entry in .rivet/hooks.json. */
+export interface HookEntry {
+  event: HookEvent
+  script: string
+  timeoutMs?: number
+}
+
+/** I4 — result of running one user hook script. */
+export interface HookResult {
+  script: string
+  ok: boolean
+  output: string
+}
+
+/** I4 — full .rivet/hooks.json payload. */
+export interface HooksConfig {
+  hooks: HookEntry[]
 }

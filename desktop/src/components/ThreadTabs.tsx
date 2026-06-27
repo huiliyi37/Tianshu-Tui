@@ -92,6 +92,11 @@ export function ThreadTabs() {
                     }
                   }}
                 >
+                  {s.domainGlyph && (
+                    <span className={`thread-tab-glyph domain-accent-${s.domainAccent}`} aria-hidden>
+                      {s.domainGlyph}
+                    </span>
+                  )}
                   <span className="thread-tab-title">{title}</span>
                   <span
                     className="thread-tab-close"

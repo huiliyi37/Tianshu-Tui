@@ -1114,6 +1114,10 @@ export class AgentLoop {
     this.latestFsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   }
 
+  isRunning(): boolean {
+    return this._running
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
     // Re-entry guard: prevent concurrent agent.run() calls.
     // React strict mode or rapid re-submits could trigger handleSubmit

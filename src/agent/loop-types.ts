@@ -8,6 +8,7 @@ import type { CompactionConfig } from '../compact/constants.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { HookRegistry } from '../hooks/registry.js'
 import type { RuntimeHookPipeline } from './runtime-hooks.js'
+import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { PlanModeState } from './plan-mode.js'
 import type { PermissionConfig } from './permissions.js'
@@ -54,6 +55,8 @@ export interface AgentConfig {
   getSessionMemoryState?: () => import('../context/types.js').LedgerSessionMemoryState | undefined
   hooks?: HookRegistry
   runtimeHooks?: RuntimeHookPipeline
+  /** I4: emit user hook results to the desktop event stream. */
+  emitHookResult?: (results: HookResult[], meta: { event: HookEvent; turn?: number; toolName?: string; error?: string }) => void
   fileHistory?: import('./file-history.js').FileHistory
   modelCards?: ModelCapabilityCard[]
   /** Shadow-only model routing telemetry cards. Does not enable model switching. */

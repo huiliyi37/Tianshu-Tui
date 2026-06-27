@@ -9,6 +9,8 @@ export const SURFACE_ORDER: Surface[] = [
   'git',
   'insights',
   'delegation',
+  'council',
+  'hooks',
   'settings',
 ]
 
@@ -29,8 +31,8 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
         return
       }
 
-      // Cmd+1..8 → switch surface
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '8') {
+      // Cmd+1..9 → switch surface
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '9') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
         return

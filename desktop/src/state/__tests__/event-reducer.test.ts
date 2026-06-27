@@ -393,3 +393,15 @@ test('events batch is idempotent: already-folded seqs are dropped before coalesc
   assert.equal(second.blocks.length, 1)
   assert.equal(second.blocks[0]!.text, 'hello!')
 })
+
+// I4 — hook_result events are collected and trimmed to the latest 50.
+test('hook_result events accumulate and are capped at 50', () => {
+  seq = 0
+  const events: SessionEvent[] = []
+  for (let i = 0; i < 55; i++) {
+    events.push(ev('hook_result', { event: 'postTool', results: [{ script: `./${i}.sh`, ok: true, output: '' }] }))
+  }
+  const s = fold(events)
+  assert.equal(s.hookResults.length, 50)
+  assert.equal((s.hookResults[0]!.data.results as { script: string }[])[0]!.script, './5.sh')
+})

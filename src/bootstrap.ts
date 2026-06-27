@@ -561,6 +561,8 @@ export function createAgentRuntime(deps: {
    * 幂等不会重置已有状态。TUI 单 session 路径不传，保持原行为。
    */
   sharedProviderHealth?: ProviderHealthTracker
+  /** I4: optional callback to surface user hook results to the desktop event stream. */
+  emitHookResult?: import('./agent/loop-types.js').AgentConfig['emitHookResult']
 }): { agent: AgentLoop } {
   const {
     provider, apiKey, auth, config, sessionId, cwd,
@@ -843,6 +845,7 @@ export function createAgentRuntime(deps: {
       meridianIndexer: refs.meridianIndexer,
       modelRoutingShadowModelCards: modelCards,
       domainKnowledgeStore,
+      emitHookResult: deps.emitHookResult,
     },
     deps.session,
     cwd,

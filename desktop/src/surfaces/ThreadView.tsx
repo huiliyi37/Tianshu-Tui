@@ -36,9 +36,10 @@ const STATUS_LABEL: Record<string, string> = {
   aborted: '已中止',
 }
 
-/** Resolve the active star domain for this session. Desktop currently defaults
- *  to 天枢 (tianshu) — real-time domain events will make this dynamic later. */
-function resolveActiveDomain(_session: SessionRecord, _view: EventViewState): StarDomainId {
+/** Resolve the active star domain for this session. Uses the session's pinned
+ *  domain when known; otherwise falls back to 天枢 (tianshu). */
+function resolveActiveDomain(session: SessionRecord, _view: EventViewState): StarDomainId {
+  if (session.domain && session.domain in STAR_DOMAINS) return session.domain as StarDomainId
   return 'tianshu'
 }
 
@@ -76,7 +77,7 @@ export function ThreadView(props: {
   const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
   const activeDomain = STAR_DOMAINS[activeDomainId]
-  const domainGlyph = activeDomain?.uiPersona.glyph ?? '✹'
+  const domainGlyph = session.domainGlyph ?? activeDomain?.uiPersona.glyph ?? '✹'
   const domainSeparator = activeDomain?.uiPersona.separator ?? 'thin'
 
   const isNearBottom = useCallback(() => {

@@ -93,6 +93,8 @@ export interface EventViewState {
   prevTotalTokens: number
   /** Deduplicated file paths touched by file-editing tools (for Task Sidebar sources). */
   sources: string[]
+  /** I4 — latest user hook results surfaced as raw hook_result events. */
+  hookResults: SessionEvent[]
 }
 
 export const initialEventState: EventViewState = {
@@ -113,6 +115,7 @@ export const initialEventState: EventViewState = {
   lastTotalTokens: 0,
   prevTotalTokens: 0,
   sources: [],
+  hookResults: [],
 }
 
 export type EventAction =
@@ -434,6 +437,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         todos.push({ id, content, status })
       }
       next.todos = todos
+      return next
+    }
+    case 'hook_result': {
+      next.hookResults = [...next.hookResults, ev].slice(-50)
       return next
     }
     default:

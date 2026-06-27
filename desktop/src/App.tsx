@@ -34,6 +34,12 @@ const InsightsSurface = lazy(() =>
 const DelegationSurface = lazy(() =>
   import('./surfaces/DelegationSurface').then((m) => ({ default: m.DelegationSurface })),
 )
+const CouncilSurface = lazy(() =>
+  import('./surfaces/CouncilSurface').then((m) => ({ default: m.CouncilSurface })),
+)
+const HooksSurface = lazy(() =>
+  import('./surfaces/HooksSurface').then((m) => ({ default: m.HooksSurface })),
+)
 
 export function App() {
   const { t: tNav } = useTranslation('nav')
@@ -91,6 +97,8 @@ export function App() {
               {ui.surface === 'git' && <GitSurface />}
               {ui.surface === 'insights' && <InsightsSurface />}
               {ui.surface === 'settings' && <SettingsSurface />}
+              {ui.surface === 'council' && <CouncilSurface />}
+              {ui.surface === 'hooks' && <HooksSurface />}
             </Suspense>
           </ErrorBoundary>
         </div>
@@ -148,6 +156,9 @@ function SurfaceStatChips({ surface, activeSessionId }: { surface: Surface; acti
   }
   if (surface === 'delegation' && activeSessionId) {
     return <span className="surface-stat">委派树</span>
+  }
+  if (surface === 'council' && activeSessionId) {
+    return <span className="surface-stat">议事会</span>
   }
   return null
 }

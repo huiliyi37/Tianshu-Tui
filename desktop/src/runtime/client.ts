@@ -7,6 +7,8 @@ import type {
   FileContent,
   GitGraphResponse,
   HealthInfo,
+  HookEntry,
+  HooksConfig,
   InsightsResponse,
   ModelEntry,
   PlanDoc,
@@ -106,6 +108,12 @@ async function apiGet<T>(path: string): Promise<T> {
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await rivetFetch(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined })
   if (!res.ok) throw new Error(`POST ${path} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await rivetFetch(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined })
+  if (!res.ok) throw new Error(`PUT ${path} -> ${res.status}`)
   return res.json() as Promise<T>
 }
 
@@ -408,6 +416,30 @@ export function getArtifact(id: string, artifactId: string): Promise<{ artifact:
   return apiGet<{ artifact: ArtifactSummary; raw: string }>(
     `/sessions/${id}/artifacts/${encodeURIComponent(artifactId)}`,
   )
+}
+
+// ── Council (I1) ────────────────────────────────────────────────────
+
+export function conveneCouncil(
+  id: string,
+  input: {
+    artifactId: string
+    objective?: string
+    seats?: { authority: string; charter?: string }[]
+    rounds?: number
+  },
+): Promise<{ planMarkdown: string; artifactId: string }> {
+  return apiPost<{ planMarkdown: string; artifactId: string }>(`/sessions/${id}/council`, input)
+}
+
+// ── Hooks (I4) ──────────────────────────────────────────────────────
+
+export function getHooks(id: string): Promise<HooksConfig> {
+  return apiGet<HooksConfig>(`/sessions/${id}/hooks`)
+}
+
+export function setHooks(id: string, hooks: HookEntry[]): Promise<HooksConfig> {
+  return apiPut<HooksConfig>(`/sessions/${id}/hooks`, { hooks })
 }
 
 // ── Schedule (N3) ───────────────────────────────────────────────────

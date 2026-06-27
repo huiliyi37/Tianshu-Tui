@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, type LucideIcon,
+  Network, Settings, Scale, Plug, type LucideIcon,
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
@@ -18,7 +18,7 @@ const STATUS_GLYPH: Record<string, string> = {
   idle: '○',
 }
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
+const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
 
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
@@ -28,6 +28,8 @@ const SURFACE_LABEL: Record<Surface, string> = {
   git: 'Git',
   insights: 'Insights',
   delegation: '委派树',
+  council: '议事会',
+  hooks: 'Hooks',
   settings: '设置',
 }
 
@@ -39,6 +41,8 @@ const NAV_ICONS: Record<Surface, LucideIcon> = {
   git: GitBranch,
   insights: BarChart3,
   delegation: Network,
+  council: Scale,
+  hooks: Plug,
   settings: Settings,
 }
 
@@ -245,6 +249,11 @@ export function ProjectSidebar() {
                       <div className="thread-row-main">
                         <div className="title">
                           <span className={`status-dot status-${s.status}`} />
+                          {s.domainGlyph && (
+                            <span className={`domain-glyph domain-accent-${s.domainAccent}`} aria-hidden>
+                              {s.domainGlyph}
+                            </span>
+                          )}
                           {s.title ?? s.id.slice(0, 8)}
                           {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
                           {s.worktreeBranch && (

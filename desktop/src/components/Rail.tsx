@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Sun, Moon, Laptop, Scale, type LucideIcon,
+  Network, Settings, Sun, Moon, Laptop, Scale, Plug, type LucideIcon,
 } from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -17,6 +17,7 @@ const ICONS: Record<Surface, LucideIcon> = {
   insights: BarChart3,
   delegation: Network,
   council: Scale,
+  hooks: Plug,
   settings: Settings,
 }
 
@@ -45,7 +46,7 @@ export function Rail(props: {
   const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'settings']
+  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)

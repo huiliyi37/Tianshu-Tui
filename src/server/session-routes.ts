@@ -35,8 +35,10 @@ import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
 import { validatePath } from '../tools/path-validate.js'
-import { readFileSync, statSync } from 'node:fs'
-import { extname, relative } from 'node:path'
+import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
+import { extname, relative, join } from 'node:path'
+import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
+import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 
 export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result' | 'markdown' | 'html'
 
@@ -688,6 +690,89 @@ export function buildSessionRoutes(
       if (!found) return { status: 404, body: { error: 'Artifact not found' } }
       const raw = await manager.readArtifact(id, artifactId)
       return { status: 200, body: { artifact: artifactSummary(found), raw: raw ?? '' } }
+    }, apiToken),
+
+    // I1 — convene a star-domain council on a plan artifact.
+    // Body: { artifactId: string, objective?: string, seats?: [...], rounds?: 1|2 }
+    'POST /sessions/:id/council': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { artifactId?: unknown; objective?: unknown; seats?: unknown; rounds?: unknown }
+      if (typeof data.artifactId !== 'string' || !data.artifactId.trim()) {
+        return { status: 400, body: { error: 'Missing or invalid "artifactId"' } }
+      }
+      if (data.objective !== undefined && typeof data.objective !== 'string') {
+        return { status: 400, body: { error: 'Invalid "objective"' } }
+      }
+      if (data.seats !== undefined && (!Array.isArray(data.seats) || data.seats.some((s: unknown) => !s || typeof (s as { authority?: unknown }).authority !== 'string'))) {
+        return { status: 400, body: { error: 'Invalid "seats"' } }
+      }
+      if (data.rounds !== undefined && (typeof data.rounds !== 'number' || data.rounds < 1 || data.rounds > 2)) {
+        return { status: 400, body: { error: 'Invalid "rounds" (must be 1 or 2)' } }
+      }
+      const session = manager.getSession(params!.id!)
+      if (!session) return { status: 404, body: { error: 'Session not found' } }
+      // I1: ensure the session has a live agent. The agent is lazily built on
+      // first run; council must operate on a ready agent (idle is OK as long as
+      // the agent exists and is not currently running a turn).
+      const agent = manager.getAgentForSession?.(params!.id!)
+      if (!agent || typeof agent.conveneCouncil !== 'function') {
+        return { status: 503, body: { error: 'Agent not ready' } }
+      }
+      try {
+        const result = await agent.conveneCouncil({
+          artifactId: data.artifactId.trim(),
+          ...(data.objective ? { objective: data.objective } : {}),
+          ...(data.seats ? { seats: data.seats as { authority: string; charter?: string }[] } : {}),
+          ...(typeof data.rounds === 'number' ? { rounds: data.rounds } : {}),
+        })
+        return { status: 200, body: result }
+      } catch (err: unknown) {
+        const status = (err as { statusCode?: number }).statusCode ?? 500
+        const message = (err as Error)?.message ?? 'Council failed'
+        return { status, body: { error: message } }
+      }
+    }, apiToken),
+
+    // I4 — read user-defined .rivet/hooks.json for this session.
+    'GET /sessions/:id/hooks': withAuth((_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const config = loadHooksConfig(rec.cwd)
+      return { status: 200, body: config }
+    }, apiToken),
+
+    // I4 — write user-defined .rivet/hooks.json for this session.
+    'PUT /sessions/:id/hooks': withAuth((body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const data = (body ?? {}) as { hooks?: unknown }
+      if (!Array.isArray(data.hooks)) {
+        return { status: 400, body: { error: 'Missing or invalid "hooks" array' } }
+      }
+      const hooks: HookEntry[] = []
+      for (const entry of data.hooks) {
+        if (!entry || typeof entry !== 'object') {
+          return { status: 400, body: { error: 'Each hook must be an object' } }
+        }
+        const e = entry as Record<string, unknown>
+        if (!VALID_EVENTS.has(e.event as HookEvent)) {
+          return { status: 400, body: { error: `Invalid hook event "${e.event}"` } }
+        }
+        if (typeof e.script !== 'string' || !e.script.trim()) {
+          return { status: 400, body: { error: 'Each hook must have a non-empty "script"' } }
+        }
+        const timeoutMs = typeof e.timeoutMs === 'number' ? e.timeoutMs : undefined
+        hooks.push({ event: e.event as HookEvent, script: e.script.trim(), ...(timeoutMs !== undefined ? { timeoutMs } : {}) })
+      }
+      const dir = join(rec.cwd, '.rivet')
+      const path = join(dir, 'hooks.json')
+      try {
+        validatePath(rec.cwd, path, 'write')
+      } catch {
+        return { status: 400, body: { error: 'Invalid hooks path' } }
+      }
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(path, JSON.stringify({ hooks }, null, 2), 'utf-8')
+      return { status: 200, body: { hooks } }
     }, apiToken),
 
     // Vision — serve a persisted user-attached image by id. The desktop fetches

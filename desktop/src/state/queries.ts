@@ -3,16 +3,19 @@ import {
   abortSession,
   approvePlan,
   closeSession,
+  conveneCouncil,
   createSchedule,
   createSession,
   deleteSchedule,
   getHealth,
   getGithubPr,
+  getHooks,
   getPlan,
   getFileDiff,
   getWorkingTree,
   listArtifacts,
   listConfigProviders,
+  listDomains,
   listGithubPrs,
   listPlans,
   listSchedule,
@@ -21,10 +24,12 @@ import {
   rejectPlan,
   sendArtifactFeedback,
   sendPrompt,
+  setDomain,
+  setHooks,
   setPlanMode,
   unarchiveSession,
 } from '../runtime/client'
-import type { PlanModeState } from '../runtime/types'
+import type { HookEntry, PlanModeState } from '../runtime/types'
 
 // Server state lives in TanStack Query: sessions/health poll on an interval,
 // artifacts refetch on demand (driven by artifact events). UI state is separate
@@ -36,6 +41,8 @@ export const qk = {
   artifacts: (id: string | null) => ['artifacts', id] as const,
   plans: (id: string | null) => ['plans', id] as const,
   plan: (id: string | null, slug: string | null) => ['plan', id, slug] as const,
+  domains: (id: string | null) => ['domains', id] as const,
+  hooks: (id: string | null) => ['hooks', id] as const,
   schedule: ['schedule'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
@@ -66,6 +73,57 @@ export function useArtifacts(sessionId: string | null, rev: number) {
     queryKey: [...qk.artifacts(sessionId), rev],
     queryFn: () => (sessionId ? listArtifacts(sessionId) : Promise.resolve([])),
     enabled: !!sessionId,
+  })
+}
+
+/** List the star-domain picker entries for a session (Auto / Off / built-in & custom). */
+export function useDomains(sessionId: string | null) {
+  return useQuery({
+    queryKey: qk.domains(sessionId),
+    queryFn: () => (sessionId ? listDomains(sessionId) : Promise.resolve([])),
+    enabled: !!sessionId,
+  })
+}
+
+export function useSetDomain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, key }: { id: string; key: string }) => setDomain(id, key),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.domains(id) })
+      qc.invalidateQueries({ queryKey: qk.sessions })
+    },
+  })
+}
+
+export function useConveneCouncil() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, artifactId, rounds }: { id: string; artifactId: string; rounds?: number }) =>
+      conveneCouncil(id, { artifactId, rounds }),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.artifacts(id) })
+    },
+  })
+}
+
+/** I4 — read the user-defined .rivet/hooks.json config for a session. */
+export function useHooks(sessionId: string | null) {
+  return useQuery({
+    queryKey: qk.hooks(sessionId),
+    queryFn: () => (sessionId ? getHooks(sessionId) : Promise.resolve({ hooks: [] })),
+    enabled: !!sessionId,
+  })
+}
+
+/** I4 — write the user-defined .rivet/hooks.json config for a session. */
+export function useSetHooks() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, hooks }: { id: string; hooks: HookEntry[] }) => setHooks(id, hooks),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.hooks(id) })
+    },
   })
 }
 
