@@ -76,7 +76,9 @@ Do NOT modify any files.`,
     name: 'reviewer',
     role: 'readonly',
     allowedTools: [...READ_ONLY_TOOLS],
-    expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.`,
+    expertisePrompt: `You are a code reviewer. Read the code carefully, identify issues, and provide actionable feedback.
+
+For code search in review tasks, prefer ast_grep over grep when the target is a known syntax pattern (e.g., "find all async functions that don't have try-catch"). ast_grep matches AST nodes, not text, and won't produce false positives from comments or string literals.`,
     defaultTimeoutMs: 600_000, // 10min — review needs thorough analysis
     tierLock: 'cheap',
     builtIn: true,
@@ -209,7 +211,7 @@ Use met:false for unmet, met:null for uncheckable. If overall is rejected, the s
   {
     name: 'patcher',
     role: 'hands',
-    allowedTools: [...WRITE_TOOLS],
+    allowedTools: [...WRITE_TOOLS, 'ast_edit'],
     expertisePrompt: `You are a patcher. Apply code changes precisely. Follow edit instructions exactly, preserving indentation and context.`,
     defaultMaxTokens: 16384,
     defaultKind: 'patch_proposal',
