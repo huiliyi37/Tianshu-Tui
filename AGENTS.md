@@ -30,13 +30,15 @@
 | `~/.rivet/sessions/<slug>/worker-*/` | worker 子会话目录（含遥测/信息素/对话 JSONL） |
 | `<cwd>/.rivet/knowledge/memory.jsonl` | 项目持久化知识（跨会话） |
 | `<cwd>/.rivet/playbook.jsonl` | 历史教训回放 |
-| `<cwd>/.rivet/artifacts/` | 大输出持久化 |
+| `<cwd>/.rivet/artifacts/` | 大输出持久化（主 session + worker session） |
 
 **排查规则**：
 - 找"某个 agent 说了什么" → `~/.rivet/sessions/<slug>/<id>.jsonl`
 - 找"worker 用了什么模型" → `~/.rivet/sessions/<slug>/worker-<id>.jsonl`（看 `model_switch` 行）或同级 `.meta.json` 的 `model` 字段
 - 找"项目级知识/记忆" → `<cwd>/.rivet/knowledge/memory.jsonl`
 - worker 会话 ID 格式：`worker-<uuid>`，与主会话共享同一目录
+- worker artifact 目录格式：`<cwd>/.rivet/artifacts/worker-${order.id.replace(/:/g, '-')}/`
+- 主会话 `ArtifactStore` 通过 `addFallbackSession(workerSessionId)` 读取 worker artifact，不拷贝文件
 - 可通过 `RIVET_SESSION_DIR` 环境变量覆盖默认目录
 
 ## 高危命令纪律（硬性闸门）

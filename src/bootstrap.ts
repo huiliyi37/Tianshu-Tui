@@ -786,8 +786,8 @@ export function createAgentRuntime(deps: {
     }
   }
 
-  // EFE routing pulls per-turn signals from the agent, which is constructed
-  // after the coordinator — bridge via late-bound reference.
+  // EFE routing pulls per-turn signals from the agent. Build the agent first so
+  // its ArtifactStore can be wired into the coordinator for worker artifact fallback.
   let agentForSignals: AgentLoop | undefined
 
   // Track 1: unified shadow→gated promotion gate. Evidence is evaluated once
@@ -819,28 +819,6 @@ export function createAgentRuntime(deps: {
     totalShadowSamples: g.evidence.totalShadowSamples,
   }))
 
-  refs.coordinator = new DelegationCoordinator({
-    baseToolRegistry: toolRegistry,
-    modelCards,
-    maxWorkers: 3,
-    runtimeFactory,
-    routing: workerRouting,
-    providerHealth,
-    domainKnowledgeStore,
-    modelTierShadowStore: refs.meridianIndexer?.getDb(),
-    modelTierBanditEnabled: modelTierGate.enabled,
-    gatedInfluenceAuditStore: refs.meridianIndexer?.getDb(),
-    efeRouting: {
-      enabled: modelRoutingGate.enabled,
-      getSignals: () => agentForSignals?.getPolicySignals(),
-    },
-    sessionRegistry: refs.sessionRegistry ?? undefined,
-    sessionId: refs.sessionId ?? undefined,
-    resumeEnabled: true,
-    reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
-    maxDelegationDepth: config.agent.maxDelegationDepth,
-  })
-
   const agent = new AgentLoop(
     {
       ...agentCfg,
@@ -870,6 +848,29 @@ export function createAgentRuntime(deps: {
     cwd,
   )
   agentForSignals = agent
+
+  refs.coordinator = new DelegationCoordinator({
+    baseToolRegistry: toolRegistry,
+    modelCards,
+    maxWorkers: 3,
+    runtimeFactory,
+    routing: workerRouting,
+    providerHealth,
+    domainKnowledgeStore,
+    modelTierShadowStore: refs.meridianIndexer?.getDb(),
+    modelTierBanditEnabled: modelTierGate.enabled,
+    gatedInfluenceAuditStore: refs.meridianIndexer?.getDb(),
+    efeRouting: {
+      enabled: modelRoutingGate.enabled,
+      getSignals: () => agentForSignals?.getPolicySignals(),
+    },
+    sessionRegistry: refs.sessionRegistry ?? undefined,
+    sessionId: refs.sessionId ?? undefined,
+    artifactStore: agent.artifactStore,
+    resumeEnabled: true,
+    reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
+    maxDelegationDepth: config.agent.maxDelegationDepth,
+  })
 
   return { agent }
 }

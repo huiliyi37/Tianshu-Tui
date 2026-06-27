@@ -198,6 +198,10 @@ export interface DelegationCoordinatorConfig {
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current session ID for claim management. */
   sessionId?: string
+  /** Primary session artifact store. When set, worker artifacts are made resolvable
+   *  by registering their session directories as fallbacks, and large worker
+   *  packets can be offloaded into the primary store. */
+  artifactStore?: import('../artifact/store.js').ArtifactStore
   /** Optional collaboration protocol for semantic locking and merge coordination. */
   collaboration?: CollaborationConfig
   /** AbortSignal to propagate to workers — fires when the tool-level timeout
@@ -455,6 +459,16 @@ export class DelegationCoordinator {
     })
     this.circuitBreaker = config.circuitBreaker ?? new CircuitBreakerManager()
     this.mailbox = new InMemoryMailbox()
+  }
+
+  /** Artifact session id used by a worker for its own ArtifactStore. */
+  private workerArtifactSessionId(orderId: string): string {
+    return `worker-${orderId.replace(/:/g, '-')}`
+  }
+
+  /** Make worker-produced artifacts resolvable from the primary session store. */
+  private registerWorkerArtifacts(orderId: string): void {
+    this.config.artifactStore?.addFallbackSession(this.workerArtifactSessionId(orderId))
   }
 
   /** Lazily start the stall sweep; stop it when no workers are in flight. */
@@ -849,7 +863,7 @@ export class DelegationCoordinator {
             nextActions: ['Perform the objective directly in this worker session'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
 
@@ -857,7 +871,7 @@ export class DelegationCoordinator {
         return {
           status: 'skipped',
           results: [],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
 
@@ -880,7 +894,7 @@ export class DelegationCoordinator {
               nextActions: ['Wait for cooldown or use a different profile'],
               evidenceStatus: 'blocked',
             }],
-            packet: await buildPrimaryWorkerPacket([]),
+            packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
           }
         }
       }
@@ -898,7 +912,7 @@ export class DelegationCoordinator {
           modelTierGatedDecisions: [],
           gatedInfluenceAudits: [],
           results: [resumeHit],
-          packet: await buildPrimaryWorkerPacket([resumeHit]),
+          packet: await buildPrimaryWorkerPacket([resumeHit], this.config.artifactStore),
         }
       }
 
@@ -1013,7 +1027,7 @@ export class DelegationCoordinator {
         status: 'completed',
         order,
         results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'))],
-        packet: await buildPrimaryWorkerPacket([]),
+        packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
       }
     }
 
@@ -1040,7 +1054,7 @@ export class DelegationCoordinator {
             nextActions: ['Reduce file scope or increase maxFiles budget'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
     }
@@ -1197,7 +1211,7 @@ export class DelegationCoordinator {
             nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
       semanticLockAcquired = true
@@ -1246,7 +1260,7 @@ export class DelegationCoordinator {
                 modelTierGatedDecisions: [tierGatedDecision],
                 gatedInfluenceAudits: [gatedInfluenceAudit],
                 results: [degraded],
-                packet: await buildPrimaryWorkerPacket([degraded]),
+                packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
               }
             }
           }
@@ -1287,6 +1301,7 @@ export class DelegationCoordinator {
             },
           }))
           run = { result: handsRun.result, sessionMessages: handsSessionMessages, usage: handsRun.usage, providerName: workerConfig.providerName }
+          this.registerWorkerArtifacts(order.id)
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1300,6 +1315,7 @@ export class DelegationCoordinator {
           ? workerRun.session.getMessages()
           : undefined
         run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: workerConfig.providerName }
+        this.registerWorkerArtifacts(order.id)
       }
     } catch (error) {
       // Physarum health: worker run threw (API/runtime fault, not task outcome).
@@ -1456,7 +1472,7 @@ export class DelegationCoordinator {
                       strongCard.model,
                       upgradedConfig.providerName,
                     )
-                    return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded]) }
+                    return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore) }
                   }
                 }
 
@@ -1517,7 +1533,7 @@ export class DelegationCoordinator {
               modelTierGatedDecisions: [tierGatedDecision],
               gatedInfluenceAudits: [gatedInfluenceAudit],
               results: [degraded],
-              packet: await buildPrimaryWorkerPacket([degraded]),
+              packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
             }
           }
         }
@@ -1535,7 +1551,7 @@ export class DelegationCoordinator {
           modelTierGatedDecisions: [tierGatedDecision],
           gatedInfluenceAudits: [gatedInfluenceAudit],
           results: [degraded],
-          packet: await buildPrimaryWorkerPacket([degraded]),
+          packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
         }
       }
     } finally {
@@ -1576,7 +1592,7 @@ export class DelegationCoordinator {
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
-        packet: await buildPrimaryWorkerPacket([run.result]),
+        packet: await buildPrimaryWorkerPacket([run.result], this.config.artifactStore),
       }
     }
 
@@ -1619,7 +1635,7 @@ export class DelegationCoordinator {
       modelTierGatedDecisions: [tierGatedDecision],
       gatedInfluenceAudits: [gatedInfluenceAudit],
       results,
-      packet: await buildPrimaryWorkerPacket(results),
+      packet: await buildPrimaryWorkerPacket(results, this.config.artifactStore),
     }
   }
 
@@ -1651,10 +1667,10 @@ export class DelegationCoordinator {
       const runnables = requests.filter(r =>
         (r.delegationDepth ?? 0) < depthCap && shouldDelegateObjective(r.objective, r.scope))
       if (runnables.length === 0 && depthCapped.length === 0) {
-        return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([]) }
+        return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([], this.config.artifactStore) }
       }
       if (runnables.length === 0) {
-        return { status: 'completed', results: depthCapped, packet: await buildPrimaryWorkerPacket(depthCapped) }
+        return { status: 'completed', results: depthCapped, packet: await buildPrimaryWorkerPacket(depthCapped, this.config.artifactStore) }
       }
 
     const queue = new WorkOrderQueue(this.config.maxWorkers, {
@@ -1772,7 +1788,7 @@ export class DelegationCoordinator {
     const baseRun: CoordinatorRun = {
       status: 'completed',
       results: aggregated,
-      packet: await buildPrimaryWorkerPacket(aggregated),
+      packet: await buildPrimaryWorkerPacket(aggregated, this.config.artifactStore),
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),
