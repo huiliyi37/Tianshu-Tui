@@ -105,7 +105,7 @@ pi-tui `tui.ts:40-83` 浓缩的高级终端渲染技术，可在 T9 的 `ansi.ts
 
 1. ✅ 写本文档
 2. ✅ **移植 `latex-to-unicode`**（Tier A 首个，移植流程已跑通）— 见 6.1
-3. 移植 `latex-block`（依赖 1 的产物）
+3. ✅ **移植 `latex-block`**（依赖 latex-to-unicode）— 见 6.2
 4. 移植 `fuzzy` + `keys` + `keybindings`（零依赖三件套）
 5. 移植 `terminal-capabilities`（解耦 latex-to-unicode 对 TERMINAL 的硬依赖）
 6. 评估 Tier C 协议技巧移植
@@ -131,3 +131,20 @@ pi-tui `tui.ts:40-83` 浓缩的高级终端渲染技术，可在 T9 的 `ansi.ts
 
 **待办（消费方接线）**：在 `src/tui/format/markdown.ts` 或 `thinking.ts` 调用
 `renderMathInText()` / `latexToUnicode()`，让 agent 输出的 LaTeX 在 TUI 里渲染为 Unicode。
+
+### 6.2 latex-block ✅ 完成
+
+**结果**：`src/tui/pi/latex-block.ts`（462 行）+ 契约测试 8 例全绿，项目 `tsc --noEmit` 零错误。
+
+**解耦改动**（仅 2 处，逻辑零改动）：
+1. **替换 `visibleWidth` → T9 `displayWidth`** — 上游 `import { visibleWidth } from "./utils"`
+   依赖 pi-tui 的 `utils.ts`（用 `Bun.stringWidth`）。改为 `import { displayWidth } from "../width.js"`，
+   复用 T9 既有 `width.ts`（基于 `string-width` 包，Node 兼容）。3 处调用点签名兼容（`string → number`）。
+2. **`noUncheckedIndexedAccess` 适配**（11 处） — `boxes[0]`、`src[i]`、`lines[...]` 等数组/字符串
+   索引访问加 `!` 非空断言（均有边界检查或 length 守卫保证安全）。
+
+**验证**：`bun test ./src/tui/pi/__tests__/` → 22 pass / 0 fail（latex-to-unicode 14 + latex-block 8）。
+覆盖：空输入/非分数单行/frac 垂直堆叠/二次公式对齐/多行/嵌套 frac/符号委托/首尾空行裁剪。
+
+**消费方接线**（待办）：与 6.1 一起，在 `markdown.ts` 的 display-math 分支调用 `latexToBlock()`，
+inline math 调用 `latexToUnicode()`。
