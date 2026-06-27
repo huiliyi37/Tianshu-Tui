@@ -159,7 +159,8 @@ export function renderAllCapsulesBlock(cwd: string): string | undefined {
  * 完整正文经 recall_capsule(star) 按需拉取。
  * 天璇的换视角核心思维已蒸馏进 static.ts BASE_PROMPT，天权的规划原则
  * 已由 evidence-scope / workflow 规则覆盖，CORE_GUARDRAILS 的 5 条护栏
- * 已由 self-verification / external-source-verification / evidence-scope 覆盖。
+ * 已由 evidence-scope（含原 self-verification / cross-layer 证据内核）/
+ * external-source-verification / delivery-contract 覆盖。
  * 不再在冻结前缀常驻任何胶囊全文或护栏——省 ~6K tokens。
  */
 
