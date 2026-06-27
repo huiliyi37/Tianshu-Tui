@@ -3,3 +3,6 @@ dist
 .DS_Store
 src-tauri/target
 src-tauri/gen
+src-tauri/resources/node/*
+!src-tauri/resources/node/.gitkeep
+.tmp-node-runtime

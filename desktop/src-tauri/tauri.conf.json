@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5273",
-    "beforeBuildCommand": "npm run build && bash scripts/pack-native.sh",
+    "beforeBuildCommand": "npm run build && bash ../scripts/pack-native.sh && node scripts/fetch-node-runtime.js",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,9 +25,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": ["app", "dmg", "nsis", "msi"],
     "resources": {
-      "../../dist": "rivet-runtime"
+      "../../dist": "rivet-runtime",
+      "resources/node": "node-runtime"
     },
     "icon": [
       "icons/32x32.png",
@@ -35,6 +36,28 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "signingIdentity": null,
+      "entitlements": null
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": ["https://example.com/tianshu-updates.json"],
+      "pubkey": "",
+      "windows": {
+        "installMode": "basicUi"
+      }
+    }
   }
 }

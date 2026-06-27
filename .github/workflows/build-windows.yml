@@ -46,12 +46,19 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      - name: Fetch bundled Node runtime
+        working-directory: desktop
+        run: node scripts/fetch-node-runtime.js
+
       - name: Build Tauri app (Windows)
         working-directory: desktop
         run: npx tauri build
         env:
-          # CI 环境不需要签名
-          TAURI_SIGNING_PRIVATE_KEY: ''
+          # 未配置签名证书时构建未签名安装包；配置 secrets 后自动签名。
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # Windows 代码签名（可选）
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

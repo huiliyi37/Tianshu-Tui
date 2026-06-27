@@ -22,6 +22,8 @@ use tauri::{
 pub struct RuntimeInfo {
     pub port: u16,
     pub token: String,
+    /// Which Node binary is hosting the sidecar: "bundled", "env", "system".
+    pub node_source: String,
 }
 
 struct Sidecar {
@@ -56,6 +58,75 @@ fn random_token() -> String {
         .collect()
 }
 
+/// Resolve the bundled Node.js binary shipped as a Tauri resource.
+///
+/// Resource layout after fetch-node-runtime runs:
+///   Resources/node-runtime/darwin-arm64/node
+///   Resources/node-runtime/darwin-x64/node
+///   Resources/node-runtime/win-x64/node.exe
+///   Resources/node-runtime/linux-arm64/node
+///   Resources/node-runtime/linux-x64/node
+fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
+    let res = app.path().resource_dir().ok()?;
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    let node_os = match os {
+        "macos" => "darwin",
+        "windows" => "win",
+        "linux" => "linux",
+        _ => return None,
+    };
+    let node_arch = match arch {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        _ => return None,
+    };
+    let ext = if os == "windows" { ".exe" } else { "" };
+    let path = res
+        .join("node-runtime")
+        .join(format!("{}-{}", node_os, node_arch))
+        .join(format!("node{}", ext));
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Fallback Node lookup when no bundled binary is available.
+///
+/// A bundled `.app` launched from Finder/Dock inherits a minimal PATH that
+/// usually lacks Homebrew/nvm dirs, so a bare `node` lookup fails. We probe the
+/// common install locations before falling back to PATH resolution.
+fn detect_system_node() -> String {
+    let candidates = [
+        "/opt/homebrew/bin/node",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+    ];
+    for c in candidates {
+        if std::path::Path::new(c).exists() {
+            return c.to_string();
+        }
+    }
+    "node".to_string()
+}
+
+/// Pick the Node.js command to host the sidecar.
+///
+/// Priority:
+///   1. `RIVET_SIDECAR_CMD` environment override (power users / CI).
+///   2. Bundled Node resource (production, no system Node required).
+///   3. Common system install locations + PATH fallback.
+fn resolve_node_cmd(app: &tauri::App) -> (String, &'static str) {
+    if let Ok(cmd) = std::env::var("RIVET_SIDECAR_CMD") {
+        return (cmd, "env");
+    }
+    if let Some(bundled) = bundled_node_path(app) {
+        return (bundled.to_string_lossy().to_string(), "bundled");
+    }
+    (detect_system_node(), "system")
+}
+
 /// Resolve the rivet runtime entry point.
 ///
 /// Resolution order (fail-soft, packaged → dev):
@@ -81,28 +152,7 @@ fn sidecar_entry(app: &tauri::App) -> PathBuf {
     dir.join("dist").join("main.js")
 }
 
-/// Locate a Node.js runtime to host the sidecar.
-///
-/// A bundled `.app` launched from Finder/Dock inherits a minimal PATH that
-/// usually lacks Homebrew/nvm dirs, so a bare `node` lookup fails. We probe the
-/// common install locations before falling back to PATH resolution. Embedding a
-/// private Node binary is deferred (see ROADMAP N5).
-fn detect_node() -> String {
-    if let Ok(cmd) = std::env::var("RIVET_SIDECAR_CMD") {
-        return cmd;
-    }
-    let candidates = [
-        "/opt/homebrew/bin/node",
-        "/usr/local/bin/node",
-        "/usr/bin/node",
-    ];
-    for c in candidates {
-        if std::path::Path::new(c).exists() {
-            return c.to_string();
-        }
-    }
-    "node".to_string()
-}
+
 
 /// Verify the port is actually OUR rivet sidecar (correct token), not merely
 /// "something is listening". A bare TCP connect can succeed against an unrelated
@@ -145,7 +195,7 @@ fn wait_until_ready(port: u16, token: &str, timeout: Duration) -> bool {
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let port = pick_free_port();
     let token = random_token();
-    let node = detect_node();
+    let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
 
     // Report spawn failures instead of swallowing them with `.ok()`: a missing
@@ -162,10 +212,8 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         Ok(c) => Some(c),
         Err(e) => {
             eprintln!(
-                "[rivet] failed to spawn sidecar (node='{}', entry='{}'): {}",
-                node,
-                entry.display(),
-                e
+                "[rivet] failed to spawn sidecar (node='{}', source='{}', entry='{}'): {}",
+                node, node_source, entry.display(), e
             );
             None
         }
@@ -177,7 +225,14 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         );
     }
 
-    (RuntimeInfo { port, token }, child)
+    (
+        RuntimeInfo {
+            port,
+            token,
+            node_source: node_source.to_string(),
+        },
+        child,
+    )
 }
 
 /// Kill the sidecar child if still tracked. Idempotent (take() empties the slot)
@@ -200,6 +255,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
