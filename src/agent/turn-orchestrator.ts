@@ -18,9 +18,8 @@ import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
 import { rejectOnAbort } from './turn-boundary-abort.js'
 import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
-import { evaluateThinkingRetry } from './thinking-retry.js'
-import { evaluatePhantomContinuation } from './phantom-continuation.js'
 import type { GoalContinuationController } from './goal-continuation.js'
+import type { PostTurnDecisionController } from './post-turn-decision.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types re-exported for deps interface ──
@@ -212,6 +211,7 @@ export interface TurnOrchestratorDeps {
 
   // === Sub-controllers ===
   goalContinuation: GoalContinuationController
+  postTurnDecision: PostTurnDecisionController
 }
 
 // ── Standalone: wrapCallbacksWithHeartbeat ──
@@ -732,19 +732,14 @@ export class TurnOrchestrator {
             artifactIdsAccessed: [],
           })
         }
-        const thinkingResult = evaluateThinkingRetry({
-          streamedText: this.deps.state.streamedText, collectedBlockCount: collectedBlocks.length,
-          thinkingAccum, thinkingOnlyRetries: this.deps.state.thinkingOnlyRetries,
-          lastThinkingContent: this.deps.state.lastThinkingContent,
+        const thinkingResult = await this.deps.postTurnDecision.evaluateThinkingRetry({
+          collectedBlockCount: collectedBlocks.length,
+          thinkingAccum,
+          turn,
+          callbacks,
+          signal: signal!,
         })
-        this.deps.state.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
-        this.deps.state.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
-        if (thinkingResult.shouldRetry) {
-          this.deps.appendSystemReminder(thinkingResult.retryMessage)
-          // Archive any partial streamed text before retrying (same rationale as TTSR above)
-          callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), false)
-          continue
-        }
+        if (thinkingResult.shouldRetry) continue
 
         // No tool calls this turn — increment the counter for convergence detection
         this.deps.state.consecutiveNoToolTurns = this.deps.state.consecutiveNoToolTurns + 1
@@ -764,31 +759,13 @@ export class TurnOrchestrator {
         if (goalCheckResult.kind === 'continue') continue
 
         // ── Phantom continuation check ──
-        // The model produced a no-tool turn but its text describes an action it
-        // never actually took (emitted a tool call as prose), or an open task
-        // contract is still in progress. Auto-continue ONE bounded iteration
-        // instead of ending the turn and forcing the user to nudge. Skipped when
-        // /goal is active (handled above), when convergence/doom-loop already
-        // steers, or when the per-run budget is exhausted.
-        if (!tracker?.isActive()) {
-          const phantom = evaluatePhantomContinuation({
-            streamedText: this.deps.state.streamedText,
-            activeContract: this.deps.state.taskContract,
-            autoContinueCount: this.deps.state.autoContinueCount,
-            maxAutoContinue: this.deps.getMaxAutoContinue(),
-            convergenceEscalated: this.deps.getDoomLoopLevel() !== 'none',
-          })
-          if (phantom.shouldContinue) {
-            this.deps.state.autoContinueCount = this.deps.state.autoContinueCount + 1
-            await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: false, callbacks }),
-              signal!,
-              'phantom-continue-complete',
-            )
-            this.deps.appendSystemReminder(phantom.message)
-            continue  // re-enter the for loop for one more iteration
-          }
-        }
+        // Only reached when goal check returned accept/finalize (goal not continuing).
+        const phantomResult = await this.deps.postTurnDecision.evaluatePhantomContinuation({
+          turn,
+          callbacks,
+          signal: signal!,
+        })
+        if (phantomResult.shouldContinue) continue
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
         await rejectOnAbort(

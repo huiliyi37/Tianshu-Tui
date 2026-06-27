@@ -22,6 +22,7 @@ import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
 import { GoalContinuationController } from './goal-continuation.js'
+import { PostTurnDecisionController } from './post-turn-decision.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -610,6 +611,26 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       completeTurn: (params) => self.turnCompletion.complete(params),
       writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
       flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
+    }),
+    postTurnDecision: new PostTurnDecisionController({
+      state: {
+        get streamedText() { return self.streamedText },
+        set streamedText(v) { self.streamedText = v },
+        get thinkingOnlyRetries() { return self.thinkingOnlyRetries },
+        set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
+        get lastThinkingContent() { return self.lastThinkingContent },
+        set lastThinkingContent(v) { self.lastThinkingContent = v },
+        get autoContinueCount() { return self.autoContinueCount },
+        set autoContinueCount(v) { self.autoContinueCount = v },
+        get taskContract() { return self.taskContract },
+        set taskContract(v) { self.taskContract = v },
+      } as any,
+      getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
+      getDoomLoopLevel: () => self.getDoomLoopLevel(),
+      appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
+      completeTurn: (params) => self.turnCompletion.complete(params),
+      getTotalUsage: () => self.session.getTotalUsage(),
+      getTurnCount: () => self.session.getTurnCount(),
     }),
   })
 }
