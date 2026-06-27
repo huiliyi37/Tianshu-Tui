@@ -23,13 +23,21 @@ const SettingsSurface = lazy(() =>
 const SkillsSurface = lazy(() =>
   import('./surfaces/SkillsSurface').then((m) => ({ default: m.SkillsSurface })),
 )
+const GitSurface = lazy(() =>
+  import('./surfaces/GitSurface').then((m) => ({ default: m.GitSurface })),
+)
+const InsightsSurface = lazy(() =>
+  import('./surfaces/InsightsSurface').then((m) => ({ default: m.InsightsSurface })),
+)
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'settings']
+const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'settings']
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
   automations: '自动化',
   attention: '需处理',
   skills: '技能',
+  git: 'Git',
+  insights: 'Insights',
   settings: '设置',
 }
 
@@ -60,8 +68,8 @@ export function App() {
         setPaletteOpen((o) => !o)
         return
       }
-      // Cmd+1..5 → switch surface
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '5') {
+      // Cmd+1..7 → switch surface
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '7') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
         return
@@ -188,6 +196,8 @@ export function App() {
               {ui.surface === 'automations' && <AutomationsSurface />}
               {ui.surface === 'attention' && <InboxSurface />}
               {ui.surface === 'skills' && <SkillsSurface />}
+              {ui.surface === 'git' && <GitSurface />}
+              {ui.surface === 'insights' && <InsightsSurface />}
               {ui.surface === 'settings' && <SettingsSurface />}
             </Suspense>
           </ErrorBoundary>

@@ -186,6 +186,78 @@ export interface DelegationNode {
   progressLine?: string
   /** T4 — elapsed wall-clock since the worker started, ms. */
   elapsedMs?: number
+  /** Actual model dispatched for this worker (insights / cost visualization). */
+  model?: string
+  /** Provider name for this worker (insights / cost visualization). */
+  provider?: string
+  /** Token usage for this worker (insights / cost visualization). */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    reasoning_tokens?: number
+    total_tokens?: number
+  }
+}
+
+export interface InsightsWorker {
+  workerId: string
+  parentId?: string
+  profile?: string
+  status?: string
+  model?: string
+  provider?: string
+  objective?: string
+  elapsedMs?: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  cost: number
+}
+
+export interface InsightsModelBreakdown {
+  model: string
+  provider?: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cost: number
+  count: number
+}
+
+export interface InsightsProviderBreakdown {
+  provider: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cost: number
+  count: number
+}
+
+export interface InsightsResponse {
+  totals: {
+    workers: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    reasoningTokens: number
+    totalTokens: number
+    cost: number
+  }
+  cacheHitRate: number | null
+  workers: InsightsWorker[]
+  modelBreakdown: InsightsModelBreakdown[]
+  providerBreakdown: InsightsProviderBreakdown[]
+}
+
+/** Git branch graph response from `GET /git/graph`. */
+export interface GitGraphResponse {
+  graph: string[]
 }
 
 /** T2 — structured active task list item (mirrors backend `todo` write). */

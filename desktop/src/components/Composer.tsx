@@ -14,6 +14,45 @@ import { compressImage } from '../lib/image-compress'
 // Controlled value: the parent owns input state so rewind/clear can set it.
 // Vision: paste/drop/select images → base64 data URLs → sent as image_url parts.
 
+// Web Speech API types are not in all lib DOM sets; declare minimally.
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number
+  results: SpeechRecognitionResultList
+}
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+}
+interface SpeechRecognitionResult {
+  isFinal: boolean
+  [index: number]: SpeechRecognitionAlternative
+}
+interface SpeechRecognitionAlternative {
+  transcript: string
+}
+interface SpeechRecognition extends EventTarget {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: Event) => void) | null
+  start(): void
+  stop(): void
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognition
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+}
+
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 220
@@ -58,6 +97,11 @@ export function Composer(props: {
 }) {
   const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, menuRev } = props
   const planning = planMode === 'planning'
+
+  useEffect(() => {
+    const win = window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    setSpeechSupported(!!(win.SpeechRecognition || win.webkitSpeechRecognition))
+  }, [])
   const togglePlan = useCallback(() => {
     onSetPlanMode?.(planning ? 'off' : 'planning')
   }, [planning, onSetPlanMode])
@@ -73,6 +117,9 @@ export function Composer(props: {
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
 
   // Restore caret after a programmatic value change (mention insertion).
   useLayoutEffect(() => {
@@ -199,6 +246,42 @@ export function Composer(props: {
     if (!text && images.length === 0) return
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
+  }
+
+  const toggleRecording = () => {
+    if (recording) {
+      recognitionRef.current?.stop()
+      return
+    }
+    const win = window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    const SpeechRecognitionCtor = win.SpeechRecognition || win.webkitSpeechRecognition
+    if (!SpeechRecognitionCtor) return
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = 'zh-CN'
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.onstart = () => setRecording(true)
+    recognition.onend = () => {
+      setRecording(false)
+      recognitionRef.current = null
+    }
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let final = ''
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results.item(i)
+        if (result.isFinal) final += result[0]?.transcript ?? ''
+        else interim += result[0]?.transcript ?? ''
+      }
+      if (final) {
+        onChange(value ? `${value} ${final}`.trim() : final)
+      } else if (interim) {
+        onChange(value ? `${value} ${interim}`.trim() : interim)
+      }
+    }
+    recognition.onerror = () => setRecording(false)
+    recognitionRef.current = recognition
+    recognition.start()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -386,6 +469,15 @@ export function Composer(props: {
           title="选择图片"
           aria-label="选择图片"
         >📎</button>
+        {speechSupported && (
+          <button
+            className={`btn ghost icon-btn ${recording ? 'recording' : ''}`}
+            onClick={toggleRecording}
+            disabled={busy}
+            title={recording ? '停止录音' : '语音输入'}
+            aria-label={recording ? '停止录音' : '语音输入'}
+          >🎤</button>
+        )}
       </div>
       <div className="composer-actions">
         <div className="plus-wrap" ref={plusRef}>

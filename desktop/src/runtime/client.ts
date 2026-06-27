@@ -5,7 +5,9 @@ import type {
   ArtifactSummary,
   DomainEntry,
   FileContent,
+  GitGraphResponse,
   HealthInfo,
+  InsightsResponse,
   ModelEntry,
   PlanDoc,
   PlanModeState,
@@ -202,6 +204,11 @@ export async function unarchiveSession(id: string): Promise<{ archived: boolean 
 
 export function fetchEvents(id: string, since: number): Promise<{ events: SessionEvent[]; lastSeq: number }> {
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
+}
+
+/** Insights — aggregated token usage, cost, and per-worker/model/provider breakdowns. */
+export function getInsights(id: string): Promise<InsightsResponse> {
+  return apiGet<InsightsResponse>(`/sessions/${id}/insights`)
 }
 
 /** D2 — @file mention picker: ranked project files under the session cwd. */
@@ -515,4 +522,11 @@ export async function restartMcpServer(serverId: string): Promise<{ ok: boolean 
 
 export async function listMcpServerTools(serverId: string): Promise<McpServerToolsResponse> {
   return apiGet<McpServerToolsResponse>(`/mcp/servers/${encodeURIComponent(serverId)}/tools`)
+}
+
+// ── Git graph ───────────────────────────────────────────────────────
+
+export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {
+  const qs = maxCount !== undefined ? `?maxCount=${maxCount}` : ''
+  return apiGet<GitGraphResponse>(`/git/graph${qs}`)
 }

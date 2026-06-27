@@ -12,6 +12,7 @@ import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, Inten
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
+import { Markdown } from '../components/Markdown'
 import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
@@ -64,6 +65,7 @@ export function ReviewPanel(props: {
     }
   }, [latestPlanSlug])
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
+  const [viewMode, setViewMode] = useState<'rendered' | 'raw'>('rendered')
   const [comment, setComment] = useState('')
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
@@ -73,6 +75,7 @@ export function ReviewPanel(props: {
     if (!sessionId) return
     try {
       setOpen(await getArtifact(sessionId, a.id))
+      setViewMode(a.kind === 'markdown' || a.kind === 'html' ? 'rendered' : 'raw')
       setComment('')
     } catch {
       // ignore
@@ -271,11 +274,28 @@ export function ReviewPanel(props: {
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>
           <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-            <h3>{open.artifact.kind} · {open.artifact.target}</h3>
+            <div className="modal-header">
+              <h3>{open.artifact.kind} · {open.artifact.target}</h3>
+              {(open.artifact.kind === 'markdown' || open.artifact.kind === 'html') && (
+                <div className="segmented">
+                  <button className={viewMode === 'rendered' ? 'active' : ''} onClick={() => setViewMode('rendered')}>渲染</button>
+                  <button className={viewMode === 'raw' ? 'active' : ''} onClick={() => setViewMode('raw')}>源码</button>
+                </div>
+              )}
+            </div>
             {open.artifact.kind === 'screenshot' ? (
               <img className="screenshot" src={`data:image/png;base64,${open.raw}`} alt={open.artifact.summary} />
             ) : open.artifact.kind === 'diff' ? (
               <DiffView raw={open.raw} />
+            ) : open.artifact.kind === 'markdown' && viewMode === 'rendered' ? (
+              <div className="artifact-rendered"><Markdown source={open.raw} /></div>
+            ) : open.artifact.kind === 'html' && viewMode === 'rendered' ? (
+              <iframe
+                className="artifact-html-frame"
+                srcDoc={open.raw}
+                sandbox=""
+                title={open.artifact.target}
+              />
             ) : (
               <pre>{open.raw}</pre>
             )}
