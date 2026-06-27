@@ -783,3 +783,54 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
+
+// ── Fleet Detail (子代理详情弹窗) ───────────────────────────────
+// Shows expanded details for a single delegation worker: profile, status,
+// current activity, elapsed, authority. Triggered by pressing Enter on a
+// worker row in the fleet panel.
+
+import type { FleetWorkerView } from '../fleet-registry.js'
+
+export function renderFleetDetail(worker: FleetWorkerView, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+
+  // Title: status glyph + worker label
+  const statusGlyph = worker.terminal
+    ? (worker.status === 'passed' ? '✓' : worker.status === 'failed' ? '✗' : '⚠')
+    : '◐'
+  const statusColor = worker.terminal
+    ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
+    : theme.primary
+  lines.push(formatTitleBar(`${color(statusGlyph, statusColor)} ${worker.shortLabel}`, width, theme))
+  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+
+  // Detail rows
+  const rows: [string, string][] = []
+  rows.push(['Profile', worker.profile])
+  rows.push(['Status', worker.status])
+  if (worker.authority) rows.push(['Authority', worker.authority])
+  rows.push(['Parent', worker.parentToolId])
+  rows.push(['Elapsed', worker.elapsedMs > 1000 ? `${(worker.elapsedMs / 1000).toFixed(1)}s` : `${worker.elapsedMs}ms`])
+
+  for (const [label, value] of rows) {
+    lines.push(padLine(` ${color(label, theme.muted)}: ${color(value, theme.secondary)}`, width, theme))
+  }
+
+  // Activity line
+  if (worker.activity) {
+    lines.push(padLine('', width, theme))
+    lines.push(padLine(` ${color('Activity:', theme.muted)}`, width, theme))
+    lines.push(padLine(`   ${color(worker.activity, theme.secondary)}`, width, theme))
+  }
+
+  // Pad to fill height
+  const remaining = Math.max(0, height - lines.length - 3)
+  for (let i = 0; i < remaining; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  lines.push(formatFooter('Esc close', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}

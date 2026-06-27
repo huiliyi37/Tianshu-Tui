@@ -1343,6 +1343,72 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
     }
 
+    case '/todo': {
+      const { getTodos, setTodos } = await import('../tools/todo.js')
+      const { TodoStore } = await import('../tools/todo-store.js')
+      const subcmd = parts[1]
+      const arg = parts.slice(2).join(' ').trim()
+      const todos = getTodos()
+
+      if (!subcmd || subcmd === 'list') {
+        // List current todos
+        const text = todos.length === 0
+          ? 'No todos. The agent will create tasks via the todo tool.'
+          : TodoStore.formatList(todos)
+        pushStatic(createLogEntry({ type: 'system', content: text }))
+      } else if (subcmd === 'add') {
+        if (!arg) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo add <content>', isError: true }))
+        } else {
+          const id = `user-${Date.now().toString(36)}`
+          setTodos([...todos, { id, content: arg, status: 'pending' as const }])
+          pushStatic(createLogEntry({ type: 'system', content: `Added: ○ [${id}] ${arg}` }))
+        }
+      } else if (subcmd === 'done') {
+        const item = todos.find(t => t.id === arg || t.id.startsWith(arg))
+        if (!item) {
+          pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${arg}". Use /todo list to see ids.`, isError: true }))
+        } else {
+          setTodos(todos.map(t => t.id === item.id ? { ...t, status: 'completed' as const } : t))
+          pushStatic(createLogEntry({ type: 'system', content: `✓ Done: ${item.content}` }))
+        }
+      } else if (subcmd === 'skip') {
+        const item = todos.find(t => t.id === arg || t.id.startsWith(arg))
+        if (!item) {
+          pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${arg}". Use /todo list to see ids.`, isError: true }))
+        } else {
+          // Remove the item entirely (skip = don't do it)
+          setTodos(todos.filter(t => t.id !== item.id))
+          pushStatic(createLogEntry({ type: 'system', content: `⊘ Skipped: ${item.content}` }))
+        }
+      } else if (subcmd === 'move') {
+        const id = parts[2]
+        const dir = parts[3] // 'up' or 'down'
+        if (!id || (dir !== 'up' && dir !== 'down')) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo move <id> <up|down>', isError: true }))
+        } else {
+          const idx = todos.findIndex(t => t.id === id || t.id.startsWith(id))
+          if (idx === -1) {
+            pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${id}".`, isError: true }))
+          } else {
+            const swapWith = dir === 'up' ? idx - 1 : idx + 1
+            if (swapWith < 0 || swapWith >= todos.length) {
+              pushStatic(createLogEntry({ type: 'system', content: 'Already at edge.' }))
+            } else {
+              const next = [...todos]
+              ;[next[idx], next[swapWith]] = [next[swapWith]!, next[idx]!]
+              setTodos(next)
+              pushStatic(createLogEntry({ type: 'system', content: `Moved ${dir}: ${todos[idx]!.content}` }))
+            }
+          }
+        }
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo [list|add <content>|done <id>|skip <id>|move <id> <up|down>]' }))
+      }
+      setIsStreaming(false)
+      return true
+    }
+
     case '/mission': {
       const snapshot = ctx.agent.getCognitiveSnapshot?.()
       const strip = formatMissionStrip(snapshot)
