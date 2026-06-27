@@ -251,7 +251,7 @@ function computeTokenEfficiency(
   _evidence: ConvergenceInput['evidenceState'],
   outputTokens?: number,
 ): number {
-  const toolCount = Math.min(windowSize, history.length)
+  const toolCount = history.length
   // New path: real output tokens → exponential decay
   if (outputTokens !== undefined && toolCount > 0) {
     const tokensPerTool = outputTokens / toolCount
