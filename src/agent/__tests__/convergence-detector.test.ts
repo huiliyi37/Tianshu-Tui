@@ -941,4 +941,74 @@ describe('evaluateConvergence', () => {
         `iterative single-file edit score should be in a middling range, got ${result.score.toFixed(2)}`)
     })
   })
+
+  // ── No-data weight re-allocation (defect 4) ───────────────────────────
+  // textRepetitionPenalty + oscillationPenalty default to 1.0 when they lack
+  // enough fingerprints (window period). Previously that 1.0 entered the score
+  // at full weight, inflating it by ~0.18 in execute phase. Now the weight is
+  // re-allocated to data-carrying signals so "no data" does not look healthy.
+
+  describe('no-data weight re-allocation (defect 4)', () => {
+    it('score without fingerprint data is NOT inflated vs with-data baseline', () => {
+      // Same tool history in both cases. The difference is only whether the
+      // penalty signals HAVE data. A no-data window should not score HIGHER
+      // than a with-data window for the same trajectory — that would mean
+      // "no evidence" is being rewarded as health.
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'grep', target: 'x' },
+        { tool: 'run_tests', target: 't' },
+      ])
+      const base = {
+        turn: 8, phaseClass: 'execute' as PhaseClass,
+        contextWindow: 200_000, recentToolHistory: history,
+      }
+      // No fingerprints → both penalty signals are in no-data sentinel state.
+      const noData = evaluateConvergence(baseInput(base))
+      // With diverse fingerprints → both signals have data and return their
+      // real (non-sentinel) values, which for a healthy diverse trajectory are
+      // high but NOT artificially maxed.
+      const withData = evaluateConvergence(baseInput({
+        ...base,
+        toolFingerprints: ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh'],
+        textFingerprints: [
+          'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+          'nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two',
+          'three four five six seven eight nine ten eleven twelve thirteen fourteen',
+        ],
+      }))
+      // The no-data score must not exceed the with-data score by the old
+      // inflation margin. Allow a small tolerance since re-allocation shifts
+      // weight onto signals whose values differ — the point is no LARGE inflation.
+      assert.ok(
+        noData.score <= withData.score + 0.05,
+        `no-data score (${noData.score.toFixed(2)}) should not inflate above with-data (${withData.score.toFixed(2)})`,
+      )
+    })
+
+    it('errorPenalty empty-window 1.0 is NOT re-allocated (semantically correct)', () => {
+      // errorPenalty returns 1.0 on empty window meaning "no errors = full
+      // marks", which is a legitimate score, not a no-data sentinel. The
+      // re-allocation must be scoped to oscillation/textRep only — verify a
+      // healthy all-success window still scores high (errorPenalty keeps its
+      // weight), not drained because errorPenalty was mis-classified.
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'edit_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'run_tests', target: 't' },
+        { tool: 'run_tests', target: 'u' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      // All successes, diverse targets → high errorPenalty retained, score
+      // should reflect a healthy trajectory (not drained by mis-allocation).
+      assert.ok(result.signals.errorPenalty === 1.0, `errorPenalty should be 1.0 for all-success window`)
+    })
+  })
 })

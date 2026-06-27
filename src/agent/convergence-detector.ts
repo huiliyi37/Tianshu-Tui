@@ -314,6 +314,19 @@ function computeOscillationPenalty(fingerprints: ReadonlyArray<string>): number 
 }
 
 /**
+ * Whether computeOscillationPenalty has enough data to produce a meaningful
+ * (non-sentinel) value. The signal returns 1.0 both when data is insufficient
+ * (window<6 or ≠2 unique values) AND when data is present but shows no
+ * oscillation. Only the former should trigger weight re-allocation — the
+ * latter is a legitimate "no penalty = healthy" score that must keep its
+ * weight. Mirrors the guard conditions in computeOscillationPenalty.
+ */
+function oscillationHasData(fingerprints: ReadonlyArray<string>): boolean {
+  const window = fingerprints.slice(-8)
+  return window.length >= 6 && new Set(window).size === 2
+}
+
+/**
  * textRepetitionPenalty: detects cross-turn text output repetition.
  * When the model produces nearly identical text across turns (despite calling
  * different tools), it's stuck in a "reformat the same analysis" loop.
@@ -361,6 +374,21 @@ function computeTextRepetitionPenalty(fingerprints: ReadonlyArray<string>): numb
   return 1.0
 }
 
+/**
+ * Whether computeTextRepetitionPenalty has enough data to produce a meaningful
+ * (non-sentinel) value. The signal returns 1.0 both when data is insufficient
+ * (too few fingerprints / too few long ones / no pairs) AND when text is
+ * genuinely diverse. Only the former should trigger weight re-allocation.
+ * Mirrors the guard conditions in computeTextRepetitionPenalty.
+ */
+function textRepetitionHasData(fingerprints: ReadonlyArray<string>): boolean {
+  const window = fingerprints.slice(-5)
+  if (window.length < 3) return false
+  const longWordSets = window.filter(fp => fp.length >= 50)
+    .map(fp => new Set(fp.split(/\s+/).filter(w => w.length >= 3)))
+  return longWordSets.length >= 3
+}
+
 // ─── Score Computation ──────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -371,7 +399,35 @@ function computeConvergenceScore(
   turn: number,
   recentToolHistory: ConvergenceInput['recentToolHistory'],
   providerName?: string,
+  signalsMissingData: ReadonlySet<keyof ConvergenceSignals> = new Set(),
 ): number {
+  // Weight re-allocation for no-data signals: when a penalty signal lacks
+  // sufficient data, its default 1.0 ("no penalty") would otherwise enter the
+  // weighted sum at full weight and inflate the score — making the agent look
+  // healthier than the evidence supports. Instead, redistribute that weight
+  // equally across the signals that DO carry data. This closes the execute-phase
+  // ~0.18 inflation (textRep 0.12 + oscillation 0.06 at default 1.0) during the
+  // early-window period before these signals have enough fingerprints.
+  //
+  // Scoped to textRepetitionPenalty + oscillationPenalty only — these are
+  // window-period no-data sentinels. errorPenalty's empty-window 1.0 is
+  // semantically correct (no errors = full marks) and is NOT re-allocated.
+  const w: PhaseWeights = { ...weights }
+  if (signalsMissingData.size > 0) {
+    // Re-allocate only to signals that are independent of editRatio: editRatio
+    // is already a composite (gated by novelty below), so adding weight to it
+    // would double-count novelty and mis-reward low-edit-ratio windows. The
+    // four targets below are pure standalone signals.
+    const others = ['targetNovelty', 'toolEntropy', 'errorPenalty', 'tokenEfficiency'] as const
+    for (const missing of signalsMissingData) {
+      const excess = w[missing]
+      if (!excess) continue
+      w[missing] = 0
+      const perSignal = excess / others.length
+      for (const key of others) w[key] += perSignal
+    }
+  }
+
   // editRatio is gated by targetNovelty: editing the same file repeatedly
   // (novelty collapses to 0) is原地打转, not progress — regardless of how many
   // successful edits happened. The 0.1 floor preserves a small baseline so a
@@ -379,13 +435,13 @@ function computeConvergenceScore(
   // is not zeroed out entirely.
   const effectiveEditRatio = signals.editRatio * Math.max(signals.targetNovelty, 0.1)
   const raw =
-    weights.editRatio * effectiveEditRatio +
-    weights.targetNovelty * signals.targetNovelty +
-    weights.toolEntropy * signals.toolEntropy +
-    weights.errorPenalty * signals.errorPenalty +
-    weights.tokenEfficiency * signals.tokenEfficiency +
-    weights.oscillationPenalty * signals.oscillationPenalty +
-    weights.textRepetitionPenalty * signals.textRepetitionPenalty
+    w.editRatio * effectiveEditRatio +
+    w.targetNovelty * signals.targetNovelty +
+    w.toolEntropy * signals.toolEntropy +
+    w.errorPenalty * signals.errorPenalty +
+    w.tokenEfficiency * signals.tokenEfficiency +
+    w.oscillationPenalty * signals.oscillationPenalty +
+    w.textRepetitionPenalty * signals.textRepetitionPenalty
 
   // Phase expectation penalty: phases that require edits (execute, verify,
   // deliver) are fundamentally off-track if no edits are happening.
@@ -578,7 +634,15 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     textRepetitionPenalty: computeTextRepetitionPenalty(input.textFingerprints ?? []),
   }
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName)
+  // Track which penalty signals lack sufficient data so their default-1.0
+  // weight can be re-allocated instead of inflating the score. Only the two
+  // window-period signals (oscillation, textRepetition) — errorPenalty's
+  // empty-window 1.0 is a legitimate "no errors = full marks".
+  const signalsMissingData = new Set<keyof ConvergenceSignals>()
+  if (!oscillationHasData(input.toolFingerprints ?? [])) signalsMissingData.add('oscillationPenalty')
+  if (!textRepetitionHasData(input.textFingerprints ?? [])) signalsMissingData.add('textRepetitionPenalty')
+
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0

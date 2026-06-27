@@ -344,10 +344,31 @@ export function computeStrategy(s: Sensorium): StrategyProfile {
     reasoningEffort = 'medium'
   }
 
+  // explorationBreadth: a continuous function of stability and complexity.
+  // Low stability widens the search for alternatives (the agent is flailing,
+  // so cast a wider net); higher complexity also broadens exploration. Both
+  // contributions are additive and continuous — there are no discrete jumps
+  // at stability=0.3 or complexity=0.5 (the old `stability<0.3 ? 0.9 : 0.3`
+  // had a 0.60 cliff). base 0.3→0.6 as complexity 0→1; stability penalty adds
+  // up to ~0.45 as stability falls from 0.3 to 0.
+  const breadthBase = 0.3 + s.complexity * 0.3
+  const stabilityPenalty = s.stability < 0.3 ? (0.3 - s.stability) * 1.5 : 0
+  const explorationBreadth = clamp(breadthBase + stabilityPenalty)
+
+  // commitThreshold: a continuous function of pressure and momentum. High
+  // pressure (context nearly full) raises the bar for committing; low momentum
+  // (failing to make progress) also raises it (don't commit a stuck state).
+  // The old `pressure>0.7 ? 0.9 : 0.6` had a 0.30 cliff at the boundary; this
+  // is smooth throughout. Baseline 0.5; pressure adds up to +0.15, low momentum
+  // adds up to +0.25 — they compose additively.
+  const pressureBoost = s.pressure > 0.7 ? (s.pressure - 0.7) * 0.5 : 0
+  const momentumDrag = s.momentum < 0.3 ? (0.3 - s.momentum) * (0.25 / 0.3) : 0
+  const commitThreshold = clamp(0.5 + pressureBoost + momentumDrag)
+
   return {
     reasoningEffort,
-    explorationBreadth: s.stability < 0.3 ? 0.9 : 0.3,
-    commitThreshold: s.pressure > 0.7 ? 0.9 : 0.6,
+    explorationBreadth,
+    commitThreshold,
     shouldEscalate: s.confidence < 0.3 && s.momentum < 0.2,
     thetaCycleInterval: s.complexity > 0.5 ? 3 : 7,
   }

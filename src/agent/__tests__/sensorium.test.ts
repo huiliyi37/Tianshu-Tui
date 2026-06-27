@@ -311,19 +311,46 @@ describe('computeStrategy', () => {
   })
 
   it('increases exploration breadth when stability is low', () => {
-    const stable = makeSensorium({ stability: 0.8 })
-    assert.equal(computeStrategy(stable).explorationBreadth, 0.3)
+    // explorationBreadth is now a continuous function of stability + complexity
+    // (was a binary `stability<0.3 ? 0.9 : 0.3` with a 0.60 cliff). Verify the
+    // direction (low stability → wider breadth) and that there is no cliff at
+    // the old 0.3 boundary.
+    const stable = makeSensorium({ stability: 0.8, complexity: 0.3 })
+    const unstable = makeSensorium({ stability: 0.2, complexity: 0.3 })
+    assert.ok(
+      computeStrategy(unstable).explorationBreadth > computeStrategy(stable).explorationBreadth,
+      `unstable breadth should exceed stable`,
+    )
 
-    const unstable = makeSensorium({ stability: 0.2 })
-    assert.equal(computeStrategy(unstable).explorationBreadth, 0.9)
+    // Continuity: just-below and just-above the old 0.3 cliff must be close,
+    // not separated by the old 0.60 jump.
+    const justBelow = computeStrategy(makeSensorium({ stability: 0.29, complexity: 0.3 })).explorationBreadth
+    const justAbove = computeStrategy(makeSensorium({ stability: 0.31, complexity: 0.3 })).explorationBreadth
+    assert.ok(
+      Math.abs(justBelow - justAbove) < 0.1,
+      `explorationBreadth must be continuous across stability=0.3 (got ${justBelow} vs ${justAbove})`,
+    )
   })
 
   it('raises commit threshold when pressure is high', () => {
-    const lowPressure = makeSensorium({ pressure: 0.3 })
-    assert.equal(computeStrategy(lowPressure).commitThreshold, 0.6)
+    // commitThreshold is now a continuous function of pressure + momentum
+    // (was a binary `pressure>0.7 ? 0.9 : 0.6` with a 0.30 cliff). Verify the
+    // direction (high pressure → higher threshold) and continuity at 0.7.
+    const lowPressure = makeSensorium({ pressure: 0.3, momentum: 0.5 })
+    const highPressure = makeSensorium({ pressure: 0.8, momentum: 0.5 })
+    assert.ok(
+      computeStrategy(highPressure).commitThreshold > computeStrategy(lowPressure).commitThreshold,
+      `high pressure should raise commit threshold`,
+    )
 
-    const highPressure = makeSensorium({ pressure: 0.8 })
-    assert.equal(computeStrategy(highPressure).commitThreshold, 0.9)
+    // Continuity: just-below and just-above the old 0.7 cliff must be close,
+    // not separated by the old 0.30 jump.
+    const justBelow = computeStrategy(makeSensorium({ pressure: 0.69, momentum: 0.5 })).commitThreshold
+    const justAbove = computeStrategy(makeSensorium({ pressure: 0.71, momentum: 0.5 })).commitThreshold
+    assert.ok(
+      Math.abs(justBelow - justAbove) < 0.1,
+      `commitThreshold must be continuous across pressure=0.7 (got ${justBelow} vs ${justAbove})`,
+    )
   })
 
   it('signals escalation when confidence low and momentum low', () => {
