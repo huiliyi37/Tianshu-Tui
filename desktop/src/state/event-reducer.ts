@@ -441,7 +441,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
   }
 }
 
-function humanizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
+export function humanizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
   if (!input) return '{}'
   const path = String(input.path ?? input.file_path ?? input.target ?? '')
   switch (toolName) {
@@ -467,6 +467,27 @@ function humanizeToolInput(toolName: string, input: Record<string, unknown> | un
     case 'read_file':
     case 'read':
       return path || safeJson(input)
+    case 'delegate_batch': {
+      const tasks = Array.isArray(input.tasks) ? input.tasks : []
+      if (tasks.length === 0) return '等待任务列表…'
+      const cap = Math.min(tasks.length, 8)
+      const lines: string[] = []
+      for (let i = 0; i < cap; i++) {
+        const task = tasks[i] as Record<string, unknown> | undefined
+        const id = typeof task?.id === 'string' && task.id.trim() ? task.id.trim() : `#${i + 1}`
+        const desc = typeof task?.description === 'string' ? task.description.trim() : ''
+        lines.push(desc ? `${id}: ${desc}` : id)
+      }
+      if (cap < tasks.length) lines.push(`… +${tasks.length - cap} more`)
+      return lines.join('\n')
+    }
+    case 'delegate_task': {
+      const objective = typeof input.objective === 'string' ? input.objective.trim() : ''
+      const agent = typeof input.agent === 'string' ? input.agent : ''
+      if (objective) return objective
+      if (agent) return `派发 ${agent}`
+      return '派发中…'
+    }
     default:
       return safeJson(input)
   }
