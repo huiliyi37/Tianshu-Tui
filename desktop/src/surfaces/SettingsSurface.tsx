@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useHealth } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { check } from '@tauri-apps/plugin-updater'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
@@ -137,7 +138,41 @@ export function SettingsSurface() {
           </dl>
         )}
       </section>
+
+      <UpdaterSection />
     </div>
+  )
+}
+
+function UpdaterSection() {
+  const [checking, setChecking] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const handleCheck = async () => {
+    setChecking(true)
+    setMessage(null)
+    try {
+      const result = await check()
+      if (result) {
+        setMessage(`发现新版本 ${result.version}，请前往发布页下载。`)
+      } else {
+        setMessage('当前已是最新版本（或更新服务器未配置）。')
+      }
+    } catch (err) {
+      setMessage(`检查更新失败：${(err as Error).message}（更新服务器尚未配置）`)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  return (
+    <section className="settings-group">
+      <h4>更新</h4>
+      <button className="btn" onClick={handleCheck} disabled={checking}>
+        {checking ? '检查中…' : '检查更新'}
+      </button>
+      {message && <div className="meta">{message}</div>}
+    </section>
   )
 }
 
