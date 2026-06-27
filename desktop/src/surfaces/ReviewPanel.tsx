@@ -19,6 +19,7 @@ import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
 
@@ -125,47 +126,40 @@ export function ReviewPanel(props: {
 
   return (
     <div className="review">
-      <div className="open-tabs-head">Open Tabs</div>
-      <div className="open-tabs">
-        {tabs.map((t) => {
-          const badge = t.badge?.()
-          return (
-            <button
-              key={t.id}
-              className={`open-tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="open-tab-glyph" aria-hidden>{t.glyph}</span>
-              <span className="open-tab-label">{t.label}</span>
-              {badge != null && badge > 0 && (
-                <span className="open-tab-badge">{badge}</span>
-              )}
-              {badge === -1 && (
-                <span className="open-tab-dot" aria-label="进行中" />
-              )}
-            </button>
-          )
-        })}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
+        <TabsList className="mx-2 mt-2 mb-1 w-auto">
+          {tabs.map((t) => {
+            const badge = t.badge?.()
+            return (
+              <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                <span aria-hidden>{t.glyph}</span>
+                <span>{t.label}</span>
+                {badge != null && badge > 0 && (
+                  <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
+                    {badge}
+                  </span>
+                )}
+                {badge === -1 && (
+                  <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                )}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
 
-      {tab === 'github' ? (
-        <div className="review-body">
+        <TabsContent value="github" className="review-body">
           <GithubPanel />
-        </div>
-      ) : tab === 'wt' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="wt" className="review-body">
           <ChangesTab sessionId={sessionId} />
-        </div>
-      ) : tab === 'files' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="files" className="review-body">
           <FileExplorer sessionId={sessionId} />
-        </div>
-      ) : tab === 'plan' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="plan" className="review-body">
           <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />
-        </div>
-      ) : tab === 'task' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="task" className="review-body">
           <section className="review-section">
             <h4>任务清单</h4>
             {todos.length === 0 && <div className="empty sm">还没有任务</div>}
@@ -221,67 +215,66 @@ export function ReviewPanel(props: {
               </div>
             ))}
           </section>
-        </div>
-      ) : (
-      <div className="review-body">
-        {(pendingApproval || pendingIntent) && (
+        </TabsContent>
+        <TabsContent value="review" className="review-body">
+          {(pendingApproval || pendingIntent) && (
+            <section className="review-section">
+              <h4>待处理</h4>
+              {pendingApproval && (
+                <ApprovalReview request={pendingApproval} onDecision={onApproval} />
+              )}
+              {pendingIntent && (
+                <IntentReview request={pendingIntent} onDecision={onIntent} />
+              )}
+            </section>
+          )}
+
+          {autonomous && !pendingApproval && !pendingIntent && (
+            <section className="review-section">
+              <div className="autonomy-note">
+                <span className="ab-glyph" aria-hidden>✦</span>
+                自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
+              </div>
+            </section>
+          )}
+
           <section className="review-section">
-            <h4>待处理</h4>
-            {pendingApproval && (
-              <ApprovalReview request={pendingApproval} onDecision={onApproval} />
-            )}
-            {pendingIntent && (
-              <IntentReview request={pendingIntent} onDecision={onIntent} />
+            <h4>Git 变更 · 代码审查</h4>
+            {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
+              <div className="empty sm">
+                <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
+              </div>
+            ) : (
+              artifacts.filter(a => a.kind === 'diff').map((a) => (
+                <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
+                  <div className="kind">{a.kind} · {a.target}</div>
+                  <div className="summary">{a.summary || a.target}</div>
+                  <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+                </div>
+              ))
             )}
           </section>
-        )}
 
-        {autonomous && !pendingApproval && !pendingIntent && (
           <section className="review-section">
-            <div className="autonomy-note">
-              <span className="ab-glyph" aria-hidden>✦</span>
-              自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
-            </div>
-          </section>
-        )}
-
-        <section className="review-section">
-          <h4>Git 变更 · 代码审查</h4>
-          {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
-            <div className="empty sm">
-              <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
-            </div>
-          ) : (
-            artifacts.filter(a => a.kind === 'diff').map((a) => (
-              <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
-                <div className="kind">{a.kind} · {a.target}</div>
+            <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
+            {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
+            {artifacts.filter(a => a.kind !== 'diff').map((a) => (
+              <div key={a.id} className="artifact-card" onClick={() => view(a)}>
+                <div className="kind">{a.kind}</div>
                 <div className="summary">{a.summary || a.target}</div>
                 <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
               </div>
-            ))
-          )}
-        </section>
-
-        <section className="review-section">
-          <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
-          {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
-          {artifacts.filter(a => a.kind !== 'diff').map((a) => (
-            <div key={a.id} className="artifact-card" onClick={() => view(a)}>
-              <div className="kind">{a.kind}</div>
-              <div className="summary">{a.summary || a.target}</div>
-              <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
-            </div>
-          ))}
-        </section>
-
-        {sessionId && (
-          <section className="review-section">
-            <h4>检查点 · 回滚</h4>
-            <RollbackSection sessionId={sessionId} />
+            ))}
           </section>
-        )}
-      </div>
-      )}
+
+          {sessionId && (
+            <section className="review-section">
+              <h4>检查点 · 回滚</h4>
+              <RollbackSection sessionId={sessionId} />
+            </section>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>

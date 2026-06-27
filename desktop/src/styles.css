@@ -411,35 +411,6 @@ body {
 
 /* ── Review panel ──────────────────────────────────────────────── */
 .review { background: var(--sidebar-surface-bg); backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation)); -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation)); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: var(--space-3); gap: var(--space-2); }
-.open-tabs-head {
-  font-size: 10px; font-weight: var(--weight-semibold);
-  color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px;
-  padding: var(--space-1) 8px;
-}
-.open-tabs { display: flex; flex-direction: column; gap: 1px; }
-.open-tab {
-  width: 100%;
-  display: flex; align-items: center; gap: var(--space-2);
-  padding: 5px 8px;
-  background: transparent; color: var(--text); border: none; border-radius: var(--radius-sm);
-  font-size: var(--text-sm); text-align: left; cursor: pointer;
-  position: relative; border-left: 2px solid transparent;
-  transition: background var(--dur) var(--ease);
-}
-.open-tab:hover { background: var(--hover); }
-.open-tab.active { background: var(--hover); border-left-color: var(--accent); }
-.open-tab-glyph { width: 16px; text-align: center; }
-.open-tab-label { flex: 1; }
-.open-tab-badge,
-.tab-badge {
-  min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-pill);
-  background: var(--accent); color: var(--accent-fg); font-size: 10px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.open-tab-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--accent); flex-shrink: 0;
-}
 .review-body { flex: 1; overflow-y: auto; }
 
 /* ── Plan panel (Cursor 3.0 Build column) ──────────────────────── */
@@ -672,46 +643,6 @@ body {
 .status-dot.reason-approval { background: var(--warning); }
 .status-dot.reason-failed { background: var(--error); }
 .status-dot.reason-completed { background: var(--success); }
-
-/* ── Command palette (Q4) ──────────────────────────────────────── */
-.palette-backdrop { align-items: flex-start; }
-.palette {
-  margin-top: 12vh; width: 560px; max-width: 92vw; max-height: 60vh;
-  background: var(--panel); border: 1px solid var(--border-strong);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
-  display: flex; flex-direction: column; overflow: hidden;
-}
-.palette-input {
-  border: none; border-bottom: 1px solid var(--border); background: transparent;
-  color: var(--text); padding: var(--space-4); font-size: var(--text-md); outline: none;
-}
-.palette-list { overflow-y: auto; padding: var(--space-2); }
-.palette-item {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); cursor: pointer;
-}
-.palette-item.active { background: var(--accent-soft); }
-.palette-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.palette-hint { color: var(--muted); font-size: var(--text-xs); margin-left: var(--space-3); flex: none; }
-.palette-shortcuts {
-  border-top: 1px solid var(--border); padding: var(--space-3);
-  display: flex; flex-direction: column; gap: var(--space-2);
-}
-.palette-shortcuts-title {
-  font-size: var(--text-xs); color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1);
-}
-.palette-shortcut-row {
-  display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm);
-}
-.palette-kbd {
-  display: inline-flex; align-items: center;
-  padding: 1px 6px; border-radius: 4px;
-  background: var(--panel-2); border: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: var(--text-xs);
-  color: var(--text); min-width: 80px; justify-content: center;
-}
-.palette-shortcut-desc { color: var(--muted); }
 
 /* ── Project → Thread sidebar ──────────────────────────────────── */
 .project-sidebar {

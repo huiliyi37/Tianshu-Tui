@@ -8,7 +8,9 @@ import { initTheme } from './lib/theme'
 import { initI18n } from './i18n'
 import './styles/tokens.css'
 import './styles.css'
+import './styles/shadcn-tokens.css'
 import 'katex/dist/katex.min.css'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 initTheme()
 initI18n()
@@ -24,7 +26,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <ErrorBoundary label="应用">
       <QueryClientProvider client={queryClient}>
         <AppStateProvider>
-          <App />
+          <TooltipProvider>
+            <App />
+          </TooltipProvider>
         </AppStateProvider>
       </QueryClientProvider>
     </ErrorBoundary>

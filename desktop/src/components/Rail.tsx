@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const ICONS: Record<Surface, LucideIcon> = {
   workspace: LayoutDashboard,
@@ -17,8 +18,6 @@ const ICONS: Record<Surface, LucideIcon> = {
   delegation: Network,
   settings: Settings,
 }
-
-
 
 const THEME_ICON: Record<ThemePref, LucideIcon> = {
   system: Laptop,
@@ -58,27 +57,30 @@ export function Rail(props: {
       <div className="rail-brand" title="天枢 · Tianshu">枢</div>
       <div className="rail-items">
         {order.map((s) => (
-          <button
-            key={s}
-            className={`rail-item ${surface === s ? 'active' : ''}`}
-            title={tNav(s)}
-            onClick={() => onSurface(s)}
-          >
-            <Icon icon={ICONS[s]} />
-            {s === 'attention' && attentionCount > 0 && (
-              <span className="rail-badge">{attentionCount > 9 ? '9+' : attentionCount}</span>
-            )}
-          </button>
+          <Tooltip key={s}>
+            <TooltipTrigger
+              className={`rail-item ${surface === s ? 'active' : ''}`}
+              onClick={() => onSurface(s)}
+            >
+              <Icon icon={ICONS[s]} />
+              {s === 'attention' && attentionCount > 0 && (
+                <span className="rail-badge">{attentionCount > 9 ? '9+' : attentionCount}</span>
+              )}
+            </TooltipTrigger>
+            <TooltipContent side="right">{tNav(s)}</TooltipContent>
+          </Tooltip>
         ))}
       </div>
       <div className="rail-foot">
-        <button
-          className="rail-item"
-          title={`${tTheme('label')}：${tTheme(theme)}`}
-          onClick={cycleTheme}
-        >
-          <Icon icon={THEME_ICON[theme]} />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            className="rail-item"
+            onClick={cycleTheme}
+          >
+            <Icon icon={THEME_ICON[theme]} />
+          </TooltipTrigger>
+          <TooltipContent side="right">{`${tTheme('label')}：${tTheme(theme)}`}</TooltipContent>
+        </Tooltip>
       </div>
     </nav>
   )
