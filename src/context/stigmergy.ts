@@ -15,6 +15,8 @@ export interface PheromoneDeposit {
   context?: string
   /** Custom half-life in ms. Default: 604_800_000 (7 days) */
   halfLifeMs?: number
+  /** Task contract ID for structured dead-end matching. Undefined for legacy entries. */
+  taskId?: string
 }
 
 export interface Pheromone {
@@ -24,6 +26,8 @@ export interface Pheromone {
   depositedAt: number
   halfLife: number
   context?: string
+  /** Task contract ID for structured dead-end matching. Undefined for legacy entries. */
+  taskId?: string
 }
 
 /** A stored pheromone with its decayed current strength computed. */
@@ -230,6 +234,7 @@ export class StigmergyStore {
       depositedAt: now,
       halfLife: deposit.halfLifeMs ?? DEFAULT_HALF_LIFE_MS,
       ...(deposit.context ? { context: deposit.context.slice(0, 80) } : {}),
+      ...(deposit.taskId ? { taskId: deposit.taskId } : {}),
     }
 
     // Overwrite existing matching entry (same path + signal)
