@@ -57,31 +57,31 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0d0d10;
-  --panel: #151519;
-  --panel-2: #1c1c22;
-  --panel-3: #232329;
-  --border: #2a2a32;
-  --border-strong: #3a3a44;
+  --bg: #0e0e10;
+  --panel: #151518;
+  --panel-2: #1c1c20;
+  --panel-3: #232328;
+  --border: #27272e;
+  --border-strong: #383842;
 
   --text: #e7e7ec;
-  --text-strong: #f6f6f9;
-  --muted: #989aa6;
-  --faint: #6c6e7a;
-  --text-dim: #7c7e89;
-  --text-secondary: #a6a8b2;
+  --text-strong: #f7f7f9;
+  --muted: #9a9ca8;
+  --faint: #6e707c;
+  --text-dim: #7d7f8a;
+  --text-secondary: #a8aab4;
   --hover: rgba(255, 255, 255, 0.06);
-  --bg-elevated: #1c1c22;
+  --bg-elevated: #1c1c20;
   --surface-2: rgba(127, 127, 127, 0.12);
   --link: var(--accent);
   --link-hover: var(--accent-hover);
   --green: var(--success);
 
-  /* Antigravity 2.0 / Codex cool azure — restrained, not periwinkle-purple. */
-  --accent: #5aa9ff;
-  --accent-hover: #7dbcff;
-  --accent-fg: #0a0f16;
-  --accent-soft: rgba(90, 169, 255, 0.14);
+  /* Cursor 3.0 inspired purple accent — high contrast against dark surfaces. */
+  --accent: #a277ff;
+  --accent-hover: #b894ff;
+  --accent-fg: #0b0814;
+  --accent-soft: rgba(162, 119, 255, 0.16);
 
   --success: #43c463;
   --success-soft: rgba(67, 196, 99, 0.14);
@@ -123,21 +123,22 @@
    data-surface="glass" to :root (set by WallpaperLayer / settings toggle).
    Uses color-mix for theme-aware transparency without duplicating hex values. */
 :root[data-surface="glass"] {
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 42%, transparent);
-  --sidebar-surface-blur: 32px;
-  --sidebar-surface-saturation: 1.14;
-  --main-surface-bg: color-mix(in oklab, var(--bg) 72%, transparent);
-  --main-surface-blur: 20px;
-  --main-surface-saturation: 1.08;
-  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 55%, transparent);
-  --compose-surface-blur: 18px;
-  --compose-surface-saturation: 1.12;
-  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 80%, transparent);
-  --popup-surface-blur: 24px;
-  --popup-surface-saturation: 1.1;
-  --modal-surface-bg: color-mix(in oklab, var(--panel) 88%, transparent);
-  --modal-surface-blur: 28px;
-  --modal-surface-saturation: 1.06;
+  /* Higher opacity than before for Cursor-like readability while keeping depth. */
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 78%, transparent);
+  --sidebar-surface-blur: 24px;
+  --sidebar-surface-saturation: 1.08;
+  --main-surface-bg: color-mix(in oklab, var(--bg) 88%, transparent);
+  --main-surface-blur: 16px;
+  --main-surface-saturation: 1.04;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 82%, transparent);
+  --compose-surface-blur: 14px;
+  --compose-surface-saturation: 1.08;
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 92%, transparent);
+  --popup-surface-blur: 20px;
+  --popup-surface-saturation: 1.06;
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 95%, transparent);
+  --modal-surface-blur: 24px;
+  --modal-surface-saturation: 1.04;
 }
 
 /* Respect reduced-transparency preference — force solid surfaces. */
@@ -176,11 +177,11 @@
   --link-hover: var(--accent-hover);
   --green: var(--success);
 
-  /* Antigravity 2.0 / Codex cool azure — restrained, not indigo-purple. */
-  --accent: #1f6feb;
-  --accent-hover: #1a5fd0;
+  /* Cursor-inspired purple accent for light theme. */
+  --accent: #7c4dff;
+  --accent-hover: #6a3df0;
   --accent-fg: #ffffff;
-  --accent-soft: rgba(31, 111, 235, 0.10);
+  --accent-soft: rgba(124, 77, 255, 0.12);
 
   --success: #1a7f37;
   --success-soft: rgba(26, 127, 55, 0.12);

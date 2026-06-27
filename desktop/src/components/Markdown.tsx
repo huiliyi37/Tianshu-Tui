@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import 'katex/dist/katex.min.css'
 import hljs from 'highlight.js/lib/common'
 
 // Conversation Markdown renderer (D1). Renders assistant/user/steer prose as

@@ -85,29 +85,29 @@ body {
 
 /* ── Rail (icon nav) ───────────────────────────────────────────── */
 .rail {
-  width: 56px; flex: none;
+  width: 48px; flex: none;
   background: var(--sidebar-surface-bg);
   backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
   -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; align-items: center;
-  padding: var(--space-3) 0; gap: var(--space-2);
+  padding: var(--space-2) 0; gap: var(--space-1);
 }
 .rail-brand {
-  width: 30px; height: 30px; border-radius: var(--radius-md);
+  width: 28px; height: 28px; border-radius: var(--radius-md);
   background: transparent; color: var(--text-strong);
   border: 1px solid var(--border-strong);
   display: flex; align-items: center; justify-content: center;
-  font-weight: var(--weight-semibold); font-size: var(--text-md);
-  margin-bottom: var(--space-2);
+  font-weight: var(--weight-semibold); font-size: var(--text-sm);
+  margin-bottom: var(--space-1);
 }
-.rail-items { display: flex; flex-direction: column; gap: var(--space-1); flex: 1; }
+.rail-items { display: flex; flex-direction: column; gap: 1px; flex: 1; }
 .rail-foot { display: flex; flex-direction: column; }
 .rail-item {
-  position: relative; width: 40px; height: 40px;
+  position: relative; width: 36px; height: 36px;
   display: flex; align-items: center; justify-content: center;
   background: transparent; color: var(--muted); border: none; cursor: pointer;
-  border-radius: var(--radius-md); transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+  border-radius: var(--radius-sm); transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 .rail-item:hover { color: var(--text); background: var(--panel-2); }
 .rail-item.active {
@@ -116,7 +116,7 @@ body {
 }
 .rail-item.active::before {
   content: '';
-  position: absolute; left: 0; top: 10px; bottom: 10px;
+  position: absolute; left: 0; top: 8px; bottom: 8px;
   width: 2px; background: var(--accent); border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
 }
 .rail-badge {
@@ -216,8 +216,8 @@ body {
 }
 .thread-tabs::-webkit-scrollbar { display: none; }
 .thread-tab {
-  display: flex; align-items: center; gap: 6px;
-  padding: var(--space-2) var(--space-3);
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 10px;
   font-size: var(--text-xs);
   background: transparent; color: var(--muted);
   border: none; border-bottom: 2px solid transparent;
@@ -1465,7 +1465,7 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { position: relative; border-top: 1px solid var(--border); padding: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); }
+.composer { position: relative; border-top: 1px solid var(--border); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); }
 .composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); }
 .composer-row { display: flex; gap: var(--space-2); align-items: flex-end; }
 .composer-row textarea { flex: 1; }

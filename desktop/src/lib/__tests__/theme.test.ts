@@ -23,11 +23,11 @@ g.document = { documentElement: { dataset: {} } }
 
 const { loadThemePref, saveThemePref, resolveTheme, setThemePref } = await import('../theme.ts')
 
-test('pref persists and defaults to system', () => {
+test('pref persists and defaults to dark', () => {
   localStorage.clear()
-  assert.equal(loadThemePref(), 'system')
-  saveThemePref('dark')
   assert.equal(loadThemePref(), 'dark')
+  saveThemePref('light')
+  assert.equal(loadThemePref(), 'light')
 })
 
 test('resolveTheme follows system via matchMedia', () => {

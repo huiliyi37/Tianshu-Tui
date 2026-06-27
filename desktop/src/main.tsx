@@ -8,6 +8,7 @@ import { initTheme } from './lib/theme'
 import { initI18n } from './i18n'
 import './styles/tokens.css'
 import './styles.css'
+import 'katex/dist/katex.min.css'
 
 initTheme()
 initI18n()

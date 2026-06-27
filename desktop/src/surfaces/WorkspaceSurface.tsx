@@ -121,8 +121,8 @@ export function WorkspaceSurface() {
     else p.collapse()
   }, [ui.reviewVisible])
 
-  const sidebarSize = parseInt(localStorage.getItem('rivet:sidebar-w') ?? '18', 10)
-  const reviewSize = parseInt(localStorage.getItem('rivet:review-w') ?? '27', 10)
+  const sidebarSize = parseInt(localStorage.getItem('rivet:sidebar-w') ?? '16', 10)
+  const reviewSize = parseInt(localStorage.getItem('rivet:review-w') ?? '26', 10)
   return (
     <div ref={wsRef} className="workspace-resizable">
       <Group orientation="horizontal" style={{ height: '100%' }}>
