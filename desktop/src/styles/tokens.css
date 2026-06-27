@@ -207,3 +207,16 @@
   --popup-surface-bg: color-mix(in oklab, var(--panel-2) 90%, transparent);
   --modal-surface-bg: color-mix(in oklab, var(--panel) 92%, transparent);
 }
+
+/* Font-weight boost levels. All three semantic weights shift together so
+   body, buttons, and headings keep their relative hierarchy. */
+html[data-font-weight="medium"] {
+  --weight-normal: 450;
+  --weight-medium: 550;
+  --weight-semibold: 650;
+}
+html[data-font-weight="bold"] {
+  --weight-normal: 500;
+  --weight-medium: 600;
+  --weight-semibold: 700;
+}

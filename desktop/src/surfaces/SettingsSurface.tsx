@@ -4,6 +4,7 @@ import { Palette, SlidersHorizontal, Plug, Cpu, type LucideIcon } from 'lucide-r
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
+import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
@@ -48,6 +49,12 @@ const NOTIF_LABEL: Record<NotifPref, string> = {
   always: '始终',
 }
 
+const FONT_WEIGHT_LABEL: Record<FontWeightPref, string> = {
+  normal: '常规',
+  medium: '中等',
+  bold: '加粗',
+}
+
 export function SettingsSurface() {
   const [activeCat, setActiveCat] = useState<SettingsCat>('appearance')
   const health = useHealth()
@@ -56,10 +63,16 @@ export function SettingsSurface() {
   const [autonomy, setAutonomy] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [notifPref, setNotifPref] = useState<NotifPref>(() => loadNotifPref())
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
+  const [fontWeight, setFontWeight] = useState<FontWeightPref>(() => loadFontWeightPref())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
     setThemePref(t)
+  }
+
+  const pickFontWeight = (w: FontWeightPref) => {
+    setFontWeight(w)
+    setFontWeightPref(w)
   }
 
   const pickAutonomy = (lvl: AutonomyLevel) => {
@@ -108,6 +121,20 @@ export function SettingsSurface() {
                   ))}
                 </SelectContent>
               </Select>
+            </section>
+            <section className="settings-group">
+              <h4>字体粗细</h4>
+              <Select value={fontWeight} onValueChange={(v) => pickFontWeight(v as FontWeightPref)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择字体粗细" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['normal', 'medium', 'bold'] as FontWeightPref[]).map((w) => (
+                    <SelectItem key={w} value={w}>{FONT_WEIGHT_LABEL[w]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="meta">调整全局字重，实时生效。</div>
             </section>
             <LanguageSection />
             <WallpaperSection />
