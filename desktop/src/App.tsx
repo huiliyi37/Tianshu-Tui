@@ -65,8 +65,8 @@ export function App() {
         setPaletteOpen((o) => !o)
         return
       }
-      // Cmd+1..7 → switch surface
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '7') {
+      // Cmd+1..8 → switch surface
+      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '8') {
         e.preventDefault()
         dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
         return

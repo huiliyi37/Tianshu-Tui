@@ -232,6 +232,7 @@ function McpSettingsManager() {
 /** Wallpaper & frosted glass settings section. */
 function WallpaperSection() {
   const { wallpaper, fit, pick, clear, changeFit } = useWallpaperControl()
+  const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const FIT_LABEL: Record<WallpaperFit, string> = {
@@ -240,13 +241,25 @@ function WallpaperSection() {
     center: '居中',
   }
 
+  const handlePick = useCallback(
+    async (f: File) => {
+      setBusy(true)
+      try {
+        await pick(f)
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pick],
+  )
+
   return (
     <section className="settings-group">
       <h4>壁纸与毛玻璃</h4>
       <div className="wallpaper-row">
         <div
           className="wallpaper-preview"
-          style={wallpaper ? { backgroundImage: `url("${wallpaper}")` } : undefined}
+          style={wallpaper ? { backgroundImage: `url("${wallpaper.url}")` } : undefined}
         >
           {!wallpaper && <span className="wallpaper-empty">无壁纸</span>}
         </div>
@@ -258,12 +271,12 @@ function WallpaperSection() {
             className="hidden-file-input"
             onChange={(e) => {
               const f = e.target.files?.[0]
-              if (f) pick(f)
+              if (f) handlePick(f)
               e.target.value = ''
             }}
           />
-          <button className="btn" onClick={() => fileRef.current?.click()}>
-            选择图片
+          <button className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
+            {busy ? '处理中…' : '选择图片'}
           </button>
           {wallpaper && (
             <button className="btn btn-danger" onClick={clear}>
@@ -287,7 +300,7 @@ function WallpaperSection() {
       </div>
       <div className="meta">
         设置壁纸后，界面自动切换为半透明毛玻璃效果（类似 macOS vibrancy）。
-        壁纸仅存储在本地，不会上传。
+        壁纸经压缩后存在本地 IndexedDB，不会上传。
       </div>
     </section>
   )
