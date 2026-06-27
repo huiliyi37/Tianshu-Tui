@@ -462,6 +462,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
+    getGoalTracker: () => self.getGoalTracker(),
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,

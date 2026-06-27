@@ -111,6 +111,9 @@ export interface TurnOrchestratorDeps {
 
   // === Config ===
   getMaxTurns: () => number
+  /** Goal tracker (owned by AgentLoop). Read-only access for the orchestrator's
+   *  goal-continuation check — avoids a back-edge into AgentLoop state. */
+  getGoalTracker: () => GoalTracker | null
   getTurnLevelThinking: () => boolean | undefined
   getPlanModeState: () => PlanModeState
   getStreamRules: () => StreamRule[] | undefined
@@ -265,12 +268,6 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
 const MAX_RULE_RETRIES = 2
 
 export class TurnOrchestrator {
-  goalTracker: GoalTracker | null = null
-
-  setGoalTracker(tracker: GoalTracker | null): void {
-    this.goalTracker = tracker
-  }
-
   constructor(private deps: TurnOrchestratorDeps) {}
 
   /**
@@ -875,7 +872,9 @@ export class TurnOrchestrator {
 
         // ── Goal continuation check ──
         // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
-        const tracker = this.goalTracker
+        // goalTracker is owned by AgentLoop; read via deps getter to avoid a
+        // loop→orchestrator back-edge.
+        const tracker = this.deps.getGoalTracker()
         let shouldContinueGoal = false
         // When the judge rejects a self-declared completion, it supplies a
         // tailored continuation reminder (unmet criteria + evidence) that

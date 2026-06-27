@@ -182,6 +182,12 @@ export class AgentLoop {
   /** U6: most recent convergence-detector result — consumed by the replan loop's
    *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
   latestConvergenceResult: ConvergenceResult | null = null
+  /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
+   *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
+   *  (isGoalActive) read LOCAL state instead of reaching back into the
+   *  orchestrator — breaking the former orchestrator→loop→orchestrator cycle.
+   *  The orchestrator reads it via the deps.getGoalTracker getter. */
+  private goalTracker: import('./goal-tracker.js').GoalTracker | null = null
   /** U6: autonomous plan execution trace. Created per task (initializeRun), steps
    *  seeded from the first todo write (capturePlanSteps), advanced per tool-turn,
    *  and checked for deviation at each turn boundary. Null outside task context. */
@@ -657,15 +663,22 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
-  /** Attach a GoalTracker to the current run. The tracker is consumed by
-   *  TurnOrchestrator.execute() which reads this.turnOrchestrator.goalTracker. */
+  /** Attach a GoalTracker to the current run. Owned by AgentLoop; the
+   *  orchestrator reads it via deps.getGoalTracker (no longer a field on
+   *  TurnOrchestrator), severing the loop→orchestrator back-edge that
+   *  getDoomLoopLevel/isGoalActive used to traverse. */
   setGoalTracker(tracker: import('./goal-tracker.js').GoalTracker | null): void {
-    this.turnOrchestrator.setGoalTracker(tracker)
+    this.goalTracker = tracker
+  }
+
+  /** Expose the goal tracker for deps wiring (orchestrator reads via getter). */
+  getGoalTracker(): import('./goal-tracker.js').GoalTracker | null {
+    return this.goalTracker
   }
 
   /** Check if goal tracker is active (for doom-loop threshold selection). */
   isGoalActive(): boolean {
-    return this.turnOrchestrator.goalTracker?.isActive() ?? false
+    return this.goalTracker?.isActive() ?? false
   }
 
   /**
@@ -849,7 +862,7 @@ export class AgentLoop {
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' {
     // Goal-active mode uses relaxed thresholds to avoid false doom-loop triggers
     // during long autonomous tasks where repeated tool types are legitimate.
-    const thresholds = getDoomLoopThresholds(this.turnOrchestrator.goalTracker?.isActive() ?? false)
+    const thresholds = getDoomLoopThresholds(this.goalTracker?.isActive() ?? false)
     return combineDoomLoopLevels(
       getDoomLoopLevel(this.traceStore.toolFingerprints, thresholds.exact),
       getClassDoomLoopLevel(this.traceStore.bashClassFingerprints ?? [], thresholds.class),
