@@ -182,9 +182,17 @@ export async function steerSession(id: string, text: string): Promise<'queued' |
   return 'queued'
 }
 
-/** N2 — feedback on an artifact, re-injected as next-turn context. */
-export function sendArtifactFeedback(id: string, artifactId: string, comment: string): Promise<SessionRecord> {
-  return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment })
+/** N2 — feedback on an artifact, re-injected as next-turn context.
+ *  `lines` carries optional diff line-level review comments (file + old/new
+ *  line + text). When `comment` is empty but `lines` is non-empty, only
+ *  line-level remarks are injected. */
+export function sendArtifactFeedback(
+  id: string,
+  artifactId: string,
+  comment: string,
+  lines?: ReadonlyArray<import('./types.js').LineComment>,
+): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment, lines })
 }
 
 export function abortSession(id: string): Promise<{ aborted: boolean }> {

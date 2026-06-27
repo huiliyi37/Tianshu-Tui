@@ -159,8 +159,17 @@ export function useUnarchiveSession() {
 
 export function useArtifactFeedback() {
   return useMutation({
-    mutationFn: ({ id, artifactId, comment }: { id: string; artifactId: string; comment: string }) =>
-      sendArtifactFeedback(id, artifactId, comment),
+    mutationFn: ({
+      id,
+      artifactId,
+      comment,
+      lines,
+    }: {
+      id: string
+      artifactId: string
+      comment: string
+      lines?: ReadonlyArray<import('../runtime/types.js').LineComment>
+    }) => sendArtifactFeedback(id, artifactId, comment, lines),
   })
 }
 

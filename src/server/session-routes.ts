@@ -653,11 +653,22 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/feedback': withAuth((body, params) => {
-      const data = (body ?? {}) as { artifactId?: string; comment?: string }
-      if (!data.artifactId || !data.comment || !data.comment.trim()) {
-        return { status: 400, body: { error: 'Missing "artifactId" or "comment"' } }
+      const data = (body ?? {}) as {
+        artifactId?: string
+        comment?: string
+        lines?: Array<{ file: string; oldLine?: number; newLine?: number; comment: string }>
       }
-      const ok = manager.feedback(params!.id!, data.artifactId, data.comment.trim())
+      const hasComment = data.comment && data.comment.trim()
+      const hasLines = data.lines && data.lines.some((l) => l.comment && l.comment.trim())
+      if (!data.artifactId || (!hasComment && !hasLines)) {
+        return { status: 400, body: { error: 'Missing "artifactId", or both "comment" and "lines" are empty' } }
+      }
+      const ok = manager.feedback(
+        params!.id!,
+        data.artifactId,
+        (data.comment ?? '').trim(),
+        data.lines,
+      )
       if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),

@@ -887,19 +887,42 @@ export class RuntimeSessionManager {
    * N2 — artifact feedback re-injection. Turns a human comment on an artifact
    * into a structured next-turn prompt so the agent revises in-context. Only
    * valid on an idle session (a finished turn); returns false while running.
+   *
+   * `lines` carries diff line-level review comments (file + old/new line +
+   * comment), surfaced as a `[LINE-LEVEL REVIEW]` block so the agent can locate
+   * each remark at an exact file:line anchor. Artifacts-level `comment` and
+   * `lines` are both optional but at least one must be non-empty.
    */
-  feedback(id: string, artifactId: string, comment: string): boolean {
+  feedback(
+    id: string,
+    artifactId: string,
+    comment: string,
+    lines?: ReadonlyArray<{ file: string; oldLine?: number; newLine?: number; comment: string }>,
+  ): boolean {
     const s = this.sessions.get(id)
     if (!s || s.running) return false
     const meta = [...s.events].reverse().find(
       (e) => e.type === 'artifact' && e.data.id === artifactId,
     )
     const target = meta ? String(meta.data.target ?? '') : ''
-    const prompt =
-      `[ARTIFACT FEEDBACK]\n` +
-      `Artifact: ${artifactId}${target ? ` (${target})` : ''}\n` +
-      `Comment: ${comment}\n\n` +
-      `Please revise your work to address this feedback.`
+    const parts: string[] = [`[ARTIFACT FEEDBACK]`]
+    parts.push(`Artifact: ${artifactId}${target ? ` (${target})` : ''}`)
+    if (comment.trim()) {
+      parts.push(`Comment: ${comment}`)
+    }
+    // 行级评论：每条带 <file>:<line> 锚点，让 agent 精确定位
+    const lineRemarks = lines?.filter((l) => l.comment.trim()) ?? []
+    if (lineRemarks.length > 0) {
+      const rendered = lineRemarks
+        .map((l) => {
+          const lineRef = l.newLine ?? l.oldLine
+          const loc = lineRef != null ? `${l.file}:${lineRef}` : l.file
+          return `${loc} — ${l.comment.trim()}`
+        })
+        .join('\n')
+      parts.push(`[LINE-LEVEL REVIEW]\n${rendered}`)
+    }
+    const prompt = `${parts.join('\n')}\n\nPlease revise your work to address this feedback.`
     return this.run(id, prompt)
   }
 

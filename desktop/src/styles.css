@@ -381,6 +381,29 @@ body {
 .diff-split-col { background: var(--panel); overflow-x: auto; }
 .diff-split-header { color: var(--text-faint); padding: 2px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 
+/* Line-level review comments */
+.diff-row { position: relative; }
+.diff-row.has-comment { box-shadow: inset 2px 0 0 var(--accent, #3b82f6); }
+.diff-row-comment-btn {
+  flex-shrink: 0; margin-left: 4px; padding: 0 4px; font-size: 11px; line-height: 1.4;
+  background: transparent; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text-faint); cursor: pointer; opacity: 0; transition: opacity .12s;
+}
+.diff-row:hover .diff-row-comment-btn { opacity: 1; }
+.diff-row-mark { color: var(--accent, #3b82f6); font-size: 10px; margin-left: 2px; }
+.diff-line-comment {
+  display: flex; gap: 6px; padding: 4px 8px 4px 40px;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent);
+  border-left: 2px solid var(--accent, #3b82f6); color: var(--text-muted);
+  font-size: 12px; white-space: pre-wrap;
+}
+.diff-line-comment-loc { color: var(--accent, #3b82f6); font-weight: 600; flex-shrink: 0; }
+.diff-line-draft { margin: 2px 0 2px 40px; padding: 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); }
+.diff-line-draft textarea { width: 100%; min-height: 48px; resize: vertical; font-size: 12px; }
+.diff-line-draft-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+.btn.sm { padding: 2px 8px; font-size: 12px; }
+.meta-badge { margin-left: 8px; color: var(--accent, #3b82f6); font-size: 11px; }
+
 /* Terminal panel — xterm.js + portable-pty 真实终端。 */
 .terminal-panel {
   flex-shrink: 0;
@@ -2109,3 +2132,10 @@ body {
 .settings-nav-item:hover { background: var(--panel-2); color: var(--text-secondary); }
 .settings-nav-item.active { background: var(--accent-soft, var(--panel-2)); color: var(--accent); font-weight: var(--weight-medium); }
 .settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-4); max-width: 700px; }
+/* Update banner + updater progress */
+.update-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); border-bottom: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 30%, transparent); color: var(--text-primary); font-size: 13px; }
+.update-banner-text { flex: 1; min-width: 0; }
+.update-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.updater-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.updater-progress { height: 4px; margin-top: 6px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
+.updater-progress-bar { height: 100%; background: var(--accent, #3b82f6); transition: width .2s; }

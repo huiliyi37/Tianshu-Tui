@@ -8,7 +8,7 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
@@ -80,6 +80,8 @@ export function ReviewPanel(props: {
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
   const [viewMode, setViewMode] = useState<'rendered' | 'raw'>('rendered')
   const [comment, setComment] = useState('')
+  // 行级评论：在 diff 弹窗里逐行累积，随 artifact 级 comment 一起回灌
+  const [lineComments, setLineComments] = useState<LineComment[]>([])
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
@@ -90,6 +92,7 @@ export function ReviewPanel(props: {
       setOpen(await getArtifact(sessionId, a.id))
       setViewMode(a.kind === 'markdown' || a.kind === 'html' ? 'rendered' : 'raw')
       setComment('')
+      setLineComments([])
     } catch {
       // ignore
     }
@@ -110,17 +113,27 @@ export function ReviewPanel(props: {
   }, [sessionId])
 
   const sendFeedback = useCallback(async () => {
-    if (!sessionId || !open || !comment.trim()) return
+    if (!sessionId || !open) return
+    // artifact 级 comment 与行级评论至少一个非空才可提交
+    const hasArtifactComment = comment.trim().length > 0
+    const hasLineComments = lineComments.some((l) => l.comment.trim())
+    if (!hasArtifactComment && !hasLineComments) return
     setSending(true)
     try {
-      await sendArtifactFeedback(sessionId, open.artifact.id, comment.trim())
+      await sendArtifactFeedback(
+        sessionId,
+        open.artifact.id,
+        comment.trim(),
+        hasLineComments ? lineComments : undefined,
+      )
       setOpen(null)
       setComment('')
+      setLineComments([])
       onFeedbackSent?.()
     } finally {
       setSending(false)
     }
-  }, [sessionId, open, comment, onFeedbackSent])
+  }, [sessionId, open, comment, lineComments, onFeedbackSent])
 
   const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
@@ -301,7 +314,21 @@ export function ReviewPanel(props: {
             {open.artifact.kind === 'screenshot' ? (
               <img className="screenshot" src={`data:image/png;base64,${open.raw}`} alt={open.artifact.summary} />
             ) : open.artifact.kind === 'diff' ? (
-              <DiffView raw={open.raw} />
+              <DiffView
+                raw={open.raw}
+                comments={lineComments}
+                onLineComment={(anchor, text) =>
+                  setLineComments((prev) => [
+                    ...prev,
+                    {
+                      file: anchor.file,
+                      oldLine: anchor.oldLine,
+                      newLine: anchor.newLine,
+                      comment: text,
+                    },
+                  ])
+                }
+              />
             ) : open.artifact.kind === 'markdown' && viewMode === 'rendered' ? (
               <div className="artifact-rendered"><Markdown source={open.raw} /></div>
             ) : open.artifact.kind === 'html' && viewMode === 'rendered' ? (
@@ -314,15 +341,24 @@ export function ReviewPanel(props: {
             ) : (
               <pre>{open.raw}</pre>
             )}
-            <label className="meta">在工件上反馈（回灌为下一轮上下文）</label>
+            <label className="meta">
+              在工件上反馈（回灌为下一轮上下文）
+              {lineComments.some((l) => l.comment.trim()) && (
+                <span className="meta-badge">已标注 {lineComments.filter((l) => l.comment.trim()).length} 行评论</span>
+              )}
+            </label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="例如：这个改动漏了错误处理，请补上 try/catch 并加测试"
+              placeholder="例如：这个改动漏了错误处理，请补上 try/catch 并加测试（行级评论可在 diff 上直接标）"
             />
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => setOpen(null)}>关闭</button>
-              <button className="btn" disabled={!comment.trim() || sending} onClick={sendFeedback}>
+              <button
+                className="btn"
+                disabled={(!comment.trim() && !lineComments.some((l) => l.comment.trim())) || sending}
+                onClick={sendFeedback}
+              >
                 {sending ? '发送中…' : '发送反馈'}
               </button>
             </div>

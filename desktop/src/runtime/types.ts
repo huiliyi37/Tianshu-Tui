@@ -298,6 +298,18 @@ export interface ArtifactSummary {
   createdAt: number
 }
 
+/**
+ * 行级评论：锚定 diff 的一行（文件 + old/new 行号 + 文本）。
+ * 锚点用 (file, oldLine, newLine) 组合，newLine 优先作为定位行；file 来自
+ * parseDiff 解析的当前文件上下文，保证多文件 diff 唯一定位。
+ */
+export interface LineComment {
+  file: string
+  oldLine?: number
+  newLine?: number
+  comment: string
+}
+
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
 export type McpTransport = 'stdio' | 'sse'

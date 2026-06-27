@@ -81,6 +81,78 @@ test('feedback requires artifactId and comment (400)', async () => {
   assert.equal(res.status, 400)
 })
 
+test('feedback with line-level comments injects [LINE-LEVEL REVIEW] with file:line anchors', async () => {
+  const { agents, router } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  const agent = agents[0]!
+
+  agent.artifacts = [{
+    id: 'edit_file:foo', tool: 'edit_file', target: 'foo.ts', sessionId: id,
+    createdAt: 1, summary: 's', sections: [], rawPath: '/tmp/x', charCount: 1, lineCount: 1, sha256: 'h',
+  }]
+  agent.callbacks!.onToolResult('t1', 'edit_file', 'ok', false)
+  agent.finish()
+  await new Promise((r) => setTimeout(r, 0))
+
+  const res = await router('POST', `/sessions/${id}/feedback`, {
+    artifactId: 'edit_file:foo',
+    comment: '整体需要补错误处理',
+    lines: [
+      { file: 'src/foo.ts', oldLine: 41, newLine: 42, comment: '这里漏了 catch' },
+      { file: 'src/bar.ts', newLine: 15, comment: '条件判断反了' },
+    ],
+  }, AUTH)
+  assert.equal(res.status, 200)
+  const fb = agent.prompts[agent.prompts.length - 1]!
+  assert.match(fb, /ARTIFACT FEEDBACK/)
+  assert.match(fb, /LINE-LEVEL REVIEW/)
+  // 每条行评论带 file:line 锚点
+  assert.match(fb, /src\/foo\.ts:42 — 这里漏了 catch/)
+  assert.match(fb, /src\/bar\.ts:15 — 条件判断反了/)
+})
+
+test('feedback accepts line-only comments with empty artifact comment', async () => {
+  const { agents, router } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  const agent = agents[0]!
+
+  agent.artifacts = [{
+    id: 'diff:patch', tool: 'bash', target: 'patch.diff', sessionId: id,
+    createdAt: 1, summary: 's', sections: [], rawPath: '/tmp/x', charCount: 1, lineCount: 1, sha256: 'h',
+  }]
+  agent.callbacks!.onToolResult('t1', 'bash', 'ok', false)
+  agent.finish()
+  await new Promise((r) => setTimeout(r, 0))
+
+  // 无 artifact 级 comment，只有行级评论 → 应成功（不再是 400）
+  const res = await router('POST', `/sessions/${id}/feedback`, {
+    artifactId: 'diff:patch',
+    comment: '',
+    lines: [{ file: 'mod.ts', newLine: 8, comment: '改名后忘改调用方' }],
+  }, AUTH)
+  assert.equal(res.status, 200)
+  const fb = agent.prompts[agent.prompts.length - 1]!
+  assert.match(fb, /LINE-LEVEL REVIEW/)
+  assert.match(fb, /mod\.ts:8 — 改名后忘改调用方/)
+  // 无 artifact 级 comment 时不该出现空的 Comment: 行
+  assert.doesNotMatch(fb, /Comment: \n/)
+})
+
+test('feedback rejects when both comment and lines are empty (400)', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
+  const id = (created.body as { id: string }).id
+  // artifactId 有但 comment 空白 + lines 空数组 → 路由层 body 校验 400
+  const res = await router('POST', `/sessions/${id}/feedback`, {
+    artifactId: 'a',
+    comment: '   ',
+    lines: [],
+  }, AUTH)
+  assert.equal(res.status, 400)
+})
+
 test('approval answer carries editedInput through to ApprovalResult', async () => {
   const { manager, agents, router } = setup()
   const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
