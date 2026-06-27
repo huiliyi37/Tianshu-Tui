@@ -122,7 +122,7 @@ export interface RuntimeHookDeps {
   /** Project root for `.rivet/presence.json`. */
   companionPresenceCwd?: string
   /** Cognitive state accessor for heartbeat payload. */
-  getCognitiveSnapshot?: () => { vigor: number; stability: number; season: string } | null
+  getCognitiveSnapshot?: () => { vigor: number; stability: number; season: string; convergencePrecision?: number; outputEfficiency?: number } | null
   /** Current task objective for heartbeat. */
   getObjective?: () => string | null
 

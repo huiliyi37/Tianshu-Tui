@@ -68,6 +68,9 @@ return new TurnStreamController({
           // thinking (reasoning) or final prose (text) before any intervention.
           output: usage.output_tokens,
         }
+        // tokenEfficiency from convergence detector: cross-validate with cache hit rate
+        const te = self.latestConvergenceResult?.signals.tokenEfficiency
+        if (te !== undefined) entry.tokenEfficiency = te
         if (usage.reasoning_tokens !== undefined) {
           entry.reasoning = usage.reasoning_tokens
           entry.text = Math.max(0, usage.output_tokens - usage.reasoning_tokens)
@@ -134,8 +137,13 @@ return new TurnStreamController({
           if (self.prevHitRate !== null && self.prevHitRate - hitRateNum > 15) {
             const diag = diagnoseCacheMiss(self.session.getCacheHistory(), turn, null, wasRewritten)
             if (diag) entry.diagnose = `${diag.reason}: ${diag.message}`
+            // Cross-validate: tokenEfficiency also collapsing → cache-break compensation loop
+            if (te !== undefined && self.prevTokenEfficiency !== undefined && self.prevTokenEfficiency > 0.5 && te < 0.2) {
+              entry.diagnose = (entry.diagnose ? `${entry.diagnose}; ` : '') + 'possible cache-break compensation loop: tokenEfficiency collapsed alongside cache hit rate'
+            }
           }
           self.prevHitRate = hitRateNum
+          if (te !== undefined) self.prevTokenEfficiency = te
         } catch { /* breadcrumbs are best-effort — never break cache logging */ }
 
         const line = JSON.stringify(entry)
@@ -295,6 +303,8 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         vigor: self.vigorState.tonic,
         stability: self.sensorium.stability,
         season: self.currentSeason ?? 'unknown',
+        convergencePrecision: self.latestConvergenceResult?.score,
+        outputEfficiency: self.latestConvergenceResult?.signals.tokenEfficiency,
       }
     },
     getObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 120) ?? null,
