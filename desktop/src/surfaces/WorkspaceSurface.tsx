@@ -168,11 +168,29 @@ export function WorkspaceSurface() {
                   onClose={handleClose}
                 />
               ) : (
-                <div className="empty thread-empty">
-                  <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
-                  <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                    + 新线程
-                  </button>
+                <div className="empty thread-empty onboard">
+                  <div className="onboard-glyph" aria-hidden>✦</div>
+                  <h2 className="onboard-title">开始你的第一个线程</h2>
+                  <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
+                  <div className="onboard-actions">
+                    <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                      + 新建线程
+                    </button>
+                  </div>
+                  <div className="onboard-hints">
+                    <div className="onboard-hint">
+                      <kbd>⌘K</kbd>
+                      <span>打开命令面板</span>
+                    </div>
+                    <div className="onboard-hint">
+                      <kbd>⌘N</kbd>
+                      <span>新建线程</span>
+                    </div>
+                    <div className="onboard-hint">
+                      <kbd>/</kbd>
+                      <span>在输入框使用斜杠命令</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
