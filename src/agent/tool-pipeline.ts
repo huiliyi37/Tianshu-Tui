@@ -538,6 +538,7 @@ export async function executeToolUse(
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),
     artifactStore: deps.artifactStore,
+    prewarmCache: deps.prewarm,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
     sessionTurnCount: deps.sessionTurnCount,

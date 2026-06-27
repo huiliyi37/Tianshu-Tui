@@ -12,6 +12,7 @@ import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 import { foldCode } from '../compact/code-fold.js'
+import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -303,6 +304,13 @@ export interface ReadFilePayloadOptions {
   limit?: number
   /** Per-call model read cap. Defaults to {@link DEFAULT_MODEL_READ_CAP}. */
   modelCap?: ModelReadCap
+  /**
+   * Full file content already read by a higher layer (e.g. a prewarm cache
+   * hit), skipping the `fs.readFile` inside this function. The content must be
+   * the verbatim file bytes (same as `await readFile(filePath, 'utf-8')` would
+   * return) — path validation, gitignore, binary, and cap truncation still run.
+   */
+  prefetchedContent?: string
 }
 
 export interface ReadFilePayload {
@@ -341,7 +349,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
   if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange) {
     if (policy.action === 'partial') {
       // Large source file: read and return PARTIAL view instead of hard error
-      const content = await readFile(filePath, 'utf-8')
+      const content = options.prefetchedContent ?? await readFile(filePath, 'utf-8')
       const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
       const partialContent = applyFoldThenPartial(content, filePath, cap)
       return {
@@ -358,7 +366,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
     )
   }
 
-  let content = await readFile(filePath, 'utf-8')
+  let content = options.prefetchedContent ?? await readFile(filePath, 'utf-8')
   const offset = options.offset ?? 1
   const limit = options.limit
   const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
@@ -552,11 +560,24 @@ export const READ_FILE_TOOL: Tool = {
     }
 
     try {
+      // Speculative prewarm hit: if a full-file read (no offset/limit) has a
+      // matching prewarm entry (mtime-verified), skip the fs read and apply the
+      // current contextWindow's cap to the cached full content. Miss → fall
+      // through to the normal fs read below.
+      let prefetchedContent: string | undefined
+      if (params.prewarmCache && canonical && canUsePrewarmForRead(params.input)) {
+        const cached = consumePrewarm(params.prewarmCache, canonical)
+        if (cached) {
+          prefetchedContent = cached.content
+          debugLog(`[prewarm-hit] file=${canonical} cached=${cached.content.length} bytes`)
+        }
+      }
       payload = await readFilePayload(params.cwd, {
         filePath,
         offset,
         limit,
         modelCap: computedCap,
+        prefetchedContent,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
