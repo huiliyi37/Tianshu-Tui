@@ -10,6 +10,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { TerminalPanel } from '../components/TerminalPanel'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
+import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -121,18 +122,32 @@ export function WorkspaceSurface() {
     else p.collapse()
   }, [ui.reviewVisible])
 
-  const sidebarSize = parseInt(localStorage.getItem('rivet:sidebar-w') ?? '16', 10)
-  const reviewSize = parseInt(localStorage.getItem('rivet:review-w') ?? '26', 10)
+  const layout = loadPanelLayout()
+
+  const handleResetLayout = () => {
+    const next = resetPanelLayout()
+    sidebarRef.current?.resize(next.sidebar)
+    reviewRef.current?.resize(next.review)
+  }
+
   return (
     <div ref={wsRef} className="workspace-resizable">
+      <button
+        className="layout-reset-btn"
+        title="重置布局"
+        aria-label="重置布局"
+        onClick={handleResetLayout}
+      >
+        ⟲
+      </button>
       <Group orientation="horizontal" style={{ height: '100%' }}>
         <Panel
           panelRef={sidebarRef}
           collapsible
-          defaultSize={`${sidebarSize}%`}
+          defaultSize={`${layout.sidebar}%`}
           minSize="12%"
           maxSize="35%"
-          onResize={({ asPercentage }) => localStorage.setItem('rivet:sidebar-w', String(Math.round(asPercentage)))}
+          onResize={({ asPercentage }) => saveSidebarWidth(Math.round(asPercentage))}
         >
           <ProjectSidebar />
         </Panel>
@@ -168,10 +183,10 @@ export function WorkspaceSurface() {
         <Panel
           panelRef={reviewRef}
           collapsible
-          defaultSize={`${reviewSize}%`}
+          defaultSize={`${layout.review}%`}
           minSize="15%"
           maxSize="45%"
-          onResize={({ asPercentage }) => localStorage.setItem('rivet:review-w', String(Math.round(asPercentage)))}
+          onResize={({ asPercentage }) => saveReviewWidth(Math.round(asPercentage))}
         >
           <ReviewPanel
             sessionId={activeId}
