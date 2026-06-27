@@ -51,7 +51,6 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
-import { detectExplorationStall } from './exploration-stall.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -664,17 +663,6 @@ export async function executeToolUse(
       // and slide the offending fingerprints out of the detection window.
    }
 
-    // Exploration stall gate — after N consecutive read-only tools without any
-    // write/test/action, block further exploration and force the agent to act.
-    // Prevents GLM/thinking-mode "explore forever, never code" loops that waste
-    // minutes of reasoning only to be killed by SSE timeout.
-    const stall = detectExplorationStall(trajectorySummary, tu.name)
-    if (stall.blocked) {
-      const msg = stall.message!
-      callbacks.onToolResult(tu.id, tu.name, msg, true)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
-
     // Plan-mode gate — block write tools during planning phase
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
     if (!planModeResult.allowed) {
@@ -926,13 +914,7 @@ export async function executeToolUse(
     let finalContent = postHookResult.result ?? harnessResult.content
     // Normalize: strip trailing whitespace to produce stable byte sequences
     // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
-    // can cause ~0.5% cache miss from otherwise identical tool results.
     finalContent = finalContent.trimEnd()
-
-    // Exploration stall advisory: append non-blocking hint to output
-    if (stall.advisory) {
-      finalContent = finalContent + '\n' + stall.advisory
-    }
 
     // LSP: notify the language server that a file changed on disk.
     // Must happen BEFORE diagnostics so the server's view is current.

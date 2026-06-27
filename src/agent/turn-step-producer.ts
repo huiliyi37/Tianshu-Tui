@@ -101,9 +101,13 @@ export class TurnStepProducer {
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
-      // GLM deep reasoning can span multiple minutes per turn — the per-turn
-      // watchdog must not falsely abort a legitimate long-thinking turn.
-      hardStallMs: this.self.config.providerName === 'glm' ? 600_000 : 240_000,
+      // GLM independent reasoning mode: no preserved thinking context, and the
+      // stream-level timeouts (read 720s / hard-cap 20min) are authoritative.
+      // Per-turn hardStall is counterproductive — GLM's legitimate deep reasoning
+      // spans multiple minutes; aborting mid-turn causes the exact "restart from
+      // scratch" symptom we're trying to avoid. Disable hardStall abort entirely
+      // for GLM; keep informational heartbeats.
+      hardStallMs: this.self.config.providerName === 'glm' ? 0 : 240_000,
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {

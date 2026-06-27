@@ -1,148 +1,112 @@
-/**
- * Semantic-aware tool result pruning (Layer 1: rule-based filtering).
- *
- * Identifies and compresses low-value content in tool results:
- * - Junk directory listings (__pycache__, node_modules, .git)
- * - Test pass lists (keep only failures + summary)
- * - Edit echo (edit_file output that duplicates prior read_file)
- * - Repeated grep (same pattern multiple times → keep latest)
- */
 import type { OaiMessage, OaiAssistantMessage } from '../api/oai-types.js'
 
-/** Junk path patterns — directory listings containing these are low-value. */
-const JUNK_DIR_RE = /(?:__pycache__|node_modules|\.git\/|\.venv|\.mypy_cache|\.pytest_cache|\.next\/|dist\/|build\/|\.tox)/
+/**
+ * 语义化工具结果去重 —— Pi semantic-prune 移植。
+ *
+ * 对幂等查询工具（grep/glob/read_file/semantic_search）的重复调用，
+ * 只保留最新一条结果。旧结果被新结果覆盖后无信息价值，但仍在消耗
+ * 上下文窗口和前缀缓存 budget。
+ */
 
-/** Lines that are just passing test markers. */
-const TEST_PASS_RE = /^\s*[✓✔●◌⊙].*\(\d+\s*ms\)\s*$|^\s*(?:PASS|✓|✔)\s+.+/
+const QUERY_TOOLS = new Set(['grep', 'glob', 'read_file', 'semantic_search'])
 
-/** Prune junk directory listings — replace bulk entries with a summary. */
-function pruneJunkDirs(content: string): string {
-  const lines = content.split('\n')
-  if (lines.length < 5) return content
-
-  const junkLines = lines.filter(l => JUNK_DIR_RE.test(l))
-  if (junkLines.length < 3) return content
-
-  const kept = lines.filter(l => !JUNK_DIR_RE.test(l))
-  kept.push(`[${junkLines.length} junk directory entries removed]`)
-  return kept.join('\n')
+interface PruneKey {
+  toolName: string
+  key: string
 }
 
-/** Prune test output — keep failures and summary, remove individual pass lines. */
-function pruneTestOutput(content: string): string {
-  if (!content.includes('pass') && !content.includes('✓') && !content.includes('✔')) return content
-  const lines = content.split('\n')
-  if (lines.length < 10) return content
+/** 提取一条 assistant message 中首个查询工具的 prune key */
+function queryKey(msg: OaiAssistantMessage): PruneKey | null {
+  if (!msg.tool_calls || msg.tool_calls.length === 0) return null
+  const tc = msg.tool_calls[0]!
+  if (!QUERY_TOOLS.has(tc.function.name)) return null
 
-  const passLines: number[] = []
-  for (let i = 0; i < lines.length; i++) {
-    if (TEST_PASS_RE.test(lines[i]!)) passLines.push(i)
+  let args: Record<string, unknown> = {}
+  try { args = JSON.parse(tc.function.arguments) } catch { return null }
+
+  const toolName = tc.function.name
+  switch (toolName) {
+    case 'grep':
+    case 'glob':
+    case 'semantic_search': {
+      const pattern = typeof args.pattern === 'string' ? args.pattern : typeof args.query === 'string' ? args.query : undefined
+      if (!pattern) return null
+      const path = typeof args.path === 'string' ? args.path : ''
+      return { toolName, key: `${pattern}|${path}` }
+    }
+    case 'read_file': {
+      const filePath = typeof args.file_path === 'string' ? args.file_path : ''
+      if (!filePath) return null
+      const offset = typeof args.offset === 'number' ? `:${args.offset}` : ''
+      const limit = typeof args.limit === 'number' ? `:${args.limit}` : ''
+      return { toolName, key: `${filePath}${offset}${limit}` }
+    }
+    default:
+      return null
   }
-  if (passLines.length < 5) return content
-
-  const kept = lines.filter((_, i) => !passLines.includes(i))
-  kept.push(`[${passLines.length} passing test lines removed]`)
-  return kept.join('\n')
 }
 
 export interface SemanticPruneResult {
-  messages: OaiMessage[]
   prunedCount: number
-  savedChars: number
 }
 
 /**
- * Apply Layer 1 semantic pruning to tool results in a message array.
- * Only processes tool results within the mutable zone (after anchorCount).
+ * 对消息列表做语义去重：同一 query key 只保留索引最大的（最新）条目。
+ *
+ * @param messages  完整的消息数组（原地修改）
+ * @param anchorCount  前 N 条消息不剪枝（保护 cache anchor 前缀不位移）
  */
-export function semanticPruneLayer1(
+export function pruneOutdatedQueryResults(
   messages: OaiMessage[],
-  anchorCount: number,
+  anchorCount = 0,
 ): SemanticPruneResult {
-  let prunedCount = 0
-  let savedChars = 0
+  if (messages.length <= anchorCount) return { prunedCount: 0 }
 
-  // Pre-build toolCallId → { name, args } index (O(n) replaces O(n²) resolveToolName)
-  const toolCallIndex = new Map<string, { name: string; args: string }>()
+  // 倒序遍历：记录每个 query key 的最新出现位置
+  const latestByKey = new Map<string, number>()
+  for (let i = messages.length - 1; i >= anchorCount; i--) {
+    const msg = messages[i]!
+    if (msg.role !== 'assistant') continue
+    const key = queryKey(msg as OaiAssistantMessage)
+    if (!key) continue
+    const compound = `${key.toolName}:${key.key}`
+    if (!latestByKey.has(compound)) {
+      latestByKey.set(compound, i)
+    }
+  }
+
+  // 正序遍历：标记需要剪枝的 assistant→tool_result 对
+  const toPrune = new Set<number>()
+  const seenKeys = new Set<string>()
+
   for (let i = anchorCount; i < messages.length; i++) {
     const msg = messages[i]!
-    if (msg.role === 'assistant') {
-      const aMsg = msg as OaiAssistantMessage
-      if (aMsg.tool_calls) {
-        for (const tc of aMsg.tool_calls) {
-          toolCallIndex.set(tc.id, { name: tc.function.name, args: tc.function.arguments })
+    if (msg.role !== 'assistant') continue
+    const key = queryKey(msg as OaiAssistantMessage)
+    if (!key) continue
+    const compound = `${key.toolName}:${key.key}`
+
+    if (seenKeys.has(compound)) {
+      // 已有更新版本 → 移除这条 assistant + 紧随的 tool_result
+      toPrune.add(i)
+      // 找到对应的 tool_result
+      const tc = (msg as OaiAssistantMessage).tool_calls![0]!
+      for (let j = i + 1; j < messages.length; j++) {
+        const next = messages[j]!
+        if (next.role === 'tool' && next.tool_call_id === tc.id) {
+          toPrune.add(j)
+          break
         }
       }
     }
+    seenKeys.add(compound)
   }
 
-  // Build grep dedup map: pattern|path|glob → latest index
-  // Uses composite key to avoid incorrectly deduplicating greps with the
-  // same pattern but different search paths or file filters.
-  const grepPatterns = new Map<string, number>()
-  for (let i = messages.length - 1; i >= anchorCount; i--) {
-    const msg = messages[i]!
-    if (msg.role !== 'tool') continue
-    const info = toolCallIndex.get(msg.tool_call_id)
-    if (!info) continue
-    if (info.name === 'grep' || info.name === 'search') {
-      try {
-        const args = JSON.parse(info.args)
-        const pattern = args.pattern || args.query || args.regex || ''
-        if (pattern) {
-          const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
-          if (!grepPatterns.has(key)) {
-            grepPatterns.set(key, i)
-          }
-        }
-      } catch { /* ignore */ }
-    }
+  // 从后往前删除（避免索引位移）
+  const indices = [...toPrune].sort((a, b) => b - a)
+  for (const idx of indices) {
+    messages.splice(idx, 1)
   }
 
-  const result = messages.map((msg, idx) => {
-    if (idx < anchorCount) return msg
-    if (msg.role !== 'tool') return msg
-    if (msg.content.startsWith('[')) return msg // already processed
-
-    const toolInfo = toolCallIndex.get(msg.tool_call_id)
-    const toolName = toolInfo?.name
-    let newContent = msg.content
-    const origLen = newContent.length
-
-    // Rule 3: grep dedup — replace older grep results with reference to latest
-    if ((toolName === 'grep' || toolName === 'search') && toolInfo && grepPatterns.size > 0) {
-      try {
-        const args = JSON.parse(toolInfo.args)
-        const pattern = args.pattern || args.query || args.regex || ''
-        if (pattern) {
-          const key = [pattern, args.path ?? '', args.glob ?? ''].join('|')
-          if (grepPatterns.get(key) !== idx) {
-            newContent = `[outdated grep for "${pattern.slice(0, 40)}", see later result]`
-          }
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Skip further processing for short content
-    if (origLen < 200 && newContent === msg.content) return msg
-
-    // Rule 1: Junk directory pruning (list_dir, glob, find results)
-    if (toolName === 'list_dir' || toolName === 'glob' || toolName === 'find_files') {
-      newContent = pruneJunkDirs(newContent)
-    }
-
-    // Rule 2: Test output pruning (bash tool running tests)
-    if (toolName === 'bash') {
-      newContent = pruneTestOutput(newContent)
-    }
-
-    if (newContent.length < origLen) {
-      prunedCount++
-      savedChars += origLen - newContent.length
-      return { ...msg, content: newContent }
-    }
-    return msg
-  })
-
-  return { messages: prunedCount > 0 ? result : messages, prunedCount, savedChars }
+  return { prunedCount: indices.length }
 }
