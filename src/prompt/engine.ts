@@ -444,12 +444,16 @@ export class PromptEngine {
     // mutating message content breaks DeepSeek exact-prefix cache. trySessionSplit (86%)
     // handles context overflow instead.
     if (!contextWindow || contextWindow < 1_000_000) {
-      const { prunedCount } = pruneOutdatedQueryResults(result, CACHE_ANCHOR_MESSAGES)
+      const { messages: prunedMessages, prunedCount, savedChars } = pruneOutdatedQueryResults(result, CACHE_ANCHOR_MESSAGES)
       if (prunedCount > 0) {
-        debugLog(`[semantic-prune] pruned ${prunedCount} duplicate query results`)
+        debugLog(`[semantic-prune] pruned ${prunedCount} results, saved ${savedChars} chars`)
+        result.length = 0
+        result.push(...prunedMessages)
       }
 
-      const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)
+      const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES, {
+        suffixTokenLimit: 8_000, // only mutate cheap-to-recache tail
+      })
       if (stalenessPruned !== result) {
         for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
       }

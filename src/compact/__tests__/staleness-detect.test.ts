@@ -208,4 +208,58 @@ describe('detectStaleness', () => {
     const result = detectStaleness(messages, 2)
     assert.equal(result.supersededCount, 1, 'first read_file of file0 should be superseded by later read')
   })
+
+  it('cache guard: skips superseded messages deep in warm prefix', () => {
+    // A superseded read whose suffix exceeds suffixTokenLimit should NOT be
+    // mutated — it sits in the warm cache prefix, rewriting it busts cache.
+    // Build a message list where the old read has many tokens after it.
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      // First read of foo.ts (long content)
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/foo.ts"}' }]),
+      tool('tc1', longContent),
+      // 3 assistant turns (satisfy lag)
+      assistantText('thinking about foo'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      // Lots of content after — makes the suffix > 8000 tokens (~32K chars)
+      ...Array.from({ length: 20 }, (_, i) => assistantText(`large context block ${i} `.repeat(200))),
+      // Second read of same file (supersedes tc1)
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/foo.ts"}' }]),
+      tool('tc2', longContent + ' updated'),
+      assistantText('done'),
+    ]
+
+    // Without cache guard: tc1 is superseded (suffix doesn't matter)
+    const withoutGuard = detectStaleness(messages, 2)
+    assert.equal(withoutGuard.supersededCount, 1, 'without guard, superseded read is pruned')
+
+    // With cache guard: tc1's suffix is huge → skip mutation
+    const withGuard = detectStaleness(messages, 2, { suffixTokenLimit: 8000 })
+    assert.equal(withGuard.supersededCount, 0, 'with cache guard, deep-prefix superseded read is skipped')
+  })
+
+  it('cache guard: still prunes cheap-to-recache tail', () => {
+    // Same scenario but the old read is near the end (small suffix)
+    const messages: OaiMessage[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'hi' },
+      // First read of foo.ts
+      assistant([{ id: 'tc1', name: 'read_file', args: '{"file_path":"src/foo.ts"}' }]),
+      tool('tc1', longContent),
+      // 3 assistant turns (satisfy lag)
+      assistantText('thinking about foo'),
+      assistantText('more thinking'),
+      assistantText('even more'),
+      // Second read of same file (supersedes tc1)
+      assistant([{ id: 'tc2', name: 'read_file', args: '{"file_path":"src/foo.ts"}' }]),
+      tool('tc2', longContent + ' updated'),
+      assistantText('done'),
+    ]
+
+    // With cache guard: tc1's suffix is small → prune proceeds
+    const withGuard = detectStaleness(messages, 2, { suffixTokenLimit: 8000 })
+    assert.equal(withGuard.supersededCount, 1, 'cheap-to-recache tail is pruned even with guard')
+  })
 })
