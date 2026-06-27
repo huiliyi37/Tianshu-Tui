@@ -4,7 +4,7 @@ import { PrewarmCache } from '../prewarm.js'
 import type { PrewarmValue } from '../prewarm-file.js'
 
 function pv(content: string): PrewarmValue {
-  return { canonicalPath: '/abs', content, uiContent: content }
+  return { canonicalPath: '/abs', content, uiContent: content, mtimeMs: 0 }
 }
 
 describe('PrewarmCache', () => {

@@ -104,6 +104,11 @@ export interface ToolCallParams {
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   /** Current session turn count — enables progressive timeout strategies. */
   sessionTurnCount?: number
+  /** Session identifier — used to isolate per-session state (read history,
+   *  dedup tracking) so concurrent sessions in the same cwd don't cross-
+   *  contaminate (e.g. a forked session seeing "already read" for a file
+   *  only the parent read). */
+  sessionId?: string
   /** Review-router re-entrancy depth propagated into worker contexts. */
   reviewDepth?: number
   /** B3: delegation nesting depth of the calling agent (primary=0, worker=1).

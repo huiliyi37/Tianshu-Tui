@@ -108,8 +108,14 @@ export function wasFileEditedBySession(canonicalPath: string): boolean {
 export function __resetSessionFileEditsForTests(): void {
   sessionFileEdits.clear()
 }
-function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined): string {
-  return `${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined, sessionId?: string): string {
+  return `${sessionId ?? ''}::${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+}
+
+/** Key for fileReadHistory — scoped by sessionId so concurrent sessions in the
+ *  same cwd (fork/worker) don't see each other's "already read" entries. */
+function fileHistoryKey(sessionId: string | undefined, canonicalPath: string): string {
+  return `${sessionId ?? ''}::${canonicalPath}`
 }
 
 function trimReadHistory(): void {
@@ -137,10 +143,11 @@ export function isUnchangedRepeatRead(
   dedupKey: string,
   offset: number,
   limit: number | undefined,
+  sessionId?: string,
 ): boolean {
   const priorSame = readHistory.get(dedupKey)
   if (priorSame && priorSame.mtimeMs === currentMtimeMs) return true
-  const fullPrior = fileReadHistory.get(canonical)
+  const fullPrior = fileReadHistory.get(fileHistoryKey(sessionId, canonical))
   if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) return true
   return false
 }
@@ -495,7 +502,7 @@ export const READ_FILE_TOOL: Tool = {
       canonical = validatePath(params.cwd, filePath)
       if (existsSync(canonical)) {
         currentMtimeMs = (await stat(canonical)).mtimeMs
-        dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
+        dedupKey = readHistoryKey(params.cwd, canonical, offset, limit, params.sessionId)
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
           if (params.artifactStore) {
@@ -507,7 +514,7 @@ export const READ_FILE_TOOL: Tool = {
           }
           debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
-        const fullEntry = fileReadHistory.get(canonical)
+        const fullEntry = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical))
         if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
@@ -524,13 +531,13 @@ export const READ_FILE_TOOL: Tool = {
     // ── 重复读取检测 ──
     // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
     const unchangedRepeat = (canonical && currentMtimeMs !== null && dedupKey)
-      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit)
+      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit, params.sessionId)
       : false
 
     let repeatWarning: string | null = null
     if (unchangedRepeat) {
       const priorSame = readHistory.get(dedupKey!)
-      const fullPrior = fileReadHistory.get(canonical!)
+      const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
       if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
         repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
       } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
@@ -545,7 +552,7 @@ export const READ_FILE_TOOL: Tool = {
     // model already has in its context.
     if (unchangedRepeat && isReadRefEnabled()) {
       const priorSame = readHistory.get(dedupKey!)
-      const fullPrior = fileReadHistory.get(canonical!)
+      const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
       const entryBytes = priorSame?.mtimeMs === currentMtimeMs ? priorSame.modelBytes : fullPrior?.modelBytes ?? 0
       const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
 
@@ -623,7 +630,7 @@ export const READ_FILE_TOOL: Tool = {
     const recordFileDedup = (artifactId?: string): void => {
       if (!canonical || currentMtimeMs === null) return
       if (offset !== 1 || limit !== undefined) return // only full reads
-      fileReadHistory.set(canonical, {
+      fileReadHistory.set(fileHistoryKey(params.sessionId, canonical), {
         mtimeMs: currentMtimeMs,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,
@@ -728,7 +735,7 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
 
       // Record file-level dedup for each file
       const currentMtimeMs = (await stat(payload.canonicalPath)).mtimeMs
-      fileReadHistory.set(payload.canonicalPath, {
+      fileReadHistory.set(fileHistoryKey(params.sessionId, payload.canonicalPath), {
         mtimeMs: currentMtimeMs,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,
