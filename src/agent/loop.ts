@@ -215,6 +215,7 @@ export class AgentLoop {
   prevEngineStats = { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 }
   prevMsgCount = 0
   prevHitRate: number | null = null
+  prevTokenEfficiency: number | undefined = undefined
   /** Estimated context tokens at the end of the previous turn — baseline for
    *  compact attribution (compactPreRatio / compactReclaimed in the cache-log). */
   prevEstTokens = 0
