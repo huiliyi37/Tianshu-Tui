@@ -234,11 +234,14 @@ function UpdaterSection() {
             setProgress(total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null)
             break
           case 'Finished':
+            // 进入"重启中"过渡态：installing=false + 完成提示，避免 relaunch 前
+            // 盲等让用户以为卡住（与 UpdateBanner 一致）。
             setProgress(100)
+            setInstalling(false)
+            setMessage('安装完成，正在重启…')
             break
         }
       })
-      setMessage('安装完成，正在重启…')
       await relaunch()
     } catch (err) {
       setMessage(`安装失败：${(err as Error).message}`)

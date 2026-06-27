@@ -12,6 +12,7 @@ import { isTauri } from '../lib/dialog'
 export function UpdateBanner() {
   const [update, setUpdate] = useState<Update | null>(null)
   const [installing, setInstalling] = useState(false)
+  const [restarting, setRestarting] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const [dismissed, setDismissed] = useState(false)
 
@@ -47,31 +48,44 @@ export function UpdateBanner() {
             setProgress(total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : null)
             break
           case 'Finished':
+            // 进入"重启中"过渡态：下载安装已完成、relaunch 即将执行。
+            // 先把 installing 置 false 并显示完成提示，避免 relaunch 前盲等
+            // 让用户以为卡住（relaunch 会替换进程，此态是最后一帧 UI）。
             setProgress(100)
+            setInstalling(false)
+            setRestarting(true)
             break
         }
       })
       await relaunch()
     } catch {
       setInstalling(false)
+      setRestarting(false)
       setProgress(null)
     }
   }
 
   if (!update || dismissed) return null
+  const busy = installing || restarting
 
   return (
     <div className="update-banner">
       <div className="update-banner-text">
-        新版本 <strong>{update.version}</strong> 可用
-        {installing && progress != null && ` · 下载中 ${progress}%`}
-        {installing && progress == null && ' · 安装中…'}
+        {restarting
+          ? '安装完成，正在重启…'
+          : (
+            <>
+              新版本 <strong>{update.version}</strong> 可用
+              {installing && progress != null && ` · 下载中 ${progress}%`}
+              {installing && progress == null && ' · 安装中…'}
+            </>
+          )}
       </div>
       <div className="update-banner-actions">
-        <button className="btn sm" onClick={install} disabled={installing}>
-          {installing ? '请稍候' : '立即更新'}
+        <button className="btn sm" onClick={install} disabled={busy}>
+          {restarting ? '重启中' : installing ? '请稍候' : '立即更新'}
         </button>
-        <button className="btn ghost sm" onClick={() => setDismissed(true)} disabled={installing}>
+        <button className="btn ghost sm" onClick={() => setDismissed(true)} disabled={busy}>
           稍后
         </button>
       </div>
