@@ -30,6 +30,15 @@ class MyClass {
     return "hello"
   }
 }
+
+function multiStmt(d: number) {
+  const x = d * 2
+  const y = x + 1
+  if (y > 10) {
+    return y
+  }
+  return x
+}
 `.trim()
 
 const jsFixture = `
@@ -169,5 +178,48 @@ describe('ast-grep meta-variables', () => {
     })
     assert.ok(out.includes('NAME=foo') || out.includes('NAME=baz'),
       `expected meta-variable NAME in output, got: ${out}`)
+  })
+
+  it('multi-node meta-var shows shape summary (nodes/lines/first-line), not raw blob', async () => {
+    // multiStmt has a 5-line body across multiple statements — $$$BODY captures
+    // all of them. The summary must report the shape, not dump joined text.
+    const out = await call({
+      pattern: 'function $NAME($$$ARGS) { $$$BODY }',
+      paths: ['sample.ts'],
+      lang: 'TypeScript',
+      includeMeta: true,
+    })
+    // Find the multiStmt match line
+    const multiLine = out.split('\n').find(l => l.includes('multiStmt'))
+    assert.ok(multiLine, `expected multiStmt in output: ${out}`)
+    // Shape summary format: BODY=<nodeCount>n/<lineCount>L: <first line preview>
+    // Must NOT be a raw joined code blob (no commas joining statements).
+    const bodyMatch = multiLine!.match(/BODY=(\d+)n\/(\d+)L:\s*(.*)/)
+    assert.ok(bodyMatch, `BODY should be a shape summary like "3n/5L: ...", got: ${multiLine}`)
+    const [, nodeStr, lineStr, preview] = bodyMatch!
+    assert.ok(parseInt(nodeStr!) >= 1, `node count should be >= 1, got ${nodeStr}`)
+    assert.ok(parseInt(lineStr!) >= 4, `multiStmt body should span 4+ lines, got ${lineStr}`)
+    assert.ok(preview!.length > 0 && preview!.length <= 50, `preview should be a short first-line, got "${preview}"`)
+    // The preview should be the first statement, not a comma-joined blob
+    assert.ok(!preview!.includes(', '), `preview should not be comma-joined statements, got "${preview}"`)
+  })
+
+  it('single-node meta-var stays as raw text (no shape summary)', async () => {
+    // $NAME is a single-node capture — it should stay as the identifier text,
+    // not get a "1n/1L:" prefix. Only $$$ multi-node vars get shape summaries.
+    const out = await call({
+      pattern: 'function $NAME($$$ARGS) { $$$BODY }',
+      paths: ['sample.ts'],
+      lang: 'TypeScript',
+      includeMeta: true,
+    })
+    // NAME=foo (raw identifier), NOT NAME=1n/1L: foo
+    // Match NAME= followed by its value up to the next comma/space — must NOT
+    // start with the "<digits>n/" shape-summary prefix.
+    const nameMatch = out.match(/NAME=([^,\]]+)/)
+    assert.ok(nameMatch, `expected NAME= in output: ${out}`)
+    const nameVal = nameMatch![1]!
+    assert.ok(!/^\d+n\//.test(nameVal), `single-node NAME should not have shape summary, got "NAME=${nameVal}"`)
+    assert.equal(nameVal, 'foo', `NAME should be raw identifier "foo", got "${nameVal}"`)
   })
 })

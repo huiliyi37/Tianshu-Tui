@@ -28,7 +28,14 @@ export interface AstGrepMatch {
 }
 
 function formatMatch(m: AstGrepMatch, includeMeta: boolean): string {
-  const base = `${m.file}:${m.line}:${m.column}: ${m.matchText.slice(0, 80)}`
+  // Multi-line matches (e.g. a whole function) would dump the body into the
+  // result line and bury the meta-vars at the end. Show only the first line of
+  // the match + a line-count marker, so the meta-var shape summaries stay
+  // visible on the same logical line the model scans.
+  const raw = m.matchText
+  const lines = raw.split('\n')
+  const head = lines.length > 1 ? `${lines[0]!.slice(0, 70)} (+${lines.length - 1} lines)` : lines[0]!.slice(0, 80)
+  const base = `${m.file}:${m.line}:${m.column}: ${head}`
   if (includeMeta && m.metaVariables && Object.keys(m.metaVariables).length > 0) {
     const mv = Object.entries(m.metaVariables).map(([k, v]) => `${k}=${v.slice(0, 40)}`).join(', ')
     return `${base}  [${mv}]`
@@ -161,9 +168,18 @@ export const AST_GREP_TOOL: Tool = {
           for (const { name, multi } of metaVarDefs) {
             if (multi) {
               const mvs = node.getMultipleMatches(name)
-              // truncate: $$$BODY / $$$ARGS can capture entire function bodies
-              // (KB of source) — unbounded join would flood the model's context.
-              if (mvs && mvs.length > 0) match.metaVariables[name] = mvs.map(n => n.text()).join(', ').slice(0, 120)
+              if (mvs && mvs.length > 0) {
+                // Shape summary, not raw text: a $$$BODY capture can span an
+                // entire function (KB of source). The model needs the SHAPE
+                // (how big, what it starts with) to judge whether the match is
+                // sane — the full text is read_file's job. Precise counts avoid
+                // ambiguity: "8 lines" is unambiguous, a truncated code blob is not.
+                const texts = mvs.map(n => n.text())
+                const nodeCount = texts.length
+                const lineCount = texts.reduce((sum, t) => sum + t.split('\n').length, 0)
+                const firstLine = texts[0]!.split('\n')[0]!.trim().slice(0, 50)
+                match.metaVariables[name] = `${nodeCount}n/${lineCount}L: ${firstLine}`
+              }
             } else {
               const mv = node.getMatch(name)
               if (mv) match.metaVariables[name] = mv.text().slice(0, 120)
