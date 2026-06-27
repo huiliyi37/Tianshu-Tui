@@ -6,6 +6,7 @@ import { saveGoalState } from './goal-persist.js'
 import { getSessionDir } from './session-persist.js'
 import type { CompleteTurnParams } from './turn-orchestrator.js'
 import type { AgentCallbacks } from './loop-types.js'
+import type { TelemetryRecord } from './telemetry-writer.js'
 
 // ── Types ──
 
@@ -19,7 +20,7 @@ export interface GoalContinuationDeps {
   getCwd: () => string
   appendSystemReminder: (content: string) => void
   completeTurn: (params: CompleteTurnParams) => Promise<void>
-  writeTelemetry: (entry: any) => void
+  writeTelemetry: (entry: TelemetryRecord) => void
   flushMeridianTurn: () => void
 }
 

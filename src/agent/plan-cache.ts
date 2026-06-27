@@ -100,6 +100,11 @@ export class PlanCache {
     return best
   }
 
+  /** Expose entries for serialization (read-only reference). */
+  getEntries(): ReadonlyMap<string, PlanTemplate> {
+    return this.entries
+  }
+
   /** Invalidate entries that reference a changed file path */
   invalidate(filePath: string): number {
     let removed = 0

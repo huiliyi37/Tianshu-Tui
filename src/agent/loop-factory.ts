@@ -5,6 +5,7 @@ import { ToolExecutionController } from './tool-execution.js'
 import type { RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.js'
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
+import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -254,7 +255,13 @@ return {
 }
 
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
-  return new RuntimeHookPipeline(createDefaultRuntimeHooks({
+  const userBridgeDeps = {
+    cwd: self.cwd,
+    sessionId: self.config.sessionId,
+    getTurn: () => self.session.getTurnCount(),
+    emitHookResult: self.config.emitHookResult,
+  }
+  const hooks = createDefaultRuntimeHooks({
     stigmergyDeposit: deposit => self.stigmergyStore.deposit(deposit),
     stigmergyQuery: () => self.stigmergyStore.query(),
     getEvidenceState: () => self.evidence.getState(),
@@ -368,16 +375,20 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       getUserMessage: () => self.initialUserMessage,
       getStreamedText: () => self.streamedText,
     },
-    userHooksBridge: {
-      cwd: self.cwd,
-      sessionId: self.config.sessionId,
-      getTurn: () => self.session.getTurnCount(),
-    },
+    userHooksBridge: userBridgeDeps,
     advisoryBus: self.advisoryBus,
     sycophancyTrap: self.sycophancyTrap,
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getContextWindow: () => self.config.contextWindow ?? 128_000,
-  }))
+  })
+
+  // I4: when any runtime hook throws, run user `onError` hooks and emit the
+  // result to the desktop event stream.
+  return new RuntimeHookPipeline(hooks, {
+    onError: (err) => {
+      runOnErrorHooks(userBridgeDeps, err.message)
+    },
+  })
 }
 
 export function createPlanTraceCoordinator(self: AgentLoop): PlanTraceCoordinator {
@@ -425,7 +436,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
     getProviderName: () => self.config.providerName,
     getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
-    injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
+    injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal) },
   })
 }
 
@@ -506,7 +517,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },
 
     // === Telemetry ===
-    writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
+    writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
     resetEvidence: () => { self.evidence.reset() },
 
     // === Abort signal ===
@@ -609,7 +620,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       getCwd: () => self.cwd,
       appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
       completeTurn: (params) => self.turnCompletion.complete(params),
-      writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
+      writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
       flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
     }),
     postTurnDecision: new PostTurnDecisionController({

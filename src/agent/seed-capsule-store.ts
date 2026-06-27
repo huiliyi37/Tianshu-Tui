@@ -197,31 +197,6 @@ export function listCapsuleStars(cwd: string): string[] {
   return loadAllCapsules(cwd).map(c => c.star)
 }
 
-// ─── 向后兼容（供旧调用方或 volatile-snapshot 迁移期使用） ───
-
-export interface SeedCapsuleL1 {
-  block: string
-  raw: string
-}
-
-/**
- * @deprecated 使用 loadAllCapsules / renderAllCapsulesBlock 代替。
- * 仅保留向后兼容——只加载天璇胶囊。
- */
-export function loadTianxuanCapsule(cwd: string): SeedCapsuleL1 | null {
-  const capsules = loadAllCapsules(cwd)
-  const tianxuan = capsules.find(c => c.star === '天璇')
-  if (!tianxuan) return null
-  return { block: tianxuan.block, raw: tianxuan.raw }
-}
-
-/**
- * @deprecated 单胶囊渲染已被合并渲染替代。保留接口以兼容。
- */
-export function renderCapsuleBlock(l1: SeedCapsuleL1): string {
-  return l1.block
-}
-
 // ─── Phase 2: Principle Extraction ─────────────────────────────
 
 export interface ExtractedPrinciple {

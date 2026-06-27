@@ -43,7 +43,7 @@ describe('executeToolUse', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -384,13 +384,10 @@ describe('executeToolUse', () => {
       config: {
         ...base.config,
         promptEngine: {
-          setStrategyShift: () => {},
-          setImpactHint: () => {},
           markGitDirty: () => { gitDirtyCalls++ },
         },
       } as any,
     })
-
     await executeToolUse(
       { id: 'tu-deliver-commit', name: 'deliver_task', input: { commit: true, message: 'feat: x' } },
       deps, noopCallbacks as any, 1, false,
@@ -409,8 +406,6 @@ describe('executeToolUse', () => {
       config: {
         ...base.config,
         promptEngine: {
-          setStrategyShift: () => {},
-          setImpactHint: () => {},
           markGitDirty: () => { gitDirtyCalls++ },
         },
       } as any,
@@ -1125,7 +1120,7 @@ describe('artifactIntercept in tool pipeline', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -1571,7 +1566,7 @@ describe('phase-aware prediction recording', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {

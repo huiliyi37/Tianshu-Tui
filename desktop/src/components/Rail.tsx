@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Sun, Moon, Laptop, type LucideIcon,
+  Network, Settings, Sun, Moon, Laptop, Scale, type LucideIcon,
 } from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -16,6 +16,7 @@ const ICONS: Record<Surface, LucideIcon> = {
   git: GitBranch,
   insights: BarChart3,
   delegation: Network,
+  council: Scale,
   settings: Settings,
 }
 
@@ -37,14 +38,14 @@ function nextTheme(p: ThemePref): ThemePref {
 export function Rail(props: {
   surface: Surface
   onSurface: (s: Surface) => void
-  attentionCount: number
+  attentionCount?: number
 }) {
   const { surface, onSurface, attentionCount } = props
   const { t: tNav } = useTranslation('nav')
   const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
+  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)
@@ -63,8 +64,8 @@ export function Rail(props: {
               onClick={() => onSurface(s)}
             >
               <Icon icon={ICONS[s]} />
-              {s === 'attention' && attentionCount > 0 && (
-                <span className="rail-badge">{attentionCount > 9 ? '9+' : attentionCount}</span>
+              {s === 'attention' && (attentionCount ?? 0) > 0 && (
+                <span className="rail-badge">{(attentionCount ?? 0) > 9 ? '9+' : attentionCount ?? 0}</span>
               )}
             </TooltipTrigger>
             <TooltipContent side="right">{tNav(s)}</TooltipContent>

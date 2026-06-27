@@ -8,7 +8,6 @@ describe('processTurnEnd', () => {
       config: {
         promptEngine: {
           setTaskProgress: () => {},
-          setBehaviorMirror: () => {},
           setDecisions: () => {},
         },
         modelCards: undefined,
@@ -44,7 +43,6 @@ describe('processTurnEnd', () => {
       config: {
         promptEngine: {
           setTaskProgress: () => { called = true },
-          setBehaviorMirror: () => {},
           setDecisions: () => {},
         },
       } as any,
@@ -59,7 +57,6 @@ describe('processTurnEnd', () => {
       config: {
         promptEngine: {
           setTaskProgress: () => { called = true },
-          setBehaviorMirror: () => {},
           setDecisions: () => {},
         },
       } as any,

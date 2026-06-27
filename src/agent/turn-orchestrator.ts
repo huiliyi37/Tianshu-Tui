@@ -20,6 +20,7 @@ import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
 import type { GoalContinuationController } from './goal-continuation.js'
 import type { PostTurnDecisionController } from './post-turn-decision.js'
+import type { TelemetryRecord } from './telemetry-writer.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types re-exported for deps interface ──
@@ -185,7 +186,7 @@ export interface TurnOrchestratorDeps {
   onCacheAdvisorTurnEnd: (params: CacheTurnEndParams) => void
 
   // === Telemetry ===
-  writeTelemetry: (entry: any) => void
+  writeTelemetry: (entry: TelemetryRecord) => void
   resetEvidence: () => void
 
   // === Abort signal ===
@@ -585,13 +586,14 @@ export class TurnOrchestrator {
         const streamEndMs = Date.now()
         if (toolUses.length > 0) {
           this.deps.writeTelemetry({
+            kind: 'stream-complete',
             ts: streamEndMs,
             turn,
             phase: 'stream-complete',
             streamDurationMs: streamEndMs - turnStartMs,
             toolCount: toolUses.length,
             toolNames: toolUses.map(tu => tu.name).join(','),
-          } as any)
+          })
         }
 
         // Feed CacheAdvisor with turn metrics after API call completes
@@ -647,12 +649,13 @@ export class TurnOrchestrator {
           // identify which tools were about to run, even if executeBatch hangs.
           const toolNames = toolUses.map(tu => tu.name).join(',')
           this.deps.writeTelemetry({
+            kind: 'tool-executing',
             ts: Date.now(),
             turn,
             phase: 'tool-executing',
             tools: toolNames,
             toolCount: toolUses.length,
-          } as any)
+          })
 
           // 工具批整体 abort-race：executeBatch 内部虽对单工具有 withToolTimeout，
           // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
@@ -679,13 +682,14 @@ export class TurnOrchestrator {
 
           // L0 telemetry: tools duration
           this.deps.writeTelemetry({
+            kind: 'tools-complete',
             ts: Date.now(),
             turn,
             phase: "tools-complete",
             toolsDurationMs: Date.now() - streamEndMs,
             totalTurnMs: Date.now() - turnStartMs,
             toolCount: toolUses.length,
-          } as any)
+          })
 
           // Feed CacheAdvisor with cache metrics + artifact eviction/access data
           if (latestTurnCache && latestTurnCache.turn === turn) {

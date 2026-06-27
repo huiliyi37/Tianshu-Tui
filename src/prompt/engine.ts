@@ -704,18 +704,9 @@ export class PromptEngine {
     this.taskProgress = state
   }
 
-  /** @deprecated Dead field — behaviorMirror never rendered into prompt. */
-  setBehaviorMirror(_mirror: string | null): void { /* noop */ }
-
-  /** @deprecated Dead field — strategyShift never rendered into prompt. */
-  setStrategyShift(_hint: string | null): void { /* noop */ }
-
   setRepairHint(hint: string | null): void {
     this.repairHint = hint
   }
-
-  /** @deprecated Dead field — impactHint never rendered into prompt. */
-  setImpactHint(_hint: string | null): void { /* noop */ }
 
 
 
