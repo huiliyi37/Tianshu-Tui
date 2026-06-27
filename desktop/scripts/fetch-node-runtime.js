@@ -18,7 +18,7 @@ import { get } from 'node:https'
 import { execSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DEFAULT_NODE_VERSION = '22.15.0'
+const DEFAULT_NODE_VERSION = '22.23.1'
 const NODE_VERSION = process.env.NODE_VERSION || DEFAULT_NODE_VERSION
 const FORCE_FETCH = process.env.FORCE_FETCH === '1'
 
