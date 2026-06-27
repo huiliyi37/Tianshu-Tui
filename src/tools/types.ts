@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../api/types.js'
 import type { ArtifactStore } from '../artifact/store.js'
 import type { PrewarmCache } from '../agent/prewarm.js'
+import type { ReadRefStats } from './read-file.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 
 /**
@@ -79,6 +80,9 @@ export interface ToolCallParams {
   /** Prewarm cache for speculative file reads — injected so read_file can hit
    *  warmed entries (mtime-verified) instead of a cold fs read. Per-session. */
   prewarmCache?: PrewarmCache
+  /** Per-session read-ref telemetry accumulator. When injected, read-ref
+   *  savings scope to this session instead of accumulating process-wide. */
+  readRefStats?: ReadRefStats
   /** B1: Task identifier for ownership attribution */
   taskId?: string
   /** B1: Files owned by the current task (subset of sessionModifiedFiles, excluding externals) */

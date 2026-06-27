@@ -73,9 +73,17 @@ function isReadRefEnabled(): boolean {
  *  as direct content to avoid wasted round-trips for tiny fragments. */
 const READ_REF_THRESHOLD = 2048
 
-/** Telemetry: cumulative bytes saved via read-ref (avoided cacheCreate). */
+/** Per-session read-ref telemetry accumulator. When injected via ToolCallParams,
+ *  read-ref stats scope to the session instead of accumulating process-wide. */
+export interface ReadRefStats {
+  savedBytes: number
+  count: number
+}
+
+/** Telemetry: cumulative bytes saved via read-ref (avoided cacheCreate).
+ *  Module-level fallback used when no per-session accumulator is injected. */
 let readRefSavedBytes = 0
-/** Telemetry: number of read-ref shortcuts executed. */
+/** Telemetry: number of read-ref shortcuts executed. Module-level fallback. */
 let readRefCount = 0
 
 /** Session-level file edit tracking: records which files this session has
@@ -551,9 +559,17 @@ export const READ_FILE_TOOL: Tool = {
           `完整内容在你上文的 tool_result 中——回看即可。`,
           `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")`,
         ].join('\n')
-        readRefSavedBytes += entryBytes
-        readRefCount++
-        debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${readRefSavedBytes} count=${readRefCount}`)
+        // Accumulate into the per-session stats if injected, else the module-level fallback.
+        if (params.readRefStats) {
+          params.readRefStats.savedBytes += entryBytes
+          params.readRefStats.count++
+        } else {
+          readRefSavedBytes += entryBytes
+          readRefCount++
+        }
+        const totalSaved = params.readRefStats?.savedBytes ?? readRefSavedBytes
+        const totalCount = params.readRefStats?.count ?? readRefCount
+        debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${totalSaved} count=${totalCount}`)
         return { content: ref }
       }
       // Small fragment — fall through to normal read to avoid wasted round-trips
