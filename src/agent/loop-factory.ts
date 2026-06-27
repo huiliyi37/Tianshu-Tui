@@ -415,7 +415,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
       self.session.replaceMessages(msgs)
       self.config.promptEngine.resetAppendixBaseline()
     },
-    dietMessages: msgs => self.p3.dietMessages(msgs as any) as any,
+    dietMessages: msgs => self.p3.dietMessages(msgs),
     trySessionSplit: () => self.compaction.trySessionSplit(),
     maybeCompact: opts => self.compaction.maybeCompact(opts),
     tryPartialCompact: target => self.compaction.tryPartialCompact(target),
