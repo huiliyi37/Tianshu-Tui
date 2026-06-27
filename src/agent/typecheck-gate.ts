@@ -25,8 +25,10 @@ import type { Diagnostic } from '../lsp/diagnostics.js'
  *  purpose — `test`/`lint`/`build` do not establish type safety. */
 export const TYPECHECK_CMD_RE = /\b(tsc|type-?check)\b/i
 
-/** Injectable so tests can mock without spawning a real tsc / needing mkdtemp. */
-export type TypecheckRunner = (cwd: string) => LspCheckResult
+/** Injectable so tests can mock without spawning a real tsc / needing mkdtemp.
+ *  Async so the real tsc subprocess (runTypeCheck) does not block the event loop
+ *  — see client.ts. Mock runners must return a Promise. */
+export type TypecheckRunner = (cwd: string) => Promise<LspCheckResult>
 
 const defaultRunner: TypecheckRunner = (cwd) => runTypeCheck(cwd, '*')
 
@@ -113,16 +115,16 @@ function loadTypecheckBaseline(cwd: string): ReadonlySet<string> {
  *   - tsc did not run to completion (crash / timeout) — fail-open
  *   - no new (non-baseline) error exists anywhere
  */
-export function runChangedFilesTypecheck(
+export async function runChangedFilesTypecheck(
   cwd: string,
   changedFiles: readonly string[],
   run: TypecheckRunner = defaultRunner,
   baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
-): ChangedFilesTypecheck | null {
+): Promise<ChangedFilesTypecheck | null> {
   const rel = changedFiles.filter(f => !isAbsolute(f) && /\.(ts|tsx)$/.test(f))
   if (rel.length === 0) return null
 
-  const res = run(cwd)
+  const res = await run(cwd)
   // tsc crashed or timed out → partial output is untrustworthy; never escalate.
   if (!res.ranOk) return null
 
@@ -216,19 +218,19 @@ function changedFilesSignature(cwd: string, tsFiles: string[]): string | null {
 
 /** Memoized wrapper for the review-gate call sites. Pure callers (tests) should
  *  use {@link runChangedFilesTypecheck} directly. */
-export function runChangedFilesTypecheckMemo(
+export async function runChangedFilesTypecheckMemo(
   cwd: string,
   changedFiles: readonly string[],
   run: TypecheckRunner = defaultRunner,
   baseline: ReadonlySet<string> = loadTypecheckBaseline(cwd),
-): ChangedFilesTypecheck | null {
+): Promise<ChangedFilesTypecheck | null> {
   const tsFiles = changedFiles.filter(f => !isAbsolute(f) && /\.(ts|tsx)$/.test(f))
   const sig = changedFilesSignature(cwd, tsFiles)
   if (sig) {
     const hit = memoByCwd.get(cwd)
     if (hit && hit.sig === sig) return hit.result
   }
-  const result = runChangedFilesTypecheck(cwd, changedFiles, run, baseline)
+  const result = await runChangedFilesTypecheck(cwd, changedFiles, run, baseline)
   if (sig) memoByCwd.set(cwd, { sig, result })
   return result
 }

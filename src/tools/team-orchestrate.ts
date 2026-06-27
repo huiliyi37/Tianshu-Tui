@@ -472,7 +472,7 @@ export function createTeamOrchestrateTool(
           if (typecheckGateEnabled() && typecheckRunner) {
             try {
               const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
-              const tc = runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
+              const tc = await runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
               if (tc) {
                 change.forceLevel = 'L3'
                 typecheckFocus = `Typecheck — ${tc.summary}`
