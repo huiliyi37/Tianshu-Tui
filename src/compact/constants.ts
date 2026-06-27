@@ -131,13 +131,6 @@ export function summaryOutputBudgetChars(contextWindow: number): { full: number;
   return { full: 3_000, partial: 2_000 }
 }
 
-/** Cache-aligned summary keeps 85% of context budget */
-export const CACHE_ALIGNED_BUDGET_PERCENT = 85
-
-/** Maximum output tokens for compaction summary (used when calling compaction model in future integration) */
-// TODO: Wire into auto-compact API call when integrating LLM-based compaction
-export const COMPACTION_SUMMARY_MAX_TOKENS = 1_024
-
 export interface CompactionConfig {
   enabled: boolean
   autoThreshold: number
