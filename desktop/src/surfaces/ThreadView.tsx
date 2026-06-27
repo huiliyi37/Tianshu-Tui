@@ -154,11 +154,13 @@ export function ThreadView(props: {
     {
       name: '/review',
       desc: 'L2 审查 · 单审查员',
+      example: '/review [关注点描述]',
       run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L2". This triggers L2 adversarial verifier.'),
     },
     {
       name: '/review max',
       desc: 'L3 审查 · 编队 5 审查员',
+      example: '/review max [关注点描述]',
       run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L3". This triggers L3 Review Squadron (5 inspectors).'),
     },
     {
@@ -173,11 +175,13 @@ export function ThreadView(props: {
     {
       name: '/plan',
       desc: '创建实施方案',
+      example: '/plan <功能描述>',
       run: () => onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.'),
     },
     {
       name: '/team',
       desc: '团队模式 · 多 agent 协作',
+      example: '/team <任务描述>',
       run: () => onSend('Run team-mode workflow through team_orchestrate for the task I will describe next.'),
     },
     {

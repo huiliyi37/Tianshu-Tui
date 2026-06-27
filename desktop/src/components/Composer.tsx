@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
-import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
+import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
 import type { PlanModeState } from '../runtime/types'
 import type { ModelEntry } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
@@ -118,6 +118,7 @@ export function Composer(props: {
   const [dragOver, setDragOver] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
+  const [slashError, setSlashError] = useState<string | null>(null)
   const [speechSupported, setSpeechSupported] = useState(false)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
 
@@ -212,6 +213,7 @@ export function Composer(props: {
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const next = e.target.value
     onChange(next)
+    if (slashError) setSlashError(null)
     onAfterCaret(next, e.target.selectionStart ?? next.length)
   }
 
@@ -244,6 +246,14 @@ export function Composer(props: {
   const submit = () => {
     const text = value.trim()
     if (!text && images.length === 0) return
+    // Guard: reject unknown slash commands instead of sending them to the agent
+    // (which would misinterpret the /token as a literal request). Mirrors TUI
+    // resolveAppPromptInput returning null for unrecognized slashes.
+    if (commands && commands.length > 0 && !isKnownSlashCommand(text, commands)) {
+      setSlashError(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
+      return
+    }
+    setSlashError(null)
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
   }
@@ -423,6 +433,7 @@ export function Composer(props: {
                   <span className="suggest-glyph" aria-hidden>/</span>
                   <span className="suggest-path">{cmd.name}</span>
                   <span className="suggest-desc">{cmd.desc}</span>
+                  {cmd.example && <span className="suggest-example">{cmd.example}</span>}
                 </li>
               ))}
         </ul>
@@ -438,6 +449,7 @@ export function Composer(props: {
         </div>
       )}
       {imageError && <div className="composer-error">{imageError}</div>}
+      {slashError && <div className="composer-error slash-error">{slashError}</div>}
       <div className="composer-row">
         <textarea
           ref={taRef}

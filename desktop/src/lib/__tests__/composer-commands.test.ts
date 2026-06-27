@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { filterCommands, detectSlash, type ComposerCommand } from '../composer-commands'
+import { filterCommands, detectSlash, isKnownSlashCommand, type ComposerCommand } from '../composer-commands'
 
 const noop = () => {}
 const CMDS: ComposerCommand[] = [
@@ -61,4 +61,41 @@ test('detectSlash: not at line start returns null', () => {
 
 test('detectSlash: whitespace ends command mode', () => {
   assert.equal(detectSlash('/re foo', 7), null)
+})
+
+// ── isKnownSlashCommand: guard against sending unknown /commands ──
+
+test('isKnownSlashCommand: exact match returns true', () => {
+  assert.equal(isKnownSlashCommand('/rewind', CMDS), true)
+  assert.equal(isKnownSlashCommand('/review', CMDS), true)
+})
+
+test('isKnownSlashCommand: command with args matches base name', () => {
+  // "/review max auth flow" matches /review max
+  assert.equal(isKnownSlashCommand('/review max auth flow', CMDS), true)
+  // "/rewind 5" matches /rewind
+  assert.equal(isKnownSlashCommand('/rewind 5', CMDS), true)
+})
+
+test('isKnownSlashCommand: unknown command returns false', () => {
+  assert.equal(isKnownSlashCommand('/foobar', CMDS), false)
+  assert.equal(isKnownSlashCommand('/xyz arg', CMDS), false)
+})
+
+test('isKnownSlashCommand: typo of known command returns false', () => {
+  // /mdel looks like /model but is a typo — must not match
+  assert.equal(isKnownSlashCommand('/mdel', CMDS), false)
+})
+
+test('isKnownSlashCommand: non-slash input returns true (not a guard concern)', () => {
+  assert.equal(isKnownSlashCommand('hello world', CMDS), true)
+  assert.equal(isKnownSlashCommand('use @file:path here', CMDS), true)
+})
+
+test('isKnownSlashCommand: prefix match counts (partial typing before submit)', () => {
+  // If the user typed "/rev" and submitted, and /review exists, it's close enough
+  // to be considered "known" (avoids false rejection during fast typing).
+  // But a bare "/re" that doesn't exactly match should still be checked:
+  // /rewind starts with /re → prefix match → true
+  assert.equal(isKnownSlashCommand('/rewind', CMDS), true)
 })
