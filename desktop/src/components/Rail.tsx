@@ -1,27 +1,20 @@
 import { useState } from 'react'
+import {
+  LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Network, Settings, Sun, Moon, Laptop, type LucideIcon,
+} from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 
-// Minimal inline icons (stroke, currentColor) — keeps the Codex-clean look with
-// zero icon-font dependency.
-function Icon({ path }: { path: string }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={path} />
-    </svg>
-  )
-}
-
-const ICONS: Record<Surface, string> = {
-  workspace: 'M4 5h16M4 5v14M4 19h16M14 5v14',
-  automations: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
-  attention: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.5 21a2 2 0 0 0 3 0',
-  skills: 'M12 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM15 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-  git: 'M7 6a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm5 3v6m0 0a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm-5 3a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-  insights: 'M3 3v18h18M7 16l4-4 4 4 5-6',
-  delegation: 'M12 2v6M12 22v-6M12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM12 14v3M9 21h6',
-  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.4-2.4H9.5l-.4 2.4a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.4h4.9l.4-2.4a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.6c.06-.33.1-.66.1-1Z',
+const ICONS: Record<Surface, LucideIcon> = {
+  workspace: LayoutDashboard,
+  automations: Clock,
+  attention: Bell,
+  skills: Puzzle,
+  git: GitBranch,
+  insights: BarChart3,
+  delegation: Network,
+  settings: Settings,
 }
 
 const LABELS: Record<Surface, string> = {
@@ -35,9 +28,16 @@ const LABELS: Record<Surface, string> = {
   settings: '设置',
 }
 
-const SUN = 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4'
-const MOON = 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z'
-const AUTO = 'M12 3v3M12 18v3M3 12h3M18 12h3'
+const THEME_ICON: Record<ThemePref, LucideIcon> = {
+  system: Laptop,
+  light: Sun,
+  dark: Moon,
+}
+
+/** Renders a lucide icon at the rail's standard size/color. */
+function Icon({ icon: Ic }: { icon: LucideIcon }) {
+  return <Ic size={18} strokeWidth={1.7} aria-hidden />
+}
 
 function nextTheme(p: ThemePref): ThemePref {
   return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
@@ -70,7 +70,7 @@ export function Rail(props: {
             title={LABELS[s]}
             onClick={() => onSurface(s)}
           >
-            <Icon path={ICONS[s]} />
+            <Icon icon={ICONS[s]} />
             {s === 'attention' && attentionCount > 0 && (
               <span className="rail-badge">{attentionCount > 9 ? '9+' : attentionCount}</span>
             )}
@@ -83,7 +83,7 @@ export function Rail(props: {
           title={`主题：${theme === 'system' ? '跟随系统' : theme === 'light' ? '亮色' : '暗色'}`}
           onClick={cycleTheme}
         >
-          <Icon path={theme === 'system' ? AUTO : theme === 'light' ? SUN : MOON} />
+          <Icon icon={THEME_ICON[theme]} />
         </button>
       </div>
     </nav>

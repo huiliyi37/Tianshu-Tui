@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Network, Settings, type LucideIcon,
+} from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
@@ -27,25 +31,21 @@ const SURFACE_LABEL: Record<Surface, string> = {
   settings: '设置',
 }
 
-function NavIcon({ surface }: { surface: Surface }) {
-  const paths: Record<Surface, string> = {
-    workspace: 'M4 5h16M4 5v14M4 19h16M14 5v14',
-    automations: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
-    attention: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.5 21a2 2 0 0 0 3 0',
-    skills: 'M12 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM15 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-    git: 'M7 6a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm5 3v6m0 0a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm-5 3a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-    insights: 'M3 3v18h18M7 16l4-4 4 4 5-6',
-    delegation: 'M12 2v6M12 22v-6M12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM12 14v3M9 21h6',
-    settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.4-2.4H9.5l-.4 2.4a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.4h4.9l.4-2.4a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.6c.06-.33.1-.66.1-1Z',
-  }
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={paths[surface]} />
-    </svg>
-  )
+const NAV_ICONS: Record<Surface, LucideIcon> = {
+  workspace: LayoutDashboard,
+  automations: Clock,
+  attention: Bell,
+  skills: Puzzle,
+  git: GitBranch,
+  insights: BarChart3,
+  delegation: Network,
+  settings: Settings,
 }
 
+function NavIcon({ surface }: { surface: Surface }) {
+  const Ic = NAV_ICONS[surface]
+  return <Ic size={16} strokeWidth={1.7} aria-hidden />
+}
 // Project → Thread sidebar (Cursor 3.0 style).
 // Top: New Session button + main navigation. Below: project tree of sessions.
 export function ProjectSidebar() {

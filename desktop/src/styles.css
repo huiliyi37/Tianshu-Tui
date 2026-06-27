@@ -1,3 +1,34 @@
+@import 'tailwindcss';
+
+/* Bridge existing design tokens (tokens.css) into Tailwind utility classes.
+   This lets new components use `bg-panel`, `text-muted`, `border-border`, etc.
+   without redefining any colors. Existing hand-written CSS below is untouched. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-panel-3: var(--panel-3);
+  --color-text: var(--text);
+  --color-text-strong: var(--text-strong);
+  --color-text-secondary: var(--text-secondary);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-pill: var(--radius-pill);
+}
+
 /* Tokens (colors/spacing/type) live in styles/tokens.css. This file is the
  * component layer and references those variables — no hardcoded hex. */
 
@@ -1239,85 +1270,6 @@ body {
 /* Match the accent color for better visual integration with prose. */
 .md .katex .mord, .md .katex .mbin, .md .katex .mrel, .md .katex .mopen, .md .katex .mclose { color: inherit; }
 
-/* DelegationSurface — full-screen delegation tree + detail sidebar. */
-.del-surface { padding: 0 var(--space-4) var(--space-4); max-width: 1100px; }
-.del-header { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-3); }
-.del-header h3 { font-size: var(--text-lg); color: var(--text-strong); font-weight: var(--weight-semibold); margin: 0; }
-.del-summary { font-size: var(--text-sm); color: var(--muted); font-family: var(--font-mono); }
-
-.del-filters { display: flex; gap: var(--space-1); margin-bottom: var(--space-3); flex-wrap: wrap; }
-.del-filter {
-  font-size: var(--text-xs); padding: 4px 12px; border-radius: var(--radius-pill);
-  border: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
-}
-.del-filter:hover { background: var(--panel-2); color: var(--text); }
-.del-filter.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-
-.del-body { display: grid; grid-template-columns: 1fr 340px; gap: var(--space-3); align-items: start; }
-@media (max-width: 900px) { .del-body { grid-template-columns: 1fr; } }
-
-.del-tree-panel {
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.del-node {
-  display: flex; align-items: center; gap: 8px; padding: 6px 10px;
-  cursor: pointer; border-bottom: 1px solid var(--border);
-  transition: background var(--dur) var(--ease);
-}
-.del-node:last-child { border-bottom: none; }
-.del-node:hover { background: var(--panel-2); }
-.del-node.selected { background: var(--accent-soft); }
-.del-node.dimmed { opacity: 0.35; }
-
-.del-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
-.del-dot.running { background: var(--accent); animation: pulse-running 1.5s var(--ease) infinite; }
-.del-dot.ok { background: var(--success); }
-.del-dot.warn { background: var(--warning); }
-.del-dot.bad { background: var(--error); }
-.del-dot.pulse { animation: pulse 1.2s var(--ease) infinite; }
-
-.del-id { font-family: var(--font-mono); font-weight: var(--weight-semibold); color: var(--text-strong); font-size: var(--text-sm); flex: none; }
-.del-profile {
-  flex: none; font-size: var(--text-xs); padding: 1px 6px; border-radius: var(--radius-pill);
-  background: var(--panel-3); color: var(--muted); font-family: var(--font-mono);
-}
-.del-model { flex: none; font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
-.del-badge {
-  margin-left: auto; flex: none; font-size: var(--text-xs); padding: 1px 8px; border-radius: var(--radius-pill);
-  background: var(--panel-2); color: var(--muted);
-}
-.del-badge.running { background: var(--accent-soft); color: var(--accent); }
-.del-badge.ok { background: var(--success-soft); color: var(--success); }
-.del-badge.warn { background: var(--warning-soft); color: var(--warning); }
-.del-badge.bad { background: var(--error-soft); color: var(--error); }
-.del-elapsed { flex: none; font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono); }
-.del-kids {
-  flex: none; font-size: 10px; min-width: 16px; text-align: center; padding: 0 4px;
-  border-radius: var(--radius-pill); background: var(--panel-3); color: var(--muted);
-}
-
-.del-detail-panel {
-  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
-  padding: var(--space-3); position: sticky; top: 0;
-}
-.del-detail-empty { color: var(--muted); font-size: var(--text-sm); text-align: center; padding: var(--space-4); }
-.del-detail-head { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); }
-.del-detail-id { font-family: var(--font-mono); font-weight: var(--weight-semibold); color: var(--text-strong); font-size: var(--text-sm); }
-
-.del-detail-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px var(--space-3); margin: 0 0 var(--space-3); }
-.del-detail-grid dt { color: var(--muted); font-size: var(--text-xs); }
-.del-detail-grid dd { color: var(--text); font-size: var(--text-sm); margin: 0; font-family: var(--font-mono); }
-
-.del-detail-obj, .del-detail-prog, .del-detail-usage { margin-bottom: var(--space-2); }
-.del-detail-label { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-.del-detail-text { color: var(--text); font-size: var(--text-sm); white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); }
-
-.del-usage-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-3); margin: 0; }
-.del-usage-grid dt { color: var(--muted); font-size: var(--text-xs); }
-.del-usage-grid dd { color: var(--text); font-size: var(--text-sm); margin: 0; font-family: var(--font-mono); }
 
 /* Star-domain course-correction card (R5) — selective externalization of
    "stuck → nudge → re-route". Deliberately quiet: distinct but not alarming. */

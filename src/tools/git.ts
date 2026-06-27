@@ -5,7 +5,7 @@ import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 import { killProcessTree } from './process-kill.js'
 
-const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash', 'stash_pop'] as const
+const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'log_graph', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
 
 const MAX_OUTPUT = 50_000
@@ -158,6 +158,15 @@ async function createSafetyRef(cwd: string, abortSignal?: AbortSignal): Promise<
   } catch { /* best-effort, never block stash */ }
 }
 
+/** Run `git log --graph --all --oneline --decorate` for the desktop Git graph view. */
+export async function getGitGraph(cwd: string, maxCount = 200): Promise<string> {
+  const count = Math.max(1, Math.min(maxCount, 500))
+  return runGit(
+    ['log', `--max-count=${count}`, '--graph', '--all', '--oneline', '--decorate', '--branches', '--remotes'],
+    cwd,
+  )
+}
+
 export const GIT_TOOL: Tool = {
   definition: {
     name: 'git',
@@ -166,6 +175,7 @@ export const GIT_TOOL: Tool = {
 - diff_summary: Show diff stats for staged and unstaged changes
 - commit: Commit only this session's modified files when available; otherwise commit already staged changes only
 - log: Show recent commit history (default 20, configurable with maxCount)
+- log_graph: Show ASCII branch/merge graph across all local and remote refs
 - stash: Stash current working directory changes
 
 For complex git operations (branch, merge, rebase, push, pull), use the bash tool instead.`,
@@ -273,6 +283,27 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 20, 100))
           const log = (await runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd, params.abortSignal)).trim()
           return { content: log || 'No commits yet.' }
+        }
+
+        case 'log_graph': {
+          const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 200, 500))
+          const graph = (
+            await runGit(
+              [
+                'log',
+                `--max-count=${maxCount}`,
+                '--graph',
+                '--all',
+                '--oneline',
+                '--decorate',
+                '--branches',
+                '--remotes',
+              ],
+              cwd,
+              params.abortSignal,
+            )
+          ).trimEnd()
+          return { content: graph || 'No commits yet.' }
         }
 
         case 'stash': {

@@ -106,6 +106,22 @@ function metaOf(status: string): { label: string; cls: StatusClass } {
   return STATUS_META[status] ?? { label: status || '—', cls: 'idle' }
 }
 
+// Tailwind color classes per status — avoids per-status CSS rules.
+const DOT_CLS: Record<StatusClass, string> = {
+  running: 'bg-accent',
+  ok: 'bg-success',
+  warn: 'bg-warning',
+  bad: 'bg-error',
+  idle: 'bg-muted',
+}
+const BADGE_CLS: Record<StatusClass, string> = {
+  running: 'bg-[var(--accent-soft)] text-accent',
+  ok: 'bg-[var(--success-soft)] text-success',
+  warn: 'bg-[var(--warning-soft)] text-warning',
+  bad: 'bg-[var(--error-soft)] text-error',
+  idle: 'bg-panel-2 text-muted',
+}
+
 function shortId(workerId: string): string {
   const tail = workerId.includes(':') ? workerId.slice(workerId.lastIndexOf(':') + 1) : workerId
   return tail.length > 0 ? tail : workerId.slice(0, 12)
@@ -147,17 +163,17 @@ function NodeRow({
   return (
     <>
       <div
-        className={`del-node ${selected ? 'selected' : ''} ${cls} ${dimmed ? 'dimmed' : ''}`}
+        className={`group flex cursor-pointer items-center gap-2 border-b border-border px-2.5 py-1.5 transition-colors duration-140 ease-[cubic-bezier(0.2,0,0,1)] hover:bg-panel-2 ${selected ? 'bg-[var(--accent-soft)]' : ''} ${dimmed ? 'opacity-35' : ''}`}
         style={{ paddingLeft: `${12 + depth * 18}px` }}
         onClick={() => onSelect(n)}
       >
-        <span className={`del-dot ${cls}${cls === 'running' ? ' pulse' : ''}`} />
-        <span className="del-id" title={n.workerId}>{shortId(n.workerId)}</span>
-        {n.profile && <span className="del-profile">{n.profile}</span>}
-        {n.model && <span className="del-model">{n.model}</span>}
-        <span className={`del-badge ${cls}`}>{label}</span>
-        {n.elapsedMs ? <span className="del-elapsed">{formatMs(n.elapsedMs)}</span> : null}
-        {hasChildren && <span className="del-kids">{t.children.length}</span>}
+        <span className={`h-2 w-2 shrink-0 rounded-full ${DOT_CLS[cls]}${cls === 'running' ? ' animate-pulse' : ''}`} />
+        <span className="shrink-0 font-mono text-[12px] font-semibold text-text-strong" title={n.workerId}>{shortId(n.workerId)}</span>
+        {n.profile && <span className="shrink-0 rounded-full bg-panel-3 px-1.5 py-px font-mono text-[11px] text-muted">{n.profile}</span>}
+        {n.model && <span className="shrink-0 font-mono text-[11px] text-muted">{n.model}</span>}
+        <span className={`ml-auto shrink-0 rounded-full px-2 py-px text-[11px] ${BADGE_CLS[cls]}`}>{label}</span>
+        {n.elapsedMs ? <span className="shrink-0 font-mono text-[11px] text-muted">{formatMs(n.elapsedMs)}</span> : null}
+        {hasChildren && <span className="flex min-w-[16px] shrink-0 items-center justify-center rounded-full bg-panel-3 px-1 text-[10px] text-muted">{t.children.length}</span>}
       </div>
       {t.children.map((c: TreeNode) => (
         <NodeRow key={c.node.workerId} t={c} selected={selected} onSelect={onSelect} dimmed={dimmed} />
@@ -166,48 +182,46 @@ function NodeRow({
   )
 }
 
-// ── Detail sidebar ─────────────────────────────────────────────
-
 function DetailPanel({ n }: { n: DelegationNode | null }) {
   if (!n) {
-    return <div className="del-detail-empty">选择一个节点查看详情</div>
+    return <div className="py-4 text-center text-[13px] text-muted">选择一个节点查看详情</div>
   }
   const { label, cls } = metaOf(n.status)
   const usage = n.usage
   return (
-    <div className="del-detail">
-      <div className="del-detail-head">
-        <span className={`del-dot ${cls}`} />
-        <span className="del-detail-id" title={n.workerId}>{shortId(n.workerId)}</span>
-        <span className={`del-badge ${cls}`}>{label}</span>
+    <div className="p-3">
+      <div className="mb-3 flex items-center gap-2">
+        <span className={`h-2 w-2 rounded-full ${DOT_CLS[cls]}`} />
+        <span className="font-mono text-[13px] font-semibold text-text-strong" title={n.workerId}>{shortId(n.workerId)}</span>
+        <span className={`rounded-full px-2 py-px text-[11px] ${BADGE_CLS[cls]}`}>{label}</span>
       </div>
-      <dl className="del-detail-grid">
-        <dt>角色</dt><dd>{n.profile ?? '—'}</dd>
-        <dt>模型</dt><dd>{n.model ?? '—'}</dd>
-        <dt>Provider</dt><dd>{n.provider ?? '—'}</dd>
-        <dt>耗时</dt><dd>{formatMs(n.elapsedMs)}</dd>
-        <dt>父节点</dt><dd>{n.parentId ? shortId(n.parentId) : '— (根)'}</dd>
+      <dl className="mb-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt className="text-[11px] text-muted">角色</dt><dd className="m-0 font-mono text-[13px] text-text">{n.profile ?? '—'}</dd>
+        <dt className="text-[11px] text-muted">模型</dt><dd className="m-0 font-mono text-[13px] text-text">{n.model ?? '—'}</dd>
+        <dt className="text-[11px] text-muted">Provider</dt><dd className="m-0 font-mono text-[13px] text-text">{n.provider ?? '—'}</dd>
+        <dt className="text-[11px] text-muted">耗时</dt><dd className="m-0 font-mono text-[13px] text-text">{formatMs(n.elapsedMs)}</dd>
+        <dt className="text-[11px] text-muted">父节点</dt><dd className="m-0 font-mono text-[13px] text-text">{n.parentId ? shortId(n.parentId) : '— (根)'}</dd>
       </dl>
       {n.objective && (
-        <div className="del-detail-obj">
-          <div className="del-detail-label">目标</div>
-          <div className="del-detail-text">{n.objective}</div>
+        <div className="mb-2">
+          <div className="mb-0.5 text-[11px] uppercase tracking-wide text-muted">目标</div>
+          <div className="whitespace-pre-wrap break-words font-mono text-[13px] text-text">{n.objective}</div>
         </div>
       )}
       {n.progressLine && (
-        <div className="del-detail-prog">
-          <div className="del-detail-label">进度</div>
-          <div className="del-detail-text">⎿ {n.progressLine}</div>
+        <div className="mb-2">
+          <div className="mb-0.5 text-[11px] uppercase tracking-wide text-muted">进度</div>
+          <div className="whitespace-pre-wrap break-words font-mono text-[13px] text-text">⎿ {n.progressLine}</div>
         </div>
       )}
       {usage && (
-        <div className="del-detail-usage">
-          <div className="del-detail-label">Token 用量</div>
-          <dl className="del-usage-grid">
-            <dt>输入</dt><dd>{formatTokens(usage.input_tokens)}</dd>
-            <dt>输出</dt><dd>{formatTokens(usage.output_tokens)}</dd>
-            <dt>缓存读</dt><dd>{formatTokens(usage.cache_read_input_tokens)}</dd>
-            <dt>总计</dt><dd>{formatTokens(usage.total_tokens)}</dd>
+        <div className="mb-2">
+          <div className="mb-0.5 text-[11px] uppercase tracking-wide text-muted">Token 用量</div>
+          <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <dt className="text-[11px] text-muted">输入</dt><dd className="m-0 font-mono text-[13px] text-text">{formatTokens(usage.input_tokens)}</dd>
+            <dt className="text-[11px] text-muted">输出</dt><dd className="m-0 font-mono text-[13px] text-text">{formatTokens(usage.output_tokens)}</dd>
+            <dt className="text-[11px] text-muted">缓存读</dt><dd className="m-0 font-mono text-[13px] text-text">{formatTokens(usage.cache_read_input_tokens)}</dd>
+            <dt className="text-[11px] text-muted">总计</dt><dd className="m-0 font-mono text-[13px] text-text">{formatTokens(usage.total_tokens)}</dd>
           </dl>
         </div>
       )}
@@ -269,8 +283,8 @@ export function DelegationSurface() {
   if (!activeSessionId) {
     return (
       <div className="surface-scroll">
-        <div className="del-surface">
-          <div className="meta">请先选择一个会话</div>
+        <div className="max-w-[1100px] px-4 pb-4">
+          <div className="py-8 text-center text-[13px] text-muted">请先选择一个会话</div>
         </div>
       </div>
     )
@@ -283,19 +297,19 @@ export function DelegationSurface() {
 
   return (
     <div className="surface-scroll">
-      <div className="del-surface">
-        <header className="del-header">
-          <h3>委派树</h3>
-          <span className="del-summary">
+      <div className="max-w-[1100px] px-4 pb-4">
+        <header className="mb-3 flex items-baseline gap-3">
+          <h3 className="m-0 text-base font-semibold text-text-strong">委派树</h3>
+          <span className="font-mono text-xs text-muted">
             {total} 个节点 · {running} 运行 · {done} 完成{attention > 0 ? ` · ${attention} 需关注` : ''}
           </span>
         </header>
 
-        <div className="del-filters">
+        <div className="mb-3 flex flex-wrap gap-1">
           {(Object.keys(FILTERS) as FilterKind[]).map((k) => (
             <button
               key={k}
-              className={`del-filter ${filter === k ? 'active' : ''}`}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-[11px] transition-colors duration-140 ease-[cubic-bezier(0.2,0,0,1)] ${filter === k ? 'border-accent bg-[var(--accent-soft)] text-accent' : 'border-border bg-panel text-muted hover:bg-panel-2 hover:text-text'}`}
               onClick={() => setFilter(k)}
             >
               {FILTERS[k]!.label}
@@ -304,10 +318,10 @@ export function DelegationSurface() {
         </div>
 
         {total === 0 ? (
-          <div className="meta">暂无委派数据。运行 <code>/team</code> 或 <code>delegate_batch</code> 后这里会显示子代理树。</div>
+          <div className="py-4 text-[13px] text-muted">暂无委派数据。运行 <code className="rounded bg-panel-2 px-1 font-mono text-[12px]">/team</code> 或 <code className="rounded bg-panel-2 px-1 font-mono text-[12px]">delegate_batch</code> 后这里会显示子代理树。</div>
         ) : (
-          <div className="del-body">
-            <div className="del-tree-panel">
+          <div className="grid items-start gap-3 [grid-template-columns:1fr_340px] max-[900px]:[grid-template-columns:1fr]">
+            <div className="overflow-hidden rounded-lg border border-border bg-panel">
               {forest.map((t) => (
                 <NodeRow
                   key={t.node.workerId}
@@ -318,7 +332,7 @@ export function DelegationSurface() {
                 />
               ))}
             </div>
-            <div className="del-detail-panel">
+            <div className="sticky top-0 rounded-lg border border-border bg-panel p-3">
               <DetailPanel n={selected} />
             </div>
           </div>

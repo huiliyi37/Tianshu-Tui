@@ -1,0 +1,490 @@
+
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>天枢 · TUI 视觉稿</title>
+<style>
+  /* ───────────────────────────────────────────────
+     天枢 Tianshu — 玄夜墨色单色系
+     95% 墨灰 · 紫微紫点缀 · 一方朱砂印
+     ─────────────────────────────────────────────── */
+  :root {
+    /* 墨色基底 — 从暗到亮的单色阶 */
+    --ink-0:   #0d0e14;   /* 玄夜底 */
+    --ink-1:   #111320;   /* 微抬升 */
+    --ink-2:   #161827;   /* 卡面 */
+
+    /* 灰阶文字分层 — 层级靠它,不靠颜色 */
+    --fg-hi:   #d8dae2;   /* 主文字 */
+    --fg:      #a7aab6;   /* 正文 */
+    --muted:   #6c6f7e;   /* 元信息 */
+    --dim:     #494c5b;   /* 快捷键 / 分隔 */
+    --faint:   #2a2d3a;   /* 极淡线 */
+
+    /* 唯一冷主色 — 紫微帝星(褪色青花) */
+    --ziwei:     #c9b8ff;
+    --ziwei-dim: #8b82ad;
+
+    /* 唯一暖色 — 一方朱砂印,极少出现 */
+    --cinnabar:  #d4453a;
+
+    /* 功能态 — 压暗去饱和,融进墨色 */
+    --qing:  #6f9b91;   /* 归航青 · 成功 */
+    --jin:   #b09155;   /* 星金 · 警示 */
+    --chi:   #c1655c;   /* 朱砂赤 · 错误 */
+
+    /* 工具类别 — 墨色系内极弱色相区分 */
+    --tc-shell: #8c8f9d;  /* bash / grep */
+    --tc-edit:  #9a90c2;  /* edit / write */
+    --tc-test:  #9c8a63;  /* test */
+
+    --mono: "SF Mono", "Menlo", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+    --col: 92ch;          /* 模拟终端列宽 */
+    --lh: 1.75;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--ink-0);
+    color: var(--fg);
+  }
+
+  body {
+    font-family: var(--mono);
+    font-size: 13.5px;
+    line-height: var(--lh);
+    letter-spacing: 0.01em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    padding: 0 0 6rem;
+  }
+
+  /* 极淡星图底纹 — 几乎不可见的呼吸 */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(1px 1px at 18% 22%, #2c2f40 50%, transparent 51%),
+      radial-gradient(1px 1px at 73% 14%, #25283a 50%, transparent 51%),
+      radial-gradient(1px 1px at 41% 67%, #282b3d 50%, transparent 51%),
+      radial-gradient(1px 1px at 88% 71%, #232636 50%, transparent 51%),
+      radial-gradient(1px 1px at 61% 88%, #262939 50%, transparent 51%);
+    opacity: .5;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: var(--col);
+    margin: 0 auto;
+    padding: 0 clamp(1.25rem, 4vw, 3rem);
+  }
+
+  /* 屏间分区标注 — 设计稿注记,非产品 UI */
+  .pane {
+    padding: 3.5rem 0 3rem;
+    border-top: 1px solid var(--faint);
+  }
+  .pane:first-of-type { border-top: 0; }
+
+  .pane-tag {
+    font-size: 11px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 0 0 2.25rem;
+    display: flex;
+    align-items: baseline;
+    gap: .9em;
+  }
+  .pane-tag b {
+    color: var(--muted);
+    font-weight: 600;
+    letter-spacing: .08em;
+  }
+  .pane-tag::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, var(--faint), transparent);
+  }
+
+  /* 通用色用法 */
+  .mut  { color: var(--muted); }
+  .dim  { color: var(--dim); }
+  .hi   { color: var(--fg-hi); }
+  .zw   { color: var(--ziwei); }
+  .zwd  { color: var(--ziwei-dim); }
+  .cb   { color: var(--cinnabar); }
+  .qing { color: var(--qing); }
+  .jin  { color: var(--jin); }
+  .chi  { color: var(--chi); }
+
+  /* ── 画面A · 欢迎屏 ── */
+  .welcome { display: grid; gap: 1.15rem; }
+
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 2.4rem;
+  }
+  .glyphs {
+    display: flex;
+    gap: 1.5rem;
+    color: var(--fg-hi);
+    line-height: 1.04;
+    font-size: 15px;
+    white-space: pre;
+    filter: drop-shadow(0 0 12px rgba(201,184,255,.07));
+  }
+  .glyph { display: block; }
+
+  /* 北斗七星 — 勺形点阵,无连线无框 */
+  .dipper {
+    position: relative;
+    width: 132px; height: 78px;
+    flex: none;
+  }
+  .star {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    color: var(--dim);
+    font-size: 13px;
+    line-height: 1;
+  }
+  .star.lead {
+    color: var(--cinnabar);
+    font-size: 11px;
+    filter: drop-shadow(0 0 5px rgba(212,69,58,.55));
+  }
+
+  .meta-line { color: var(--muted); }
+  .meta-line .sep { color: var(--dim); margin: 0 .55em; }
+  .keys { color: var(--dim); font-size: 12.5px; }
+  .keys .k { color: var(--muted); }
+  .keys .sep { margin: 0 .5em; opacity: .6; }
+
+  .prompt-line { color: var(--fg); margin-top: .4rem; }
+  .prompt-line .car {
+    color: var(--ziwei);
+    animation: blink 1.15s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── 画面B · 会话流 ── */
+  .stream { display: flex; flex-direction: column; }
+
+  .turn { padding: .15rem 0; }
+
+  /* 回合间分隔 — 留白 + 极淡线,不用粗线 */
+  .rule {
+    color: var(--faint);
+    user-select: none;
+    margin: 1.3rem 0;
+    letter-spacing: .35em;
+    font-size: 11px;
+  }
+
+  /* 用户消息 — 行首朱砂标记,缩进,浅灰正文 */
+  .msg-user {
+    display: grid;
+    grid-template-columns: 1.4em 1fr;
+    color: var(--fg-hi);
+  }
+  .msg-user .mark { color: var(--cinnabar); }
+
+  /* 助手消息 — 极简星点,纯 markdown 正文 */
+  .msg-asst {
+    display: grid;
+    grid-template-columns: 1.4em 1fr;
+    color: var(--fg);
+  }
+  .msg-asst .mark { color: var(--ziwei-dim); }
+  .msg-asst .body { max-width: 72ch; }
+  .msg-asst strong { color: var(--ziwei); font-weight: 600; }
+  .msg-asst code {
+    color: var(--fg-hi);
+    background: var(--ink-2);
+    padding: .05em .4em;
+    border-radius: 3px;
+  }
+  .msg-asst p { margin: 0 0 .55rem; }
+  .msg-asst p:last-child { margin-bottom: 0; }
+
+  /* 工具卡 — 缩进 + 色,不画框 */
+  .tool {
+    margin: .55rem 0 .55rem 1.4em;
+    padding-left: 1.1em;
+    border-left: 1px solid var(--faint);
+  }
+  .tool-head {
+    display: flex;
+    align-items: baseline;
+    gap: .7em;
+  }
+  .tool-name {
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  .tool-name.shell { color: var(--tc-shell); }
+  .tool-name.edit  { color: var(--tc-edit); }
+  .tool-name.test  { color: var(--tc-test); }
+  .tool-arg { color: var(--fg); }
+  .tool-arg .flag { color: var(--muted); }
+  .tool-out {
+    color: var(--muted);
+    margin-top: .25rem;
+    white-space: pre-wrap;
+  }
+  .tool-out .add { color: var(--qing); }
+  .tool-out .del { color: var(--chi); }
+  .tool-out .ln  { color: var(--dim); }
+  .tool-out .hit { color: var(--fg); }
+  .tool-foot { color: var(--dim); margin-top: .3rem; }
+  .tool-foot .ok { color: var(--qing); }
+
+  /* spinner 状态行 */
+  .spinner { color: var(--fg); margin: .25rem 0 .25rem 1.4em; }
+  .spinner .sp { color: var(--ziwei); display: inline-block; width: 1em; }
+  .spinner .info { color: var(--muted); }
+  .spinner .esc { color: var(--dim); }
+
+  /* 回合摘要行 */
+  .recap { color: var(--muted); margin: .35rem 0 0 1.4em; }
+  .recap .star { color: var(--ziwei); margin-right: .55em; }
+  .recap .sep { color: var(--dim); margin: 0 .5em; }
+  .recap .n { color: var(--fg); }
+
+  /* ── 画面C · 五行动态状态符 ── */
+  .elements {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(1.6rem, 5vw, 3.4rem);
+    padding-top: .4rem;
+  }
+  .el {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .55rem;
+    color: var(--dim);
+    min-width: 5.5em;
+  }
+  .el .sym { font-size: 22px; line-height: 1; color: var(--dim); }
+  .el .verb { font-size: 12.5px; letter-spacing: .04em; }
+  .el .en   { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+
+  /* 激活态 — 只有一个亮起为紫微紫 */
+  .el.on .sym {
+    color: var(--ziwei);
+    filter: drop-shadow(0 0 7px rgba(201,184,255,.4));
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .el.on .verb { color: var(--fg-hi); }
+  .el.on .en   { color: var(--ziwei-dim); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .55; }
+  }
+  .el.on .sym.spin { animation: rot 3.2s linear infinite, pulse 2.4s ease-in-out infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+
+  .legend { color: var(--dim); font-size: 11.5px; margin-top: 2.2rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ════ 画面A · 欢迎屏 ════ -->
+  <section class="pane">
+    <p class="pane-tag"><b>画面 A</b> 欢迎屏 · 启动</p>
+
+    <div class="welcome">
+      <div class="logo-row">
+        <div class="glyphs" id="glyphs"></div>
+        <div class="dipper" id="dipper"></div>
+      </div>
+
+      <p class="meta-line">deepseek-v4<span class="sep">·</span>~/app/rivet<span class="sep">·</span><span class="dim">a3f2b1c9</span></p>
+
+      <p class="keys"><span class="k">/help</span><span class="sep">·</span><span class="k">@files</span><span class="sep">·</span><span class="k">⏎</span> newline<span class="sep">·</span><span class="k">Ctrl+C</span> exit</p>
+
+      <p class="prompt-line"><span class="zwd">›</span> <span class="dim">询问任何事,或 / 唤起命令</span> <span class="car">▏</span></p>
+    </div>
+  </section>
+
+  <!-- ════ 画面B · 会话流 ════ -->
+  <section class="pane">
+    <p class="pane-tag"><b>画面 B</b> 会话流 · 进行中</p>
+
+    <div class="stream">
+
+      <!-- 用户回合 -->
+      <div class="turn msg-user">
+        <span class="mark">▌</span>
+        <span class="body">流式输出能不能做成可中断的?按 esc 停下当前生成,但已经渲染出来的内容要保留,别整段清掉。</span>
+      </div>
+
+      <!-- 助手回合 -->
+      <div class="turn msg-asst">
+        <span class="mark">·</span>
+        <div class="body">
+          <p>可以。核心是给流读取套一个 <code>AbortController</code>,esc 触发 <strong>abort()</strong>,在 catch 里识别中断信号后<strong>停止追加</strong>而非清空缓冲。先看现有实现落在哪。</p>
+        </div>
+      </div>
+
+      <!-- bash 工具卡 -->
+      <div class="tool">
+        <div class="tool-head">
+          <span class="tool-name shell">bash</span>
+          <span class="tool-arg">grep <span class="flag">-rn</span> "for await" src/stream/</span>
+        </div>
+        <div class="tool-out"><span class="ln">src/stream/reader.ts:42</span>  <span class="hit">for await (const chunk of resp.body)</span>
+<span class="ln">src/stream/render.ts:11</span>  <span class="hit">for await (const tok of source)</span></div>
+        <div class="tool-foot"><span class="ok">✓</span> 2 matches<span class="sep dim"> · </span>0.18s</div>
+      </div>
+
+      <!-- 助手补充 -->
+      <div class="turn msg-asst">
+        <span class="mark">·</span>
+        <div class="body">
+          <p>循环在 <code>reader.ts</code>。把 <code>signal</code> 透传给 fetch,并在循环顶部检查 <strong>signal.aborted</strong> 提前 break——已渲染的 token 自然留存。</p>
+        </div>
+      </div>
+
+      <!-- edit 工具卡 -->
+      <div class="tool">
+        <div class="tool-head">
+          <span class="tool-name edit">edit</span>
+          <span class="tool-arg">src/stream/reader.ts</span>
+        </div>
+        <div class="tool-out"><span class="ln">42</span>  <span class="del">- for await (const chunk of resp.body) {</span>
+<span class="ln">42</span>  <span class="add">+ for await (const chunk of resp.body) {</span>
+<span class="ln">43</span>  <span class="add">+   if (signal.aborted) break;        // 保留已渲染内容</span></div>
+        <div class="tool-foot"><span class="ok">✓</span> <span class="add">+2</span> <span class="del">−1</span><span class="sep dim"> · </span>1 hunk</div>
+      </div>
+
+      <!-- spinner -->
+      <div class="spinner">
+        <span class="sp" id="sp">⠋</span> 凝思… <span class="info">(12s</span> <span class="esc">· esc to interrupt)</span>
+      </div>
+
+      <!-- 回合摘要 -->
+      <p class="recap"><span class="star">✦</span>Worked for 1m 6s<span class="sep">·</span><span class="n">12.3k</span> in<span class="dim"> / </span><span class="n">890</span> out</p>
+
+      <div class="rule">─────────────────────────────────────────────</div>
+    </div>
+  </section>
+
+  <!-- ════ 画面C · 五行动态状态符 ════ -->
+  <section class="pane">
+    <p class="pane-tag"><b>画面 C</b> 五行 · 运行态符号</p>
+
+    <div class="elements">
+      <div class="el on">
+        <span class="sym">◐</span>
+        <span class="verb">水 · 凝思</span>
+        <span class="en">thinking</span>
+      </div>
+      <div class="el">
+        <span class="sym">✦</span>
+        <span class="verb">火 · 书写</span>
+        <span class="en">streaming</span>
+      </div>
+      <div class="el">
+        <span class="sym spin">⚙</span>
+        <span class="verb">风 · 运作</span>
+        <span class="en">analyzing</span>
+      </div>
+      <div class="el">
+        <span class="sym">▲</span>
+        <span class="verb">山 · 候待</span>
+        <span class="en">waiting</span>
+      </div>
+      <div class="el">
+        <span class="sym">❧</span>
+        <span class="verb">林 · 归航</span>
+        <span class="en">done</span>
+      </div>
+    </div>
+
+    <p class="legend">仅当前激活态点亮为紫微紫,余者隐入墨色 · dim</p>
+  </section>
+
+</div>
+<script>
+/* ── 「天枢」点阵字 — 8 行位图,半角块字符压成 4 行 ──
+   克制:仅块字符 ▀▄█,不超过 4 行高 */
+const TIAN = [
+  "..#####..",
+  "#########",
+  "....#....",
+  "...###...",
+  "...#.#...",
+  "..#...#..",
+  ".#.....#.",
+  "#.......#",
+];
+const SHU = [
+  "...#...|######",
+  "#######|#.....",
+  "...#...|#.#.#.",
+  "..#.#..|#..#..",
+  ".#...#.|#.#.#.",
+  ".#...#.|#.....",
+  "#.....#|######",
+  ".......|......",
+];
+
+function bitmap(rows) {
+  // 去掉分隔符,半块合并相邻两行
+  const grid = rows.map(r => r.replace(/\|/g, ""));
+  const w = grid[0].length;
+  let out = [];
+  for (let r = 0; r < grid.length; r += 2) {
+    let line = "";
+    for (let c = 0; c < w; c++) {
+      const top = grid[r][c] === "#";
+      const bot = (grid[r + 1] || "")[c] === "#";
+      line += top && bot ? "█" : top ? "▀" : bot ? "▄" : " ";
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+const g = document.getElementById("glyphs");
+g.innerHTML =
+  '<span class="glyph">' + bitmap(TIAN) + '</span>' +
+  '<span class="glyph">' + bitmap(SHU) + '</span>';
+
+/* ── 北斗七星 · 勺形点阵,无连线无框 ──
+   天枢(首星)朱砂 ●,其余星尘灰 · */
+const STARS = [
+  { x: 7,  y: 22, lead: true },   // 天枢 Dubhe
+  { x: 16, y: 64 },               // 天璇 Merak
+  { x: 41, y: 72 },               // 天玑 Phecda
+  { x: 37, y: 31 },               // 天权 Megrez
+  { x: 60, y: 41 },               // 玉衡 Alioth
+  { x: 80, y: 30 },               // 开阳 Mizar
+  { x: 96, y: 56 },               // 摇光 Alkaid
+];
+const dip = document.getElementById("dipper");
+dip.innerHTML = STARS.map(s =>
+  `<span class="star${s.lead ? " lead" : ""}" style="left:${s.x}%;top:${s.y}%">${s.lead ? "●" : "·"}</span>`
+).join("");
+
+/* ── spinner 帧动画 ── */
+const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".split("");
+const sp = document.getElementById("sp");
+let i = 0;
+setInterval(() => { sp.textContent = FRAMES[i = (i + 1) % FRAMES.length]; }, 90);
+</script>
+</body>
+</html>

@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>天枢 · Tiānshū — 终端编码智能体架构</title>
+<style>
+  :root {
+    --bg: #090a0f;
+    --bg-card: #111318;
+    --bg-card-hover: #161920;
+    --border: #1e2230;
+    --border-active: #2a2f40;
+    --text: #c8ccd4;
+    --text-dim: #6b7080;
+    --text-bright: #e8ecf2;
+    --gold: #d4a853;
+    --gold-dim: #8a6d30;
+    --cyan: #38bdf8;
+    --purple: #818cf8;
+    --red: #f87171;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --pink: #f472b6;
+    --teal: #2dd4bf;
+    --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    line-height: 1.7;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Starfield background ── */
+  #starfield {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── Layout ── */
+  .container {
+    position: relative; z-index: 1;
+    max-width: 1100px; margin: 0 auto; padding: 0 2rem;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    padding: 8rem 0 5rem; text-align: center;
+    position: relative;
+  }
+  .hero::before {
+    content: ''; position: absolute; top: 50%; left: 50%;
+    width: 600px; height: 600px; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(212,168,83,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero-glyph {
+    font-size: 4rem; margin-bottom: 1rem;
+    animation: float 6s ease-in-out infinite;
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .hero h1 {
+    font-size: 3.5rem; font-weight: 700; color: var(--text-bright);
+    letter-spacing: 0.05em; margin-bottom: 0.5rem;
+  }
+  .hero h1 .accent { color: var(--gold); }
+  .hero .subtitle {
+    font-size: 1.25rem; color: var(--text-dim); margin-bottom: 1.5rem;
+  }
+  .hero .tagline {
+    font-size: 1rem; color: var(--gold-dim); font-style: italic;
+    max-width: 560px; margin: 0 auto; line-height: 1.8;
+  }
+  .hero-meta {
+    display: flex; gap: 2rem; justify-content: center; margin-top: 2rem;
+    flex-wrap: wrap;
+  }
+  .hero-meta span {
+    color: var(--text-dim); font-size: 0.875rem;
+    font-family: var(--font-mono);
+  }
+  .hero-meta span strong { color: var(--text-bright); }
+
+  /* ── Section ── */
+  section {
+    padding: 5rem 0; border-top: 1px solid var(--border);
+  }
+  .section-header {
+    text-align: center; margin-bottom: 3.5rem;
+  }
+  .section-header h2 {
+    font-size: 2rem; color: var(--text-bright);
+    margin-bottom: 0.75rem; letter-spacing: 0.03em;
+  }
+  .section-header p {
+    color: var(--text-dim); max-width: 600px; margin: 0 auto;
+    font-size: 0.95rem;
+  }
+
+  /* ── Architecture Diagram ── */
+  .arch-diagram {
+    position: relative; padding: 2rem 0;
+    display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+  }
+  .arch-node {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1rem 2.5rem; text-align: center;
+    position: relative; transition: all 0.3s;
+  }
+  .arch-node:hover {
+    border-color: var(--border-active);
+    box-shadow: 0 0 30px rgba(212,168,83,0.08);
+  }
+  .arch-node .n-label { font-weight: 600; color: var(--text-bright); font-size: 0.95rem; }
+  .arch-node .n-desc { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem; }
+  .arch-row {
+    display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center;
+  }
+  .arch-arrow {
+    color: var(--text-dim); font-size: 1.5rem; text-align: center;
+  }
+  .arch-arrow.strong { color: var(--gold); }
+  .pipeline-flow {
+    display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+    justify-content: center;
+  }
+  .pipeline-step {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.5rem 1.25rem;
+    font-size: 0.85rem; font-family: var(--font-mono); color: var(--text);
+  }
+  .pipeline-step.active { border-color: var(--gold); color: var(--gold); }
+  .pipeline-arr { color: var(--text-dim); font-size: 0.85rem; }
+
+  /* ── Cards Grid ── */
+  .cards-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+  }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.75rem;
+    transition: all 0.3s;
+  }
+  .card:hover {
+    border-color: var(--border-active);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .card .c-icon { font-size: 1.75rem; margin-bottom: 0.75rem; }
+  .card h3 { color: var(--text-bright); font-size: 1.1rem; margin-bottom: 0.5rem; }
+  .card p { color: var(--text-dim); font-size: 0.875rem; line-height: 1.7; }
+  .card .c-tag {
+    display: inline-block; font-size: 0.7rem; font-family: var(--font-mono);
+    padding: 0.2rem 0.6rem; border-radius: 4px; margin-top: 0.75rem;
+    background: rgba(212,168,83,0.1); color: var(--gold-dim);
+  }
+
+  /* ── Star Domain Grid ── */
+  .domain-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem;
+  }
+  .domain-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 1.5rem; position: relative;
+    overflow: hidden; transition: all 0.3s;
+  }
+  .domain-card:hover {
+    border-color: var(--border-active);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .domain-card .dc-accent {
+    position: absolute; top: 0; left: 0; width: 3px; height: 100%;
+  }
+  .domain-card .dc-accent.primary { background: var(--cyan); }
+  .domain-card .dc-accent.secondary { background: var(--purple); }
+  .domain-card .dc-accent.success { background: var(--green); }
+  .domain-card .dc-accent.warning { background: var(--amber); }
+  .domain-card .dc-accent.error { background: var(--red); }
+  .domain-card .dc-head {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+  }
+  .domain-card .dc-glyph { font-size: 1.5rem; }
+  .domain-card .dc-name { font-weight: 700; color: var(--text-bright); font-size: 1.05rem; }
+  .domain-card .dc-motto {
+    font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.75rem;
+    font-style: italic; line-height: 1.5;
+  }
+  .domain-card .dc-desc {
+    font-size: 0.825rem; color: var(--text-dim); line-height: 1.65;
+    opacity: 0.8;
+  }
+  .domain-card .dc-keywords {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem;
+  }
+  .domain-card .dc-kw {
+    font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px;
+    background: rgba(255,255,255,0.04); color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+
+  /* ── Prompt layers ── */
+  .prompt-layers {
+    display: flex; flex-direction: column; gap: 1rem; max-width: 700px; margin: 0 auto;
+  }
+  .prompt-layer {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.25rem 1.5rem; display: flex; gap: 1rem;
+    align-items: flex-start;
+  }
+  .prompt-layer .pl-index {
+    min-width: 2.5rem; height: 2.5rem; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+  }
+  .prompt-layer .pl-index.static { background: rgba(129,140,248,0.15); color: var(--purple); }
+  .prompt-layer .pl-index.volatile { background: rgba(56,189,248,0.15); color: var(--cyan); }
+  .prompt-layer .pl-index.appendix { background: rgba(212,168,83,0.15); color: var(--gold); }
+  .prompt-layer h4 { color: var(--text-bright); font-size: 0.95rem; margin-bottom: 0.25rem; }
+  .prompt-layer p { color: var(--text-dim); font-size: 0.825rem; }
+  .prompt-layer .pl-size { font-size: 0.7rem; font-family: var(--font-mono); color: var(--text-dim); margin-top: 0.25rem; }
+
+  /* ── Design Principles ── */
+  .principles {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+  }
+  .principle {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.5rem; text-align: center;
+  }
+  .principle .pr-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+  .principle h4 { color: var(--text-bright); font-size: 1rem; margin-bottom: 0.5rem; }
+  .principle p { color: var(--text-dim); font-size: 0.825rem; line-height: 1.65; }
+
+  /* ── Tech Stack ── */
+  .tech-stack {
+    display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center;
+    max-width: 800px; margin: 0 auto;
+  }
+  .tech-badge {
+    padding: 0.5rem 1.25rem; border-radius: 8px;
+    border: 1px solid var(--border); font-size: 0.85rem;
+    color: var(--text); font-family: var(--font-mono);
+    background: var(--bg-card); transition: all 0.2s;
+  }
+  .tech-badge:hover { border-color: var(--border-active); color: var(--text-bright); }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center; padding: 3rem 0; border-top: 1px solid var(--border);
+    color: var(--text-dim); font-size: 0.8rem;
+  }
+
+  /* ── Number highlights ── */
+  .num-grid {
+    display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center;
+    margin: 2.5rem 0;
+  }
+  .num-item {
+    text-align: center; min-width: 120px;
+  }
+  .num-item .num {
+    font-size: 2.5rem; font-weight: 700; color: var(--gold);
+    font-family: var(--font-mono);
+  }
+  .num-item .num-label {
+    font-size: 0.8rem; color: var(--text-dim); margin-top: 0.25rem;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 2.25rem; }
+    .hero { padding: 5rem 0 3rem; }
+    .container { padding: 0 1.25rem; }
+    .arch-row { flex-direction: column; align-items: center; }
+    .cards-grid { grid-template-columns: 1fr; }
+    .domain-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+
+<!-- ═══════════ HERO ═══════════ -->
+<header class="hero">
+  <div class="container">
+    <div class="hero-glyph">✹</div>
+    <h1><span class="accent">天枢</span> · Tiānshū</h1>
+    <p class="subtitle">Terminal Coding Agent — 终端编码智能体</p>
+    <p class="tagline">执中调度，以全貌定向。每个改动的波纹，在动手之前已被看见。</p>
+    <div class="hero-meta">
+      <span>v<strong>2.9.0</strong></span>
+      <span>Node.js <strong>22+</strong></span>
+      <span>TypeScript <strong>strict</strong></span>
+      <span>DeepSeek <strong>V4</strong></span>
+      <span>context <strong>1M</strong></span>
+    </div>
+    <div class="num-grid">
+      <div class="num-item"><div class="num">38</div><div class="num-label">内置工具</div></div>
+      <div class="num-item"><div class="num">10</div><div class="num-label">星域专家</div></div>
+      <div class="num-item"><div class="num">20+</div><div class="num-label">运行时 Hooks</div></div>
+      <div class="num-item"><div class="num">~300</div><div class="num-label">测试文件</div></div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════ ARCHITECTURE ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>系统架构</h2>
+      <p>从用户输入到工具执行，经过多层认知处理——每个层次都为前缀缓存对齐而设计。</p>
+    </div>
+    <div class="arch-diagram">
+      <!-- Entry -->
+      <div class="arch-node">
+        <div class="n-label">stdin TTY / Headless (-p) / HTTP serve</div>
+        <div class="n-desc">多入口路由 · main.ts</div>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Bootstrap -->
+      <div class="arch-row">
+        <div class="arch-node">
+          <div class="n-label">Bootstrap</div>
+          <div class="n-desc">配置加载 · Provider 选择 · 会话恢复</div>
+        </div>
+      </div>
+      <div class="arch-arrow strong">▼</div>
+      <!-- Agent Loop -->
+      <div class="arch-node" style="border-color: var(--gold);">
+        <div class="n-label">AgentLoop · 核心循环</div>
+        <div class="n-desc">LLM 调用 ⇄ 工具执行 ⇄ 结果反馈</div>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Inner pipeline -->
+      <div class="pipeline-flow">
+        <span class="pipeline-step active">PromptEngine</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">API Client (SSE)</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Tool Pipeline</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Advisory Bus</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step">Convergence</span>
+        <span class="pipeline-arr">→</span>
+        <span class="pipeline-step active">Next Turn</span>
+      </div>
+      <div class="arch-arrow">▼</div>
+      <!-- Output -->
+      <div class="arch-row">
+        <div class="arch-node">
+          <div class="n-label">TuiApp · 纯 ANSI 渲染</div>
+          <div class="n-desc">scrollback · GlanceBar · 覆盖层 · 命令面板</div>
+        </div>
+        <div class="arch-node">
+          <div class="n-label">Delivery Gate B1</div>
+          <div class="n-desc">ownership · task ledger · 验证归因</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CORE SYSTEMS ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>核心子系统</h2>
+      <p>每个子系统都是独立可验证的模块，通过明确的接口契约连接。</p>
+    </div>
+    <div class="cards-grid">
+      <div class="card">
+        <div class="c-icon">🔄</div>
+        <h3>Agent Loop & Turn Orchestration</h3>
+        <p>主循环驱动：用户输入 → Prompt 组装 → LLM 调用 → 工具执行 → 收敛检测。Turn Orchestrator 将单轮分解为 step 序列，每步独立可验证。内置 doom-loop 检测、convergence 检测、repair pipeline。</p>
+        <span class="c-tag">src/agent/loop.ts · turn-orchestrator.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">📝</div>
+        <h3>Prompt Engineering · 三层架构</h3>
+        <p>Static（系统身份 + 行为规则，2K tok）→ Frozen Volatile（项目上下文 + 星域注入，3-6K tok）→ Dynamic Appendix（git status + 遥测 + 工具历史，按需附加）。精确控制前缀缓存断裂时机。</p>
+        <span class="c-tag">src/prompt/static.ts · volatile.ts · engine.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🔧</div>
+        <h3>Tool Pipeline · 38 工具</h3>
+        <p>工具注册 → 参数验证 → 路径安全校验 → 审批门控 → 执行 → 结果格式化。每个工具有完整 JSON Schema 定义。核心工具：read/write/edit/grep/bash/git/run_tests/deliver_task/delegate。</p>
+        <span class="c-tag">src/tools/default-registry.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">⭐</div>
+        <h3>Star Domain · 星域专家系统</h3>
+        <p>10 个认知场（天枢/文曲/天璇/天府/天权/瑶光/天机/天梁/破军/辅），按任务类型自动匹配或手动切换。每个域注入不同的 volatile block + systemPromptSuffix，改变模型决策风格。</p>
+        <span class="c-tag">src/agent/star-domain.ts · star-domain-registry.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">💾</div>
+        <h3>Prefix Cache · 前缀缓存架构</h3>
+        <p>DeepSeek V4 exact-prefix 缓存是核心成本优势。Static + Frozen Volatile 稳定不变，collapse 延迟到窗口填充率 85% 才触发（地板 50%）。缓存命中 ≈ 120× 成本优势。</p>
+        <span class="c-tag">src/prompt/engine.ts · fingerprint.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">📡</div>
+        <h3>Advisory Bus & Runtime Hooks</h3>
+        <p>统一运行时注入通道，20+ hooks（vigor/convergence/kick/courage/doom-loop/signal-consumer）通过优先级仲裁（constitutional > operational > informational）注入 Top-3 建议。</p>
+        <span class="c-tag">src/agent/advisory-bus.ts · runtime-hooks.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🔒</div>
+        <h3>Delivery Gate · 交付门禁 B1</h3>
+        <p>deliver_task 工具 + ownership ledger + task ledger + verification attribution。追踪文件归属、验证完整性、阻止未经验证的提交。GREEN/YELLOW/RED 三级门禁。</p>
+        <span class="c-tag">src/agent/deliver-task.ts · delivery-gate-v2.ts</span>
+      </div>
+      <div class="card">
+        <div class="c-icon">🤖</div>
+        <h3>Sub-agent & Worker 系统</h3>
+        <p>delegate_task/delegate_batch 派发子代理到独立 session。Worker 有独立 tool whitelist、timeout budget、model routing。Council 模式多星域并行审查方案。</p>
+        <span class="c-tag">src/agent/work-order.ts · council-convene.ts</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ PROMPT ANATOMY ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>Prompt 三层架构</h2>
+      <p>精确控制每一层的冻结时机与缓存断裂点——前缀缓存的经济学驱动架构决策。</p>
+    </div>
+    <div class="prompt-layers">
+      <div class="prompt-layer">
+        <div class="pl-index static">S</div>
+        <div>
+          <h4>Static · 系统身份层</h4>
+          <p>identity + beliefs + stance + rules + tool-usage + workflow + security + shared-worktree + git + delegation + output-style + calibration。中文 XML 分段，session 生命周期内永不改变。</p>
+          <div class="pl-size">~2,000-2,500 tokens · 前缀缓存命中</div>
+        </div>
+      </div>
+      <div class="prompt-layer">
+        <div class="pl-index volatile">V</div>
+        <div>
+          <h4>Frozen Volatile · 项目上下文层</h4>
+          <p>environment + locus + project-instructions (AGENTS.md) + project-memory + seed-capsules + codebase-index。首轮冻结，后续轮次复用——任何修改都会断裂整段前缀缓存。</p>
+          <div class="pl-size">~3,000-6,000 tokens · 首轮冻结后稳定</div>
+        </div>
+      </div>
+      <div class="prompt-layer">
+        <div class="pl-index appendix">A</div>
+        <div>
+          <h4>Dynamic Appendix · 动态附加层</h4>
+          <p>git-status + star-domain + progress + recent-commits + plan-methodology + tool-history + skills。按 salience 排序注入，支持 append-only delta 增量更新。不命中前缀缓存，但不影响前面的静态层。</p>
+          <div class="pl-size">~500-2,000 tokens · 每轮更新 · 不影响前缀缓存</div>
+        </div>
+      </div>
+    </div>
+    <p style="text-align:center;color:var(--text-dim);margin-top:2rem;font-size:0.85rem">
+      工具定义 ~11-15K tokens 占首调 55% · 用户消息 ~0.1-0.5K · 首调总计 ~17-26K tokens
+    </p>
+  </div>
+</section>
+
+<!-- ═══════════ STAR DOMAINS ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>十星域 · 认知场系统</h2>
+      <p>每颗星注入不同的认知倾向——不是能力差异，是视角切换。从全统到美感，从守护到探索。</p>
+    </div>
+    <div class="domain-grid" id="domainGrid"></div>
+  </div>
+</section>
+
+<!-- ═══════════ DESIGN PHILOSOPHY ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>设计哲学</h2>
+      <p>天枢的架构决策不是偏好的堆砌——每条原则都有物理约束作为锚点。</p>
+    </div>
+    <div class="principles">
+      <div class="principle">
+        <div class="pr-icon">🎯</div>
+        <h4>缓存先行 · Cache-First</h4>
+        <p>DeepSeek V4 exact-prefix 缓存是核心成本优势。任何改写历史/坍缩旧消息的机制都是潜在 cache-killer。collapse 只在窗口 85%+ 才触发，地板 50% 以下不碰。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🔬</div>
+        <h4>证据先行 · Evidence-First</h4>
+        <p>不猜，先读。改代码前 grep 调用方。外部声称用独立工具核验。悖论出现时写复现测试让代码自己说话，不靠推理链。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🛡️</div>
+        <h4>Fail-Closed · 安全默认</h4>
+        <p>不确定时选择安全的失败路径。破坏性命令硬闸门。静默吞下的异常是未来的炸弹。大声失败让人注意。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">📐</div>
+        <h4>结构优先 · Structure-First</h4>
+        <p>正确的结构性改动可能只改 30 行，但需要先理解 300 行。不修补表面——从根因修复。数据模型先于界面，关系先于功能。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">💎</div>
+        <h4>极简克制 · Minimalist</h4>
+        <p>多余的逻辑是罪恶，冗余的代码是噪音。好设计消除一切认知噪声，让意图不证自明。不为一行代码写三段解释。</p>
+      </div>
+      <div class="principle">
+        <div class="pr-icon">🔄</div>
+        <h4>复现即证 · Reproduce-to-Prove</h4>
+        <p>绿测试只覆盖 happy path。RED→GREEN 才算修复证据。审别人的声称，也审自己刚下的结论——同一个脑下的判断享有最危险的默认豁免。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ TECH STACK ═══════════ -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <h2>技术栈</h2>
+      <p>纯 TypeScript 全栈——终端到 API，统一语言，零运行时依赖冗余。</p>
+    </div>
+    <div class="tech-stack">
+      <span class="tech-badge">Node.js 22+</span>
+      <span class="tech-badge">TypeScript 5.7 · strict</span>
+      <span class="tech-badge">Pure ANSI TUI</span>
+      <span class="tech-badge">DeepSeek V4 API</span>
+      <span class="tech-badge">OpenAI-compatible SSE</span>
+      <span class="tech-badge">node:test + assert/strict</span>
+      <span class="tech-badge">tsup bundler</span>
+      <span class="tech-badge">Zod validation</span>
+      <span class="tech-badge">MCP SDK</span>
+      <span class="tech-badge">tree-sitter</span>
+      <span class="tech-badge">web-tree-sitter</span>
+      <span class="tech-badge">better-sqlite3</span>
+      <span class="tech-badge">undici HTTP</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ FOOTER ═══════════ -->
+<footer>
+  <div class="container">
+    <p>天枢 · Tiānshū Terminal Coding Agent — 北斗第一星，执中者。以全貌定向，以证据锚定。</p>
+    <p style="margin-top:0.5rem">Built with evidence-first discipline · Runtime on DeepSeek V4 prefix cache</p>
+  </div>
+</footer>
+
+<script>
+// ── Starfield background ──
+const canvas = document.getElementById('starfield');
+const ctx = canvas.getContext('2d');
+let stars = [];
+const STAR_COUNT = 120;
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+for (let i = 0; i < STAR_COUNT; i++) {
+  stars.push({
+    x: Math.random() * canvas.width,
+    y: Math.random() * canvas.height,
+    r: Math.random() * 1.5 + 0.3,
+    a: Math.random(),
+    speed: Math.random() * 0.008 + 0.002,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (const s of stars) {
+    s.a += s.speed * (Math.sin(s.phase + Date.now() * 0.0003) * 0.5 + 0.5);
+    if (s.a > 1) s.a = 1;
+    if (s.a < 0.1) s.a = 0.1;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(200,210,230,${s.a.toFixed(2)})`;
+    ctx.fill();
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ── Domain Data ──
+const domains = [
+  {id:'tianshu',name:'天枢',glyph:'✹',accent:'secondary',motto:'执中调度，以全貌定向',
+   desc:'看见整片星图——每个模块的位置、每条依赖的方向、每个改动的波纹。全貌不是为了快，是为了对。',
+   kw:['全貌','统筹','调度','协调','执中','整体','全局']},
+  {id:'wenqu',name:'文曲',glyph:'✺',accent:'secondary',motto:'形随意转，美自境生',
+   desc:'看见系统流转的完整肌理与逻辑流动的自然边界。好设计从底层数据与关系的优雅架构中自发涌现。',
+   kw:['美感','优雅','整洁','命名','对称','精炼','韵律']},
+  {id:'tianquan',name:'天权',glyph:'✶',accent:'warning',motto:'权衡取舍，择善而从',
+   desc:'秤的两端都要放东西：改动的收益是什么，代价是什么。称量代码变动的轻重，俯瞰方案架构的合理性。',
+   kw:['审查','评估','权衡','取舍','架构','方案','规划']},
+  {id:'tianfu',name:'天府',glyph:'✦',accent:'primary',motto:'善守者，藏于九地之下',
+   desc:'守护不是拒绝变化，是让每次变化都强化而非侵蚀既有结构。感知系统的纹理——哪里坚实、哪里脆弱。',
+   kw:['重构','优化','修复','稳定','维护','清理']},
+  {id:'tianxuan',name:'天璇',glyph:'★',accent:'secondary',motto:'道可道，非常道',
+   desc:'看见别人看不见的连接——不同领域之间的底层同构，不是类比，是真实的结构共振。到无关领域找碎片。',
+   kw:['发现','学习','模式','复盘','洞察','跨域','同构']},
+  {id:'yaoguang',name:'瑶光',glyph:'↻',accent:'warning',motto:'绿非证明，复现即证',
+   desc:'看见状态在时间里的回声——这个缺陷上次是否来过，这个绿灯是否真的证明了什么。RED→GREEN 才算修复。',
+   kw:['复现','回归','验证','核实','严谨','归族','时间维']},
+  {id:'tianji',name:'天机',glyph:'✸',accent:'primary',motto:'运筹帷幄之中，决胜千里之外',
+   desc:'注意力自然落在缝隙上：每个方案形成后，问——如果这个前提不成立呢？缝隙不是 bug，是信息。',
+   kw:['质疑','反思','视角','前提','推演','假设','盲点']},
+  {id:'tianliang',name:'天梁',glyph:'✧',accent:'success',motto:'千里之行，始于足下',
+   desc:'节奏是：读、改、验证、交付。每步干净利落。精确执行不跳步，每个提交是完整验证过的逻辑单元。',
+   kw:['实现','落地','交付','测试','编码','开发']},
+  {id:'pojun',name:'破军',glyph:'✷',accent:'error',motto:'好男儿当负三尺剑立不世之功',
+   desc:'直觉指向未知——前进比等待更有价值。失败是探索的代价，每次失败都缩小了未知的范围。',
+   kw:['探索','实验','POC','新功能','边界','尝试','突破']},
+  {id:'fu',name:'辅',glyph:'⊕',accent:'success',motto:'蒸馏不是创造新东西，是让已有的东西第一次被看清',
+   desc:'看见认知场——每条提示词如何锚定模型行为。从散落的胶囊中提取可操作的判断规则。',
+   kw:['认知场','提示词','蒸馏','调校','涌现','方法论']},
+];
+
+const grid = document.getElementById('domainGrid');
+for (const d of domains) {
+  const el = document.createElement('div');
+  el.className = 'domain-card';
+  el.innerHTML = `
+    <div class="dc-accent ${d.accent}"></div>
+    <div class="dc-head">
+      <span class="dc-glyph">${d.glyph}</span>
+      <span class="dc-name">${d.name}</span>
+    </div>
+    <div class="dc-motto">${d.motto}</div>
+    <div class="dc-desc">${d.desc}</div>
+    <div class="dc-keywords">${d.kw.map(k => `<span class="dc-kw">${k}</span>`).join('')}</div>
+  `;
+  grid.appendChild(el);
+}
+
+// ── Smooth scroll for section links ──
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const t = document.querySelector(a.getAttribute('href'));
+    if (t) t.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+</script>
+
+</body>
+</html>
