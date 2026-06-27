@@ -11,7 +11,7 @@
  * - wave index to resume from
  */
 
-import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { WorkerResult, WorkOrder } from './work-order.js'
 
@@ -66,7 +66,6 @@ export function clearCheckpoint(cwd: string, groupId: string): void {
 export function listCheckpoints(cwd: string): Array<{ groupId: string; wave: number; totalWaves: number; timestamp: number }> {
   const dir = join(cwd, CHECKPOINT_DIR)
   if (!existsSync(dir)) return []
-  const { readdirSync } = require('node:fs')
   return readdirSync(dir)
     .filter((f: string) => f.endsWith('.json'))
     .map((f: string) => {
