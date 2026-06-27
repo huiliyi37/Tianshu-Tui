@@ -14,5 +14,6 @@ export function mapQueriedPheromones(results: PheromoneQueryResult[]): Pheromone
     depositedAt: r.depositedAt,
     halfLife: r.halfLife,
     ...(r.context ? { context: r.context } : {}),
+    ...(r.taskId ? { taskId: r.taskId } : {}),
   }))
 }

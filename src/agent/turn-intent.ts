@@ -8,7 +8,7 @@ import { buildIntentPreview, type IntentPreview, type IntentPreviewAction } from
 export type IntentEvalResult = 'continue' | 'veto' | 'alternative'
 
 export interface TurnIntentDeps {
-  depositDeadEnd(deposit: { path: string; signal: 'dead-end'; strength: number; context: string }): Promise<void>
+  depositDeadEnd(deposit: { path: string; signal: 'dead-end'; strength: number; context: string; taskId?: string }): Promise<void>
   addUserMessage(message: string): void
 }
 
@@ -20,6 +20,8 @@ export interface IntentEvalInput {
   pressureResult: PressureResult
   recentToolHistory: ToolHistoryEntry[]
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
+  /** Task contract ID for structured dead-end matching (P2). */
+  taskContractId?: string
 }
 
 const MAX_INTENT_PREVIEWS = 3
@@ -50,6 +52,7 @@ export class TurnIntentController {
       pheromones: input.pheromones,
       thrashingSuggestion: input.pressureResult.suggestion ?? null,
       recentTargets,
+      taskContractId: input.taskContractId,
     })
     if (!preview) return 'continue'
 
@@ -70,6 +73,7 @@ export class TurnIntentController {
           signal: 'dead-end',
           strength: 0.9,
           context: 'intent veto',
+          taskId: input.taskContractId,
         })
       }
       this.deps.addUserMessage('<intent-veto>User vetoed the previous plan. Re-plan from the nearest safe branch point before using tools.</intent-veto>')

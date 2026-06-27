@@ -30,6 +30,8 @@ export interface PheromoneRef {
   depositedAt: number
   halfLife: number
   context?: string
+  /** Task contract ID for structured dead-end matching. Undefined for legacy entries. */
+  taskId?: string
 }
 
 // ─── Sensorium ──────────────────────────────────────────────────────

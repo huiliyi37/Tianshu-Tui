@@ -283,6 +283,7 @@ export class TurnStepProducer {
       pressureResult,
       recentToolHistory: this.self.recentToolHistory,
       onIntentPreview: callbacks.onIntentPreview,
+      taskContractId: this.self.taskContract?.id,
     })
     debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
     if (intentResult === 'veto') {
