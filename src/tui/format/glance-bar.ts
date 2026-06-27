@@ -54,8 +54,10 @@ export interface GlanceBarInput {
   cacheHitRate?: number
   /** 上下文占比 0-1 */
   contextRatio?: number
-  /** 估算已用 token（用于 ◧ Xk/Yk 显示，对齐 Ink） */
+  /** API 实际 prompt token（用于颜色阈值，反映真实窗口压力） */
   estimatedTokens?: number
+  /** 可见对话消息的 token 估算（用于 ◧ Xk/Yk 显示，不含系统提示/工具） */
+  conversationTokens?: number
   /** 模型上下文窗口 token 上限（与 estimatedTokens 配套） */
   maxTokens?: number
   /** 本轮费用（美元） */
@@ -100,9 +102,10 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
-  if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
+  const displayTokens = input.conversationTokens !== undefined ? input.conversationTokens : input.estimatedTokens
+  if (!narrow && displayTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
     const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.muted
-    parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
+    parts.push(color(`◧${formatTokensK(displayTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
     // cost > 0 用 secondary 高亮，让用户感知到花费

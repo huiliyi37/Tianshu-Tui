@@ -52,7 +52,7 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
-import { truncateToDisplayWidth } from '../width.js'
+import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
@@ -153,8 +153,10 @@ export interface AgentCallbacks {
  * 全部为「当前会话累计 / 估算」的真实值，避免 TUI 端自行 += 累加导致膨胀。
  */
 export interface TuiMetrics {
-  /** 当前估算 prompt token（含 prefix overhead） */
+  /** 当前估算 prompt token（含 prefix overhead，API 实际占用） */
   estimatedTokens: number
+  /** 仅可见对话消息的本地 token 估算（不含系统提示/工具 schema/prefix overhead） */
+  conversationTokens: number
   /** 模型上下文窗口 token 上限 */
   maxTokens: number
   /** 缓存命中率 0-1（近 N 回合优先，回退会话累计）；无数据为 null */
@@ -1899,6 +1901,22 @@ export class TuiApp {
     return truncateToDisplayWidth(text, Math.max(1, this.columns - 1), { ambiguousAsWide: true })
   }
 
+  /**
+   * 构造输入框的一行（左右竖边框 + 内容 + padding 到 innerWidth）。
+   *
+   * 与 clampLine 同口径（wide 上界）：截断与 padding 都按 ambiguousAsWide 度量，
+   * 保证含 `— … · → ↑ ↓` 等 East-Asian Ambiguous 符号的输入行在 CJK 终端
+   * （这些符号按 2 列渲染）也严格 ≤ columns → 不折行 → rowsForLine 计数正确，
+   * 避免 fullRewrite 回顶欠擦导致的输入框重影（paste / 历史导航）。
+   * box-drawing（│）恒按 1 列（width.ts isBoxOrBlock），不受影响。
+   */
+  private renderInputRow(content: string, innerWidth: number, leftBar: string, rightBar: string): string {
+    const opts = { ambiguousAsWide: true }
+    const truncated = truncateToDisplayWidth(content, innerWidth, opts)
+    const pad = Math.max(0, innerWidth - displayWidth(truncated, opts))
+    return `${leftBar}${truncated}${' '.repeat(pad)}${rightBar}`
+  }
+
   /** 渲染一条全宽反色提示条（用于审批/意图框顶部隔离）。 */
   private renderBanner(text: string, bgColor: string, fgColor: string = '#000000'): string {
     const label = ` ${text} `
@@ -1920,7 +1938,9 @@ export class TuiApp {
       stalled,
     }, this.theme)
     if (spinnerLine) {
-      lines.push({ text: spinnerLine })
+      // spinner 行含 …/·（East-Asian Ambiguous），CJK 终端按 2 列渲染 → 长行会折行而
+      // rowsForLine 低估 → 重影。clampLine 用 wide 上界截断到 columns-1，保证不折行。
+      lines.push({ text: this.clampLine(spinnerLine) })
     }
 
     // 1b. Thinking 展开内容（状态行已由 spinner 承担）。split 结果记忆化见 getThinkingLines。
@@ -2088,15 +2108,17 @@ export class TuiApp {
     let glanceContextRatio: number | undefined
     let glanceCost: number
     let glanceEstimatedTokens: number | undefined
+    let glanceConversationTokens: number | undefined
     let glanceMaxTokens: number | undefined
     if (metrics) {
       glanceCacheHitRate = metrics.cacheHitRate ?? undefined
-      // estimatedTokens is now calibrated against real API prompt_tokens in
-      // SessionContext, so it reflects current context occupancy rather than a
-      // stale single-turn request size. Use it as the progress numerator.
+      // Context pressure color still reflects the real API-facing occupancy,
+      // because the context window limit is enforced against the total prompt.
       glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
       glanceCost = metrics.cost
       glanceEstimatedTokens = metrics.estimatedTokens
+      // Display the chat-visible context size (excludes system prompt / tools).
+      glanceConversationTokens = metrics.conversationTokens
       glanceMaxTokens = metrics.maxTokens
     } else {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
@@ -2147,6 +2169,7 @@ export class TuiApp {
         modelName: this.state.modelName,
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
+        conversationTokens: glanceConversationTokens,
         maxTokens: glanceMaxTokens,
         cost: glanceCost,
         elapsedMs: Date.now() - this.state.turnStartMs,
@@ -2191,16 +2214,13 @@ export class TuiApp {
 
       lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        const firstLine = truncateToWidth(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth)
-        lines.push({ text: `${leftBar}${firstLine}${' '.repeat(Math.max(0, innerWidth - stringWidth(firstLine)))}${rightBar}` })
+        lines.push({ text: this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
         for (const extra of inputLines.slice(1)) {
-          const t = truncateToWidth(colorizeInputLine(extra), innerWidth)
-          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
         }
       } else {
         for (const inputDisplayLine of inputLines) {
-          const t = truncateToWidth(colorizeInputLine(inputDisplayLine), innerWidth)
-          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
         }
       }
       lines.push({ text: botBorder })

@@ -661,6 +661,10 @@ async function main() {
       // appended since (provider-agnostic — works for DeepSeek/MiMo/GLM). Falls
       // back to the calibrated estimate before the first response / post-compact.
       estimatedTokens: session.getRealOccupancy(),
+      // Visible conversation only (excluding system prompt / tool schemas / prefix
+      // overhead) for the GlanceBar context display, so users see the chat-sized
+      // context rather than the API-facing prompt bulk.
+      conversationTokens: session.getConversationTokens(),
       maxTokens,
       cacheHitRate: session.getRecentTurnHitRate(3) ?? session.getCacheHitRate(),
       cost,

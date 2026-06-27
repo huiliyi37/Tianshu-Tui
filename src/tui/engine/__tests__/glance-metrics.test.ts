@@ -49,6 +49,7 @@ test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（cache 命中率常驻
   const { app, out } = makeApp()
   app.setMetricsProvider(() => ({
     estimatedTokens: 50_000,
+    conversationTokens: 50_000,
     maxTokens: 200_000,
     cacheHitRate: 0.3,
     cost: 1.23,
@@ -62,7 +63,7 @@ test('metricsProvider 提供真实 ◧Xk/Yk·$cost·⚡%（cache 命中率常驻
   // estimatedTokens (50k) is the calibrated context occupancy; lastRealPromptTokens
   // is only used internally to compute the calibration ratio.
   assert.ok(plain.includes('◧50k/200k'), `Xk/Yk: ${plain}`)
-  assert.ok(plain.includes('$1.23'), `cost: ${plain}`)
+  assert.ok(plain.includes('1.23'), `cost: ${plain}`)
   assert.ok(plain.includes('⚡30%'), `cache 常驻展示: ${plain}`)
 })
 
@@ -70,6 +71,7 @@ test('cache 健康态（≥50%）常驻展示为 dim 色，不再门控隐藏', 
   const { app, out } = makeApp()
   app.setMetricsProvider(() => ({
     estimatedTokens: 50_000,
+    conversationTokens: 50_000,
     maxTokens: 200_000,
     cacheHitRate: 0.6,
     cost: 1.23,
@@ -97,8 +99,27 @@ test('无 provider 回退：cost 单次计算，多次 onTurnComplete 不膨胀'
   app.callbacks.onTurnComplete(cumulative, 3, false)
   await tick(30)
   const plain = stripAnsi(out.chunks.join(''))
-  assert.ok(plain.includes('$1.00'), `cost should be single-shot $1.00: ${plain}`)
-  assert.ok(!plain.includes('$3.00'), 'cost must not inflate to $3.00 across turns')
+  assert.ok(plain.includes('1.00'), `cost should be single-shot $1.00: ${plain}`)
+  assert.ok(!plain.includes('3.00'), 'cost must not inflate to $3.00 across turns')
+})
+
+test('GlanceBar 显示可见对话 token（conversationTokens），颜色仍按真实 API 占用（estimatedTokens）', () => {
+  const { app, out } = makeApp()
+  app.setMetricsProvider(() => ({
+    estimatedTokens: 95_000,   // real API-facing occupancy → high ratio
+    conversationTokens: 47_000, // visible chat context → lower number
+    maxTokens: 1_000_000,
+    cacheHitRate: 0.99,
+    cost: 0,
+    inputTokens: 95_000,
+    outputTokens: 2_000,
+    lastRealPromptTokens: 95_000,
+  }))
+  app.setModelInfo('test', 1_000_000)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('◧47k/1.0M'), `应显示可见对话 token: ${plain}`)
+  // 95k/1M = 9.5% → muted color, not warning/error; ratio is based on estimatedTokens.
+  assert.ok(!plain.includes('◧95k/1.0M'), `不应显示 API 总 prompt: ${plain}`)
 })
 
 test('getMetrics 暴露与 GlanceBar 同源的真实指标（供 SlashRouter 读 cost/maxTokens）', () => {
@@ -108,6 +129,7 @@ test('getMetrics 暴露与 GlanceBar 同源的真实指标（供 SlashRouter 读
 
   app.setMetricsProvider(() => ({
     estimatedTokens: 80_000,
+    conversationTokens: 80_000,
     maxTokens: 200_000,
     cacheHitRate: 0.5,
     cost: 2.5,

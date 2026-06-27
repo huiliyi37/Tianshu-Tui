@@ -18,7 +18,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { WriteStream } from 'node:tty'
 import { LiveEngine, type LiveRegionLine } from '../live-engine.js'
-import { displayWidth } from '../../width.js'
+import { displayWidth, truncateToDisplayWidth } from '../../width.js'
+import stringWidth from 'string-width'
 
 /**
  * screen-buffer 终端模拟器：追踪整屏内容（display rows × columns 网格）。
@@ -525,4 +526,128 @@ test('forceRedraw 正确路径: 无 clear 的 render() 走 fullRewrite，绝不�
   assert.equal(tulCount, 1, `fullRewrite 后 ╭ 出现 ${tulCount} 次，预期 1 — forceRedraw 残留旧帧`)
   assert.ok(!screen.includes('天枢'), '旧域名"天枢"不应残留在新帧中')
   assert.ok(screen.includes('天玑域'), '新域名应出现')
+})
+
+// ── 输入框重影：含 ambiguous 符号的输入行折行致 rowsForLine 低估 ──────────────
+// 用户报告：复制粘贴 / 方向键读历史时输入框重复渲染。根因 = East-Asian Ambiguous
+// 符号（— … · → ↑ ↓ •，CJK 终端按 2 列渲染）在 narrow 默认下被算 1 列：
+//   渲染层 padding 按窄补 → 实际行宽在 wide 终端溢出 columns → 折行
+//   rowsForLine 按窄算 → 认为 1 行 → lastDisplayRows 低估
+//   → 下一帧 fullRewrite 的 cursorUp 量不足 → 旧输入框底部残留 = 重影
+// 修复：app.ts renderInputRow 用 wide 上界截断+padding（与 clampLine 同口径），
+// 保证行宽 ≤ columns → 不折行 → rowsForLine（窄/宽口径）都算 1 行。
+// 本组用 ScreenTerminal(ambiguousWide:true) 模拟 CJK 终端，对比 narrow 旧逻辑与
+// wide 新逻辑在 paste / history 两个用户场景下的重影。
+
+/** 复刻 app.ts 旧实现：narrow truncateToWidth + stringWidth padding（重影源） */
+function inputRowNarrow(content: string, innerWidth: number, leftBar: string, rightBar: string): string {
+  let truncated = content
+  if (stringWidth(content) > innerWidth) {
+    truncated = ''
+    let w = 0
+    for (const ch of content) {
+      const cw = stringWidth(ch)
+      if (w + cw > innerWidth) break
+      truncated += ch
+      w += cw
+    }
+  }
+  const pad = Math.max(0, innerWidth - stringWidth(truncated))
+  return `${leftBar}${truncated}${' '.repeat(pad)}${rightBar}`
+}
+
+/** 复刻 app.ts renderInputRow 新实现：wide 截断 + wide padding（修复后） */
+function inputRowWide(content: string, innerWidth: number, leftBar: string, rightBar: string): string {
+  const opts = { ambiguousAsWide: true }
+  const truncated = truncateToDisplayWidth(content, innerWidth, opts)
+  const pad = Math.max(0, innerWidth - displayWidth(truncated, opts))
+  return `${leftBar}${truncated}${' '.repeat(pad)}${rightBar}`
+}
+
+const AMBIG_FILLER = '— … → ·' // 4 个 ambiguous 符号（CJK 终端各按 2 列，比 narrow 多 4 列）
+
+test('反模式确认: narrow padding 下含 ambiguous 的输入行在 wide 终端折行（重影前提）', () => {
+  const cols = 40
+  const innerWidth = cols - 6 // 34
+  const term = new ScreenTerminal(cols, 20, { ambiguousWide: true })
+  // 内容窄计恰好填满 innerWidth，但含 ambiguous → wide 终端实际更宽 → 折行
+  const ascii = 'x'.repeat(innerWidth - AMBIG_FILLER.length)
+  const content = ascii + AMBIG_FILLER
+  const leftBar = '│ '
+  const rightBar = ' │'
+  const row = inputRowNarrow(content, innerWidth, leftBar, rightBar)
+  // 写入终端，看占几行（ambiguousWide 模拟器按 2 列推进光标）
+  term.write(row)
+  // 末行 row 1 是折行后的第二段内容
+  assert.ok(term.getRow(1).trim().length > 0, 'narrow padding 下 wide 终端应折到第 2 行（重影前提成立）')
+})
+
+test('paste 含 ambiguous 字符: wide padding 不残留旧输入框（用户场景 1）', () => {
+  const cols = 40
+  const innerWidth = cols - 6
+  const term = new ScreenTerminal(cols, 30, { ambiguousWide: true })
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+  const leftBar = '│ '
+  const rightBar = ' │'
+  const top = '╭' + '─'.repeat(cols - 2) + '╮'
+  const bot = '╰' + '─'.repeat(cols - 2) + '╯'
+
+  // Frame 1: placeholder（空输入，无 ambiguous，单行）
+  const ph = inputRowWide(`〉 █placeholder`, innerWidth, leftBar, rightBar)
+  engine.render(lines(top, ph, bot))
+  term.flush()
+
+  // Frame 2: paste 多行文本，其中一行内容接近列宽且含 — … →（ambiguous）
+  // —— 真实 paste 技术文档的典型形态
+  const ascii = 'x'.repeat(innerWidth - AMBIG_FILLER.length - 8)
+  const line1 = inputRowWide('  行一', innerWidth, leftBar, rightBar)
+  const line2 = inputRowWide(`〉 ${ascii}${AMBIG_FILLER}█`, innerWidth, leftBar, rightBar)
+  engine.render(lines(top, line1, line2, bot))
+
+  const screen = term.getRowsFrom(0).join('\n')
+  const tulCount = screen.split('╭').length - 1
+  const botCount = screen.split('╰').length - 1
+  assert.equal(tulCount, 1, `paste 后 ╭ 出现 ${tulCount} 次，预期 1 — 旧顶框残留 = 输入框重影`)
+  assert.equal(botCount, 1, `paste 后 ╰ 出现 ${botCount} 次，预期 1 — 旧底框残留 = 输入框重影`)
+})
+
+test('history 导航含中文标点（——…）: wide padding 不残留旧输入框（用户场景 2）', () => {
+  const cols = 40
+  const innerWidth = cols - 6
+  const term = new ScreenTerminal(cols, 30, { ambiguousWide: true })
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+  const leftBar = '│ '
+  const rightBar = ' │'
+  const top = '╭' + '─'.repeat(cols - 2) + '╮'
+  const bot = '╰' + '─'.repeat(cols - 2) + '╯'
+
+  // Frame 1: placeholder
+  engine.render(lines(top, inputRowWide('〉 █history placeholder', innerWidth, leftBar, rightBar), bot))
+  term.flush()
+
+  // Frame 2: 按上键取回的历史消息——含中文破折号「——」和省略号「…」（ambiguous）
+  const msg = '帮我重构这个模块——注意边界情况…以及并发'
+  engine.render(lines(top, inputRowWide(`〉 ${msg}█`, innerWidth, leftBar, rightBar), bot))
+
+  const screen = term.getRowsFrom(0).join('\n')
+  const tulCount = screen.split('╭').length - 1
+  assert.equal(tulCount, 1, `history 后 ╭ 出现 ${tulCount} 次，预期 1 — 输入框重影`)
+  assert.ok(screen.includes('重构'), '历史消息内容应在屏上')
+})
+
+test('spinner 行含 …· 经 clampLine 不折行（rowsForLine 一致）', () => {
+  const cols = 30 // 窄列强制接近列宽
+  const term = new ScreenTerminal(cols, 20, { ambiguousWide: true })
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+  // spinner 行形态：⠋ Thinking… (12s · esc to interrupt)，含 … 和 · 两个 ambiguous
+  const spinner = '⠋ Thinking… (12s · esc to interrupt)'
+  // clampLine 等价：wide 上界截断到 cols-1
+  const clamped = truncateToDisplayWidth(spinner, cols - 1, { ambiguousAsWide: true })
+  engine.render(lines(clamped))
+  term.flush()
+
+  // 不论 narrow/wide 口径，clampLine 已保证行宽 ≤ cols-1 → 不折行 → rowsForLine=1
+  assert.equal(displayWidth(clamped, { ambiguousAsWide: true }) <= cols, true, 'clampLine 后 wide 宽度 ≤ cols')
+  assert.equal(Math.ceil(displayWidth(clamped, { ambiguousAsWide: true }) / cols), 1, 'wide 口径占 1 行')
+  assert.equal(Math.ceil(displayWidth(clamped) / cols), 1, 'narrow 口径占 1 行（rowsForLine 不论口径都对）')
 })

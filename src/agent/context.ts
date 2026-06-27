@@ -365,6 +365,12 @@ export class SessionContext {
     return Math.round(base * this.state.contextCalibrationRatio)
   }
 
+  /** 仅统计当前 oaiMessages 的本地 token 估算（不含 prefix overhead / 校准）。
+   *  用于 UI 显示“可见对话上下文”，与 API 实际 prompt 区分开。 */
+  getConversationTokens(): number {
+    return this.state.estimatedTokens
+  }
+
   /**
    * Real context-window occupancy for display: anchor on the model's exact
    * tokenization (last API prompt_tokens) and estimate only the un-sent tail.
