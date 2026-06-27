@@ -69,7 +69,7 @@ import { readFile } from 'node:fs/promises'
 
 const PLAN_PATH_RE = /(?:\.rivet\/knowledge\/|docs\/superpowers\/plans\/)[^\s]+\.md/
 
-function extractPlanPath(objective: string, files?: string[]): string | null {
+export function extractPlanPath(objective: string, files?: string[]): string | null {
   const match = objective.match(PLAN_PATH_RE)
   if (match) return match[0]
   if (files) {
@@ -81,7 +81,7 @@ function extractPlanPath(objective: string, files?: string[]): string | null {
   return null
 }
 
-function parseChecklistItems(markdown: string): Array<{ text: string; files: string[] }> {
+export function parseChecklistItems(markdown: string): Array<{ text: string; files: string[] }> {
   const items: Array<{ text: string; files: string[] }> = []
   for (const line of markdown.split('\n')) {
     const m = line.match(/^- \[ \] (.+)$/)
@@ -147,9 +147,9 @@ npx tsc --noEmit
 
 ---
 
-### 任务 2：在 `plan-task.ts` 中添加 checklist 解析的单元测试
+### 任务 2：为 `extractPlanPath` 和 `parseChecklistItems` 编写单元测试
 
-**文件：** `src/tools/__tests__/plan-task.test.ts`（新建，若无则创建）
+**文件：** `src/tools/__tests__/plan-task.test.ts`（新建）
 
 ```typescript
 import { describe, it } from 'node:test'
@@ -189,7 +189,7 @@ describe('parseChecklistItems', () => {
       const m = line.match(/^- \[ \] (.+)$/)
       if (!m) continue
       const text = m[1]!.trim()
-      const fileRefs = text.match(/`([^`]+\.ts[x]?)`/g) ?? []
+      const fileRefs = text.match(/`([^`]+\.\w+)`/g) ?? []
       const files = fileRefs.map(f => f.replace(/`/g, ''))
       items.push({ text, files })
     }
@@ -231,38 +231,7 @@ node --import tsx --test src/tools/__tests__/plan-task.test.ts
 
 ---
 
-### 任务 3：导出纯函数并更新测试文件引用真实导出
-
-**文件：** `src/tools/plan-task.ts`（导出）、`src/tools/__tests__/plan-task.test.ts`（更新 import）
-
-**改动 A — `plan-task.ts` 中将两个函数改为 `export`：**
-
-```typescript
-export function extractPlanPath(objective: string, files?: string[]): string | null { ... }
-export function parseChecklistItems(markdown: string): Array<{ text: string; files: string[] }> { ... }
-```
-
-**改动 B — 测试文件改为 import 真实函数：**
-
-```typescript
-import { extractPlanPath, parseChecklistItems } from '../plan-task.js'
-```
-
-删除测试中内联的 `PLAN_PATH_RE` 和 `parseChecklistItems` 定义，改用导入。
-
-**验证命令：**
-```bash
-npx tsc --noEmit
-node --import tsx --test src/tools/__tests__/plan-task.test.ts
-```
-
-**预期：** typecheck + 6 tests pass。
-
-**commit：** `feat(plan-task): detect plan file paths and parse checklist into patcher tasks`
-
----
-
-### 任务 4：重写 `buildTeamWorkflowPrompt` 的 "Suggested phases"
+### 任务 3：重写 `buildTeamWorkflowPrompt` 的 "Suggested phases"
 
 **文件：** `src/workflows/ecosystem-workflows.ts`
 
@@ -311,7 +280,7 @@ node --import tsx --test src/workflows/__tests__/ecosystem-workflows.test.ts
 **commit：** `fix(team): correct tool guidance in team workflow prompt`
 
 
-### 任务 5：端到端集成测试 — 用真实计划文件验证完整流程
+### 任务 4：端到端集成测试 — 用真实计划文件验证完整流程
 
 **文件：** `src/tools/__tests__/plan-task.test.ts`（追加）
 
@@ -345,7 +314,7 @@ node --import tsx --test src/tools/__tests__/plan-task.test.ts
 
 ---
 
-### 任务 6：全量回归 — 运行所有受影响测试
+### 任务 5：全量回归 — 运行所有受影响测试
 
 **验证命令：**
 ```bash
