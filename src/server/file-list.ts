@@ -124,6 +124,55 @@ export function rankFiles(paths: string[], query: string, limit = 50): string[] 
   return scored.slice(0, limit).map((s) => s.path)
 }
 
+// ── Single-level directory listing (for file browser tree) ──────
+
+export interface DirEntry {
+  name: string
+  isDirectory: boolean
+}
+
+/**
+ * List direct children of `dir` — one level only (not recursive).
+ * Used by the desktop file browser to lazily build a tree on expand.
+ * Excludes common build/dependency directories and gitignored entries.
+ * Directories sorted first, then files, both alphabetical.
+ * Returns [] for non-existent or unreadable directories.
+ */
+export async function listDirEntries(dir: string): Promise<DirEntry[]> {
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return []
+  }
+  const gitignore = await GitignoreFilter.create(dir)
+  const entries: DirEntry[] = []
+  for (const name of names) {
+    // Exclude hidden dirs like .git, .rivet — but allow dotfiles (.env.example)
+    if (name.startsWith('.') && EXCLUDE_DIRS.has(name)) continue
+    const fullPath = join(dir, name)
+    let s: Awaited<ReturnType<typeof lstat>>
+    try {
+      s = await lstat(fullPath)
+    } catch {
+      continue
+    }
+    if (s.isSymbolicLink()) continue
+    if (s.isDirectory()) {
+      if (EXCLUDE_DIRS.has(name)) continue
+      entries.push({ name, isDirectory: true })
+    } else if (s.isFile()) {
+      if (gitignore.isIgnored(dir, fullPath)) continue
+      entries.push({ name, isDirectory: false })
+    }
+  }
+  entries.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+  return entries
+}
+
 function depth(p: string): number {
   let n = 0
   for (let i = 0; i < p.length; i++) if (p[i] === '/') n++
