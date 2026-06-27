@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 // Each test starts from a clean slate by clearing the store via
 // consumePlan (which reads + clears).
 
-import { storePlan, consumePlan, getStoredPlan } from '../../agent/plan-store.js'
+import { storePlan, consumePlan, getStoredPlan } from '../plan-store.js'
 
 function clearStore(): void {
   consumePlan() // consume clears; call until null
