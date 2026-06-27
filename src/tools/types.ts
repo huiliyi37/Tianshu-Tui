@@ -21,6 +21,19 @@ export interface DelegationActivity {
   status: 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
   /** Latest worker activity line (running) or terminal summary. */
   progressLine?: string
+  /** Actual model dispatched for this worker (insights / cost visualization). */
+  model?: string
+  /** Provider name for this worker (insights / cost visualization). */
+  provider?: string
+  /** Token usage for this worker (insights / cost visualization). */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    reasoning_tokens?: number
+    total_tokens?: number
+  }
 }
 
 /**
