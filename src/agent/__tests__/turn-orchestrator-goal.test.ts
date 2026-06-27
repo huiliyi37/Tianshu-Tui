@@ -39,7 +39,10 @@ function makeOrchestrator(opts: {
   telemetrySink?: Array<Record<string, unknown>>
 }): TurnOrchestrator {
   const deps = {
-    getStreamedText: () => opts.streamedText ?? 'GOAL ACHIEVED',
+    state: {
+      get streamedText() { return opts.streamedText ?? 'GOAL ACHIEVED' },
+      set streamedText(_v: string) {},
+    },
     getGoalJudgeDeps: () => opts.judgeDeps,
     getGoalJudgeEvidence: () => ({ text: 'modified: a.ts', modifiedFiles: ['a.ts'] }),
     writeTelemetry: (entry: Record<string, unknown>) => { opts.telemetrySink?.push(entry) },

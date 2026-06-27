@@ -97,6 +97,30 @@ export interface CacheTurnEndParams {
   artifactIdsAccessed: string[]
 }
 
+// ── TurnStateBag: getter/setter view into AgentLoop mutable fields ──
+
+export interface TurnStateBag {
+  streamedText: string
+  lastPrewarmAt: number
+  gitChangeRate: number
+  turnBudget: TurnBudget
+  latestFsWatcherState: FsWatcherState
+  consecutiveNoToolTurns: number
+  autoContinueCount: number
+  thinkingOnlyRetries: number
+  lastThinkingContent: string
+  lastTurnTextFingerprint: string
+  lastTurnThinkingFingerprint: string
+  recentTextFingerprints: string[]
+  turnsSinceLastObjection: number
+  traceStore: TraceStore
+  importGraph: ImportGraph | null
+  lastConflictCheckCount: number
+  latestRisk: RiskAssessment
+  thetaRequestsThisTurn: number
+  taskContract: import('../context/task-contract.js').TaskContract | undefined
+}
+
 // ── Deps interface ──
 
 export interface TurnOrchestratorDeps {
@@ -187,42 +211,10 @@ export interface TurnOrchestratorDeps {
   // === FsWatcher ===
   getFsWatcherState: () => FsWatcherState
 
-  // === Per-run state (mirrored on AgentLoop, survives across runs) ===
-  getStreamedText: () => string
-  setStreamedText: (v: string) => void
-  getLastPrewarmAt: () => number
-  setLastPrewarmAt: (v: number) => void
-  getGitChangeRate: () => number
-  setGitChangeRate: (v: number) => void
-  setTurnBudget: (v: TurnBudget) => void
-  getLatestFsWatcherState: () => FsWatcherState
-  setLatestFsWatcherState: (v: FsWatcherState) => void
-  getConsecutiveNoToolTurns: () => number
-  setConsecutiveNoToolTurns: (v: number) => void
-  getAutoContinueCount: () => number
-  setAutoContinueCount: (v: number) => void
+  // === Per-run state (getter/setter view into AgentLoop mutable fields) ===
+  state: TurnStateBag
   getMaxAutoContinue: () => number
-  getActiveContract: () => import('../context/task-contract.js').TaskContract | undefined
   getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
-  getThinkingOnlyRetries: () => number
-  setThinkingOnlyRetries: (v: number) => void
-  getLastThinkingContent: () => string
-  setLastThinkingContent: (v: string) => void
-  getLastTurnTextFingerprint: () => string
-  setLastTurnTextFingerprint: (v: string) => void
-  getLastTurnThinkingFingerprint: () => string
-  setLastTurnThinkingFingerprint: (v: string) => void
-  getRecentTextFingerprints: () => string[]
-  setTurnsSinceLastObjection: (v: number) => void
-  getTraceStore: () => TraceStore
-  setTraceStore: (v: TraceStore) => void
-  getImportGraph: () => ImportGraph | null
-  setImportGraph: (v: ImportGraph | null) => void
-  getLastConflictCheckCount: () => number
-  setLastConflictCheckCount: (v: number) => void
-  getLatestRisk: () => RiskAssessment
-  setLatestRisk: (v: RiskAssessment) => void
-  setThetaRequestsThisTurn: (v: number) => void
 
   // === Goal completion judge (optional) ===
   /** Provides judge spawn deps. Undefined → judge disabled (legacy accept-on-marker). */
@@ -302,7 +294,7 @@ export class TurnOrchestrator {
         objective: tracker.getGoal(),
         criteria: tracker.getSuccessCriteria(),
         evidence: evidence.text,
-        finalClaim: this.deps.getStreamedText(),
+        finalClaim: this.deps.state.streamedText,
         scopeFiles: evidence.modifiedFiles,
         signal,
       }),
@@ -413,7 +405,7 @@ export class TurnOrchestrator {
 
     try {
       for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
-        this.deps.setThetaRequestsThisTurn(0)
+        this.deps.state.thetaRequestsThisTurn = 0
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.deps.syncPlanModeToConfig()
         const signal = this.deps.getAbortSignal()
@@ -429,7 +421,7 @@ export class TurnOrchestrator {
         const rssRatio = snap
           ? snap.memory.rssBytes / snap.memory.memoryLimitBytes
           : 0
-        this.deps.setTurnBudget(createTurnBudget(rssRatio))
+        this.deps.state.turnBudget = createTurnBudget(rssRatio)
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
@@ -447,8 +439,8 @@ export class TurnOrchestrator {
           if (compactionResult.userMessageConsumed) userMessageConsumed = true
         }
 
-        this.deps.setStreamedText('')
-        this.deps.setLastPrewarmAt(0)
+        this.deps.state.streamedText = ''
+        this.deps.state.lastPrewarmAt = 0
         let _tb = Date.now()
         this.deps.getHeartbeat()?.tick('prewarm')
         await rejectOnAbort(this.deps.prewarmRecentReads(), signal!, 'prewarm')
@@ -456,11 +448,11 @@ export class TurnOrchestrator {
 
         // ── Git freshness: file change rate (Zeitgeber signal) ──
         getGitChangeRate(this.deps.getCwd()).then(rate => {
-          this.deps.setGitChangeRate(smoothChangeRate(rate, this.deps.getGitChangeRate()))
+          this.deps.state.gitChangeRate = smoothChangeRate(rate, this.deps.state.gitChangeRate)
         }).catch(() => {})
 
         // ── FS freshness: realtime external Zeitgeber signal ──
-        this.deps.setLatestFsWatcherState(this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false })
+        this.deps.state.latestFsWatcherState = this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false }
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
         this.deps.getHeartbeat()?.tick('perception')
@@ -519,10 +511,10 @@ export class TurnOrchestrator {
         let turnThinkingAccum = ''
         let rateLimitOccurred = false
         let rateLimitRetryMs = 0
-        const prevThinkingFingerprint = this.deps.getLastTurnThinkingFingerprint()
+        const prevThinkingFingerprint = this.deps.state.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
-        const prevFingerprint = this.deps.getLastTurnTextFingerprint()
+        const prevFingerprint = this.deps.state.lastTurnTextFingerprint
 
         // L0 streaming-executor telemetry: measure stream + tool execution latency.
         const turnStartMs = Date.now()
@@ -530,7 +522,7 @@ export class TurnOrchestrator {
         const streamOnce = () => this.deps.streamTurn({
           request,
           turn,
-          lastTurnTextFingerprint: this.deps.getLastTurnTextFingerprint(),
+          lastTurnTextFingerprint: this.deps.state.lastTurnTextFingerprint,
           streamRules: this.deps.getStreamRules(),
           disabledRulePatterns,
           callbacks: {
@@ -618,7 +610,7 @@ export class TurnOrchestrator {
               classifyApiError(streamResult.streamError).shouldReconnect
             ) {
               attempt++
-              this.deps.setStreamedText('')
+              this.deps.state.streamedText = ''
               turnTextAccum = ''
               turnThinkingAccum = ''
               pendingFlush = ''
@@ -647,17 +639,17 @@ export class TurnOrchestrator {
           }
         }
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
-        this.deps.setLastTurnTextFingerprint(streamResult.lastTurnTextFingerprint)
-        this.deps.setLastTurnThinkingFingerprint(streamResult.lastTurnThinkingFingerprint)
+        this.deps.state.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
+        this.deps.state.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
         // Track text fingerprints for cross-turn repetition detection
         if (streamResult.lastTurnTextFingerprint.length >= 50) {
-          const fps = this.deps.getRecentTextFingerprints()
+          const fps = this.deps.state.recentTextFingerprints
           fps.push(streamResult.lastTurnTextFingerprint)
           if (fps.length > 8) fps.shift()
         }
         // Anti-habituation: detect model-initiated objections to reset staleness counter.
         if (turnTextAccum.includes('⚠') || turnTextAccum.includes('风险评估') || turnTextAccum.includes('遗留项')) {
-          this.deps.setTurnsSinceLastObjection(0)
+          this.deps.state.turnsSinceLastObjection = 0
         }
 
         // TTSR: stream rule triggered — inject reminder and retry, governed
@@ -724,7 +716,7 @@ export class TurnOrchestrator {
         if (signal?.aborted) {
           // P0: skip addAssistantBlocks — partial blocks from an aborted
           // stream must not pollute the message list and break prefix cache.
-          if (this.deps.getStreamedText().length > 0) this.deps.addUsage({ output_tokens: Math.ceil(this.deps.getStreamedText().length / 4) })
+          if (this.deps.state.streamedText.length > 0) this.deps.addUsage({ output_tokens: Math.ceil(this.deps.state.streamedText.length / 4) })
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
           // runPostSession is best-effort cleanup — its failure must not cause
           // the outer catch to double-delete an unrelated message.
@@ -749,8 +741,8 @@ export class TurnOrchestrator {
         // content block, synthesize one from the accumulated streamedText.
         // Otherwise the reply is visible in the TUI but absent from history,
         // and the model re-answers this turn's question on the next run.
-        if (this.deps.getStreamedText() && !collectedBlocks.some(b => b.type === 'text')) {
-          collectedBlocks.push({ type: 'text', text: this.deps.getStreamedText() })
+        if (this.deps.state.streamedText && !collectedBlocks.some(b => b.type === 'text')) {
+          collectedBlocks.push({ type: 'text', text: this.deps.state.streamedText })
         }
 
         if (collectedBlocks.length > 0) { this.deps.addAssistantBlocks(collectedBlocks); assistantResponded = true }
@@ -762,7 +754,7 @@ export class TurnOrchestrator {
 
         if (toolUses.length > 0) {
           // Reset no-tool counter — model is taking action
-          this.deps.setConsecutiveNoToolTurns(0)
+          this.deps.state.consecutiveNoToolTurns = 0
           // ── Pre-execution diagnostic snapshot ──
           // Write sensorium before tool execution so freeze analysis can
           // identify which tools were about to run, even if executeBatch hangs.
@@ -783,16 +775,16 @@ export class TurnOrchestrator {
             this.deps.executeBatch({
               toolUses, callbacks, turn, checkpointCreatedThisTurn,
               abortSignal: signal!,
-              traceStore: this.deps.getTraceStore(), importGraph: this.deps.getImportGraph(),
-              lastConflictCheckCount: this.deps.getLastConflictCheckCount(), latestRisk: this.deps.getLatestRisk(),
+              traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
+              lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
             }),
             signal!,
             'tools',
           )
-          this.deps.setTraceStore(r.traceStore)
-          this.deps.setImportGraph(r.importGraph)
-          this.deps.setLastConflictCheckCount(r.lastConflictCheckCount)
-          this.deps.setLatestRisk(r.latestRisk)
+          this.deps.state.traceStore = r.traceStore
+          this.deps.state.importGraph = r.importGraph
+          this.deps.state.lastConflictCheckCount = r.lastConflictCheckCount
+          this.deps.state.latestRisk = r.latestRisk
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
 
           // U6: record this tool-turn into the execution trace.
@@ -854,12 +846,12 @@ export class TurnOrchestrator {
           })
         }
         const thinkingResult = evaluateThinkingRetry({
-          streamedText: this.deps.getStreamedText(), collectedBlockCount: collectedBlocks.length,
-          thinkingAccum, thinkingOnlyRetries: this.deps.getThinkingOnlyRetries(),
-          lastThinkingContent: this.deps.getLastThinkingContent(),
+          streamedText: this.deps.state.streamedText, collectedBlockCount: collectedBlocks.length,
+          thinkingAccum, thinkingOnlyRetries: this.deps.state.thinkingOnlyRetries,
+          lastThinkingContent: this.deps.state.lastThinkingContent,
         })
-        this.deps.setLastThinkingContent(thinkingResult.nextState.lastThinkingContent)
-        this.deps.setThinkingOnlyRetries(thinkingResult.nextState.thinkingOnlyRetries)
+        this.deps.state.lastThinkingContent = thinkingResult.nextState.lastThinkingContent
+        this.deps.state.thinkingOnlyRetries = thinkingResult.nextState.thinkingOnlyRetries
         if (thinkingResult.shouldRetry) {
           this.deps.appendSystemReminder(thinkingResult.retryMessage)
           // Archive any partial streamed text before retrying (same rationale as TTSR above)
@@ -868,7 +860,7 @@ export class TurnOrchestrator {
         }
 
         // No tool calls this turn — increment the counter for convergence detection
-        this.deps.setConsecutiveNoToolTurns(this.deps.getConsecutiveNoToolTurns() + 1)
+        this.deps.state.consecutiveNoToolTurns = this.deps.state.consecutiveNoToolTurns + 1
 
         // ── Goal continuation check ──
         // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
@@ -882,7 +874,7 @@ export class TurnOrchestrator {
         let judgeContinuationReminder: string | null = null
         if (tracker?.isActive()) {
           const goalResult = tracker.check(
-            this.deps.getStreamedText(),
+            this.deps.state.streamedText,
             this.deps.getEstimatedTokens(),
             signal?.aborted === true,
           )
@@ -940,7 +932,7 @@ export class TurnOrchestrator {
             this.deps.appendSystemReminder(
               `[GOAL CONTINUATION ${iter}/${maxIter}${wallInfo}] 目标尚未达成。继续执行。\n` +
               `目标: ${tracker!.getGoal()}\n` +
-              `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
+              `上轮输出摘要: ${this.deps.state.streamedText.slice(-500)}\n` +
               `完成后输出 "GOAL ACHIEVED" 声明完成。遇到无法解决的阻塞时输出 "GOAL BLOCKED"。`
             )
           }
@@ -956,14 +948,14 @@ export class TurnOrchestrator {
         // steers, or when the per-run budget is exhausted.
         if (!tracker?.isActive()) {
           const phantom = evaluatePhantomContinuation({
-            streamedText: this.deps.getStreamedText(),
-            activeContract: this.deps.getActiveContract(),
-            autoContinueCount: this.deps.getAutoContinueCount(),
+            streamedText: this.deps.state.streamedText,
+            activeContract: this.deps.state.taskContract,
+            autoContinueCount: this.deps.state.autoContinueCount,
             maxAutoContinue: this.deps.getMaxAutoContinue(),
             convergenceEscalated: this.deps.getDoomLoopLevel() !== 'none',
           })
           if (phantom.shouldContinue) {
-            this.deps.setAutoContinueCount(this.deps.getAutoContinueCount() + 1)
+            this.deps.state.autoContinueCount = this.deps.state.autoContinueCount + 1
             await rejectOnAbort(
               this.deps.completeTurn({ turn, isFinal: false, callbacks }),
               signal!,

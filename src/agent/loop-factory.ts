@@ -20,7 +20,7 @@ import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
-import { TurnOrchestrator } from './turn-orchestrator.js'
+import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -523,42 +523,49 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === FsWatcher ===
     getFsWatcherState: () => self.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false },
 
-    // === Per-run state ===
-    getStreamedText: () => self.streamedText,
-    setStreamedText: (v) => { self.streamedText = v },
-    getLastPrewarmAt: () => self.lastPrewarmAt,
-    setLastPrewarmAt: (v) => { self.lastPrewarmAt = v },
-    getGitChangeRate: () => self.gitChangeRate,
-    setGitChangeRate: (v) => { self.gitChangeRate = v },
-    setTurnBudget: (v) => { self.turnBudget = v },
-    getLatestFsWatcherState: () => self.latestFsWatcherState,
-    setLatestFsWatcherState: (v) => { self.latestFsWatcherState = v },
-    getConsecutiveNoToolTurns: () => self.consecutiveNoToolTurns,
-    setConsecutiveNoToolTurns: (v) => { self.consecutiveNoToolTurns = v },
-    getAutoContinueCount: () => self.autoContinueCount,
-    setAutoContinueCount: (v) => { self.autoContinueCount = v },
+    // === Per-run state (getter/setter view into AgentLoop fields) ===
+    state: {
+      get streamedText() { return self.streamedText },
+      set streamedText(v) { self.streamedText = v },
+      get lastPrewarmAt() { return self.lastPrewarmAt },
+      set lastPrewarmAt(v) { self.lastPrewarmAt = v },
+      get gitChangeRate() { return self.gitChangeRate },
+      set gitChangeRate(v) { self.gitChangeRate = v },
+      get turnBudget() { return self.turnBudget },
+      set turnBudget(v) { self.turnBudget = v },
+      get latestFsWatcherState() { return self.latestFsWatcherState },
+      set latestFsWatcherState(v) { self.latestFsWatcherState = v },
+      get consecutiveNoToolTurns() { return self.consecutiveNoToolTurns },
+      set consecutiveNoToolTurns(v) { self.consecutiveNoToolTurns = v },
+      get autoContinueCount() { return self.autoContinueCount },
+      set autoContinueCount(v) { self.autoContinueCount = v },
+      get thinkingOnlyRetries() { return self.thinkingOnlyRetries },
+      set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
+      get lastThinkingContent() { return self.lastThinkingContent },
+      set lastThinkingContent(v) { self.lastThinkingContent = v },
+      get lastTurnTextFingerprint() { return self.lastTurnTextFingerprint },
+      set lastTurnTextFingerprint(v) { self.lastTurnTextFingerprint = v },
+      get lastTurnThinkingFingerprint() { return self.lastTurnThinkingFingerprint },
+      set lastTurnThinkingFingerprint(v) { self.lastTurnThinkingFingerprint = v },
+      get recentTextFingerprints() { return self.recentTextFingerprints },
+      set recentTextFingerprints(v) { self.recentTextFingerprints = v },
+      get turnsSinceLastObjection() { return self.turnsSinceLastObjection },
+      set turnsSinceLastObjection(v) { self.turnsSinceLastObjection = v },
+      get traceStore() { return self.traceStore },
+      set traceStore(v) { self.traceStore = v },
+      get importGraph() { return self.importGraph },
+      set importGraph(v) { self.importGraph = v },
+      get lastConflictCheckCount() { return self.lastConflictCheckCount },
+      set lastConflictCheckCount(v) { self.lastConflictCheckCount = v },
+      get latestRisk() { return self.latestRisk },
+      set latestRisk(v) { self.latestRisk = v },
+      get thetaRequestsThisTurn() { return self.thetaRequestsThisTurn },
+      set thetaRequestsThisTurn(v) { self.thetaRequestsThisTurn = v },
+      get taskContract() { return self.taskContract },
+      set taskContract(v) { self.taskContract = v },
+    } as TurnStateBag,
     getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
-    getActiveContract: () => self.taskContract,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
-    getThinkingOnlyRetries: () => self.thinkingOnlyRetries,
-    setThinkingOnlyRetries: (v) => { self.thinkingOnlyRetries = v },
-    getLastThinkingContent: () => self.lastThinkingContent,
-    setLastThinkingContent: (v) => { self.lastThinkingContent = v },
-    getLastTurnTextFingerprint: () => self.lastTurnTextFingerprint,
-    setLastTurnTextFingerprint: (v) => { self.lastTurnTextFingerprint = v },
-    getLastTurnThinkingFingerprint: () => self.lastTurnThinkingFingerprint,
-    setLastTurnThinkingFingerprint: (v) => { self.lastTurnThinkingFingerprint = v },
-    getRecentTextFingerprints: () => self.recentTextFingerprints,
-    setTurnsSinceLastObjection: (v) => { self.turnsSinceLastObjection = v },
-    getTraceStore: () => self.traceStore,
-    setTraceStore: (v) => { self.traceStore = v },
-    getImportGraph: () => self.importGraph,
-    setImportGraph: (v) => { self.importGraph = v },
-    getLastConflictCheckCount: () => self.lastConflictCheckCount,
-    setLastConflictCheckCount: (v) => { self.lastConflictCheckCount = v },
-    getLatestRisk: () => self.latestRisk,
-    setLatestRisk: (v) => { self.latestRisk = v },
-    setThetaRequestsThisTurn: (v) => { self.thetaRequestsThisTurn = v },
 
     // === Goal completion judge ===
     getGoalJudgeDeps: () => {
