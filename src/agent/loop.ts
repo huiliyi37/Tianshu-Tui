@@ -584,14 +584,6 @@ export class AgentLoop {
     return this.planTraceCoordinator.buildStepResultFromTurn(turn)
   }
 
-  /** U6: turn-boundary deviation check. Reads the latest convergence result +
-   *  no-tool counter + most recent step result, detects deviation, applies a
-   *  course correction, and refreshes the replan/trace prompt surfaces. No-op
-   *  until the trace has steps (i.e. the agent has produced a todo plan). */
-  runReplanCheck(): void {
-    this.planTraceCoordinator.runReplanCheck()
-  }
-
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
       recordToolHistory(this, name, input, isError, result);
       // F-fix (session 803d897d): field habituation moves discipline text out of
@@ -1263,17 +1255,6 @@ export class AgentLoop {
     }
 
     return { action: 'proceed' }
-  }
-
-  async runCompaction(
-    turn: number,
-    snap: ResourceSensorSnapshot | null,
-  ): Promise<{
-    compacted: boolean
-    shouldAbort: boolean
-    userMessageConsumed: boolean
-  }> {
-    return this.compactBoundaryCoordinator.runCompaction(turn, snap)
   }
 
   private async _runInner(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {

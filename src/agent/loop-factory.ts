@@ -486,11 +486,11 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getCacheHistory: () => self.session.getCacheHistory(),
 
     // === Sub-processes (thin wrappers) ===
-    runCompaction: (turn, snap) => self.runCompaction(turn, snap),
+    runCompaction: (turn, snap) => self.compactBoundaryCoordinator.runCompaction(turn, snap),
     runPerception: (turn, estTokens, actionable, callbacks) => self.turnStepProducer.runPerception(turn, estTokens, actionable, callbacks),
     runConvergenceCheck: (turn, phaseClass, assistantResponded, userMessageConsumed, callbacks) =>
       self.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
-    runReplanCheck: () => { self.runReplanCheck() },
+    runReplanCheck: () => { self.planTraceCoordinator.runReplanCheck() },
     buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
       self.turnStepProducer.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
     prewarmRecentReads: () => self.prewarmController.prewarmRecentReads(),
