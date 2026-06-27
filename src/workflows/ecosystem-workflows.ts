@@ -307,13 +307,15 @@ Execution flow — follow these exact steps:
 If the objective IS a Markdown plan file path (e.g. .rivet/knowledge/...md or docs/superpowers/plans/...md):
   1. Read the plan file and note its implementation checklist.
   2. Call plan_task with { objective, files: [planPath, plus the source files mentioned in the plan], execute: true }.
-     plan_task will auto-detect the plan file, parse the - [ ] checklist items, and create one patcher worker per item.
+     plan_task will auto-detect the plan file, parse the - [ ] checklist items, create one patcher worker per item,
+     and store the plan internally so team_orchestrate can pick it up automatically.
   3. After plan_task dispatches the first wave, integrate the returned worker diffs into the working tree.
-  4. If the plan_task output shows remaining waves, call team_orchestrate with { mode: 'standard', objective, planJson: <UnifiedPlan JSON from plan_task output>, fromWave: <next wave index> }.
+  4. If the output shows remaining waves, call team_orchestrate with { mode: 'standard', objective, fromWave: <next wave index> }.
+     (No need to pass planJson — team_orchestrate reads it from the internal plan store.)
 
 If the objective is a free-form task description (no plan file):
   1. Call plan_task with { objective, execute: true } to decompose and dispatch the first wave.
-  2. Follow the same integrate-then-continue pattern as above.
+  2. Follow the same integrate-then-continue pattern as above (team_orchestrate without planJson).
 
 After ALL waves complete:
   1. Run targeted tests + npx tsc --noEmit.

@@ -4,6 +4,7 @@ import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, r
 import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
+import { storePlan } from '../agent/plan-store.js'
 import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
 import type { TodoItem } from './todo-store.js'
@@ -197,6 +198,10 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           isError: true,
         }
       }
+
+      // Bridge: store the serialized plan so team_orchestrate can auto-consume
+      // it without the model copy-pasting JSON between tool calls.
+      storePlan(serializeUnifiedPlan(plan))
 
       if (params.input.execute !== true) {
         // Return JSON + human-readable summary with methodology guidance
