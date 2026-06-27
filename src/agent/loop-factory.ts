@@ -631,6 +631,9 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       completeTurn: (params) => self.turnCompletion.complete(params),
       getTotalUsage: () => self.session.getTotalUsage(),
       getTurnCount: () => self.session.getTurnCount(),
+      // GLM independent reasoning: thinking-only turns are legitimate output,
+      // not failed utterances. Skip retry to avoid wasting time on fresh reasoning.
+      skipThinkingRetry: self.config.providerName === 'glm',
     }),
   })
 }

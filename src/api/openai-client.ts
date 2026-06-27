@@ -242,15 +242,15 @@ export class OpenAIClient implements StreamClient {
     signal?: AbortSignal,
   ): Promise<void> {
     this.lastRequestMessages = request.messages
-    // DeepSeek thinking mode reasoning_content rules (official docs):
-    // - Tool-call turns: reasoning_content MUST be echoed in all subsequent requests.
-    // - Pure text turns (no tool_calls): reasoning_content is ignored by the API;
-    //   strip it to avoid bloating context and potentially triggering repetition.
-    // - Thinking disabled: strip all reasoning_content.
+    // reasoning_content stripping rules:
+    // - DeepSeek (preserved thinking): keep for tool-call turns, strip for pure-text
+    // - GLM (independent reasoning): always strip — no preserved thinking context
+    // - Thinking disabled: always strip
     const messages = request.messages.map(m => {
       if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
+      const isGlm = this.config.providerName === 'glm'
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
-      if (this.config.thinking === 'enabled' && hasToolCalls) return m
+      if (this.config.thinking === 'enabled' && hasToolCalls && !isGlm) return m
       const { reasoning_content: _, ...rest } = m
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       // After stripping reasoning_content, ensure `content` exists.
@@ -307,14 +307,10 @@ export class OpenAIClient implements StreamClient {
         if (this.config.providerName === 'minimax') {
           body.thinking = { type: 'adaptive' }
         }
-        // GLM Preserved Thinking: retain previous reasoning across turns.
-        // Reduces thinking time (incremental vs. full re-reasoning), improves
-        // cache hit rate, and is officially recommended for Coding/Agent use.
-        // Requires echoing reasoning_content back in subsequent requests
-        // (already handled by echoReasoning logic above).
-        if (this.config.providerName === 'glm') {
-          (body.thinking as Record<string, unknown>)['clear_thinking'] = false
-        }
+        // GLM: independent reasoning mode (no preserved thinking).
+        // Prior reasoning is NOT echoed — each turn is a fresh reasoning start.
+        // This avoids the cross-API-call context discontinuity that causes GLM
+        // to restart reasoning mid-turn after a stream abort/timeout.
         if (this.config.providerName === 'claude' && this.config.reasoningEffort) {
           const budgetMap: Record<string, number> = {
             max: this.config.maxTokens,
@@ -478,7 +474,7 @@ export class OpenAIClient implements StreamClient {
 
       await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef, lifecycle)
     }, signal, {
-      maxTotalDurationMs: 10 * 60_000,
+      maxTotalDurationMs: this.config.providerName === 'glm' ? 20 * 60_000 : 10 * 60_000,
       maxTotalRetries: isThinking ? 1 : undefined,
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
@@ -529,11 +525,11 @@ export class OpenAIClient implements StreamClient {
     // 改为按输出进度续期：到达基础硬顶时若最近 30s 内仍有 data 事件，
     // 续 60s 一档，绝对上限 3×基础（30min）兜底 runaway。
     const timeoutController = new AbortController()
-    const baseStreamMs = 10 * 60_000
+    const isGlm = this.config.providerName === 'glm'
+    const baseStreamMs = isGlm ? 20 * 60_000 : 10 * 60_000
     const streamStartedAt = Date.now()
     let lastDataEventAt = streamStartedAt
     let hardCapExtended = false
-    const isGlm = this.config.providerName === 'glm'
     const progressWindowMs = isGlm ? GLM_HARD_CAP_PROGRESS_WINDOW_MS : HARD_CAP_PROGRESS_WINDOW_MS
     const checkHardCap = (): void => {
       const action = decideStreamHardCap({

@@ -101,7 +101,9 @@ export class TurnStepProducer {
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
-      hardStallMs: 240_000,
+      // GLM deep reasoning can span multiple minutes per turn — the per-turn
+      // watchdog must not falsely abort a legitimate long-thinking turn.
+      hardStallMs: this.self.config.providerName === 'glm' ? 600_000 : 240_000,
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {

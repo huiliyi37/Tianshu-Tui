@@ -21,6 +21,10 @@ export interface PostTurnDecisionDeps {
   completeTurn: (params: CompleteTurnParams) => Promise<void>
   getTotalUsage: () => import('../api/types.js').Usage
   getTurnCount: () => number
+  /** GLM independent reasoning mode: disable thinking-only retry.
+   *  GLM's deep reasoning without tools/text is a legitimate turn output,
+   *  not a failed utterance — retrying only wastes time with fresh reasoning. */
+  skipThinkingRetry?: boolean
 }
 
 export type ThinkingRetryResult =
@@ -48,6 +52,7 @@ export class PostTurnDecisionController {
     callbacks: AgentCallbacks
     signal: AbortSignal
   }): Promise<ThinkingRetryResult> {
+    if (this.deps.skipThinkingRetry) return { shouldRetry: false }
     const result = evaluateThinkingRetry({
       streamedText: this.deps.state.streamedText,
       collectedBlockCount: params.collectedBlockCount,
