@@ -50,6 +50,7 @@
     "benchmark": "tsx scripts/run-benchmark.ts"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.44.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "diff": "^9.0.0",
     "get-east-asian-width": "^1.6.0",
