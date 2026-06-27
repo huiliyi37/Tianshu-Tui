@@ -35,6 +35,12 @@ function formatElapsed(ms: number): string {
   return `${ms}ms`
 }
 
+/** Per-wave compact progress bar (8 segments). */
+function waveProgressBar(done: number, total: number): string {
+  const ratio = total > 0 ? Math.min(1, done / total) : 0
+  const filled = Math.round(ratio * 8)
+  return `[${'█'.repeat(filled)}${'░'.repeat(Math.max(0, 8 - filled))}] ${done}/${total}`
+}
 function progressBar(done: number, total: number, segments = 12): string {
   const ratio = total > 0 ? Math.min(1, done / total) : 0
   const filled = Math.round(ratio * segments)
@@ -62,6 +68,11 @@ export function buildTeamPanelLines(model: TeamPanelModel, width = 80): string[]
     const active = index === model.currentWave && !complete
     const waveGlyph = complete ? '✓' : active ? '◐' : '◌'
     lines.push(truncate(`  ${wave.id} ${waveGlyph}  ${riskMark(wave.risk)}  ${wave.reason}`, rule))
+    // Per-wave progress bar: shows done/total for this wave's tasks.
+    const waveTaskIds = wave.taskIds
+    const waveDone = waveTaskIds.filter(id => tasks.get(id)?.status === 'done').length
+    const waveTotal = waveTaskIds.length
+    lines.push(truncate(`    ${waveProgressBar(waveDone, waveTotal)}`, rule))
     for (const id of wave.taskIds) {
       const task = tasks.get(id)
       if (!task) continue
