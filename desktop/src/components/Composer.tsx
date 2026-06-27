@@ -57,6 +57,22 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 220
 
+/** Highlight placeholder arguments like `<描述>` in slash command examples. */
+function HighlightedExample({ text }: { text: string }) {
+  const parts = text.split(/(<[^>]+>)/g)
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith('<') && part.endsWith('>') ? (
+          <span key={i} className="suggest-arg">{part}</span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 export function computeComposerTextareaStyle(scrollHeight: number, maxHeight = COMPOSER_TEXTAREA_MAX_HEIGHT): { height: string; overflowY: 'hidden' | 'auto' } {
   const height = Math.min(Math.max(0, scrollHeight), maxHeight)
   return {
@@ -79,7 +95,7 @@ function isImageFileName(name: string): boolean {
 
 type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
-  | { mode: 'command'; items: ComposerCommand[]; index: number }
+  | { mode: 'command'; items: ComposerCommand[]; index: number; matched: boolean }
 
 export function Composer(props: {
   sessionId: string
@@ -199,8 +215,12 @@ export function Composer(props: {
       const slash = detectSlash(text, caret)
       if (slash) {
         clearTimeout(debounce.current)
-        const items = filterCommands(commands, slash.query)
-        setSuggest(items.length > 0 ? { mode: 'command', items, index: 0 } : null)
+        const filtered = filterCommands(commands, slash.query)
+        const matched = filtered.length > 0
+        // If the user typed something with no match, still show the full list
+        // grayed-out so they see available commands instead of a blank menu.
+        const items = matched ? filtered : commands
+        setSuggest({ mode: 'command', items, index: matched ? 0 : -1, matched })
         return
       }
     }
@@ -231,11 +251,17 @@ export function Composer(props: {
   const accept = () => {
     if (!suggest) return
     if (suggest.mode === 'file') selectFile(suggest.token, suggest.items[suggest.index]!)
-    else runCommand(suggest.items[suggest.index]!)
+    else if (suggest.index >= 0 && suggest.matched) runCommand(suggest.items[suggest.index]!)
+    else {
+      // No matching command — toast and keep the menu open briefly so the user sees the hint.
+      const firstToken = value.trim().split(/\s/)[0]
+      toast.error(`未知命令 "${firstToken}" — 输入 / 查看可用命令`)
+    }
   }
 
   const move = (delta: number) => {
     if (!suggest) return
+    if (suggest.mode === 'command' && !suggest.matched) return
     const n = suggest.items.length
     const index = (suggest.index + delta + n) % n
     setSuggest({ ...suggest, index } as Suggest)
@@ -419,20 +445,27 @@ export function Composer(props: {
                   <span className="suggest-path">{path}</span>
                 </li>
               ))
-            : suggest.items.map((cmd, i) => (
-                <li
-                  key={cmd.name}
-                  role="option"
-                  aria-selected={i === suggest.index}
-                  className={`suggest-item ${i === suggest.index ? 'active' : ''}`}
-                  onMouseDown={(e) => { e.preventDefault(); runCommand(cmd) }}
-                >
-                  <span className="suggest-glyph" aria-hidden>/</span>
-                  <span className="suggest-path">{cmd.name}</span>
-                  <span className="suggest-desc">{cmd.desc}</span>
-                  {cmd.example && <span className="suggest-example">{cmd.example}</span>}
-                </li>
-              ))}
+            : suggest.items.map((cmd, i) => {
+                const disabled = !suggest.matched
+                return (
+                  <li
+                    key={cmd.name}
+                    role="option"
+                    aria-selected={i === suggest.index}
+                    aria-disabled={disabled}
+                    className={`suggest-item ${i === suggest.index && !disabled ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      if (!disabled) runCommand(cmd)
+                    }}
+                  >
+                    <span className="suggest-glyph" aria-hidden>/</span>
+                    <span className="suggest-path">{cmd.name}</span>
+                    <span className="suggest-desc">{cmd.desc}</span>
+                    {cmd.example && <span className="suggest-example"><HighlightedExample text={cmd.example} /></span>}
+                  </li>
+                )
+              })}
         </ul>
       )}
       {images.length > 0 && (
