@@ -148,6 +148,11 @@ body {
   content: '';
   position: absolute; left: 0; top: 8px; bottom: 8px;
   width: 2px; background: var(--accent); border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  animation: rail-indicator-in var(--dur) var(--ease);
+}
+@keyframes rail-indicator-in {
+  from { opacity: 0; transform: scaleY(0); transform-origin: center; }
+  to { opacity: 1; transform: scaleY(1); transform-origin: center; }
 }
 .rail-badge {
   position: absolute; top: 4px; right: 4px; min-width: 15px; height: 15px;
@@ -156,7 +161,11 @@ body {
   display: flex; align-items: center; justify-content: center; line-height: 1;
 }
 
-.surface { flex: 1; min-height: 0; }
+.surface { flex: 1; min-height: 0; animation: surface-in var(--dur) var(--ease); }
+@keyframes surface-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .surface-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); }
 
 .workspace {
@@ -224,23 +233,33 @@ body {
 .review-expand-hint svg {
   width: 14px; height: 14px;
 }
-.single-pane { height: 100%; overflow-y: auto; }
+.single-pane { height: 100%; overflow-y: auto; max-width: 1400px; margin: 0 auto; }
+.surface-scroll { height: 100%; overflow-y: auto; max-width: 1400px; margin: 0 auto; }
 
-/* Non-workspace surface topbar — replaces the removed Rail for navigation back. */
 .surface-topbar {
   flex: none;
   display: flex; align-items: center; justify-content: space-between;
   height: 44px; padding: 0 var(--space-4);
-  background: var(--panel); border-bottom: 1px solid var(--border);
+  max-width: 1400px; margin: 0 auto; width: 100%;
+  background: var(--sidebar-surface-bg);
+  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  border-bottom: 1px solid var(--border);
 }
 .surface-back {
   display: flex; align-items: center; gap: var(--space-2);
   padding: 4px 8px;
   background: transparent; color: var(--text); border: 1px solid var(--border);
-  border-radius: var(--radius-md); font-size: var(--text-sm); cursor: pointer;
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .surface-back:hover { background: var(--hover); border-color: var(--accent); color: var(--accent); }
+.surface-topbar-left { display: flex; align-items: center; gap: var(--space-3); }
+.surface-topbar-right { display: flex; align-items: center; gap: var(--space-2); }
+.surface-stat {
+  font-size: var(--text-xs); color: var(--muted);
+  font-family: var(--font-mono); white-space: nowrap;
+}
+.surface-stat strong { color: var(--text-strong); font-weight: var(--weight-semibold); }
 .surface-title {
   font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-strong);
 }
@@ -1548,68 +1567,6 @@ body {
   background: var(--panel-2); color: var(--muted); cursor: pointer;
 }
 .plus-btn:hover, .plus-btn.open { color: var(--text); border-color: var(--border-strong); }
-.plus-menu {
-  position: absolute; left: 0; bottom: calc(100% + 6px); z-index: var(--z-modal);
-  min-width: 248px; padding: var(--space-1);
-  background: var(--panel); border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
-}
-.plus-menu-section { padding: var(--space-1) 0; }
-.plus-menu-section + .plus-menu-section { border-top: 1px solid var(--border); }
-.plus-menu-title {
-  padding: 2px var(--space-2); font-size: 10px; text-transform: uppercase;
-  letter-spacing: 0.4px; color: var(--muted);
-}
-.plus-menu-item {
-  width: 100%; display: flex; align-items: center; gap: var(--space-2);
-  padding: var(--space-1) var(--space-2); border: none; background: transparent;
-  border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--text);
-  cursor: pointer; text-align: left;
-}
-.plus-menu-item:hover:not(:disabled) { background: var(--accent-soft); }
-.plus-menu-item.disabled, .plus-menu-item:disabled { color: var(--muted); cursor: default; }
-.pm-glyph { width: 16px; text-align: center; color: var(--muted); flex-shrink: 0; }
-.pm-glyph.mono { font-family: var(--font-mono); color: var(--accent); }
-.pm-label { flex-shrink: 0; }
-.pm-trailing { margin-left: auto; color: var(--accent); font-size: var(--text-xs); }
-.pm-hint { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
-.pm-chev { color: var(--muted); margin-left: auto; }
-
-/* PlusMenu second-level panel (Models / Skills / 星域) — searchable list. */
-.plus-submenu { display: flex; flex-direction: column; min-width: 300px; max-width: 360px; }
-.plus-sub-head {
-  display: flex; align-items: center; gap: var(--space-1);
-  padding: 2px var(--space-1) var(--space-1); border-bottom: 1px solid var(--border);
-}
-.plus-back {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0; font-size: 16px; line-height: 1;
-  border: none; background: transparent; color: var(--muted);
-  border-radius: var(--radius-sm); cursor: pointer;
-}
-.plus-back:hover { color: var(--text); background: var(--accent-soft); }
-.plus-sub-title { font-size: var(--text-sm); font-weight: 600; color: var(--text); }
-.plus-sub-search { padding: var(--space-1); }
-.plus-search-input {
-  width: 100%; padding: 5px var(--space-2); font-size: var(--text-sm);
-  color: var(--text); background: var(--panel-2);
-  border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none;
-}
-.plus-search-input:focus { border-color: var(--border-strong); }
-.plus-sub-list { max-height: 320px; overflow-y: auto; padding: var(--space-1) 0; }
-.plus-sub-state { padding: var(--space-2); font-size: var(--text-xs); color: var(--muted); text-align: center; }
-.plus-sub-state.error { color: var(--error, #e5534b); }
-.plus-row { align-items: flex-start; }
-.plus-row.active { background: var(--accent-soft); }
-.plus-row .pm-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.pm-row-desc {
-  font-size: var(--text-xs); color: var(--muted); font-weight: 400;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px;
-}
-.pm-switch { margin-left: auto; font-size: var(--text-xs); flex-shrink: 0; }
-.pm-switch.on { color: var(--accent); }
-.pm-switch.off { color: var(--muted); }
-
 /* @file mention / slash command autocomplete (D2/D3) — floats above composer. */
 .composer-suggest {
   position: absolute; left: 12px; right: 12px; bottom: calc(100% - 4px);

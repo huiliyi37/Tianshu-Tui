@@ -1,7 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useHealth, useCreateSession } from './state/queries'
-import { useUiDispatch, useUiState } from './state/store'
+import { useHealth, useCreateSession, useSessions } from './state/queries'
+import { useUiDispatch, useUiState, type Surface } from './state/store'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
@@ -60,19 +60,23 @@ export function App() {
 
         {ui.surface !== 'workspace' && (
           <header className="surface-topbar">
-            <button
-              className="surface-back"
-              onClick={() => dispatch({ type: 'setSurface', surface: 'workspace' })}
-              title="返回工作台"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M19 12H5M12 19l-7-7 7-7" />
-              </svg>
-              工作台
-            </button>
-            <span className="surface-title">{tNav(ui.surface)}</span>
-            <span />
+            <div className="surface-topbar-left">
+              <button
+                className="surface-back"
+                onClick={() => dispatch({ type: 'setSurface', surface: 'workspace' })}
+                title="返回工作台"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                工作台
+              </button>
+              <span className="surface-title">{tNav(ui.surface)}</span>
+            </div>
+            <div className="surface-topbar-right">
+              <SurfaceStatChips surface={ui.surface} activeSessionId={ui.activeSessionId} />
+            </div>
           </header>
         )}
 
@@ -117,4 +121,33 @@ export function App() {
     </div>
     </WallpaperProvider>
   )
+}
+
+/** Per-surface stat chips shown in the topbar right side. */
+function SurfaceStatChips({ surface, activeSessionId }: { surface: Surface; activeSessionId: string | null }) {
+  const sessions = useSessions()
+  if (surface === 'insights') {
+    const count = sessions.data?.length ?? 0
+    return (
+      <span className="surface-stat">
+        <strong>{count}</strong> 个会话
+      </span>
+    )
+  }
+  if (surface === 'attention') {
+    // Count sessions with attention/blocked status
+    const pending = sessions.data?.filter((s: { status: string }) => s.status === 'blocked' || s.status === 'attention').length ?? 0
+    return (
+      <span className="surface-stat">
+        {pending > 0 ? <><strong>{pending}</strong> 需处理</> : '无待处理'}
+      </span>
+    )
+  }
+  if (surface === 'git' && activeSessionId) {
+    return <span className="surface-stat">Git 状态</span>
+  }
+  if (surface === 'delegation' && activeSessionId) {
+    return <span className="surface-stat">委派树</span>
+  }
+  return null
 }
