@@ -392,6 +392,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         model: ev.data.model != null ? String(ev.data.model) : prev?.model,
         provider: ev.data.provider != null ? String(ev.data.provider) : prev?.provider,
         usage: ev.data.usage != null && typeof ev.data.usage === 'object' ? (ev.data.usage as DelegationNode['usage']) : prev?.usage,
+        artifactId: ev.data.artifactId != null ? String(ev.data.artifactId) : prev?.artifactId,
+        changedFiles: Array.isArray(ev.data.changedFiles) ? (ev.data.changedFiles as string[]) : prev?.changedFiles,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }

@@ -34,6 +34,12 @@ export interface DelegationActivity {
     reasoning_tokens?: number
     total_tokens?: number
   }
+  /** Persisted diff artifact id (in the worker's fallback session). Lets the UI
+   *  fetch this worker's diff for independent review. Absent when the worker
+   *  produced no diff or persistence failed (降级：UI 隐藏 diff 入口). */
+  artifactId?: string
+  /** Files this worker changed (for diff review entry hints). */
+  changedFiles?: string[]
 }
 
 /**

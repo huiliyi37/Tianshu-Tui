@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
+import { getArtifact } from '../runtime/client'
+import { DiffView } from '../components/DiffView'
 import type { DelegationNode } from '../runtime/types'
 
 // DelegationSurface — dedicated surface for visualizing the delegation tree.
@@ -182,7 +184,7 @@ function NodeRow({
   )
 }
 
-function DetailPanel({ n }: { n: DelegationNode | null }) {
+function DetailPanel({ n, onViewDiff }: { n: DelegationNode | null; onViewDiff?: (artifactId: string) => void }) {
   if (!n) {
     return <div className="py-4 text-center text-[13px] text-muted">选择一个节点查看详情</div>
   }
@@ -214,8 +216,24 @@ function DetailPanel({ n }: { n: DelegationNode | null }) {
           <div className="whitespace-pre-wrap break-words font-mono text-[13px] text-text">⎿ {n.progressLine}</div>
         </div>
       )}
-      {usage && (
+      {n.changedFiles && n.changedFiles.length > 0 && (
         <div className="mb-2">
+          <div className="mb-0.5 text-[11px] uppercase tracking-wide text-muted">改动文件（{n.changedFiles.length}）</div>
+          <div className="font-mono text-[12px] text-muted">
+            {n.changedFiles.slice(0, 5).join('\n')}{n.changedFiles.length > 5 ? `\n… +${n.changedFiles.length - 5}` : ''}
+          </div>
+        </div>
+      )}
+      {n.artifactId && onViewDiff && (
+        <button
+          className="mt-1 w-full cursor-pointer rounded-md border border-border bg-panel-2 px-3 py-1.5 text-[12px] text-text transition-colors hover:border-accent hover:text-accent"
+          onClick={() => onViewDiff(n.artifactId!)}
+        >
+          查看改动（diff）
+        </button>
+      )}
+      {usage && (
+        <div className="mb-2 mt-2">
           <div className="mb-0.5 text-[11px] uppercase tracking-wide text-muted">Token 用量</div>
           <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
             <dt className="text-[11px] text-muted">输入</dt><dd className="m-0 font-mono text-[13px] text-text">{formatTokens(usage.input_tokens)}</dd>
@@ -239,6 +257,22 @@ export function DelegationSurface() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [filter, setFilter] = useState<FilterKind>('all')
+  // Diff modal: holds the fetched artifact + raw for the selected worker's diff.
+  const [diffOpen, setDiffOpen] = useState<{ artifact: import('../runtime/types').ArtifactSummary; raw: string } | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+
+  const openDiff = async (artifactId: string) => {
+    if (!activeSessionId) return
+    setDiffLoading(true)
+    try {
+      const res = await getArtifact(activeSessionId, artifactId)
+      setDiffOpen(res)
+    } catch {
+      // 取 diff 失败（artifact 被清理/session 切换）— 静默，可重试
+    } finally {
+      setDiffLoading(false)
+    }
+  }
 
   const forest = useMemo(() => buildDelegationForest(delegationMap), [delegationMap])
 
@@ -333,11 +367,31 @@ export function DelegationSurface() {
               ))}
             </div>
             <div className="sticky top-0 rounded-lg border border-border bg-panel p-3">
-              <DetailPanel n={selected} />
+              <DetailPanel n={selected} onViewDiff={openDiff} />
             </div>
           </div>
         )}
       </div>
+      {diffOpen && (
+        <div className="modal-backdrop" onClick={() => setDiffOpen(null)}>
+          <div className="modal wide" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>委派 diff · {diffOpen.artifact.target}</h3>
+            </div>
+            <DiffView raw={diffOpen.raw} />
+            <div className="modal-actions">
+              <button className="btn ghost" onClick={() => setDiffOpen(null)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {diffLoading && (
+        <div className="modal-backdrop">
+          <div className="modal wide">
+            <div className="py-8 text-center text-[13px] text-muted">加载 diff…</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

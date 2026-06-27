@@ -78,6 +78,14 @@ export class ArtifactStore {
     }
   }
 
+  /** Derive a store bound to a different session id, sharing the same baseDir,
+   *  clock, and id generator. Used by the coordinator to persist worker diffs
+   *  into a per-worker session directory (worker-<orderId>) so the primary
+   *  store can resolve them via addFallbackSession. */
+  forSession(sessionId: string): ArtifactStore {
+    return new ArtifactStore(this.baseDir, sessionId, { now: this.now, idGenerator: this.idGenerator })
+  }
+
   async save(input: SaveArtifactInput): Promise<string> {
     await mkdir(this.dir, { recursive: true })
 

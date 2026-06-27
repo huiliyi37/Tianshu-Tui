@@ -1276,6 +1276,11 @@ export class DelegationCoordinator {
           // subagent write operations (edit_file/write_file/bash) even when Rivet
           // correctly provisions write tools and worktree isolation. This is a
           // host-layer constraint, not a Rivet work-order or worktree bug.
+          // Register the worker's fallback session BEFORE runHands so any diff
+          // persisted during the run is resolvable by the primary store, and hand
+          // a worker-scoped store to runHands for persistence.
+          this.registerWorkerArtifacts(order.id)
+          const workerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
           const handsRun = await wrapAbort(this.runHands({
             order,
             wtCoordinator: new WorktreeCoordinator(cwd),
@@ -1285,6 +1290,7 @@ export class DelegationCoordinator {
             compact: workerConfig.compact,
             activeClaims,
             domainKnowledgeStore: this.config.domainKnowledgeStore,
+            artifactStore: workerStore,
             runAgent: async (prompt, callbacks, workerCwd) => {
               const sessionRun = await this.runWorker({
                 ...workerConfig,
@@ -1301,7 +1307,6 @@ export class DelegationCoordinator {
             },
           }))
           run = { result: handsRun.result, sessionMessages: handsSessionMessages, usage: handsRun.usage, providerName: workerConfig.providerName }
-          this.registerWorkerArtifacts(order.id)
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {

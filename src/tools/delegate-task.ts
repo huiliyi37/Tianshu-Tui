@@ -145,6 +145,8 @@ export function createDelegateTaskTool(
             model: r.model,
             provider: r.provider,
             usage: r.usage,
+            artifactId: r.diffArtifactId,
+            changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
           })
         }
       }

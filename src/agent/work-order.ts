@@ -156,6 +156,10 @@ export const workerResultSchema = z.object({
   patchSummary: z.string().optional(),
   verification: verificationMetadataSchema.optional(),
   changedFiles: z.array(z.string()),
+  /** Persisted diff artifact id (set by runHandsSession after落盘). Absent if the
+   *  worker produced no diff or persistence failed. Carried through to
+   *  DelegationActivity.artifactId so the UI can fetch this worker's diff. */
+  diffArtifactId: z.string().optional(),
   examinedFiles: z.array(z.string()).optional(),
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),

@@ -217,6 +217,11 @@ export interface DelegationNode {
     reasoning_tokens?: number
     total_tokens?: number
   }
+  /** Persisted diff artifact id (worker fallback session). Lets the UI fetch this
+   *  worker's diff for independent review. Absent when no diff or persistence failed. */
+  artifactId?: string
+  /** Files this worker changed (for diff review entry hints). */
+  changedFiles?: string[]
 }
 
 export interface InsightsWorker {

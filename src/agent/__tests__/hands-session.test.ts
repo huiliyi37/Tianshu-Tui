@@ -89,6 +89,82 @@ describe('runHandsSession', () => {
     assert.equal(wtCoordinator.getActiveCount(), 0)
   })
 
+  it('persists diff via artifactStore and backfills diffArtifactId', async () => {
+    const order = testOrder({ id: 'wo-persist-diff' })
+    // Mock artifactStore: record saves, return a synthetic id.
+    const saved: Array<{ tool: string; target: string; rawContent: string }> = []
+    const artifactStore = {
+      async save(input: { tool: string; target: string; rawContent: string; summary: string }) {
+        saved.push(input)
+        return `hands_session:persisted123`
+      },
+    }
+    const config: HandsSessionConfig = {
+      order,
+      wtCoordinator,
+      cwd: baseDir,
+      maxTurns: 2,
+      contextWindow: 128_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      artifactStore,
+      runAgent: async (_prompt, _callbacks, workerCwd) => {
+        mkdirSync(join(workerCwd, 'src'), { recursive: true })
+        writeFileSync(join(workerCwd, 'src', 'mod.ts'), 'export const x = 2\n')
+        execSync('git add -A && git commit -m "worker mod"', { cwd: workerCwd, stdio: 'pipe' })
+        return JSON.stringify({
+          workOrderId: order.id,
+          status: 'passed',
+          summary: 'Created mod.ts',
+          findings: [],
+          artifacts: [],
+          changedFiles: ['src/mod.ts'],
+          risks: [],
+          nextActions: [],
+          evidenceStatus: 'verified',
+        })
+      },
+    }
+
+    const run = await runHandsSession(config)
+    // diffArtifactId backfilled from the store save result
+    assert.equal(run.result.diffArtifactId, 'hands_session:persisted123')
+    // store.save was called once with the worker order id as target + diff content
+    assert.equal(saved.length, 1)
+    assert.equal(saved[0]!.tool, 'hands_session')
+    assert.equal(saved[0]!.target, order.id)
+    assert.ok(saved[0]!.rawContent.includes('mod.ts'), 'persisted diff should mention the changed file')
+  })
+
+  it('degrades gracefully when artifactStore save throws (diffArtifactId undefined)', async () => {
+    const order = testOrder({ id: 'wo-persist-fail' })
+    const artifactStore = {
+      async save() { throw new Error('disk full') },
+    }
+    const config: HandsSessionConfig = {
+      order,
+      wtCoordinator,
+      cwd: baseDir,
+      maxTurns: 2,
+      contextWindow: 128_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      artifactStore,
+      runAgent: async (_prompt, _callbacks, workerCwd) => {
+        mkdirSync(join(workerCwd, 'src'), { recursive: true })
+        writeFileSync(join(workerCwd, 'src', 'fail.ts'), 'export const y = 3\n')
+        execSync('git add -A && git commit -m "worker fail"', { cwd: workerCwd, stdio: 'pipe' })
+        return JSON.stringify({
+          workOrderId: order.id, status: 'passed', summary: 'ok', findings: [], artifacts: [],
+          changedFiles: ['src/fail.ts'], risks: [], nextActions: [], evidenceStatus: 'verified',
+        })
+      },
+    }
+
+    const run = await runHandsSession(config)
+    // 落盘失败不致命：diffArtifactId 未设，但 diff 仍在 artifacts 里
+    assert.equal(run.result.diffArtifactId, undefined)
+    assert.ok(run.result.artifacts.find(a => a.kind === 'diff'), 'diff still in artifacts as fallback')
+  })
+
   it('diffs worker changes against the current feature branch when baseRef is not provided', async () => {
     const featureBaseDir = mkdtempSync(join(tmpdir(), 'rivet-hands-feature-base-'))
     initGitRepo(featureBaseDir, 'feature/base')

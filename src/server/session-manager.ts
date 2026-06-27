@@ -1462,6 +1462,8 @@ export class RuntimeSessionManager {
           model: a.model,
           provider: a.provider,
           usage: a.usage,
+          artifactId: a.artifactId,
+          changedFiles: a.changedFiles,
         })
       },
     }
