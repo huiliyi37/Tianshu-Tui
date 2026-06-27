@@ -1363,7 +1363,10 @@ body {
 }
 .scroll-bottom-btn:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
 .msg { white-space: pre-wrap; word-break: break-word; border-radius: var(--radius-md); padding: var(--space-2) var(--space-3); transition: background var(--dur) var(--ease); }
-.msg-role { color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: var(--space-1); }
+.msg-role { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px; margin-bottom: var(--space-1); }
+.msg-role-glyph { font-size: 12px; line-height: 1; }
+.msg-role-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.msg-role-label { text-transform: none; letter-spacing: normal; }
 .msg-body { position: relative; }
 /* Message cards: borderless, content breathes via background tint and spacing. */
 .msg.user { background: var(--panel-2); border: none; }
@@ -1388,7 +1391,6 @@ body {
 .msg.user .msg-role { color: var(--accent); }
 .msg.assistant .msg-body { color: var(--text); }
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
-.msg-role { color: var(--faint); margin-bottom: 2px; }
 
 /* ── Conversation Markdown (D1) ───────────────────────────────────── */
 /* .msg sets pre-wrap for plain blocks; Markdown subtree resets to normal flow

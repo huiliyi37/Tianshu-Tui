@@ -351,6 +351,8 @@ export function ThreadView(props: {
                       block={item.block}
                       sessionId={session.id}
                       onOpenImage={openImage}
+                      domainGlyph={domainGlyph}
+                      domainName={activeDomain?.name}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -521,18 +523,21 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 // only the actively-growing last block re-renders during streaming.
 const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
-  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage
+  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
+  a.domainGlyph === b.domainGlyph && a.domainName === b.domainName
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
   onOpenImage?: (src: string) => void
+  domainGlyph?: string
+  domainName?: string
 }) {
   if (block.kind === 'user') {
     return (
-      <MsgBlock role="你">
+      <MsgBlock role="你" roleGlyph="user">
         <Markdown source={block.text} />
         {block.imageIds && block.imageIds.length > 0 && sessionId ? (
           <div className="msg-images">
@@ -579,7 +584,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
   }
   if (block.kind === 'steer') {
     return (
-      <MsgBlock role="引导 · 已排队">
+      <MsgBlock role="引导" roleGlyph="steer">
         <Markdown source={block.text} />
       </MsgBlock>
     )
@@ -610,7 +615,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
     )
   }
   return (
-    <MsgBlock role={STAR_DOMAINS.tianshu.name}>
+    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} />
     </MsgBlock>
   )
@@ -679,11 +684,12 @@ function StreamingText({ source }: { source: string }) {
 /** MsgBlock — message wrapper with a copy button that appears on hover. */
 function MsgBlock(props: {
   role?: string
+  roleGlyph?: string | 'user' | 'steer'
   isError?: boolean
   className?: string
   children: React.ReactNode
 }) {
-  const { role, isError, className, children } = props
+  const { role, roleGlyph, isError, className, children } = props
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -698,11 +704,20 @@ function MsgBlock(props: {
 
   const kind = className
     ? ` ${className}`
-    : isError ? ' error' : role === '引导 · 已排队' ? ' steer' : role === '你' ? ' user' : ' assistant'
+    : isError ? ' error' : role === '引导' ? ' steer' : role === '你' ? ' user' : ' assistant'
 
   return (
     <div className={`msg${kind}`}>
-      {role && <div className="msg-role">{role}</div>}
+      {role && (
+        <div className="msg-role" title={role}>
+          {roleGlyph === 'user' && <span className="msg-role-dot" />}
+          {roleGlyph === 'steer' && <span className="msg-role-glyph">↳</span>}
+          {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' && (
+            <span className="msg-role-glyph">{roleGlyph}</span>
+          )}
+          <span className="msg-role-label">{role}</span>
+        </div>
+      )}
       <div className="msg-body" ref={ref}>
         <button
           className="msg-copy-btn"
