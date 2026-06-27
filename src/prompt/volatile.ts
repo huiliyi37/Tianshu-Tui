@@ -114,6 +114,9 @@ export interface ToolHistoryEntry {
   tool: string
   target: string
   status: 'success' | 'failed' | 'running'
+  /** Tool name + sorted-args hash for dedup (fingerprint granularity).
+   *  edit_file(a.ts, "x", "y") and edit_file(a.ts, "y", "z") get different hashes. */
+  argsHash?: string
   error?: string
 }
 

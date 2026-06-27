@@ -14,17 +14,23 @@ export function recordToolHistory(
   isError: boolean,
   result: string,
 ): void {
-const target = typeof input?.path === 'string'
+    const target = typeof input?.path === 'string'
       ? input.path
       : typeof input?.file_path === 'string'
         ? input.file_path
         : typeof input?.command === 'string'
           ? input.command.slice(0, 50)
           : name
+    // Deterministic argsHash: tool name + sorted input keys → SHA-256 first 8 hex chars.
+    const argsHash = createHash('sha256')
+      .update(`${name}:${JSON.stringify(input, Object.keys(input).sort())}`)
+      .digest('hex')
+      .slice(0, 8)
     self.recentToolHistory.push({
       tool: name,
       target,
       status: isError ? 'failed' : 'success',
+      argsHash,
       error: isError ? result.slice(0, 50) : undefined,
     })
     if (self.recentToolHistory.length > 5) self.recentToolHistory.shift()

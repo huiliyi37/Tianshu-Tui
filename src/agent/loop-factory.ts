@@ -227,7 +227,7 @@ export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHoo
 return {
       cwd: self.cwd,
       turn: self.session.getTurnCount(),
-      recentToolHistory: self.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+      recentToolHistory: self.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target, argsHash: h.argsHash })),
       sensorium: self.sensorium,
       strategy: self.strategy,
       vigor: self.vigorState,

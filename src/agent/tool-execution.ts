@@ -6,6 +6,7 @@ import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
+import { fingerprintToolCall } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { RepairPipeline } from './repair-pipeline.js'
 import type { ImportGraph } from './import-graph.js'
@@ -381,7 +382,7 @@ export class ToolExecutionController {
       if (tr && tr.type === 'tool_result') {
         const content = typeof tr.content === 'string' ? tr.content : ''
         this.accumulator.record({ toolName: tu.name, toolUseId: tu.id, content, turn: input.turn })
-        this.deps.recordToolNamedFingerprint?.(tu.id, tu.name)
+        this.deps.recordToolNamedFingerprint?.(fingerprintToolCall(tu.name, tu.input, 'running'), tu.name)
       }
     }
     if (input.toolUses.length > 0) {

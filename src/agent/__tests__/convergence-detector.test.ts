@@ -500,6 +500,124 @@ describe('evaluateConvergence', () => {
     assert.equal(result.signals.oscillationPenalty, 1.0)
   })
 
+  // ── Change 1: argsHash granularity ──
+
+  it('targetNovelty uses argsHash when available (same file, different edits)', () => {
+    // edit_file(a.ts, old="x", new="y") vs edit_file(a.ts, old="y", new="z")
+    // — same target path, different argsHash → higher novelty
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-xy' },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-yz' },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-xy' },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+    }))
+    // 2 unique argsHash values among 3 entries → novelty = (2-1)/(3-1) = 0.5
+    assert.equal(result.signals.targetNovelty, 0.5)
+  })
+
+  it('targetNovelty falls back to target when argsHash is absent', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+    }))
+    // Fallback to target: 2 unique targets among 3 → (2-1)/(3-1) = 0.5
+    assert.equal(result.signals.targetNovelty, 0.5)
+  })
+
+  // ── Change 2: tokenEfficiency exponential decay ──
+
+  it('tokenEfficiency uses exponential decay when outputTokens is provided', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'c.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'd.ts', status: 'success' as const },
+      { tool: 'grep', target: 'foo', status: 'success' as const },
+      { tool: 'glob', target: '*.ts', status: 'success' as const },
+    ]
+    // 6 tools, 3000 output tokens → 500 tokens/tool → exp(-1) ≈ 0.368
+    const result = evaluateConvergence(baseInput({
+      turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      outputTokens: 3000,
+    }))
+    const expected = Math.exp(-1)
+    assert.ok(
+      Math.abs(result.signals.tokenEfficiency - expected) < 0.01,
+      `tokenEfficiency should be ~${expected.toFixed(3)}, got ${result.signals.tokenEfficiency.toFixed(3)}`,
+    )
+  })
+
+  it('tokenEfficiency falls back to heuristic when outputTokens is absent', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'c.ts', status: 'success' as const },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      // outputTokens intentionally omitted
+    }))
+    // Old heuristic: writes=2, reads=1 → productive/total = 2/3, ratio=0.5 → bonus=0.2 → 0.867
+    assert.ok(result.signals.tokenEfficiency > 0.5, 'fallback should still give reasonable efficiency')
+  })
+
+  // ── Change 3: oscillation positional reversal (multi-value) ──
+
+  it('oscillation detects A→B→A→C→A→B multi-value pattern (old algorithm silently ignored it)', () => {
+    // Old algorithm: Set.size===3 → returns 1.0 (missed oscillation)
+    // New algorithm: reversals via hash[i]===hash[i-2] && !== hash[i-1]
+    const fingerprints = ['a', 'b', 'a', 'c', 'a', 'b', 'c', 'b']
+    const history = makeHistory(fingerprints.map((fp, i) => ({
+      tool: `tool-${i % 3}`, target: `file-${i}`,
+    })))
+    const result = evaluateConvergence(baseInput({
+      turn: 10, phaseClass: 'verify', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    // Reversals at i=2(a→b→a), i=4(a→c→a), i=7(b→c→b) = 3 out of 6 possible
+    // → rate=3/6=0.5 → penalty=0.5 (old algorithm would return 1.0)
+    assert.ok(
+      result.signals.oscillationPenalty > 0.4 && result.signals.oscillationPenalty < 0.6,
+      `oscillation penalty should be ~0.50 for multi-value pattern, got ${result.signals.oscillationPenalty.toFixed(2)}`,
+    )
+  })
+
+  it('oscillation: severe A-B-A-B-A-B-A-B yields near-zero penalty', () => {
+    const fingerprints = ['a', 'b', 'a', 'b', 'a', 'b', 'a', 'b']
+    const history = makeHistory(fingerprints.map((fp, i) => ({
+      tool: fp === 'a' ? 'bash' : 'ls', target: `file-${i}`,
+    })))
+    const result = evaluateConvergence(baseInput({
+      turn: 10, phaseClass: 'verify', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    // Every step from i=2 is a reversal → 6 reversals / 6 possible = 1.0 → penalty = 0
+    assert.ok(
+      result.signals.oscillationPenalty < 0.1,
+      `severe A-B oscillation should yield near-0 penalty, got ${result.signals.oscillationPenalty.toFixed(2)}`,
+    )
+  })
+
+  it('oscillation: < 4 fingerprints returns 1.0 (insufficient data)', () => {
+    const fingerprints = ['a', 'b', 'a']
+    const history = makeHistory([
+      { tool: 'bash', target: '1' },
+      { tool: 'bash', target: '2' },
+      { tool: 'bash', target: '3' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    assert.equal(result.signals.oscillationPenalty, 1.0)
+  })
+
   // ── Delivery-aware completion nudge ──
 
   it('verified deliveryStatus triggers completion nudge message', () => {
