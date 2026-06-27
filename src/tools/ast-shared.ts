@@ -10,6 +10,55 @@ export const LANG_BY_EXT: Record<string, string> = {
   '.jsx': 'Tsx',
   '.html': 'Html',
   '.css': 'Css',
+  // Dynamic languages — registered via registerDynamicLanguage, parsed by name
+  // (lowercase), NOT via napi.Lang.X. See DYNAMIC_LANGS + ensureDynamicLangsRegistered.
+  '.py': 'python',
+  '.pyi': 'python',
+  '.json': 'json',
+  '.jsonc': 'json',
+}
+
+/**
+ * Languages loaded from @ast-grep/lang-* packages via registerDynamicLanguage.
+ * These are parsed by their registered NAME string (e.g. parse('python', src)),
+ * not via napi.Lang.X — they have no enumerable Lang enum member.
+ */
+export const DYNAMIC_LANGS = new Set(['python', 'json'])
+
+export function isDynamicLang(langName: string): boolean {
+  return DYNAMIC_LANGS.has(langName)
+}
+
+/**
+ * Register all dynamic languages EXACTLY ONCE. ast-grep/napi's
+ * registerDynamicLanguage honors only the FIRST call — subsequent calls are
+ * silently ignored (issue ast-grep/ast-grep#2669). So we batch every dynamic
+ * language into one registration guarded by a module-level flag.
+ *
+ * Lazy: the lang-* packages ship native prebuilds, importing them has a small
+ * cost, so we defer until an ast tool actually runs and only when a dynamic
+ * language file is present. Missing packages degrade gracefully (the language
+ * is dropped from registration, parse later reports "unsupported").
+ */
+let dynamicLangsRegistered = false
+export async function ensureDynamicLangsRegistered(napi: typeof import('@ast-grep/napi')): Promise<void> {
+  if (dynamicLangsRegistered) return
+  dynamicLangsRegistered = true
+  // registration values are LangRegistration-shaped objects from the lang-* packages
+  const registration: Record<string, { libraryPath: string; extensions: string[]; languageSymbol?: string }> = {}
+  try {
+    const pythonMod = await import('@ast-grep/lang-python')
+    registration.python = (pythonMod.default ?? pythonMod) as { libraryPath: string; extensions: string[]; languageSymbol?: string }
+  } catch { /* package not installed — python unavailable */ }
+  try {
+    const jsonMod = await import('@ast-grep/lang-json')
+    registration.json = (jsonMod.default ?? jsonMod) as { libraryPath: string; extensions: string[]; languageSymbol?: string }
+  } catch { /* package not installed — json unavailable */ }
+  if (Object.keys(registration).length > 0) {
+    try {
+      napi.registerDynamicLanguage(registration)
+    } catch { /* already registered by another caller or API change — ignore */ }
+  }
 }
 
 export function inferLang(filePath: string): string | null {
@@ -44,11 +93,20 @@ export function buildLangMap(napi: typeof import('@ast-grep/napi')): Record<stri
 /** Directories to skip during recursive file collection.
  *  Build artifacts (dist/build/out/.next/coverage) are excluded so ast_grep
  *  doesn't parse compiled output — it produces noise matches and wastes parse
- *  budget on files that aren't the source of truth. */
-const EXCLUDE_DIRS = new Set([
+ *  budget on files that aren't the source of truth.
+ *
+ *  Extendable via RIVET_AST_EXCLUDE (comma-separated dir names) for project-
+ *  specific output dirs (lib, target, .output, vendor, etc.). */
+const BASE_EXCLUDE_DIRS = [
   'node_modules', '.git', '.rivet',
   'dist', 'build', 'out', '.next', '.turbo', 'coverage', '.nyc_output',
-])
+]
+function resolveExcludeDirs(): Set<string> {
+  const env = process.env.RIVET_AST_EXCLUDE
+  if (!env) return new Set(BASE_EXCLUDE_DIRS)
+  const extra = env.split(',').map(s => s.trim()).filter(Boolean)
+  return new Set([...BASE_EXCLUDE_DIRS, ...extra])
+}
 /** Hard cap on files collected per ast_grep/ast_edit invocation. Without it,
  *  a bare `ast_grep pattern` (paths defaults to '.') parses every source file
  *  in the repo — readFileSync + tree-sitter parse on thousands of files stalls
@@ -61,6 +119,7 @@ const MAX_FILES = 5000
 const MAX_DEPTH = 25
 
 export function collectFiles(searchPath: string): string[] {
+  const excludeDirs = resolveExcludeDirs()
   const abs = resolve(searchPath)
   if (!existsSync(abs)) return []
   const stat = lstatSync(abs)
@@ -73,7 +132,7 @@ export function collectFiles(searchPath: string): string[] {
       if (files.length >= MAX_FILES) return
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (EXCLUDE_DIRS.has(entry.name)) continue
+        if (excludeDirs.has(entry.name)) continue
         walk(full, depth + 1)
       } else if (entry.isFile()) {
         files.push(full)

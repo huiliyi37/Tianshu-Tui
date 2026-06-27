@@ -7,6 +7,8 @@ import {
   collectFiles,
   collectMetaVarNames,
   buildLangMap,
+  isDynamicLang,
+  ensureDynamicLangsRegistered,
 } from './ast-shared.js'
 
 export interface AstGrepInput {
@@ -82,6 +84,9 @@ export const AST_GREP_TOOL: Tool = {
 
     // Lang uses non-enumerable getters — build the map from the resolved napi.
     const LANG_MAP = buildLangMap(napi)
+    // Register dynamic languages (python/json) once before any parse — lazy,
+    // single-shot, degrades gracefully if the lang-* package is missing.
+    await ensureDynamicLangsRegistered(napi)
 
     // Parse the pattern ONCE: a bare pattern string and a `{ rule: ... }` JSON
     // object are both valid ast-grep inputs. Done outside the file loop so we
@@ -101,7 +106,9 @@ export const AST_GREP_TOOL: Tool = {
         continue
       }
 
-      const langValue = LANG_MAP[langStr]
+      // Dynamic languages (python/json) are parsed by their registered name;
+      // built-in languages go through napi.Lang.X via LANG_MAP.
+      const langValue = isDynamicLang(langStr) ? langStr : LANG_MAP[langStr]
       // runtime assertion: napi.Lang uses non-enumerable getters — verify we got a real string
       if (typeof langValue !== 'string') {
         errors.push(`${filePath}: LANG_MAP returned non-string for "${langStr}" — possible @ast-grep/napi API change`)

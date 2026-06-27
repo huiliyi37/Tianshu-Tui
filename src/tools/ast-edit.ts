@@ -8,6 +8,8 @@ import {
   collectFiles,
   collectMetaVarNames,
   buildLangMap,
+  isDynamicLang,
+  ensureDynamicLangsRegistered,
 } from './ast-shared.js'
 
 // ── types ─────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ export const AST_EDIT_TOOL: Tool = {
     }
 
     const LANG_MAP = buildLangMap(napi)
+    await ensureDynamicLangsRegistered(napi)
 
     const allFiles: string[] = []
     for (const p of paths) {
@@ -133,7 +136,9 @@ export const AST_EDIT_TOOL: Tool = {
         continue
       }
 
-      const langValue = LANG_MAP[langStr]
+      // Dynamic languages (python/json) are parsed by their registered name;
+      // built-in languages go through napi.Lang.X via LANG_MAP.
+      const langValue = isDynamicLang(langStr) ? langStr : LANG_MAP[langStr]
       // runtime assertion: napi.Lang uses non-enumerable getters — verify we got a real string
       if (typeof langValue !== 'string') {
         errors.push(`${filePath}: LANG_MAP returned non-string for "${langStr}" — possible @ast-grep/napi API change`)
@@ -205,9 +210,30 @@ export const AST_EDIT_TOOL: Tool = {
           })
         }
 
+        // Overlap guard: findAll returns non-nested matches, but a pattern can
+        // still produce ranges that touch/cross when meta-variables expand
+        // asymmetrically. commitEdits on overlapping ranges corrupts the output.
+        // Drop any edit whose range encloses or is enclosed by an earlier one,
+        // keeping the first (outermost) match intact.
+        edits.sort((a, b) => a.startPos - b.startPos)
+        const deduped: typeof edits = []
+        let skippedOverlap = 0
+        for (const e of edits) {
+          const prev = deduped[deduped.length - 1]
+          if (prev && e.startPos < prev.endPos) {
+            // overlaps or nested — skip to avoid corrupting commitEdits
+            skippedOverlap++
+            continue
+          }
+          deduped.push(e)
+        }
+        if (skippedOverlap > 0) {
+          errors.push(`${filePath}: skipped ${skippedOverlap} overlapping match(es) for "${op.find.slice(0, 40)}" — nested ranges would corrupt the edit`)
+        }
+
         // apply edits and re-parse for next op
         try {
-          currentSource = root.commitEdits(edits)
+          currentSource = root.commitEdits(deduped)
         } catch {
           errors.push(`${filePath}: commitEdits failed for "${op.find.slice(0, 40)}"`)
           break

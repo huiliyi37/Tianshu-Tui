@@ -9,6 +9,8 @@ import {
   resolveLang,
   collectFiles,
   collectMetaVarNames,
+  DYNAMIC_LANGS,
+  isDynamicLang,
 } from '../ast-shared.js'
 
 const testDir = join(process.cwd(), '.test-tmp', `ast-shared-${randomBytes(4).toString('hex')}`)
@@ -135,5 +137,79 @@ describe('collectMetaVarNames', () => {
     const vars = collectMetaVarNames('$X = $X')
     assert.equal(vars.length, 1)
     assert.equal(vars[0]!.name, 'X')
+  })
+})
+
+// ── dynamic languages (python/json) ──────────────────────────────
+
+describe('dynamic language support', () => {
+  it('maps .py to python', () => {
+    assert.equal(inferLang('foo.py'), 'python')
+    assert.equal(inferLang('foo.pyi'), 'python')
+  })
+
+  it('maps .json to json', () => {
+    assert.equal(inferLang('data.json'), 'json')
+    assert.equal(inferLang('data.jsonc'), 'json')
+  })
+
+  it('isDynamicLang identifies python and json', () => {
+    assert.equal(isDynamicLang('python'), true)
+    assert.equal(isDynamicLang('json'), true)
+    assert.equal(isDynamicLang('TypeScript'), false)
+    assert.equal(isDynamicLang('Tsx'), false)
+  })
+
+  it('DYNAMIC_LANGS set contains exactly python and json', () => {
+    assert.equal(DYNAMIC_LANGS.size, 2)
+    assert.ok(DYNAMIC_LANGS.has('python'))
+    assert.ok(DYNAMIC_LANGS.has('json'))
+  })
+
+  it('resolveLang returns dynamic lang name for .py files', () => {
+    assert.equal(resolveLang(undefined, 'script.py'), 'python')
+    // explicit still wins
+    assert.equal(resolveLang('TypeScript', 'script.py'), 'TypeScript')
+  })
+})
+
+// ── configurable exclude dirs (RIVET_AST_EXCLUDE) ────────────────
+
+describe('collectFiles configurable exclusion', () => {
+  it('excludes dist/build/out by default (build artifacts)', () => {
+    const dir = join(process.cwd(), '.test-tmp', `ast-exclude-${randomBytes(4).toString('hex')}`)
+    return (async () => {
+      await mkdir(join(dir, 'dist'), { recursive: true })
+      await mkdir(join(dir, 'src'), { recursive: true })
+      await writeFile(join(dir, 'dist', 'bundle.js'), 'compiled')
+      await writeFile(join(dir, 'src', 'real.ts'), 'source')
+      const files = collectFiles(dir)
+      assert.ok(files.some(f => f.includes('real.ts')), 'src file should be collected')
+      assert.ok(!files.some(f => f.includes('dist')), 'dist should be excluded')
+      await rm(dir, { recursive: true, force: true })
+    })()
+  })
+
+  it('honors RIVET_AST_EXCLUDE for project-specific dirs', () => {
+    const dir = join(process.cwd(), '.test-tmp', `ast-env-exclude-${randomBytes(4).toString('hex')}`)
+    const prev = process.env.RIVET_AST_EXCLUDE
+    return (async () => {
+      await mkdir(join(dir, 'target'), { recursive: true })  // Rust-style output dir
+      await mkdir(join(dir, 'src'), { recursive: true })
+      await writeFile(join(dir, 'target', 'release'), 'binary')
+      await writeFile(join(dir, 'src', 'main.rs'), 'source')
+      // target is NOT in the default exclude list
+      let files = collectFiles(dir)
+      assert.ok(files.some(f => f.includes('target')), 'target collected without env override')
+
+      process.env.RIVET_AST_EXCLUDE = 'target, vendor'
+      files = collectFiles(dir)
+      assert.ok(!files.some(f => f.includes('target')), 'target excluded via RIVET_AST_EXCLUDE')
+      assert.ok(files.some(f => f.includes('main.rs')), 'src still collected')
+
+      await rm(dir, { recursive: true, force: true })
+      if (prev === undefined) delete process.env.RIVET_AST_EXCLUDE
+      else process.env.RIVET_AST_EXCLUDE = prev
+    })()
   })
 })
