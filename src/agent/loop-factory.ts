@@ -21,6 +21,7 @@ import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
 import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
+import { GoalContinuationController } from './goal-continuation.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -462,7 +463,6 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
-    getGoalTracker: () => self.getGoalTracker(),
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,
@@ -567,44 +567,50 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
 
-    // === Goal completion judge ===
-    getGoalJudgeDeps: () => {
-      // Disabled explicitly → undefined → orchestrator keeps legacy accept-on-marker.
-      if (self.config.goalJudge?.enabled === false) return undefined
-      const coordinator = self.config.coordinatorRef?.()
-      // Enabled but no coordinator to spawn the judge → empty deps → runGoalJudge
-      // returns inconclusive (fail-open accept+warning), never blocking the loop.
-      if (!coordinator) return {}
-      const browserMode = self.config.goalJudge?.browser === true
-      return {
-        spawnJudge: (objective, scope, signal) => coordinator.delegate({
-          parentTurnId: 'goal:judge',
-          objective,
-          kind: 'verify',
-          profile: 'goal_judge',
-          scope,
-        }, signal),
-        browserMode,
-      }
-    },
-    getGoalJudgeEvidence: () => {
-      const state = self.evidence.getState()
-      const modifiedFiles = [...state.filesModified]
-      const readFiles = [...state.filesRead]
-      const verifications = state.verifications.map(v =>
-        `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`)
-      const text = [
-        modifiedFiles.length > 0 ? `Modified files: ${modifiedFiles.join(', ')}` : '',
-        readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
-        verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
-      ].filter(Boolean).join('\n')
+    // === Sub-controllers ===
+    goalContinuation: new GoalContinuationController({
+      getGoalTracker: () => self.getGoalTracker(),
+      getGoalJudgeDeps: () => {
+        if (self.config.goalJudge?.enabled === false) return undefined
+        const coordinator = self.config.coordinatorRef?.()
+        if (!coordinator) return {}
+        const browserMode = self.config.goalJudge?.browser === true
+        return {
+          spawnJudge: (objective, scope, signal) => coordinator.delegate({
+            parentTurnId: 'goal:judge',
+            objective,
+            kind: 'verify',
+            profile: 'goal_judge',
+            scope,
+          }, signal),
+          browserMode,
+        }
+      },
+      getGoalJudgeEvidence: () => {
+        const state = self.evidence.getState()
+        const modifiedFiles = [...state.filesModified]
+        const readFiles = [...state.filesRead]
+        const verifications = state.verifications.map(v =>
+          `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`)
+        const text = [
+          modifiedFiles.length > 0 ? `Modified files: ${modifiedFiles.join(', ')}` : '',
+          readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
+          verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
+        ].filter(Boolean).join('\n')
 
-      // Meridian blast radius — let the judge verify downstream consumers too.
-      // Absolute paths silently return empty on repo-relative LIKE, so filter first.
-      const db = self.config.meridianIndexer?.getDb()
-      const fullText = appendMeridianBlastRadius(text, modifiedFiles, db)
-      return { text: fullText, modifiedFiles }
-    },
+        const db = self.config.meridianIndexer?.getDb()
+        const fullText = appendMeridianBlastRadius(text, modifiedFiles, db)
+        return { text: fullText, modifiedFiles }
+      },
+      getStreamedText: () => self.streamedText,
+      getEstimatedTokens: () => self.session.getEstimatedTokens(),
+      getSessionId: () => self.config.sessionId,
+      getCwd: () => self.cwd,
+      appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
+      completeTurn: (params) => self.turnCompletion.complete(params),
+      writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
+      flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
+    }),
   })
 }
 
