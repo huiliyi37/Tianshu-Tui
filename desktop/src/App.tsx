@@ -10,6 +10,7 @@ import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { Toaster } from 'sonner'
+import { WallpaperLayer } from './components/WallpaperLayer'
 // L1 #10: 非首屏 Surface 懒加载，减小首屏 chunk
 const InboxSurface = lazy(() =>
   import('./surfaces/InboxSurface').then((m) => ({ default: m.InboxSurface })),
@@ -169,6 +170,7 @@ export function App() {
 
   return (
     <div className="shell">
+      <WallpaperLayer />
       <div className="main">
         {sidecarDown && (
           <div className="banner error">sidecar 离线，重连中…</div>

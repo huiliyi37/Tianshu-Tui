@@ -96,6 +96,60 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+
+  /* ── Frosted glass surface tokens (P2) ────────────────────────────
+     Activated by --surface-mode: glass on :root. Each layer has a distinct
+     transparency / blur / saturation to create visual depth over wallpaper.
+     Solid mode (default) falls back to opaque --panel / --bg — zero perf cost
+     when transparency is off or the user prefers reduced transparency. */
+  --sidebar-surface-bg: var(--panel);
+  --sidebar-surface-blur: 0px;
+  --sidebar-surface-saturation: 1;
+  --main-surface-bg: var(--bg);
+  --main-surface-blur: 0px;
+  --main-surface-saturation: 1;
+  --compose-surface-bg: var(--panel-2);
+  --compose-surface-blur: 0px;
+  --compose-surface-saturation: 1;
+  --popup-surface-bg: var(--panel-2);
+  --popup-surface-blur: 0px;
+  --popup-surface-saturation: 1;
+  --modal-surface-bg: var(--panel);
+  --modal-surface-blur: 0px;
+  --modal-surface-saturation: 1;
+}
+
+/* Glass mode — translucent layers with backdrop blur. Activated by adding
+   data-surface="glass" to :root (set by WallpaperLayer / settings toggle).
+   Uses color-mix for theme-aware transparency without duplicating hex values. */
+:root[data-surface="glass"] {
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 42%, transparent);
+  --sidebar-surface-blur: 32px;
+  --sidebar-surface-saturation: 1.14;
+  --main-surface-bg: color-mix(in oklab, var(--bg) 72%, transparent);
+  --main-surface-blur: 20px;
+  --main-surface-saturation: 1.08;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 55%, transparent);
+  --compose-surface-blur: 18px;
+  --compose-surface-saturation: 1.12;
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 80%, transparent);
+  --popup-surface-blur: 24px;
+  --popup-surface-saturation: 1.1;
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 88%, transparent);
+  --modal-surface-blur: 28px;
+  --modal-surface-saturation: 1.06;
+}
+
+/* Respect reduced-transparency preference — force solid surfaces. */
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-surface="glass"] {
+    --sidebar-surface-bg: var(--panel);
+    --sidebar-surface-blur: 0px;
+    --main-surface-bg: var(--bg);
+    --compose-surface-bg: var(--panel-2);
+    --popup-surface-bg: var(--panel-2);
+    --modal-surface-bg: var(--panel);
+  }
 }
 
 /* ── Light ──────────────────────────────────────────────────────── */
@@ -141,4 +195,14 @@
   --shadow-sm: 0 1px 2px rgba(20, 20, 40, 0.08);
   --shadow-md: 0 6px 20px rgba(20, 20, 40, 0.12);
   --shadow-lg: 0 16px 48px rgba(20, 20, 40, 0.16);
+}
+
+/* Glass mode overrides for light theme — higher opacity than dark (light
+   backgrounds need more coverage to stay readable over a wallpaper). */
+:root[data-theme="light"][data-surface="glass"] {
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 62%, transparent);
+  --main-surface-bg: color-mix(in oklab, var(--bg) 82%, transparent);
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 70%, transparent);
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 90%, transparent);
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 92%, transparent);
 }

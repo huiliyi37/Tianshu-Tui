@@ -32,6 +32,41 @@
 /* Tokens (colors/spacing/type) live in styles/tokens.css. This file is the
  * component layer and references those variables — no hardcoded hex. */
 
+/* ── Frosted glass surface system (P2) ──────────────────────────── */
+
+/* Wallpaper layer — fixed full-viewport background behind everything. */
+.wallpaper-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+
+/* Surface utility classes — each maps to a token layer with backdrop-filter.
+   In solid mode (default), blur=0 and bg=opaque → zero overhead.
+   In glass mode, each layer becomes translucent with distinct blur depth. */
+.surface-sidebar {
+  background: var(--sidebar-surface-bg);
+  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+}
+.surface-main {
+  background: var(--main-surface-bg);
+  backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation));
+}
+.surface-compose {
+  background: var(--compose-surface-bg);
+  backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation));
+}
+.surface-popup {
+  background: var(--popup-surface-bg);
+  backdrop-filter: blur(var(--popup-surface-blur)) saturate(var(--popup-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--popup-surface-blur)) saturate(var(--popup-surface-saturation));
+}
+.surface-modal {
+  background: var(--modal-surface-bg);
+  backdrop-filter: blur(var(--modal-surface-blur)) saturate(var(--modal-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--modal-surface-blur)) saturate(var(--modal-surface-saturation));
+}
+
+
 * { box-sizing: border-box; }
 
 html, body, #root { height: 100%; margin: 0; }
@@ -50,7 +85,10 @@ body {
 
 /* ── Rail (icon nav) ───────────────────────────────────────────── */
 .rail {
-  width: 56px; flex: none; background: var(--panel);
+  width: 56px; flex: none;
+  background: var(--sidebar-surface-bg);
+  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column; align-items: center;
   padding: var(--space-3) 0; gap: var(--space-2);
@@ -318,7 +356,7 @@ body {
 .artifacts { background: var(--panel); overflow-y: auto; border-left: 1px solid var(--border); }
 
 /* ── Review panel ──────────────────────────────────────────────── */
-.review { background: var(--panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: var(--space-3); gap: var(--space-2); }
+.review { background: var(--sidebar-surface-bg); backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation)); -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation)); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; padding: var(--space-3); gap: var(--space-2); }
 .open-tabs-head {
   font-size: 10px; font-weight: var(--weight-semibold);
   color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.6px;
@@ -623,7 +661,9 @@ body {
 
 /* ── Project → Thread sidebar ──────────────────────────────────── */
 .project-sidebar {
-  background: var(--panel); border-right: 1px solid var(--border);
+  background: var(--sidebar-surface-bg);
+  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
   overflow-y: auto; display: flex; flex-direction: column;
   padding: var(--space-3);
   gap: var(--space-2);
@@ -1042,7 +1082,7 @@ body {
 .status-failed, .status-aborted { background: var(--error); }
 .status-idle { background: var(--muted); }
 
-.conversation { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
+.conversation { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--main-surface-bg); backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation)); -webkit-backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation)); }
 
 /* ── Thread (single-session) ───────────────────────────────────── */
 .thread { display: flex; flex-direction: column; height: 100%; min-height: 0; }
