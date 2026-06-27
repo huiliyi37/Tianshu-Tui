@@ -203,4 +203,51 @@ describe('ast-edit onFileWrite', () => {
     } as unknown as ToolCallParams)
     assert.equal(written.length, 0, `expected 0 onFileWrite calls in dryRun mode, got ${written.length}`)
   })
+
+  // ── post-edit syntax gate (#2) ────────────────────────────────────
+  // A replacement whose template itself introduces invalid syntax (unbalanced
+  // braces) must be caught by the post-edit ERROR-node check and the file must
+  // NOT be written. Without the gate, a broken file would persist silently.
+
+  it('does NOT write a file when the replace introduces a syntax error', async () => {
+    const target = join(testDir, 'syntax-gate-test.ts')
+    await writeFile(target, 'var x = 1\nvar y = 2\n')
+    const before = await readFile(target, 'utf-8')
+    const result = await astEdit.execute({
+      input: {
+        // replace with an unbalanced brace — valid ast-grep template, invalid TS
+        ops: [{ find: 'var $NAME = $VAL', replace: 'var $NAME = {{{' }],
+        paths: ['syntax-gate-test.ts'],
+        lang: 'TypeScript',
+        dryRun: false,
+      },
+      cwd: testDir,
+      toolUseId: 'test-syntax-gate',
+      abortSignal: new AbortController().signal,
+      onOutput: undefined,
+    } as unknown as ToolCallParams)
+    const after = await readFile(target, 'utf-8')
+    assert.equal(after, before, 'file must be unchanged when post-edit syntax check fails')
+    assert.ok(result.content.includes('NOT written') || result.content.includes('syntax error'),
+      `expected post-edit syntax gate error in output, got: ${result.content}`)
+  })
+
+  // ── multi-line dryRun diff (#6) ───────────────────────────────────
+
+  it('dryRun preview shows multi-line before/after as separate blocks, not collapsed \\n', async () => {
+    // A function-body match spans multiple lines. The preview must show the
+    // actual line shape (not collapse to \n) so the model can judge the change.
+    const target = join(testDir, 'multiline-preview.ts')
+    await writeFile(target, 'function inc() {\n  count = count + 1\n}\n')
+    const out = await call({
+      ops: [{ find: 'function $NAME($$$A) { $$$B }', replace: 'async function $NAME($$$A) { $$$B }' }],
+      paths: ['multiline-preview.ts'],
+      lang: 'TypeScript',
+      dryRun: true,
+    })
+    // Multi-line aware: before/after on separate lines with - / + markers,
+    // not a single line with literal \n.
+    assert.ok(out.includes('async function'), `expected the replacement in preview, got: ${out}`)
+    assert.ok(!out.includes('\\n'), `multi-line change should not be collapsed to literal \\n: ${out}`)
+  })
 })

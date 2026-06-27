@@ -7,6 +7,7 @@ import {
   resolveLang,
   collectFiles,
   collectMetaVarNames,
+  buildLangMap,
 } from './ast-shared.js'
 
 // ── types ─────────────────────────────────────────────────────────
@@ -114,13 +115,7 @@ export const AST_EDIT_TOOL: Tool = {
       return { content: 'Error: @ast-grep/napi is not installed. Run: npm install @ast-grep/napi', isError: true }
     }
 
-    const LANG_MAP: Record<string, string> = {
-      TypeScript: napi.Lang.TypeScript as unknown as string,
-      Tsx: napi.Lang.Tsx as unknown as string,
-      JavaScript: napi.Lang.JavaScript as unknown as string,
-      Html: napi.Lang.Html as unknown as string,
-      Css: napi.Lang.Css as unknown as string,
-    }
+    const LANG_MAP = buildLangMap(napi)
 
     const allFiles: string[] = []
     for (const p of paths) {
@@ -220,13 +215,34 @@ export const AST_EDIT_TOOL: Tool = {
       }
 
       if (changes.length > 0) {
-        fileResults.push({ file: filePath, changes })
+        // Final syntax check on the post-edit source before writing. The per-op
+        // loop detects ERROR nodes between ops, but the LAST op's result is
+        // never re-checked — a replacement can itself introduce invalid syntax
+        // (e.g. an unbalanced brace in the replace template). Catch it here so
+        // we never persist a broken file silently.
+        let finalSyntaxOk = true
         if (!dryRun) {
           try {
-            params.onFileWrite?.(filePath)
-            await writeFileAtomicAsync(filePath, currentSource)
+            const finalRoot = napi.parse(langValue, currentSource).root()
+            const finalErrors = finalRoot.findAll({ rule: { kind: 'ERROR' } } as unknown as string)
+            if (finalErrors.length > 0) {
+              errors.push(`${filePath}: post-edit syntax error (${finalErrors.length} ERROR node(s)) — file NOT written, change discarded`)
+              finalSyntaxOk = false
+            }
           } catch {
-            errors.push(`${filePath}: failed to write changes`)
+            errors.push(`${filePath}: post-edit parse failed — file NOT written, change discarded`)
+            finalSyntaxOk = false
+          }
+        }
+        if (finalSyntaxOk) {
+          fileResults.push({ file: filePath, changes })
+          if (!dryRun) {
+            try {
+              params.onFileWrite?.(filePath)
+              await writeFileAtomicAsync(filePath, currentSource)
+            } catch {
+              errors.push(`${filePath}: failed to write changes`)
+            }
           }
         }
       }
@@ -241,9 +257,18 @@ export const AST_EDIT_TOOL: Tool = {
     for (const fr of fileResults) {
       body += `\n${fr.file}:`
       for (const ch of fr.changes) {
-        const beforeBrief = ch.before.replace(/\n/g, '\\n').slice(0, 60)
-        const afterBrief = ch.after.replace(/\n/g, '\\n').slice(0, 60)
-        body += `\n  L${ch.line}: ${beforeBrief} → ${afterBrief}`
+        // Multi-line-aware preview: show before/after as separate blocks instead
+        // of collapsing newlines to \n. The model can judge whether a structural
+        // replacement is correct only if it sees the actual shape of the change.
+        const beforeLines = ch.before.split('\n')
+        const afterLines = ch.after.split('\n')
+        const beforeShow = beforeLines.length > 1
+          ? beforeLines.slice(0, 3).join('\n    ') + (beforeLines.length > 3 ? `\n    … (+${beforeLines.length - 3} lines)` : '')
+          : beforeLines[0]!.slice(0, 80)
+        const afterShow = afterLines.length > 1
+          ? afterLines.slice(0, 3).join('\n    ') + (afterLines.length > 3 ? `\n    … (+${afterLines.length - 3} lines)` : '')
+          : afterLines[0]!.slice(0, 80)
+        body += `\n  L${ch.line}:\n    - ${beforeShow}\n    + ${afterShow}`
       }
     }
 

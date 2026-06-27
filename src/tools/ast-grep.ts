@@ -6,6 +6,7 @@ import {
   resolveLang,
   collectFiles,
   collectMetaVarNames,
+  buildLangMap,
 } from './ast-shared.js'
 
 export interface AstGrepInput {
@@ -79,14 +80,19 @@ export const AST_GREP_TOOL: Tool = {
     const errors: string[] = []
     let filesScanned = 0
 
-    // Lang uses non-enumerable getters — direct property access is the only reliable way
-    const LANG_MAP: Record<string, string> = {
-      TypeScript: napi.Lang.TypeScript as unknown as string,
-      Tsx: napi.Lang.Tsx as unknown as string,
-      JavaScript: napi.Lang.JavaScript as unknown as string,
-      Html: napi.Lang.Html as unknown as string,
-      Css: napi.Lang.Css as unknown as string,
-    }
+    // Lang uses non-enumerable getters — build the map from the resolved napi.
+    const LANG_MAP = buildLangMap(napi)
+
+    // Parse the pattern ONCE: a bare pattern string and a `{ rule: ... }` JSON
+    // object are both valid ast-grep inputs. Done outside the file loop so we
+    // don't JSON.parse the same pattern per file.
+    let ruleOrPattern: string | Record<string, unknown> = pattern
+    try {
+      const parsed = JSON.parse(pattern)
+      if (parsed && typeof parsed === 'object' && 'rule' in parsed) {
+        ruleOrPattern = parsed
+      }
+    } catch { /* not JSON — use as pattern string */ }
 
     for (const filePath of allFiles) {
       const langStr = resolveLang(explicitLang, filePath)
@@ -129,14 +135,6 @@ export const AST_GREP_TOOL: Tool = {
 
       let found
       try {
-        // parse as rule object if JSON
-        let ruleOrPattern: string | Record<string, unknown> = pattern
-        try {
-          const parsed = JSON.parse(pattern)
-          if (parsed && typeof parsed === 'object' && 'rule' in parsed) {
-            ruleOrPattern = parsed
-          }
-        } catch { /* not JSON — use as pattern string */ }
         found = root.findAll(ruleOrPattern as string)
       } catch {
         errors.push(`${filePath}: pattern compile error`)
@@ -156,10 +154,12 @@ export const AST_GREP_TOOL: Tool = {
           for (const { name, multi } of metaVarDefs) {
             if (multi) {
               const mvs = node.getMultipleMatches(name)
-              if (mvs && mvs.length > 0) match.metaVariables[name] = mvs.map(n => n.text()).join(', ')
+              // truncate: $$$BODY / $$$ARGS can capture entire function bodies
+              // (KB of source) — unbounded join would flood the model's context.
+              if (mvs && mvs.length > 0) match.metaVariables[name] = mvs.map(n => n.text()).join(', ').slice(0, 120)
             } else {
               const mv = node.getMatch(name)
-              if (mv) match.metaVariables[name] = mv.text()
+              if (mv) match.metaVariables[name] = mv.text().slice(0, 120)
             }
           }
         }
