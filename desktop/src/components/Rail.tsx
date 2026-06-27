@@ -20,6 +20,7 @@ const ICONS: Record<Surface, string> = {
   skills: 'M12 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM15 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
   git: 'M7 6a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm5 3v6m0 0a3 3 0 1 0 6 0 3 3 0 0 0-6 0Zm-5 3a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
   insights: 'M3 3v18h18M7 16l4-4 4 4 5-6',
+  delegation: 'M12 2v6M12 22v-6M12 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 18a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM12 14v3M9 21h6',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.4-2.4H9.5l-.4 2.4a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.4h4.9l.4-2.4a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.6c.06-.33.1-.66.1-1Z',
 }
 
@@ -30,6 +31,7 @@ const LABELS: Record<Surface, string> = {
   skills: '技能',
   git: 'Git',
   insights: 'Insights',
+  delegation: '委派树',
   settings: '设置',
 }
 
@@ -49,7 +51,7 @@ export function Rail(props: {
   const { surface, onSurface, attentionCount } = props
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'settings']
+  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)

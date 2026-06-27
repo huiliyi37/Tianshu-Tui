@@ -29,8 +29,11 @@ const GitSurface = lazy(() =>
 const InsightsSurface = lazy(() =>
   import('./surfaces/InsightsSurface').then((m) => ({ default: m.InsightsSurface })),
 )
+const DelegationSurface = lazy(() =>
+  import('./surfaces/DelegationSurface').then((m) => ({ default: m.DelegationSurface })),
+)
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'settings']
+const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
   automations: '自动化',
@@ -38,6 +41,7 @@ const SURFACE_LABEL: Record<Surface, string> = {
   skills: '技能',
   git: 'Git',
   insights: 'Insights',
+  delegation: '委派树',
   settings: '设置',
 }
 
@@ -195,6 +199,7 @@ export function App() {
               {ui.surface === 'workspace' && <WorkspaceSurface />}
               {ui.surface === 'automations' && <AutomationsSurface />}
               {ui.surface === 'attention' && <InboxSurface />}
+              {ui.surface === 'delegation' && <DelegationSurface />}
               {ui.surface === 'skills' && <SkillsSurface />}
               {ui.surface === 'git' && <GitSurface />}
               {ui.surface === 'insights' && <InsightsSurface />}
