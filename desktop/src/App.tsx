@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useState, useEffect, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useHealth, useSessions, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
 import { useGlobalNotifications } from './state/use-global-notifications'
@@ -35,22 +36,13 @@ const DelegationSurface = lazy(() =>
 )
 
 const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
-const SURFACE_LABEL: Record<Surface, string> = {
-  workspace: '工作台',
-  automations: '自动化',
-  attention: '需处理',
-  skills: '技能',
-  git: 'Git',
-  insights: 'Insights',
-  delegation: '委派树',
-  settings: '设置',
-}
 
 function nextTheme(p: ThemePref): ThemePref {
   return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
 }
 
 export function App() {
+  const { t } = useTranslation()
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
@@ -151,7 +143,7 @@ export function App() {
       { id: 'theme', label: '切换主题', hint: '外观', run: () => setThemePref(nextTheme(loadThemePref())) },
     ]
     for (const s of SURFACE_ORDER) {
-      cmds.push({ id: `surface-${s}`, label: `前往 ${SURFACE_LABEL[s]}`, hint: '导航', run: () => dispatch({ type: 'setSurface', surface: s }) })
+      cmds.push({ id: `surface-${s}`, label: t('commandPalette.goTo', { label: t(`nav.${s}`) }), hint: t('commandPalette.hintNavigate'), run: () => dispatch({ type: 'setSurface', surface: s }) })
     }
     for (const p of deriveProjects(list, loadKnownProjects())) {
       cmds.push({ id: `proj-${p.cwd}`, label: `项目：${p.name}`, hint: '项目', run: () => dispatch({ type: 'setProject', cwd: p.cwd }) })
@@ -166,7 +158,7 @@ export function App() {
     }
     return cmds
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions.data, dispatch])
+  }, [sessions.data, dispatch, t])
 
   return (
     <div className="shell">
@@ -190,7 +182,7 @@ export function App() {
               </svg>
               工作台
             </button>
-            <span className="surface-title">{SURFACE_LABEL[ui.surface]}</span>
+            <span className="surface-title">{t(`nav.${ui.surface}`)}</span>
             <span />
           </header>
         )}

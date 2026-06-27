@@ -5,10 +5,12 @@ import { App } from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { AppStateProvider } from './state/store'
 import { initTheme } from './lib/theme'
+import { initI18n } from './i18n'
 import './styles/tokens.css'
 import './styles.css'
 
 initTheme()
+initI18n()
 
 const queryClient = new QueryClient({
   defaultOptions: {

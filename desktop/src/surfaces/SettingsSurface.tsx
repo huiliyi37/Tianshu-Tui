@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useHealth } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -75,6 +76,8 @@ export function SettingsSurface() {
           ))}
         </div>
       </section>
+
+      <LanguageSection />
 
       <WallpaperSection />
 
@@ -285,6 +288,28 @@ function WallpaperSection() {
       <div className="meta">
         设置壁纸后，界面自动切换为半透明毛玻璃效果（类似 macOS vibrancy）。
         壁纸仅存储在本地，不会上传。
+      </div>
+    </section>
+  )
+}
+
+/** Language selector — switches i18next locale, persisted to localStorage. */
+function LanguageSection() {
+  const { t, i18n } = useTranslation()
+  const langs = ['zh-CN', 'en'] as const
+  return (
+    <section className="settings-group">
+      <h4>{t('language.label')}</h4>
+      <div className="seg">
+        {langs.map((l) => (
+          <button
+            key={l}
+            className={`seg-item ${i18n.language === l ? 'active' : ''}`}
+            onClick={() => i18n.changeLanguage(l)}
+          >
+            {t(`language.${l}`)}
+          </button>
+        ))}
       </div>
     </section>
   )

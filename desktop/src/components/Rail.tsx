@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
   Network, Settings, Sun, Moon, Laptop, type LucideIcon,
@@ -17,16 +18,7 @@ const ICONS: Record<Surface, LucideIcon> = {
   settings: Settings,
 }
 
-const LABELS: Record<Surface, string> = {
-  workspace: '工作台',
-  automations: '自动化',
-  attention: '需处理',
-  skills: '技能',
-  git: 'Git',
-  insights: 'Insights',
-  delegation: '委派树',
-  settings: '设置',
-}
+
 
 const THEME_ICON: Record<ThemePref, LucideIcon> = {
   system: Laptop,
@@ -49,6 +41,7 @@ export function Rail(props: {
   attentionCount: number
 }) {
   const { surface, onSurface, attentionCount } = props
+  const { t: tr } = useTranslation()
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
   const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
@@ -67,7 +60,7 @@ export function Rail(props: {
           <button
             key={s}
             className={`rail-item ${surface === s ? 'active' : ''}`}
-            title={LABELS[s]}
+            title={tr(`nav.${s}`)}
             onClick={() => onSurface(s)}
           >
             <Icon icon={ICONS[s]} />
@@ -80,7 +73,7 @@ export function Rail(props: {
       <div className="rail-foot">
         <button
           className="rail-item"
-          title={`主题：${theme === 'system' ? '跟随系统' : theme === 'light' ? '亮色' : '暗色'}`}
+          title={`${tr('theme.label')}：${tr(`theme.${theme}`)}`}
           onClick={cycleTheme}
         >
           <Icon icon={THEME_ICON[theme]} />
