@@ -32,6 +32,13 @@ describe('tool-tiers', () => {
       }
     })
 
+    it('contains essential search tools', () => {
+      const required = ['web_search', 'web_fetch', 'grep', 'semantic_search']
+      for (const name of required) {
+        assert.ok(CORE_TOOLS.includes(name as never), `core tool missing: ${name}`)
+      }
+    })
+
     it('does not include EXTENDED-only tools', () => {
       const extendedInCore = CORE_TOOLS.filter(t => EXTENDED_TOOLS.includes(t as never))
       assert.equal(extendedInCore.length, 0, `overlap between CORE and EXTENDED: ${extendedInCore.join(', ')}`)
@@ -39,9 +46,16 @@ describe('tool-tiers', () => {
   })
 
   describe('EXTENDED_TOOLS', () => {
-    it('includes web_search and web_fetch', () => {
-      assert.ok(EXTENDED_TOOLS.includes('web_search' as never))
-      assert.ok(EXTENDED_TOOLS.includes('web_fetch' as never))
+    it('includes browser and team tools', () => {
+      assert.ok(EXTENDED_TOOLS.includes('browser' as never))
+      assert.ok(EXTENDED_TOOLS.includes('team_orchestrate' as never))
+    })
+
+    it('web_search and web_fetch are now in CORE (not EXTENDED)', () => {
+      assert.ok(!EXTENDED_TOOLS.includes('web_search' as never))
+      assert.ok(!EXTENDED_TOOLS.includes('web_fetch' as never))
+      assert.ok(CORE_TOOLS.includes('web_search' as never))
+      assert.ok(CORE_TOOLS.includes('web_fetch' as never))
     })
 
     it('does not include essential editing tools', () => {
