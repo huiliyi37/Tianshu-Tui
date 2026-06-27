@@ -231,6 +231,15 @@ export async function getFileContent(
   return apiGet<FileContent>(`/sessions/${id}/file-content?${qs}`)
 }
 
+/** Gap 1 — directory listing for file browser. Returns direct children. */
+export async function listDir(
+  id: string,
+  path: string,
+): Promise<{ path: string; entries: import('./types.js').DirEntry[] }> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+  return apiGet(`/sessions/${id}/list-dir${qs}`)
+}
+
 export function answerApproval(
   id: string,
   requestId: string,

@@ -15,11 +15,12 @@ import { FileViewer } from '../components/FileViewer'
 import { Markdown } from '../components/Markdown'
 import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
+import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
 
 interface TabDef {
   id: ReviewTab
@@ -118,6 +119,7 @@ export function ReviewPanel(props: {
     { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
     { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
     { id: 'wt', label: 'Diff', glyph: '⟐' },
+    { id: 'files', label: 'Files', glyph: '📁' },
     { id: 'github', label: 'PR', glyph: '🔀' },
   ]
 
@@ -153,6 +155,10 @@ export function ReviewPanel(props: {
       ) : tab === 'wt' ? (
         <div className="review-body">
           <ChangesTab sessionId={sessionId} />
+        </div>
+      ) : tab === 'files' ? (
+        <div className="review-body">
+          <FileExplorer sessionId={sessionId} />
         </div>
       ) : tab === 'plan' ? (
         <div className="review-body">
