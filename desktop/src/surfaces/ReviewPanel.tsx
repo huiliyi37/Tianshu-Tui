@@ -194,38 +194,14 @@ export function ReviewPanel(props: {
             ))}
           </section>
 
-          <section className="review-section">
-            <h4>涉及文件 · {sources.length}</h4>
-            {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
-            {sources.map((path) => (
-              <div
-                key={path}
-                className="source-item"
-                title={`查看 ${path}`}
-                onClick={() => viewFile(path)}
-              >
-                <span className="source-icon" aria-hidden>📄</span>
-                <FilePath path={path} className="source-path" />
-              </div>
-            ))}
-            {fileLoading && <div className="empty sm">加载文件…</div>}
-            {fileContent && (
-              <div className="review-file-viewer">
-                <div className="review-file-header">
-                  <FilePath path={fileContent.path} />
-                  <button className="btn ghost sm" onClick={() => openFile(fileContent.path).catch(() => {})}>
-                    在编辑器中打开
-                  </button>
-                  <button className="btn ghost sm" onClick={() => setFileContent(null)}>关闭</button>
-                </div>
-                <FileViewer
-                  content={fileContent.content}
-                  language={fileContent.language}
-                  startLine={fileContent.startLine}
-                />
-              </div>
-            )}
-          </section>
+          <SourceListSection
+            sources={sources}
+            fileContent={fileContent}
+            fileLoading={fileLoading}
+            onView={viewFile}
+            onOpen={() => fileContent && openFile(fileContent.path).catch(() => {})}
+            onClose={() => setFileContent(null)}
+          />
 
           <section className="review-section">
             <h4>工件 · {artifacts.length}</h4>
@@ -560,5 +536,63 @@ function IntentReview(props: {
         <button className="btn sm" onClick={() => onDecision('continue')}>继续</button>
       </div>
     </div>
+  )
+}
+
+// T2 companion — collapsible source file list so long file rosters don't push
+// the rest of the Task tab off-screen.
+function SourceListSection(props: {
+  sources: string[]
+  fileContent: FileContent | null
+  fileLoading: boolean
+  onView: (path: string) => void
+  onOpen: () => void
+  onClose: () => void
+}) {
+  const { sources, fileContent, fileLoading, onView, onOpen, onClose } = props
+  const [expanded, setExpanded] = useState(false)
+  const PREVIEW_LIMIT = 8
+  const needsCollapse = sources.length > PREVIEW_LIMIT
+  const visible = expanded || !needsCollapse ? sources : sources.slice(0, PREVIEW_LIMIT)
+  const remaining = sources.length - PREVIEW_LIMIT
+
+  return (
+    <section className="review-section">
+      <h4>涉及文件 · {sources.length}</h4>
+      {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
+      {visible.map((path) => (
+        <div
+          key={path}
+          className="source-item"
+          title={`查看 ${path}`}
+          onClick={() => onView(path)}
+        >
+          <span className="source-icon" aria-hidden>📄</span>
+          <FilePath path={path} className="source-path" />
+        </div>
+      ))}
+      {needsCollapse && (
+        <button className="source-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? '收起' : `展开剩余 ${remaining} 个文件`}
+        </button>
+      )}
+      {fileLoading && <div className="empty sm">加载文件…</div>}
+      {fileContent && (
+        <div className="review-file-viewer">
+          <div className="review-file-header">
+            <FilePath path={fileContent.path} />
+            <button className="btn ghost sm" onClick={onOpen}>
+              在编辑器中打开
+            </button>
+            <button className="btn ghost sm" onClick={onClose}>关闭</button>
+          </div>
+          <FileViewer
+            content={fileContent.content}
+            language={fileContent.language}
+            startLine={fileContent.startLine}
+          />
+        </div>
+      )}
+    </section>
   )
 }
