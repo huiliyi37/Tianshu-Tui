@@ -196,12 +196,14 @@ const workerResultIngestSchema = z.object({
   ]).default([]),
   examinedFiles: z.array(z.string()).optional(),
   risks: z.union([
-    z.array(z.string()),
-    z.undefined().transform(() => [] as string[]),
+    // Accept structured risk objects (model infers shape from findings),
+    // plain strings, or missing/empty. Coerced to strings in normalizeWorkerResult.
+    z.array(z.union([z.record(z.string(), z.unknown()), z.string().min(1)])),
+    z.undefined().transform(() => [] as (Record<string, unknown> | string)[]),
   ]).default([]),
   nextActions: z.union([
-    z.array(z.string()),
-    z.undefined().transform(() => [] as string[]),
+    z.array(z.union([z.record(z.string(), z.unknown()), z.string().min(1)])),
+    z.undefined().transform(() => [] as (Record<string, unknown> | string)[]),
   ]).default([]),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
 })
@@ -471,6 +473,8 @@ function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): W
     artifacts: raw.artifacts.map((artifact, index) => typeof artifact === 'string'
       ? { kind: 'note' as const, title: `Artifact ${index + 1}`, content: artifact }
       : artifact),
+    risks: raw.risks.map(r => typeof r === 'string' ? r : JSON.stringify(r)),
+    nextActions: raw.nextActions.map(a => typeof a === 'string' ? a : JSON.stringify(a)),
   })
 }
 

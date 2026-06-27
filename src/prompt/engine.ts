@@ -444,10 +444,9 @@ export class PromptEngine {
     // mutating message content breaks DeepSeek exact-prefix cache. trySessionSplit (86%)
     // handles context overflow instead.
     if (!contextWindow || contextWindow < 1_000_000) {
-      const { prunedMessages, prunedCount } = pruneOutdatedQueryResults(result, CACHE_ANCHOR_MESSAGES)
+      const { prunedCount } = pruneOutdatedQueryResults(result, CACHE_ANCHOR_MESSAGES)
       if (prunedCount > 0) {
-        result.length = 0
-        result.push(...prunedMessages)
+        debugLog(`[semantic-prune] pruned ${prunedCount} duplicate query results`)
       }
 
       const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)

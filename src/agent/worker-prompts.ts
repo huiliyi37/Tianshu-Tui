@@ -160,8 +160,8 @@ function buildReadOnlyResultShape(): string {
   ],
   "changedFiles": [],
   "examinedFiles": ["REQUIRED: list all files you read/inspected but did NOT modify"],
-  "risks": [],
-  "nextActions": [],
+  "risks": ["string — brief risk description, one per item"],
+  "nextActions": ["string — suggested next action, one per item"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
@@ -190,8 +190,8 @@ function buildWriteResultShape(): string {
     "skipped": 0,
     "durationMs": 0
   },
-  "risks": [],
-  "nextActions": [],
+  "risks": ["string — brief risk description, one per item"],
+  "nextActions": ["string — suggested next action, one per item"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
