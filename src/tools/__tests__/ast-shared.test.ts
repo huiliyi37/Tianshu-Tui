@@ -1,0 +1,139 @@
+import { describe, it, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdir, writeFile, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
+import {
+  LANG_BY_EXT,
+  inferLang,
+  resolveLang,
+  collectFiles,
+  collectMetaVarNames,
+} from '../ast-shared.js'
+
+const testDir = join(process.cwd(), '.test-tmp', `ast-shared-${randomBytes(4).toString('hex')}`)
+
+before(async () => {
+  await rm(testDir, { recursive: true, force: true })
+  await mkdir(testDir, { recursive: true })
+  await mkdir(join(testDir, 'sub'), { recursive: true })
+  await mkdir(join(testDir, '.hidden-dir'), { recursive: true })
+  await mkdir(join(testDir, 'node_modules', 'pkg'), { recursive: true })
+  await mkdir(join(testDir, '.git', 'objects'), { recursive: true })
+  await mkdir(join(testDir, '.rivet', 'knowledge'), { recursive: true })
+
+  await writeFile(join(testDir, 'sample.ts'), 'var x = 1')
+  await writeFile(join(testDir, 'sample.js'), 'var y = 2')
+  await writeFile(join(testDir, 'sub', 'nested.tsx'), 'var z = 3')
+  await writeFile(join(testDir, '.hidden-dir', 'hidden.ts'), 'var w = 4')
+  await writeFile(join(testDir, 'node_modules', 'pkg', 'index.js'), '')
+  await writeFile(join(testDir, '.git', 'objects', 'hash'), '')
+  await writeFile(join(testDir, '.rivet', 'knowledge', 'memory.json'), '')
+})
+
+after(async () => {
+  await rm(testDir, { recursive: true, force: true })
+})
+
+// ── LANG_BY_EXT / inferLang / resolveLang ─────────────────────────
+
+describe('language inference', () => {
+  it('maps .ts to TypeScript', () => {
+    assert.equal(inferLang('/foo/bar.ts'), 'TypeScript')
+  })
+  it('maps .tsx to Tsx', () => {
+    assert.equal(inferLang('/foo/bar.tsx'), 'Tsx')
+  })
+  it('maps .js to JavaScript', () => {
+    assert.equal(inferLang('/foo/bar.js'), 'JavaScript')
+  })
+  it('maps .jsx to Tsx', () => {
+    assert.equal(inferLang('/foo/bar.jsx'), 'Tsx')
+  })
+  it('maps .html to Html', () => {
+    assert.equal(inferLang('/foo/bar.html'), 'Html')
+  })
+  it('maps .css to Css', () => {
+    assert.equal(inferLang('/foo/bar.css'), 'Css')
+  })
+  it('returns null for unsupported extension', () => {
+    assert.equal(inferLang('/foo/bar.rs'), null)
+  })
+  it('resolveLang prefers explicit over inferred', () => {
+    assert.equal(resolveLang('TypeScript', '/foo/bar.js'), 'TypeScript')
+  })
+  it('resolveLang falls back to inference when explicit is undefined', () => {
+    assert.equal(resolveLang(undefined, '/foo/bar.ts'), 'TypeScript')
+  })
+})
+
+// ── collectFiles ──────────────────────────────────────────────────
+
+describe('collectFiles', () => {
+  it('returns files matching directory walk', () => {
+    const files = collectFiles(testDir)
+    const names = files.map(f => f.replace(testDir + '/', ''))
+    assert.ok(names.includes('sample.ts'), `expected sample.ts, got ${names.join(', ')}`)
+    assert.ok(names.includes('sample.js'), `expected sample.js`)
+  })
+
+  it('skips node_modules', () => {
+    const files = collectFiles(testDir)
+    assert.ok(!files.some(f => f.includes('node_modules')), 'should not include node_modules files')
+  })
+
+  it('skips .git', () => {
+    const files = collectFiles(testDir)
+    assert.ok(!files.some(f => f.includes('.git/')), 'should not include .git files')
+  })
+
+  it('skips .rivet', () => {
+    const files = collectFiles(testDir)
+    assert.ok(!files.some(f => f.includes('.rivet/')), 'should not include .rivet files')
+  })
+
+  it('does NOT skip .hidden-dir (only well-known tool dirs)', () => {
+    const files = collectFiles(testDir)
+    assert.ok(files.some(f => f.includes('.hidden-dir')), 'should include .hidden-dir files')
+  })
+
+  it('returns nested files', () => {
+    const files = collectFiles(testDir)
+    assert.ok(files.some(f => f.includes('sub/nested.tsx')), 'should include nested files')
+  })
+
+  it('returns single file when path is a file', () => {
+    const files = collectFiles(join(testDir, 'sample.ts'))
+    assert.equal(files.length, 1)
+  })
+})
+
+// ── collectMetaVarNames ───────────────────────────────────────────
+
+describe('collectMetaVarNames', () => {
+  it('extracts single-node meta-variables ($NAME)', () => {
+    const vars = collectMetaVarNames('function $NAME($$$ARGS) { $$$BODY }')
+    const names = vars.map(v => v.name)
+    assert.deepStrictEqual(names.sort(), ['ARGS', 'BODY', 'NAME'].sort())
+  })
+
+  it('marks multi-node vars correctly', () => {
+    const vars = collectMetaVarNames('function $NAME($$$ARGS) { $$$BODY }')
+    const byName: Record<string, boolean> = {}
+    for (const v of vars) byName[v.name] = v.multi
+    assert.equal(byName['NAME'], false, 'NAME should be single-node')
+    assert.equal(byName['ARGS'], true, 'ARGS should be multi-node')
+    assert.equal(byName['BODY'], true, 'BODY should be multi-node')
+  })
+
+  it('returns empty for pattern with no meta-vars', () => {
+    const vars = collectMetaVarNames('function foo() { return 1 }')
+    assert.equal(vars.length, 0)
+  })
+
+  it('deduplicates repeated meta-var names', () => {
+    const vars = collectMetaVarNames('$X = $X')
+    assert.equal(vars.length, 1)
+    assert.equal(vars[0]!.name, 'X')
+  })
+})

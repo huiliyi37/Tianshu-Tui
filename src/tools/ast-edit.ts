@@ -1,69 +1,13 @@
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { readFileSync, writeFileSync, existsSync, lstatSync, readdirSync } from 'node:fs'
-import { resolve, extname, join } from 'node:path'
-
-// ── shared file utilities (mirrors ast-grep.ts) ───────────────────
-
-const LANG_BY_EXT: Record<string, string> = {
-  '.ts': 'TypeScript',
-  '.tsx': 'Tsx',
-  '.js': 'JavaScript',
-  '.jsx': 'Tsx',
-  '.html': 'Html',
-  '.css': 'Css',
-}
-
-function inferLang(filePath: string): string | null {
-  const ext = extname(filePath).toLowerCase()
-  return LANG_BY_EXT[ext] ?? null
-}
-
-function resolveLang(explicit: string | undefined, filePath: string): string | null {
-  if (explicit) return explicit
-  return inferLang(filePath)
-}
-
-function collectFiles(searchPath: string): string[] {
-  const abs = resolve(searchPath)
-  if (!existsSync(abs)) return []
-  const stat = lstatSync(abs)
-  if (stat.isFile()) return [abs]
-  if (!stat.isDirectory()) return []
-  const files: string[] = []
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name)
-      if (entry.isDirectory()) {
-        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
-        walk(full)
-      } else if (entry.isFile()) {
-        files.push(full)
-      }
-    }
-  }
-  walk(abs)
-  return files
-}
-
-/**
- * Extract meta-variable names from an ast-grep pattern string.
- * Returns pairs of (name, isMulti) where isMulti means $$$NAME (multi-node).
- */
-function collectMetaVarNames(pattern: string): Array<{ name: string; multi: boolean }> {
-  const seen = new Set<string>()
-  const vars: Array<{ name: string; multi: boolean }> = []
-  // group 1: $$ (optional, present → multi), group 2: name
-  const re = /\$(\$\$)?([A-Za-z_][A-Za-z0-9_]*)/g
-  let m: RegExpExecArray | null
-  while ((m = re.exec(pattern)) !== null) {
-    const name = m[2]!
-    if (!seen.has(name)) {
-      seen.add(name)
-      vars.push({ name, multi: m[1] === '$$' })
-    }
-  }
-  return vars
-}
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { writeFileAtomicAsync } from '../fs-atomic.js'
+import {
+  inferLang,
+  resolveLang,
+  collectFiles,
+  collectMetaVarNames,
+} from './ast-shared.js'
 
 // ── types ─────────────────────────────────────────────────────────
 
@@ -195,8 +139,9 @@ export const AST_EDIT_TOOL: Tool = {
       }
 
       const langValue = LANG_MAP[langStr]
+      // runtime assertion: napi.Lang uses non-enumerable getters — verify we got a real string
       if (typeof langValue !== 'string') {
-        errors.push(`${filePath}: unsupported language`)
+        errors.push(`${filePath}: LANG_MAP returned non-string for "${langStr}" — possible @ast-grep/napi API change`)
         continue
       }
 
@@ -278,7 +223,7 @@ export const AST_EDIT_TOOL: Tool = {
         fileResults.push({ file: filePath, changes })
         if (!dryRun) {
           try {
-            writeFileSync(filePath, currentSource, 'utf-8')
+            await writeFileAtomicAsync(filePath, currentSource)
           } catch {
             errors.push(`${filePath}: failed to write changes`)
           }
