@@ -624,7 +624,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
         set autoContinueCount(v) { self.autoContinueCount = v },
         get taskContract() { return self.taskContract },
         set taskContract(v) { self.taskContract = v },
-      } as any,
+      },
       getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
       getDoomLoopLevel: () => self.getDoomLoopLevel(),
       appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },

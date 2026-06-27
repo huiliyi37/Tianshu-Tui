@@ -7,8 +7,14 @@ import { rejectOnAbort } from './turn-boundary-abort.js'
 
 // ── Types ──
 
+/** The subset of TurnStateBag this controller reads/writes. Declared as a Pick
+ *  so the factory can pass a partial bag (only these 5 fields) without an `as any`
+ *  escape — the controller never touches the other 14 state fields. */
+export type PostTurnState = Pick<TurnStateBag,
+  'streamedText' | 'thinkingOnlyRetries' | 'lastThinkingContent' | 'taskContract' | 'autoContinueCount'>
+
 export interface PostTurnDecisionDeps {
-  state: TurnStateBag
+  state: PostTurnState
   getMaxAutoContinue: () => number
   getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
   appendSystemReminder: (content: string) => void
