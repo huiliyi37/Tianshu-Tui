@@ -32,10 +32,11 @@ function readThemeColors(): { background: string; foreground: string; cursor: st
   }
 }
 
-export function TerminalPanel({ cwd }: { cwd: string }) {
+export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyId?: string }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
+  const ptyId = externalPtyId ?? crypto.randomUUID()
 
   useEffect(() => {
     const host = hostRef.current
@@ -47,7 +48,6 @@ export function TerminalPanel({ cwd }: { cwd: string }) {
     let disposed = false
     let unlistenOutput: UnlistenFn | null = null
     let unlistenExit: UnlistenFn | null = null
-    const ptyId = crypto.randomUUID()
 
     const colors = readThemeColors()
     const term = new Terminal({

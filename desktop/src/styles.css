@@ -1992,6 +1992,22 @@ body {
 .changes-delta .del { color: var(--error); }
 .changes-diff-view { flex: 1; min-width: 0; overflow: auto; padding: var(--space-3); }
 
+/* TerminalTabs — multi-tab terminal panel (Gap 4) */
+.terminal-tabs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.tt-tab-bar { display: flex; align-items: center; gap: 2px; padding: 0 var(--space-2); border-bottom: 1px solid var(--border); background: var(--panel); flex: none; overflow-x: auto; }
+.tt-tab { display: flex; align-items: center; gap: 4px; padding: 4px 8px; cursor: pointer; font-size: var(--text-xs); color: var(--muted); border-right: 1px solid var(--border); white-space: nowrap; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.tt-tab:hover { background: var(--panel-2); color: var(--text-secondary); }
+.tt-tab.active { color: var(--text-strong); background: var(--bg); }
+.tt-tab-icon { flex: none; opacity: 0.7; }
+.tt-tab.active .tt-tab-icon { color: var(--accent); opacity: 1; }
+.tt-tab-title { overflow: hidden; text-overflow: ellipsis; }
+.tt-tab-close { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; background: none; cursor: pointer; color: var(--faint); border-radius: var(--radius-sm); padding: 0; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.tt-tab-close:hover { background: var(--error-soft, var(--panel-3)); color: var(--error); }
+.tt-add { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: none; cursor: pointer; color: var(--muted); border-radius: var(--radius-sm); margin-left: 2px; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.tt-add:hover { background: var(--panel-2); color: var(--accent); }
+.tt-terminals { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.tt-terminal-wrapper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
 /* FileExplorer — read-only file browser (Gap 1) */
 .file-explorer { display: flex; height: 100%; min-height: 0; }
 .fe-tree-panel {

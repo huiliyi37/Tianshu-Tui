@@ -7,7 +7,7 @@ import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
-import { TerminalPanel } from '../components/TerminalPanel'
+import { TerminalTabs } from '../components/TerminalTabs'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
@@ -176,7 +176,7 @@ export function WorkspaceSurface() {
                 </div>
               )}
             </div>
-            {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
+            {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
           </div>
         </Panel>
         <Separator className="panel-resize-handle" />
