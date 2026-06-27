@@ -483,6 +483,13 @@ function buildManagedAgent(
   }
 }
 
+class CouncilError extends Error {
+  constructor(message: string, public statusCode: number) {
+    super(message)
+    this.name = 'CouncilError'
+  }
+}
+
 /**
  * I1: 在指定 session 上召集议事会。输入 artifactId 必须指向一个包含
  * ```council-plan-json 代码块的可执行计划；后端从 raw 中提取 UnifiedPlan
@@ -500,24 +507,18 @@ async function conveneCouncilOnCoordinator(
   },
 ): Promise<{ planMarkdown: string; artifactId: string }> {
   if (agent.isRunning()) {
-    const err = new Error('Session is already running a turn')
-    ;(err as unknown as Record<string, number>).statusCode = 409
-    throw err
+    throw new CouncilError('Session is already running a turn', 409)
   }
   if (!coordinator) {
     throw new Error('DelegationCoordinator not initialized')
   }
   const raw = await agent.artifactStore?.readRaw(input.artifactId)
   if (!raw) {
-    const err = new Error('Artifact not found')
-    ;(err as unknown as Record<string, number>).statusCode = 404
-    throw err
+    throw new CouncilError('Artifact not found', 404)
   }
   const planJson = extractCouncilPlanJson(raw)
   if (!planJson) {
-    const err = new Error('Artifact does not contain a valid council-plan-json block')
-    ;(err as unknown as Record<string, number>).statusCode = 400
-    throw err
+    throw new CouncilError('Artifact does not contain a valid council-plan-json block', 400)
   }
   const draftItems: PlanItem[] = planJson.tasks.map((t) => ({
     id: t.id,
@@ -543,8 +544,15 @@ async function conveneCouncilOnCoordinator(
       signal?: AbortSignal,
       onProgress?: (completed: number, total: number) => void,
     ) => {
+      const delegationReqs: import('../agent/coordinator.js').DelegationRequest[] = requests.map((r) => ({
+        parentTurnId: r.parentTurnId,
+        objective: r.objective,
+        kind: r.kind,
+        profile: r.profile,
+        scope: r.scope,
+      }))
       const run = await coordinator.delegateBatch(
-        requests as unknown as import('../agent/coordinator.js').DelegationRequest[],
+        delegationReqs,
         policy,
         signal,
         onProgress,

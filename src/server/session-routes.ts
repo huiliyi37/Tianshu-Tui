@@ -726,9 +726,10 @@ export function buildSessionRoutes(
         })
         return { status: 200, body: result }
       } catch (err: unknown) {
-        const status = (err as { statusCode?: number }).statusCode ?? 500
-        const message = (err as Error)?.message ?? 'Council failed'
-        return { status, body: { error: message } }
+        if (err instanceof Error && 'statusCode' in err && typeof (err as { statusCode: unknown }).statusCode === 'number') {
+          return { status: (err as { statusCode: number }).statusCode, body: { error: err.message } }
+        }
+        return { status: 500, body: { error: (err as Error)?.message ?? 'Council failed' } }
       }
     }, apiToken),
 
