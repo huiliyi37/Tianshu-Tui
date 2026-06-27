@@ -1457,6 +1457,49 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
     }
 
+    case '/workflow': {
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const sub = parts[1]
+      const { listWorkflows, loadWorkflow, listTraces, loadTrace, formatTrace, parseWorkflow } = await import('../agent/workflow-runner.js')
+
+      if (!sub || sub === 'list') {
+        const names = listWorkflows(cwd)
+        const text = names.length === 0
+          ? 'No workflows. Create one in .rivet/workflows/*.yaml'
+          : `Available workflows:\n\n${names.map(n => `  ${n}`).join('\n')}\n\nUse: /workflow <name> to execute.`
+        pushStatic(createLogEntry({ type: 'system', content: text }))
+      } else if (sub === 'replay') {
+        const traceId = parts[2]
+        if (!traceId) {
+          const traces = listTraces(cwd, 10)
+          const text = traces.length === 0
+            ? 'No traces available.'
+            : `Recent traces:\n\n${traces.map(t => `  ${t.traceId} — ${t.workflowName} (${t.finalStatus})`).join('\n')}\n\nUse: /workflow replay <id> to view.`
+          pushStatic(createLogEntry({ type: 'system', content: text }))
+        } else {
+          const trace = loadTrace(cwd, traceId)
+          if (!trace) {
+            pushStatic(createLogEntry({ type: 'system', content: `Trace "${traceId}" not found.`, isError: true }))
+          } else {
+            pushStatic(createLogEntry({ type: 'system', content: formatTrace(trace) }))
+          }
+        }
+      } else {
+        // Execute workflow by name
+        const wf = loadWorkflow(cwd, sub)
+        if (!wf) {
+          pushStatic(createLogEntry({ type: 'system', content: `Workflow "${sub}" not found. Use /workflow list to see available workflows.`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `▶ Workflow "${wf.name}" loaded (${wf.steps.length} steps).\n${wf.description ?? ''}\n\n→ Type your objective to execute, or /cancel to abort.`,
+          }))
+        }
+      }
+      setIsStreaming(false)
+      return true
+    }
+
     case '/constellation': {
       const cwd = ctx.agent.cwd ?? process.cwd()
       const sub = (parts[1] ?? 'view').toLowerCase()
