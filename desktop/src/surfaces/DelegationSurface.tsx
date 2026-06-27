@@ -115,10 +115,10 @@ const DOT_CLS: Record<StatusClass, string> = {
   idle: 'bg-muted',
 }
 const BADGE_CLS: Record<StatusClass, string> = {
-  running: 'bg-[var(--accent-soft)] text-accent',
-  ok: 'bg-[var(--success-soft)] text-success',
-  warn: 'bg-[var(--warning-soft)] text-warning',
-  bad: 'bg-[var(--error-soft)] text-error',
+  running: 'bg-accent-soft text-accent',
+  ok: 'bg-success-soft text-success',
+  warn: 'bg-warning-soft text-warning',
+  bad: 'bg-error-soft text-error',
   idle: 'bg-panel-2 text-muted',
 }
 
@@ -163,7 +163,7 @@ function NodeRow({
   return (
     <>
       <div
-        className={`group flex cursor-pointer items-center gap-2 border-b border-border px-2.5 py-1.5 transition-colors duration-140 ease-[cubic-bezier(0.2,0,0,1)] hover:bg-panel-2 ${selected ? 'bg-[var(--accent-soft)]' : ''} ${dimmed ? 'opacity-35' : ''}`}
+        className={`group flex cursor-pointer items-center gap-2 border-b border-border px-2.5 py-1.5 transition-colors duration-140 ease-smooth hover:bg-panel-2 ${selected ? 'bg-accent-soft' : ''} ${dimmed ? 'opacity-35' : ''}`}
         style={{ paddingLeft: `${12 + depth * 18}px` }}
         onClick={() => onSelect(n)}
       >
@@ -309,7 +309,7 @@ export function DelegationSurface() {
           {(Object.keys(FILTERS) as FilterKind[]).map((k) => (
             <button
               key={k}
-              className={`cursor-pointer rounded-full border px-3 py-1 text-[11px] transition-colors duration-140 ease-[cubic-bezier(0.2,0,0,1)] ${filter === k ? 'border-accent bg-[var(--accent-soft)] text-accent' : 'border-border bg-panel text-muted hover:bg-panel-2 hover:text-text'}`}
+              className={`cursor-pointer rounded-full border px-3 py-1 text-[11px] transition-colors duration-140 ease-smooth ${filter === k ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-panel text-muted hover:bg-panel-2 hover:text-text'}`}
               onClick={() => setFilter(k)}
             >
               {FILTERS[k]!.label}

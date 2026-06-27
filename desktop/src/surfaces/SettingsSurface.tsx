@@ -11,7 +11,7 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
-import { useWallpaperControl, type WallpaperFit } from '../components/WallpaperLayer'
+import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -231,7 +231,7 @@ function McpSettingsManager() {
 
 /** Wallpaper & frosted glass settings section. */
 function WallpaperSection() {
-  const { wallpaper, fit, pick, clear, changeFit } = useWallpaperControl()
+  const { wallpaper, fit, pick, clear, changeFit } = useWallpaper()
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 

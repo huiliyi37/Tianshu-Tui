@@ -85,6 +85,12 @@ test('isKnownSlashCommand: unknown command returns false', () => {
 test('isKnownSlashCommand: typo of known command returns false', () => {
   // /mdel looks like /model but is a typo — must not match
   assert.equal(isKnownSlashCommand('/mdel', CMDS), false)
+  // /reviewx is not /review and should not match by prefix
+  assert.equal(isKnownSlashCommand('/reviewx', CMDS), false)
+})
+
+test('isKnownSlashCommand: multi-word command without extra args is known', () => {
+  assert.equal(isKnownSlashCommand('/review max', CMDS), true)
 })
 
 test('isKnownSlashCommand: non-slash input returns true (not a guard concern)', () => {

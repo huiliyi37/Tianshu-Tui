@@ -1,17 +1,17 @@
-import { lazy, Suspense, useState, useEffect, useMemo } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useHealth, useSessions, useCreateSession } from './state/queries'
-import { useUiDispatch, useUiState, type Surface } from './state/store'
+import { useHealth, useCreateSession } from './state/queries'
+import { useUiDispatch, useUiState } from './state/store'
 import { useGlobalNotifications } from './state/use-global-notifications'
-import { deriveProjects, loadKnownProjects } from './lib/projects'
-import { loadThemePref, setThemePref, type ThemePref } from './lib/theme'
-import type { Command } from './lib/commands'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { Toaster } from 'sonner'
 import { WallpaperLayer } from './components/WallpaperLayer'
+import { WallpaperProvider } from './components/WallpaperContext'
+import { useGlobalShortcuts } from './lib/use-global-shortcuts'
+import { useSurfaceCommands } from './lib/use-surface-commands'
 // L1 #10: 非首屏 Surface 懒加载，减小首屏 chunk
 const InboxSurface = lazy(() =>
   import('./surfaces/InboxSurface').then((m) => ({ default: m.InboxSurface })),
@@ -35,135 +35,23 @@ const DelegationSurface = lazy(() =>
   import('./surfaces/DelegationSurface').then((m) => ({ default: m.DelegationSurface })),
 )
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'settings']
-
-function nextTheme(p: ThemePref): ThemePref {
-  return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
-}
-
 export function App() {
   const { t: tNav } = useTranslation('nav')
-  const { t: tCmd } = useTranslation('commandPalette')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
-  const sessions = useSessions()
   const createSession = useCreateSession()
   useGlobalNotifications()
 
   const [paletteOpen, setPaletteOpen] = useState(false)
+  useGlobalShortcuts(setPaletteOpen)
+  const commands = useSurfaceCommands()
 
   const sidecarDown = health.isError
-
-  // Global shortcuts. All desktop shortcuts register here, in a single
-  // handler, to avoid N component-level window.addEventListener calls.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey
-      // Cmd+K → command palette toggle
-      if (mod && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault()
-        setPaletteOpen((o) => !o)
-        return
-      }
-      // Cmd+1..8 → switch surface
-      if (mod && !e.shiftKey && e.key >= '1' && e.key <= '8') {
-        e.preventDefault()
-        dispatch({ type: 'setSurface', surface: SURFACE_ORDER[Number(e.key) - 1]! })
-        return
-      }
-      // Cmd+Shift+[ / ] → cycle tabs (previous / next)
-      if (mod && e.shiftKey && (e.key === '[' || e.key === ']')) {
-        e.preventDefault()
-        const tabs = ui.openTabs
-        if (tabs.length < 2) return
-        const idx = ui.activeSessionId ? tabs.indexOf(ui.activeSessionId) : -1
-        const dir = e.key === '[' ? -1 : 1
-        const next = tabs[(idx + dir + tabs.length) % tabs.length]
-        if (next) dispatch({ type: 'setActive', id: next })
-        return
-      }
-      // Cmd+Shift+B → toggle review panel (must precede Cmd+B)
-      if (mod && e.shiftKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault()
-        dispatch({ type: 'setReview', visible: !ui.reviewVisible })
-        dispatch({ type: 'setReviewManual', on: true })
-        return
-      }
-      // Cmd+B → toggle sidebar
-      if (mod && !e.shiftKey && (e.key === 'b' || e.key === 'B')) {
-        e.preventDefault()
-        dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
-        return
-      }
-      // Cmd+J → toggle terminal
-      if (mod && (e.key === 'j' || e.key === 'J')) {
-        e.preventDefault()
-        dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })
-        return
-      }
-      // Cmd+N → new thread dialog
-      if (mod && (e.key === 'n' || e.key === 'N')) {
-        e.preventDefault()
-        dispatch({ type: 'openNew', open: true })
-        return
-      }
-      // Cmd+, → settings surface
-      if (mod && e.key === ',') {
-        e.preventDefault()
-        dispatch({ type: 'setSurface', surface: 'settings' })
-        return
-      }
-      // Cmd+/ → shortcut cheatsheet (via command palette search)
-      if (mod && e.key === '/') {
-        e.preventDefault()
-        setPaletteOpen(true)
-        return
-      }
-      // Cmd+W → close current thread tab
-      if (mod && (e.key === 'w' || e.key === 'W')) {
-        e.preventDefault()
-        if (ui.activeSessionId) dispatch({ type: 'closeTab', id: ui.activeSessionId })
-        return
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [dispatch, ui.sidebarVisible, ui.reviewVisible, ui.terminalVisible, ui.activeSessionId, ui.openTabs])
-
-  const jumpTo = (cwd: string, id: string) => {
-    dispatch({ type: 'setProject', cwd })
-    dispatch({ type: 'setActive', id })
-    dispatch({ type: 'setSurface', surface: 'workspace' })
-  }
-
-  const commands: Command[] = useMemo(() => {
-    const list = sessions.data ?? []
-    const cmds: Command[] = [
-      { id: 'new-thread', label: '新建线程', hint: '操作', run: () => dispatch({ type: 'openNew', open: true }) },
-      { id: 'theme', label: '切换主题', hint: '外观', run: () => setThemePref(nextTheme(loadThemePref())) },
-    ]
-    for (const s of SURFACE_ORDER) {
-      cmds.push({ id: `surface-${s}`, label: tCmd('goTo', { label: tNav(s) }), hint: tCmd('hintNavigate'), run: () => dispatch({ type: 'setSurface', surface: s }) })
-    }
-    for (const p of deriveProjects(list, loadKnownProjects())) {
-      cmds.push({ id: `proj-${p.cwd}`, label: `项目：${p.name}`, hint: '项目', run: () => dispatch({ type: 'setProject', cwd: p.cwd }) })
-    }
-    for (const s of list) {
-      cmds.push({
-        id: `thread-${s.id}`,
-        label: `线程：${s.title ?? s.id.slice(0, 8)}`,
-        hint: '跳转',
-        run: () => jumpTo(s.cwd, s.id),
-      })
-    }
-    return cmds
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessions.data, dispatch, tNav, tCmd])
-
   return (
-    <div className="shell">
-      <WallpaperLayer />
+    <WallpaperProvider>
+      <div className="shell">
+        <WallpaperLayer />
       <div className="main">
         {sidecarDown && (
           <div className="banner error">sidecar 离线，重连中…</div>
@@ -227,5 +115,6 @@ export function App() {
       )}
       <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
+    </WallpaperProvider>
   )
 }
