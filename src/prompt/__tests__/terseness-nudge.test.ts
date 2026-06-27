@@ -14,14 +14,14 @@ describe('renderTersenessNudge (Phase 2B)', () => {
   it('governs prose only and protects verification rigor', () => {
     const out = renderTersenessNudge(false)
     assert.match(out, /^<output-style>/)
-    assert.match(out, /OUTPUT PROSE ONLY/)
-    assert.match(out, /never reduce verification/i)
-    assert.doesNotMatch(out, /especially terse/)
+    assert.match(out, /只约束输出文字/)
+    assert.match(out, /绝不因此削减验证/)
+    assert.doesNotMatch(out, /尤其简洁/)
   })
 
   it('escalates with a stricter clause', () => {
     const out = renderTersenessNudge(true)
-    assert.match(out, /especially terse/)
+    assert.match(out, /尤其简洁/)
   })
 })
 
@@ -42,7 +42,7 @@ describe('buildDynamicAppendixParts terseness wiring', () => {
     const parts = buildDynamicAppendixParts(baseCtx({ tersenessEnabled: true }))
     const styleBlocks = parts.filter(p => p.name === 'output-style')
     assert.equal(styleBlocks.length, 1)
-    assert.match(styleBlocks[0]!.content, /Be terse in prose/)
+    assert.match(styleBlocks[0]!.content, /文字要精炼/)
   })
 
   it('opt-in via RIVET_TERSE=1 env flag', () => {
@@ -63,6 +63,6 @@ describe('buildDynamicAppendixParts terseness wiring', () => {
     )
     const block = parts.find(p => p.name === 'output-style')
     assert.ok(block)
-    assert.match(block!.content, /especially terse/)
+    assert.match(block!.content, /尤其简洁/)
   })
 })
