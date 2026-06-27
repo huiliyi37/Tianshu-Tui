@@ -15,24 +15,16 @@ import { parseOptionalInt, rangeContains } from './shared-range.js'
 const LAG_STEPS = 3 // only evaluate tool results at least 3 assistant turns old
 const MIN_CONTENT_CHARS = 500 // skip short results
 
-/**
- * When set, a tool result whose all-message suffix (every message after it)
- * exceeds this many estimated tokens is inside the warm, already-sent cache
- * prefix — mutating it forces the provider to re-write the entire suffix at
- * cacheWrite premium. Such results are left for compaction (which rebuilds
- * the cache anyway) to reclaim. Undefined = no cache guard (legacy behavior).
- *
- * Default (when cacheGuard is enabled but no explicit limit): 8000 tokens —
- * matches pi's pruneSupersededToolResults default. Only the cheap-to-recache
- * tail gets pruned.
- */
-const DEFAULT_SUFFIX_TOKEN_LIMIT = 8000
-
 export interface StalenessOptions {
   /**
-   * Enable prompt-cache-aware pruning. When set, staleness mutations are
-   * skipped for messages whose suffix exceeds `suffixTokenLimit` tokens,
-   * preventing expensive cacheWrite premiums on exact-prefix providers.
+   * Prompt-cache-aware pruning. When set, staleness mutations are skipped
+   * for messages whose suffix exceeds this many estimated tokens — such
+   * messages sit in the warm cache prefix and mutating them forces the
+   * provider to re-write the entire suffix at cacheWrite premium.
+   *
+   * Undefined = no cache guard (legacy behavior). The production caller
+   * (PromptEngine) passes 8000; tests may omit it to exercise the unguarded
+   * path.
    */
   suffixTokenLimit?: number
 }
