@@ -122,11 +122,20 @@ describe('work-order contract', () => {
   })
 
   it('reports schema errors from the WorkerResult candidate, not incidental JSON', () => {
-    assert.throws(() => parseWorkerResult(`{"note":"incidental"}\n{
+    // parseWorkerResult no longer throws on schema errors — it returns a blocked
+    // result with the diagnostic error details, allowing the coordinator to surface
+    // the failure without crashing the retry chain.
+    const result = parseWorkerResult(`{"note":"incidental"}\n{
   "workOrderId": "wo_1",
   "status": "done",
   "summary": "Invalid result status"
-}`, 'wo_1'), /Invalid enum value/)
+}`, 'wo_1')
+    assert.equal(result.status, 'blocked')
+    // The diagnostic includes errors from ALL candidates; the important one
+    // (invalid enum value "done") should be present somewhere in the output.
+    const diag = result.artifacts[0]!.content as string
+    assert.ok(diag.includes('done') || diag.includes('invalid_enum_value'),
+      `expected blocked result to mention the "done" status error. Got: ${diag}`)
   })
 
   it('auto-fixes wrong workOrderId to expected one (fault tolerance for cheap models)', () => {

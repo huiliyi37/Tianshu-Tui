@@ -376,14 +376,65 @@ function extractBalancedJsonCandidates(text: string): string[] {
 }
 
 export function extractJsonCandidates(text: string): string[] {
-  const candidates = [...extractFencedJsonCandidates(text), ...extractBalancedJsonCandidates(text)]
-  if (candidates.length > 0) return candidates
+  // Strategy 1: fenced JSON (```json ... ``` or ``` ... ```) — Codex-style multi-tag.
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)]
+    .map(m => m[1]?.trim())
+    .filter((c): c is string => Boolean(c?.includes('{') && c.includes('}')))
 
-  const firstBrace = text.indexOf('{')
-  const lastBrace = text.lastIndexOf('}')
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return [text.slice(firstBrace, lastBrace + 1)]
+  // Strategy 2: balanced { ... } pairs anywhere in the response.
+  const balanced = extractBalancedJsonCandidates(text)
+
+  // Strategy 3: YAML/TOML fences — some models wrap JSON in ```yaml or ```toml.
+  const altFenced = [...text.matchAll(/```(?:yaml|toml)?\s*([\s\S]*?)```/g)]
+    .map(m => m[1]?.trim())
+    .filter((c): c is string => Boolean(c?.startsWith('{') && c.endsWith('}')))
+
+  const all = [...fenced, ...altFenced, ...balanced]
+
+  // Strategy 4: tail extraction — models most often place JSON at the END of
+  // the response after prose. Try the last N characters as a candidate.
+  const TAIL_SIZE = 8000
+  const tail = text.length > TAIL_SIZE ? text.slice(-TAIL_SIZE) : text
+  const tailFirst = tail.indexOf('{')
+  const tailLast = tail.lastIndexOf('}')
+  if (tailFirst !== -1 && tailLast > tailFirst) {
+    const tailCandidate = tail.slice(tailFirst, tailLast + 1)
+    // Avoid duplicate of an already-captured balanced candidate
+    if (!all.includes(tailCandidate)) {
+      all.push(tailCandidate)
+    }
   }
+
+  if (all.length > 0) return all
+
+  // Strategy 5: raw text — treat the entire trimmed message as a candidate.
+  const trimmed = text.trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return [trimmed]
+  }
+
+  // Strategy 6: truncated JSON repair — find the first { and append } to balance.
+  const firstBrace = text.indexOf('{')
+  if (firstBrace !== -1) {
+    const truncated = text.slice(firstBrace)
+    // Count open vs close braces and append enough } to balance.
+    let depth = 0
+    let inStr = false
+    let esc = false
+    for (const ch of truncated) {
+      if (esc) { esc = false; continue }
+      if (ch === '\\') { esc = true; continue }
+      if (ch === '"') { inStr = !inStr; continue }
+      if (inStr) continue
+      if (ch === '{') depth++
+      else if (ch === '}') depth--
+    }
+    if (depth > 0) {
+      all.push(truncated + '}'.repeat(depth))
+    }
+  }
+
+  if (all.length > 0) return all
 
   throw new Error('Worker result did not contain a JSON object')
 }
@@ -431,6 +482,8 @@ function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): 
 }
 
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {
+  // extractJsonCandidates throws when truly no JSON is found — let it propagate
+  // so the caller's repair loop can trigger a retry with the repair prompt.
   const candidates = extractJsonCandidates(text)
   const errors: string[] = []
 
@@ -451,7 +504,14 @@ export function parseWorkerResult(text: string, expectedWorkOrderId: string): Wo
     }
   }
 
-  throw new Error(errors.at(-1) ?? 'Worker result did not contain a valid JSON object')
+  // All JSON candidates failed to parse or validate. Return a blocked result
+  // with diagnostic details so the coordinator can see what went wrong, instead
+  // of throwing and triggering yet another retry with the same broken prompt.
+  // The caller's repair loop already handles retries; this is the terminal case.
+  return buildBlockedWorkerResult(
+    { id: expectedWorkOrderId } as WorkOrder,
+    `JSON candidates found (${candidates.length}) but none parseable. Errors: ${errors.join(' | ')}`.slice(0, 500),
+  )
 }
 
 export function buildBlockedWorkerResult(order: WorkOrder, reason: string): WorkerResult {
