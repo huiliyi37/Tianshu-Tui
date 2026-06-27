@@ -54,8 +54,8 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -2396,7 +2396,8 @@ export class TuiApp {
     domainPickerData?: () => DomainPickerData
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void): void {
+    choicePanelData?: () => ChoicePanelData
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -2404,6 +2405,7 @@ export class TuiApp {
     this.overlayController.setDomainPickerExec(domainPickerExec)
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
+    this.overlayController.setChoicePanelExec(choicePanelExec)
     // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -2490,6 +2492,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.themePickerData?.() ?? { entries: [], selectedIndex: 0 }
         return renderThemePicker({ ...data, selectedIndex: this.overlayController.nav().themePickerIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Choice Panel — 通用选项选择弹窗；selectedIndex 由 overlayNav 注入
+    this.overlay.register('choice-panel', {
+      render: (_w, _h) => {
+        const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
+        return renderChoicePanel({ ...data, selectedIndex: this.overlayController.nav().choicePanelIndex }, this.columns, this.rows, this.theme)
       },
     })
   }

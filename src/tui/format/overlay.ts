@@ -707,3 +707,79 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
+
+// ── Choice Panel (通用选项选择弹窗) ──────────────────────────────
+// A question + N choices (each with optional description + recommended flag).
+// Used when the agent needs the user to pick one of several strategies,
+// confirm a risky action, or select a star domain — the TUI equivalent of
+// the desktop "ask" overlay.
+
+export interface ChoiceEntry {
+  id: string
+  label: string
+  description?: string
+  /** Marked with ★ to guide the user toward the agent's suggestion. */
+  recommended?: boolean
+}
+
+export interface ChoicePanelData {
+  /** Question / prompt shown as the title bar. */
+  title: string
+  choices: ChoiceEntry[]
+  selectedIndex: number
+}
+
+export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar(data.title, width, theme))
+  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+
+  const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
+  const contentRows = Math.max(1, height - 5) // border + title + separator + footer + bottom
+
+  if (data.choices.length === 0) {
+    lines.push(padLine(color('  （无可用选项）', theme.dim), width, theme))
+    lines.push(formatFooter('Esc close', width, theme))
+    lines.push(formatBottomBorder(width, theme))
+    return lines
+  }
+
+  // Each choice takes 1-2 lines (label + optional description). Calculate
+  // how many fit, with wrapping for long descriptions.
+  let rowsUsed = 0
+  for (let i = 0; i < data.choices.length; i++) {
+    if (rowsUsed >= contentRows) break
+    const c = data.choices[i]!
+    const selected = i === data.selectedIndex
+    const accent = selected ? theme.primary : theme.dim
+
+    // Label line: cursor + recommended star + label
+    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const star = c.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
+    const labelColor = selected ? theme.primary : theme.secondary
+    const labelText = selected ? color(c.label, labelColor, { bold: true }) : color(c.label, labelColor)
+    lines.push(padLine(` ${cursor} ${star} ${labelText}`, width, theme))
+    rowsUsed++
+
+    // Description line(s)
+    if (c.description && rowsUsed < contentRows) {
+      const descWrapped = wrapToWidth(c.description, innerWidth, 2)
+      for (const d of descWrapped) {
+        if (rowsUsed >= contentRows) break
+        lines.push(padLine(`     ${color(d, theme.muted)}`, width, theme))
+        rowsUsed++
+      }
+    }
+  }
+
+  // Pad remaining rows
+  while (rowsUsed < contentRows) {
+    lines.push(padLine('', width, theme))
+    rowsUsed++
+  }
+
+  lines.push(formatFooter('↑↓ select  Enter confirm  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}

@@ -1,4 +1,4 @@
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import type { RewindData } from '../format/rewind.js'
 import type { HistorySearchData } from '../format/history-search.js'
@@ -12,6 +12,7 @@ export interface OverlayNavState {
   domainPickerIndex: number
   modelPickerIndex: number
   themePickerIndex: number
+  choicePanelIndex: number
   query: string
 }
 
@@ -27,6 +28,7 @@ export interface OverlayDataProviders {
   domainPickerData?: () => DomainPickerData
   modelPickerData?: () => ModelPickerData
   themePickerData?: () => ThemePickerData
+  choicePanelData?: () => ChoicePanelData
 }
 
 /**
@@ -35,7 +37,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, query: '' }
+  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (content: string) => void
@@ -43,13 +45,14 @@ export class OverlayController {
   private domainPickerExec?: (key: string) => void
   private modelPickerExec?: (key: string) => void
   private themePickerExec?: (key: string) => void
+  private choicePanelExec?: (id: string) => void
   private cockpitPanel: Panel = 'summary'
 
   // ── nav state ──
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
@@ -65,7 +68,8 @@ export class OverlayController {
   get domainPickerIndex(): number { return this.overlayNav.domainPickerIndex }
   setDomainPickerIndex(v: number): void { this.overlayNav.domainPickerIndex = v }
   get modelPickerIndex(): number { return this.overlayNav.modelPickerIndex }
-  setModelPickerIndex(v: number): void { this.overlayNav.modelPickerIndex = v }
+  get choicePanelIndex(): number { return this.overlayNav.choicePanelIndex }
+  setChoicePanelIndex(v: number): void { this.overlayNav.choicePanelIndex = v }
   get themePickerIndex(): number { return this.overlayNav.themePickerIndex }
   setThemePickerIndex(v: number): void { this.overlayNav.themePickerIndex = v }
 
@@ -98,6 +102,8 @@ export class OverlayController {
   setModelPickerExec(fn: ((key: string) => void) | undefined): void { this.modelPickerExec = fn }
   getThemePickerExec(): ((key: string) => void) | undefined { return this.themePickerExec }
   setThemePickerExec(fn: ((key: string) => void) | undefined): void { this.themePickerExec = fn }
+  getChoicePanelExec(): ((id: string) => void) | undefined { return this.choicePanelExec }
+  setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
 
   // ── cockpit panel ──
   getCockpitPanel(): Panel { return this.cockpitPanel }
