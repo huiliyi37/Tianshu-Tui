@@ -12,6 +12,13 @@ import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
@@ -64,17 +71,16 @@ export function SettingsSurface() {
 
       <section className="settings-group">
         <h4>外观</h4>
-        <div className="seg">
-          {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
-            <button
-              key={t}
-              className={`seg-item ${theme === t ? 'active' : ''}`}
-              onClick={() => pick(t)}
-            >
-              {THEME_LABEL[t]}
-            </button>
-          ))}
-        </div>
+        <Select value={theme} onValueChange={(v) => pick(v as ThemePref)}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="选择主题" />
+          </SelectTrigger>
+          <SelectContent>
+            {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+              <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </section>
 
       <LanguageSection />
@@ -89,33 +95,31 @@ export function SettingsSurface() {
 
       <section className="settings-group">
         <h4>工具组密度</h4>
-        <div className="seg">
-          {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
-            <button
-              key={d}
-              className={`seg-item ${ui.toolDensity === d ? 'active' : ''}`}
-              onClick={() => pickDensity(d)}
-            >
-              {DENSITY_LABEL[d]}
-            </button>
-          ))}
-        </div>
+        <Select value={ui.toolDensity} onValueChange={(v) => pickDensity(v as ToolDensity)}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="选择密度" />
+          </SelectTrigger>
+          <SelectContent>
+            {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
+              <SelectItem key={d} value={d}>{DENSITY_LABEL[d]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="meta">控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。</div>
       </section>
 
       <section className="settings-group">
         <h4>通知</h4>
-        <div className="seg">
-          {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
-            <button
-              key={n}
-              className={`seg-item ${notifPref === n ? 'active' : ''}`}
-              onClick={() => pickNotif(n)}
-            >
-              {NOTIF_LABEL[n]}
-            </button>
-          ))}
-        </div>
+        <Select value={notifPref} onValueChange={(v) => pickNotif(v as NotifPref)}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="选择通知策略" />
+          </SelectTrigger>
+          <SelectContent>
+            {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
+              <SelectItem key={n} value={n}>{NOTIF_LABEL[n]}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <div className="meta">控制何时收到系统通知：从不（完全静默）、仅后台（窗口失焦时提醒）、始终（全部提醒）。</div>
       </section>
 
@@ -314,17 +318,16 @@ function LanguageSection() {
   return (
     <section className="settings-group">
       <h4>{t('label')}</h4>
-      <div className="seg">
-        {langs.map((l) => (
-          <button
-            key={l}
-            className={`seg-item ${i18n.language === l ? 'active' : ''}`}
-            onClick={() => i18n.changeLanguage(l)}
-          >
-            {t(l)}
-          </button>
-        ))}
-      </div>
+      <Select value={i18n.language} onValueChange={(v) => { if (v) i18n.changeLanguage(v) }}>
+        <SelectTrigger className="w-40">
+          <SelectValue placeholder={t('label')} />
+        </SelectTrigger>
+        <SelectContent>
+          {langs.map((l) => (
+            <SelectItem key={l} value={l}>{t(l)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </section>
   )
 }

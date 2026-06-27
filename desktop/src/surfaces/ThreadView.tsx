@@ -10,6 +10,16 @@ import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { RewindOverlay } from '../components/RewindOverlay'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { useUiState } from '../state/store'
@@ -56,6 +66,7 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const toolDensity = useUiState().toolDensity
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
@@ -268,7 +279,7 @@ export function ThreadView(props: {
           )}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
-          <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
+          <button className="icon-btn thread-close" title="关闭会话" onClick={() => setShowCloseConfirm(true)} aria-label="关闭会话">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M18 6 6 18M6 6l12 12" />
@@ -400,6 +411,21 @@ export function ThreadView(props: {
         />
       )}
       {lightbox && <ImageLightbox src={lightbox} onClose={() => setLightbox(null)} />}
+
+      <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>关闭会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              关闭后该线程将从标签栏移除，未保存的上下文将丢失。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onClose}>关闭</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

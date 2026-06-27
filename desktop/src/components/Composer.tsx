@@ -123,8 +123,6 @@ export function Composer(props: {
   }, [planning, onSetPlanMode])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const plusRef = useRef<HTMLDivElement>(null)
-  const [plusOpen, setPlusOpen] = useState(false)
   const lastEscAt = useRef(0)
   const reqSeq = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout>>()
@@ -156,17 +154,6 @@ export function Composer(props: {
   }, [value])
 
   useEffect(() => () => clearTimeout(debounce.current), [])
-
-  // Close the "+" menu when clicking outside its wrapper (which includes the
-  // trigger button, so toggling on the button doesn't immediately re-close).
-  useEffect(() => {
-    if (!plusOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (plusRef.current && !plusRef.current.contains(e.target as Node)) setPlusOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [plusOpen])
 
   const closeSuggest = () => setSuggest(null)
 
@@ -521,29 +508,19 @@ export function Composer(props: {
         )}
       </div>
       <div className="composer-actions">
-        <div className="plus-wrap" ref={plusRef}>
-          <button
-            className={`plus-btn ${plusOpen ? 'open' : ''}`}
-            onClick={() => setPlusOpen((o) => !o)}
-            title="添加模式 / 图片 / 命令"
-            aria-label="添加"
-            aria-haspopup="menu"
-            aria-expanded={plusOpen}
-          >+</button>
-          {plusOpen && (
-            <PlusMenu
-              sessionId={sessionId}
-              menuRev={menuRev}
-              sessionRunning={busy}
-              planMode={planMode}
-              onSetPlanMode={onSetPlanMode}
-              onPickImage={() => fileInputRef.current?.click()}
-              imageDisabled={images.length >= MAX_IMAGES}
-              commands={commands}
-              onRunCommand={runCommand}
-              onClose={() => setPlusOpen(false)}
-            />
-          )}
+        <div className="plus-wrap">
+          <PlusMenu
+            sessionId={sessionId}
+            menuRev={menuRev}
+            sessionRunning={busy}
+            planMode={planMode}
+            onSetPlanMode={onSetPlanMode}
+            onPickImage={() => fileInputRef.current?.click()}
+            imageDisabled={images.length >= MAX_IMAGES}
+            commands={commands}
+            onRunCommand={runCommand}
+            onClose={() => {}}
+          />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} />
         {onSetPlanMode && (

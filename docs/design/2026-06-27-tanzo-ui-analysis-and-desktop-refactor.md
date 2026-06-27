@@ -2,6 +2,8 @@
 
 > 2026-06-27 · 对比分析 Tanzo (`github.com/f4tumnigrum/Tanzo`) 与天枢桌面端 (`opencode-tui/desktop`)
 
+> **2026-06-27 更新**：Phase 5 已完成 PlusMenu、SettingsSurface、ThreadTabs、AlertDialog 到 shadcn/ui 的迁移（底层依赖 `@base-ui/react`），并开始使用 `lucide-react` 图标。详见 `docs/changelog-2026-06-27.md`。
+
 ## 1. 两个项目的技术栈对比
 
 | 维度 | Tanzo | 天枢桌面端 |
@@ -10,8 +12,8 @@
 | **React** | React 19 + React Router 7 | React 18 (无路由) |
 | **样式系统** | **Tailwind CSS 4** + shadcn/ui 组件库 + CVA | **手写 CSS** + CSS 变量 tokens |
 | **状态管理** | Zustand + TanStack Query/Table | 自研 store (useReducer) |
-| **图标** | **lucide-react** (专业图标库) | 手写 SVG path |
-| **组件库** | shadcn/ui (30+ 组件) + base-ui/react | 全手写 |
+| **图标** | **lucide-react** (专业图标库) | **lucide-react** 逐步替换手写 SVG |
+| **组件库** | shadcn/ui (30+ 组件) + base-ui/react | **shadcn/ui 逐步引入**（Command、Dialog、Select、Switch、Tabs、Tooltip、ContextMenu、AlertDialog 等） |
 | **国际化** | i18next (en/zh-CN, 50KB×2) | 无 (硬编码中文) |
 | **虚拟列表** | react-virtuoso | 无 |
 | **可调整面板** | react-resizable-panels | CSS grid (固定列宽) |
@@ -232,4 +234,4 @@ bun add react-virtuoso
 | React Router 7 | 天枢用 surface 状态机切换，不需要 URL 路由 |
 | TanStack Query | 天枢用自研 SSE 流式状态，与 Query 的轮询模型冲突 |
 | motion (Framer Motion) | 过重，天枢的 CSS transition 够用 |
-| base-ui/react | 底层原语库，天枢不需要这个抽象层 |
+| base-ui/react | 已通过 shadcn/ui `base-nova` 风格间接引入，作为底层原语使用 |

@@ -20,6 +20,16 @@ import { ChangesTab } from './ChangesTab'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
 
@@ -127,7 +137,7 @@ export function ReviewPanel(props: {
   return (
     <div className="review">
       <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
-        <TabsList className="mx-2 mt-2 mb-1 w-auto">
+        <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {tabs.map((t) => {
             const badge = t.badge?.()
             return (
@@ -400,6 +410,7 @@ function RollbackSection(props: { sessionId: string }) {
   const [preview, setPreview] = useState<{ text: string; confirmationToken: string } | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'previewed' | 'running' | 'none'>('idle')
   const [result, setResult] = useState<RollbackResult | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const loadPreview = useCallback(async () => {
     setState('loading')
@@ -446,8 +457,26 @@ function RollbackSection(props: { sessionId: string }) {
           <pre className="rp-preview">{preview.text}</pre>
           <div className="rp-actions">
             <button className="btn ghost sm" onClick={() => setState('idle')}>取消</button>
-            <button className="btn sm danger" onClick={execute}>确认回滚</button>
+            <button className="btn sm danger" onClick={() => setShowConfirm(true)}>确认回滚</button>
           </div>
+
+          <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+            <AlertDialogContent className="max-w-lg sm:max-w-lg">
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认回滚？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  此操作会将当前会话恢复到上一个检查点。部分副作用（如已执行的 bash 命令）可能无法撤销。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <pre className="max-h-48 overflow-auto rounded-md bg-panel-2 p-2 text-xs">{preview.text}</pre>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setShowConfirm(false)}>取消</AlertDialogCancel>
+                <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={execute}>
+                  确认回滚
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
       {result && (

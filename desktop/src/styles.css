@@ -1116,6 +1116,18 @@ body {
   opacity: 1;
   padding: 0 var(--space-4) var(--space-2);
 }
+/* Responsive: hide secondary header chips on narrow screens */
+@media (max-width: 1200px) {
+  .ctx-delta { display: none; }
+}
+@media (max-width: 1000px) {
+  .cache-chip { display: none; }
+  .ctx-meter { display: none; }
+}
+@media (max-width: 800px) {
+  .ctx-bar, .ctx-bar-fill, .ctx-bar-label { display: none; }
+  .mode-chip { display: none; }
+}
 /* Star-domain glyph — always visible, breathes while streaming. */
 .thread-glyph {
   color: var(--accent);
@@ -1732,7 +1744,16 @@ body {
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 .welcome-pill:hover { color: var(--text); border-color: var(--border-strong); background: var(--panel-2); }
-.banner { padding: 8px 14px; font-size: 13px; }
+/* Onboarding empty state (thread-empty with guides) */
+.thread-empty.onboard { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: var(--space-3); padding: var(--space-8); }
+.onboard-glyph { font-size: 48px; color: var(--accent); line-height: 1; animation: onboard-breathe 3s var(--ease) infinite; }
+@keyframes onboard-breathe { 0%,100% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.08); } }
+.onboard-title { font-size: var(--text-xl); font-weight: var(--weight-semibold); color: var(--text-strong); margin: 0; }
+.onboard-subtitle { font-size: var(--text-sm); color: var(--muted); margin: 0; }
+.onboard-actions { margin: var(--space-3) 0; }
+.onboard-hints { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-2); }
+.onboard-hint { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--muted); }
+.onboard-hint kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); }
 .banner { padding: 8px 14px; font-size: 13px; }
 .banner.error { background: var(--error-soft); color: var(--error); }
 
