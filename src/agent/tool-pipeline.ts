@@ -1277,7 +1277,7 @@ export async function executeToolUse(
          })
        } catch { /* non-critical: signal injection is best-effort */ }
      }
-   } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
+   } else if ((tu.name === 'write_file' || tu.name === 'edit_file' || tu.name === 'hash_edit') && !harnessResult.isError) {
       deps.evidence.trackFileModified(tu.input.file_path as string)
       deps.config.promptEngine.markGitDirty()
       deps.config.contextClaimStore?.markClaimsStaleForFile(
