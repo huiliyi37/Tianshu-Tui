@@ -817,11 +817,14 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
     lines.push(padLine(` ${color(label, theme.muted)}: ${color(value, theme.secondary)}`, width, theme))
   }
 
-  // Activity line
-  if (worker.activity) {
+  // Activity log (ring buffer — newest last; fallback to single activity line)
+  const activityLog = worker.activityLog ?? (worker.activity ? [worker.activity] : [])
+  if (activityLog.length > 0) {
     lines.push(padLine('', width, theme))
-    lines.push(padLine(` ${color('Activity:', theme.muted)}`, width, theme))
-    lines.push(padLine(`   ${color(worker.activity, theme.secondary)}`, width, theme))
+    lines.push(padLine(` ${color('Activity Log:', theme.muted)}`, width, theme))
+    for (const entry of activityLog) {
+      lines.push(padLine(`   ${color('⎿', theme.dim)} ${color(entry, theme.secondary)}`, width, theme))
+    }
   }
 
   // Pad to fill height

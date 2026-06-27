@@ -1417,6 +1417,46 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       return true
     }
 
+    case '/plan-template': {
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const sub = parts[1]
+      const { loadPlanTemplates, getPlanTemplate, savePlanTemplate, formatTemplateList } = await import('../agent/plan-templates.js')
+
+      if (!sub || sub === 'list') {
+        const templates = loadPlanTemplates(cwd)
+        pushStatic(createLogEntry({ type: 'system', content: formatTemplateList(templates) }))
+      } else if (sub === 'save') {
+        const name = parts[2]
+        const description = parts.slice(3).join(' ').trim()
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-template save <name> [description]', isError: true }))
+        } else {
+          // Save current plan (if any) as template
+          const { getStoredPlan } = await import('../agent/plan-store.js')
+          const currentPlan = getStoredPlan()
+          if (!currentPlan) {
+            pushStatic(createLogEntry({ type: 'system', content: 'No active plan to save. Run /plan first.', isError: true }))
+          } else {
+            savePlanTemplate(cwd, name, `\`\`\`json\n${currentPlan}\n\`\`\`\n`, description)
+            pushStatic(createLogEntry({ type: 'system', content: `✓ Saved template "${name}" to .rivet/plan-templates/${name}.md` }))
+          }
+        }
+      } else {
+        // Treat as template name to load
+        const tpl = getPlanTemplate(cwd, sub)
+        if (!tpl) {
+          pushStatic(createLogEntry({ type: 'system', content: `Template "${sub}" not found. Use /plan-template list to see available templates.`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Loaded template: ${tpl.name}\n${tpl.description ? tpl.description + '\n' : ''}${tpl.estimatedWaves ? `Estimated waves: ${tpl.estimatedWaves}\n` : ''}\n${tpl.content}\n\n→ Use /plan to refine, or /team to execute.`,
+          }))
+        }
+      }
+      setIsStreaming(false)
+      return true
+    }
+
     case '/constellation': {
       const cwd = ctx.agent.cwd ?? process.cwd()
       const sub = (parts[1] ?? 'view').toLowerCase()
@@ -1577,6 +1617,29 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
           return `  ${n}. [${s.messageId.slice(0, 8)}] ${files || '(no files)'}`
         })
         pushStatic(createLogEntry({ type: 'system', content: `Undo history (${snapshots.length} total):\n${lines.join('\n')}\n\nUse /undo <number> to revert, /undo preview <number> to inspect.` }))
+      }
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/team-resume': {
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const { listCheckpoints, formatCheckpointList, loadCheckpoint } = await import('../agent/wave-checkpoint.js')
+      const groupId = parts[1]
+
+      if (!groupId) {
+        const checkpoints = listCheckpoints(cwd)
+        pushStatic(createLogEntry({ type: 'system', content: formatCheckpointList(checkpoints) }))
+      } else {
+        const cp = loadCheckpoint(cwd, groupId)
+        if (!cp) {
+          pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Checkpoint: ${cp.groupId}\nResume from wave ${cp.lastCompletedWave + 2}/${cp.totalWaves} (${cp.remainingOrders.length} tasks remaining).\nObjective: ${cp.objective}`,
+          }))
+        }
       }
       setIsStreaming(false)
       return true

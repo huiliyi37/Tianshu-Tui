@@ -13,6 +13,9 @@
 import type { DelegationActivity } from '../tools/types.js'
 import { shortOrderLabel } from '../tools/worker-activity-stream.js'
 import type { WorkerPanelStatus } from './worker-panel-model.js'
+/** Max activity log entries kept per worker (ring buffer). */
+const ACTIVITY_LOG_MAX = 20
+
 
 export interface FleetWorkerView {
   /** Work order id（稳定的 per-worker 标识，区别于 spawning tool id）。 */
@@ -31,8 +34,11 @@ export interface FleetWorkerView {
   /** 是否已到达终态。 */
   terminal: boolean
   /** 最新运行活动行（running）或终态摘要。 */
+  /** Latest activity line (running) or terminal summary. */
   activity?: string
-  /** 自首次观测起的毫秒数（快照时计算；终态后冻结）。 */
+  /** Recent activity log entries (newest last, capped at ACTIVITY_LOG_MAX). */
+  activityLog: string[]
+  /** Self-observed ms since first observation (snapshot-time; frozen after terminal). */
   elapsedMs: number
 }
 
@@ -51,6 +57,7 @@ interface FleetRecord {
   status: DelegationActivity['status']
   terminal: boolean
   activity?: string
+  activityLog: string[]
   startedAt: number
   updatedAt: number
 }
@@ -80,15 +87,25 @@ export class FleetRegistry {
   apply(activity: DelegationActivity, now: number = Date.now()): void {
     const terminal = TERMINAL_STATUSES.has(activity.status)
     const existing = this.records.get(activity.workOrderId)
+
+    // Maintain activity log ring buffer
+    const log = existing?.activityLog ? [...existing.activityLog] : []
+    if (activity.progressLine && activity.progressLine !== existing?.activity) {
+      log.push(activity.progressLine)
+      if (log.length > ACTIVITY_LOG_MAX) log.shift()
+    }
+
     if (existing) {
       existing.status = activity.status
       existing.terminal = terminal
       existing.updatedAt = now
+      existing.activityLog = log
       if (activity.profile) existing.profile = activity.profile
       if (activity.authority) existing.authority = activity.authority
       if (activity.progressLine) existing.activity = activity.progressLine
       return
     }
+
     this.records.set(activity.workOrderId, {
       workerId: activity.workOrderId,
       parentToolId: activity.parentToolId,
@@ -97,6 +114,7 @@ export class FleetRegistry {
       status: activity.status,
       terminal,
       activity: activity.progressLine,
+      activityLog: log,
       startedAt: now,
       updatedAt: now,
     })
@@ -113,6 +131,7 @@ export class FleetRegistry {
       panelStatus: panelStatusOf(r.status),
       terminal: r.terminal,
       activity: r.activity,
+      activityLog: r.activityLog,
       elapsedMs: Math.max(0, (r.terminal ? r.updatedAt : now) - r.startedAt),
     }
   }
