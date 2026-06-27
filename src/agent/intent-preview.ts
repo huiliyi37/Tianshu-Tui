@@ -19,16 +19,48 @@ export interface BuildIntentPreviewInput {
   recentTargets?: string[]
 }
 
+/**
+ * 兼容历史 dead-end path 的格式：旧数据存的是 `summarizeTarget` 生成的
+ * `处理 ${target}` 摘要（带中文前缀与可能的 `...` 截断尾）；新数据直接存原始 target。
+ * 提取出实际内容用于与 recentTargets 关联比对。
+ *
+ * 不依赖特定前缀常量做相等判断（开源项目文案可能本地化），用「剥离已知摘要前缀」
+ * 兜底：能剥离则取剥离后内容，否则原样返回（新格式 / 自定义内容）。
+ */
+function extractDeadEndPath(path: string): string {
+  // 兼容旧摘要格式 `处理 xxx` / `处理 xxx...`
+  if (path.startsWith('处理 ')) return path.slice(3).replace(/\.\.\.$/, '')
+  return path
+}
+
+/**
+ * 筛选出与当前目标关联的 dead-end 信号。
+ *
+ * 旧实现把「信息素库里存在任意一条 dead-end」当作触发条件（stigmergyStore.query()
+ * 不带参数返回全量），与当前目标零关联检查 → 历史无关任务 veto 残留（7 天半衰期）
+ * 导致任何新任务都强弹意图闸。
+ *
+ * 关联判定：dead-end 提取出的实际内容与任一 recentTarget（已过滤伪目标 `<...`）
+ * 子串重合。fallback 摘要「继续执行当前计划」无具体目标，永不关联 → 跳过。
+ */
+function relevantDeadEnds(pheromones: PheromoneRef[], recentTargets?: string[]): PheromoneRef[] {
+  const targets = recentTargets?.filter(t => t && !t.startsWith('<')) ?? []
+  const deadEnds = pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0)
+  if (targets.length === 0) return []
+  return deadEnds.filter(de => {
+    const extracted = extractDeadEndPath(de.path)
+    // fallback 摘要无具体目标，无法关联
+    if (!extracted || extracted === '继续执行当前计划') return false
+    return targets.some(t => extracted.includes(t) || t.includes(extracted))
+  })
+}
+
 export function shouldShowIntent(input: BuildIntentPreviewInput): boolean {
   if (input.strategy && input.strategy.commitThreshold > 0.8) return true
   // vigor < 0.3 → 触发自动适应（策略已在 vigor-hook 中调整），不再弹确认框
-  if (input.pheromones.some(p => p.signal === 'dead-end' && p.strength > 0)) return true
+  if (relevantDeadEnds(input.pheromones, input.recentTargets).length > 0) return true
   if (input.thrashingSuggestion === 'task_decomposition') return true
   return false
-}
-
-function unique(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))]
 }
 
 function summarizeTarget(targets: string[]): string {
@@ -49,7 +81,7 @@ export function buildIntentPreview(input: BuildIntentPreviewInput): IntentPrevie
   if (!shouldShowIntent(input)) return null
 
   const warnings: string[] = []
-  const deadEnds = unique(input.pheromones.filter(p => p.signal === 'dead-end' && p.strength > 0).map(p => p.path))
+  const deadEnds = relevantDeadEnds(input.pheromones, input.recentTargets).map(p => extractDeadEndPath(p.path))
   if (input.strategy && input.strategy.commitThreshold > 0.8) warnings.push('high commit threshold')
   // vigor 低时不再弹警告——策略已在 vigor-hook 中自动调整
   if (input.thrashingSuggestion === 'task_decomposition') warnings.push('检测到上下文/压缩抖动，建议拆分任务')

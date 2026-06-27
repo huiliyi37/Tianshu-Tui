@@ -8,7 +8,9 @@ import type { Sensorium, SensoriumInput } from '../sensorium.js'
 describe('computeSensorium', () => {
   it('computes momentum from prediction accumulator', () => {
     const input: SensoriumInput = {
-      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 7 },
+      // 滑动窗口口径：窗口内 7 正 3 错 → momentum 0.7（非 consecutiveCorrect/10）。
+      // 一次探索性报错不清零，连续多错才压低 momentum。
+      predictionAcc: { windowSize: 10, predictions: [true, true, true, true, true, true, true, false, false, false], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.3 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file', 'bash', 'write_file', 'bash'],
@@ -291,7 +293,7 @@ describe('computeSensorium', () => {
 
   it('all dimensions are frozen/immutable result', () => {
     const input: SensoriumInput = {
-      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 5 },
+      predictionAcc: { windowSize: 10, predictions: [true, true, true, true, true], consecutiveCorrect: 5 },
       pressureResult: { tier: 1, shouldCompact: true, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.65 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file'],
@@ -299,7 +301,9 @@ describe('computeSensorium', () => {
       doomLevel: 'none',
     }
     const s1 = computeSensorium(input)
-    const s2 = computeSensorium({ ...input, predictionAcc: { ...input.predictionAcc, consecutiveCorrect: 9 } })
+    // 滑动窗口口径：改 predictions 数组（非 consecutiveCorrect）才改变 momentum。
+    // s1 全对 → momentum 1；s2 混入错误 → momentum < 1，二者不同。
+    const s2 = computeSensorium({ ...input, predictionAcc: { ...input.predictionAcc, predictions: [true, true, true, true, true, false, false, false] } })
     assert.notEqual(s1.momentum, s2.momentum) // fresh computation each call
   })
 })

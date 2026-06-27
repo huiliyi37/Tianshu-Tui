@@ -40,7 +40,7 @@ export interface PheromoneRef {
  * Computed purely from existing monitor outputs — zero LLM overhead.
  */
 export interface Sensorium {
-  /** Prediction accuracy momentum: consecutiveCorrect / windowSize */
+  /** Prediction accuracy momentum: 滑动窗口成功率（窗口内正确数/总数），抗探索性报错噪声 */
   momentum: number
   /** 多维压力：上下文填充 (0.50) + 验证债 (0.30) + CVM 开销 (0.15) + 增速 (0.05) */
   pressure: number
@@ -106,7 +106,14 @@ function clamp(v: number): number {
 
 function computeMomentum(acc: SensoriumInput['predictionAcc']): number {
   if (acc.windowSize <= 0) return 0
-  return clamp(acc.consecutiveCorrect / acc.windowSize)
+  // 滑动窗口成功率（非连续正确率）：探索性工具报错（grep 无匹配/文件不存在/测试 RED）
+  // 是常态，旧口径用 consecutiveCorrect 会让一次报错清零全部累积 → momentum 从 0.9 坠崖
+  // 到 0 → commitThreshold 被推高 → 误触发意图闸强弹。改用窗口内成功率，单次报错只让
+  // momentum 平滑下降（窗口 10、1 错 9 对 → 0.9），连续多错仍能正确反映停滞。
+  // consecutiveCorrect 字段保留供 shouldTippingPointReset（转折点判定）继续使用。
+  if (acc.predictions.length === 0) return 0
+  const wins = acc.predictions.filter(p => p).length
+  return clamp(wins / acc.predictions.length)
 }
 
 /**

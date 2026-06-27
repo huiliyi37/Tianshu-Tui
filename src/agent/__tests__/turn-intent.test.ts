@@ -79,9 +79,24 @@ describe('TurnIntentController', () => {
     const result = await controller.evaluate(makeInput(async () => 'veto'))
 
     assert.equal(result, 'veto')
-    assert.match(events[0]!, /^deposit:dead-end:intent veto:/)
+    // path 存原始 target（非 preview.summary 摘要），绕开「处理 」前缀耦合
+    assert.equal(events[0], 'deposit:dead-end:intent veto:src/agent/loop.ts')
     assert.match(events[1]!, /^message:<intent-veto>/)
     assert.equal(events.length, 2)
+  })
+
+  it('does NOT deposit dead-end when veto has no concrete target', async () => {
+    // 无具体目标（全为 <... 伪目标或空）时不沉积——避免产生永不匹配的永久噪声 dead-end
+    const events: string[] = []
+    const controller = makeController(events)
+    const input = makeInput(async () => 'veto')
+    input.recentToolHistory = [{ tool: 'bash', target: '<ephemeral>', status: 'success' }]
+
+    const result = await controller.evaluate(input)
+
+    assert.equal(result, 'veto')
+    assert.ok(!events.some(e => e.startsWith('deposit:')), '无具体目标不应沉积 dead-end')
+    assert.match(events[0]!, /^message:<intent-veto>/)
   })
 
   it('injects alternative guidance on alternative action', async () => {
