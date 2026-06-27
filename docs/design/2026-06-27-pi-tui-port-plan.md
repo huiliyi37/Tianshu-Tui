@@ -106,7 +106,7 @@ pi-tui `tui.ts:40-83` 浓缩的高级终端渲染技术，可在 T9 的 `ansi.ts
 1. ✅ 写本文档
 2. ✅ **移植 `latex-to-unicode`**（Tier A 首个，移植流程已跑通）— 见 6.1
 3. ✅ **移植 `latex-block`**（依赖 latex-to-unicode）— 见 6.2
-4. 移植 `fuzzy` + `keys` + `keybindings`（零依赖三件套）
+4. ✅ **移植 `fuzzy`**（零依赖）— 见 6.3。`keys`/`keybindings` 经评估暂缓（依赖 pi-natives 原生键盘绑定，且与 T9 `input-handler.ts` 重叠）。
 5. 移植 `terminal-capabilities`（解耦 latex-to-unicode 对 TERMINAL 的硬依赖）
 6. 评估 Tier C 协议技巧移植
 
@@ -148,3 +148,17 @@ pi-tui `tui.ts:40-83` 浓缩的高级终端渲染技术，可在 T9 的 `ansi.ts
 
 **消费方接线**（待办）：与 6.1 一起，在 `markdown.ts` 的 display-math 分支调用 `latexToBlock()`，
 inline math 调用 `latexToUnicode()`。
+
+### 6.3 fuzzy ✅ 完成
+
+**结果**：`src/tui/pi/fuzzy.ts`（298 行）+ 契约测试 10 例全绿，项目 `tsc --noEmit` 零错误。
+
+**解耦改动**：无。`fuzzy.ts` 是真正的零依赖纯函数模块（`fuzzyMatch`/`fuzzyRank`/`fuzzyFilter`），
+源码级拷贝即可用。匹配是 word-local 的：query 按空格分 token，每个 token 必须在某单词内顺序匹配。
+
+**关于 keys/keybindings（评估后暂缓）**：二者 `import { KeyEventType, matchesKey, parseKey, parseKittySequence } from "@oh-my-pi/pi-natives"`
+——依赖 Rust 原生键盘协议解析。虽然原生调用是 JS 路径的加速 fallback（可 stub 成 null 让 JS 接管），
+但 T9 已有完整的 `input-handler.ts` + `input-line.ts` 键盘处理，功能重叠。移植收益不抵 stub 维护成本，暂缓。
+若未来 T9 需要更精细的 Kitty keyboard protocol 支持，再回来移植并 stub 化原生依赖。
+
+**验证**：`bun test ./src/tui/pi/__tests__/` → 32 pass / 0 fail（latex-to-unicode 14 + latex-block 8 + fuzzy 10）。
