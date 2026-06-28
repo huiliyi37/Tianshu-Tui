@@ -50,6 +50,22 @@ export class LiveEngine {
   /** live region 行缓存：每行的原始文本（不含 ANSI）用于 diff */
   private lineCache: string[] = []
 
+  /**
+   * ambiguous 宽度模式缓存。`ambiguousWideEnabled()` 每次读 `process.env` 并做
+   * 字符串比较，而一帧渲染里 rowsForLine 被调数十次（countDisplayRows / canDiff /
+   * buildDiff / reconcileWidth），重复读 env 是无谓开销。该值在一次进程中基本不变，
+   * 惰性读取一次后缓存即可。
+   */
+  private ambiguousWideCache: boolean | null = null
+
+  /** ambiguous 宽度模式（缓存 process.env 读取）。 */
+  private ambiguousWide(): boolean {
+    if (this.ambiguousWideCache === null) {
+      this.ambiguousWideCache = ambiguousWideEnabled()
+    }
+    return this.ambiguousWideCache
+  }
+
   constructor(options: LiveEngineOptions) {
     this.stdout = options.stdout
     this.reservedRows = options.reservedRows ?? 2
@@ -64,7 +80,7 @@ export class LiveEngine {
     if (width <= 0) return 1
     // 行数估算必须与终端实际换行一致：CJK 终端把 ambiguous 符号按 2 列渲染，
     // 用 ambiguousAsWide 度量（env 门控，默认 narrow=string-width）避免低估行数。
-    const dw = displayWidth(text, { ambiguousAsWide: ambiguousWideEnabled() })
+    const dw = displayWidth(text, { ambiguousAsWide: this.ambiguousWide() })
     if (dw === 0) return 1
     return Math.ceil(dw / width)
   }

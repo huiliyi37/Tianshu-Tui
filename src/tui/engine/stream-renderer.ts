@@ -17,7 +17,7 @@
  */
 
 import { formatMarkdown } from '../format/markdown.js'
-import { capLiveTail } from '../live-tail-cap.js'
+import { capLiveTailMarkdownSafe } from '../live-tail-cap.js'
 import type { RivetTheme } from '../theme.js'
 
 /**
@@ -124,9 +124,8 @@ export class StreamRenderer {
    * display-width aware 截断到 maxRows 显示行。
    */
   getLiveTailLines(maxRows: number): string[] {
-    const text = this.pending.replace(/\n+$/, '')
-    if (!text) return []
-    const capped = capLiveTail(text, this.options.getColumns(), maxRows)
+    if (!this.pending) return []
+    const capped = capLiveTailMarkdownSafe(this.pending, this.options.getColumns(), maxRows)
     return capped ? capped.split('\n') : []
   }
 

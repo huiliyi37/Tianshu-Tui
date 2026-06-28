@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
-import { InputHandler } from '../input-handler.js'
+import { InputHandler, type KeyPress } from '../input-handler.js'
 import type { ReadStream } from 'node:tty'
 
 /** 最小 stdin mock：满足 InputHandler 构造期调用，并能注入 data。 */
@@ -110,6 +110,65 @@ describe('InputHandler · bracketed paste (C1)', () => {
     assert.equal(returns, 1, 'trailing CR after paste submits')
     handler.dispose()
   })
+
+  it('buffers split paste start marker across chunks', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    let pasted: string | null = null
+    let keys = 0
+    handler.onPaste((t) => { pasted = t })
+    handler.onAnyKey(() => { keys++ })
+
+    stdin.emitData('\x1B[200')
+    assert.equal(pasted, null, 'start marker incomplete — no paste')
+    assert.equal(keys, 0, 'no spurious keys from partial marker')
+
+    stdin.emitData('~split-start\x1B[201~')
+    assert.equal(pasted, 'split-start', 'paste assembled across start-marker boundary')
+    assert.equal(keys, 0, 'still no regular keys')
+    handler.dispose()
+  })
+
+  it('buffers split paste end marker across chunks', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    let pasted: string | null = null
+    let returns = 0
+    handler.onPaste((t) => { pasted = t })
+    handler.onKey('return', () => { returns++ })
+
+    stdin.emitData('\x1B[200~split-end\x1B[201')
+    assert.equal(pasted, null, 'end marker incomplete — paste held')
+
+    stdin.emitData('~\r')
+    assert.equal(pasted, 'split-end', 'paste closed across end-marker boundary')
+    assert.equal(returns, 1, 'trailing CR after paste submits')
+    handler.dispose()
+  })
+})
+
+describe('InputHandler · multi-sequence chunks (领航星 2026-06-11 UX)', () => {
+  it('parses two arrow keys in one chunk', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: string[] = []
+    handler.onAnyKey((k) => { keys.push(k.name) })
+
+    stdin.emitData('\x1B[A\x1B[B')
+    assert.deepEqual(keys, ['up', 'down'], 'each arrow key dispatched separately')
+    handler.dispose()
+  })
+
+  it('parses escape sequence followed by printable char in one chunk', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: string[] = []
+    handler.onAnyKey((k) => { keys.push(k.name) })
+
+    stdin.emitData('\x1B[Aa')
+    assert.deepEqual(keys, ['up', 'unknown'], 'arrow key then normal char')
+    handler.dispose()
+  })
 })
 
 describe('InputHandler · surrogate-pair chunk buffering (领航星 2026-06-11 UX)', () => {
@@ -153,5 +212,61 @@ describe('InputHandler · surrogate-pair chunk buffering (领航星 2026-06-11 U
     // 模拟上游在 dispose 后又来了一段——应当无副作用
     stdin.emitData('\uDE00')
     assert.deepEqual(chars, [])
+  })
+})
+
+describe('InputHandler · Shift+Tab and Alt+letter (领航星 2026-06-28)', () => {
+  it('parses Shift+Tab (\\x1B[Z) as shift_tab', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B[Z')
+    assert.equal(keys.length, 1, 'one key dispatched')
+    assert.equal(keys[0]!.name, 'shift_tab')
+    assert.equal(keys[0]!.shift, true)
+    handler.dispose()
+  })
+
+  it('parses Alt+f (\\x1Bf) as meta=true', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1Bf')
+    assert.equal(keys.length, 1, 'one key dispatched')
+    assert.equal(keys[0]!.char, 'f')
+    assert.equal(keys[0]!.meta, true, 'Alt key should set meta=true')
+    assert.equal(keys[0]!.ctrl, false)
+    handler.dispose()
+  })
+
+  it('parses Alt+Shift+F (\\x1BF) as meta=true shift=true', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1BF')
+    assert.equal(keys.length, 1)
+    assert.equal(keys[0]!.char, 'F')
+    assert.equal(keys[0]!.meta, true)
+    assert.equal(keys[0]!.shift, true, 'uppercase implies shift')
+    handler.dispose()
+  })
+
+  it('Alt+digit parses correctly (\\x1B1 → char=1 meta=true)', () => {
+    const stdin = makeStdin()
+    const handler = new InputHandler({ stdin })
+    const keys: KeyPress[] = []
+    handler.onAnyKey((k) => { keys.push(k) })
+
+    stdin.emitData('\x1B1')
+    assert.equal(keys.length, 1)
+    assert.equal(keys[0]!.char, '1')
+    assert.equal(keys[0]!.meta, true)
+    handler.dispose()
   })
 })

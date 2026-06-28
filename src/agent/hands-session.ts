@@ -74,9 +74,23 @@ export interface HandsSessionRun {
  * 5. Clean up the worktree (always, even on failure)
  */
 export async function runHandsSession(config: HandsSessionConfig): Promise<HandsSessionRun> {
+  // Worktree isolation requires git. When git is absent (or the cwd isn't a git
+  // repo), createWorktree throws — we fall back to running in-place in the
+  // primary cwd. This mirrors session-manager's isolatedWorktree fallback
+  // (session-manager.ts). In-place is safe because Rivet's file-claim registry
+  // already prevents cross-worker write conflicts on the same branch — same
+  // guarantee that lets multiple sessions share a cwd. The only loss is the
+  // worktree-scoped diff (collected below only when a real worktree exists).
+  let wt: { path: string; branch?: string }
+  let inPlace = false
   try {
-    const wt = config.wtCoordinator.create(config.order.id)
-    config.order.workerCwd = wt.path
+    wt = config.wtCoordinator.create(config.order.id)
+  } catch {
+    wt = { path: config.cwd }
+    inPlace = true
+  }
+  config.order.workerCwd = wt.path
+  try {
     const scopeResult = materializeScope(config.cwd, wt.path, worktreeScopeFiles(config.order))
     if (scopeResult.missing.length > 0) {
       return {
@@ -109,7 +123,9 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
      }
    }
 
-    const baseRef = config.baseRef ?? getCurrentGitRef(config.cwd)
+    // Collect diff only when running in a real worktree (in-place mode has no
+    // isolated worktree and no base ref, so diff is meaningless).
+    const baseRef = inPlace ? undefined : (config.baseRef ?? getCurrentGitRef(config.cwd))
     const diff = baseRef ? collectDiff(config.cwd, wt.path, baseRef) : ''
 
     let result: WorkerResult

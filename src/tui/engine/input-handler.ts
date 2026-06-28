@@ -67,6 +67,8 @@ export type KeyName =
   | 'ctrl_b'
   | 'ctrl_f'
   | 'ctrl_x'
+  | 'ctrl_]'
+  | 'shift_tab'
   | 'unknown'
 
 export type KeyHandler = (key: KeyPress) => void
@@ -75,7 +77,8 @@ export interface InputHandlerOptions {
   stdin: ReadStream
   /** 初始输入模式 */
   mode?: InputMode
-  /** 单独 ESC 字节的刷新超时（ms）。期间无后续字节则派发 escape。 */
+  /** 单独 ESC 字节的刷新超时（ms）。期间无后续字节则派发 escape。
+   *  80ms 平衡低延迟和高延迟 SSH（原 40ms 在 150ms+ RTT 连接上会导致方向键序列被拆包）。 */
   escapeTimeoutMs?: number
 }
 
@@ -111,6 +114,7 @@ const CTRL_CODES: Record<number, KeyName> = {
   0x17: 'ctrl_w',
   0x18: 'ctrl_x',
   0x1a: 'ctrl_z',
+  0x1d: 'ctrl_]',
   0x1b: 'escape',
   0x7f: 'backspace',
 }
@@ -138,6 +142,7 @@ const ANSI_ESCAPE_MAP: Record<string, KeyName> = {
   '[21~': 'f10',
   '[23~': 'f11',
   '[24~': 'f12',
+  '[Z': 'shift_tab',
 }
 
 export class InputHandler {
@@ -145,8 +150,6 @@ export class InputHandler {
   private mode: InputMode
   private handlers = new Map<string, Set<KeyHandler>>()
   private pasteHandlers = new Set<(text: string) => void>()
-  private escaped = false
-  private escapeSeq = ''
   private escapeTimeoutMs: number
   private escapeTimer: ReturnType<typeof setTimeout> | null = null
   /** 当为 true 时，单独的 ESC 字节立即派发为 escape，不等待超时。
@@ -162,6 +165,11 @@ export class InputHandler {
    * 这里在 handleData 入口预拼，在派发前剥离尾部 high-surrogate。
    */
   private pendingData = ''
+  /**
+   * 跨 chunk 输入字节缓冲。ESC 序列、bracketed paste 起止标记都可能被拆到
+   * 多个 `data` 事件里；保留未处理完的尾部，等待后续字节完整后再派发。
+   */
+  private inputBuffer = ''
 
   constructor(options: InputHandlerOptions) {
     this.stdin = options.stdin
@@ -220,6 +228,7 @@ export class InputHandler {
       this.escapeTimer = null
     }
     this.pendingData = ''
+    this.inputBuffer = ''
     this.stdin.removeAllListeners('data')
     this.stdin.setRawMode(false)
     this.stdin.pause()
@@ -237,9 +246,6 @@ export class InputHandler {
     }
 
     // 0b. 若末尾是孤立的 high-surrogate，剥出留到下个 chunk 拼接。
-    // 注意：不做内容裁剪对 paste 路径也是安全的——consumePaste 会自己
-    // 累积 pasteBuffer，跨 chunk 的代理对在收到 low-surrogate 后由
-    // pasteActive 路径整体派发，Display 上仍是完整 emoji。
     if (data.length > 0) {
       const lastCode = data.charCodeAt(data.length - 1)
       if (lastCode >= 0xD800 && lastCode <= 0xDBFF) {
@@ -249,79 +255,107 @@ export class InputHandler {
       }
     }
 
-    // 1. 进行中的 paste：累积直到结束标记
-    if (this.pasteActive) {
-      this.consumePaste(data)
-      return
-    }
+    this.inputBuffer += data
 
-    // 2. 检测 paste 起始标记（可能与前置/后续字节同 chunk 到达）
-    const startIdx = data.indexOf(PASTE_START)
-    if (startIdx !== -1) {
-      const before = data.slice(0, startIdx)
-      if (before) this.handleData(before)
-      this.pasteActive = true
-      this.pasteBuffer = ''
-      this.consumePaste(data.slice(startIdx + PASTE_START.length))
-      return
-    }
-
-    // 3. 新字节到达 → 取消待定的 lone-ESC 超时（后续序列接管解析）
+    // 新字节到达 → 取消待定的 lone-ESC 超时（后续序列接管解析）
     if (this.escapeTimer) {
       clearTimeout(this.escapeTimer)
       this.escapeTimer = null
     }
 
-    const parsed = this.parseInput(data)
-
-    // overlay 激活时，单独 ESC 立即派发，不等 40ms 超时。
-    if (data === '\x1B' && this.escapeImmediate) {
-      this.escaped = false
-      this.escapeSeq = ''
-      this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
-      return
-    }
-
-    if (parsed.key) {
-      this.dispatch(parsed.key)
-      // 关键：parseInput 只取首字符/首序列；剩余部分递归派发。
-      // 这条路径只在「单 chunk 含多字符」时触发——典型场景：
-      //   (a) surrogate 合并后跟 ASCII：'\uD83D\uDE00a' → 😀 + a
-      //   (b) 高频 typing 把多个按键并到一次 stdin data 事件
-      //   旧实现会派发 {char: 整串} 一个 char 字段，把多字符粘成单键
-      //   ——输入框会显示成一团乱码、insertText 把整串塞在光标后。
-      const rest = data.slice(parsed.consumed)
-      if (rest) this.handleData(rest)
-      return
-    }
-
-    // 4. lone ESC 进入 escaped 态 → 起短定时器，无后续则刷新为 escape
-    if (this.escaped && this.escapeSeq === '\x1B') {
-      this.escapeTimer = setTimeout(() => {
-        this.escapeTimer = null
-        if (this.escaped && this.escapeSeq === '\x1B') {
-          this.escaped = false
-          this.escapeSeq = ''
-          this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
-        }
-      }, this.escapeTimeoutMs)
-    }
+    this.processInputBuffer()
   }
 
-  /** 累积 paste 内容；遇结束标记则规范化换行并一次性派发，再处理尾部字节。 */
-  private consumePaste(chunk: string): void {
-    const endIdx = chunk.indexOf(PASTE_END)
-    if (endIdx === -1) {
-      this.pasteBuffer += chunk
-      return
+  /**
+   * 从缓冲区起始位置连续派发普通按键，直到遇到不完整序列或缓冲区末尾。
+   * 返回实际消费的字节数。
+   */
+  private dispatchKeys(buf: string): number {
+    let i = 0
+    while (i < buf.length) {
+      const parsed = this.parseInput(buf.slice(i))
+      if (!parsed.key) break
+      this.dispatch(parsed.key)
+      i += parsed.consumed
     }
-    this.pasteBuffer += chunk.slice(0, endIdx)
-    const text = this.pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-    this.pasteActive = false
-    this.pasteBuffer = ''
-    for (const handler of this.pasteHandlers) handler(text)
-    const rest = chunk.slice(endIdx + PASTE_END.length)
-    if (rest) this.handleData(rest)
+    return i
+  }
+
+  /** 处理跨 chunk 缓冲的输入缓冲区，按 paste → ESC 序列 → 普通字符优先级解析。 */
+  private processInputBuffer(): void {
+    while (this.inputBuffer.length > 0) {
+      // 1. 进行中的 paste：累积直到结束标记
+      if (this.pasteActive) {
+        const endIdx = this.inputBuffer.indexOf(PASTE_END)
+        if (endIdx !== -1) {
+          this.pasteBuffer += this.inputBuffer.slice(0, endIdx)
+          const text = this.pasteBuffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+          this.pasteActive = false
+          this.pasteBuffer = ''
+          for (const handler of this.pasteHandlers) handler(text)
+          this.inputBuffer = this.inputBuffer.slice(endIdx + PASTE_END.length)
+          continue
+        }
+
+        const partial = getPartialSuffix(this.inputBuffer, PASTE_END)
+        if (partial > 0) {
+          this.pasteBuffer += this.inputBuffer.slice(0, -partial)
+          this.inputBuffer = this.inputBuffer.slice(-partial)
+          break
+        }
+
+        this.pasteBuffer += this.inputBuffer
+        this.inputBuffer = ''
+        break
+      }
+
+      // 2. 检测 paste 起始标记（前面可能还有普通按键）
+      const startIdx = this.inputBuffer.indexOf(PASTE_START)
+      if (startIdx !== -1) {
+        const prefix = this.inputBuffer.slice(0, startIdx)
+        const consumed = this.dispatchKeys(prefix)
+        if (consumed < prefix.length) {
+          // 前缀里有未完整的按键，先保留，等下一 chunk 再处理
+          this.inputBuffer = this.inputBuffer.slice(consumed)
+          break
+        }
+        // 前缀派发完毕，进入 paste 模式
+        this.inputBuffer = this.inputBuffer.slice(startIdx + PASTE_START.length)
+        this.pasteActive = true
+        this.pasteBuffer = ''
+        continue
+      }
+
+      // 3. paste 起始标记被拆到 chunk 边界，保留可能的部分标记
+      const partialStart = getPartialSuffix(this.inputBuffer, PASTE_START)
+      if (partialStart > 0) {
+        const prefixLen = this.inputBuffer.length - partialStart
+        const consumed = this.dispatchKeys(this.inputBuffer.slice(0, prefixLen))
+        this.inputBuffer = this.inputBuffer.slice(consumed)
+        break
+      }
+
+      // 4. 普通按键
+      const consumed = this.dispatchKeys(this.inputBuffer)
+      this.inputBuffer = this.inputBuffer.slice(consumed)
+      break
+    }
+
+    // lone ESC 超时处理
+    if (this.inputBuffer === '\x1B' && !this.pasteActive) {
+      if (this.escapeImmediate) {
+        this.inputBuffer = ''
+        this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
+      } else {
+        this.escapeTimer = setTimeout(() => {
+          this.escapeTimer = null
+          if (this.inputBuffer === '\x1B' && !this.pasteActive) {
+            this.inputBuffer = ''
+            this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
+          }
+        }, this.escapeTimeoutMs)
+      }
+    }
   }
 
   /** 把按键分发到 name / 通配 / mode 前缀三类处理器。 */
@@ -346,69 +380,65 @@ export class InputHandler {
    * 解析 data 首部的一个按键事件 + 实际消费的 code unit 数。
    *
    * 返回 { key: null, consumed: 0 } 表示"等后续字节"（孤 ESC 字节、跨 chunk
-   * 代理对前半），handleData 据此决定是否挂起；否则 key 非 null，consumed
-   * 告诉调用方"data 已被消费的字节数"，剩余 data.slice(consumed) 由 handleData
-   * 递归再派发——这条路径是「单 stdin chunk 含多字符」时的唯一安全通道。
+   * 的 CSI/SS3 序列）；否则 key 非 null，consumed 告诉调用方已消费的字节数。
    */
   private parseInput(data: string): { key: KeyPress | null; consumed: number } {
     if (data.length === 0) return { key: null, consumed: 0 }
 
-    // 完整 ESC 序列一次到达（如 \x1B[A）——直接解析，不走两阶段状态机
-    if (data.startsWith('\x1B') && data.length > 1) {
-      const name = this.resolveEscapeSequence(data)
-      if (name) {
-        const meta = data.includes(';3') || data.includes(';4')
-        const shift = data.includes(';2')
-        return { key: { raw: data, char: '', name, ctrl: false, meta, shift }, consumed: data.length }
+    // ESC 序列
+    if (data.startsWith('\x1B')) {
+      if (data.length === 1) return { key: null, consumed: 0 }
+
+      // CSI 序列（方向键、功能键、带修饰键的序列等）
+      const csiMatch = data.match(/^\x1B\[[0-9;]*[A-Za-z~]/)
+      if (csiMatch) {
+        const seq = csiMatch[0]
+        const name = this.resolveEscapeSequence(seq)
+        const meta = seq.includes(';3') || seq.includes(';4')
+        const shift = seq.includes(';2') || name === 'shift_tab'
+        return { key: { raw: seq, char: '', name: name ?? 'unknown', ctrl: false, meta, shift }, consumed: seq.length }
       }
-      return { key: { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }, consumed: data.length }
+
+      // SS3 序列（F1-F4 等）
+      const ss3Match = data.match(/^\x1BO[A-Za-z]/)
+      if (ss3Match) {
+        const seq = ss3Match[0]
+        const name = this.resolveEscapeSequence(seq)
+        return { key: { raw: seq, char: '', name: name ?? 'unknown', ctrl: false, meta: false, shift: false }, consumed: seq.length }
+      }
+
+      // Alt/Meta + 可打印字符（\x1B 后跟非 [ 非 O 的字符）
+      // 终端将 Alt+key 编码为 ESC + key。如 Alt+f → \x1Bf。
+      if (data.length >= 2 && data[1] !== '[' && data[1] !== 'O') {
+        const char = data[1]!
+        const isUpper = char >= 'A' && char <= 'Z'
+        return {
+          key: { raw: data.slice(0, 2), char, name: 'unknown', ctrl: false, meta: true, shift: isUpper },
+          consumed: 2,
+        }
+      }
+
+      // 看起来是未完整的 CSI/SS3 序列，等待后续字节
+      if (/^\x1B(\[([0-9;]*)|O)$/.test(data)) {
+        return { key: null, consumed: 0 }
+      }
+
+      // 无法识别的 ESC 序列：消费掉 ESC 字节本身，避免无限循环
+      return { key: { raw: '\x1B', char: '', name: 'unknown', ctrl: false, meta: false, shift: false }, consumed: 1 }
     }
 
-    // 单独的 ESC 字节 — 进入 escaped 状态，等待后续字节
-    if (data === '\x1B') {
-      this.escaped = true
-      this.escapeSeq = '\x1B'
-      return { key: null, consumed: 0 }
-    }
-
-    if (this.escaped) {
-      this.escapeSeq += data
-      const fullSeq = this.escapeSeq
-      const name = this.resolveEscapeSequence(fullSeq)
-      if (name) {
-        this.escaped = false
-        this.escapeSeq = ''
-        const meta = fullSeq.includes(';3') || fullSeq.includes(';4')
-        const shift = fullSeq.includes(';2')
-        return { key: { raw: fullSeq, char: '', name, ctrl: false, meta, shift }, consumed: 0 /* 全路径已消费 */ }
-      }
-      // 如果序列还没结束（如 `\x1B[1` 等待 `;5D`），保持 escaped 状态
-      if (this.escapeSeq.length > 10) {
-        // 超长序列，放弃解析
-        this.escaped = false
-        this.escapeSeq = ''
-        return { key: { raw: data, char: '', name: 'unknown', ctrl: false, meta: false, shift: false }, consumed: data.length }
-      }
-      return { key: null, consumed: 0 }
-    }
-
-    // 单字节字符
+    // 单字节控制字符
     const code = data.codePointAt(0)
     if (code === undefined) return { key: null, consumed: 0 }
-
-    // Ctrl+key 范围 (0x01-0x1F 和 0x7F) — 1 个 UTF-16 code unit
     if (code <= 0x1f || code === 0x7f) {
       const name = CTRL_CODES[code] ?? 'unknown'
       return {
-        key: { raw: data, char: '', name, ctrl: code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d, meta: false, shift: false },
+        key: { raw: data.slice(0, 1), char: '', name, ctrl: code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d, meta: false, shift: false },
         consumed: 1,
       }
     }
 
     // 可打印字符：UTF-16 代理对占 2 code unit；BMP 占 1。
-    // ⚠️ 这里关键：data 可能含「emoji 簇（多 codepoint ZWJ 序列）」
-    // 之类的多字符，但 parseInput 只取首「用户字符」——一个 codepoint。
-    // 多 codepoint 簇的拆分留给 InputLine 的 graphemeSegmenter 处理。
     const charLen = code > 0xFFFF ? 2 : 1
     const char = data.slice(0, charLen)
     return {
@@ -449,4 +479,14 @@ export class InputHandler {
 
     return null
   }
+}
+
+/** 返回 `buf` 后缀中是 `marker` 前缀的最长长度（0 表示没有）。
+ *  用于 bracketed paste 起止标记跨 chunk 时保留不完整尾部。 */
+function getPartialSuffix(buf: string, marker: string): number {
+  const max = Math.min(marker.length - 1, buf.length)
+  for (let len = max; len > 0; len--) {
+    if (buf.endsWith(marker.slice(0, len))) return len
+  }
+  return 0
 }

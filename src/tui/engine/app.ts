@@ -113,6 +113,26 @@ export function looksLikeFilePath(input: string): boolean {
 const SIDE_PANEL_MIN_COLUMNS = 120
 const SIDE_PANEL_WIDTH = 32
 
+/**
+ * 输入框线框字符集（按 separator 主题）。纯字面量，提升到模块级避免 renderLive
+ * 每帧重建对象字面量。 getInputChrome 据此缓存着色后的 leftBar/rightBar/botBorder。
+ */
+interface BoxCharSet { tl: string; tr: string; bl: string; br: string; h: string; v: string; m: string }
+const INPUT_BOX_CHARS = {
+  thin:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' },
+  thick: { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃', m: '┳' },
+  dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
+} as const
+
+/** 按 separator 取线框字符集，未知 separator 回退到 thin。返回值确定非空。 */
+function boxCharsFor(separator: string): BoxCharSet {
+  switch (separator) {
+    case 'thick': return INPUT_BOX_CHARS.thick
+    case 'dots': return INPUT_BOX_CHARS.dots
+    default: return INPUT_BOX_CHARS.thin
+  }
+}
+
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -286,6 +306,11 @@ export class TuiApp {
   /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
   private sidePanelLeaderPending = false
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
+  /** 清理 Ctrl+X leader 状态（overlay/模式切换时调用，防止后续按键误触 side panel）。 */
+  private clearSidePanelLeader(): void {
+    this.sidePanelLeaderPending = false
+    if (this.sidePanelLeaderTimer) { clearTimeout(this.sidePanelLeaderTimer); this.sidePanelLeaderTimer = null }
+  }
 
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
@@ -448,7 +473,11 @@ export class TuiApp {
     })
 
     // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
+    // 审批/意图/overlay 模式下不处理粘贴——粘贴文本会"穿透"到输入框，
+    // 退出模式后出现幽灵文本。
     this.input.onPaste((text) => {
+      const mode = this.input.getMode()
+      if (mode !== 'input') return
       this.inputLine.insertText(text)
       this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
@@ -571,37 +600,46 @@ export class TuiApp {
         this.overlay.activate('command-palette')
         return
       }
-      if (key.name === 'escape' && !this.inputLine.vimEnabled) {
-        if (this.overlay.isActive()) {
-          // Close active overlay
-          this.overlay.deactivate()
-          this.renderLive()
-        } else if (this.isAgentActive()) {
-          this.handleAbort()
-        } else {
-          // Idle: double-ESC within 400ms on empty input → rewind overlay
-          const now = Date.now()
-          if (this.inputLine.value.trim()) {
-            // Has text: ESC clears input (like Claude Code)
-            this.inputLine.setValue('')
+      if (key.name === 'escape') {
+        // Vim 模式下：overlay/agent 激活时 ESC 关闭 overlay 或中断 agent，
+        // 空闲时 ESC 落入输入框的 vim normal/insert 切换（保持原行为）。
+        if (this.inputLine.vimEnabled) {
+          if (this.overlay.isActive()) {
+            this.overlay.deactivate()
             this.renderLive()
-          } else if (now - this.inputController.lastEscAt < 400) {
-            // Double-ESC → rewind
-            this.inputController.lastEscAt = 0
-            this.overlayController.resetNav()
-            this.overlay.activate('rewind')
-            this.renderLive()
-          } else {
-            // First ESC — record timestamp
-            this.inputController.lastEscAt = now
+            return
           }
+          if (this.isAgentActive()) {
+            this.handleAbort()
+            return
+          }
+          // 空闲 + vim：ESC 落入输入框处理 vim 模式切换
+        } else {
+          if (this.overlay.isActive()) {
+            this.overlay.deactivate()
+            this.renderLive()
+          } else if (this.isAgentActive()) {
+            this.handleAbort()
+          } else {
+            // Idle: double-ESC within 400ms on empty input → rewind overlay
+            const now = Date.now()
+            if (this.inputLine.value.trim()) {
+              // Has text: ESC clears input (like Claude Code)
+              this.inputLine.setValue('')
+              this.renderLive()
+            } else if (now - this.inputController.lastEscAt < 400) {
+              // Double-ESC → rewind
+              this.inputController.lastEscAt = 0
+              this.overlayController.resetNav()
+              this.overlay.activate('rewind')
+              this.renderLive()
+            } else {
+              // First ESC — record timestamp
+              this.inputController.lastEscAt = now
+            }
+          }
+          return
         }
-        return
-      }
-      if (key.name === 'ctrl_l') {
-        process.stdout.write('\x1B[2J\x1B[H')
-        this.renderLive()
-        return
       }
       if (key.name === 'ctrl_o') {
         this.expandLastTruncatedTool()
@@ -638,7 +676,7 @@ export class TuiApp {
         }
         // Leader not followed by 'r': fall through to normal input handling.
       }
-      if (key.char === ']' && !key.ctrl && !key.meta) {
+      if (key.name === 'ctrl_]') {
         this.toggleSidePanel()
         return
       }
@@ -854,6 +892,8 @@ export class TuiApp {
     // 在激活任何全屏覆盖层之前，必须先干净地清除主屏幕底部的 live region（输入框和 GlanceBar），
     // 避免退出覆盖层后主屏幕残留旧的 live region 导致重影和重复行。
     this.live.clear()
+    // 清理 Ctrl+X leader 状态，防止 overlay 内的按键误触 side panel toggle
+    this.clearSidePanelLeader()
 
     switch (id) {
       case 'pager':
@@ -1374,11 +1414,14 @@ export class TuiApp {
     return this.overlayController.getQuery()
   }
 
-  /** 判断按键是否为可打印字符（用于搜索型 overlay 的字符输入）。 */
+  /** 判断按键是否为可打印字符（用于搜索型 overlay 的字符输入）。
+   *  ] 不视为可打印——它被全局快捷键映射为侧栏 toggle，在搜索中不应被吃掉。 */
   private isPrintableKey(key: { name: string; char: string; ctrl?: boolean; meta?: boolean }): boolean {
     if (key.ctrl || key.meta) return false
     const ch = key.char
-    return !!ch && ch.length === 1 && ch.charCodeAt(0) >= 0x20 && ch !== '\x7f'
+    if (!ch || ch.length !== 1) return false
+    const code = ch.charCodeAt(0)
+    return code >= 0x20 && code !== 0x7f && code !== 0x5d // exclude DEL and ]
   }
 
   /** 编辑搜索型 overlay 的 query：传字符追加，传 null 退格删一字符。每次编辑复位选中索引。 */
@@ -1790,21 +1833,23 @@ export class TuiApp {
     this.renderLive()
   }
 
-  /** 切换右侧面板展开/折叠（仅宽终端生效）。 */
+  /** 切换右侧面板展开/折叠（仅宽终端生效）。overlay 激活时静默忽略。 */
   toggleSidePanel(): void {
+    if (this.overlay.isActive()) return
     this.setSidePanelOpen(!this.state.sidePanelOpen)
   }
 
-  /** 设置右侧面板展开状态；若终端太窄则静默不展开。 */
+  /** 设置右侧面板展开状态；若终端太窄或 overlay 激活则静默不展开。 */
   setSidePanelOpen(open: boolean): void {
     if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
+    if (this.overlay.isActive()) return
     this.state.sidePanelOpen = open
     this.renderLive()
   }
 
-  /** 查询右侧面板是否展开。 */
+  /** 查询右侧面板是否展开（对齐可见状态——窄终端下面板不可见即为关闭）。 */
   isSidePanelOpen(): boolean {
-    return this.state.sidePanelOpen
+    return this.state.sidePanelOpen && this.columns >= SIDE_PANEL_MIN_COLUMNS
   }
 
   /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
@@ -2296,6 +2341,35 @@ export class TuiApp {
    *  ticker / 批渲染帧文本未变时直接复用，消除每帧 O(n) split。主题切换经 forceRedraw 失效。 */
   private thinkingLinesMemo: { key: string; lines: string[] } | null = null
 
+  /**
+   * 输入框静态 chrome 缓存：leftBar / rightBar / botBorder 只依赖
+   * (separator, innerWidth, borderColor)，与输入文本、光标、GlanceBar 指标无关。
+   * renderLive 每帧重建这些边框是纯重复工作（含 `chars.h.repeat(innerWidth+2)`
+   * 这类 O(cols) 字符串构造）；按三元 key 缓存后，稳态帧（idle / 光标移动）直接命中。
+   * 着色用 color() 包装，结果确定性，不引入渲染状态耦合。
+   */
+  private inputChromeMemo: {
+    key: string
+    leftBar: string
+    rightBar: string
+    botBorder: string
+  } | null = null
+
+  private getInputChrome(
+    separator: string,
+    innerWidth: number,
+    borderColor: string,
+  ): { leftBar: string; rightBar: string; botBorder: string } {
+    const key = `${separator}|${innerWidth}|${borderColor}`
+    if (this.inputChromeMemo?.key === key) return this.inputChromeMemo
+    const chars = boxCharsFor(separator)
+    const leftBar = color(chars.v + ' ', borderColor)
+    const rightBar = color(' ' + chars.v, borderColor)
+    const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
+    this.inputChromeMemo = { key, leftBar, rightBar, botBorder }
+    return { leftBar, rightBar, botBorder }
+  }
+
   private getThinkingLines(expanded: boolean): string[] {
     const text = this.state.thinkingText
     const key = `${expanded ? '1' : '0'}\u0000${text}`
@@ -2374,8 +2448,10 @@ export class TuiApp {
 
     const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS && this.state.sidePanelOpen
     const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
-    const savedColumns = this.columns
-    const contentCols = savedColumns - sidePanelWidth
+    const contentCols = this.columns - sidePanelWidth
+    // 局部 cols：侧栏展开时用压缩后的主区宽度，否则用原始终端宽度。
+    // 不改写 this.columns，避免异步回调读到临时值。
+    const cols = showSidePanel ? contentCols : this.columns
 
     // Metrics 供 side panel 与 GlanceBar 共享，提前计算。
     const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
@@ -2398,17 +2474,10 @@ export class TuiApp {
       glanceCost = this.estimateSessionCost()
     }
 
-    // 让 live 内容按主区域宽度排版；后续再把 side panel 拼到右侧。
-    if (showSidePanel) {
-      (this as any).columns = contentCols
-    }
-
     let lines: LiveRegionLine[] = []
-    let chromeStart = 0
-    try {
-      lines = []
+    lines = []
 
-      // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
+    // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
     const stalled = this.streamRenderController.lastActivityMs > 0 && Date.now() - this.streamRenderController.lastActivityMs > 10_000
     const spinnerLine = formatSpinnerStatus({
       tick: this.streamRenderController.tick,
@@ -2451,7 +2520,7 @@ export class TuiApp {
     if (!showSidePanel) {
       if (this.liveTeamModel) {
         const model = this.teamModelWithLiveStatus(this.liveTeamModel)
-        for (const line of formatTeamPanel(model, this.theme, this.columns)) {
+        for (const line of formatTeamPanel(model, this.theme, cols)) {
           lines.push({ text: line })
         }
       } else {
@@ -2473,7 +2542,7 @@ export class TuiApp {
           const fleetLines = formatWorkerFleet(
             activeWorkers,
             this.theme,
-            this.columns,
+            cols,
             { done: summary.done, total: summary.total, running: summary.running },
           )
           for (const line of fleetLines) lines.push({ text: line })
@@ -2500,7 +2569,7 @@ export class TuiApp {
     if (this.toolGroupController.isActiveGroup()) {
       const activeGroup = this.toolGroupController.getActiveGroup()
       if (activeGroup && activeGroup.entries.length > 0) {
-        const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, this.columns)
+        const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, cols)
         for (const line of groupLines) {
           lines.push({ text: line })
         }
@@ -2511,7 +2580,7 @@ export class TuiApp {
     if (this.toolGroupController.isActiveBashGroup()) {
       const activeBashGroup = this.toolGroupController.getActiveBashGroup()
       if (activeBashGroup && activeBashGroup.entries.length > 0) {
-        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, this.columns)
+        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, cols)
         for (const line of groupLines) {
           lines.push({ text: line })
         }
@@ -2530,7 +2599,7 @@ export class TuiApp {
           toolInput: meta.input,
           outputTail: this.toolGroupController.getAccumulated(id),
           elapsedMs: Date.now() - meta.startMs,
-          columns: this.columns,
+          columns: cols,
           tick: this.streamRenderController.tick,
         }, this.theme)
         for (const line of toolLines) {
@@ -2555,7 +2624,7 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const preview = renderApprovalPreview(p.name, p.input, this.columns - 4, this.theme)
+        const preview = renderApprovalPreview(p.name, p.input, cols - 4, this.theme)
         lines.push({ text: '' })
         lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
@@ -2592,10 +2661,11 @@ export class TuiApp {
 
     // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
     if (!showSidePanel) {
-      const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
+      const taskLines = formatTaskList(this.state.todos, this.theme, { width: cols, maxRows: 6, showProgressBar: false })
       if (taskLines.length > 0) {
         lines.push({ text: '' })
         for (const taskLine of taskLines) lines.push({ text: taskLine })
+        lines.push({ text: '' })
       }
     }
 
@@ -2620,28 +2690,21 @@ export class TuiApp {
       const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
       const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
 
-      // 2. 根据 separator 确定线框字符
-      const chars = ({
-        thin:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' },
-        thick: { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃', m: '┳' },
-        dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
-      } as any)[uiSep] ?? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' }
-
-      const innerWidth = Math.max(20, this.columns - 6)
-      const leftBar = color(chars.v + ' ', borderColor)
-      const rightBar = color(' ' + chars.v, borderColor)
-      const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
+      const innerWidth = Math.max(20, cols - 6)
+      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor)，
+      // 缓存复用，避免每帧 repeat(innerWidth) 重建。
+      const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)
 
       // 3. 构建高保真左右指标 Segment
       const leftStr = formatGlanceLeft({
-        width: this.columns,
+        width: cols,
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
       }, this.theme)
 
       const rightStr = formatGlanceRight({
-        width: this.columns,
+        width: cols,
         modelName: this.state.modelName,
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
@@ -2656,6 +2719,7 @@ export class TuiApp {
       const plainRight = stripAnsiLen(rightStr)
 
       // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
+      const chars = boxCharsFor(uiSep)
       let topBorder = ''
       if (innerWidth < plainLeft + plainRight + 10) {
         topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
@@ -2718,12 +2782,6 @@ export class TuiApp {
           lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
-      }
-    }
-
-    } finally {
-      if (showSidePanel) {
-        this.columns = savedColumns
       }
     }
 

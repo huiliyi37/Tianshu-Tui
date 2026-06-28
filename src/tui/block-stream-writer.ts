@@ -12,6 +12,9 @@ const DEFAULT_CONFIG: BlockStreamConfig = {
   maxBufferSize: 64 * 1024,
 }
 
+/** 句末标点（中英文）。拆成数组用 lastIndexOf 逐个定位，避免逐字符 includes 的 O(n²)。 */
+const SENTENCE_ENDS = ['。', '！', '？', '.', '!', '?', '；', ';']
+
 export class BlockStreamWriter {
   private buffer = ''
   private idleTimer: ReturnType<typeof setTimeout> | null = null
@@ -131,10 +134,13 @@ export class BlockStreamWriter {
   }
 
   private findSentenceEnd(text: string): number {
-    // 句末标点（中英文）：。！？.!?；; 取最后一个出现位置作为切点
+    // 句末标点（中英文）：。！？.!?；; 取最后一个出现位置作为切点。
+    // 旧实现 for + includes 是 O(n²)（includes 每字符扫描标点表）；这里用 lastIndexOf
+    // 逐标点取最大下标，常数次 O(n) 调用，消除高吞吐流式下的二次扫描。
     let last = -1
-    for (let i = 0; i < text.length; i++) {
-      if ('。！？.!?；;'.includes(text[i]!)) last = i
+    for (const end of SENTENCE_ENDS) {
+      const idx = text.lastIndexOf(end)
+      if (idx > last) last = idx
     }
     return last
   }

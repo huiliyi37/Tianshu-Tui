@@ -27,6 +27,10 @@ export interface TaskListOptions {
   width?: number
   /** 面板最大行数（含标题 + 摘要行），默认 6 */
   maxRows?: number
+  /** 是否显示标题里的 8-cell 进度条。默认 false（Claude Code 风格 compact 标题）。
+   *  三个调用方（主区 live、side panel）都采用 compact 标题，故默认与之对齐；
+   *  需要进度条的调用方显式传 true。 */
+  showProgressBar?: boolean
 }
 
 /** 三态字形（与 Claude Code 对齐）。 */
@@ -46,22 +50,28 @@ function progressBar(done: number, total: number): string {
 
 function renderLine(t: TodoItem, theme: RivetTheme, maxContentWidth: number): string {
   const glyph = glyphFor(t.status)
-  // 按显示宽度截断（CJK/全角占 2 列）。
-  const content = displayWidth(t.content, WIDE) > maxContentWidth
-    ? `${truncateToDisplayWidth(t.content, maxContentWidth - displayWidth('…', WIDE), WIDE)}…`
+  const ELLIPSIS_W = displayWidth('…', WIDE)
+
+  // 前缀按状态组合：
+  //  - pending/completed：`  ☐ `（CJK 终端 ☐ 是 ambiguous → 2 列）
+  //  - in_progress：`▸ ◐ `（◐ 同为 ambiguous → 2 列）
+  // 这些 ambiguous glyph 在 wide 口径下占 2 列，content 预算必须按前缀**实际显示
+  // 宽度**扣减而非硬编码，否则整行会溢出终端宽度折行 → rowsForLine 低估 → chrome 残留。
+  // caller 传入的 maxContentWidth 已扣 4 列 indent（= narrow 口径的前缀宽），
+  // 故 content 预算 = maxContentWidth 补回这 4 列再减前缀真实宽度。
+  const prefix = t.status === 'in_progress'
+    ? `${color('▸', theme.primary)} ${color(glyph, theme.primary, { bold: true })} `
+    : `  ${color(glyph, theme.muted)} `
+  const prefixW = displayWidth(prefix, WIDE)
+  const contentBudget = maxContentWidth + 4 - prefixW
+  const content = displayWidth(t.content, WIDE) > contentBudget
+    ? `${truncateToDisplayWidth(t.content, contentBudget - ELLIPSIS_W, WIDE)}…`
     : t.content
-  if (t.status === 'in_progress') {
-    // ▸ prefix marks the current focus point; non-active items get space padding for alignment.
-    const adjustedWidth = maxContentWidth - 2 // account for ▸ prefix
-    const truncatedContent = displayWidth(content, WIDE) > adjustedWidth
-      ? `${truncateToDisplayWidth(content, adjustedWidth - displayWidth('…', WIDE), WIDE)}…`
-      : content
-    return `${color('▸', theme.primary)} ${color(glyph, theme.primary, { bold: true })} ${color(truncatedContent, theme.primary, { bold: true })}`
-  } else if (t.status === 'completed') {
-    return `  ${color(glyph, theme.muted)} ${color(content, theme.muted)}`
-  } else {
-    return `  ${color(glyph, theme.muted)} ${color(content, theme.muted)}`
-  }
+
+  const styled = t.status === 'in_progress'
+    ? color(content, theme.primary, { bold: true })
+    : color(content, theme.muted)
+  return `${prefix}${styled}`
 }
 
 /**
@@ -77,6 +87,7 @@ export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskL
   if (items.length === 0) return []
   const width = opts.width ?? 80
   const maxRows = Math.max(3, opts.maxRows ?? 6)
+  const showProgressBar = opts.showProgressBar === true
   const maxContentWidth = Math.max(8, width - 4)
 
   const lines: string[] = []
@@ -85,8 +96,11 @@ export function formatTaskList(items: TodoItem[], theme: RivetTheme, opts: TaskL
   const pending = items.filter(t => t.status === 'pending')
   const done = completed.length
 
-  // 标题：◇ 任务 (done/total)
-  lines.push(color(`◇ 任务 [${progressBar(done, items.length)}] ${done}/${items.length}`, theme.secondary, { bold: true }))
+  // 标题：◇ 任务 (done/total)，可选进度条
+  const header = showProgressBar
+    ? `◇ 任务 [${progressBar(done, items.length)}] ${done}/${items.length}`
+    : `◇ 任务 (${done}/${items.length})`
+  lines.push(color(header, theme.secondary, { bold: true }))
 
   // 预算：标题已占 1 行，完成摘要占 1 行（当有完成项时）
   let budget = maxRows - 1 // 去掉标题

@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import stringWidth from 'string-width'
+import { displayWidth } from '../../width.js'
 import { makeApp, stripAnsi } from './_harness.js'
 import type { TodoItem } from '../../../tools/todo-store.js'
 
@@ -39,7 +39,7 @@ test('宽屏显式展开后 side panel 展示 todo 与当前工具', () => {
   const lines = lastFrameLines(out)
   const panelLine = lines.find(l => l.includes('◇ 任务'))
   assert.ok(panelLine, 'found merged side-panel line')
-  assert.equal(stringWidth(panelLine), 120, 'merged line spans full terminal width')
+  assert.equal(displayWidth(panelLine, { ambiguousAsWide: true }), 120, 'merged line spans full terminal width')
 
   // 主区底部 chrome 仍保留
   assert.ok(plain.includes('天枢'), 'GlanceBar domain still visible')
@@ -99,5 +99,6 @@ test('side panel 展示 FleetRegistry 中的活跃 worker', () => {
 
   const plain = lastFramePlain(out)
   assert.ok(plain.includes('worker'), `worker header in side panel: ${plain}`)
-  assert.ok(plain.includes('T1'), `worker short label in side panel: ${plain}`)
+  // 统一渲染后侧栏与主区共用 formatWorkerRow：显示星名·职能名而非 shortLabel。
+  assert.ok(plain.includes('侦察'), `worker profile label in side panel (unified): ${plain}`)
 })

@@ -13,7 +13,8 @@ import type { FleetWorkerView } from './fleet-registry.js'
 import { color } from './engine/ansi.js'
 import { formatTokenProgressBar } from './format/glance-bar.js'
 import { formatTaskList } from './format/task-list.js'
-import stringWidth from 'string-width'
+import { formatWorkerRow } from './format/worker-fleet.js'
+import { displayWidth, truncateToDisplayWidth } from './width.js'
 
 export interface SidePanelInput {
   /** 面板总宽度（含边框），通常 24-32 列 */
@@ -56,9 +57,16 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   const botBorder = color(`╰${h.repeat(totalW - 2)}╯`, theme.muted)
   const leftEdge = color('│', theme.muted)
 
+  const AMBIGUOUS_WIDE = { ambiguousAsWide: true }
+  const ELLIPSIS_WIDTH = displayWidth('…', AMBIGUOUS_WIDE)
+
   const pad = (text: string, target: number): string => {
-    const dw = stringWidth(text)
-    if (dw >= target) return text.slice(0, Math.max(0, target - 1)) + '…'
+    const dw = displayWidth(text, AMBIGUOUS_WIDE)
+    if (dw > target) {
+      if (target < ELLIPSIS_WIDTH) return ''
+      const truncated = truncateToDisplayWidth(text, Math.max(0, target - ELLIPSIS_WIDTH), AMBIGUOUS_WIDE)
+      return truncated + '…'
+    }
     return text + ' '.repeat(target - dw)
   }
 
@@ -95,13 +103,13 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   // ── Section: 任务列表（复用 formatTaskList）──
   lines.push(sectionDivider())
-  const taskLines = formatTaskList(input.todos, theme, { width: contentW, maxRows: MAX_TASK_ROWS })
+  const taskLines = formatTaskList(input.todos, theme, { width: contentW, maxRows: MAX_TASK_ROWS, showProgressBar: false })
   if (taskLines.length > 0) {
     for (const taskLine of taskLines) {
       lines.push(line(taskLine))
     }
   } else {
-    lines.push(line(color('◇ 任务 [░░░░░░░░] 0/0', theme.secondary, { bold: true })))
+    lines.push(line(color('◇ 任务 (0/0)', theme.secondary, { bold: true })))
     lines.push(line(muted('  暂无任务')))
   }
 
@@ -110,14 +118,10 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(sectionDivider())
     lines.push(line(color(input.workers.length === 1 ? '◆ worker' : `◆ workers (${input.workers.length})`, theme.secondary, { bold: true })))
     const shown = input.workers.slice(0, MAX_WORKERS)
+    // 复用主区 formatWorkerRow：宽窄屏切换时字段（glyph/label/activity/elapsed）一致，
+    // 不再各自维护一套渲染，消除「主区显示 activity、侧栏显示 shortLabel+profile」的突变。
     for (const wrk of shown) {
-      const statusIcon = wrk.terminal ? '✓' : wrk.status === 'failed' ? '✗' : '●'
-      const statusColor = wrk.terminal ? theme.success : wrk.status === 'failed' ? theme.error : theme.primary
-      const label = truncateStr(wrk.shortLabel, 8)
-      const profile = truncateStr(wrk.profile, 8)
-      const elapsed = formatElapsedShort(wrk.elapsedMs)
-      const row = `${color(statusIcon, statusColor)} ${label} ${dim(profile)} ${muted(elapsed)}`
-      lines.push(line(row))
+      lines.push(line(formatWorkerRow(wrk, theme, contentW)))
     }
     if (input.workers.length > MAX_WORKERS) {
       lines.push(line(muted(`... +${input.workers.length - MAX_WORKERS} more`)))
@@ -154,7 +158,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   // ── Section: 快捷键提示 ──
   lines.push(sectionDivider())
-  lines.push(line(dim('] toggle · ctrl+x r open')))
+  lines.push(line(dim('ctrl+] toggle · ctrl+x r')))
 
   lines.push(botBorder)
   return lines
@@ -173,19 +177,35 @@ function parseActivePlan(pointer: string | undefined): { title: string; path: st
 }
 
 function decodeXmlEntities(s: string): string {
+  // 两阶段解码：先展开具名/数字实体，**最后**再把 &amp; → &。
+  // 反过来（先解 &amp;）会让 "&amp;lt;" 被错解成 "<"：&amp; 先变 &，残留的 "lt;"
+  // 虽不再被匹配，但顺序错误时 "&amp;lt;" 这类已转义过的二次输入会被破坏。
+  // 数字实体（&#39; &#x27;）覆盖所有可打印字符，具名实体补齐 XML 五件套 + apos。
   return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => safeFromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => safeFromCodePoint(parseInt(dec, 10)))
     .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
+    .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+/** 数字实体还原：拒绝代理对（U+D800–DFFF）与超平面外的非法码点，避免生成乱码。 */
+function safeFromCodePoint(cp: number): string {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return ''
+  try { return String.fromCodePoint(cp) } catch { return '' }
 }
 
 function truncateStr(s: string, max: number): string {
   if (max <= 0) return ''
-  const dw = stringWidth(s)
+  const AMBIGUOUS_WIDE = { ambiguousAsWide: true }
+  const ELLIPSIS_WIDTH = displayWidth('…', AMBIGUOUS_WIDE)
+  const dw = displayWidth(s, AMBIGUOUS_WIDE)
   if (dw <= max) return s
-  if (max <= 3) return '…'
-  return s.slice(0, max - 1) + '…'
+  if (max < ELLIPSIS_WIDTH) return '…'
+  const truncated = truncateToDisplayWidth(s, max - ELLIPSIS_WIDTH, AMBIGUOUS_WIDE)
+  return truncated + '…'
 }
 
 function formatTokensCompact(n: number): string {

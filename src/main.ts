@@ -747,6 +747,19 @@ async function main() {
 
   // ── First-run template prompt (before clearing screen) ───────
   if (ctx.templatesPendingAgents && !args.includes('--dangerously-skip-permissions')) {
+    // Detect git availability to advise first-run users. Git is optional (the
+    // agent runs in-place without it), but unlocks worktree isolation, commit,
+    // diff review, and checkpoints. Mirrors the inline try/catch probe pattern
+    // used at main.ts:396 (gitBranch detection).
+    const gitAvailable = (() => {
+      try {
+        execSync('git rev-parse --is-inside-work-tree', { cwd: process.cwd(), stdio: 'pipe' })
+        return true
+      } catch {
+        return false
+      }
+    })()
+
     const { createInterface } = await import('node:readline/promises')
     const rl = createInterface({ input: stdin, output: stdout })
     try {
@@ -755,6 +768,13 @@ async function main() {
       stdout.write('│ This project has no AGENTS.md or .rivet.md.     │\n')
       stdout.write('│ Create them from templates?                      │\n')
       stdout.write('╰──────────────────────────────────────────────────╯\n')
+      if (!gitAvailable) {
+        stdout.write('\n')
+        stdout.write('  ⚠ 未检测到 git。git 是可选依赖——不装也能正常用，\n')
+        stdout.write('    但安装后可解锁：委派隔离 / 检查点回滚 / commit / diff 审查。\n')
+        stdout.write('    安装：https://git-scm.com/downloads\n')
+        stdout.write('\n')
+      }
       stdout.write('  [1] Create both (AGENTS.md + .rivet.md)\n')
       stdout.write('  [2] Skip                         \n')
       stdout.write('\n')

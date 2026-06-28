@@ -3,7 +3,7 @@
  */
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import stringWidth from 'string-width'
+import { displayWidth } from '../width.js'
 import { renderSidePanel } from '../side-panel.js'
 import { getTheme } from '../theme.js'
 
@@ -68,7 +68,11 @@ describe('renderSidePanel', () => {
       modelName: 'test',
     }, theme)
     const all = lines.map(stripAnsi).join(' ')
-    assert.ok(all.includes('T1'), `worker label: ${all}`)
+    // 复用主区 formatWorkerRow 后，侧栏 worker 行字段与主区一致：
+    //   ◐ {星名 · 职能名} {elapsed}（窄列省略 activity），不再显示 shortLabel(如 T1)。
+    assert.ok(all.includes('侦察'), `worker profile label (unified with main area): ${all}`)
+    assert.ok(all.includes('◐'), `running status glyph: ${all}`)
+    assert.ok(all.includes('5s'), `worker elapsed: ${all}`)
   })
 
   it('renders current tool info', () => {
@@ -132,8 +136,39 @@ describe('renderSidePanel', () => {
         domainGlyph: '❂', domainName: '天枢测试星域',
       }, theme)
       for (const line of lines) {
-        const w = stringWidth(stripAnsi(line))
+        const w = displayWidth(line, { ambiguousAsWide: true })
         assert.ok(w <= width, `panel width=${width}: line display-width ${w} must be ≤ ${width}, got: "${stripAnsi(line)}"`)
+      }
+    }
+  })
+
+  it('lines with East-Asian Ambiguous symbols stay within panel width under wide metric', () => {
+    // — … · → 等 ambiguous 符号在 CJK 终端按 2 列渲染。narrow(stringWidth) 度量会
+    // 低估，让含这些符号的行溢出折行。本测试用 wide 口径断言，确保 formatWorkerRow /
+    // truncateStr / formatTaskList 都按 wide 截断，杜绝溢出。
+    for (const width of [24, 32]) {
+      const lines = renderSidePanel({
+        columns: width,
+        todos: [
+          { id: '1', content: '处理边界——重试→策略·缓存…并发', status: 'in_progress' },
+        ],
+        workers: [{
+          workerId: 'wo_01', shortLabel: 'T1', parentToolId: 'tool_01',
+          profile: 'code_scout', authority: 'tianquan', status: 'running',
+          panelStatus: 'running', terminal: false,
+          activity: '扫描——目录→过滤·结果……',
+          activityLog: [],
+          elapsedMs: 5000,
+        }],
+        modelName: '模型—名称…·',
+        currentTool: { name: '工具→名称·…', elapsedMs: 1234567 },
+        estimatedTokens: 123456789, maxTokens: 999999999,
+        cacheHitRate: 0.5,
+        domainGlyph: '❂', domainName: '天枢',
+      }, theme)
+      for (const line of lines) {
+        const w = displayWidth(line, { ambiguousAsWide: true })
+        assert.ok(w <= width, `ambiguous width=${width}: wide display-width ${w} must be ≤ ${width}, got: "${stripAnsi(line)}"`)
       }
     }
   })
@@ -164,6 +199,27 @@ describe('renderSidePanel', () => {
     assert.ok(all.includes('.rivet/plans/p1.md'), `plan path: ${all}`)
   })
 
+  it('decodes XML entities in active plan title/path (named + numeric + amp-first ordering)', () => {
+    // 覆盖 decodeXmlEntities 三类修复：
+    //  - &apos; / &#39; → '  （旧实现未处理，会原样残留）
+    //  - &amp;lt; → &lt; （应停在 &lt; 文本，不被二次解成 <；验证 amp-last 顺序）
+    //  - &#x27; → '      （十六进制数字实体）
+    const lines = renderSidePanel({
+      columns: 48,
+      todos: [],
+      workers: [],
+      modelName: 'test',
+      activePlan: '<active-plan title="Bob&apos;s &amp;lt;tag&gt; task &#39;A&#x27;s" path="x/y.txt">',
+    }, theme)
+    const all = lines.map(stripAnsi).join(' ')
+    assert.ok(all.includes("Bob's"), `apos decoded: ${all}`)
+    // &#39; → ' and &#x27; → ' ; 验证数字实体被解码
+    assert.ok(all.includes("'A's"), `&#39; and &#x27; decoded to apostrophe: ${all}`)
+    // &amp;lt; 必须解成字面 "&lt;"，不能进一步变成 "<"
+    assert.ok(all.includes('&lt;'), `amp-first would corrupt: ${all}`)
+    assert.ok(!all.includes(' <tag'), `no double-decode of escaped lt: ${all}`)
+  })
+
   it('renders shortcuts hint', () => {
     const lines = renderSidePanel({
       columns: 32,
@@ -172,7 +228,7 @@ describe('renderSidePanel', () => {
       modelName: 'test',
     }, theme)
     const all = lines.map(stripAnsi).join(' ')
-    assert.ok(all.includes('] toggle'), `toggle hint: ${all}`)
-    assert.ok(all.includes('ctrl+x r open'), `open hint: ${all}`)
+    assert.ok(all.includes('ctrl+] toggle'), `toggle hint: ${all}`)
+    assert.ok(all.includes('ctrl+x r'), `open hint: ${all}`)
   })
 })

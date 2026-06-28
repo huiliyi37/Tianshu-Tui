@@ -55,6 +55,26 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme
 import stringWidth from 'string-width'
 
 /**
+ * Grapheme 边界缓存：Intl.Segmenter 对整串分段是 O(n)，而 prevGrapheme/
+ * nextGrapheme 在每次光标移动（左右键/backspace/delete）都被调用。长输入下
+ * 每次按键重跑全长分段会卡。按 value 缓存边界数组，value 未变（纯光标移动）
+ * 直接复用；并用二分定位而非线性扫描边界。
+ */
+interface GraphemeCache {
+  value: string
+  bounds: number[] // 升序的 code-unit 偏移（含 0 与末尾）
+}
+
+/** 返回字符串中所有 grapheme 边界的 code-unit 偏移（含 0 与末尾）。 */
+function graphemeBoundaries(value: string): number[] {
+  const bounds = [0]
+  for (const seg of graphemeSegmenter.segment(value)) {
+    bounds.push(seg.index + seg.segment.length)
+  }
+  return bounds
+}
+
+/**
  * 水平视窗：当光标行的内容部分超过可用宽度时，以光标位置为中心截取可见窗口。
  * 前缀（`〉 ` 或 `  `）始终保留，截断只发生在内容部分。
  *
@@ -121,13 +141,26 @@ function hscrollCursorLine(
   return prefix + leftEllipsis + leftChars.join('') + rightChars.join('') + rightEllipsis
 }
 
-/** 返回字符串中所有 grapheme 边界的 code-unit 偏移（含 0 与末尾）。 */
-function graphemeBoundaries(value: string): number[] {
-  const bounds = [0]
-  for (const seg of graphemeSegmenter.segment(value)) {
-    bounds.push(seg.index + seg.segment.length)
+/** 在升序边界数组中找严格小于 cursor 的最大下标（光标左侧最近边界）。二分 O(log n)。 */
+function boundaryBefore(bounds: number[], cursor: number): number {
+  let lo = 0, hi = bounds.length - 1, ans = 0
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1
+    if (bounds[mid]! < cursor) { ans = bounds[mid]!; lo = mid + 1 }
+    else hi = mid - 1
   }
-  return bounds
+  return ans
+}
+
+/** 在升序边界数组中找严格大于 cursor 的最小下标（光标右侧最近边界）。二分 O(log n)。 */
+function boundaryAfter(bounds: number[], cursor: number): number {
+  let lo = 0, hi = bounds.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (bounds[mid]! > cursor) hi = mid
+    else lo = mid + 1
+  }
+  return bounds[lo]! > cursor ? bounds[lo]! : -1
 }
 
 function viewportAroundCursor(lines: string[], cursorLine: number, maxLines?: number): string[] {
@@ -168,6 +201,9 @@ export class InputLine {
   private _vimEnabled: boolean
   private _vimMode: VimMode
   private _maxLength: number
+
+  /** Grapheme 边界缓存（按 value 失效）。光标移动不改 value，命中缓存省去 O(n) 分段。 */
+  private _graphemeCache: GraphemeCache | null = null
 
   private onChangeCallback?: (value: string, cursor: number) => void
   private onSubmitCallback?: (value: string) => void
@@ -452,23 +488,22 @@ export class InputLine {
   /** 光标左侧最近的 grapheme 边界。 */
   private prevGrapheme(): number {
     if (this._cursor <= 0) return 0
-    const bounds = graphemeBoundaries(this._value)
-    let prev = 0
-    for (const b of bounds) {
-      if (b < this._cursor) prev = b
-      else break
-    }
-    return prev
+    return boundaryBefore(this.graphemeBounds(), this._cursor)
   }
 
   /** 光标右侧最近的 grapheme 边界。 */
   private nextGrapheme(): number {
     if (this._cursor >= this._value.length) return this._value.length
+    const b = boundaryAfter(this.graphemeBounds(), this._cursor)
+    return b < 0 ? this._value.length : b
+  }
+
+  /** 当前 value 的 grapheme 边界（按 value 缓存，纯光标移动命中缓存）。 */
+  private graphemeBounds(): number[] {
+    if (this._graphemeCache?.value === this._value) return this._graphemeCache.bounds
     const bounds = graphemeBoundaries(this._value)
-    for (const b of bounds) {
-      if (b > this._cursor) return b
-    }
-    return this._value.length
+    this._graphemeCache = { value: this._value, bounds }
+    return bounds
   }
 
   private moveHome(): InputLineEvent | null {

@@ -155,7 +155,7 @@ describe('formatTaskList', () => {
       mk('3', 'task C', 'pending'),
       mk('4', 'task D', 'pending'),
     ]
-    const lines = formatTaskList(items, theme, { width: 80 })
+    const lines = formatTaskList(items, theme, { width: 80, showProgressBar: true })
     const header = stripAnsi(lines[0]!)
     // 2/4 = 50% → 4 filled cells out of 8
     assert.ok(header.includes('█'), 'progress bar has filled cells')
@@ -165,7 +165,7 @@ describe('formatTaskList', () => {
 
   it('progress bar all empty when nothing done', () => {
     const items = [mk('1', 'task A', 'pending'), mk('2', 'task B', 'in_progress')]
-    const lines = formatTaskList(items, theme, { width: 80 })
+    const lines = formatTaskList(items, theme, { width: 80, showProgressBar: true })
     const header = stripAnsi(lines[0]!)
     assert.ok(header.includes('░'), 'all empty cells')
     assert.ok(!header.includes('█'), 'no filled cells when 0 done')
@@ -173,7 +173,7 @@ describe('formatTaskList', () => {
 
   it('progress bar all filled when all done', () => {
     const items = [mk('1', 'task A', 'completed'), mk('2', 'task B', 'completed')]
-    const lines = formatTaskList(items, theme, { width: 80 })
+    const lines = formatTaskList(items, theme, { width: 80, showProgressBar: true })
     const header = stripAnsi(lines[0]!)
     assert.ok(header.includes('█'), 'all filled cells')
     assert.ok(!header.includes('░'), 'no empty cells when all done')
@@ -190,5 +190,17 @@ describe('formatTaskList', () => {
     const pendingLine = lines.find(l => stripAnsi(l).includes('pending task'))
     assert.ok(activeLine && stripAnsi(activeLine).includes('▸'), 'in_progress has ▸ prefix')
     assert.ok(pendingLine && !stripAnsi(pendingLine).includes('▸'), 'pending does NOT have ▸ prefix')
+  })
+
+  it('can hide progress bar for Claude Code-style compact header', () => {
+    const items = [
+      mk('1', 'task A', 'completed'),
+      mk('2', 'task B', 'pending'),
+    ]
+    const lines = formatTaskList(items, theme, { width: 80, showProgressBar: false }).map(stripAnsi)
+    const header = lines[0]!
+    assert.ok(header.includes('◇ 任务 (1/2)'), `compact header: ${header}`)
+    assert.ok(!header.includes('█'), 'no filled progress cells')
+    assert.ok(!header.includes('░'), 'no empty progress cells')
   })
 })
