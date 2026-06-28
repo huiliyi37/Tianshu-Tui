@@ -127,6 +127,10 @@ export function Composer(props: {
   const reqSeq = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout>>()
   const pendingCaret = useRef<number | null>(null)
+  // IME 组合输入状态追踪：中文/日文输入法选词时按 Enter 确认候选词，绝不能被
+  // 当成"提交消息"。用 ref 追踪 compositionstart/end，比 e.nativeEvent.isComposing
+  // 更可靠（部分 WebView 下 isComposing 在 keydown 时尚未更新）。
+  const composingRef = useRef(false)
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -305,10 +309,14 @@ export function Composer(props: {
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME 组合输入中（中文/日文选词）：Enter 是确认候选词，不触发任何命令/提交。
+    // 这是中文用户最高频的误触来源——不加此守卫，拼音选词按 Enter 会直接提交半截内容。
+    const isComposing = composingRef.current || e.nativeEvent.isComposing || e.keyCode === 229
+
     if (suggest) {
       if (e.key === 'ArrowDown') { e.preventDefault(); move(1); return }
       if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); return }
-      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); accept(); return }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !isComposing) { e.preventDefault(); accept(); return }
       if (e.key === 'Escape') { e.preventDefault(); closeSuggest(); return }
     }
 
@@ -318,7 +326,7 @@ export function Composer(props: {
       return
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
       e.preventDefault()
       submit()
     } else if (e.key === 'Escape') {
@@ -477,6 +485,8 @@ export function Composer(props: {
             : 'Ask anything…'}
           onChange={handleChange}
           onKeyDown={onKeyDown}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => { composingRef.current = false }}
           onClick={(e) => onAfterCaret(value, e.currentTarget.selectionStart ?? value.length)}
         />
         <input
