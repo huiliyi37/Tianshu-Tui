@@ -1270,23 +1270,37 @@ export class RuntimeSessionManager {
    * (derived from the session event log, since OaiMessage has no ts field).
    * Returns empty for sessions without a live agent (rehydrated/idle).
    */
-  listRewindPoints(id: string): { index: number; content: string; timestamp: number }[] | undefined {
+  listRewindPoints(id: string): { index: number; content: string; timestamp: number; seq?: number }[] | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
     if (!s.agent) return []
     const msgs = s.agent.getMessages()
-    // Collect user-event timestamps from the event log so we can map each
-    // user message to its original submission time.
-    const userTimestamps: number[] = []
+    // Collect user events (seq + ts + text) so we can map each user message to
+    // both its submission time AND the seq of its originating `user` event. The
+    // seq lets the UI anchor previews/forks on the exact `u-${seq}` block the
+    // rewind reducer will cut at — same anchor rewind() emits as anchorSeq.
+    const userEvents: { seq: number; ts: number; text: string }[] = []
     for (const e of s.events) {
-      if (e.type === 'user') { userTimestamps.push(e.ts) }
+      if (e.type === 'user') {
+        userEvents.push({ seq: e.seq, ts: e.ts, text: String((e.data as { text?: unknown }).text ?? '') })
+      }
     }
-    const entries: { index: number; content: string; timestamp: number }[] = []
+    const entries: { index: number; content: string; timestamp: number; seq?: number }[] = []
     let userIdx = 0
     for (let i = 0; i < msgs.length; i++) {
       const m = msgs[i]!
       if (m.role === 'user' && typeof m.content === 'string') {
-        entries.push({ index: i, content: m.content, timestamp: userTimestamps[userIdx] ?? 0 })
+        const ue = userEvents[userIdx]
+        // Emit seq only when the ordinal lines up AND the text matches, so a
+        // trimmed/diverged event log degrades to the client's text heuristic
+        // instead of anchoring on the wrong block.
+        const seq = ue && ue.text === m.content ? ue.seq : undefined
+        entries.push({
+          index: i,
+          content: m.content,
+          timestamp: ue?.ts ?? 0,
+          ...(seq !== undefined ? { seq } : {}),
+        })
         userIdx++
       }
     }

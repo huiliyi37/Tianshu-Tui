@@ -356,6 +356,13 @@ export interface RewindPoint {
   index: number
   content: string
   timestamp: number
+  /**
+   * Seq of the originating `user` event, i.e. the `u-${seq}` block the rewind
+   * reducer cuts at. Lets the timeline preview anchor on the exact same block a
+   * fork will truncate, so preview == post-fork state. Absent when the event log
+   * was trimmed/diverged (client falls back to ordinal/text heuristics).
+   */
+  seq?: number
 }
 
 export function getRewindPoints(id: string): Promise<{ points: RewindPoint[] }> {

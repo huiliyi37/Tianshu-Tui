@@ -122,25 +122,40 @@ export function ThreadView(props: {
   // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
   // U8: depend on blocksRev so in-place streaming text updates still recompute.
   const filteredBlocks = useMemo(() => {
-    if (selectedTurnIndex === -1 || selectedTurnIndex === rewindPoints.length) {
+    // selectedTurnIndex === -1 (no selection) or === length (slider far right) =
+    // latest: show everything.
+    if (selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length) {
       return view.blocks
     }
 
-    let userBlockCount = 0
-    let cutoffIndex = view.blocks.length
+    // Historical: parked BEFORE rewind point `selectedTurnIndex`, so only the
+    // turns a fork here would keep are shown. Anchor on that point's `seq` — the
+    // exact `u-${seq}` block rewind() truncates from — so the preview is the
+    // byte-for-byte post-fork state (no drift from system/compaction/image turns
+    // that broke the old user-block-counting heuristic).
+    const point = rewindPoints[selectedTurnIndex]
+    if (!point) return view.blocks
 
+    if (typeof point.seq === 'number') {
+      const cutIdx = view.blocks.findIndex(
+        (b) => b.kind === 'user' && b.key === `u-${point.seq}`,
+      )
+      if (cutIdx >= 0) return view.blocks.slice(0, cutIdx)
+    }
+
+    // Fallback (event log trimmed → no seq): cut at the (selectedTurnIndex)-th
+    // user block. Equivalent to the seq path on a healthy 1:1 block/message log.
+    let userBlockCount = 0
     for (let i = 0; i < view.blocks.length; i++) {
       if (view.blocks[i]?.kind === 'user') {
-        if (userBlockCount === selectedTurnIndex + 1) {
-          cutoffIndex = i
-          break
+        if (userBlockCount === selectedTurnIndex) {
+          return view.blocks.slice(0, i)
         }
         userBlockCount++
       }
     }
-
-    return view.blocks.slice(0, cutoffIndex)
-  }, [view.blocks, selectedTurnIndex, rewindPoints.length])
+    return view.blocks
+  }, [view.blocks, selectedTurnIndex, rewindPoints])
 
   const rendered = useMemo(() => groupBlocks(filteredBlocks), [filteredBlocks, view.blocksRev])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
@@ -480,11 +495,11 @@ export function ThreadView(props: {
               }}
               className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
             />
-            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[200px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? rewindPoints[selectedTurnIndex]?.content : '最新'}>
-              {selectedTurnIndex === -1 || selectedTurnIndex === rewindPoints.length ? (
+            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? `分叉点（第 ${selectedTurnIndex + 1} 轮）：${rewindPoints[selectedTurnIndex]?.content}` : '最新'}>
+              {selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length ? (
                 '最新 (Latest)'
               ) : (
-                `轮次 ${selectedTurnIndex + 1}: ${rewindPoints[selectedTurnIndex]?.content}`
+                `↩ 第 ${selectedTurnIndex + 1} 轮之前`
               )}
             </span>
           </div>
@@ -632,7 +647,7 @@ export function ThreadView(props: {
                   <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
                 <span className="font-medium">
-                  您正在查看历史轮次 ({selectedTurnIndex + 1}/{rewindPoints.length})。在此状态下发送新消息将从该点分叉（Fork）并截断后续历史。
+                  已回退到第 {selectedTurnIndex + 1} 轮之前（仅显示其前的 {selectedTurnIndex} 轮）。在此发送新消息将从这里分叉（Fork），截断第 {selectedTurnIndex + 1} 轮及其后的历史。
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
