@@ -39,6 +39,7 @@ import { formatMilestoneLine } from './constellation/format.js'
 import { join } from 'path'
 import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
+import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -826,6 +827,20 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // 异步检查更新：不阻塞启动，失败静默，有新版本时写入 scrollback 提示。
+  if (!process.env.RIVET_NO_UPDATE_CHECK) {
+    void (async () => {
+      try {
+        const update = await checkForUpdate()
+        if (update?.hasUpdate) {
+          app.commitStatic(formatUpdateBanner(update.current, update.latest))
+        }
+      } catch {
+        // fail-open: 离线/注册表不可达时不打扰用户
+      }
+    })()
+  }
 }
 
 main().catch((err) => {
