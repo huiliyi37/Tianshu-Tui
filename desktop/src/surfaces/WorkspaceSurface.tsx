@@ -163,7 +163,11 @@ export function WorkspaceSurface() {
           maxSize="35%"
           onResize={({ asPercentage }) => saveSidebarWidth(Math.round(asPercentage))}
         >
-          <ProjectSidebar />
+          <ProjectSidebar
+            onCollapse={() => {
+              dispatch({ type: 'setSidebar', visible: false })
+            }}
+          />
         </Panel>
         <Separator className="panel-resize-handle" />
         <Panel minSize="30%">
@@ -295,6 +299,23 @@ export function WorkspaceSurface() {
             <path d="M15 18l-6-6 6-6" />
           </svg>
           <span className="capsule-text">审查面板</span>
+        </button>
+      )}
+
+      {!ui.sidebarVisible && (
+        <button
+          className="sidebar-expand-capsule"
+          title="展开侧边栏 (Cmd+B)"
+          onClick={() => {
+            dispatch({ type: 'setSidebar', visible: true })
+          }}
+          aria-label="展开侧边栏"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M9 6l6 6-6 6" />
+          </svg>
+          <span className="capsule-text">项目侧边栏</span>
         </button>
       )}
     </div>

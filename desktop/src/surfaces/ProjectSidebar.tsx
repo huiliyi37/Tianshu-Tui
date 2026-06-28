@@ -61,7 +61,8 @@ function formatRelativeTime(timestamp: number): string {
   return `${months}mo`
 }
 
-export function ProjectSidebar() {
+export function ProjectSidebar(props: { onCollapse?: () => void }) {
+  const { onCollapse } = props
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
@@ -154,14 +155,38 @@ export function ProjectSidebar() {
   return (
     <div className="project-sidebar">
       <div className="sidebar-top-container">
-        <button
-          className="sidebar-new-btn outline"
-          onClick={() => dispatch({ type: 'openNew', open: true })}
-          title="新建对话 (⌘N)"
-        >
-          <span className="snb-glyph" aria-hidden>+</span>
-          <span className="snb-label">New Conversation</span>
-        </button>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <button
+            className="sidebar-new-btn outline flex-1"
+            onClick={() => dispatch({ type: 'openNew', open: true })}
+            title="新建对话 (⌘N)"
+            style={{ margin: 0 }}
+          >
+            <span className="snb-glyph" aria-hidden>+</span>
+            <span className="snb-label">New Conversation</span>
+          </button>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="sidebar-collapse-btn p-1.5 rounded hover:bg-panel-2 border border-border text-muted hover:text-text transition-all shrink-0"
+              title="收起侧边栏 (⌘B)"
+              style={{
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                background: 'transparent',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <path d="M9 3v18" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         <nav className="sidebar-nav" aria-label="主导航">
           {CORE_SURFACES.map((s) => (

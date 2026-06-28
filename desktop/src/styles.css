@@ -3765,3 +3765,39 @@ html[data-theme="nebula"] .plan-panel {
 .mission-btn.abort { border-color: var(--error); color: var(--error); }
 .mission-btn.open { background: var(--accent); color: #fff; border-color: var(--accent); }
 .mission-btn.open:hover { background: var(--accent-hover); }
+
+/* Left Sidebar Expand Capsule */
+.sidebar-expand-capsule {
+  position: fixed;
+  left: -10px;
+  top: 45%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 10px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  box-shadow: var(--shadow-md);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.sidebar-expand-capsule:hover {
+  left: 0;
+  color: var(--text-strong);
+  border-color: var(--accent);
+  background: var(--panel-3);
+  box-shadow: var(--shadow-lg);
+}
+.sidebar-expand-capsule svg {
+  color: var(--accent);
+  transition: transform var(--dur) var(--ease);
+}
+.sidebar-expand-capsule:hover svg {
+  transform: translateX(2px);
+}

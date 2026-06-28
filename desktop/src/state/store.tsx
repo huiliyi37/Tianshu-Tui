@@ -91,9 +91,9 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'setToolDensity':
       return { ...state, toolDensity: action.density }
     case 'setSidebar':
-      return { ...state, sidebarVisible: action.visible }
+      return { ...state, sidebarVisible: action.visible, zenMode: action.visible ? false : state.zenMode }
     case 'setReview':
-      return { ...state, reviewVisible: action.visible }
+      return { ...state, reviewVisible: action.visible, zenMode: action.visible ? false : state.zenMode }
     case 'toggleZen': {
       const next = !state.zenMode
       return {
