@@ -223,7 +223,14 @@ export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): 
   const r2Contributions: SeatContribution[] = input.seats.map(seat => {
     const result = run2.results.find(r => r.workOrderId === `council:seat-${seat.authority}-r2`)
     if (!result) return { authority: seat.authority, summary: '', additions: [], risks: [], challenges: [], alternatives: [], round: 2 }
-    return { ...parseSeatContribution(seat.authority, result), round: 2 }
+    const contrib: SeatContribution = { ...parseSeatContribution(seat.authority, result), round: 2 }
+    // 真实 model 回填：与 round1 一致，从 coordinator workerModels 匹配，
+    // 而非信任 worker 自报（rebuttal schema 同样不含 modelUsed）。
+    if (run2.workerModels && !contrib.modelUsed) {
+      const m = run2.workerModels.find(wm => wm.workOrderId === result.workOrderId)
+      if (m) contrib.modelUsed = m.model
+    }
+    return contrib
   })
   const allRebuttals = r2Contributions.flatMap(c => c.rebuttals ?? [])
   const aggregate = { ...round1.aggregate, conflicts: resolveConflictsWithRebuttals(round1.aggregate.conflicts, allRebuttals) }

@@ -43,6 +43,15 @@ const CAPABILITY_TASKS: { key: string; label: string }[] = [
 
 const INHERIT = '__inherit__'
 
+/** Built-in star-domain ids valid as council seat authorities. An authority that
+ *  is NOT a loaded domain makes the seat worker tool-less (fail-closed) and skips
+ *  cognitive injection — so we suggest these. Custom domains (card frontmatter)
+ *  are still allowed, hence a datalist (suggest) rather than a hard select. */
+const BUILTIN_DOMAINS = [
+  'tianshu', 'pojun', 'tianfu', 'tianliang', 'tianquan',
+  'tianji', 'tianxuan', 'fu', 'wenqu', 'yaoguang',
+]
+
 function encodeTarget(t: RoutingTarget): string {
   return `${t.provider}::${t.model}`
 }
@@ -170,6 +179,11 @@ export function RoutingSettings() {
   if (loading) return <div className="meta">加载子代理路由配置…</div>
   if (!config) return <div className="meta warn">{error ?? '无法读取路由配置'}</div>
 
+  const seatAuthorities = config.council.seats.map((s) => s.authority.trim())
+  const hasEmptySeat = seatAuthorities.some((a) => !a)
+  const dupAuthority = seatAuthorities.find((a, i) => a && seatAuthorities.indexOf(a) !== i)
+  const councilInvalid = hasEmptySeat || Boolean(dupAuthority)
+
   return (
     <div className="routing-settings flex flex-col gap-5">
       <div className="meta">
@@ -271,7 +285,13 @@ export function RoutingSettings() {
           给每个议事会席位单独指定模型,实现「天权用 DeepSeek Pro、天府用 GLM」这类<strong>跨模型会诊</strong>——不同模型不同视角,
           且各跑各的服务端缓存互不挤兑。留空则用内置默认（tianquan / tianfu / tianxuan,全席同模型）。
           席位级覆盖<strong>优先于</strong>上方 council_expert 的 profile 覆盖。
+          <br />
+          authority 须为<strong>星域 id</strong>（内置 10 个见输入框建议,或已加载的自定义域）;非星域会让该席位无工具且无认知注入。每席 authority 不可重复。
         </div>
+
+        <datalist id="council-domains">
+          {BUILTIN_DOMAINS.map((d) => <option key={d} value={d} />)}
+        </datalist>
 
         {config.council.seats.length === 0 && (
           <div className="meta">未配置自定义席位 —— 使用内置默认 3 席。</div>
@@ -284,9 +304,10 @@ export function RoutingSettings() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
+                  list="council-domains"
                   value={seat.authority}
-                  onChange={(e) => updateSeat(idx, { authority: e.target.value })}
-                  placeholder="席位 authority（如 tianquan）"
+                  onChange={(e) => updateSeat(idx, { authority: e.target.value.trim() })}
+                  placeholder="席位 authority（星域 id，如 tianquan）"
                   className="flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs font-mono text-text focus:border-accent focus:outline-none"
                 />
                 <Select value={seatModelValue} onValueChange={(v) => { if (v) setSeatModel(idx, v) }}>
@@ -321,8 +342,11 @@ export function RoutingSettings() {
         })}
 
         <button className="btn self-start" onClick={addSeat}>+ 添加席位</button>
-        {config.council.seats.some((s) => !s.authority.trim()) && (
+        {hasEmptySeat && (
           <span className="meta warn">每个席位都需填 authority,否则无法保存。</span>
+        )}
+        {dupAuthority && (
+          <span className="meta warn">authority「{dupAuthority}」重复 —— 每席必须不同,否则会丢席。</span>
         )}
       </section>
 
@@ -332,7 +356,7 @@ export function RoutingSettings() {
         <button
           className="btn"
           onClick={save}
-          disabled={saving || !dirty || config.council.seats.some((s) => !s.authority.trim())}
+          disabled={saving || !dirty || councilInvalid}
         >
           {saving ? '保存中…' : '保存路由'}
         </button>

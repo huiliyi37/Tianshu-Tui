@@ -128,6 +128,16 @@ export function createCouncilConveneTool(
         ...(s.provider && s.model ? { provider: s.provider, model: s.model } : {}),
       }))
 
+      // Seats bind to results by authority (workOrderId = `council:seat-<authority>`),
+      // and the work queue dedupes by an authority-derived key. Two seats sharing an
+      // authority would silently collapse to one worker AND double-count its
+      // contribution — fail loud instead of dropping a seat the user asked for.
+      const authorities = councilSeats.map(s => s.authority)
+      const dupe = authorities.find((a, i) => authorities.indexOf(a) !== i)
+      if (dupe) {
+        return { content: `council_convene: 席位 authority 重复「${dupe}」—— 每席必须是不同的星域 id（议事会按 authority 绑定结果，重复会丢席并重复计票）。`, isError: true }
+      }
+
       const deps: CouncilDeps = {
         delegateBatch: async (requests, policy, signal, onProgress) => {
           const run = await coordinator.delegateBatch(requests as unknown as DelegationRequest[], policy, signal, onProgress)

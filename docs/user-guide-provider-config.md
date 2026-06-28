@@ -741,7 +741,8 @@ rivet config providers  # 应该只显示内置 Provider
 - **`provider` 与 `model` 必须成对**——只写一个视为未配置,该席位走默认路由。
 - **优先级最高**:`agent.council.seats[].provider/model` > `agent.review.profiles["council_expert"]` > `workers.routing["code_edit"]` > 内置启发式。所以一旦给席位配了 provider/model,上面那套全席统一的 `council_expert` 覆盖对该席位不再生效。
 - **席位数即并行 worker 数**:配 3 个席位就并发派 3 个子代理,各自独立 provider/model/缓存。
-- **临时覆盖**:也可在调用 `council_convene` 时传 `seats:[{authority, provider, model}, …]`,逐次覆盖配置默认席位(per-call > config > 内置)。
+- **`authority` 必须是星域 id**(内置 10 个:`tianshu` / `pojun` / `tianfu` / `tianliang` / `tianquan` / `tianji` / `tianxuan` / `fu` / `wenqu` / `yaoguang`,或已加载的自定义域)。非星域 authority 会让该席位**无工具(fail-closed)且无认知注入**,席位形同失明——务必从建议列表里选。
+- **每席 `authority` 不可重复**。议事会按 authority 绑定结果,重复会导致丢席 + 重复计票,`council_convene` 会直接报错拒绝(fail-loud)。要「同一视角对比两个模型」目前不支持,请用不同星域。
 
 ### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
 

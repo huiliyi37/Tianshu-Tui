@@ -360,6 +360,40 @@ describe('per-seat modelOverride 透传（异构议事会）', () => {
     assert.deepEqual(overrides, [undefined, undefined])
   })
 
+  it('round2 contribution 回填 modelUsed（与 round1 一致）', async () => {
+    let round = 0
+    const deps: CouncilDeps = {
+      delegateBatch: async (reqs) => {
+        round++
+        const suffix = round >= 2 ? '-r2' : ''
+        return {
+          results: reqs.map(r => ({
+            ...workerResult(`${r.authority}${suffix}`, JSON.stringify({
+              authority: r.authority, summary: 's',
+              additions: [{ id: r.authority === 'tianquan' ? 'A' : 'B', title: r.authority, detail: r.authority }],
+              risks: [], challenges: [], alternatives: [],
+            })),
+          })),
+          workerModels: reqs.map(r => ({
+            workOrderId: deriveStableWorkOrderId(`council:seat-${r.authority}${suffix}`) ?? '',
+            model: round >= 2 ? `${r.authority}-r2-model` : `${r.authority}-r1-model`,
+          })),
+        }
+      },
+      now: () => 1,
+    }
+    const twoSeat: CouncilInput = {
+      draft: { objective: 'x', items: [] },
+      seats: [{ authority: 'tianquan' }, { authority: 'tianfu' }],
+      maxRounds: 2,
+    }
+    const plan = await runCouncilDebate(twoSeat, deps)
+    const r2 = plan.contributions.filter(c => c.round === 2)
+    if (r2.length > 0) {
+      assert.ok(r2.every(c => c.modelUsed?.endsWith('-r2-model')), 'round2 应回填 round2 的真实模型')
+    }
+  })
+
   it('第二轮反驳同样携带 modelOverride', async () => {
     // round1 制造冲突 → 触发 round2；断言 round2 请求也带 override。
     const r2captured: Array<{ authority: string; modelOverride?: { provider: string; model: string } }> = []
