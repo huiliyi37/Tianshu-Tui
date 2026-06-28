@@ -32,6 +32,7 @@ import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
 import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
+import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
@@ -680,12 +681,15 @@ async function main() {
   // ── SlashRouter ──────────────────────────────────────────────
   registerTuiSlashCommands(app, ctx)
 
-  // slash 命令提示列表（仅 / 开头的 command 类，过滤 __surface: 面板项）
-  app.setSlashCommands(
-    getPaletteCommands()
-      .filter(c => c.name.startsWith('/'))
-      .map(c => ({ name: c.name, description: c.description })),
-  )
+  // slash 命令提示列表：静态 palette 命令 + 动态已加载 skill 的 /skill <name>
+  const paletteHints = getPaletteCommands()
+    .filter(c => c.name.startsWith('/'))
+    .map(c => ({ name: c.name, description: c.description }))
+  const skillHints = skillRegistry.list().map(s => ({
+    name: `/skill ${s.name}`,
+    description: s.description ? s.description.split('\n')[0]! : `Load skill: ${s.name}`,
+  }))
+  app.setSlashCommands([...paletteHints, ...skillHints])
 
   // ── 真实指标 provider（GlanceBar cache/ctx/cost）─────────────
   // 闭包动态读 module-level ctx：/model 切换时 switchAgentRuntime 原地改 ctx.agent，
