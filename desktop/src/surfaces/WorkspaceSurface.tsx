@@ -175,6 +175,7 @@ export function WorkspaceSurface() {
                  ui.surface === 'hooks' ? <HooksSurface /> :
                  active ? (
                   <ThreadView
+                    key={active.id}
                     session={active}
                     view={view}
                     onSend={handleSend}

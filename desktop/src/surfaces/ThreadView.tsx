@@ -90,7 +90,8 @@ export function ThreadView(props: {
   }, [])
 
   // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
-  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks])
+  // U8: depend on blocksRev so in-place streaming text updates still recompute.
+  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks, view.blocksRev])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
@@ -154,14 +155,8 @@ export function ThreadView(props: {
     return Math.min(Math.round((tokens / window) * 100), 100)
   }, [session.contextTokens, session.contextWindow])
 
-  // Latest turn's total tokens for the compact "tok" chip.
-  const latestTokens = useMemo(() => {
-    for (let i = view.blocks.length - 1; i >= 0; i--) {
-      const t = view.blocks[i]!.turn
-      if (t?.totalTokens) return t.totalTokens
-    }
-    return 0
-  }, [view.blocks])
+  // U9: latest turn tokens are already tracked by the reducer in lastTotalTokens.
+  const latestTokens = view.lastTotalTokens
 
   // Cache hit rate from cumulative cache tokens in turn_complete events.
   const cacheHitRate = useMemo(() => {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { useConfigProviders, qk } from '../state/queries'
 import {
   setupConfigProvider,
@@ -35,6 +36,8 @@ function ProviderRow({
       setKeyInput('')
       setEditing(false)
       onRefresh()
+    } catch (e) {
+      toast.error(`保存 Key 失败: ${(e as Error).message}`)
     } finally { setBusy(false) }
   }
 
@@ -43,6 +46,8 @@ function ProviderRow({
     try {
       await setProviderAsDefault(p.name)
       onRefresh()
+    } catch (e) {
+      toast.error(`设为默认失败: ${(e as Error).message}`)
     } finally { setBusy(false) }
   }
 
@@ -52,6 +57,8 @@ function ProviderRow({
     try {
       await removeConfigProvider(p.name)
       onRefresh()
+    } catch (e) {
+      toast.error(`移除 Provider 失败: ${(e as Error).message}`)
     } finally { setBusy(false) }
   }
 
@@ -112,6 +119,8 @@ function PresetCard({
     try {
       await setupConfigProvider({ providerName: preset.key })
       onRefresh()
+    } catch (e) {
+      toast.error(`添加 Provider 失败: ${(e as Error).message}`)
     } finally { setBusy(false) }
   }
 

@@ -59,6 +59,9 @@ export interface ConvoBlock {
 export interface EventViewState {
   lastSeq: number
   blocks: ConvoBlock[]
+  /** U8: monotonic revision for blocks; bumped on every blocks mutation so
+   *  consumers can memoize without paying for a full array copy each delta. */
+  blocksRev: number
   pendingApproval: ApprovalRequest | null
   pendingIntent: IntentRequest | null
   /** Bumped on every artifact event so consumers can invalidate the artifact query. */
@@ -100,6 +103,7 @@ export interface EventViewState {
 export const initialEventState: EventViewState = {
   lastSeq: 0,
   blocks: [],
+  blocksRev: 0,
   pendingApproval: null,
   pendingIntent: null,
   artifactRev: 0,
@@ -181,18 +185,22 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         ...(Array.isArray(ev.data.imageIds) && ev.data.imageIds.length > 0 ? { imageIds: ev.data.imageIds as string[] } : {}),
         ...(Array.isArray(ev.data.images) && ev.data.images.length > 0 ? { images: ev.data.images as string[] } : {}),
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     case 'text_delta': {
       const text = String(ev.data.text ?? '')
       if (next.private_textOpen && next.blocks.length > 0) {
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
-        next.blocks = [...next.blocks]
+        // U8: in-place update of the last block avoids O(n) full-array copy on
+        // every streaming delta; blocksRev signals the change to consumers.
         next.blocks[lastIdx] = { ...last, text: last.text + text }
+        next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_thinkingOpen = false
         next.blocks = [...next.blocks, { key: `t-${ev.seq}`, kind: 'assistant', text }]
         next.private_textOpen = true
+        next.blocksRev = next.blocksRev + 1
       }
       return next
     }
@@ -201,12 +209,13 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (next.private_thinkingOpen && next.blocks.length > 0) {
         const lastIdx = next.blocks.length - 1
         const last = next.blocks[lastIdx]!
-        next.blocks = [...next.blocks]
         next.blocks[lastIdx] = { ...last, text: last.text + text }
+        next.blocksRev = next.blocksRev + 1
       } else if (text) {
         next.private_textOpen = false
         next.blocks = [...next.blocks, { key: `th-${ev.seq}`, kind: 'thinking', text }]
         next.private_thinkingOpen = true
+        next.blocksRev = next.blocksRev + 1
       }
       return next
     }
@@ -220,6 +229,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         role: `tool · ${String(ev.data.name ?? '')}`,
         text: humanizeToolInput(String(ev.data.name ?? ''), toolInput),
       }]
+      next.blocksRev = next.blocksRev + 1
       const toolName = String(ev.data.name ?? '')
       if (FILE_TOOLS.has(toolName)) {
         const input = (ev.data.input ?? {}) as Record<string, unknown>
@@ -242,6 +252,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         text: String(ev.data.uiContent ?? ev.data.result ?? ''),
         isError: !!ev.data.isError,
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     case 'phase':
       next.private_textOpen = false
@@ -282,6 +293,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
           isFinal: !!ev.data.isFinal,
         },
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     }
     case 'checkpoint': {
@@ -295,6 +307,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         text: '',
         hash,
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     }
     case 'decision_shift': {
@@ -314,6 +327,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
           severity,
         },
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     }
     case 'error':
@@ -325,6 +339,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         text: `Error: ${String(ev.data.error ?? '')}`,
         isError: true,
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     case 'rewind': {
       const prompt = String(ev.data.prompt ?? '')
@@ -345,6 +360,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'turn',
         text: `⏪ Rewound — message restored to input.`,
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     }
     case 'status':
@@ -420,6 +436,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         kind: 'steer',
         text: String(ev.data.text ?? ''),
       }]
+      next.blocksRev = next.blocksRev + 1
       return next
     case 'model_switched':
     case 'domain_changed':
