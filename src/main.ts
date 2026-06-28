@@ -240,7 +240,10 @@ async function main() {
           isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
           getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
-        toolRegistry.register(createUpdateGoalTool(() => goalTrackerRef.current))
+        toolRegistry.register(createUpdateGoalTool(
+          () => goalTrackerRef.current,
+          () => ({ sessionId, cwd: process.cwd() }),
+        ))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,

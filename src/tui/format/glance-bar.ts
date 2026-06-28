@@ -45,6 +45,11 @@ export interface GoalStateSnapshot {
   iteration: number
   maxIterations: number
   elapsedMs: number
+  wallClockBudgetMs?: number
+  criteria: string[]
+  criteriaMet?: number
+  criteriaUnmet?: number
+  criteriaTotal?: number
 }
 
 export interface TodoSummary {
@@ -116,8 +121,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const modeBadge = formatModeBadge(input, theme)
   if (modeBadge) parts.push(modeBadge)
 
-  // Goal 进度
-  if (input.goal?.active) {
+  // Goal 进度（active / paused / blocked 都显示，complete 不显示）
+  if (input.goal && input.goal.status !== 'complete') {
     const g = input.goal
     const goalText = narrow
       ? `◆${g.iteration}/${g.maxIterations}`

@@ -534,7 +534,10 @@ export function createInteractiveToolRegistry(
   })))
 
   // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
-  reg.register(createUpdateGoalTool(() => refs.goalTrackerRef.current))
+  reg.register(createUpdateGoalTool(
+    () => refs.goalTrackerRef.current,
+    () => ({ sessionId: refs.sessionId ?? undefined, cwd }),
+  ))
 
   return { registry: reg }
 }

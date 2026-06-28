@@ -2505,14 +2505,20 @@ export class TuiApp {
     const goalSnapshot = (() => {
       try {
         const gt = this.goalTrackerProvider?.()
-        if (gt && gt.isActive()) {
+        if (gt && gt.getStatus() !== 'complete') {
+          const verdict = gt.getLastVerdict()
           return {
-            active: true,
+            active: gt.getStatus() === 'active',
             status: gt.getStatus(),
             goal: gt.getGoal(),
             iteration: gt.getIteration(),
             maxIterations: gt.getMaxIterations(),
             elapsedMs: gt.getWallClockElapsedMs(),
+            wallClockBudgetMs: gt.getWallClockBudgetMs(),
+            criteria: gt.getSuccessCriteria(),
+            criteriaMet: verdict?.criteriaMet,
+            criteriaUnmet: verdict?.criteriaUnmet,
+            criteriaTotal: verdict?.criteriaTotal,
           }
         }
       } catch { /* provider 失败不应中断渲染 */ }
@@ -2879,6 +2885,7 @@ export class TuiApp {
         cost: glanceCost,
         activePlan,
         planTrace,
+        goal: goalSnapshot,
       }
       const panelLines = renderSidePanel(sidePanelInput, this.theme)
       lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)

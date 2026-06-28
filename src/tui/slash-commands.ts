@@ -112,8 +112,12 @@ const HELP_TEXT = `Available commands:
 /todo [list|add <content>|done <id>|skip <id>|move <id> up|down] — Manage task list
 /plan-template [list|<name>|save <name>] — Reusable plan templates
 /team-resume [groupId] — Resume team execution from wave checkpoint
-/goal <objective> — Set autonomous goal for multi-turn execution
-/cancel-goal — Cancel autonomous goal
+/goal <objective> [--max N] [--budget M] [--criteria '["..."]'] — Set autonomous goal
+/goal-status — Show current goal state
+/goal-pause — Pause active goal
+/goal-resume — Resume paused/blocked goal
+/goal-cancel — Cancel autonomous goal
+/goal-criteria [set '["..."]'] — View or set success criteria
 /rollback [<N>] — Rollback file changes (alias of /undo)
 /write-plan — Write current plan to file
 Ctrl+C — Interrupt current turn (press twice to exit)`
@@ -195,6 +199,82 @@ async function collectDirtyFiles(cwd: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+interface ParsedGoalArgs {
+  goalText: string
+  maxIterations?: number
+  wallClockMs?: number
+  criteria?: string[]
+}
+
+/** 解析 /goal 命令行参数，支持 --max N / --budget M / --criteria '["..."]'
+ *  其余部分合并为目标描述。 */
+function parseGoalArgs(parts: string[]): ParsedGoalArgs {
+  const out: ParsedGoalArgs = { goalText: '' }
+  const textParts: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!
+    if (p === '--max' && parts[i + 1]) {
+      const n = Number(parts[i + 1])
+      if (Number.isInteger(n) && n > 0) out.maxIterations = n
+      i++
+      continue
+    }
+    if (p === '--budget' && parts[i + 1]) {
+      const n = Number(parts[i + 1])
+      if (!Number.isNaN(n) && n > 0) out.wallClockMs = Math.round(n * 60000)
+      i++
+      continue
+    }
+    if (p === '--criteria' && parts[i + 1]) {
+      try {
+        const parsed = JSON.parse(parts[i + 1]!)
+        if (Array.isArray(parsed) && parsed.every((c: unknown) => typeof c === 'string')) {
+          out.criteria = parsed as string[]
+        }
+      } catch { /* ignore invalid JSON */ }
+      i++
+      continue
+    }
+    textParts.push(p)
+  }
+  out.goalText = textParts.join(' ').trim()
+  return out
+}
+
+/** 把 GoalTracker 状态持久化到会话目录（best-effort）。 */
+async function persistGoalState(ctx: SlashHandlerContext, tracker: import('../agent/goal-tracker.js').GoalTracker): Promise<void> {
+  if (!ctx.currentSessionId) return
+  try {
+    const { saveGoalState } = await import('../agent/goal-persist.js')
+    const { getSessionDir } = await import('../agent/session-persist.js')
+    saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
+  } catch { /* best-effort */ }
+}
+
+/** 格式化当前 goal 状态供 /goal-status 使用。 */
+function formatGoalStatus(tracker: import('../agent/goal-tracker.js').GoalTracker): string {
+  const status = tracker.getStatus()
+  const statusLabels: Record<string, string> = { active: '进行中', paused: '已暂停', blocked: '已阻塞', complete: '已完成' }
+  const lines = [
+    `🎯 ${tracker.getGoal()}`,
+    `状态: ${statusLabels[status] ?? status}`,
+    `迭代: ${tracker.getIteration()}/${tracker.getMaxIterations()}`,
+    `已用时间: ${Math.round(tracker.getWallClockElapsedMs() / 1000)}s`,
+  ]
+  const budget = tracker.getWallClockBudgetMs()
+  if (budget !== undefined) lines.push(`时间预算: ${Math.round(budget / 60000)}m`)
+  const criteria = tracker.getSuccessCriteria()
+  if (criteria.length > 0) {
+    lines.push('验收项:')
+    criteria.forEach((c, i) => lines.push(`  ${i + 1}. ${c}`))
+  }
+  const verdict = tracker.getLastVerdict()
+  if (verdict) {
+    lines.push(`最近核验: ${verdict.overall} · ${verdict.criteriaMet}/${verdict.criteriaTotal} 项通过`)
+  }
+  return lines.join('\n')
 }
 
 function formatClaimLine(claim: import('../context/claims.js').ContextClaim): string {
@@ -653,44 +733,36 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const goalText = parts.slice(1).join(' ').trim()
-      if (!goalText) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description>\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the iteration budget is exhausted.\nCancel with /cancel-goal.' }))
+      const parsed = parseGoalArgs(parts.slice(1))
+      if (!parsed.goalText) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description> [--max N] [--budget M] [--criteria \'["..."]\']\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the budget is exhausted.\nCancel with /goal-cancel.' }))
         setIsStreaming(false)
         return true
       }
-      // Dynamic import to avoid circular dependency
       const { GoalTracker, buildGoalModePrompt } = await import('../agent/goal-tracker.js')
-      const maxIterations = Math.max(50, Math.floor(ctx.maxTokens / 4000))
+      const maxIterations = parsed.maxIterations ?? Math.max(50, Math.floor(ctx.maxTokens / 4000))
       const tracker = new GoalTracker({
-        goal: goalText,
+        goal: parsed.goalText,
         maxIterations,
         contextWindow: ctx.maxTokens,
+        wallClockMs: parsed.wallClockMs,
         maxJudgeRuns: ctx.agent.config.goalJudge?.maxRuns,
       })
+      if (parsed.criteria) {
+        tracker.setSuccessCriteria(parsed.criteria)
+      }
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
-      // Persist initial goal state so it survives session restart.
-      if (ctx.currentSessionId) {
-        try {
-          const { saveGoalState } = await import('../agent/goal-persist.js')
-          const { getSessionDir } = await import('../agent/session-persist.js')
-          saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
-        } catch { /* best-effort */ }
-      }
-      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /cancel-goal to abort.\nUse /goal-resume to resume a paused/blocked goal.` }))
-      // Side-path: extract concrete success criteria the completion judge will
-      // verify against. Async (never blocks goal start); criteria default to a
-      // generic template on failure, and the judge does wide judgment if empty.
-      // Uses a dedicated cheap client to avoid sharing the main session's
-      // StreamClient (lifecycle controller / socket pool contention).
-      if (ctx.agent.config.goalJudge?.enabled !== false) {
+      await persistGoalState(ctx, tracker)
+      const budgetHint = parsed.wallClockMs !== undefined
+        ? `Wall-clock budget: ${Math.round(parsed.wallClockMs / 60000)}m. `
+        : ''
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${parsed.goalText}\nMax iterations: ${maxIterations}. ${budgetHint}Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /goal-cancel to abort.\nUse /goal-pause to pause, /goal-resume to resume.` }))
+      if (ctx.agent.config.goalJudge?.enabled !== false && !parsed.criteria) {
         void (async () => {
           try {
             const { extractGoalCriteria, completionFromClient, buildCheapClient } = await import('../agent/goal-criteria.js')
             const { loadConfig } = await import('../config/manager.js')
-            // Try dedicated cheap client first; fall back to main client.
             const cfg = await loadConfig()
             const cheapProfile = cfg.workers?.profiles?.cheap
             const allProviders = ctx.agent.config.allProviders ?? {}
@@ -703,18 +775,17 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             } else {
               completion = completionFromClient(ctx.agent.config.client, ctx.agent.config.promptEngine.getModel())
             }
-            const criteria = await extractGoalCriteria(goalText, completion)
+            const criteria = await extractGoalCriteria(parsed.goalText, completion)
             tracker.setSuccessCriteria(criteria)
-            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
+            await persistGoalState(ctx, tracker)
+            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）：\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
           } catch {
-            // extraction failure is non-fatal — judge falls back to wide judgment
             pushStatic(createLogEntry({ type: 'system', content: '🔍 验收项提取已降级为宽判模式（extraction failed）。' }))
           }
         })()
       }
       setIsStreaming(false)
-      // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
-      ctx.submitToAgent?.(buildGoalModePrompt(goalText))
+      ctx.submitToAgent?.(buildGoalModePrompt(parsed.goalText))
       return true
     },
   },
@@ -804,6 +875,45 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           pushStatic(createLogEntry({ type: 'system', content: `📋 Judge 验收项（${criteria.length} 项）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n用 /goal-criteria set \'["..."]\' 覆盖。` }))
         }
       }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/goal-status',
+    immediate: true,
+    handler(ctx) {
+      const { pushStatic, setIsStreaming } = ctx
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No active goal. Use /goal <task> to start one.' }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: formatGoalStatus(tracker) }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/goal-pause',
+    immediate: true,
+    async handler(ctx) {
+      const { pushStatic, setIsStreaming } = ctx
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No active goal to pause. Use /goal <task> to start one.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const status = tracker.getStatus()
+      if (status !== 'active') {
+        pushStatic(createLogEntry({ type: 'system', content: `Goal is ${status}, cannot pause.` }))
+        setIsStreaming(false)
+        return true
+      }
+      tracker.pause('Paused by user', 'user')
+      await persistGoalState(ctx, tracker)
+      pushStatic(createLogEntry({ type: 'system', content: `⏸ Goal paused: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | Use /goal-resume to continue.` }))
       setIsStreaming(false)
       return true
     },

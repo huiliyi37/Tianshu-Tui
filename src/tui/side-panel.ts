@@ -12,7 +12,7 @@ import type { TodoItem } from '../tools/todo-store.js'
 import type { FleetWorkerView } from './fleet-registry.js'
 import type { PlanExecutionTrace, PlanStep } from '../agent/plan-execution-trace.js'
 import { color } from './engine/ansi.js'
-import { formatTokenProgressBar } from './format/glance-bar.js'
+import { formatTokenProgressBar, type GoalStateSnapshot } from './format/glance-bar.js'
 import { formatTaskList } from './format/task-list.js'
 import { formatWorkerRow } from './format/worker-fleet.js'
 import { displayWidth, truncateToDisplayWidth } from './width.js'
@@ -36,6 +36,8 @@ export interface SidePanelInput {
   activePlan?: string
   /** 当前计划执行轨迹，可选 */
   planTrace?: PlanExecutionTrace | null
+  /** 当前目标状态快照，可选 */
+  goal?: GoalStateSnapshot
 }
 
 /** 最多展示的 worker 行数（超出截断）。 */
@@ -102,6 +104,12 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(sectionDivider())
     lines.push(line(color('⚙ 工具', theme.secondary, { bold: true })))
     lines.push(line(`${color('⚙', theme.secondary)} ${truncateStr(toolName, contentW - 4)}${dim(elapsed)}`))
+  }
+
+  // ── Section: 目标（Goal）──
+  if (input.goal) {
+    lines.push(sectionDivider())
+    lines.push(...formatGoalSection(input.goal, contentW, theme))
   }
 
   // ── Section: 任务列表（复用 formatTaskList）──
@@ -233,6 +241,38 @@ function formatElapsedShort(ms: number): string {
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return `${mins}m${secs}s`
+}
+
+function formatGoalSection(goal: GoalStateSnapshot, contentW: number, theme: RivetTheme): string[] {
+  const out: string[] = []
+  const statusLabels: Record<string, string> = {
+    active: '进行中',
+    paused: '已暂停',
+    blocked: '已阻塞',
+  }
+  const statusColor =
+    goal.status === 'blocked' ? theme.error
+      : goal.status === 'paused' ? theme.warning
+      : theme.secondary
+  out.push(color(`◆ 目标 · ${statusLabels[goal.status] ?? goal.status}`, statusColor, { bold: true }))
+  out.push(truncateStr(goal.goal, contentW))
+
+  const iterRatio = goal.maxIterations > 0 ? goal.iteration / goal.maxIterations : 0
+  const iterBar = formatTokenProgressBar(iterRatio, theme)
+  out.push(`${color('iter', theme.dim)} ${iterBar}`)
+
+  const elapsedStr = formatElapsedShort(goal.elapsedMs)
+  const budgetStr = goal.wallClockBudgetMs !== undefined
+    ? ` / ${formatElapsedShort(goal.wallClockBudgetMs)}`
+    : ''
+  out.push(color(`⏱ ${elapsedStr}${budgetStr}`, theme.dim))
+
+  if (goal.criteriaTotal !== undefined && goal.criteriaTotal > 0) {
+    out.push(color(`验收 ${goal.criteriaMet ?? 0}/${goal.criteriaTotal}`, theme.dim))
+  } else if (goal.criteria.length > 0) {
+    out.push(color(`验收项 ${goal.criteria.length} 项`, theme.dim))
+  }
+  return out
 }
 
 function formatPlanTrace(trace: PlanExecutionTrace, contentW: number, theme: RivetTheme) {
