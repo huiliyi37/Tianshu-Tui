@@ -117,6 +117,19 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     const lines = formatToolCard({ toolName: 'bash', content: '' }, theme)
     assert.ok(stripAnsi(lines[1]!).includes('(no output)'))
   })
+
+  it('ask_user_question renders fully without truncation', () => {
+    const content = 'Which provider do you want?\n\n  1. OpenAI\n  2. Anthropic\n  3. Google\n  4. DeepSeek\n  5. Local'
+    const lines = formatToolCard({ toolName: 'ask_user_question', content }, theme)
+    const plain = lines.map(stripAnsi)
+    // Header uses ? bullet and Ask title
+    assert.ok(plain[0]!.includes('?'), 'question bullet')
+    assert.ok(plain[0]!.includes('Ask'), 'question title')
+    // All 5 options are visible, no truncation marker
+    assert.ok(plain.some(l => l.includes('1. OpenAI')))
+    assert.ok(plain.some(l => l.includes('5. Local')))
+    assert.ok(!plain.some(l => l.includes('[Ctrl+O]')), 'must not be truncated')
+  })
 })
 
 describe('toolCardTitle / isToolCardTruncated', () => {
@@ -132,6 +145,7 @@ describe('toolCardTitle / isToolCardTruncated', () => {
     const long = Array.from({ length: 10 }, (_, i) => `l${i}`).join('\n')
     assert.equal(isToolCardTruncated({ toolName: 'bash', content: long }), true)
     assert.equal(isToolCardTruncated({ toolName: 'bash', content: 'one\ntwo' }), false)
+    assert.equal(isToolCardTruncated({ toolName: 'ask_user_question', content: long }), false)
   })
 })
 

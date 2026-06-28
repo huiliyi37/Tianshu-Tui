@@ -32,6 +32,7 @@ import { SteerBuffer } from '../steer-buffer.js'
 import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
+import { formatAskUserQuestion } from '../format/ask-user-question.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
@@ -2078,6 +2079,16 @@ export class TuiApp {
         })
         return
       }
+    }
+
+    // ask_user_question 用模态化边框卡片渲染，确保问题和选项完整可见。
+    if (name === 'ask_user_question') {
+      const formatted = formatAskUserQuestion({ content: finalContent, columns: this.columns }, this.theme)
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
     }
 
     const cardInput = {
