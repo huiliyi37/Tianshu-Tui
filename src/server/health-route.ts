@@ -17,8 +17,9 @@ export function buildHealthRoute(
    * don't run a registry see a healthy sidecar.
    */
   registryReady?: () => boolean,
-  /** Whether the default provider has a usable API key. false = setup mode. */
-  configured = true,
+  /** Whether the default provider has a usable API key. Callback so it
+   *  re-checks on each /health poll (user may have configured since startup). */
+  configured?: () => boolean,
 ): Record<string, RouteHandler> {
   return {
     'GET /health': (body, _params, headers) => {
@@ -35,7 +36,7 @@ export function buildHealthRoute(
           sessionCount,
           runningCount,
           registryOk: registryReady ? registryReady() : true,
-          configured,
+          configured: configured?.() ?? true,
         },
       }
     },
