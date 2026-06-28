@@ -63,36 +63,55 @@ export interface ServeContext {
   model: ModelConfig
   apiKey: string
   auth?: AuthProvider
+  /** true when the default provider has a usable API key (inline or env). */
+  configured: boolean
 }
 
 /**
- * Resolve provider/model/auth/apiKey once at server start. Throws a descriptive
- * Error (caught by the CLI entry) when the runtime is not configured.
+ * Resolve provider/model/auth/apiKey once at server start. On first launch
+ * the user may have no API key configured yet — instead of crashing (which
+ * blocks the desktop settings UI from ever being reached), we return a
+ * degraded context with apiKey='' and configured=false. The server starts,
+ * /config routes accept setup requests, and session creation re-resolves
+ * the key from disk at runtime.
  */
 export function resolveServeContext(loader: () => Config = loadConfig): ServeContext {
   const config = loader()
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {
-    throw new Error(`Provider "${config.provider.default}" not configured`)
+    throw new Error(`Provider "${config.provider.default}" not configured. Run 'rivet config setup' first.`)
   }
 
   let auth: AuthProvider | undefined
   let apiKey = ''
+  let configured = true
   if (provider.auth?.type === 'oauth') {
-    auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
-    if (!auth.isAuthenticated()) {
-      throw new Error(`Provider "${provider.name}" OAuth authentication is required before starting the server`)
+    try {
+      auth = createAuthProvider(provider.auth, process.env, provider.apiKey)
+      if (!auth.isAuthenticated()) configured = false
+    } catch {
+      configured = false
     }
   } else {
-    apiKey = resolveApiKey(provider)
+    try {
+      apiKey = resolveApiKey(provider)
+    } catch {
+      // First launch / no env var set — degrade gracefully so the server
+      // stays alive and /config routes can receive the key setup.
+      configured = false
+      console.error(`[serve] No API key configured for provider "${provider.name}". Server started in setup mode — configure via desktop Settings or 'rivet config setup'.`)
+    }
   }
 
+  // When the default provider has no models, fall back to the first
+  // available model across all providers (or a minimal placeholder) so
+  // the UI can still enumerate models in the setup flow.
   const model = provider.models[0]
-  if (!model) {
-    throw new Error(`Provider "${provider.name}" has no configured models`)
-  }
+    ?? Object.values(config.provider.providers)
+      .flatMap(p => p.models)[0]
+    ?? { id: 'unknown', maxTokens: 4096, contextWindow: 128_000 }
 
-  return { config, provider, model, apiKey, auth }
+  return { config, provider, model, apiKey, auth, configured }
 }
 
 export interface BuiltAgent {
@@ -381,6 +400,31 @@ function assembleAgentLoop(
  * conflict blocking become live. Omitting `registry` (CLI / single-session)
  * keeps the previous behavior byte-for-byte.
  */
+/**
+ * Resolve the initial model spec for a new session. When the server started
+ * in setup mode (ctx.configured=false), the user may have since configured
+ * an API key via /config routes — re-read from disk to pick it up. Falls
+ * back to ctx.apiKey when the key is still unavailable.
+ */
+function resolveInitialSpec(ctx: ServeContext): ResolvedModelSpec {
+  if (ctx.configured) {
+    return {
+      provider: ctx.provider,
+      apiKey: ctx.apiKey,
+      auth: ctx.auth,
+      model: { id: ctx.model.id, maxTokens: ctx.model.maxTokens, contextWindow: ctx.model.contextWindow, reasoningEffort: ctx.model.reasoningEffort },
+    }
+  }
+  // Re-read config — the user may have called POST /config/providers since startup.
+  const fresh = resolveServeContext()
+  return {
+    provider: fresh.provider,
+    apiKey: fresh.apiKey,
+    auth: fresh.auth,
+    model: { id: fresh.model.id, maxTokens: fresh.model.maxTokens, contextWindow: fresh.model.contextWindow, reasoningEffort: fresh.model.reasoningEffort },
+  }
+}
+
 export function buildAgentLoop(
   ctx: ServeContext,
   cwd: string,
@@ -390,17 +434,7 @@ export function buildAgentLoop(
   shared?: SharedRuntime,
 ): BuiltAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
-  const spec: ResolvedModelSpec = {
-    provider: ctx.provider,
-    apiKey: ctx.apiKey,
-    auth: ctx.auth,
-    model: {
-      id: ctx.model.id,
-      maxTokens: ctx.model.maxTokens,
-      contextWindow: ctx.model.contextWindow,
-      reasoningEffort: ctx.model.reasoningEffort,
-    },
-  }
+  const spec = resolveInitialSpec(ctx)
   const agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return { agent, sessionId }
 }
@@ -421,17 +455,7 @@ function buildManagedAgent(
   shared?: SharedRuntime,
 ): import('./session-manager.js').ManagedAgent {
   const stores = buildSessionStores(ctx, cwd, sessionId, registry, shared)
-  let spec: ResolvedModelSpec = {
-    provider: ctx.provider,
-    apiKey: ctx.apiKey,
-    auth: ctx.auth,
-    model: {
-      id: ctx.model.id,
-      maxTokens: ctx.model.maxTokens,
-      contextWindow: ctx.model.contextWindow,
-      reasoningEffort: ctx.model.reasoningEffort,
-    },
-  }
+  let spec: ResolvedModelSpec = resolveInitialSpec(ctx)
   let agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
   return {
     run: (prompt, callbacks, images) => agent.run(prompt, callbacks, images),
@@ -796,6 +820,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     routes,
     buildHealthRoute(sessions, startedAt, version, apiToken, () =>
       opts.ephemeral ? true : sessionRegistry !== undefined,
+    ctx.configured,
     ),
   )
 
