@@ -162,6 +162,8 @@ export function WorkspaceSurface() {
           minSize="12%"
           maxSize="35%"
           onResize={({ asPercentage }) => saveSidebarWidth(Math.round(asPercentage))}
+          onCollapse={() => dispatch({ type: 'setSidebar', visible: false })}
+          onExpand={() => dispatch({ type: 'setSidebar', visible: true })}
         >
           <ProjectSidebar
             onCollapse={() => {
@@ -262,6 +264,8 @@ export function WorkspaceSurface() {
           minSize="15%"
           maxSize="45%"
           onResize={({ asPercentage }) => saveReviewWidth(Math.round(asPercentage))}
+          onCollapse={() => dispatch({ type: 'setReview', visible: false })}
+          onExpand={() => dispatch({ type: 'setReview', visible: true })}
         >
           <ReviewPanel
             sessionId={activeId}

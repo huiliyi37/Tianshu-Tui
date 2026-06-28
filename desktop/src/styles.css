@@ -3511,7 +3511,7 @@ html[data-theme="nebula"] .plan-panel {
 /* Capsule Toggle Buttons */
 .review-expand-capsule {
   position: fixed;
-  right: -10px;
+  right: 0;
   top: 45%;
   transform: translateY(-50%);
   z-index: 40;
@@ -3521,6 +3521,7 @@ html[data-theme="nebula"] .plan-panel {
   padding: 10px 16px 10px 12px;
   background: var(--panel-2);
   border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
   border-radius: var(--radius-pill) 0 0 var(--radius-pill);
   box-shadow: var(--shadow-md);
   color: var(--text-secondary);
@@ -3530,7 +3531,7 @@ html[data-theme="nebula"] .plan-panel {
   transition: all var(--dur) var(--ease);
 }
 .review-expand-capsule:hover {
-  right: 0;
+  transform: translateY(-50%) scale(1.05);
   color: var(--text-strong);
   border-color: var(--accent);
   background: var(--panel-3);
@@ -3769,7 +3770,7 @@ html[data-theme="nebula"] .plan-panel {
 /* Left Sidebar Expand Capsule */
 .sidebar-expand-capsule {
   position: fixed;
-  left: -10px;
+  left: 0;
   top: 45%;
   transform: translateY(-50%);
   z-index: 40;
@@ -3779,6 +3780,7 @@ html[data-theme="nebula"] .plan-panel {
   padding: 10px 12px 10px 16px;
   background: var(--panel-2);
   border: 1px solid var(--border);
+  border-right: 2px solid var(--accent);
   border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
   box-shadow: var(--shadow-md);
   color: var(--text-secondary);
@@ -3788,7 +3790,7 @@ html[data-theme="nebula"] .plan-panel {
   transition: all var(--dur) var(--ease);
 }
 .sidebar-expand-capsule:hover {
-  left: 0;
+  transform: translateY(-50%) scale(1.05);
   color: var(--text-strong);
   border-color: var(--accent);
   background: var(--panel-3);
