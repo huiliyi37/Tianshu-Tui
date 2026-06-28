@@ -725,7 +725,15 @@ export function createAgentRuntime(deps: {
       if (routeName && workerRouting.profiles[routeName]) {
         const routeProfile = workerRouting.profiles[routeName]
         const resolved = config.provider.providers[routeProfile.provider]
-        if (resolved && routeProfile.model === card.model) {
+        // Route to the configured provider+model as long as the provider exists and
+        // actually offers the configured model. The previous guard required
+        // `routeProfile.model === card.model`, which defeated the whole point of
+        // worker routing (independent model → isolated server-side prefix cache):
+        // any profile configured with a DIFFERENT model was silently skipped and
+        // workers fell back to the primary model, competing with the primary
+        // session's cache entries. Now we allow a distinct model and set it on
+        // workerModel so the worker actually runs on the routed model.
+        if (resolved && resolved.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)) {
           try {
             if (resolved.auth?.type === 'oauth') {
               const routedAuth = resolved.name === provider.name
@@ -733,11 +741,13 @@ export function createAgentRuntime(deps: {
                 : createAuthProvider(resolved.auth, process.env)
               if (routedAuth?.isAuthenticated()) {
                 workerProvider = resolved
+                workerModel = routeProfile.model
                 workerApiKey = ''
                 workerAuth = routedAuth
               }
             } else {
               workerProvider = resolved
+              workerModel = routeProfile.model
               workerApiKey = resolveApiKey(resolved)
               workerAuth = undefined
             }
