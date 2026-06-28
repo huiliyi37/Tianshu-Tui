@@ -36,7 +36,12 @@ export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyI
   const hostRef = useRef<HTMLDivElement>(null)
   const cwdRef = useRef(cwd)
   cwdRef.current = cwd
-  const ptyId = externalPtyId ?? crypto.randomUUID()
+  // Stable fallback id for the no-prop case. A bare `crypto.randomUUID()` in the
+  // render body would mint a new id every render, so once `ptyId` is in the
+  // effect deps the terminal would tear down + respawn on every re-render.
+  const fallbackIdRef = useRef('')
+  if (!fallbackIdRef.current) fallbackIdRef.current = crypto.randomUUID()
+  const ptyId = externalPtyId ?? fallbackIdRef.current
 
   useEffect(() => {
     const host = hostRef.current
@@ -114,9 +119,9 @@ export function TerminalPanel({ cwd, ptyId: externalPtyId }: { cwd: string; ptyI
       void ptyKill(ptyId).catch(() => {})
       term.dispose()
     }
-    // 仅挂载时初始化一次；cwd 经 cwdRef 读取，切项目不重启已开终端（符合终端常规语义）。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    // ptyId 变更时重建：cleanup 杀掉旧 pty + dispose 旧 term，再以新 id 重新挂载，
+    // 不再静默忽略切换。cwd 经 cwdRef 读取，故切项目不重启已开终端（符合终端常规语义）。
+  }, [ptyId])
 
   return (
     <div className="terminal-panel">
