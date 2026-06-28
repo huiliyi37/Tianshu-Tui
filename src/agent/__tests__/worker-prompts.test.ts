@@ -83,7 +83,7 @@ describe('worker prompts', () => {
 
     const prompt = buildWorkerRepairPrompt(order, 'not json', 'Unexpected token')
 
-    assert.ok(prompt.includes('Repair the previous answer'))
+    assert.ok(prompt.includes('YOUR PREVIOUS ANSWER COULD NOT BE USED'))
     assert.ok(prompt.includes('Unexpected token'))
     assert.ok(prompt.includes('workOrderId'))
     assert.ok(prompt.includes('wo_1'))

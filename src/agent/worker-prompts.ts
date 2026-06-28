@@ -283,10 +283,14 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
 }
 
 export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, parseError: string): string {
-  // Use tail of previous text — JSON output is more likely at the end.
-  const tail = previousText.length <= 4000
+  // Tail of previous text as reference for the model to repair. A complete
+  // WorkerResult JSON for write-capable workers (multiple findings + artifacts
+  // + changedFiles) commonly reaches 5–8K chars; 4000 truncated mid-object and
+  // left the model without enough context to rebuild. 8000 covers a full
+  // typical packet while staying well under the 8192-token output budget.
+  const tail = previousText.length <= 8000
     ? previousText
-    : previousText.slice(-4000)
+    : previousText.slice(-8000)
 
   const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
