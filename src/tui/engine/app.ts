@@ -37,7 +37,7 @@ import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../form
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
-import { renderApprovalPreview } from '../format/approval-renderers.js'
+import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
@@ -2709,14 +2709,11 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const preview = renderApprovalPreview(p.name, p.input, cols - 4, this.theme)
+        const promptLines = formatApprovalPrompt({ toolName: p.name, input: p.input, columns: cols }, this.theme)
         lines.push({ text: '' })
-        lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
-        lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
-        for (const pv of preview) {
-          lines.push({ text: this.clampLine(` │ ${pv}`) })
+        for (const promptLine of promptLines) {
+          lines.push({ text: this.clampLine(promptLine) })
         }
-        lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'approve')}  ${keyHint('n', 'deny')}  ${keyHint('e', 'edit')} ───────────────`) })
       }
     }
 
