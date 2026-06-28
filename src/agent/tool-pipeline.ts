@@ -49,6 +49,7 @@ import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
+import { evaluateTddGate, parseTddGateConfig, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 
@@ -67,6 +68,9 @@ const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
 
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000 // 2 minutes
 
+/** TDD gate config — parsed once from env at module load. */
+const _TDD_GATE_CONFIG: TddGateConfig = parseTddGateConfig()
+
 /** Tools that may mutate the workspace and therefore open the rollback window. */
 const MUTATING_TOOLS: ReadonlySet<string> = new Set([
   'write_file', 'edit_file', 'apply_patch', 'bash',
@@ -74,6 +78,11 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 function isMutatingTool(name: string): boolean {
   return MUTATING_TOOLS.has(name)
 }
+
+/** Edit/write tools — the TDD gate only intervenes on these. */
+const EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'edit_file', 'write_file', 'apply_patch', 'hash_edit',
+])
 
 function sortedInputKeys(input: Record<string, unknown>): string[] {
   return Object.keys(input).sort()
@@ -565,6 +574,19 @@ export async function executeToolUse(
         const gateMsg = `Tool blocked by cerebellar gate: recent prediction error rate is elevated. Read the file before editing to ensure mental model is current.`
         callbacks.onToolResult(tu.id, tu.name, gateMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+     }
+   }
+
+    // TDD Gate: block edit/write tools when the model has edited files
+    // without running tests. Pure decision function, stateless — the
+    // EvidenceTracker holds the edit counter and test-verification log.
+    const tddConfig: TddGateConfig = deps.config.tddGate ?? _TDD_GATE_CONFIG
+    if (tddConfig.enabled && EDIT_TOOL_NAMES.has(tu.name)) {
+      const gateState = deps.evidence.getGateState()
+      const decision = evaluateTddGate(gateState, tu.name, tddConfig)
+      if (decision.action === 'block') {
+        callbacks.onToolResult(tu.id, tu.name, decision.message!, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
    }
 
