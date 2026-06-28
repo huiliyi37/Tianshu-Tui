@@ -3,11 +3,17 @@ import type { ThemeJson } from './theme-types'
 import dark from '../styles/themes/dark.json'
 import light from '../styles/themes/light.json'
 import nebula from '../styles/themes/nebula.json'
+import sakura from '../styles/themes/sakura.json'
+import cyberpunk from '../styles/themes/cyberpunk.json'
+import cupertino from '../styles/themes/cupertino.json'
 
 const THEMES: Record<ResolvedTheme, ThemeJson> = {
   dark: dark as ThemeJson,
   light: light as ThemeJson,
   nebula: nebula as ThemeJson,
+  sakura: sakura as ThemeJson,
+  cyberpunk: cyberpunk as ThemeJson,
+  cupertino: cupertino as ThemeJson,
 }
 
 export function loadThemeJson(resolved: ResolvedTheme): ThemeJson {

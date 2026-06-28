@@ -47,6 +47,9 @@ export function SettingsSurface() {
     light: t('theme.light'),
     dark: t('theme.dark'),
     nebula: t('theme.nebula'),
+    sakura: '樱花粉 (Sakura Pink)',
+    cyberpunk: '赛博朋克 (Cyberpunk Neon)',
+    cupertino: '苹果极简 (Cupertino Clean)',
   }
   const DENSITY_LABEL: Record<ToolDensity, string> = {
     compact: t('densityCompact'),
@@ -144,7 +147,7 @@ export function SettingsSurface() {
                   <SelectValue placeholder={t('themePlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {(['system', 'light', 'dark', 'nebula'] as ThemePref[]).map((t) => (
+                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino'] as ThemePref[]).map((t) => (
                     <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
                   ))}
                 </SelectContent>
