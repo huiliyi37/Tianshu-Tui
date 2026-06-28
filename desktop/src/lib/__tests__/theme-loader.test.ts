@@ -10,7 +10,6 @@ class MemStorage {
   clear(): void { this.store.clear() }
 }
 const styleProps = new Map<string, string>()
-let matchMediaQuery = ''
 const g = globalThis as unknown as {
   localStorage: MemStorage
   window: { matchMedia: (q: string) => { matches: boolean; addEventListener(): void; removeEventListener(): void } }
@@ -18,7 +17,7 @@ const g = globalThis as unknown as {
 }
 g.localStorage = new MemStorage()
 g.window = {
-  matchMedia: (q: string) => { matchMediaQuery = q; return { matches: false, addEventListener() {}, removeEventListener() {} } },
+  matchMedia: (_q: string) => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
 }
 g.document = {
   documentElement: {
@@ -121,7 +120,7 @@ test('applyThemeJson(glass=true) writes glass surface tokens', () => {
 test('applyThemeJson respects prefers-reduced-transparency', () => {
   // Simulate OS reduced transparency
   g.window.matchMedia = (q: string) => {
-    matchMediaQuery = q
+    void q
     return { matches: q.includes('reduce'), addEventListener() {}, removeEventListener() {} }
   }
   styleProps.clear()
@@ -130,7 +129,7 @@ test('applyThemeJson respects prefers-reduced-transparency', () => {
   assert.equal(styleProps.get('--sidebar-surface-bg'), 'var(--panel)', 'reduced transparency should force solid surfaces')
   // Reset
   g.window.matchMedia = (q: string) => {
-    matchMediaQuery = q
+    void q
     return { matches: false, addEventListener() {}, removeEventListener() {} }
   }
 })

@@ -66,6 +66,7 @@ export type KeyName =
   | 'ctrl_t'
   | 'ctrl_b'
   | 'ctrl_f'
+  | 'ctrl_x'
   | 'unknown'
 
 export type KeyHandler = (key: KeyPress) => void
@@ -108,6 +109,7 @@ const CTRL_CODES: Record<number, KeyName> = {
   0x14: 'ctrl_t',
   0x15: 'ctrl_u',
   0x17: 'ctrl_w',
+  0x18: 'ctrl_x',
   0x1a: 'ctrl_z',
   0x1b: 'escape',
   0x7f: 'backspace',

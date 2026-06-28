@@ -703,6 +703,10 @@ async function main() {
   // 读 TodoStore 单例（todo 工具的 canonical 源），T9 不直接 import 工具层单例。
   app.setTodosProvider(() => getTodos())
 
+  // ── 当前已批准计划指针 provider ─────────────────────────────
+  // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。
+  app.setActivePlanProvider(() => ctx!.agent.config.promptEngine?.getActivePlanPointer())
+
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
   // onSteerDrain 由 TuiApp callbacks 真实 drain，此处无需外层 override。

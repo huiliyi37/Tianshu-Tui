@@ -1,8 +1,8 @@
 /**
- * T9 右侧持久面板 — 非模态信息展示。
+ * T9 右侧可折叠状态面板 — OpenCode 风格任务/状态概览。
  *
- * 在宽终端（≥100 列）时，于主区域右侧渲染一个固定宽度的信息面板。
- * 内容：todo 列表、worker 舰队、当前工具、模型/域摘要、token 仪表。
+ * 默认折叠，由 TuiApp 根据用户命令/快捷键控制是否渲染。
+ * 内容分块：当前工具、任务列表、Worker 舰队、当前计划、指标、快捷键提示。
  *
  * 纯函数输出：接收数据 → 返回格式化行数组（含 ANSI）。
  */
@@ -12,6 +12,7 @@ import type { TodoItem } from '../tools/todo-store.js'
 import type { FleetWorkerView } from './fleet-registry.js'
 import { color } from './engine/ansi.js'
 import { formatTokenProgressBar } from './format/glance-bar.js'
+import { formatTaskList } from './format/task-list.js'
 import stringWidth from 'string-width'
 
 export interface SidePanelInput {
@@ -29,13 +30,15 @@ export interface SidePanelInput {
   maxTokens?: number
   cacheHitRate?: number
   cost?: number
+  /** 当前已批准计划指针（XML 字符串），可选 */
+  activePlan?: string
 }
 
 /** 最多展示的 worker 行数（超出截断）。 */
-const MAX_WORKERS = 6
+const MAX_WORKERS = 5
 
-/** 最多展示的 todo 行数。 */
-const MAX_TODOS = 5
+/** 任务区最大行数（含标题与摘要）。 */
+const MAX_TASK_ROWS = 6
 
 /**
  * 渲染右侧面板为固定宽度的行数组。
@@ -64,6 +67,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   const dim = (s: string) => color(s, theme.dim)
   const muted = (s: string) => color(s, theme.muted)
+  const sectionDivider = () => line(muted('─'.repeat(contentW)))
 
   // 归一化 currentTool
   const toolName = input.currentTool?.name ?? input.currentToolName
@@ -71,7 +75,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   lines.push(topBorder)
 
-  // ── 区块 1：星域 + 模型摘要 ──
+  // ── Section: 星域 + 模型摘要 ──
   if (input.domainGlyph || input.domainName) {
     const glyph = input.domainGlyph ?? ''
     const name = input.domainName ?? ''
@@ -81,31 +85,30 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(line(muted(`model: ${truncateStr(input.modelName, contentW - 7)}`)))
   }
 
-  // ── 区块 2：Token 仪表 ──
-  if (input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
-    const ratio = Math.min(1, input.estimatedTokens / input.maxTokens)
-    const bar = formatTokenProgressBar(ratio, theme)
-    lines.push(line(muted('─'.repeat(contentW))))
-    lines.push(line(bar))
-    const costStr = input.cost !== undefined && input.cost > 0
-      ? `  ${input.cost.toFixed(2)}` : ''
-    lines.push(line(dim(`${formatTokensCompact(input.estimatedTokens)} / ${formatTokensCompact(input.maxTokens)}${costStr}`)))
-  } else {
-    lines.push(line(muted('─'.repeat(contentW))))
-  }
-
-  // ── 区块 3：当前工具 ──
+  // ── Section: 当前工具 ──
   if (toolName) {
     const elapsed = toolElapsed ? ` ${formatElapsedShort(toolElapsed)}` : ''
-    lines.push(line(muted('─'.repeat(contentW))))
+    lines.push(sectionDivider())
+    lines.push(line(color('⚙ 工具', theme.secondary, { bold: true })))
     lines.push(line(`${color('⚙', theme.secondary)} ${truncateStr(toolName, contentW - 4)}${dim(elapsed)}`))
   }
 
-  // ── 区块 4：Worker 舰队 ──
+  // ── Section: 任务列表（复用 formatTaskList）──
+  lines.push(sectionDivider())
+  const taskLines = formatTaskList(input.todos, theme, { width: contentW, maxRows: MAX_TASK_ROWS })
+  if (taskLines.length > 0) {
+    for (const taskLine of taskLines) {
+      lines.push(line(taskLine))
+    }
+  } else {
+    lines.push(line(color('◇ 任务 [░░░░░░░░] 0/0', theme.secondary, { bold: true })))
+    lines.push(line(muted('  暂无任务')))
+  }
+
+  // ── Section: Worker 舰队 ──
   if (input.workers.length > 0) {
-    lines.push(line(muted('─'.repeat(contentW))))
-    const header = input.workers.length === 1 ? 'worker' : `workers (${input.workers.length})`
-    lines.push(line(muted(header)))
+    lines.push(sectionDivider())
+    lines.push(line(color(input.workers.length === 1 ? '◆ worker' : `◆ workers (${input.workers.length})`, theme.secondary, { bold: true })))
     const shown = input.workers.slice(0, MAX_WORKERS)
     for (const wrk of shown) {
       const statusIcon = wrk.terminal ? '✓' : wrk.status === 'failed' ? '✗' : '●'
@@ -121,39 +124,66 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     }
   }
 
-  // ── 区块 5：Todo 列表 ──
-  const activeTodos = input.todos.filter(t => t.status !== 'completed')
-  if (activeTodos.length > 0) {
-    lines.push(line(muted('─'.repeat(contentW))))
-    lines.push(line(muted(`tasks (${activeTodos.length})`)))
-    const shown = activeTodos.slice(0, MAX_TODOS)
-    for (const todo of shown) {
-      const icon = todo.status === 'in_progress' ? color('▸', theme.primary) : color('○', theme.muted)
-      const text = truncateStr(todo.content, contentW - 4)
-      lines.push(line(`${icon} ${text}`))
-    }
-    if (activeTodos.length > MAX_TODOS) {
-      lines.push(line(muted(`... +${activeTodos.length - MAX_TODOS} more`)))
-    }
+  // ── Section: 当前已批准计划 ──
+  const plan = parseActivePlan(input.activePlan)
+  if (plan) {
+    lines.push(sectionDivider())
+    lines.push(line(color('◈ 计划', theme.secondary, { bold: true })))
+    lines.push(line(truncateStr(plan.title, contentW)))
+    lines.push(line(dim(truncateStr(plan.path, contentW))))
+  }
+
+  // ── Section: Token 仪表 ──
+  if (input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
+    lines.push(sectionDivider())
+    lines.push(line(color('◧ 上下文', theme.secondary, { bold: true })))
+    const ratio = Math.min(1, input.estimatedTokens / input.maxTokens)
+    lines.push(line(formatTokenProgressBar(ratio, theme)))
+    const costStr = input.cost !== undefined && input.cost > 0
+      ? `  ${input.cost.toFixed(2)}` : ''
+    lines.push(line(dim(`${formatTokensCompact(input.estimatedTokens)} / ${formatTokensCompact(input.maxTokens)}${costStr}`)))
   }
 
   // 缓存命中率指示
   if (input.cacheHitRate !== undefined) {
+    lines.push(sectionDivider())
     const cp = (input.cacheHitRate * 100).toFixed(0)
     const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted
-    lines.push(line(muted('─'.repeat(contentW))))
     lines.push(line(`${color(`cache ${cp}%`, cacheColor)}`))
   }
 
+  // ── Section: 快捷键提示 ──
+  lines.push(sectionDivider())
+  lines.push(line(dim('] toggle · ctrl+x r open')))
+
   lines.push(botBorder)
   return lines
+}
+
+/** 轻量解析已批准计划指针，仅提取标题与路径。 */
+function parseActivePlan(pointer: string | undefined): { title: string; path: string } | null {
+  if (!pointer) return null
+  const titleMatch = pointer.match(/title="([^"]*)"/)
+  const pathMatch = pointer.match(/path="([^"]*)"/)
+  if (!titleMatch && !pathMatch) return null
+  const title = decodeXmlEntities(titleMatch?.[1] ?? '')
+  const path = decodeXmlEntities(pathMatch?.[1] ?? '')
+  if (!title && !path) return null
+  return { title: title || 'Untitled plan', path: path || '' }
+}
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
 }
 
 function truncateStr(s: string, max: number): string {
   if (max <= 0) return ''
   const dw = stringWidth(s)
   if (dw <= max) return s
-  // 简单字符截断（对 ASCII 足够），3 留给省略号
   if (max <= 3) return '…'
   return s.slice(0, max - 1) + '…'
 }

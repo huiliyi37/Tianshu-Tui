@@ -150,4 +150,29 @@ describe('renderSidePanel', () => {
       assert.ok(!stripAnsi(line).includes('undefined'), 'no undefined in output')
     }
   })
+
+  it('renders active plan section when pointer given', () => {
+    const lines = renderSidePanel({
+      columns: 32,
+      todos: [],
+      workers: [],
+      modelName: 'test',
+      activePlan: '<active-plan slug="p1" title="Rewrite ANSI renderer" path=".rivet/plans/p1.md">go</active-plan>',
+    }, theme)
+    const all = lines.map(stripAnsi).join(' ')
+    assert.ok(all.includes('Rewrite ANSI renderer'), `plan title: ${all}`)
+    assert.ok(all.includes('.rivet/plans/p1.md'), `plan path: ${all}`)
+  })
+
+  it('renders shortcuts hint', () => {
+    const lines = renderSidePanel({
+      columns: 32,
+      todos: [],
+      workers: [],
+      modelName: 'test',
+    }, theme)
+    const all = lines.map(stripAnsi).join(' ')
+    assert.ok(all.includes('] toggle'), `toggle hint: ${all}`)
+    assert.ok(all.includes('ctrl+x r open'), `open hint: ${all}`)
+  })
 })

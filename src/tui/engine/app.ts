@@ -111,7 +111,7 @@ export function looksLikeFilePath(input: string): boolean {
 
 /** 右侧面板触发阈值与宽度。 */
 const SIDE_PANEL_MIN_COLUMNS = 120
-const SIDE_PANEL_WIDTH = 28
+const SIDE_PANEL_WIDTH = 32
 
 // ── State types ────────────────────────────────────────────────
 
@@ -144,6 +144,8 @@ export interface TuiState {
   committedCount: number
   /** 常驻任务面板（todo 列表，canonical 源为 TodoStore） */
   todos: TodoItem[]
+  /** 右侧面板是否展开（默认折叠） */
+  sidePanelOpen: boolean
 }
 
 // ── Agent callbacks interface ──────────────────────────────────
@@ -243,6 +245,8 @@ export class TuiApp {
   private metricsGlanceController = new MetricsGlanceController()
   /** todo 列表访问器（main-ansi 读 TodoStore 单例） */
   private todosProvider?: () => TodoItem[]
+  /** 当前已批准计划指针访问器（main-ansi 读 PromptEngine） */
+  private activePlanProvider?: () => string | undefined
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
@@ -279,6 +283,9 @@ export class TuiApp {
    *  real turn completion or user submit. */
   private _watchdogAutoContinues = 0
   private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
+  /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
+  private sidePanelLeaderPending = false
+  private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
 
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
@@ -430,6 +437,7 @@ export class TuiApp {
       modelName: options.modelName ?? 'unknown',
       committedCount: 0,
       todos: [],
+      sidePanelOpen: false,
     }
 
     // Wire resize
@@ -611,6 +619,27 @@ export class TuiApp {
           this.overlayController.resetNav()
           this.overlay.activate('history-search')
         }
+        return
+      }
+      // ── Side panel shortcuts ────────────────────────────────
+      // Ctrl+X leader key: wait for 'r' to open the right panel (OpenCode-style).
+      if (key.name === 'ctrl_x') {
+        this.sidePanelLeaderPending = true
+        if (this.sidePanelLeaderTimer) clearTimeout(this.sidePanelLeaderTimer)
+        this.sidePanelLeaderTimer = setTimeout(() => { this.sidePanelLeaderPending = false }, 800)
+        return
+      }
+      if (this.sidePanelLeaderPending) {
+        this.sidePanelLeaderPending = false
+        if (this.sidePanelLeaderTimer) { clearTimeout(this.sidePanelLeaderTimer); this.sidePanelLeaderTimer = null }
+        if (key.char.toLowerCase() === 'r') {
+          this.setSidePanelOpen(true)
+          return
+        }
+        // Leader not followed by 'r': fall through to normal input handling.
+      }
+      if (key.char === ']' && !key.ctrl && !key.meta) {
+        this.toggleSidePanel()
         return
       }
       // ── Slash command handling ──────────────────────────────
@@ -1658,6 +1687,19 @@ export class TuiApp {
           return true
         },
       },
+      {
+        name: '/panel',
+        description: 'Toggle right side panel',
+        immediate: true,
+        handler: ({ trimmed }) => {
+          const parts = trimmed.split(/\s+/)
+          const arg = parts[1]?.toLowerCase()
+          if (arg === 'on') this.setSidePanelOpen(true)
+          else if (arg === 'off') this.setSidePanelOpen(false)
+          else this.toggleSidePanel()
+          return true
+        },
+      },
     ])
   }
 
@@ -1734,10 +1776,35 @@ export class TuiApp {
     this.todosProvider = provider
   }
 
+  /**
+   * 注入当前已批准计划指针访问器（main-ansi 读 PromptEngine）。
+   * 用于右侧面板 lightweight 展示当前执行的任务计划。
+   */
+  setActivePlanProvider(provider: () => string | undefined): void {
+    this.activePlanProvider = provider
+  }
+
   /** 直接设置任务面板内容（供测试与 provider 刷新复用）。 */
   setTodos(items: TodoItem[]): void {
     this.state.todos = items
     this.renderLive()
+  }
+
+  /** 切换右侧面板展开/折叠（仅宽终端生效）。 */
+  toggleSidePanel(): void {
+    this.setSidePanelOpen(!this.state.sidePanelOpen)
+  }
+
+  /** 设置右侧面板展开状态；若终端太窄则静默不展开。 */
+  setSidePanelOpen(open: boolean): void {
+    if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
+    this.state.sidePanelOpen = open
+    this.renderLive()
+  }
+
+  /** 查询右侧面板是否展开。 */
+  isSidePanelOpen(): boolean {
+    return this.state.sidePanelOpen
   }
 
   /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
@@ -2305,7 +2372,7 @@ export class TuiApp {
       return
     }
 
-    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS
+    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS && this.state.sidePanelOpen
     const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
     const savedColumns = this.columns
     const contentCols = savedColumns - sidePanelWidth
@@ -2669,6 +2736,12 @@ export class TuiApp {
         }
         return undefined
       })()
+      let activePlan: string | undefined
+      try {
+        activePlan = this.activePlanProvider?.()
+      } catch {
+        activePlan = undefined
+      }
       const sidePanelInput: SidePanelInput = {
         columns: sidePanelWidth,
         todos: this.state.todos,
@@ -2681,6 +2754,7 @@ export class TuiApp {
         maxTokens: glanceMaxTokens,
         cacheHitRate: glanceCacheHitRate,
         cost: glanceCost,
+        activePlan,
       }
       const panelLines = renderSidePanel(sidePanelInput, this.theme)
       lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)
