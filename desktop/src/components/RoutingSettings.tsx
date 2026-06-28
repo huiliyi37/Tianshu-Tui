@@ -16,13 +16,19 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-/** Review worker profiles worth surfacing. `reviewer` is the one the
- *  deliver_task post-commit auto review actually uses. */
-const REVIEW_PROFILES: { key: string; label: string; hint: string }[] = [
+/** Sub-agent worker profiles worth surfacing. Profile-keyed overrides apply to
+ *  ANY worker carrying that profile — covers deliver_task review, council 议事会
+ *  seats (council_expert), and team waves (patcher/reviewer/scouts). A profile
+ *  override takes precedence over workers.routing task routing in the
+ *  coordinator, so it's the right lever for "council strong, others cheap". */
+const SUBAGENT_PROFILES: { key: string; label: string; hint: string }[] = [
   { key: 'reviewer', label: 'reviewer', hint: '提交后自动审查 / L3 编队审查' },
-  { key: 'adversarial_verifier', label: 'adversarial_verifier', hint: 'L2 对抗验证' },
+  { key: 'adversarial_verifier', label: 'adversarial_verifier', hint: 'L2 对抗验证 / team 验证' },
   { key: 'verifier', label: 'verifier', hint: '验证循环' },
-  { key: 'patcher', label: 'patcher', hint: '补丁建议' },
+  { key: 'patcher', label: 'patcher', hint: '补丁建议 / team 编码' },
+  { key: 'council_expert', label: 'council_expert', hint: '议事会席位（覆盖优先于任务路由）' },
+  { key: 'code_scout', label: 'code_scout', hint: 'team 代码侦察' },
+  { key: 'doc_scout', label: 'doc_scout', hint: 'team 文档侦察' },
 ]
 
 /** The 5 capability tasks that workers.routing maps to a named profile. */
@@ -86,6 +92,17 @@ export function RoutingSettings() {
     () => (config ? Object.keys(config.workers.profiles) : []),
     [config],
   )
+  // Surface any override keys present in config but not in the well-known list
+  // (e.g. goal_judge or a hand-edited profile) so they stay visible/editable
+  // rather than silently persisting on save.
+  const allProfiles = useMemo(() => {
+    if (!config) return SUBAGENT_PROFILES
+    const known = new Set(SUBAGENT_PROFILES.map((p) => p.key))
+    const extra = Object.keys(config.review.profiles)
+      .filter((k) => !known.has(k))
+      .map((k) => ({ key: k, label: k, hint: '自定义 profile' }))
+    return [...SUBAGENT_PROFILES, ...extra]
+  }, [config])
 
   const setReviewProfile = (profileKey: string, value: string) => {
     setConfig((prev) => {
@@ -143,10 +160,15 @@ export function RoutingSettings() {
         目标 provider 须已在「Provider」里配置且有 API Key，否则该项会静默回退到主会话模型。
       </div>
 
-      {/* agent.review — 审查 worker 路由 */}
+      {/* agent.review.profiles — 按 profile 覆盖子代理模型（review / council / team 通用） */}
       <section className="flex flex-col gap-3">
-        <h5 className="text-xs font-semibold text-text">审查 worker 模型（agent.review）</h5>
-        {REVIEW_PROFILES.map((p) => {
+        <h5 className="text-xs font-semibold text-text">按 profile 覆盖子代理模型（agent.review.profiles）</h5>
+        <div className="meta">
+          按 worker profile 名覆盖,命中所有携带该 profile 的子代理——涵盖提交后审查、议事会席位（council_expert）、
+          team 编队（patcher / reviewer / scouts）。profile 覆盖<strong>优先于</strong>下方的任务路由,
+          适合「议事会用强模型、其余子代理走 Flash」这类精细控制。
+        </div>
+        {allProfiles.map((p) => {
           const current = config.review.profiles[p.key]
           return (
             <label key={p.key} className="flex items-center justify-between gap-3">

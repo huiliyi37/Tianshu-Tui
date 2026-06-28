@@ -654,7 +654,8 @@ rivet config providers  # 应该只显示内置 Provider
 }
 ```
 
-- **`profiles`**：按 worker profile 名指定 `{ provider, model }`。提交后自动审查（`deliver_task` commit）实际用的是 **`reviewer`** 这个 profile，所以只想让提交审查走 Flash，配 `reviewer` 一项即可；要把对抗验证（L2）、补丁建议也一并下放就把 `adversarial_verifier` / `verifier` / `patcher` 也配上。profile 名必须是内置注册表里的（`reviewer` / `adversarial_verifier` / `verifier` / `patcher` / `council_expert` / `goal_judge` 等），拼错会被拒。
+- **`profiles`**：按 worker profile 名指定 `{ provider, model }`，命中**所有携带该 profile 的子代理**（不止提交后审查——见下文「council / team 覆盖」）。提交后自动审查（`deliver_task` commit）实际用的是 **`reviewer`** 这个 profile，所以只想让提交审查走 Flash，配 `reviewer` 一项即可；要把对抗验证（L2）、补丁建议也一并下放就把 `adversarial_verifier` / `verifier` / `patcher` 也配上。
+  - **键名不做注册表校验**：profile 名是自由字符串，写错（如把 `reviewer` 拼成 `reviewr`）**不会报错，也不会回退**——只是永远匹配不到任何 worker，等于**静默失效**。常用的有效 profile：`reviewer` / `adversarial_verifier` / `verifier` / `patcher` / `council_expert` / `code_scout` / `doc_scout`。配 `RIVET_DEBUG=1` 可在日志看 `[review-override] active` / `[worker-model] review-override` 确认是否真的命中。
 - **`skipAuto`**（默认 `false`）：设为 `true` 完全关闭 `deliver_task` 的提交后自动审查（等价于环境变量 `RIVET_REVIEW_DISCIPLINE=0`，但限本配置文件）。急救用，不想要审查时最直接。
 - **`mechanicalFastPath`**（默认 `true`）：纯文档 / 纯重命名变更跳过审查 worker 和未验证 RED 闸门。
 
@@ -683,9 +684,42 @@ rivet config providers  # 应该只显示内置 Provider
 - **`routing` 的值**必须是 `workers.profiles` 里已定义的档位名。内置默认已经把上面 4 个任务都指向 `cheap-flash`（即 DeepSeek Flash），所以**主会话用 DeepSeek 时，子代理默认就已经在用 Flash 了**——通常无需额外配置；只有改用别的档位（如自定义 provider）时才需要覆盖。
 - 内置档位：`cheap`(MiniMax) / `cheap-flash`(DeepSeek Flash) / `capable`(DeepSeek Pro) / `mimo` / `mimo-pro` / `mimo-ultra`，可直接引用或在 `profiles` 里覆盖。
 
+### council 议事会 / team 编队的覆盖
+
+`council_convene`（议事会）和 `team_orchestrate` / team_max（编队）派出的子代理,和上面两套配置**走完全相同的派发链**（`coordinator.delegateBatch → runtimeFactory`）,所以路由配置对它们**自动生效**,跨 provider 缓存隔离一样适用——「GLM 主控 + Flash 子代理」无需为它们额外操作。
+
+两条路由键如何落到 council/team 的每个 worker（`order.kind` 经 `mapWorkOrderKindToCapabilityTask` 映射为能力任务）：
+
+| 调用方 | `order.kind` | `workers.routing` 键（能力任务） | `agent.review.profiles` 键（profile） |
+|--------|--------------|--------------------------------|--------------------------------------|
+| 议事会席位 | `plan` | `code_edit` | `council_expert` |
+| team 规划扇出 | `plan` | `code_edit` | （planner） |
+| team 编码 | `patch_proposal` | `risky_refactor` | `patcher` |
+| team 审查 | `review` | `risky_refactor` | `reviewer` |
+| team 验证 | `verify` | `test_failure_diagnosis` | `adversarial_verifier` |
+| team 侦察 | `code_search` | `repo_summarization` | `code_scout` / `doc_scout` |
+
+**优先级**：`agent.review.profiles[profile]` > `workers.routing[task]` > 内置启发式。即 profile 覆盖会盖过任务路由。
+
+两个务必知道的点：
+
+1. **路由按任务 / profile,不区分调用方。** `agent.review.profiles["patcher"]` 会**同时**影响 `deliver_task` 审查和 team 编码（都是 `patcher`）；`workers.routing["code_edit"]` 会**同时**影响议事会席位和 team 规划。无法只改其中一方——要单独控制某一类,用它**独有**的 profile 键（议事会用 `council_expert`,侦察用 `code_scout` / `doc_scout`）。
+2. **议事会的 tier 护栏不绑定真实派发。** 议事会内部 `routeCouncilSeat` 的「天府席位强制 strong」等护栏只写遥测,**不影响实际选型**。因此若你把 `workers.routing["code_edit"]` 指向 Flash 省缓存,**议事会席位也会一起掉到 Flash**。要「议事会保持强模型、其余子代理走 Flash」,就用 profile 覆盖（它优先级更高）：
+
+```json
+{
+  "workers": { "routing": { "code_edit": "cheap-flash" } },
+  "agent": { "review": { "profiles": {
+    "council_expert": { "provider": "deepseek", "model": "deepseek-v4-pro" }
+  } } }
+}
+```
+
+> 桌面端「集成 → 子代理 / 审查模型路由」面板的「按 profile 覆盖子代理模型」一节已列出 `council_expert` / `code_scout` / `doc_scout`,上述配方可直接在 UI 完成,无需手改 JSON。
+
 ### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
 
-仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
+仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查、team 侦察和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存；同时把 `council_expert` 单独留在 DeepSeek Pro，演示「议事会保强、其余走 Flash」的 profile 覆盖配方。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
 
 ---
 

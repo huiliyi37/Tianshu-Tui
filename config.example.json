@@ -20,7 +20,10 @@
         "reviewer": { "provider": "deepseek", "model": "deepseek-v4-flash" },
         "adversarial_verifier": { "provider": "deepseek", "model": "deepseek-v4-flash" },
         "verifier": { "provider": "deepseek", "model": "deepseek-v4-flash" },
-        "patcher": { "provider": "deepseek", "model": "deepseek-v4-flash" }
+        "patcher": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "code_scout": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "doc_scout": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "council_expert": { "provider": "deepseek", "model": "deepseek-v4-pro" }
       }
     }
   },
