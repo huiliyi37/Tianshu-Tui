@@ -253,9 +253,12 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
 
   const lines: string[] = [header]
   const tail = (input.outputTail ?? '').replace(/\n+$/, '')
+  const tailCount = input.tailLines ?? 3
+  const maxWidth = Math.max(10, input.columns - 6)
+
+  // 固定 tail 区域高度：内容不足时顶部补空行，避免卡片高度随输出变化而跳动。
+  const tailLines: string[] = []
   if (tail) {
-    const tailCount = input.tailLines ?? 3
-    const maxWidth = Math.max(10, input.columns - 6)
     const shown = tail.split('\n').slice(-tailCount).map(l => {
       // 按显示宽度截断（CJK 2 列、ambiguous 2 列）。… 自身 2 列，预算留给它。
       const ellW = displayWidth('…', WIDE)
@@ -264,8 +267,18 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
         : l
       return color(clipped, theme.muted)
     })
-    lines.push(...indentBody(shown, '', theme))
+    tailLines.push(...indentBody(shown, '', theme))
   }
+
+  // 无输出时显示占位符，保持固定高度
+  if (tailLines.length === 0) {
+    tailLines.push(`${color(BODY_FIRST_PREFIX, theme.dim)}${color('…', theme.dim)}`)
+  }
+  while (tailLines.length < tailCount) {
+    tailLines.unshift(BODY_CONT_PREFIX)
+  }
+
+  lines.push(...tailLines)
   return lines
 }
 
