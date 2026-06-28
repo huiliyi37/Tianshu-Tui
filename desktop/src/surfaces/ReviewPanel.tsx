@@ -31,7 +31,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files' | 'canvas'
 
 interface TabDef {
   id: ReviewTab
@@ -82,6 +82,41 @@ export function ReviewPanel(props: {
   const [comment, setComment] = useState('')
   // 行级评论：在 diff 弹窗里逐行累积，随 artifact 级 comment 一起回灌
   const [lineComments, setLineComments] = useState<LineComment[]>([])
+
+  // Live Canvas state
+  const [selectedCanvasArtifact, setSelectedCanvasArtifact] = useState<ArtifactSummary | null>(null)
+  const [canvasContent, setCanvasContent] = useState<string>('')
+  const [canvasLoading, setCanvasLoading] = useState<boolean>(false)
+  const [canvasWidth, setCanvasContentWidth] = useState<'100%' | '768px' | '375px'>('100%')
+  const [canvasKey, setCanvasKey] = useState<number>(0)
+
+  const canvasArtifacts = useMemo(() => {
+    return artifacts.filter((a) => a.kind === 'html' || a.kind === 'markdown' || a.target.endsWith('.html') || a.target.endsWith('.md') || a.target.endsWith('.css'))
+  }, [artifacts])
+
+  useEffect(() => {
+    if (canvasArtifacts.length > 0 && !selectedCanvasArtifact) {
+      setSelectedCanvasArtifact(canvasArtifacts[0]!)
+    }
+  }, [canvasArtifacts, selectedCanvasArtifact])
+
+  useEffect(() => {
+    if (selectedCanvasArtifact && sessionId) {
+      setCanvasLoading(true)
+      getArtifact(sessionId, selectedCanvasArtifact.id)
+        .then((res) => {
+          setCanvasContent(res.raw)
+        })
+        .catch((err) => {
+          console.error(err)
+        })
+        .finally(() => {
+          setCanvasLoading(false)
+        })
+    } else {
+      setCanvasContent('')
+    }
+  }, [selectedCanvasArtifact, sessionId])
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
@@ -142,6 +177,7 @@ export function ReviewPanel(props: {
     { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
     { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
     { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
+    { id: 'canvas', label: 'Canvas', glyph: '🎨' },
     { id: 'wt', label: 'Diff', glyph: '⟐' },
     { id: 'files', label: 'Files', glyph: '📁' },
     { id: 'github', label: 'PR', glyph: '🔀' },
@@ -172,6 +208,112 @@ export function ReviewPanel(props: {
 
         <TabsContent value="github" className="review-body">
           <GithubPanel />
+        </TabsContent>
+        <TabsContent value="canvas" className="review-body flex flex-col h-full">
+          <div className="canvas-container flex flex-col h-full gap-2 p-2">
+            {canvasArtifacts.length === 0 ? (
+              <div className="empty sm">没有可预览的 HTML 或 Markdown 工件</div>
+            ) : (
+              <>
+                <div className="canvas-selector flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">选择工件:</span>
+                  <select
+                    className="canvas-select bg-panel-2 border border-border rounded px-2 py-1 text-xs text-text flex-1"
+                    value={selectedCanvasArtifact?.id || ''}
+                    onChange={(e) => {
+                      const found = canvasArtifacts.find((a) => a.id === e.target.value)
+                      if (found) setSelectedCanvasArtifact(found)
+                    }}
+                  >
+                    {canvasArtifacts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.target} ({a.kind})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedCanvasArtifact && (
+                  <div className="canvas-preview-wrapper flex-1 flex flex-col border border-border rounded overflow-hidden bg-panel">
+                    <div className="canvas-toolbar flex items-center justify-between bg-panel-2 border-b border-border px-3 py-1.5 text-xs">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="canvas-btn flex items-center gap-1 hover:text-text-strong"
+                          onClick={() => setCanvasKey((k) => k + 1)}
+                          title="重新加载"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                          </svg>
+                          刷新
+                        </button>
+                        <span className="text-border">|</span>
+                        <button
+                          className="canvas-btn flex items-center gap-1 hover:text-text-strong"
+                          onClick={() => {
+                            if (canvasContent) {
+                              const blob = new Blob([canvasContent], { type: 'text/html' })
+                              const url = URL.createObjectURL(blob)
+                              window.open(url, '_blank')
+                            }
+                          }}
+                          title="在浏览器中打开"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" />
+                          </svg>
+                          浏览器打开
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-panel-3 rounded p-0.5 border border-border">
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '100%' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasContentWidth('100%')}
+                        >
+                          Desktop
+                        </button>
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '768px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasContentWidth('768px')}
+                        >
+                          Tablet
+                        </button>
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '375px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasContentWidth('375px')}
+                        >
+                          Mobile
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="canvas-viewport flex-1 bg-white flex items-center justify-center overflow-auto p-4">
+                      {canvasLoading ? (
+                        <div className="text-xs text-muted-foreground">加载中...</div>
+                      ) : selectedCanvasArtifact.kind === 'markdown' ? (
+                        <div
+                          style={{ width: canvasWidth, transition: 'width 0.2s' }}
+                          className="canvas-content-box h-full bg-panel text-text p-4 rounded overflow-auto border border-border"
+                        >
+                          <Markdown source={canvasContent} />
+                        </div>
+                      ) : (
+                        <iframe
+                          key={canvasKey}
+                          style={{ width: canvasWidth, transition: 'width 0.2s' }}
+                          className="canvas-content-box h-full bg-white rounded shadow-sm border border-border"
+                          srcDoc={canvasContent}
+                          sandbox="allow-scripts"
+                          title={selectedCanvasArtifact.target}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </TabsContent>
         <TabsContent value="wt" className="review-body">
           <ChangesTab sessionId={sessionId} />

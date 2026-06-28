@@ -26,7 +26,7 @@ import {
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
-import { fetchSessionImageObjectUrl } from '../runtime/client'
+import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -80,6 +80,21 @@ export function ThreadView(props: {
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+
+  // Time-Travel Timeline Slider state
+  const [rewindPoints, setRewindPoints] = useState<import('../runtime/client').RewindPoint[]>([])
+  const [selectedTurnIndex, setSelectedTurnIndex] = useState<number>(-1)
+
+  useEffect(() => {
+    if (session.id) {
+      getRewindPoints(session.id)
+        .then(({ points }) => {
+          setRewindPoints(points)
+          setSelectedTurnIndex(points.length) // default to latest
+        })
+        .catch((err) => console.error(err))
+    }
+  }, [session.id])
   // 发消息失败时回填输入内容：useSendPrompt 的 onError 派发 'send-prompt-failed' 事件，
   // 此处监听并把失败的 prompt 塞回输入框，让用户能编辑后重发（而非因 submit 已清空而丢失）。
   // 仅当当前输入框为空时回填，避免覆盖用户失败后已手动输入的新内容。
@@ -106,7 +121,28 @@ export function ThreadView(props: {
 
   // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
   // U8: depend on blocksRev so in-place streaming text updates still recompute.
-  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks, view.blocksRev])
+  const filteredBlocks = useMemo(() => {
+    if (selectedTurnIndex === -1 || selectedTurnIndex === rewindPoints.length) {
+      return view.blocks
+    }
+
+    let userBlockCount = 0
+    let cutoffIndex = view.blocks.length
+
+    for (let i = 0; i < view.blocks.length; i++) {
+      if (view.blocks[i]?.kind === 'user') {
+        if (userBlockCount === selectedTurnIndex + 1) {
+          cutoffIndex = i
+          break
+        }
+        userBlockCount++
+      }
+    }
+
+    return view.blocks.slice(0, cutoffIndex)
+  }, [view.blocks, selectedTurnIndex, rewindPoints.length])
+
+  const rendered = useMemo(() => groupBlocks(filteredBlocks), [filteredBlocks, view.blocksRev])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
@@ -423,6 +459,37 @@ export function ThreadView(props: {
             </svg>
           </button>
         </div>
+
+        {rewindPoints.length > 0 && (
+          <div className="thread-timeline-slider-container px-4 py-2 border-t border-border bg-panel-2 flex items-center gap-3">
+            <span className="text-xs text-muted font-medium flex items-center gap-1 shrink-0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              时间旅行:
+            </span>
+            <input
+              type="range"
+              min="0"
+              max={rewindPoints.length}
+              value={selectedTurnIndex === -1 ? rewindPoints.length : selectedTurnIndex}
+              onChange={(e) => {
+                const val = Number(e.target.value)
+                setSelectedTurnIndex(val)
+              }}
+              className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
+            />
+            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[200px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? rewindPoints[selectedTurnIndex]?.content : '最新'}>
+              {selectedTurnIndex === -1 || selectedTurnIndex === rewindPoints.length ? (
+                '最新 (Latest)'
+              ) : (
+                `轮次 ${selectedTurnIndex + 1}: ${rewindPoints[selectedTurnIndex]?.content}`
+              )}
+            </span>
+          </div>
+        )}
+
         <div className="thread-header-meta">
           {session.model && (
             <span className="model-chip" title={`当前模型: ${session.model}`}>
@@ -556,12 +623,65 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className="composer-float-inner">
+          {selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length && (
+            <div className="historical-turn-banner flex items-center justify-between bg-warning-soft border border-warning/30 rounded-lg p-3 mb-2 text-xs">
+              <div className="flex items-center gap-2 text-warning">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <span className="font-medium">
+                  您正在查看历史轮次 ({selectedTurnIndex + 1}/{rewindPoints.length})。在此状态下发送新消息将从该点分叉（Fork）并截断后续历史。
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  className="px-2.5 py-1 rounded bg-warning text-white hover:bg-warning/90 transition-colors font-medium"
+                  onClick={async () => {
+                    const point = rewindPoints[selectedTurnIndex]
+                    if (point) {
+                      try {
+                        await rewindSession(session.id, point.index)
+                        setSelectedTurnIndex(-1)
+                        const { points } = await getRewindPoints(session.id)
+                        setRewindPoints(points)
+                      } catch (err) {
+                        console.error(err)
+                      }
+                    }
+                  }}
+                >
+                  在此分叉 (Fork)
+                </button>
+                <button
+                  className="px-2.5 py-1 rounded bg-panel-3 hover:bg-panel-2 border border-border text-text transition-colors"
+                  onClick={() => setSelectedTurnIndex(-1)}
+                >
+                  返回最新
+                </button>
+              </div>
+            </div>
+          )}
           <Composer
             sessionId={session.id}
             value={input}
             onChange={setInput}
             busy={busy}
-            onSubmit={(text, images) => {
+            onSubmit={async (text, images) => {
+              if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
+                const point = rewindPoints[selectedTurnIndex]
+                if (point) {
+                  try {
+                    await rewindSession(session.id, point.index)
+                    setSelectedTurnIndex(-1)
+                    const { points } = await getRewindPoints(session.id)
+                    setRewindPoints(points)
+                  } catch (err) {
+                    console.error(err)
+                  }
+                }
+              }
               if (busy) onSteer(text)
               else onSend(text, images)
               setInput('')

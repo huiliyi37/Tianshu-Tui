@@ -3302,3 +3302,115 @@ html[data-theme="nebula"] .plan-panel {
   color: var(--accent);
   background: var(--accent-soft);
 }
+
+/* ── Antigravity 2.0 UI Optimizations ────────────────────────────── */
+
+/* Live Canvas Panel */
+.canvas-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.canvas-select {
+  outline: none;
+  transition: border-color var(--dur) var(--ease);
+}
+.canvas-select:focus {
+  border-color: var(--accent);
+}
+.canvas-preview-wrapper {
+  box-shadow: var(--shadow-md);
+}
+.canvas-toolbar {
+  user-select: none;
+}
+.canvas-btn {
+  color: var(--muted);
+  transition: color var(--dur) var(--ease);
+}
+.canvas-btn:hover {
+  color: var(--text-strong);
+}
+.canvas-viewport {
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.canvas-content-box {
+  box-shadow: var(--shadow-lg);
+}
+
+/* SVG Flow Lines & Flowing Light Animation */
+.glowing-particle {
+  filter: drop-shadow(0 0 4px var(--accent));
+}
+.stroke-accent-pulse {
+  stroke-dasharray: 4 2;
+  animation: stroke-pulse 20s linear infinite;
+}
+@keyframes stroke-pulse {
+  to {
+    stroke-dashoffset: -400;
+  }
+}
+.graph-node-card {
+  box-shadow: var(--shadow-sm);
+  transition: all var(--dur) var(--ease);
+}
+.graph-node-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--accent);
+}
+
+/* Timeline Slider */
+.timeline-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--border);
+  height: 4px;
+  border-radius: 999px;
+  outline: none;
+  transition: background var(--dur) var(--ease);
+}
+.timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.timeline-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-hover);
+}
+.timeline-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.timeline-slider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-hover);
+}
+
+/* Historical Turn Banner */
+.historical-turn-banner {
+  animation: slide-down 0.2s var(--ease);
+}
+@keyframes slide-down {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
