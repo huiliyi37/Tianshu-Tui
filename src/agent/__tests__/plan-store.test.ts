@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 // Each test starts from a clean slate by clearing the store via
 // consumePlan (which reads + clears).
 
-import { storePlan, consumePlan, getStoredPlan } from '../plan-store.js'
+import { storePlan, consumePlan, getStoredPlan, setPlanSession } from '../plan-store.js'
 
 function clearStore(): void {
   consumePlan() // consume clears; call until null
@@ -85,6 +85,24 @@ describe('plan-store', () => {
       storePlan('{"new":true}') // new plan_task call overwrites
       assert.equal(consumePlan(), '{"new":true}')
       assert.equal(consumePlan(), null)
+    })
+  })
+
+  describe('session isolation', () => {
+    it('different sessions do not share stored plans', () => {
+      storePlan('{"session":"A"}', 'session-A')
+      storePlan('{"session":"B"}', 'session-B')
+      assert.equal(consumePlan('session-A'), '{"session":"A"}')
+      assert.equal(consumePlan('session-B'), '{"session":"B"}')
+      assert.equal(consumePlan('session-A'), null)
+      assert.equal(consumePlan('session-B'), null)
+    })
+
+    it('setPlanSession makes default callers use that session', () => {
+      setPlanSession('session-X')
+      storePlan('{"session":"X"}')
+      assert.equal(consumePlan(), '{"session":"X"}')
+      assert.equal(consumePlan('session-X'), null)
     })
   })
 })

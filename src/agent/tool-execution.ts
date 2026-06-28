@@ -94,7 +94,7 @@ export interface ToolExecutionDeps {
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition (plan_steps) for the loop's PlanExecutionTrace. */
-  onPlanSteps?: (descriptions: string[]) => void
+  onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
   /** Whether goal mode is active — relaxes doom-loop thresholds when true. */

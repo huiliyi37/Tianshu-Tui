@@ -237,7 +237,7 @@ export function createTeamOrchestrateTool(
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
       const { mode, objective, planPath, planMarkdown, planJson: explicitPlanJson, maxParallel, fromWave } = parsed.data
       // Bridge: auto-consume the plan stored by plan_task when planJson is omitted.
-      const planJson = explicitPlanJson ?? consumePlan()
+      const planJson = explicitPlanJson ?? consumePlan(params.sessionId)
 
       // Task-size gate: block small tasks from triggering heavy orchestration
       const scale = classifyOrchestrationScale(objective)
@@ -262,7 +262,7 @@ export function createTeamOrchestrateTool(
         // Re-store for multi-wave: consumePlan cleared it, but subsequent
         // waves need it too.  Only re-store when the model didn't pass an
         // explicit planJson (explicit always takes priority).
-        if (!explicitPlanJson) storePlan(planJson)
+        if (!explicitPlanJson) storePlan(planJson, params.sessionId)
       }
 
       let markdown = planMarkdown

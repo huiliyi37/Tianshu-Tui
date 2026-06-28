@@ -3,6 +3,9 @@ import type { Tool } from './types.js'
 import { TodoStore } from './todo-store.js'
 import type { TodoItem } from './todo-store.js'
 import { detectDependencies, assessScopeRisk, buildScopeNotice } from './todo-deps.js'
+import { writeFileAtomicSync } from '../fs-atomic.js'
+import { existsSync, readFileSync } from 'node:fs'
+import { getSessionDir } from '../agent/session-persist.js'
 
 const VALID_STATUSES = ['pending', 'in_progress', 'completed'] as const
 
@@ -37,6 +40,41 @@ export function getTodos(): TodoItem[] {
 
 export function setTodos(todos: TodoItem[]): void {
   defaultStore.write(todos)
+  persistTodos()
+}
+
+let todoSessionId: string | undefined
+let todoCwd: string | undefined
+
+export function setTodoSession(sessionId: string, cwd: string): void {
+  todoSessionId = sessionId
+  todoCwd = cwd
+}
+
+function todoPersistPath(): string | undefined {
+  if (!todoSessionId || !todoCwd) return undefined
+  return `${getSessionDir(todoCwd)}/${todoSessionId}.todos.json`
+}
+
+function persistTodos(): void {
+  const path = todoPersistPath()
+  if (!path) return
+  try {
+    writeFileAtomicSync(path, JSON.stringify(defaultStore.read(), null, 2) + '\n')
+  } catch { /* best-effort */ }
+}
+
+export function loadTodos(sessionId: string, cwd: string): TodoItem[] | null {
+  const path = `${getSessionDir(cwd)}/${sessionId}.todos.json`
+  if (!existsSync(path)) return null
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8'))
+    if (Array.isArray(raw)) {
+      defaultStore.write(raw as TodoItem[])
+      return raw as TodoItem[]
+    }
+  } catch { /* ignore corrupted file */ }
+  return null
 }
 
 /**
@@ -106,10 +144,9 @@ Always update the list when completing or starting a task.`,
 
       // U6/C1: the todo list IS the LLM's goal decomposition. Surface the
       // ordered descriptions to the loop, which seeds the PlanExecutionTrace
-      // on the first write (idempotent — later status-update writes are a
-      // no-op on the trace via withPlanSteps). Zero new tool, zero budget.
+      // 同步到 PlanExecutionTrace：首次写入会 seed，后续写入会同步状态。
       if (params.onPlanSteps && data.todos.length > 0) {
-        params.onPlanSteps(data.todos.map(t => t.content))
+        params.onPlanSteps(data.todos.map(t => ({ id: t.id, content: t.content, status: t.status })))
       }
 
       const summary = TodoStore.formatSummary(data.todos)

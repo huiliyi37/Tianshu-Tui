@@ -172,9 +172,8 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         graph = decomposeObjective({ objective, files })
       }
 
-      // Populate todo store so the PlanExecutionTrace baseline is immediately
-      // seeded (U6: trace captures steps from the first todo write). Skip the
-      // "verify" node (task-graph.ts always appends one) — it's a post-hoc
+      // Populate todo store and seed the PlanExecutionTrace baseline immediately.
+      // Skip the "verify" node (task-graph.ts always appends one) — it's a post-hoc
       // gate, not a user-facing step.
       const leafNodes = graph.nodes.filter(n => n.kind !== 'verify')
       if (leafNodes.length > 0) {
@@ -184,6 +183,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           status: 'pending' as const,
         }))
         setTodos(todoItems)
+        params.onPlanSteps?.(todoItems.map(t => ({ id: t.id, content: t.content, status: t.status })))
       }
 
       // Step 2: convert to UnifiedPlan
@@ -201,7 +201,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
 
       // Bridge: store the serialized plan so team_orchestrate can auto-consume
       // it without the model copy-pasting JSON between tool calls.
-      storePlan(serializeUnifiedPlan(plan))
+      storePlan(serializeUnifiedPlan(plan), params.sessionId)
 
       if (params.input.execute !== true) {
         // Return JSON + human-readable summary with methodology guidance
