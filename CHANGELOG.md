@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-06-28 — 体验前质量加固：渲染重影根治 + 意图闸误报修复 + 子代理结构化输出 + 桌面端对标 Codex/Antigravity
+
+用户开始体验前的集中质量加固，14 commit 覆盖五条线。详见 [`docs/changelog-2026-06-28.md`](docs/changelog-2026-06-28.md)。
+
+### Fixed — TUI 渲染 / 输入框重影
+
+- **渲染层统一 East-Asian Ambiguous 宽度口径**（`91daf1c5` / `1e0a8744`）— 输入框边框行、spinner 行、task-list/tool-card/glance-bar/welcome 统一到与 `rowsForLine` 一致的 wide 口径。根因是含 `— … →` 等 ambiguous 符号的行在 CJK 终端折成 2 行而行数估算算 1 行 → fullRewrite 欠擦 → 旧输入框残留。
+
+### Fixed — 意图闸误报
+
+- **dead-end 关联匹配**（`5c3b44eb`）— veto 沉积改存原始 target，匹配层只保留与 `recentTargets` 子串重合的 dead-end（旧实现任意一条即触发）。修正早期误判：pheromones 按项目+会话隔离，无跨会话残留（`52b9398b`）。
+- **momentum 滑动窗口**（`5c3b44eb`）— `computeMomentum` 从连续正确率（一次报错清零）改为窗口成功率，单次探索性报错平滑下降而非坠崖。
+
+### Fixed — 提交卡顿
+
+- **typecheck 异步化**（`830484d1`）— `runTypeCheck` 从 `spawnSync` 改异步 `spawn`，消除 commit 期间 spinner 冻结（事件循环被 tsc 阻塞数十秒）。
+
+### Fixed — 子代理输出可靠性
+
+- **结构化输出 response_format**（`7b89028c`）— worker repair 轮用无 tools 单发请求 + `response_format: json_object` 强制合法 JSON，规避 json_object + tools 的已知冲突。`ProviderCapabilities` 加 `supportsResponseFormat`（DeepSeek/GLM/openai/codex true，其余降级）。
+- **worker 独立路由隔离缓存**（`0943a5b7`）— 放开 workerRouting 的同 model 限制 + 赋值 `routeProfile.model`，worker 真正跑在配的独立 model 上，prefix cache 不竞争主控。
+- **repair tail 8000**（`c2eefbbf`）— 参考文本 4000→8000 字符，覆盖典型 5–8K WorkerResult。
+
+### Added — 桌面端功能（对标 Codex / Antigravity）
+
+- **Diff 行级评论回灌**（`0611b89a`）— `DiffView` 行级锚点 + 行内评论；后端 `feedback` 加 `lines` 渲染为 `[LINE-LEVEL REVIEW]` 带 `<file>:<line>`。
+- **委派节点独立 diff 审查**（`220fddce` / `e700105b`）— worker diff 落盘 + `DelegationActivity.artifactId`；DelegationSurface 节点 modal 弹 DiffView。审查补 retry/escalation 分支 artifactStore 注入。
+- **多 repo Project 工作区**（`08124cb6`）— `Project {id, roots[]}` + localStorage 迁移 + NewSessionDialog 多 root chips。后端 coordinator 集成留后续。
+- **Updater 自动更新闭环**（`045da9dd` / `8d75b640`）— `downloadAndInstall` + 进度 + `relaunch` + `UpdateBanner`；GitHub Releases 托管（sign-and-build.sh / gen-latest-json.js / CI）；relaunch 前「重启中」过渡态。
+
 ## 2026-06-07 — v2.9.2: Server Subsystem + Intent Retrieval Router + Review Discipline + Stall Root-Cause Closure
 
 Merge of `fix/stall-root-causes-abort-exit` into `main` (merge commit `6ac0c3d`). Pre-merge `main` is preserved at tag `v2.9.2` / branch `backup/v2.9.2-pre-merge` (see `docs/releases/v2.9.2-merge-record.md`). Verified at merge: `tsc --noEmit` clean.
