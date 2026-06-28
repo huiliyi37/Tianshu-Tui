@@ -40,6 +40,38 @@ class MemoryPersistence implements SessionPersistenceAdapter {
   loadAll(): PersistedSession[] { return this.saved }
 }
 
+/**
+ * Lazy adapter: implements loadRecords()/loadEvents() so the manager exercises
+ * the lazy-boot path. Counts loadEvents() calls so tests can assert the log is
+ * read on demand (first open) and re-read after an LRU eviction — never at boot.
+ */
+class LazyMemoryPersistence implements SessionPersistenceAdapter {
+  records = new Map<string, SessionRecord>()
+  events = new Map<string, SessionEvent[]>()
+  loadEventsCalls: string[] = []
+
+  constructor(seed: PersistedSession[] = []) {
+    for (const s of seed) {
+      this.records.set(s.record.id, s.record)
+      this.events.set(s.record.id, s.events.slice())
+    }
+  }
+  saveRecord(record: SessionRecord): void { this.records.set(record.id, { ...record }) }
+  appendEvent(id: string, event: SessionEvent): void {
+    const arr = this.events.get(id) ?? []
+    arr.push(event)
+    this.events.set(id, arr)
+  }
+  loadAll(): PersistedSession[] {
+    return [...this.records.values()].map((r) => ({ record: r, events: this.events.get(r.id) ?? [] }))
+  }
+  loadRecords(): SessionRecord[] { return [...this.records.values()].map((r) => ({ ...r })) }
+  loadEvents(id: string): SessionEvent[] {
+    this.loadEventsCalls.push(id)
+    return (this.events.get(id) ?? []).map((e) => ({ ...e }))
+  }
+}
+
 function ev(seq: number, type: SessionEvent['type'], data: Record<string, unknown> = {}): SessionEvent {
   return { seq, ts: 100 + seq, type, data }
 }
@@ -102,6 +134,87 @@ test('new events after rehydrate are persisted via the adapter', () => {
   mgr.run(s.id, 'go')
   const persistedEvents = mem.events.get(s.id) ?? []
   assert.ok(persistedEvents.some((e) => e.type === 'status'), 'run status event persisted')
+})
+
+test('lazy rehydrate reads no event logs at boot, loads on first open', () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'a', status: 'completed', createdAt: 1, updatedAt: 9,
+      cwd: '/work', lastSeq: 2, pendingApprovals: 0,
+    },
+    events: [ev(1, 'status', { status: 'running' }), ev(2, 'text_delta', { text: 'hi' })],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  // Boot scanned records only — the (potentially huge) event log is untouched.
+  assert.equal(mem.loadEventsCalls.length, 0, 'no event-log read at boot')
+  assert.equal(mgr.listSessions().length, 1, 'session listed from index record alone')
+
+  // First open lazily materializes the log.
+  const replay = mgr.getEvents('a', 0)!
+  assert.deepEqual(mem.loadEventsCalls, ['a'])
+  assert.equal(replay.events.length, 2)
+  assert.equal(replay.lastSeq, 2)
+
+  // Re-open is a no-op against disk (already resident).
+  mgr.getEvents('a', 0)
+  assert.deepEqual(mem.loadEventsCalls, ['a'], 'resident log is not re-read')
+})
+
+test('lazy rehydrate caps resident logs (LRU) and reloads evicted ones', () => {
+  const seed: PersistedSession[] = ['s1', 's2', 's3'].map((id, i) => ({
+    record: {
+      id, status: 'completed' as const, createdAt: 1, updatedAt: i,
+      cwd: '/work', lastSeq: 1, pendingApprovals: 0,
+    },
+    events: [ev(1, 'text_delta', { text: id })],
+  }))
+  const mem = new LazyMemoryPersistence(seed)
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+    maxLoadedSessions: 2,
+  })
+
+  mgr.getEvents('s1', 0)
+  mgr.getEvents('s2', 0)
+  mgr.getEvents('s3', 0) // exceeds cap → evicts LRU (s1), still on disk
+  assert.deepEqual(mem.loadEventsCalls, ['s1', 's2', 's3'])
+
+  // Re-opening the evicted session reloads it from disk (proves it was dropped).
+  const replay = mgr.getEvents('s1', 0)!
+  assert.deepEqual(mem.loadEventsCalls, ['s1', 's2', 's3', 's1'], 's1 reloaded after eviction')
+  assert.equal(replay.events.length, 1)
+})
+
+test('lazy rehydrate flags an interrupted run aborted without reading the log', () => {
+  const seed: PersistedSession[] = [{
+    record: {
+      id: 'crash', status: 'running', createdAt: 1, updatedAt: 5,
+      cwd: '/work', lastSeq: 3, pendingApprovals: 1,
+    },
+    events: [ev(1, 'status', { status: 'running' }), ev(2, 'tool_use', {}), ev(3, 'approval_required', { requestId: 'r' })],
+  }]
+  const mem = new LazyMemoryPersistence(seed)
+  const mgr = new RuntimeSessionManager({
+    createAgent: () => new NoopAgent(),
+    persistence: mem,
+  })
+
+  // The restart marker is appended straight to disk — no event-log read at boot.
+  assert.equal(mem.loadEventsCalls.length, 0, 'no event-log read for the abort marker')
+  const rec = mgr.getSession('crash')!
+  assert.equal(rec.status, 'aborted')
+  assert.equal(rec.pendingApprovals, 0)
+  const marker = (mem.events.get('crash') ?? []).find(
+    (e) => e.type === 'status' && (e.data as { reason?: string }).reason === 'sidecar-restart',
+  )
+  assert.ok(marker, 'restart marker persisted')
+  assert.ok(marker!.seq > 3, 'seq does not regress')
 })
 
 test('stats() reports session and running counts', () => {

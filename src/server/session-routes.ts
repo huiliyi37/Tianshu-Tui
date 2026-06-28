@@ -301,6 +301,29 @@ export function buildSessionRoutes(
       return { status: 200, body: { archived: false } }
     }, apiToken),
 
+    // Storage usage report — total/archived bytes + per-archived-session sizes.
+    // Stat-based (no event-log reads), safe to poll from the settings UI.
+    'GET /storage': withAuth(() => {
+      return { status: 200, body: manager.storageReport() }
+    }, apiToken),
+
+    // Manual cleanup — irreversibly delete archived sessions' files. Body:
+    //   { ids?: string[] }          → delete exactly these (must be archived)
+    //   { olderThanDays?: number }  → keep only archived idle for ≥ N days
+    //   {}                          → delete ALL archived
+    // Active/running sessions are never affected (manager enforces this).
+    'POST /storage/cleanup': withAuth((body) => {
+      const data = (body ?? {}) as { ids?: unknown; olderThanDays?: unknown }
+      const opts: { ids?: string[]; olderThanMs?: number } = {}
+      if (Array.isArray(data.ids)) {
+        opts.ids = data.ids.filter((x): x is string => typeof x === 'string')
+      }
+      if (typeof data.olderThanDays === 'number' && data.olderThanDays >= 0) {
+        opts.olderThanMs = data.olderThanDays * 86_400_000
+      }
+      return { status: 200, body: manager.purgeArchived(opts) }
+    }, apiToken),
+
     'GET /sessions/:id': withAuth((_body, params) => {
       const rec = manager.getSession(params!.id!)
       if (!rec) return { status: 404, body: { error: 'Session not found' } }

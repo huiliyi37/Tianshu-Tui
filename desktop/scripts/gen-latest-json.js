@@ -32,10 +32,12 @@ if (!version || !bundleDir || !downloadBase) {
   process.exit(1)
 }
 
-// 平台 → 安装包相对路径（相对 bundleDir）
+// 平台 → updater 安装包相对路径（相对 bundleDir）。
+// 注意：macOS 的 updater 产物是 .app.tar.gz（createUpdaterArtifacts 才会签名，
+// 同目录有配对 .sig）；.dmg 只用于首次手动安装，没有 .sig，不能作 updater 源。
 const PLATFORMS = {
-  'darwin-aarch64': 'dmg/*.dmg',
-  'darwin-x86_64': 'dmg/*.dmg',
+  'darwin-aarch64': 'macos/*.app.tar.gz',
+  'darwin-x86_64': 'macos/*.app.tar.gz',
   'windows-x86_64': 'nsis/*-setup.exe',
 }
 
@@ -56,8 +58,8 @@ function findAsset(sub, pattern) {
   return hit ? join(dir, hit) : null
 }
 
-// darwin：aarch64 / x86_64 共用同一个 dmg（除非分架构构建）。取第一个 dmg。
-const darwinAsset = findAsset('dmg', /\.dmg$/)
+// darwin：aarch64 / x86_64 共用同一个 .app.tar.gz（除非分架构构建）。
+const darwinAsset = findAsset('macos', /\.app\.tar\.gz$/)
 const winAsset = findAsset('nsis', /-setup\.exe$/)
 
 function entry(assetAbsPath) {
