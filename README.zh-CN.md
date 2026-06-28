@@ -84,7 +84,7 @@ GoalTracker 与回合循环、doom-loop 检测、交付门禁集成。在 goal �
 
 ### Skills 系统
 
-可复用的工作流剧本,从 `.rivet/skills/*.md` 加载。两层渐进式披露:只有 name + description 进入上下文,完整指令按需通过 `skill` 工具加载。配置中可按名导入指定 Claude Code skills。
+可复用的工作流剧本,从 `.rivet/skills/*.md` 加载。两层渐进式披露:只有 name + description 进入上下文,完整指令按需通过 `skill` 工具或 `/skill` 斜杠命令加载。配置中可按名导入指定 Claude Code skills。
 
 **内置 skills** 随仓库发布在 `.rivet/skills/`:
 
@@ -99,8 +99,12 @@ GoalTracker 与回合循环、doom-loop 检测、交付门禁集成。在 goal �
 **使用 skill**:
 
 ```
-/skill writing-plans       # 把完整指令加载进上下文
+/skill writing-plans                # 加载并立即执行该 skill 协议
+/skill writing-plans <你的任务>      # 加载 skill 并附带初始任务
+/skill off writing-plans            # 停止持续注入该 skill 指令
 ```
+
+调用 skill 后,其完整指令会作为当前 prompt,agent 本轮立即响应。随后每轮动态附录会以受保护的 `<invoked-skills>` 块重新注入完整技能体,使其在上下文压缩后仍然生效。模型可在 workflow 走完后调用 `skill(name="writing-plans", complete=true)` 释放;用户也可手动用 `/skill off <name>` 释放。
 
 或当任务匹配触发模式时,agent 自动加载。
 
@@ -386,16 +390,20 @@ $ARGUMENTS' > .rivet/commands/review.md
 | `/rollback` | 预览/恢复 git 检查点(`confirm` 执行) |
 | `/undo` | 撤销上次文件变更(预览,`confirm` 恢复) |
 | `/rewind` | 双 ESC:倒带到过往用户消息 |
-| `/sessions` `/resume <n>` | 列出/恢复已保存会话 |
+| `/sessions` `/resume <n>` | 列出/恢复已保存会话(恢复侧边面板、todo 列表与当前计划) |
 | `/effort [off\|low\|medium\|high\|max]` | 控制推理深度 |
 | `/theme [name\|list]` | 切换色彩主题 |
-| `/skill <name>` | 加载 skill 的完整指令 |
+| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | 管理权限模式和工具/bash 允许/拒绝规则 |
+| `/skill <name>` | 加载并立即执行 skill |
+| `/skill off <name>` | 停止持续注入已调用 skill |
 | `/debug [prompt\|cache\|mcp]` | 调试 prompt、缓存统计或 MCP |
 | `/mcp` | MCP 服务器连接状态 |
 | `/memory <text>` | 保存会话记忆条目 |
 | `/exit` `/quit` | 保存会话并退出 |
 
 双击 **ESC** 打开倒带覆盖层。按 **Esc** 关闭任何覆盖层。
+
+> **斜杠命令补全**——命令面板支持多 token 斜杠命令,如 `/skill <name>`、`/permission ...`、`/model <name>`。输入 `/skill ` 后,面板会模糊匹配 skill 名称,无需用方向键搜索。
 
 ## 开发
 

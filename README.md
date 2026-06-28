@@ -1,5 +1,7 @@
 # Rivet
 
+> 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md)
+
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
 ## Prerequisites
@@ -119,7 +121,7 @@ Convenes multiple expert seats to review a plan or design, with optional second-
 
 ### Skills System
 
-Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progressive disclosure: only name + description enters context; full instructions load on demand via the `skill` tool. Import specific Claude Code skills by name in config.
+Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progressive disclosure: only name + description enters context; full instructions load on demand via the `skill` tool or the `/skill` slash command. Import specific Claude Code skills by name in config.
 
 **Built-in skills** ship in `.rivet/skills/`:
 
@@ -134,8 +136,12 @@ Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progress
 **Using a skill**:
 
 ```
-/skill writing-plans       # loads full instructions into context
+/skill writing-plans                # load and immediately run the skill protocol
+/skill writing-plans <your task>    # load skill and pass an initial task
+/skill off writing-plans            # stop re-injecting the skill instructions
 ```
+
+When a skill is invoked, its full instructions become the current prompt and the agent responds immediately. The instructions are then re-injected into each subsequent turn as a protected `<invoked-skills>` appendix block, so they survive context compaction. The model releases a skill by calling `skill(name="writing-plans", complete=true)` when the workflow is finished, or you can release it manually with `/skill off <name>`.
 
 Or the agent auto-loads skills when the task matches their trigger patterns.
 
@@ -319,16 +325,20 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and auto-discover at startup.
 | `/rollback` | Preview/restore git checkpoint (`confirm` to execute) |
 | `/undo` | Undo last file change (preview, `confirm` to restore) |
 | `/rewind` | Double-ESC: rewind to a past user message |
-| `/sessions` `/resume <n>` | List/restore saved sessions |
+| `/sessions` `/resume <n>` | List/restore saved sessions (restores side panel, todos, and active plan) |
 | `/effort [off\|low\|medium\|high\|max]` | Control reasoning depth |
 | `/theme [name\|list]` | Switch color theme |
-| `/skill <name>` | Load a skill's full instructions |
+| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | Manage permission mode and tool/bash allow/deny rules |
+| `/skill <name>` | Load and immediately invoke a skill |
+| `/skill off <name>` | Stop re-injecting an invoked skill |
 | `/debug [prompt\|cache\|mcp]` | Debug prompt, cache stats, or MCP |
 | `/mcp` | MCP server connection status |
 | `/memory <text>` | Save session memory entry |
 | `/exit` `/quit` | Save session and exit |
 
 Double-tap **ESC** for rewind overlay. Press **Esc** to dismiss any overlay.
+
+> **Slash command completion** — the command palette supports multi-token slash commands such as `/skill <name>`, `/permission ...`, and `/model <name>`. Type `/skill ` and the palette fuzzy-matches the skill name, so you don't have to arrow-search.
 
 ## For Developers
 
