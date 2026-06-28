@@ -246,6 +246,113 @@ export function ThreadView(props: {
       desc: '认知自感知',
       run: () => onSend('Show the cognitive sensorium state: task status, verification gaps, delivery readiness, and active signals.'),
     },
+    {
+      name: '/council',
+      desc: '议事会 · 星域专家审查',
+      example: '/council <目标描述>',
+      run: () => onSend('Convene a star-domain council to review this objective. Use council_convene with the task I will describe next.'),
+    },
+    {
+      name: '/goal',
+      desc: '设定自主目标 · 跨 turn 执行',
+      example: '/goal <高层目标>',
+      run: () => onSend('Set an autonomous goal and execute across multiple turns until complete. Goal: the task I will describe next.'),
+    },
+    {
+      name: '/cancel-goal',
+      desc: '取消自主目标',
+      run: () => onSend('Cancel the current autonomous goal if one is active.'),
+    },
+    {
+      name: '/effort',
+      desc: '设置推理强度 (off/low/medium/high/max)',
+      run: () => onSend('Show current reasoning effort level. Available: off, low, medium, high, max.'),
+    },
+    {
+      name: '/model',
+      desc: '切换模型',
+      run: () => onSend('Show available models for switching.'),
+    },
+    {
+      name: '/domain',
+      desc: '切换星域人格',
+      run: () => onSend('Show available star domains for switching.'),
+    },
+    {
+      name: '/todo',
+      desc: '任务清单管理 (list/add/done/skip/move)',
+      run: () => onSend('Show current todo list. Use /todo add/done/skip/move to manage tasks.'),
+    },
+    {
+      name: '/undo',
+      desc: '撤销文件更改',
+      run: () => onSend('Undo the last file change. Use /undo preview N to preview before undoing.'),
+    },
+    {
+      name: '/rollback',
+      desc: '回滚文件更改（/undo 别名）',
+      run: () => onSend('Rollback recent file changes.'),
+    },
+    {
+      name: '/workflow',
+      desc: 'YAML 工作流编排 (list/<name>/replay)',
+      run: () => onSend('Show available workflows from .rivet/workflows/*.yaml.'),
+    },
+    {
+      name: '/plan-template',
+      desc: '计划模板库 (list/save/<name>)',
+      run: () => onSend('Show available plan templates from .rivet/plan-templates/*.md.'),
+    },
+    {
+      name: '/team-resume',
+      desc: '从 wave checkpoint 恢复团队执行',
+      run: () => onSend('Show available team checkpoints for resume.'),
+    },
+    {
+      name: '/fork',
+      desc: 'Fork 当前会话',
+      run: () => onSend('Fork the current session into a new branch.'),
+    },
+    {
+      name: '/branch',
+      desc: '分支树 · 查看父/子会话',
+      run: () => onSend('Show the session branch tree: parent and child sessions.'),
+    },
+    {
+      name: '/sessions',
+      desc: '列出所有会话',
+      run: () => onSend('List all saved sessions.'),
+    },
+    {
+      name: '/skill',
+      desc: '技能管理 (list/<name>)',
+      run: () => onSend('Show available skills.'),
+    },
+    {
+      name: '/evidence',
+      desc: '验证证据摘要',
+      run: () => onSend('Show evidence summary: last 10 verifications and pass rate.'),
+    },
+    {
+      name: '/status',
+      desc: 'Agent 状态总览',
+      run: () => onSend('Show agent status: model, domain, cache hit rate, token usage, cost.'),
+    },
+    {
+      name: '/mcp',
+      desc: 'MCP 服务器状态',
+      run: () => onSend('Show MCP server connection status.'),
+    },
+    {
+      name: '/leave',
+      desc: '在星图留下标记',
+      run: () => onSend('Leave a mark in the starmap summarizing this session.'),
+    },
+    {
+      name: '/diagram',
+      desc: '生成 Mermaid 图表骨架',
+      run: () => onSend('Generate a mermaid diagram skeleton. Types: architecture, dataflow, sequence, flowchart, comparison, state.'),
+    },
   ], [onSetApprovalMode, onSend])
 
   // Lookup map for welcome cards/pills to call the actual slash command
