@@ -748,6 +748,11 @@ export class PromptEngine {
     this.activePlanPointer = pointer ?? undefined
   }
 
+  /** Return the currently approved-plan pointer (slug/title/path block), if any. */
+  getActivePlanPointer(): string | undefined {
+    return this.activePlanPointer
+  }
+
   setIntentRetrievalRoute(route: string | null): void {
     this.intentRetrievalRoute = route ?? undefined
     this.invalidateFreshCache()

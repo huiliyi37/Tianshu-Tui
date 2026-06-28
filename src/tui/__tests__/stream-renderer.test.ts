@@ -118,6 +118,13 @@ test('getLiveTailLines: CJK 宽字符按显示宽度截断', () => {
   assert.ok(cjkCount <= 10, `expected <= 10 CJK chars, got ${cjkCount}`)
 })
 
+test('getLiveTailLines: 从代码块中间开始时补 synthetic fence', () => {
+  const { renderer } = makeRenderer()
+  renderer.push('```ts\nconst a = 1\n')
+  const tail = renderer.getLiveTailLines(5)
+  assert.ok(tail[0]!.startsWith('```'), 'tail prepended with synthetic fence so prose is not boxed')
+})
+
 test('reset 丢弃 pending 与 committed 状态', () => {
   const { renderer, commits } = makeRenderer()
   renderer.push('a\n\nb tail')

@@ -174,7 +174,7 @@ export class InputHandler {
   constructor(options: InputHandlerOptions) {
     this.stdin = options.stdin
     this.mode = options.mode ?? 'input'
-    this.escapeTimeoutMs = options.escapeTimeoutMs ?? 80
+    this.escapeTimeoutMs = options.escapeTimeoutMs ?? 40
     this.stdin.setRawMode(true)
     this.stdin.resume()
     this.stdin.setEncoding('utf8')
