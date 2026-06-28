@@ -45,6 +45,8 @@ import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
+import { buildWorkerDetailContent } from '../worker-detail.js'
+import type { TasksFilter } from '../format/overlay.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -225,6 +227,8 @@ export class TuiApp {
   /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
    *  从流式块中拦截的初始编码面板解码而来；终态委派到 scrollback 后清空。 */
   private liveTeamModel: TeamPanelModel | null = null
+  /** 当前在 pager overlay 中查看的 worker detail workerId；null 表示查看主 scrollback。 */
+  private workerDetailWorkerId: string | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** W-B3: stream render state manager (ticker/tick/lastActivity/header) */
@@ -865,6 +869,7 @@ export class TuiApp {
     // top and erased it, (2) set lastDisplayRows=0. After alt screen exit,
     // cursor is at that same cleared position (end of scrollback).
     // Erase any residual chars on this line, reset render state, append fresh.
+    this.workerDetailWorkerId = null
     this.stdout.write('\r\x1B[0J')
     this.live.reset()
     this.renderLive()
@@ -881,18 +886,24 @@ export class TuiApp {
   }
 
   /**
-   * Get running delegation workers for the `/tasks` overlay.
+   * Get workers for the `/tasks` overlay.
    * Reads per-worker state from the fleet read model (fed by onDelegationActivity),
    * grouped by the spawning delegation tool. Falls back to an empty fleet when no
    * delegation is in flight.
    */
-  getRunningWorkers(): TasksData {
+  getTasksData(filter?: TasksFilter): TasksData {
+    const activeFilter = filter ?? this.overlayController.nav().tasksFilter ?? 'running'
     const now = Date.now()
-    const active = this.fleet.getActiveWorkers(now)
+    const source = activeFilter === 'running'
+      ? this.fleet.getActiveWorkers(now)
+      : activeFilter === 'completed'
+        ? this.fleet.getCompletedWorkers(now)
+        : this.fleet.getAllWorkers(now, 'all')
     const byParent = new Map<string, TasksWorkerRow[]>()
-    for (const w of active) {
+    for (const w of source) {
       const arr = byParent.get(w.parentToolId) ?? []
       arr.push({
+        workerId: w.workerId,
         shortLabel: w.shortLabel,
         profile: w.profile,
         status: w.status,
@@ -903,10 +914,48 @@ export class TuiApp {
     }
     const groups: TasksGroup[] = []
     for (const [parentToolId, workers] of byParent) {
-      const p = this.fleet.getGroupProgress(parentToolId)
+      const p = activeFilter === 'completed'
+        // completed 分组进度从归档区重新计算
+        ? this.deriveGroupProgress(parentToolId, workers)
+        : this.fleet.getGroupProgress(parentToolId)
       groups.push({ parentToolId, total: p.total, done: p.done, failed: p.failed, running: p.running, workers })
     }
-    return { groups }
+    return { groups, filter: activeFilter, completedCount: this.fleet.completedSize() }
+  }
+
+  private deriveGroupProgress(parentToolId: string, workers: TasksWorkerRow[]): import('../fleet-registry.js').FleetGroupProgress {
+    const total = workers.length
+    const done = workers.filter(w => w.status === 'passed').length
+    const failed = workers.filter(w => w.status !== 'passed' && w.status !== 'running').length
+    const running = workers.filter(w => w.status === 'running').length
+    return { total, done, failed, running }
+  }
+
+  /** 当前是否在 pager 中查看某个 worker 的 detail。 */
+  getWorkerDetailId(): string | null {
+    return this.workerDetailWorkerId
+  }
+
+  /** 获取当前在 fleet（含归档区）中的 worker 实时视图。 */
+  getWorkerDetailView(workerId: string): import('../fleet-registry.js').FleetWorkerView | undefined {
+    return this.fleet.getWorkerById(workerId)
+  }
+
+  /** 兼容旧名：返回 running worker 列表。 */
+  getRunningWorkers(): TasksData {
+    return this.getTasksData('running')
+  }
+
+  /** 打开指定 worker 的 detail pager。 */
+  openWorkerDetail(workerId: string): void {
+    this.workerDetailWorkerId = workerId
+    const nav = this.overlayController.nav()
+    nav.pagerPage = 0
+    nav.pagerMode = 'page'
+    nav.pagerSearchQuery = ''
+    nav.pagerSearchCurrent = 0
+    nav.pagerSelectedMessage = 0
+    this.activateOverlay('pager')
   }
 
   /**
@@ -942,6 +991,44 @@ export class TuiApp {
     if (c === 'q' && !isSearch) {
       this.deactivateOverlay()
       return true
+    }
+
+    if (id === 'tasks') {
+      const nav = this.overlayController.nav()
+      const data = this.getTasksData(nav.tasksFilter)
+      const selectable = data.groups.flatMap(g => g.workers.map(w => w.workerId))
+      const count = selectable.length
+
+      if (key.name === 'tab') {
+        const filters: TasksFilter[] = ['running', 'completed', 'all']
+        const next = (filters.indexOf(nav.tasksFilter) + 1) % filters.length
+        nav.tasksFilter = filters[next]!
+        nav.tasksIndex = 0
+        this.overlay.rerender()
+        return true
+      }
+      if (key.name === 'down' || c === 'j') {
+        if (count > 0) {
+          nav.tasksIndex = (nav.tasksIndex + 1) % count
+          this.overlay.rerender()
+        }
+        return true
+      }
+      if (key.name === 'up' || c === 'k') {
+        if (count > 0) {
+          nav.tasksIndex = (nav.tasksIndex - 1 + count) % count
+          this.overlay.rerender()
+        }
+        return true
+      }
+      if (key.name === 'return' && count > 0) {
+        const workerId = selectable[nav.tasksIndex]
+        if (workerId) {
+          this.openWorkerDetail(workerId)
+        }
+        return true
+      }
+      return false
     }
 
     if (id === 'pager') {
@@ -2711,11 +2798,11 @@ export class TuiApp {
       },
     })
 
-    // Tasks — /tasks 显示运行中子代理
+    // Tasks — /tasks 显示运行中子代理（支持选中/进入 detail）
     this.overlay.register('tasks', {
       render: (_w, _h) => {
-        const data = overlayData?.tasksData?.() ?? { groups: [] }
-        return renderTasks(data, this.columns, this.rows, this.theme)
+        const data = overlayData?.tasksData?.() ?? { groups: [], filter: 'running' as const, completedCount: 0 }
+        return renderTasks(data, this.columns, this.rows, this.theme, this.overlayController.nav().tasksIndex)
       },
     })
 

@@ -112,8 +112,10 @@ describe('renderTasks: per-worker 舰队', () => {
         done: 1,
         failed: 0,
         running: 1,
-        workers: [{ shortLabel: 'T1', profile: 'code_scout', status: 'running', activity: 'grep seams', elapsedMs: 1500 }],
+        workers: [{ workerId: 'wo_team:T1', shortLabel: 'T1', profile: 'code_scout', status: 'running', activity: 'grep seams', elapsedMs: 1500 }],
       }],
+      filter: 'running',
+      completedCount: 0,
     }
     const text = stripAnsi(renderTasks(data, 60, 12, theme).join('\n'))
     assert.ok(text.includes('Running Agents'))
@@ -121,27 +123,73 @@ describe('renderTasks: per-worker 舰队', () => {
     assert.ok(text.includes('1/3 done'))
     assert.ok(text.includes('T1·code_scout'))
     assert.ok(text.includes('grep seams'))
-    assert.ok(text.includes('1 worker running'))
+    assert.ok(text.includes('Enter detail'))
+    assert.ok(text.includes('Tab filter'))
   })
 
   it('多组：序号化组标题 + failed 计数', () => {
     const data: TasksData = {
       groups: [
-        { parentToolId: 'a', total: 2, done: 0, failed: 1, running: 1, workers: [{ shortLabel: 'T1', profile: 'patcher', status: 'running', elapsedMs: 800 }] },
-        { parentToolId: 'b', total: 1, done: 0, failed: 0, running: 1, workers: [{ shortLabel: 'W1', profile: 'reviewer', status: 'running', elapsedMs: 200 }] },
+        { parentToolId: 'a', total: 2, done: 0, failed: 1, running: 1, workers: [{ workerId: 'wo_a:T1', shortLabel: 'T1', profile: 'patcher', status: 'running', elapsedMs: 800 }] },
+        { parentToolId: 'b', total: 1, done: 0, failed: 0, running: 1, workers: [{ workerId: 'wo_b:W1', shortLabel: 'W1', profile: 'reviewer', status: 'running', elapsedMs: 200 }] },
       ],
+      filter: 'running',
+      completedCount: 0,
     }
     const text = stripAnsi(renderTasks(data, 64, 14, theme).join('\n'))
     assert.ok(text.includes('group 1'))
     assert.ok(text.includes('group 2'))
     assert.ok(text.includes('1 failed'))
-    assert.ok(text.includes('2 workers running'))
+    assert.ok(text.includes('Enter detail'))
   })
 
   it('空舰队：显示 no running workers', () => {
-    const text = stripAnsi(renderTasks({ groups: [] }, 50, 10, theme).join('\n'))
+    const text = stripAnsi(renderTasks({ groups: [], filter: 'running', completedCount: 0 }, 50, 10, theme).join('\n'))
     assert.ok(text.includes('no running workers'))
-    assert.ok(text.includes('0 workers running'))
+    assert.ok(text.includes('q/Esc close'))
+  })
+
+  it('completed filter：显示标题与 completed 计数', () => {
+    const data: TasksData = {
+      groups: [{
+        parentToolId: 'tool_a',
+        total: 1,
+        done: 1,
+        failed: 0,
+        running: 0,
+        workers: [{ workerId: 'wo_x', shortLabel: 'X', profile: 'patcher', status: 'passed', elapsedMs: 1200 }],
+      }],
+      filter: 'completed',
+      completedCount: 1,
+    }
+    const text = stripAnsi(renderTasks(data, 80, 12, theme).join('\n'))
+    assert.ok(text.includes('Completed Agents'))
+    assert.ok(text.includes('1 completed'))
+  })
+
+  it('选中态渲染光标', () => {
+    const data: TasksData = {
+      groups: [{
+        parentToolId: 'tool_a',
+        total: 2,
+        done: 1,
+        failed: 0,
+        running: 1,
+        workers: [
+          { workerId: 'wo_1', shortLabel: 'A', profile: 'scout', status: 'running', elapsedMs: 100 },
+          { workerId: 'wo_2', shortLabel: 'B', profile: 'scout', status: 'running', elapsedMs: 100 },
+        ],
+      }],
+      filter: 'running',
+      completedCount: 0,
+    }
+    const lines = renderTasks(data, 60, 12, theme, 1)
+    const text = stripAnsi(lines.join('\n'))
+    // 第二个 worker 行应以 ▶ 开头（去 ANSI 后仍是 ▶）
+    const workerLines = text.split('\n').filter(l => l.includes('A·') || l.includes('B·'))
+    assert.equal(workerLines.length, 2)
+    assert.ok(!workerLines[0]!.includes('▶'), 'first worker not selected')
+    assert.ok(workerLines[1]!.includes('▶'), 'second worker selected')
   })
 
   it('纯 ASCII 行严格等宽（padLine 对齐）', () => {
@@ -152,8 +200,10 @@ describe('renderTasks: per-worker 舰队', () => {
         done: 1,
         failed: 0,
         running: 1,
-        workers: [{ shortLabel: 'T1', profile: 'scout', status: 'running', activity: 'reading files', elapsedMs: 1200 }],
+        workers: [{ workerId: 'wo_1', shortLabel: 'T1', profile: 'scout', status: 'running', activity: 'reading files', elapsedMs: 1200 }],
       }],
+      filter: 'running',
+      completedCount: 0,
     }
     const width = 56
     assertAllWidth(renderTasks(data, width, 12, theme), width)

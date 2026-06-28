@@ -16,6 +16,7 @@ function worker(over: Partial<FleetWorkerView> = {}): FleetWorkerView {
     panelStatus: 'running',
     terminal: false,
     activity: '⚙ read_file',
+    activityLog: [],
     elapsedMs: 2000,
     ...over,
   }

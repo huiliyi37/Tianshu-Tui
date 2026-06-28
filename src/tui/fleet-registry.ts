@@ -78,6 +78,8 @@ function panelStatusOf(status: DelegationActivity['status']): WorkerPanelStatus 
 
 export class FleetRegistry {
   private records = new Map<string, FleetRecord>()
+  /** 终态 worker 归档区：clearGroup 后仍可被 detail pager 查询。 */
+  private terminalRecords = new Map<string, FleetRecord>()
 
   /**
    * 归约一条委派活动事件。
@@ -86,6 +88,13 @@ export class FleetRegistry {
    */
   apply(activity: DelegationActivity, now: number = Date.now()): void {
     const terminal = TERMINAL_STATUSES.has(activity.status)
+    // 若之前在归档区被终态后重新收到 running，则移回 active（resume/重跑场景）
+    const archived = this.terminalRecords.get(activity.workOrderId)
+    if (archived && !terminal) {
+      this.records.set(activity.workOrderId, archived)
+      this.terminalRecords.delete(activity.workOrderId)
+    }
+
     const existing = this.records.get(activity.workOrderId)
 
     // Maintain activity log ring buffer
@@ -171,19 +180,66 @@ export class FleetRegistry {
     return ids
   }
 
-  /** 委派工具终态时清理该组所有 worker 记录。 */
+  /** 委派工具终态时把该组 worker 移入归档区，而不是删除。 */
   clearGroup(parentToolId: string): void {
     for (const [id, r] of this.records) {
-      if (r.parentToolId === parentToolId) this.records.delete(id)
+      if (r.parentToolId === parentToolId) {
+        this.records.delete(id)
+        this.terminalRecords.set(id, r)
+      }
     }
+  }
+
+  /** 按 id 查找 worker（active 优先，其次归档区）。 */
+  getWorkerById(workerId: string, now: number = Date.now()): FleetWorkerView | undefined {
+    const r = this.records.get(workerId) ?? this.terminalRecords.get(workerId)
+    return r ? this.toView(r, now) : undefined
+  }
+
+  private allTerminalRecords(): FleetRecord[] {
+    return [...this.records.values()].filter(r => r.terminal)
+      .concat([...this.terminalRecords.values()])
+  }
+
+  /** 已终态 worker 列表（按首见时间升序）。 */
+  getCompletedWorkers(now: number = Date.now()): FleetWorkerView[] {
+    return this.allTerminalRecords()
+      .sort((a, b) => a.startedAt - b.startedAt)
+      .map(r => this.toView(r, now))
+  }
+
+  /** 全部 worker（active + 归档），可选 filter。 */
+  getAllWorkers(now: number = Date.now(), filter: 'active' | 'completed' | 'all' = 'all'): FleetWorkerView[] {
+    const source: FleetRecord[] = []
+    if (filter === 'active') {
+      source.push(...[...this.records.values()].filter(r => !r.terminal))
+    } else if (filter === 'completed') {
+      source.push(...this.allTerminalRecords())
+    } else {
+      // all：union active records + terminal archive，按 id 去重
+      const seen = new Set<string>()
+      for (const r of this.records.values()) {
+        seen.add(r.workerId)
+        source.push(r)
+      }
+      for (const r of this.terminalRecords.values()) {
+        if (!seen.has(r.workerId)) source.push(r)
+      }
+    }
+    return source.sort((a, b) => a.startedAt - b.startedAt).map(r => this.toView(r, now))
   }
 
   get size(): number {
     return this.records.size
   }
 
+  /** 已终态 worker 数量。 */
+  completedSize(): number {
+    return this.terminalRecords.size
+  }
+
   isEmpty(): boolean {
-    return this.records.size === 0
+    return this.records.size === 0 && this.terminalRecords.size === 0
   }
 
   /** 是否有任一 worker 仍在跑（auto-collapse 判据）。 */
@@ -196,5 +252,6 @@ export class FleetRegistry {
 
   clear(): void {
     this.records.clear()
+    this.terminalRecords.clear()
   }
 }

@@ -278,6 +278,7 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
         failed: 0,
         running: 1,
         workers: [{
+          workerId: 'wo_team:T1',
           shortLabel: 'T1',
           profile: 'code_scout',
           status: 'running',
@@ -285,6 +286,8 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
           elapsedMs: 1500,
         }],
       }],
+      filter: 'running' as const,
+      completedCount: 0,
     }),
   })
   assert.equal(app.activateOverlay('tasks'), true, 'tasks overlay 应成功激活')

@@ -17,6 +17,7 @@ function mkWorker(overrides: Partial<FleetWorkerView> = {}): FleetWorkerView {
     panelStatus: 'running',
     terminal: false,
     activity: '⚙ grep -r auth src/',
+    activityLog: [],
     elapsedMs: 4200,
     ...overrides,
   }
@@ -37,7 +38,7 @@ test('renderFleetDetail: shows profile', () => {
 })
 
 test('renderFleetDetail: shows current activity line', () => {
-  const lines = renderFleetDetail(mkWorker({ activity: '⚙ reading auth.ts' }), 60, 20, theme)
+  const lines = renderFleetDetail(mkWorker({ activityLog: ['⚙ reading auth.ts'] }), 60, 20, theme)
   const plain = lines.map(stripAnsi).join('\n')
   assert.ok(plain.includes('reading auth.ts'), 'activity line visible')
 })

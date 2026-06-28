@@ -458,6 +458,8 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 export type TasksWorkerStatus = 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
 
 export interface TasksWorkerRow {
+  /** 稳定的 per-worker id（work order id），用于进入 detail pager。 */
+  workerId: string
   /** 短标签，例如 "wo_team:T1" → "T1"。 */
   shortLabel: string
   profile: string
@@ -466,6 +468,8 @@ export interface TasksWorkerRow {
   activity?: string
   elapsedMs: number
 }
+
+export type TasksFilter = 'running' | 'completed' | 'all'
 
 export interface TasksGroup {
   /** 派生这组 worker 的委派工具调用 id（不直接展示，仅用于分组/序号）。 */
@@ -480,6 +484,10 @@ export interface TasksGroup {
 
 export interface TasksData {
   groups: TasksGroup[]
+  /** 当前 filter 模式。 */
+  filter: TasksFilter
+  /** 已终态 worker 总数（用于 footer 提示）。 */
+  completedCount: number
 }
 
 const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
@@ -654,17 +662,26 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
   return lines
 }
 
-export function renderTasks(data: TasksData, width: number, height: number, theme: RivetTheme): string[] {
+export function renderTasks(
+  data: TasksData,
+  width: number,
+  height: number,
+  theme: RivetTheme,
+  selectedIndex = -1,
+): string[] {
   const lines: string[] = []
+  const title = data.filter === 'completed' ? 'Completed Agents'
+    : data.filter === 'all' ? 'All Agents'
+      : 'Running Agents'
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('Running Agents', width, theme))
+  lines.push(formatTitleBar(title, width, theme))
 
   const maxEntries = Math.max(1, height - 5)
-  const totalActive = data.groups.reduce((n, g) => n + g.workers.length, 0)
 
-  // 逐组渲染：组头（进度条 + done/total）后跟该组在跑 worker 行。多组时以
+  // 逐组渲染：组头（进度条 + done/total）后跟 worker 行。多组时以
   // 序号区分（parentToolId 是不透明的 tool id，不直接展示）。
   const body: string[] = []
+  const selectable: { workerId: string; bodyIndex: number }[] = []
   const multiGroup = data.groups.length > 1
   data.groups.forEach((g, gi) => {
     const bar = color(tasksProgressBar(g.done, g.total), theme.muted)
@@ -673,6 +690,7 @@ export function renderTasks(data: TasksData, width: number, height: number, them
     const groupTitle = multiGroup ? `group ${gi + 1}` : 'fleet'
     body.push(` ${color('◆', theme.primary)} ${groupTitle}  ${bar} ${counts}${failedNote}`)
     for (const w of g.workers) {
+      selectable.push({ workerId: w.workerId, bodyIndex: body.length })
       const glyph = TASK_STATUS_GLYPH[w.status] ?? '·'
       const glyphColored = w.status === 'running'
         ? color(glyph, theme.primary)
@@ -688,20 +706,42 @@ export function renderTasks(data: TasksData, width: number, height: number, them
     }
   })
 
-  if (totalActive === 0) {
-    body.push(color(' (no running workers)', theme.dim))
+  if (selectable.length === 0) {
+    const emptyText = data.filter === 'completed' ? ' (no completed workers)'
+      : data.filter === 'all' ? ' (no workers)'
+        : ' (no running workers)'
+    body.push(color(emptyText, theme.dim))
   }
 
+  const selectedBodyIndex = selectedIndex >= 0 && selectedIndex < selectable.length
+    ? selectable[selectedIndex]!.bodyIndex
+    : -1
+
   const visible = body.slice(0, maxEntries)
-  for (const line of visible) {
+  for (let i = 0; i < visible.length; i++) {
+    let line = visible[i]!
+    if (i === selectedBodyIndex) {
+      // 把前导三个空格替换为光标 + 两个空格，保持宽度一致
+      line = `${color('▶', theme.primary, { bold: true })}  ${line.slice(3)}`
+    }
     lines.push(padLine(line, width, theme))
   }
   for (let i = visible.length; i < maxEntries; i++) {
     lines.push(padLine('', width, theme))
   }
 
-  const summary = totalActive === 1 ? '1 worker running' : `${totalActive} workers running`
-  lines.push(formatFooter(`${summary}  ·  q/Esc close`, width, theme))
+  const runningCount = data.groups.reduce((n, g) => n + g.workers.filter(w => w.status === 'running').length, 0)
+  const visibleCount = data.groups.reduce((n, g) => n + g.workers.length, 0)
+  const summaryParts: string[] = []
+  if (data.filter === 'running' || data.filter === 'all') {
+    summaryParts.push(`${runningCount} running`)
+  }
+  if (data.filter === 'completed' || data.filter === 'all') {
+    summaryParts.push(`${data.completedCount} completed`)
+  }
+  if (summaryParts.length === 0) summaryParts.push(`${visibleCount} workers`)
+  const summary = summaryParts.join(' · ')
+  lines.push(formatFooter(`${summary}  ·  ↑↓ select  Enter detail  Tab filter  q/Esc close`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines

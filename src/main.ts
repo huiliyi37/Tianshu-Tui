@@ -27,6 +27,7 @@ import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
+import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
 import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
@@ -425,8 +426,19 @@ async function main() {
     return filterCommands(base, tuiApp.getOverlayQuery())
   }
   tuiApp.registerOverlays({
-    // Pager — scrollback 内容 + 消息级解析（用于搜索/消息视图）
+    // Pager — scrollback 内容 或 当前选中 worker 的 detail（用于 /tasks Enter）
     pagerContent: () => {
+      const workerId = tuiApp.getWorkerDetailId()
+      if (workerId) {
+        const liveView = tuiApp.getWorkerDetailView(workerId)
+        const { content, title, messages } = buildWorkerDetailContent(workerId, process.cwd(), liveView)
+        return {
+          content,
+          page: 0,
+          title,
+          messages,
+        }
+      }
       const content = tuiApp.getScrollbackContent() || '(no messages yet)'
       return {
         content,
@@ -522,8 +534,8 @@ async function main() {
         query,
       }
     },
-    // Tasks — /tasks 显示运行中子代理（per-worker，来自舰队读模型）
-    tasksData: () => tuiApp.getRunningWorkers(),
+    // Tasks — /tasks 显示子代理（per-worker，来自舰队读模型；filter 由 overlay nav 决定）
+    tasksData: () => tuiApp.getTasksData(),
     // Domain Picker — 裸 /domain 打开的 CC 风星域选择器（entries 由共享 builder 构造）
     domainPickerData: () => ({
       entries: buildDomainPickerEntries(ctx!.agent.getSessionDomain()),

@@ -13,6 +13,8 @@ export interface OverlayNavState {
   rewindIndex: number
   historySearchIndex: number
   chronicleIndex: number
+  tasksIndex: number
+  tasksFilter: import('../format/overlay.js').TasksFilter
   domainPickerIndex: number
   modelPickerIndex: number
   themePickerIndex: number
@@ -41,7 +43,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (content: string) => void
@@ -56,7 +58,7 @@ export class OverlayController {
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
@@ -77,6 +79,10 @@ export class OverlayController {
   setHistorySearchIndex(v: number): void { this.overlayNav.historySearchIndex = v }
   get chronicleIndex(): number { return this.overlayNav.chronicleIndex }
   setChronicleIndex(v: number): void { this.overlayNav.chronicleIndex = v }
+  get tasksIndex(): number { return this.overlayNav.tasksIndex }
+  setTasksIndex(v: number): void { this.overlayNav.tasksIndex = v }
+  get tasksFilter(): import('../format/overlay.js').TasksFilter { return this.overlayNav.tasksFilter }
+  setTasksFilter(v: import('../format/overlay.js').TasksFilter): void { this.overlayNav.tasksFilter = v }
   get domainPickerIndex(): number { return this.overlayNav.domainPickerIndex }
   setDomainPickerIndex(v: number): void { this.overlayNav.domainPickerIndex = v }
   get modelPickerIndex(): number { return this.overlayNav.modelPickerIndex }
