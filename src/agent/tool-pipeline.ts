@@ -49,7 +49,7 @@ import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
-import { evaluateTddGate, parseTddGateConfig, type TddGateConfig } from './tdd-gate.js'
+import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 
@@ -78,11 +78,6 @@ const MUTATING_TOOLS: ReadonlySet<string> = new Set([
 function isMutatingTool(name: string): boolean {
   return MUTATING_TOOLS.has(name)
 }
-
-/** Edit/write tools — the TDD gate only intervenes on these. */
-const EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
-  'edit_file', 'write_file', 'apply_patch', 'hash_edit',
-])
 
 function sortedInputKeys(input: Record<string, unknown>): string[] {
   return Object.keys(input).sort()
@@ -581,7 +576,7 @@ export async function executeToolUse(
     // without running tests. Pure decision function, stateless — the
     // EvidenceTracker holds the edit counter and test-verification log.
     const tddConfig: TddGateConfig = deps.config.tddGate ?? _TDD_GATE_CONFIG
-    if (tddConfig.enabled && EDIT_TOOL_NAMES.has(tu.name)) {
+    if (tddConfig.enabled && EDIT_TOOLS.has(tu.name)) {
       const gateState = deps.evidence.getGateState()
       const decision = evaluateTddGate(gateState, tu.name, tddConfig)
       if (decision.action === 'block') {
