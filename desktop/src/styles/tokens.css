@@ -102,6 +102,12 @@
      transparency / blur / saturation to create visual depth over wallpaper.
      Solid mode (default) falls back to opaque --panel / --bg — zero perf cost
      when transparency is off or the user prefers reduced transparency. */
+  /* Custom glass sliders configurations */
+  --sidebar-glass-opacity: 80%;
+  --sidebar-glass-blur: 24px;
+  --main-glass-opacity: 90%;
+  --main-glass-blur: 16px;
+
   --sidebar-surface-bg: var(--panel);
   --sidebar-surface-blur: 0px;
   --sidebar-surface-saturation: 1;
@@ -126,11 +132,11 @@
    Uses color-mix for theme-aware transparency without duplicating hex values. */
 :root[data-surface="glass"] {
   /* Higher opacity than before for Cursor-like readability while keeping depth. */
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 78%, transparent);
-  --sidebar-surface-blur: 24px;
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) var(--sidebar-glass-opacity), transparent);
+  --sidebar-surface-blur: var(--sidebar-glass-blur);
   --sidebar-surface-saturation: 1.08;
-  --main-surface-bg: color-mix(in oklab, var(--bg) 88%, transparent);
-  --main-surface-blur: 16px;
+  --main-surface-bg: color-mix(in oklab, var(--bg) var(--main-glass-opacity), transparent);
+  --main-surface-blur: var(--main-glass-blur);
   --main-surface-saturation: 1.04;
   --compose-surface-bg: color-mix(in oklab, var(--panel-2) 78%, transparent);
   --compose-surface-border: color-mix(in oklab, var(--border) 60%, transparent);
@@ -207,11 +213,11 @@
 /* Glass mode overrides for light theme — higher opacity than dark (light
    backgrounds need more coverage to stay readable over a wallpaper). */
 :root[data-theme="light"][data-surface="glass"] {
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 84%, transparent);
-  --sidebar-surface-blur: 32px;
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) var(--sidebar-glass-opacity), transparent);
+  --sidebar-surface-blur: var(--sidebar-glass-blur);
   --sidebar-surface-saturation: 1.1;
-  --main-surface-bg: color-mix(in oklab, var(--bg) 92%, transparent);
-  --main-surface-blur: 24px;
+  --main-surface-bg: color-mix(in oklab, var(--bg) var(--main-glass-opacity), transparent);
+  --main-surface-blur: var(--main-glass-blur);
   --main-surface-saturation: 1.05;
   --compose-surface-bg: color-mix(in oklab, var(--panel-2) 88%, transparent);
   --compose-surface-border: color-mix(in oklab, var(--border) 70%, transparent);
@@ -300,11 +306,11 @@ html[data-font-family="mono"] {
 }
 
 :root[data-theme="nebula"][data-surface="glass"] {
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 85%, transparent);
-  --sidebar-surface-blur: 32px;
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) var(--sidebar-glass-opacity), transparent);
+  --sidebar-surface-blur: var(--sidebar-glass-blur);
   --sidebar-surface-saturation: 1.1;
-  --main-surface-bg: color-mix(in oklab, var(--bg) 92%, transparent);
-  --main-surface-blur: 24px;
+  --main-surface-bg: color-mix(in oklab, var(--bg) var(--main-glass-opacity), transparent);
+  --main-surface-blur: var(--main-glass-blur);
   --main-surface-saturation: 1.05;
   --compose-surface-bg: color-mix(in oklab, var(--panel-2) 88%, transparent);
   --compose-surface-border: color-mix(in oklab, var(--border) 70%, transparent);

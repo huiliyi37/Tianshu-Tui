@@ -2679,3 +2679,32 @@ html[data-theme="nebula"] .plan-item-row.active {
 html[data-theme="nebula"] .plan-panel {
   background: transparent;
 }
+
+/* Glass custom customization sliders styling (Phase 5+) */
+.glass-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  outline: none;
+  transition: background var(--dur) var(--ease);
+}
+.glass-slider:hover {
+  background: var(--border-strong);
+}
+.glass-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.glass-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: var(--accent-hover);
+}
