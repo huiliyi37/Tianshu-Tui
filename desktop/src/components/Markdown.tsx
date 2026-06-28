@@ -3,7 +3,16 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import hljs from 'highlight.js/lib/common'
+
+// U8b — highlight.js is loaded on demand the first time we actually need to
+// highlight a code block. This keeps the initial bundle smaller and avoids
+// paying the common-language pack cost on screens that never render code.
+type Hljs = typeof import('highlight.js/lib/common').default
+let hljsPromise: Promise<Hljs> | null = null
+function getHljs(): Promise<Hljs> {
+  if (!hljsPromise) hljsPromise = import('highlight.js/lib/common').then((m) => m.default)
+  return hljsPromise
+}
 
 // Conversation Markdown renderer (D1). Renders assistant/user/steer prose as
 // GFM Markdown. Syntax highlighting runs ASYNCHRONOUSLY after mount (highlight.js
@@ -35,7 +44,8 @@ function cancelIdle(id: number): void {
   else clearTimeout(id)
 }
 
-function highlightWithin(root: HTMLElement): void {
+async function highlightWithin(root: HTMLElement): Promise<void> {
+  const hljs = await getHljs()
   const blocks = root.querySelectorAll<HTMLElement>('pre code:not([data-hl])')
   blocks.forEach((el) => {
     // Mark first so a skipped (oversized) block is never retried on re-render.
@@ -145,7 +155,7 @@ function MarkdownImpl({ source, highlight = true }: { source: string; highlight?
     if (huge || !highlight) return
     const root = ref.current
     if (!root) return
-    const id = scheduleIdle(() => highlightWithin(root))
+    const id = scheduleIdle(() => { void highlightWithin(root) })
     return () => cancelIdle(id)
   }, [source, highlight, huge])
 
