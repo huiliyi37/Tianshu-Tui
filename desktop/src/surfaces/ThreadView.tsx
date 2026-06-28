@@ -166,13 +166,10 @@ export function ThreadView(props: {
   }, [session.contextTokens, session.contextWindow])
 
   // Latest turn's total tokens for the compact "tok" chip.
-  const latestTokens = useMemo(() => {
-    for (let i = view.blocks.length - 1; i >= 0; i--) {
-      const t = view.blocks[i]!.turn
-      if (t?.totalTokens) return t.totalTokens
-    }
-    return 0
-  }, [view.blocks])
+  // reducer 在 turn_complete 时已维护 view.lastTotalTokens（event-reducer.ts:273），
+  // 直接读即可——旧实现用 useMemo 全表倒序扫描 view.blocks，而流式时 blocks 每帧变化，
+  // 导致每帧都从末尾扫到开头找最后一个带 turn 的块，长会话越卡。直接读消除了每帧 O(n)。
+  const latestTokens = view.lastTotalTokens
 
   // Cache hit rate from cumulative cache tokens in turn_complete events.
   const cacheHitRate = useMemo(() => {

@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import type { DelegationNode } from '../runtime/types'
 
 // T4 — subagent fleet panel (Codex `Down` panel / Antigravity Manager parity).
@@ -9,6 +10,10 @@ import type { DelegationNode } from '../runtime/types'
 // (session-manager emits workerId/parentId/profile/status/progressLine/elapsedMs),
 // so this never fabricates fields the backend does not send (no model badge /
 // findings / confidence yet — those need DelegationActivity enrichment).
+//
+// memo + useMemo：ThreadView 每个流式帧都重渲染，而 delegation 引用多数帧不变。
+// 不加 memo 时，每次重渲染都执行 Object.values(nodes).sort() 和多次 .filter() 计数，
+// 节点数多时是无谓开销。memo 短路 + 把派生计算放进 useMemo（仅 nodes 变时重算）。
 
 type StatusClass = 'running' | 'ok' | 'warn' | 'bad' | 'idle'
 
@@ -39,8 +44,10 @@ function shortId(workerId: string): string {
   return tail.length > 0 ? tail : workerId.slice(0, 12)
 }
 
-export function DelegationTree({ nodes }: { nodes: Record<string, DelegationNode> }) {
-  const list = Object.values(nodes).sort((a, b) => a.updatedAt - b.updatedAt)
+export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: Record<string, DelegationNode> }) {
+  // 派生列表与计数放进 useMemo：仅 nodes 引用变化时才重算 Object.values + sort + filter。
+  // 流式帧间 nodes 不变 → 跳过全部计算，配合外层 memo 短路整个组件 reconcile。
+  const list = useMemo(() => Object.values(nodes).sort((a, b) => a.updatedAt - b.updatedAt), [nodes])
   if (list.length === 0) return null
 
   const total = list.length
@@ -104,4 +111,4 @@ export function DelegationTree({ nodes }: { nodes: Record<string, DelegationNode
       {render(undefined, 0)}
     </div>
   )
-}
+})
