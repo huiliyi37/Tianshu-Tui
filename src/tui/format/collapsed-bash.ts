@@ -10,6 +10,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -131,35 +132,43 @@ export function formatCollapsedBashGroup(input: FormatCollapsedBashGroupInput): 
   const elapsed = Date.now() - group.startMs
   const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
 
-  lines.push(color(`● ${summary} · ${elapsedStr}`, theme.primary))
+  // 摘要行：展开状态指示器 + 摘要 + 耗时
+  const indicator = expanded ? '▼' : '▶'
+  lines.push(color(`${indicator} ${summary} · ${elapsedStr}`, theme.primary))
 
   const completed = group.entries.filter(e => e.completed)
   if (completed.length === 0) {
-    lines.push(color('  (results pending…)', theme.muted))
+    lines.push(color('│  (results pending…)', theme.muted))
     return lines
   }
 
   if (expanded || completed.length <= 3) {
-    for (const entry of completed) {
+    for (let i = 0; i < completed.length; i++) {
+      const entry = completed[i]!
+      const isLast = i === completed.length - 1
+      const connector = isLast ? '│  ╰─' : '│  ├─'
+      const childPrefix = isLast ? '│     ' : '│  │  '
       const failedMarker = entry.isError ? color(' ✗', theme.error) : ''
-      lines.push(`  ⎿  ${color(entry.command, theme.muted)}${failedMarker}`)
+      lines.push(`${connector} ${color(entry.command, theme.muted)}${failedMarker}`)
       if (entry.content && !entry.isError) {
+        const maxWidth = Math.max(10, (input.columns ?? 80) - childPrefix.length)
         const previewLines = entry.content.replace(/\n+$/, '').split('\n').slice(0, 3)
         for (const pl of previewLines) {
-          const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
-          lines.push(`     ${color(trimmed, theme.muted)}`)
+          const trimmed = displayWidth(pl) > maxWidth ? truncateToDisplayWidth(pl, maxWidth - 2) + '…' : pl
+          lines.push(`${childPrefix}${color(trimmed, theme.muted)}`)
         }
         const totalLines = entry.content.split('\n').length
         if (totalLines > 3) {
-          lines.push(color(`     … +${totalLines - 3} more lines`, theme.muted))
+          lines.push(color(`${childPrefix}… +${totalLines - 3} more lines`, theme.muted))
         }
       }
     }
   } else {
     const commands = completed.map(e => e.command).join(', ')
-    const preview = commands.length > 80 ? commands.slice(0, 79) + '…' : commands
-    lines.push(`  ⎿  ${color(preview, theme.muted)}`)
-    lines.push(color(`     … +${completed.length - 3} more commands [Ctrl+O]`, theme.secondary))
+    const maxWidth = Math.max(10, (input.columns ?? 80) - 9)
+    const preview = displayWidth(commands) > maxWidth ? truncateToDisplayWidth(commands, maxWidth - 2) + '…' : commands
+    lines.push(`│  ╰─ ${color(preview, theme.muted)}`)
+    lines.push(color(`│     … +${completed.length - 3} more commands [Ctrl+O]`, theme.secondary))
   }
 
   return lines

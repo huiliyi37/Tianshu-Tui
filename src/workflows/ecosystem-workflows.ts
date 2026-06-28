@@ -1,7 +1,7 @@
-import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
 import { DEFAULT_COUNCIL_SEATS } from '../agent/council/council-routing.js'
 
-const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
+const BASE_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-28-plan-methodology-base.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
 
 export interface WritingPlanPromptOptions {
@@ -114,8 +114,8 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
   const feature = options.feature.trim()
   const path = options.planPath ?? defaultPlanPath(feature, options.date)
 
-  // 构建最小 TaskContract 供 methodology 路由使用
-  //（/plan 无文件上下文，路由默认走 lightweight；agent 后续可 override）
+  // /plan 显式要求写实现计划，统一使用 Superpowers-based 基础模板。
+  // 任务深度仅作为信息展示，不影响模板选择；安全/多 gate 任务由模型在基础模板上追加安全附录。
   const contract: TaskContract = {
     id: 'slash-plan',
     objective: feature,
@@ -128,19 +128,20 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
     isActionable: true,
   }
   const depth = classifyTaskDepth(contract)
-  const methodology = classifyPlanMethodology(contract, depth)
-
-  const templatePath = methodology === 'full' ? FULL_TEMPLATE_PATH : LIGHTWEIGHT_TEMPLATE_PATH
-  const templateLabel = methodology === 'full' ? '完整版（9阶段）' : '轻量版（5阶段）'
-  const methodologyNote = methodology === 'full'
-    ? '必须包含：安全不变量、触发路径清单、双门对齐数据流图。系统边界标定和跨模块协调说明不可省略。'
-    : '单模块边界内变更，聚焦核心改动与验证即可。'
 
   return `创建实现计划：${feature}
 
-计划模板路由：任务深度 ${depth} → ${templateLabel}
-模板路径：${templatePath}
-${methodologyNote}
+计划模板路由：任务深度 ${depth} → 基础模板（Superpowers writing-plans）
+模板路径：${BASE_TEMPLATE_PATH}
+
+本模板强制四条工程纪律，验收时必查：
+1. **至少一张 Mermaid 图**：架构/数据流/状态图；若涉及安全/权限/沙箱/多 enforcement gate，追加安全附录并画双门对齐数据流图。
+2. **TDD**：每个任务 RED → GREEN → 重构，测试断言行为而非 plumbing。
+3. **探针先行**：写复杂实现/测试前先用 30 秒探针验证核心假设；临时探针交付前清理。
+4. **瑶光反证**：用真实输入形状复现原问题（RED），再验证修复（GREEN）；不取信提交信息，取 exit code；方案 GREEN ≠ 落地 GREEN。
+
+如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。
+否则不需要写安全附录，按基础模板走完即可。
 
 要求：
 - 不要写实现代码。先深入读相关代码，理解每个要改的函数为什么存在。
@@ -190,7 +191,7 @@ ${methodologyNote}
 `
 }
 
-const PLAN_CLOSE_FLAGS = new Set(['--apply', '--tasks', '--verified', '--delivery', '--note'])
+const PLAN_CLOSE_FLAGS = new Set(['--apply', '--preview', '--tasks', '--verified', '--delivery', '--note'])
 
 function readUntilNextPlanCloseFlag(tokens: string[], start: number): { value: string; nextIndex: number } {
   const parts: string[] = []
@@ -210,7 +211,7 @@ export function parsePlanCloseArgs(args: string): PlanClosePromptOptions | null 
   if (!filePath || filePath.startsWith('--')) return null
 
   let tasks = ''
-  let apply = false
+  let apply = true
   const verifiedCommands: string[] = []
   let deliveryState: PlanClosePromptOptions['deliveryState']
   let note: string | undefined
@@ -220,6 +221,11 @@ export function parsePlanCloseArgs(args: string): PlanClosePromptOptions | null 
     const token = tokens[i]!
     if (token === '--apply') {
       apply = true
+      i++
+      continue
+    }
+    if (token === '--preview') {
+      apply = false
       i++
       continue
     }
@@ -279,7 +285,7 @@ export function buildPlanClosePrompt(options: PlanClosePromptOptions): string {
   return lines.join('\n')
 }
 
-const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
+const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
 
 export const TEAM_USAGE = 'Team usage: /team <task|docs/superpowers/plans/file.md> or /team max <task>'
 

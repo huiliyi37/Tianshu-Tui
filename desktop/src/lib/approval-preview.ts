@@ -39,6 +39,31 @@ export function editableKey(req: ApprovalRequest): 'new_string' | 'content' | nu
   return null
 }
 
+export interface ApprovalActionProps {
+  /** Button class names (space-separated). */
+  variant: string
+  label: string
+}
+
+/**
+ * Visual weights for the three approval actions.
+ * Approve is the primary/recommended action; reject is danger-tinged;
+ * edit is neutral ghost.
+ */
+export function getApprovalActionProps(
+  action: 'approve' | 'reject' | 'edit',
+  editing = false,
+): ApprovalActionProps {
+  switch (action) {
+    case 'approve':
+      return { variant: 'btn sm primary', label: editing ? '应用并批准' : '批准' }
+    case 'reject':
+      return { variant: 'btn ghost sm danger', label: '拒绝' }
+    case 'edit':
+      return { variant: 'btn ghost sm', label: editing ? '取消编辑' : '编辑' }
+  }
+}
+
 /**
  * Readable preview of what the agent wants to do. Edit/write tools render as a
  * diff; everything else as pretty JSON.

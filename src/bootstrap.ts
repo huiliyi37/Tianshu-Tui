@@ -37,6 +37,7 @@ import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
 import { loadPersistedGrants } from './tools/path-grants.js'
 import { createDelegateBatchTool } from './tools/delegate-batch.js'
 import { createTeamOrchestrateTool } from './tools/team-orchestrate.js'
+import type { PlanExecutorDeps } from './agent/plan-executor.js'
 import { runTypeCheck } from './lsp/client.js'
 import { createCouncilConveneTool } from './tools/council-convene.js'
 import { needsTemplatesInit } from './bootstrap/project-templates.js'
@@ -385,8 +386,11 @@ export function createInteractiveToolRegistry(
     () => refs.sessionId ?? undefined,
   ))
 
-  // team_orchestrate
-  reg.register(createTeamOrchestrateTool({
+  // Shared plan-execution kernel deps: team_orchestrate and plan_task(execute:true)
+  // run the SAME closed loop through executePlan (dispatch + scope-health +
+  // telemetry + reward/episode closure). plan_task opts out of the review gate
+  // (its post-commit auto review covers the diff).
+  const planExecutorDeps: PlanExecutorDeps = {
     delegate: async (request, abortSignal) => {
       if (!refs.coordinator) throw new Error('DelegationCoordinator not initialized')
       return refs.coordinator.delegate(request, abortSignal)
@@ -432,7 +436,8 @@ export function createInteractiveToolRegistry(
     getSessionId: () => refs.sessionId ?? undefined,
     getMeridianIndexer: () => refs.meridianIndexer,
     getTypecheckRunner: () => (cwd: string) => runTypeCheck(cwd, '*'),
-  }, { defaultMaxParallel: config.agent.maxTeamParallel }))
+  }
+  reg.register(createTeamOrchestrateTool(planExecutorDeps, { defaultMaxParallel: config.agent.maxTeamParallel }))
 
   // council_convene — 单轮多星域会诊出计划（与 team_orchestrate 解耦，绝不派执行）。
   reg.register(createCouncilConveneTool({
@@ -443,7 +448,7 @@ export function createInteractiveToolRegistry(
     getSessionId: () => refs.sessionId ?? undefined,
     recordRoutingShadow: event => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
     recordCouncilSession: event => recordCouncilSession(refs.meridianIndexer?.getDb(), event),
-  }))
+  }, config.agent.council.seats.length > 0 ? config.agent.council.seats : undefined))
 
   // recall_capsule
   reg.register(createRecallCapsuleTool(() => cwd))
@@ -466,6 +471,8 @@ export function createInteractiveToolRegistry(
   // PLAN_MODE_ALLOWED_TOOLS already references web_search alongside recall.
   reg.register(createPlanTaskTool({
     getCoordinator: () => refs.coordinator,
+    getExecutorDeps: () => planExecutorDeps,
+    getSessionId: () => refs.sessionId ?? undefined,
   }))
 
   // B1 deliver_task
@@ -534,7 +541,10 @@ export function createInteractiveToolRegistry(
   })))
 
   // update_goal — model-driven goal lifecycle control (paused/blocked/complete)
-  reg.register(createUpdateGoalTool(() => refs.goalTrackerRef.current))
+  reg.register(createUpdateGoalTool(
+    () => refs.goalTrackerRef.current,
+    () => ({ sessionId: refs.sessionId ?? undefined, cwd }),
+  ))
 
   return { registry: reg }
 }
@@ -664,6 +674,72 @@ export function createAgentRuntime(deps: {
   const runtimeFactory: WorkerRuntimeFactory = (_order, card, workerRegistry) => {
     const writeProfiles = profileRegistry.listWriteProfiles()
     const isWrite = writeProfiles.includes(_order.profile)
+
+    // Per-order modelOverride: highest precedence (above review override and
+    // workers routing). Builds a dedicated client for the seat's provider/model
+    // so e.g. a council with one DeepSeek-Pro seat and one GLM seat runs each on
+    // its own server-side cache. Falls through to normal routing when the
+    // provider is unknown / lacks the model / has no credentials (silent
+    // fallback, consistent with the other routing layers).
+    if (_order.modelOverride) {
+      const ovProvider = config.provider.providers[_order.modelOverride.provider]
+      const ovModel = _order.modelOverride.model
+      const ovModelOk = ovProvider?.models.some(m => m.id === ovModel || m.alias === ovModel)
+      if (ovProvider && ovModelOk) {
+        let ovApiKey = ''
+        let ovAuth: ReturnType<typeof createAuthProvider> | undefined
+        let ovReady = false
+        try {
+          if (ovProvider.auth?.type === 'oauth') {
+            ovAuth = ovProvider.name === provider.name ? auth : createAuthProvider(ovProvider.auth, process.env)
+            ovReady = Boolean(ovAuth?.isAuthenticated())
+          } else {
+            ovApiKey = resolveApiKey(ovProvider)
+            ovReady = Boolean(ovApiKey)
+          }
+        } catch {
+          ovReady = false
+        }
+        if (ovReady) {
+          const ovSpec = ovProvider.models.find(m => m.id === ovModel || m.alias === ovModel)
+          const ovContextWindow = ovSpec?.contextWindow ?? card.contextWindow
+          const ovMaxTokens = isWrite
+            ? Math.min(8192, ovSpec?.maxTokens ?? ovContextWindow)
+            : Math.min(4096, ovSpec?.maxTokens ?? ovContextWindow)
+          const ovCapabilities = resolveCapabilities(ovProvider.name, ovProvider.capabilities)
+          debugLog(`[worker-model] modelOverride active: profile=${_order.profile} authority=${_order.authority} → ${ovProvider.name}/${ovModel} isWrite=${isWrite}`)
+          return {
+            order: _order,
+            providerName: ovProvider.name,
+            client: createProviderClient(ovProvider, ovCapabilities, {
+              apiKey: ovApiKey,
+              model: ovModel,
+              reasoningEffort: undefined,
+              maxTokens: ovMaxTokens,
+              thinkingBudget: isWrite ? 8192 : 4096,
+              auth: ovAuth,
+            }),
+            promptEngine: new PromptEngine({
+              model: ovModel,
+              maxTokens: ovMaxTokens,
+              staticCtx: { tools: workerRegistry.getDefinitions() },
+              volatileCtx: { cwd, sessionMemoryBlock: persist.buildMemoryBlock() },
+            }),
+            toolRegistry: workerRegistry,
+            cwd,
+            maxTurns: 8,
+            contextWindow: ovContextWindow,
+            compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+            activeClaims: claimStore.listActiveClaims(),
+            domainKnowledgeStore,
+            forceJsonRepair: ovCapabilities.supportsResponseFormat,
+          }
+        }
+        debugLog(`[worker-model] modelOverride skip: ${_order.modelOverride.provider}/${ovModel} no credentials → fallback`)
+      } else {
+        debugLog(`[worker-model] modelOverride skip: provider=${_order.modelOverride.provider} modelOk=${ovModelOk} → fallback`)
+      }
+    }
 
     // Review override fast path: if the profile is configured for a different
     // provider, use the pre-resolved override (different provider+model from

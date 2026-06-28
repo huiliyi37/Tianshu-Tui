@@ -41,6 +41,8 @@ const seatSchema = z.object({
   charter: z.string().optional(),
   tierHint: z.enum(['cheap', 'balanced', 'strong']).optional(),
   noDowngrade: z.boolean().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
 })
 
 const inputSchema = z.object({
@@ -53,7 +55,12 @@ const inputSchema = z.object({
    *  instead of waiting for the model to extract planJson and call team_orchestrate. */
   autoExecute: z.boolean().optional(),
 })
-export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator): Tool {
+export function createCouncilConveneTool(
+  coordinator: CouncilConveneCoordinator,
+  /** Configured default seats (agent.council.seats). When non-empty, used as the
+   *  default council instead of DEFAULT_COUNCIL_SEATS; per-call `seats` still wins. */
+  defaultSeats?: CouncilSeat[],
+): Tool {
   return {
     definition: {
       name: 'council_convene',
@@ -79,7 +86,7 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
           },
           seats: {
             type: 'array',
-            description: 'Optional seat overrides. Defaults to tianquan/tianfu/tianxuan.',
+            description: 'Optional seat overrides. Defaults to tianquan/tianfu/tianxuan (or agent.council.seats from config). Set provider+model on a seat to run it on a dedicated model (heterogeneous council).',
             items: {
               type: 'object',
               properties: {
@@ -87,6 +94,8 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
                 charter: { type: 'string' },
                 tierHint: { type: 'string', enum: ['cheap', 'balanced', 'strong'] },
                 noDowngrade: { type: 'boolean' },
+                provider: { type: 'string', description: 'Per-seat provider (must exist in config.provider.providers). Pair with model.' },
+                model: { type: 'string', description: 'Per-seat model (must exist in the provider). Pair with provider.' },
               },
               required: ['authority'],
             },
@@ -106,12 +115,28 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       const { objective, draftItems, seats, rounds, autoExecute } = parsed.data
 
       const items: PlanItem[] = draftItems ?? []
-      const councilSeats: CouncilSeat[] = (seats && seats.length > 0 ? seats : [...DEFAULT_COUNCIL_SEATS]).map(s => ({
+      // Precedence: per-call seats > configured agent.council.seats > built-in default.
+      const baseSeats: CouncilSeat[] = seats && seats.length > 0
+        ? seats
+        : (defaultSeats && defaultSeats.length > 0 ? defaultSeats : [...DEFAULT_COUNCIL_SEATS])
+      const councilSeats: CouncilSeat[] = baseSeats.map(s => ({
         authority: s.authority,
         ...(s.charter ? { charter: s.charter } : {}),
         ...(s.tierHint ? { tierHint: s.tierHint } : {}),
         ...(s.noDowngrade !== undefined ? { noDowngrade: s.noDowngrade } : {}),
+        // Per-seat provider/model → threaded as modelOverride by the orchestrator.
+        ...(s.provider && s.model ? { provider: s.provider, model: s.model } : {}),
       }))
+
+      // Seats bind to results by authority (workOrderId = `council:seat-<authority>`),
+      // and the work queue dedupes by an authority-derived key. Two seats sharing an
+      // authority would silently collapse to one worker AND double-count its
+      // contribution — fail loud instead of dropping a seat the user asked for.
+      const authorities = councilSeats.map(s => s.authority)
+      const dupe = authorities.find((a, i) => authorities.indexOf(a) !== i)
+      if (dupe) {
+        return { content: `council_convene: 席位 authority 重复「${dupe}」—— 每席必须是不同的星域 id（议事会按 authority 绑定结果，重复会丢席并重复计票）。`, isError: true }
+      }
 
       const deps: CouncilDeps = {
         delegateBatch: async (requests, policy, signal, onProgress) => {

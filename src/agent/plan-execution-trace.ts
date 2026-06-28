@@ -10,6 +10,7 @@
  */
 
 import type { TaskDepthLayer } from '../context/task-contract.js'
+import type { PlanStepInput } from '../tools/types.js'
 
 // ─── Types ─────────────────────────────────────────────────────
 
@@ -122,40 +123,67 @@ export function maxStepsForDepth(depth: TaskDepthLayer): number {
   return MAX_STEPS_BY_DEPTH[depth]
 }
 
+function mapTodoStatusToStepStatus(status: PlanStepInput['status']): StepStatus {
+  switch (status) {
+    case 'in_progress': return 'active'
+    case 'completed': return 'done'
+    default: return 'pending'
+  }
+}
+
+/** 向后兼容：字符串描述等价于 `{ content: ... }`。 */
+type PlanStepLike = PlanStepInput | string
+
+function normalizePlanStepInputs(steps: PlanStepLike[]): PlanStepInput[] {
+  return steps.map((s, i) =>
+    typeof s === 'string'
+      ? { id: `step-${i + 1}`, content: s }
+      : s,
+  )
+}
+
 /**
- * U6/C1: 把 LLM 在 planning 阶段产出的步骤描述映射成结构化 PlanStep[]。
+ * U6/C1: 把 planning 阶段产出的步骤输入映射成结构化 PlanStep[]。
  * 模型只需给出描述，expectedTools 由 inferExpectedTools 自动推断（含 LSP 关键词）。
  * 步数按 depthLayer 截断（unit=3 / wiring=5 / system=8），空白描述被过滤。
  */
 export function buildPlanSteps(
-  descriptions: string[],
+  steps: PlanStepLike[],
   depthLayer: TaskDepthLayer,
 ): PlanStep[] {
   const max = MAX_STEPS_BY_DEPTH[depthLayer]
-  return descriptions
-    .map(d => d.trim())
-    .filter(d => d.length > 0)
+  return normalizePlanStepInputs(steps)
+    .filter(s => s.content.trim().length > 0)
     .slice(0, max)
-    .map((description, i) => ({
-      id: `step-${i + 1}`,
-      description,
-      expectedTools: inferExpectedTools(description),
-      status: 'pending' as StepStatus,
+    .map((s, i) => ({
+      id: s.id ?? `step-${i + 1}`,
+      description: s.content.trim(),
+      expectedTools: inferExpectedTools(s.content),
+      status: mapTodoStatusToStepStatus(s.status),
     }))
 }
 
 /**
- * U6/C1: 把分解出的步骤填入 trace。
- * 幂等守卫：只在 trace 尚无步骤且无执行历史时填充——防止模型重复调用
- * plan_steps 把已经在推进的轨迹清空。已开始执行后再分解视为 no-op
- * （后续偏差走 correctPlan，不走这里）。
+ * U6/C1: 把分解出的步骤填入 trace；若 trace 已有步骤，则按 id/description
+ * 同步状态。这样 todo write / plan_task 都能持续刷新 PlanExecutionTrace。
  */
 export function withPlanSteps(
   trace: PlanExecutionTrace,
   steps: PlanStep[],
 ): PlanExecutionTrace {
-  if (trace.steps.length > 0 || trace.history.length > 0) return trace
-  return { ...trace, steps }
+  if (trace.history.length > 0 && trace.steps.length === 0) return { ...trace, steps }
+  if (trace.steps.length === 0) return { ...trace, steps }
+
+  const merged = trace.steps.map(existing => {
+    const match = steps.find(s =>
+      (s.id && s.id === existing.id) || s.description === existing.description
+    )
+    if (!match) return existing
+    // 不覆盖已经 done/replanned 的状态为 pending/active
+    if (existing.status === 'done' || existing.status === 'replanned') return existing
+    return { ...existing, status: match.status }
+  })
+  return { ...trace, steps: merged }
 }
 
 /**

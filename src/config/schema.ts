@@ -74,10 +74,14 @@ export const permissionAllowRuleSchema = z.object({
 export const bashAllowlistSchema = z.object({
   /** Command prefixes that bypass bash-write approval. Matched by prefix: "git status" allows "git status --porcelain". */
   allowlist: z.array(z.string().min(1)).default([]),
+  /** Command prefixes that are always blocked, regardless of mode or allowlist. */
+  denylist: z.array(z.string().min(1)).default([]),
 }).default({})
 
 export const permissionsSchema = z.object({
   allow: z.array(permissionAllowRuleSchema).default([]),
+  /** Deny rules take precedence over allow rules and approval mode. */
+  deny: z.array(permissionAllowRuleSchema).default([]),
   bash: bashAllowlistSchema,
 })
 
@@ -141,6 +145,29 @@ export const reviewConfigSchema = z.object({
  *  should use this instead of redeclaring the shape inline. */
 export type ReviewConfig = z.infer<typeof reviewConfigSchema>
 
+/** Per-seat council configuration. When `provider`+`model` are set, that seat's
+ *  worker runs on an independent provider/model (its own server-side cache),
+ *  enabling heterogeneous councils — e.g. one seat on DeepSeek Pro, another on
+ *  GLM — for genuine cross-model deliberation. Provider must exist in
+ *  config.provider.providers; otherwise the seat silently falls back to the
+ *  session model (same rule as agent.review / workers routing). */
+export const councilSeatConfigSchema = z.object({
+  authority: z.string().min(1),
+  charter: z.string().optional(),
+  tierHint: z.enum(['cheap', 'balanced', 'strong']).optional(),
+  noDowngrade: z.boolean().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+})
+
+/** council_convene seat configuration. `seats` overrides the built-in
+ *  tianquan/tianfu/tianxuan default when non-empty. */
+export const councilConfigSchema = z.object({
+  seats: z.array(councilSeatConfigSchema).default([]),
+}).default({})
+
+export type CouncilConfig = z.infer<typeof councilConfigSchema>
+
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
   maxTurns: z.number().int().positive().default(50),
@@ -173,6 +200,9 @@ export const agentSchema = z.object({
   maxDelegationDepth: z.number().int().positive().default(2),
   /** Default max concurrent workers per team wave when input.maxParallel is unset. Clamped 1..5. */
   maxTeamParallel: z.number().int().min(1).max(5).default(3),
+  /** council_convene seat configuration — custom seats with optional per-seat
+   *  provider/model for heterogeneous (cross-model) councils. */
+  council: councilConfigSchema,
   /**
    * Max auto-continue iterations per run when a no-tool turn shows action intent
    * or an open task contract (phantom tool-call recovery). 0 disables. Clamped 0..3.

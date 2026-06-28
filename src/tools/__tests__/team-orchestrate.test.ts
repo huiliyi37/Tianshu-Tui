@@ -12,6 +12,7 @@ import type { ChangeSet } from '../../agent/review-discipline.js'
 import type { TeamTask } from '../../agent/team-plan.js'
 import type { TeamRunSummary } from '../../agent/team-orchestrator.js'
 import { decodeTeamPanelModel } from '../../tui/team-panel-model.js'
+import { storePlan, consumePlan, getStoredPlan } from '../../agent/plan-store.js'
 
 function stubRun(packet = 'stub'): CoordinatorRun {
   return { status: 'completed', results: [], packet }
@@ -655,4 +656,43 @@ test('team_orchestrate review survives a throwing impact analyzer', async () => 
   assert.equal(result.isError, false)
   assert.match(result.content, /Review gate \[L2\]/)
   assert.doesNotMatch(result.content, /Blast radius/)
+})
+
+test('team_orchestrate auto-consumes plan from session store when planJson omitted', async () => {
+  const sessionId = 'team-auto-consume'
+  consumePlan(sessionId) // ensure clean
+  const plan = JSON.stringify({
+    version: 1,
+    objective: 'auto consume test',
+    tasks: [{
+      id: 'T1',
+      title: 'Edit foo',
+      objective: 'Modify src/agent/foo.ts',
+      profile: 'patcher',
+      kind: 'patch_proposal',
+      files: ['src/agent/foo.ts'],
+      dependsOn: [],
+      riskTier: 'low',
+    }],
+    source: 'plan_task',
+    createdAt: Date.now(),
+  })
+  storePlan(plan, sessionId)
+
+  let captured: DelegationRequest[] = []
+  const tool = createTeamOrchestrateTool({
+    delegateBatch: async (requests) => { captured = requests; return stubRun('auto-consumed') },
+  })
+  const result = await tool.execute({
+    input: { mode: 'standard', objective: 'force: auto consume plan' },
+    cwd: process.cwd(),
+    toolUseId: 'tu-auto-consume',
+    sessionId,
+  })
+
+  assert.equal(result.isError, false)
+  assert.equal(captured.length, 1)
+  assert.match(captured[0]!.objective, /Modify src\/agent\/foo\.ts/)
+  // team_orchestrate consumes then re-stores the plan for multi-wave continuity.
+  assert.ok(getStoredPlan(sessionId) !== null)
 })

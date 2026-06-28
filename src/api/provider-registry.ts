@@ -28,6 +28,7 @@ export const providerEntrySchema = z.object({
     hasToolJsonInContentBug: z.boolean(),
     effortFormat: z.enum(['reasoning_effort', 'output_config', 'none']),
     prefixCacheStrategy: z.enum(['deepseek-native', 'anthropic-cache-control', 'none']),
+    supportsResponseFormat: z.boolean(),
   }),
   /** Cache profile (from provider-profile.ts) */
   cacheProfile: z.object({
@@ -65,6 +66,7 @@ function buildEntry(
       hasToolJsonInContentBug: caps.hasToolJsonInContentBug,
       effortFormat: caps.effortFormat,
       prefixCacheStrategy: caps.prefixCacheStrategy,
+      supportsResponseFormat: caps.supportsResponseFormat,
     },
     cacheProfile: {
       cacheType: profile.cacheType,

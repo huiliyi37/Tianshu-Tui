@@ -91,6 +91,9 @@ test('#1 listRewindPoints returns only user messages with string content', async
   assert.equal(points[0]!.index, 0)
   assert.equal(points[1]!.index, 2)
   assert.equal(points[2]!.index, 4)
+  // Messages here are injected out-of-band (no matching `user` events), so the
+  // ordinal/text guard must omit seq → client falls back to its heuristic.
+  assert.ok(points.every(p => p.seq === undefined), 'diverged log exposes no seq')
 })
 
 test('#2 rewind truncates messages to the selected index', async () => {
@@ -167,6 +170,12 @@ test('#4b rewind emits an anchorSeq matching the rewound user event', async () =
   // messages: [u Hello, a ok, u Do task A, a ok, u Now do B, a ok]
   const points = manager.listRewindPoints(s.id)!
   assert.deepEqual(points.map(p => [p.index, p.content]), [[0, 'Hello'], [2, 'Do task A'], [4, 'Now do B']])
+
+  // Each point exposes the seq of its originating `user` event — the desktop
+  // timeline uses it to anchor preview/fork on the exact `u-${seq}` block, so
+  // preview equals the post-fork state.
+  const userEventSeqs = manager.getEvents(s.id, 0)!.events.filter(e => e.type === 'user').map(e => e.seq)
+  assert.deepEqual(points.map(p => p.seq), userEventSeqs, 'point.seq matches its user event seq')
 
   assert.ok(manager.rewind(s.id, 2), 'rewind to "Do task A" should succeed')
   const events = manager.getEvents(s.id, 0)!.events

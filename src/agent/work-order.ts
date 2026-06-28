@@ -118,6 +118,11 @@ export const workOrderSchema = z.object({
   authority: z.string().optional(),
   /** Team planner risk tier for shadow-only model tier recommendation. */
   riskTier: z.enum(['low', 'medium', 'high']).optional(),
+  /** Per-order provider/model override (highest routing precedence). When set,
+   *  the worker runs on this exact provider/model with its own client/cache —
+   *  used by heterogeneous council seats. Silently ignored if the provider is
+   *  unknown or lacks credentials (runtimeFactory falls back to the session model). */
+  modelOverride: z.object({ provider: z.string().min(1), model: z.string().min(1) }).optional(),
 })
 
 export type WorkOrder = z.infer<typeof workOrderSchema>
@@ -236,6 +241,8 @@ export interface CreateReadOnlyWorkOrderInput {
   riskTier?: 'low' | 'medium' | 'high'
   /** B2: current session turn for progressive timeout calculation. */
   sessionTurn?: number
+  /** Per-order provider/model override (highest routing precedence). */
+  modelOverride?: { provider: string; model: string }
 }
 
 function toolsForAuthority(tools: string[], authority?: string): string[] {
@@ -302,6 +309,7 @@ export function createReadOnlyWorkOrder(input: CreateReadOnlyWorkOrderInput): Wo
     delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     riskTier: input.riskTier,
+    modelOverride: input.modelOverride,
   })
 }
 
@@ -346,6 +354,7 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     delegationDepth: input.delegationDepth ?? 0,
     authority: input.authority,
     riskTier: input.riskTier,
+    modelOverride: input.modelOverride,
   })
 }
 

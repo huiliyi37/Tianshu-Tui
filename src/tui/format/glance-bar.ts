@@ -38,6 +38,26 @@ export function resolveStarDomainDisplay(domainName: string | undefined): { glyp
   return { glyph: '☆', name: domainName }
 }
 
+export interface GoalStateSnapshot {
+  active: boolean
+  status: string
+  goal: string
+  iteration: number
+  maxIterations: number
+  elapsedMs: number
+  wallClockBudgetMs?: number
+  criteria: string[]
+  criteriaMet?: number
+  criteriaUnmet?: number
+  criteriaTotal?: number
+}
+
+export interface TodoSummary {
+  total: number
+  done: number
+  inProgress: number
+}
+
 export interface GlanceBarInput {
   /** 终端宽度 */
   width: number
@@ -70,6 +90,14 @@ export interface GlanceBarInput {
   turnCount?: number
   /** 是否处于 stall（无 token 超过阈值） */
   stalled?: boolean
+  /** 当前审批模式 */
+  approvalMode?: string
+  /** 是否处于 plan mode */
+  planMode?: boolean
+  /** 当前 goal 状态快照 */
+  goal?: GoalStateSnapshot
+  /** todo 摘要 */
+  todoSummary?: TodoSummary
 }
 
 export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): string {
@@ -88,6 +116,30 @@ export function formatGlanceLeft(input: GlanceBarInput, theme: RivetTheme): stri
 export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): string {
   const narrow = input.narrow ?? input.width < 60
   const parts: string[] = []
+
+  // 权限/计划模式 badge（最高优先级，用户必须随时知道当前安全模式）
+  const modeBadge = formatModeBadge(input, theme)
+  if (modeBadge) parts.push(modeBadge)
+
+  // Goal 进度（active / paused / blocked 都显示，complete 不显示）
+  if (input.goal && input.goal.status !== 'complete') {
+    const g = input.goal
+    const goalText = narrow
+      ? `◆${g.iteration}/${g.maxIterations}`
+      : `◆ ${g.iteration}/${g.maxIterations} · ${formatElapsed(g.elapsedMs)}`
+    const goalColor = g.status === 'blocked' ? theme.error : g.status === 'paused' ? theme.warning : theme.secondary
+    parts.push(color(goalText, goalColor))
+  }
+
+  // Todo 摘要
+  if (input.todoSummary && input.todoSummary.total > 0) {
+    const t = input.todoSummary
+    const todoText = narrow
+      ? `☐${t.done}/${t.total}`
+      : `☐ ${t.done}/${t.total}${t.inProgress > 0 ? ` · ◐ ${t.inProgress}` : ''}`
+    parts.push(color(todoText, theme.primary))
+  }
+
   if (input.modelName) {
     // 模型名属于最低层级元信息，用 dim 而不是 muted
     parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
@@ -105,7 +157,8 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const displayTokens = input.conversationTokens !== undefined ? input.conversationTokens : input.estimatedTokens
   if (!narrow && displayTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
     const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.muted
-    parts.push(color(`◧${formatTokensK(displayTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
+    const pct = `${(ratio * 100).toFixed(0)}%`
+    parts.push(color(`◧${formatTokensK(displayTokens)}/${formatTokensK(input.maxTokens)} ${pct}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
     // cost > 0 用 secondary 高亮，让用户感知到花费
@@ -121,6 +174,19 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   const elapsedPart = color(zone4, input.stalled ? theme.warning : theme.dim)
 
   return [zone3, elapsedPart].filter(Boolean).join('  ')
+}
+
+function formatModeBadge(input: GlanceBarInput, theme: RivetTheme): string | null {
+  if (input.planMode) {
+    return color('[plan]', theme.primary)
+  }
+  switch (input.approvalMode) {
+    case 'manual': return color('[ask]', theme.warning)
+    case 'dangerously-skip-permissions': return color('[yolo]', theme.error)
+    case 'auto-accept': return color('[auto]', theme.success)
+    case 'auto-safe': return color('[safe]', theme.muted)
+    default: return input.approvalMode ? color(`[${input.approvalMode}]`, theme.muted) : null
+  }
 }
 
 /**

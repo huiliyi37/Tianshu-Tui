@@ -124,7 +124,7 @@ test('WaveCheckpoint: completedResults and remainingOrders preserved through rou
     const cp = mkCheckpoint({
       lastCompletedWave: 1,
       completedResults: [
-        { workOrderId: 'T1', status: 'passed', summary: 'done', findings: [], risks: [], changedFiles: [], evidenceStatus: 'verified', artifacts: [], modelUsed: 'test', usage: { input_tokens: 100, output_tokens: 50 } },
+        { workOrderId: 'T1', status: 'passed', summary: 'done', findings: [], risks: [], nextActions: [], changedFiles: [], evidenceStatus: 'verified', artifacts: [], model: 'test', usage: { input_tokens: 100, output_tokens: 50 } },
       ],
       remainingOrders: [
         { id: 'T2', objective: 'fix tests', profile: 'patcher', kind: 'patch_proposal', scope: {}, authority: 'tianquan' },

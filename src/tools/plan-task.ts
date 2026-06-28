@@ -1,17 +1,16 @@
 import type { Tool, ToolCallParams } from './types.js'
 import { decomposeObjective, renderTaskGraphSummary } from '../agent/task-planner.js'
 import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, renderUnifiedPlanSummary, validateUnifiedPlan } from '../agent/unified-plan.js'
-import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
-import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
+import { executePlan, type PlanExecutorDeps, type PlanExecutorRun } from '../agent/plan-executor.js'
 import { storePlan } from '../agent/plan-store.js'
-import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
 import type { TodoItem } from './todo-store.js'
 import { readFile } from 'node:fs/promises'
 import type { TaskGraph, TaskGraphNode } from '../agent/task-graph.js'
 
-const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
+const BASE_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-28-plan-methodology-base.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
 
 // ── Plan file detection & checklist parsing (plan_task → team_orchestrate fast path) ──
@@ -89,20 +88,21 @@ function buildMethodologyGuidance(objective: string, files: string[]): string {
     isActionable: true,
   }
   const depth = classifyTaskDepth(contract)
-  const methodology = classifyPlanMethodology(contract, depth)
-
-  const templatePath = methodology === 'full' ? FULL_TEMPLATE_PATH : LIGHTWEIGHT_TEMPLATE_PATH
-  const templateType = methodology === 'full' ? '完整版（9阶段）' : '轻量版（5阶段）'
+  // 默认使用 Superpowers-based 基础模板；只有明确极小（unit 深度 + 不超过一个文件）才降级为轻量版。
+  const useLightweight = depth === 'unit' && files.length <= 1
+  const templatePath = useLightweight ? LIGHTWEIGHT_TEMPLATE_PATH : BASE_TEMPLATE_PATH
+  const templateType = useLightweight ? '轻量版（5阶段）' : '基础模板（Superpowers writing-plans）'
+  const note = useLightweight
+    ? '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。'
+    : '默认使用基础模板，强制四条纪律：① 至少一张 Mermaid 图；② TDD RED→GREEN；③ 探针先行；④ 瑶光反证（真实输入复现、取 exit code、方案 GREEN≠落地 GREEN）。安全/权限/沙箱/多 enforcement gate 任务追加安全附录。'
 
   return [
     '## 计划方法论路由',
     '',
-    `任务深度: ${depth} | 推荐模板: ${methodology} | ${templateType}`,
+    `任务深度: ${depth} | 推荐模板: ${templateType}`,
     `模板路径: ${templatePath}`,
     '',
-    methodology === 'full'
-      ? '必须包含: 安全不变量、触发路径清单、双门对齐数据流图。系统边界标定和跨模块协调说明不可省略。'
-      : '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。',
+    note,
     '',
     '如用户已显式指定模板，以用户指定为准。',
   ].join('\n')
@@ -110,11 +110,10 @@ function buildMethodologyGuidance(objective: string, files: string[]): string {
 
 export function createPlanTaskTool(deps: {
   getCoordinator: () => DelegationCoordinator | null
+  /** Shared closed-loop execution kernel (same one team_orchestrate uses). */
+  getExecutorDeps: () => PlanExecutorDeps
   getSessionTurn?: () => number | undefined
   getSessionId?: () => string | undefined
-  /** Optional: pass through telemetry hooks from bootstrap. */
-  recordTeamWaveTelemetry?: TeamOrchestratorDeps['recordTeamWaveTelemetry']
-  recordTeamSchedulerShadow?: TeamOrchestratorDeps['recordTeamSchedulerShadow']
 }): Tool {
   return {
     definition: {
@@ -172,9 +171,8 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         graph = decomposeObjective({ objective, files })
       }
 
-      // Populate todo store so the PlanExecutionTrace baseline is immediately
-      // seeded (U6: trace captures steps from the first todo write). Skip the
-      // "verify" node (task-graph.ts always appends one) — it's a post-hoc
+      // Populate todo store and seed the PlanExecutionTrace baseline immediately.
+      // Skip the "verify" node (task-graph.ts always appends one) — it's a post-hoc
       // gate, not a user-facing step.
       const leafNodes = graph.nodes.filter(n => n.kind !== 'verify')
       if (leafNodes.length > 0) {
@@ -184,6 +182,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           status: 'pending' as const,
         }))
         setTodos(todoItems)
+        params.onPlanSteps?.(todoItems.map(t => ({ id: t.id, content: t.content, status: t.status })))
       }
 
       // Step 2: convert to UnifiedPlan
@@ -201,7 +200,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
 
       // Bridge: store the serialized plan so team_orchestrate can auto-consume
       // it without the model copy-pasting JSON between tool calls.
-      storePlan(serializeUnifiedPlan(plan))
+      storePlan(serializeUnifiedPlan(plan), params.sessionId)
 
       if (params.input.execute !== true) {
         // Return JSON + human-readable summary with methodology guidance
@@ -215,7 +214,12 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         }
       }
 
-      // Step 4: execute via team orchestrator
+      // Step 4: execute via the shared plan executor — the SAME closed loop as
+      // team_orchestrate, minus the review gate. plan_task's post-execution path
+      // is the commit flow, whose post-commit auto review gate already covers the
+      // diff; running a review-squadron here too would double-review. So
+      // reviewGate:false — plan_task still gets dispatch + scope-health +
+      // telemetry + reward/episode closure, just no review-squadron dispatch.
       const coordinator = deps.getCoordinator()
       if (!coordinator) {
         return {
@@ -225,30 +229,31 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
       }
 
       const tasks = unifiedPlanToTeamTasks(plan)
-      const input: TeamRunInput = {
-        mode: 'standard',
-        objective,
-        tasks,
-        maxParallel: 3,
-        parentTurnId: `plan:${params.toolUseId ?? Date.now()}`,
-        abortSignal: params.abortSignal,
-      }
-
-      const orchestratorDeps: TeamOrchestratorDeps = {
-        delegateBatch: (requests, policy, abortSignal, onProgress) =>
-          coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
-        recordTeamWaveTelemetry: deps.recordTeamWaveTelemetry,
-        recordTeamSchedulerShadow: deps.recordTeamSchedulerShadow,
-        sessionId: deps.getSessionId?.(),
-      }
-
       try {
-        const summary = await runTeamSkeleton(input, orchestratorDeps)
+        const run: PlanExecutorRun = await executePlan(
+          {
+            mode: 'standard',
+            objective,
+            tasks,
+            fromWave: 0,
+            maxParallel: 3,
+            sessionId: params.sessionId,
+            parentTurnId: `plan:${params.toolUseId ?? Date.now()}`,
+            reviewDepth: params.reviewDepth ?? 0,
+            cwd: params.cwd,
+            abortSignal: params.abortSignal,
+            // Review handled by the post-commit auto gate — see comment above.
+            reviewGate: false,
+          },
+          deps.getExecutorDeps(),
+        )
         const guidance = buildMethodologyGuidance(objective, files ?? [])
         const todoNote = leafNodes.length > 0
           ? `\n\n✅ Todo list 已同步 (${leafNodes.length} 项)。`
           : ''
-        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${summary.packet}` }
+        return {
+          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${run.summary.packet}${run.notes.scopeHealthNote}${run.notes.deliverySynthesis}`,
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `${renderUnifiedPlanSummary(plan)}\n\nExecution failed: ${msg}`, isError: true }

@@ -235,26 +235,42 @@ describe('ecosystem workflow helpers', () => {
     assert.ok(!resolved?.prompt.includes('rounds:'))
   })
 
-  it('resolves /plan close into a plan_close tool prompt', () => {
+  it('resolves /plan close into a plan_close tool prompt with apply by default', () => {
     const resolved = resolveEcosystemWorkflowInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7 --verified npx tsc --noEmit --delivery YELLOW --note external files present')
 
     assert.equal(resolved?.command, '/plan')
     assert.ok(resolved?.prompt.includes('Use the plan_close tool'))
     assert.ok(resolved?.prompt.includes('- file_path: docs/superpowers/plans/demo.md'))
     assert.ok(resolved?.prompt.includes('- tasks: 1-7'))
-    assert.ok(resolved?.prompt.includes('- apply: false'))
-    assert.ok(resolved?.prompt.includes('Preview only; do not write the file.'))
+    assert.ok(resolved?.prompt.includes('- apply: true'))
+    assert.ok(!resolved?.prompt.includes('Preview only'))
     assert.ok(resolved?.prompt.includes('npx tsc --noEmit'))
     assert.ok(resolved?.prompt.includes('- deliveryState: YELLOW'))
     assert.ok(resolved?.prompt.includes('- note: external files present'))
   })
 
-  it('resolves /plan-close into a plan_close tool prompt with apply flag', () => {
-    const resolved = resolveEcosystemWorkflowInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply')
+  it('resolves /plan-close into a plan_close tool prompt with apply by default', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan-close docs/superpowers/plans/demo.md --tasks all')
 
     assert.equal(resolved?.command, '/plan-close')
     assert.ok(resolved?.prompt.includes('Use the plan_close tool'))
     assert.ok(resolved?.prompt.includes('- tasks: all'))
+    assert.ok(resolved?.prompt.includes('- apply: true'))
+    assert.ok(!resolved?.prompt.includes('Preview only'))
+  })
+
+  it('supports --preview to keep plan_close in preview mode', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan-close docs/superpowers/plans/demo.md --tasks all --preview')
+
+    assert.equal(resolved?.command, '/plan-close')
+    assert.ok(resolved?.prompt.includes('- apply: false'))
+    assert.ok(resolved?.prompt.includes('Preview only; do not write the file.'))
+  })
+
+  it('still accepts explicit --apply for compatibility', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply')
+
+    assert.equal(resolved?.command, '/plan-close')
     assert.ok(resolved?.prompt.includes('- apply: true'))
     assert.ok(!resolved?.prompt.includes('Preview only'))
   })

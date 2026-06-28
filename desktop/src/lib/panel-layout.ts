@@ -73,3 +73,22 @@ export function resetPanelLayout(): PanelLayout {
   }
   return { ...DEFAULTS }
 }
+
+/**
+ * Workspace 右侧面板（ReviewPanel）自适应规则。
+ *
+ * 参考 TUI side panel 策略：总宽度不足或右侧面板被挤压到太窄时自动折叠，
+ * 避免主对话流与 side panel 争夺空间导致内容拥挤。
+ */
+export const REVIEW_AUTO_COLLAPSE_WIDTH = 1000
+export const REVIEW_MIN_WIDTH_PX = 280
+
+/**
+ * 判断右侧面板是否应自动折叠。
+ *
+ * @param workspaceWidth 工作区总宽度（像素）
+ * @param reviewWidthPx  右侧面板当前宽度（像素）
+ */
+export function shouldAutoCollapseReview(workspaceWidth: number, reviewWidthPx: number): boolean {
+  return workspaceWidth < REVIEW_AUTO_COLLAPSE_WIDTH || reviewWidthPx < REVIEW_MIN_WIDTH_PX
+}

@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Palette, SlidersHorizontal, Plug, Cpu, type LucideIcon } from 'lucide-react'
+import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
 import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
 import { loadGlassConfig, saveGlassConfig, type GlassConfig } from '../lib/glass-custom'
+import { loadUiDensity, saveUiDensity, applyUiDensity, type UiDensity } from '../lib/ui-density'
+import { useEnabledTabs, ALL_TABS } from '../lib/review-tabs'
 import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -16,6 +18,7 @@ import { FontSettingsPanel } from '../components/FontSettingsPanel'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
+import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
@@ -27,13 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system'
+type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system' | 'help'
 
 const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [
   { id: 'appearance', icon: Palette },
   { id: 'behavior', icon: SlidersHorizontal },
   { id: 'integrations', icon: Plug },
   { id: 'system', icon: Cpu },
+  { id: 'help', icon: LifeBuoy },
 ]
 
 
@@ -43,9 +47,13 @@ export function SettingsSurface() {
 
   const THEME_LABEL: Record<ThemePref, string> = {
     system: t('theme.system'),
-    light: t('theme.light'),
+    light: '默认亮色 (Default Light)',
     dark: t('theme.dark'),
     nebula: t('theme.nebula'),
+    sakura: '樱花粉 (Sakura Pink)',
+    cyberpunk: '赛博朋克 (Cyberpunk Neon)',
+    cupertino: '苹果极简 (Cupertino Clean)',
+    'light-classic': '经典亮色 (Classic Light)',
   }
   const DENSITY_LABEL: Record<ToolDensity, string> = {
     compact: t('densityCompact'),
@@ -73,6 +81,8 @@ export function SettingsSurface() {
   const [fontWeight, setFontWeight] = useState<FontWeightPref>(() => loadFontWeightPref())
   const [fontFamily, setFontFamily] = useState<FontFamilyPref>(() => loadFontFamilyPref())
   const [glassConfig, setGlassConfig] = useState<GlassConfig>(() => loadGlassConfig())
+  const [uiDensity, setUiDensity] = useState<UiDensity>(() => loadUiDensity())
+  const [enabledTabs, setEnabledTabs] = useEnabledTabs()
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -87,6 +97,12 @@ export function SettingsSurface() {
   const pickFontFamily = (f: FontFamilyPref) => {
     setFontFamily(f)
     setFontFamilyPref(f)
+  }
+
+  const pickUiDensity = (density: UiDensity) => {
+    setUiDensity(density)
+    saveUiDensity(density)
+    applyUiDensity(density)
   }
 
   const updateGlass = (updates: Partial<GlassConfig>) => {
@@ -136,7 +152,7 @@ export function SettingsSurface() {
                   <SelectValue placeholder={t('themePlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {(['system', 'light', 'dark', 'nebula'] as ThemePref[]).map((t) => (
+                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic'] as ThemePref[]).map((t) => (
                     <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
                   ))}
                 </SelectContent>
@@ -157,6 +173,20 @@ export function SettingsSurface() {
               <div className="meta">{t('fontWeightHint')}</div>
             </section>
             <FontSettingsPanel value={fontFamily} onChange={pickFontFamily} />
+            <section className="settings-group">
+              <h4>界面信息密度</h4>
+              <Select value={uiDensity} onValueChange={(v) => pickUiDensity(v as UiDensity)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择界面信息密度" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="compact">紧凑 (Compact)</SelectItem>
+                  <SelectItem value="cozy">标准 (Cozy)</SelectItem>
+                  <SelectItem value="spacious">宽松 (Spacious)</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="meta">调整全局间距、内边距和字体大小，以获得最舒适的阅读与操作体验。</div>
+            </section>
             <LanguageSection />
             <WallpaperSection glassConfig={glassConfig} updateGlass={updateGlass} />
           </>
@@ -196,6 +226,34 @@ export function SettingsSurface() {
               </Select>
               <div className="meta">{t('notifHint')}</div>
             </section>
+            <section className="settings-group">
+              <h4>右侧面板标签自定义</h4>
+              <div className="flex flex-col gap-2 mt-2">
+                {ALL_TABS.map((tab) => {
+                  const isChecked = enabledTabs.includes(tab.id)
+                  return (
+                    <label key={tab.id} className="flex items-center gap-2 text-xs text-text cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={isChecked && enabledTabs.length === 1} // Prevent disabling all tabs
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEnabledTabs([...enabledTabs, tab.id])
+                          } else {
+                            setEnabledTabs(enabledTabs.filter((id) => id !== tab.id))
+                          }
+                        }}
+                        className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
+                      />
+                      <span className="font-mono text-muted shrink-0">{tab.glyph}</span>
+                      <span>{tab.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="meta mt-1.5">勾选以显示或隐藏右侧审查面板（ReviewPanel）中对应的标签页，至少保持显示一个标签。</div>
+            </section>
           </>
         )}
         {activeCat === 'integrations' && (
@@ -203,6 +261,10 @@ export function SettingsSurface() {
             <section className="settings-group">
               <h4>{t('provider')}</h4>
               <ProviderSettings />
+            </section>
+            <section className="settings-group">
+              <h4>子代理 / 审查模型路由</h4>
+              <RoutingSettings />
             </section>
             <section className="settings-group">
               <McpSettingsManager />
@@ -230,8 +292,129 @@ export function SettingsSurface() {
             <UpdaterSection />
           </>
         )}
+        {activeCat === 'help' && <HelpSection onNavigate={setActiveCat} />}
       </div>
     </div>
+  )
+}
+
+/**
+ * In-app user guide. Surfaces the few configuration concepts most likely to
+ * trip up a first-time user (provider + key, sub-agent routing / cache
+ * contention, autonomy, where config & session data live, shortcuts) and
+ * provides jump buttons into the relevant settings category.
+ */
+function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void }) {
+  return (
+    <>
+      <section className="settings-group">
+        <h4>快速开始</h4>
+        <ol className="help-steps">
+          <li>在「集成」里添加一个模型 Provider，并填入 API Key（首个 Provider 会自动设为主控模型）。</li>
+          <li>到「行为」选择新线程的默认自治档位。</li>
+          <li>用 <kbd>⌘N</kbd> 新建线程，描述你的任务，天枢会自主完成编码。</li>
+        </ol>
+        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 Provider →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>关键任务命令</h4>
+        <div className="meta">
+          在输入框打 <kbd>/</kbd> 会弹出命令补全，也可用 <kbd>⌘K</kbd> 命令面板。下面是几条最常用的重型任务命令——
+          带 <code>&lt;…&gt;</code> 的需要在命令后跟上你的任务描述。
+        </div>
+        <dl className="help-cmds">
+          <div>
+            <dt><code>/team &lt;任务&gt;</code></dt>
+            <dd>团队模式：拆解任务 → 多个 patcher 子代理分波并行；主控负责集成、验证、最终 <code>deliver_task</code>。子代理不会自动提交，产出当作 diff 证据由主控审慎合并。也可传计划文件路径（<code>/team docs/…plan.md</code>）按计划执行。</dd>
+          </div>
+          <div>
+            <dt><code>/team max &lt;任务&gt;</code></dt>
+            <dd>强编队：执行前先做多视角规划（依赖分析 / 风险审计 / 对抗盲点搜索）再并行落地。适合大改动 / 高风险重构。</dd>
+          </div>
+          <div>
+            <dt><code>/council &lt;目标&gt;</code></dt>
+            <dd>议事会：多星域专家单轮对抗会诊，<strong>只出计划不执行</strong>，产出可审计的议事记录 + 任务表。可选 <code>--seats tianquan,tianfu,…</code> 指定席位、<code>--rounds 2</code> 开启辩论轮（仅首轮有冲突时才进第二轮）。每席模型可在「集成 → 路由」里配成异构。</dd>
+          </div>
+          <div>
+            <dt><code>/review [关注点]</code></dt>
+            <dd>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。关注点可选，用来聚焦审查范围。</dd>
+          </div>
+          <div>
+            <dt><code>/review max [关注点]</code></dt>
+            <dd>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。改动较大或要交付前用它兜底。</dd>
+          </div>
+          <div>
+            <dt><code>/goal &lt;高层目标&gt;</code></dt>
+            <dd>自主目标：设定一个高层目标后<strong>跨多个 turn 持续自主执行</strong>直到达成。中途用 <code>/cancel-goal</code> 取消。</dd>
+          </div>
+          <div>
+            <dt><code>/plan &lt;功能&gt;</code></dt>
+            <dd>规划模式：先读代码、出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</dd>
+          </div>
+        </dl>
+        <div className="meta" style={{ marginTop: 8 }}>
+          重型并发命令（team / review max / council）会派出子代理——务必先配好「子代理 / 审查模型路由」，
+          否则子代理和主控抢同一个无缓存 Provider 会拖慢主对话（见下一节）。
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>模型 Provider 与 API Key</h4>
+        <div className="meta">
+          在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。
+          其中一个被标记为「主控」，即对话主循环使用的模型。Key 只存在本地
+          <code> ~/.rivet/config.json</code>，不会上传。
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>子代理 / 审查模型路由（重要）</h4>
+        <div className="meta">
+          天枢在「提交后审查」和「能力任务委派」时会派出子代理。如果子代理和主控用
+          <strong> 同一个无服务端前缀缓存的 Provider</strong>（GLM / Kimi / Codex 等），并发请求会
+          <strong> 抢占并驱逐主会话的服务端缓存</strong>，导致主对话突然变慢甚至看起来卡死。
+        </div>
+        <div className="meta" style={{ marginTop: 8 }}>
+          解决办法：把子代理路由到一个便宜的「副模型」（如 DeepSeek Flash）。
+          支持<strong>跨 Provider</strong>路由——主控用 GLM，子代理走 DeepSeek Flash，两条缓存互不干扰。
+          若指定的 Provider / 模型不存在或缺 Key，会静默回退到主控模型（不报错）。
+        </div>
+        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置路由 →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>自治档位</h4>
+        <div className="meta">
+          在「行为 → 新线程默认自治档位」设置。高档位在项目目录内全自动执行；
+          项目目录外的写入仍受沙箱限制，且任何改动都可回滚。
+        </div>
+        <button className="btn" onClick={() => onNavigate('behavior')}>前往「行为」设置 →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>配置文件与数据位置</h4>
+        <dl className="kv">
+          <div><dt>主配置</dt><dd><code>~/.rivet/config.json</code>（JSON，camelCase 键）</dd></div>
+          <div><dt>项目级覆盖</dt><dd>项目根目录 <code>.rivet-config.json</code></dd></div>
+          <div><dt>会话日志</dt><dd><code>~/.rivet/sessions/&lt;项目&gt;/</code></dd></div>
+          <div><dt>配置示例</dt><dd>仓库根目录 <code>config.example.json</code></dd></div>
+        </dl>
+        <div className="meta" style={{ marginTop: 8 }}>
+          手改配置后无需重启桌面端，下一次新建会话即生效。注意加载器只接受
+          JSON 格式（不是 TOML），键名为 camelCase。
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>常用快捷键</h4>
+        <dl className="kv">
+          <div><dt><kbd>⌘K</kbd></dt><dd>打开命令面板</dd></div>
+          <div><dt><kbd>⌘N</kbd></dt><dd>新建线程</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>在输入框使用斜杠命令</dd></div>
+        </dl>
+      </section>
+    </>
   )
 }
 

@@ -477,7 +477,7 @@ src/
 | [`docs/review-discipline.md`](docs/review-discipline.md) | 结构化代码审查规则体系 |
 | [`docs/WINDOWS-INSTALL.md`](docs/WINDOWS-INSTALL.md) | Windows 安装与 Shell 兼容性指南 |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南 |
-| [`config.example.toml`](config.example.toml) | 示例 TOML 配置文件 |
+| [`config.example.json`](config.example.json) | 示例配置文件（含子代理/审查模型路由） |
 
 ## 统计
 

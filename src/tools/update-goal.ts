@@ -12,7 +12,10 @@ import type { GoalTracker } from '../agent/goal-tracker.js'
 
 type GoalTrackerRef = { current: GoalTracker | null }
 
-export function createUpdateGoalTool(getTracker: () => GoalTracker | null): Tool {
+export function createUpdateGoalTool(
+  getTracker: () => GoalTracker | null,
+  getSessionInfo?: () => { sessionId?: string; cwd?: string } | null,
+): Tool {
   return {
     definition: {
       name: 'update_goal',
@@ -68,6 +71,14 @@ export function createUpdateGoalTool(getTracker: () => GoalTracker | null): Tool
           tracker.markBlocked(reason ?? 'Blocked by model', 'model')
         } else {
           tracker.pause(reason ?? 'Paused by model', 'model')
+        }
+        const sessionInfo = getSessionInfo?.()
+        if (sessionInfo?.sessionId && sessionInfo.cwd) {
+          try {
+            const { saveGoalState } = await import('../agent/goal-persist.js')
+            const { getSessionDir } = await import('../agent/session-persist.js')
+            saveGoalState(getSessionDir(sessionInfo.cwd), sessionInfo.sessionId, tracker)
+          } catch { /* best-effort */ }
         }
         return { content: `Goal status updated to ${status}.` }
       } catch (e) {

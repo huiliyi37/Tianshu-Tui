@@ -96,6 +96,73 @@ describe('council_convene 工具', () => {
     assert.notEqual(res.uiContent, res.content)
   })
 
+  it('per-call seats 带 provider+model → 扇出请求携带 modelOverride（异构议事会）', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    await tool.execute(paramsWith({
+      objective: 'x',
+      seats: [
+        { authority: 'tianquan', provider: 'deepseek', model: 'deepseek-v4-pro' },
+        { authority: 'tianfu', provider: 'glm', model: 'glm-4.6' },
+        { authority: 'tianxuan' },
+      ],
+    }))
+    const reqs = calls.requests[0]!
+    assert.deepEqual(reqs.find(r => r.authority === 'tianquan')?.modelOverride, { provider: 'deepseek', model: 'deepseek-v4-pro' })
+    assert.deepEqual(reqs.find(r => r.authority === 'tianfu')?.modelOverride, { provider: 'glm', model: 'glm-4.6' })
+    assert.equal(reqs.find(r => r.authority === 'tianxuan')?.modelOverride, undefined)
+  })
+
+  it('config defaultSeats（无 per-call seats）→ 用配置席位并带 modelOverride', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator, [
+      { authority: 'tianquan', provider: 'deepseek', model: 'deepseek-v4-pro' },
+      { authority: 'tianfu', provider: 'glm', model: 'glm-4.6' },
+    ])
+    await tool.execute(paramsWith({ objective: 'x' }))
+    const reqs = calls.requests[0]!
+    assert.deepEqual(reqs.map(r => r.authority), ['tianquan', 'tianfu'])
+    assert.deepEqual(reqs.find(r => r.authority === 'tianquan')?.modelOverride, { provider: 'deepseek', model: 'deepseek-v4-pro' })
+    assert.deepEqual(reqs.find(r => r.authority === 'tianfu')?.modelOverride, { provider: 'glm', model: 'glm-4.6' })
+  })
+
+  it('重复 authority（per-call）→ isError 且零派发', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator)
+    const res = await tool.execute(paramsWith({
+      objective: 'x',
+      seats: [
+        { authority: 'tianquan', provider: 'deepseek', model: 'deepseek-v4-pro' },
+        { authority: 'tianquan', provider: 'glm', model: 'glm-4.6' },
+      ],
+    }))
+    assert.equal(res.isError, true)
+    assert.match(res.content, /重复/)
+    assert.equal(calls.requests.length, 0, '重复席位必须在派发前拦截')
+  })
+
+  it('重复 authority（config defaultSeats）→ isError', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator, [
+      { authority: 'tianfu', provider: 'deepseek', model: 'deepseek-v4-pro' },
+      { authority: 'tianfu', provider: 'glm', model: 'glm-4.6' },
+    ])
+    const res = await tool.execute(paramsWith({ objective: 'x' }))
+    assert.equal(res.isError, true)
+    assert.equal(calls.requests.length, 0)
+  })
+
+  it('per-call seats 优先于 config defaultSeats', async () => {
+    const { coordinator, calls } = makeCoordinator()
+    const tool = createCouncilConveneTool(coordinator, [
+      { authority: 'tianquan', provider: 'deepseek', model: 'deepseek-v4-pro' },
+    ])
+    await tool.execute(paramsWith({ objective: 'x', seats: [{ authority: 'wenqu' }] }))
+    const reqs = calls.requests[0]!
+    assert.deepEqual(reqs.map(r => r.authority), ['wenqu'])
+    assert.equal(reqs[0]!.modelOverride, undefined)
+  })
+
   it('解耦：扇出请求绝不携带写/执行语义（kind 全 plan，无 patch/verify）', async () => {
     const { coordinator, calls } = makeCoordinator()
     const tool = createCouncilConveneTool(coordinator)

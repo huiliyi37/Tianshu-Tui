@@ -28,7 +28,7 @@ import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
-import { isToolAllowed, isBashCommandAllowlisted, learnBashPrefix } from './permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
@@ -49,6 +49,7 @@ import type { CacheAdvisor } from '../cache/advisor.js'
 import type { TaskLedger } from './task-ledger.js'
 import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
+import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
 
@@ -66,6 +67,9 @@ const BLOCKED_CLASSES: ReadonlySet<string> = new Set([
 ])
 
 const DEFAULT_TOOL_TIMEOUT_MS = 120_000 // 2 minutes
+
+/** TDD gate config — parsed once from env at module load. */
+const _TDD_GATE_CONFIG: TddGateConfig = parseTddGateConfig()
 
 /** Tools that may mutate the workspace and therefore open the rollback window. */
 const MUTATING_TOOLS: ReadonlySet<string> = new Set([
@@ -212,9 +216,13 @@ export interface ToolPipelineDeps {
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition from plan_steps into the loop's PlanExecutionTrace. */
-  onPlanSteps?: (descriptions: string[]) => void
+  onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Called when the model explicitly loads a skill via the skill tool. */
+  onSkillInvoked?: (name: string) => void
+  /** Called when the model explicitly marks a skill as complete via the skill tool. */
+  onSkillCompleted?: (name: string) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -533,6 +541,8 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
     onPlanClosed: deps.onPlanClosed,
+    onSkillInvoked: deps.onSkillInvoked,
+    onSkillCompleted: deps.onSkillCompleted,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),
@@ -559,6 +569,19 @@ export async function executeToolUse(
         const gateMsg = `Tool blocked by cerebellar gate: recent prediction error rate is elevated. Read the file before editing to ensure mental model is current.`
         callbacks.onToolResult(tu.id, tu.name, gateMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: gateMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+     }
+   }
+
+    // TDD Gate: block edit/write tools when the model has edited files
+    // without running tests. Pure decision function, stateless — the
+    // EvidenceTracker holds the edit counter and test-verification log.
+    const tddConfig: TddGateConfig = deps.config.tddGate ?? _TDD_GATE_CONFIG
+    if (tddConfig.enabled && EDIT_TOOLS.has(tu.name)) {
+      const gateState = deps.evidence.getGateState()
+      const decision = evaluateTddGate(gateState, tu.name, tddConfig)
+      if (decision.action === 'block') {
+        callbacks.onToolResult(tu.id, tu.name, decision.message!, true)
+        return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: decision.message!, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
    }
 
@@ -697,9 +720,37 @@ export async function executeToolUse(
       && (risk.level === 'none' || risk.level === 'low')
       && approvalMode === 'auto-safe'
 
-    const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
+    const allowRules = [
+      ...(deps.config.permissions?.allow ?? []),
+      ...(deps.config.permissionsOverlay?.allow ?? []),
+    ]
+    const denyRules = [
+      ...(deps.config.permissions?.deny ?? []),
+      ...(deps.config.permissionsOverlay?.deny ?? []),
+    ]
+    const bashAllowPrefixes = [
+      ...(deps.config.permissions?.bash?.allowlist ?? []),
+      ...(deps.config.permissionsOverlay?.bashAllow ?? []),
+    ]
+    const bashDenyPrefixes = [
+      ...(deps.config.permissions?.bash?.denylist ?? []),
+      ...(deps.config.permissionsOverlay?.bashDeny ?? []),
+    ]
+
+    // Deny rules always win, even in dangerously-skip-permissions.
+    const denied = isToolDenied(tu.name, tu.input, denyRules)
+    const bashDenied = tu.name === 'bash' && typeof tu.input.command === 'string'
+      ? isBashCommandDenied(tu.input.command, bashDenyPrefixes)
+      : false
+    if (denied || bashDenied) {
+      const reason = `Tool execution denied: ${tu.name} matches an active deny rule`
+      callbacks.onToolResult(tu.id, tu.name, reason, true)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: reason, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
+
+    const allowlisted = isToolAllowed(tu.name, tu.input, allowRules)
     const bashAllowlisted = tu.name === 'bash' && typeof tu.input.command === 'string'
-      ? isBashCommandAllowlisted(tu.input.command, deps.config.permissions?.bash?.allowlist)
+      ? isBashCommandAllowlisted(tu.input.command, bashAllowPrefixes)
       : false
     // Autonomy-first: when a real kernel sandbox boundary is in effect, an
     // in-workspace bash write is safe-by-construction (writes can't escape the

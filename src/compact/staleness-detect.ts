@@ -148,7 +148,7 @@ export function detectStaleness(
     if (msg.content.startsWith('[')) return msg // already processed
 
     // Cache guard: skip if this message is deep in the warm prefix
-    if (suffixTokens !== undefined && suffixTokens[idx]! > suffixLimit) return msg
+    if (suffixLimit !== undefined && suffixTokens !== undefined && suffixTokens[idx]! > suffixLimit) return msg
 
     // Check lag: is this tool result old enough?
     const assistantTurnsAfter = assistantIndices.filter(ai => ai > idx).length

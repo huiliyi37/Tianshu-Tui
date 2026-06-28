@@ -71,6 +71,22 @@ describe('intent-sanitizer semantic verb extraction', () => {
     const result = disambiguateByVerb(candidates as any, '修复')
     assert.deepEqual(result, ['bug_fix', 'review_audit'])
   })
+
+  it('does not let a single verb demote security_safety below other kinds', () => {
+    // "test the security fix" → both security_safety and verification match
+    // verb "test" maps to verification, but security_safety should NOT be demoted
+    const candidates = ['security_safety', 'verification'] as any
+    const result = disambiguateByVerb(candidates, 'test')
+    assert.equal(result[0], 'security_safety', 'security_safety must stay first regardless of verb')
+  })
+
+  it('does not let a single verb demote bug_fix below low-priority kinds', () => {
+    // "test the bug fix" → both bug_fix and verification match
+    // verb "test" maps to verification, but bug_fix should NOT be demoted
+    const candidates = ['bug_fix', 'verification'] as any
+    const result = disambiguateByVerb(candidates, 'test')
+    assert.equal(result[0], 'bug_fix', 'bug_fix must stay first when paired with verification')
+  })
 })
 
 describe('end-to-end integration with buildHeuristicRetrievalRoute', () => {
@@ -150,5 +166,53 @@ describe('multi-turn taskList fallback', () => {
 
     const result = resolveContextualIdentifier('做 P1', currentAssistant, taskList)
     assert.deepEqual(result, [])
+  })
+})
+
+describe('ordinal reference resolution (第一个/第二项)', () => {
+  it('resolves "第一个" to the first task in lastAssistantMessage', () => {
+    const lastAssistant = `
+接下来可以做的事：
+1. 修复 loop.ts 中的内存泄露
+2. 重写 buildIntentRouterPrompt 单元测试
+3. 整理过时文档
+`
+    const result = resolveContextualIdentifier('做第一个', lastAssistant)
+    assert.ok(result.length >= 1)
+    const first = result.find(r => r.identifier === '第1项' || r.identifier === '第一项' || r.identifier === '第一个')
+    assert.ok(first, 'should resolve ordinal "第一个" to a contextual task')
+    assert.equal(first!.resolvedContent, '修复 loop.ts 中的内存泄露')
+  })
+
+  it('resolves "第二项" and "第3个" to the correct index', () => {
+    const lastAssistant = `
+- P1: 修复内存泄露
+- P2: 重写测试
+- P3: 整理文档
+`
+    const r2 = resolveContextualIdentifier('就做第二项', lastAssistant)
+    assert.ok(r2.length >= 1)
+    assert.ok(r2.some(r => r.resolvedContent.includes('重写测试')), '第二项 should map to second task')
+
+    const r3 = resolveContextualIdentifier('第3个', lastAssistant)
+    assert.ok(r3.length >= 1)
+    assert.ok(r3.some(r => r.resolvedContent.includes('整理文档')), '第3个 should map to third task')
+  })
+
+  it('returns empty when ordinal exceeds available items', () => {
+    const lastAssistant = '- P1: 修复内存泄露'
+    const result = resolveContextualIdentifier('做第五个', lastAssistant)
+    assert.deepEqual(result, [])
+  })
+
+  it('falls back to taskList when lastAssistantMessage has no parseable list', () => {
+    const lastAssistant = '好的，请继续'
+    const taskList = [
+      { id: 'P1', content: '修复内存泄露', status: 'pending' as const, turnCreated: 1, turnUpdated: 1 },
+      { id: 'P2', content: '重构 API', status: 'pending' as const, turnCreated: 1, turnUpdated: 1 },
+    ]
+    const result = resolveContextualIdentifier('做第二个', lastAssistant, taskList)
+    assert.ok(result.length >= 1)
+    assert.ok(result.some(r => r.resolvedContent.includes('重构 API')), '第二个 should map to second taskList item')
   })
 })

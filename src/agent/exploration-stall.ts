@@ -3,24 +3,20 @@ import type { ToolHistoryEntry } from '../prompt/volatile.js'
 // ── Types ──
 
 export interface ExplorationStallResult {
-  isStalled: boolean
-  readOnlyStreak: number
-  threshold: number
+  /** Whether the current turn should be hard-blocked. */
+  blocked: boolean
+  /** Total consecutive exploration tools including the current one. */
+  consecutiveExploreCount: number
+  /** Hard-block message when blocked; null otherwise. */
+  message: string | null
+  /** Soft advisory when in the advisory zone; null otherwise. */
+  advisory: string | null
 }
 
 // ── Constants ──
 
-/** Tools that modify the working tree — advancing past exploration. */
-const WRITE_TOOLS = new Set([
-  'write_file',
-  'edit_file',
-  'hash_edit',
-  'apply_patch',
-  'ast_edit',
-])
-
-/** Tools that are read-only query operations — these advance exploration but don't modify. */
-const READ_TOOLS = new Set([
+/** Read-only query tools that advance exploration without modifying code. */
+export const EXPLORATION_TOOLS = new Set([
   'grep',
   'glob',
   'read_file',
@@ -37,7 +33,8 @@ const READ_TOOLS = new Set([
   'web_fetch',
 ])
 
-const DEFAULT_STALL_THRESHOLD = 5
+const DEFAULT_HARD_THRESHOLD = 15
+const ADVISORY_THRESHOLD = 12
 
 // ── Detection ──
 
@@ -46,29 +43,53 @@ const DEFAULT_STALL_THRESHOLD = 5
  * consecutive turns without ever writing. This indicates the agent is
  * stuck in an information-gathering loop without making progress.
  *
- * Ported from oh-my-pi's `exploration-stall.ts` — supplements convergence
- * detection's tool-fingerprint approach with a behavior-pattern dimension.
+ * Signature expected by callers/tests:
+ *   detectExplorationStall(history, currentTool, threshold?)
+ *
+ * - `currentTool` is included in the count.
+ * - Any non-exploration tool resets the streak.
+ * - Default behavior: advisory at 12-14 consecutive, hard-block at 15+.
+ * - Explicit `threshold` disables advisory and hard-blocks at that count.
  */
 export function detectExplorationStall(
   history: ToolHistoryEntry[],
-  threshold: number = DEFAULT_STALL_THRESHOLD,
+  currentTool: string,
+  threshold?: number,
 ): ExplorationStallResult {
-  let readOnlyStreak = 0
-
-  // Walk from most recent to oldest, counting consecutive read-only turns.
-  for (let i = history.length - 1; i >= 0; i--) {
-    const entry = history[i]!
-    if (WRITE_TOOLS.has(entry.tool)) break           // progress made — reset
-    if (READ_TOOLS.has(entry.tool)) { readOnlyStreak++; continue }
-    // Non-read, non-write tools (bash, run_tests, git, todo, delegate, etc.)
-    // don't count toward either direction — they're neutral for this metric.
-    // We break on write but continue past neutral tools so a bash between
-    // reads doesn't falsely reset the streak.
+  if (!EXPLORATION_TOOLS.has(currentTool)) {
+    return { blocked: false, consecutiveExploreCount: 0, message: null, advisory: null }
   }
 
+  let consecutiveExploreCount = 1
+  for (let i = history.length - 1; i >= 0; i--) {
+    const entry = history[i]!
+    if (EXPLORATION_TOOLS.has(entry.tool)) {
+      consecutiveExploreCount++
+    } else {
+      break
+    }
+  }
+
+  const hardThreshold = threshold ?? DEFAULT_HARD_THRESHOLD
+
+  if (consecutiveExploreCount >= hardThreshold) {
+    return {
+      blocked: true,
+      consecutiveExploreCount,
+      message: `Exploration stall detected: ${consecutiveExploreCount} consecutive read-only tools. Time to act.`,
+      advisory: null,
+    }
+  }
+
+  const advisory =
+    threshold === undefined && consecutiveExploreCount >= ADVISORY_THRESHOLD
+      ? `You have used ${consecutiveExploreCount} consecutive exploration tools. Consider taking action instead of gathering more information.`
+      : null
+
   return {
-    isStalled: readOnlyStreak >= threshold,
-    readOnlyStreak,
-    threshold,
+    blocked: false,
+    consecutiveExploreCount,
+    message: null,
+    advisory,
   }
 }

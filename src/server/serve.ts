@@ -868,6 +868,34 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 }
 
 /**
+ * Parent-death watchdog. The desktop shell spawns the sidecar with
+ * `RIVET_PARENT_PID` set to its own pid; we poll whether that process still
+ * exists and self-terminate when it's gone. This is the cross-platform backstop
+ * for the case the shell's `Child::kill()` can't cover — a crash, a SIGKILL, or
+ * Windows "End task" — which would otherwise leave an orphaned `node.exe`
+ * holding the port. No-op when the env var is absent (manual `rivet serve`).
+ */
+function installParentWatchdog(onParentGone: () => void): void {
+  const raw = process.env.RIVET_PARENT_PID
+  const ppid = raw ? Number(raw) : NaN
+  if (!Number.isInteger(ppid) || ppid <= 0) return
+  const timer = setInterval(() => {
+    let alive = true
+    try {
+      // signal 0 probes existence/permission without actually signalling.
+      process.kill(ppid, 0)
+    } catch (err) {
+      // ESRCH = parent gone. EPERM = alive but not ours → still alive.
+      alive = (err as NodeJS.ErrnoException).code === 'EPERM'
+    }
+    if (!alive) onParentGone()
+  }, 3000)
+  // Don't let the watchdog itself keep the event loop alive — the HTTP server
+  // already does, and an unref'd timer won't block a clean exit.
+  timer.unref()
+}
+
+/**
  * CLI command handler for `rivet serve [--port N]`. Wires signal handlers and
  * prints the listening banner. Exits non-zero on misconfiguration.
  */
@@ -889,6 +917,10 @@ export function serveCommand(args: string[]): void {
   }
   process.on('SIGINT', shutdownServer)
   process.on('SIGTERM', shutdownServer)
+  installParentWatchdog(() => {
+    console.error('[serve] parent process gone — shutting down sidecar')
+    shutdownServer()
+  })
 
   // Last-resort: SIGKILL MCP children even if shutdownServer threw.
   process.on('exit', () => {

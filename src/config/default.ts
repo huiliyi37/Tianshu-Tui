@@ -119,6 +119,7 @@ export const DEFAULT_CONFIG: Config = {
     autoDelegateEnabled: false,
     maxDelegationDepth: 2,
     maxTeamParallel: 3,
+    council: { seats: [] },
     maxAutoContinue: 1,
     intentRetrievalRouter: {
       enabled: true,
@@ -139,7 +140,8 @@ export const DEFAULT_CONFIG: Config = {
     },
     permissions: {
       allow: [],
-      bash: { allowlist: [] },
+      deny: [],
+      bash: { allowlist: [], denylist: [] },
     },
     review: {
       profiles: {},

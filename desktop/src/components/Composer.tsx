@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { listFiles, listModels, switchModel } from '../runtime/client'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
-import type { ModelEntry, PlanModeState } from '../runtime/types'
+import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
 
@@ -137,7 +137,30 @@ export function Composer(props: {
   const [imageError, setImageError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+
+  // Parse mentions from the value prop
+  const { text, mentions } = useMemo(() => {
+    const regex = /@file:([^\s]+)\s?/g
+    const paths: string[] = []
+    const cleanText = value.replace(regex, (_m, path) => {
+      paths.push(path)
+      return ''
+    })
+    return { text: cleanText, mentions: paths }
+  }, [value])
+
+  const removeMention = (pathToRemove: string) => {
+    const remaining = mentions.filter((m) => m !== pathToRemove)
+    const suffix = remaining.map((m) => `@file:${m}`).join(' ')
+    let newValue = text
+    if (suffix) {
+      const needsSpace = text.length > 0 && !text.endsWith(' ')
+      newValue = `${text}${needsSpace ? ' ' : ''}${suffix}`
+    }
+    onChange(newValue)
+  }
 
   // Restore caret after a programmatic value change (mention insertion).
   useLayoutEffect(() => {
@@ -155,7 +178,7 @@ export function Composer(props: {
     const next = computeComposerTextareaStyle(el.scrollHeight)
     el.style.height = next.height
     el.style.overflowY = next.overflowY
-  }, [value])
+  }, [text])
 
   useEffect(() => () => clearTimeout(debounce.current), [])
 
@@ -200,10 +223,10 @@ export function Composer(props: {
     }, 120)
   }
 
-  const onAfterCaret = (text: string, caret: number) => {
+  const onAfterCaret = (textVal: string, caret: number) => {
     // Slash command menu takes priority at line start.
     if (commands && commands.length > 0) {
-      const slash = detectSlash(text, caret)
+      const slash = detectSlash(textVal, caret)
       if (slash) {
         clearTimeout(debounce.current)
         const filtered = filterCommands(commands, slash.query)
@@ -215,21 +238,28 @@ export function Composer(props: {
         return
       }
     }
-    const token = detectMention(text, caret)
+    const token = detectMention(textVal, caret)
     if (token) queryFiles(token)
     else closeSuggest()
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const next = e.target.value
-    onChange(next)
-    onAfterCaret(next, e.target.selectionStart ?? next.length)
+    const nextText = e.target.value
+    const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+    let newValue = nextText
+    if (suffix) {
+      const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+      newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+    }
+    onChange(newValue)
+    onAfterCaret(newValue, e.target.selectionStart ?? newValue.length)
   }
 
   const selectFile = (token: MentionToken, path: string) => {
-    const { text, caret } = applyMention(value, token, path)
-    pendingCaret.current = caret
-    onChange(text)
+    const { text: nextRawValue } = applyMention(value, token, path)
+    // Place caret at the end of the text segment (where the '@' query was)
+    pendingCaret.current = token.start
+    onChange(nextRawValue)
     closeSuggest()
   }
 
@@ -284,7 +314,10 @@ export function Composer(props: {
     recognition.lang = 'zh-CN'
     recognition.continuous = true
     recognition.interimResults = true
-    recognition.onstart = () => setRecording(true)
+    recognition.onstart = () => {
+      setSpeechError(null)
+      setRecording(true)
+    }
     recognition.onend = () => {
       setRecording(false)
       recognitionRef.current = null
@@ -298,12 +331,30 @@ export function Composer(props: {
         else interim += result[0]?.transcript ?? ''
       }
       if (final) {
-        onChange(value ? `${value} ${final}`.trim() : final)
+        const nextText = text ? `${text} ${final}`.trim() : final
+        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        let newValue = nextText
+        if (suffix) {
+          const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+          newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+        }
+        onChange(newValue)
       } else if (interim) {
-        onChange(value ? `${value} ${interim}`.trim() : interim)
+        const nextText = text ? `${text} ${interim}`.trim() : interim
+        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        let newValue = nextText
+        if (suffix) {
+          const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+          newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+        }
+        onChange(newValue)
       }
     }
-    recognition.onerror = () => setRecording(false)
+    recognition.onerror = (event: Event) => {
+      const code = (event as Event & { error?: string }).error
+      setSpeechError(code === 'not-allowed' ? '麦克风权限被拒绝' : '语音识别失败')
+      setRecording(false)
+    }
     recognitionRef.current = recognition
     recognition.start()
   }
@@ -473,11 +524,38 @@ export function Composer(props: {
           ))}
         </div>
       )}
+      {mentions.length > 0 && (
+        <div className="composer-chips flex flex-wrap gap-1.5 px-3 pt-2 pb-1">
+          {mentions.map((path) => (
+            <div key={path} className="composer-chip flex items-center gap-1 bg-panel-3 border border-border rounded-full pl-2 pr-1.5 py-0.5 text-xs text-text-secondary" title={path}>
+              <span className="text-muted shrink-0" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              </span>
+              <span className="truncate max-w-[180px] font-mono text-[11px]">{path.split('/').pop()}</span>
+              <button
+                type="button"
+                className="chip-remove hover:text-error hover:bg-error-soft rounded-full p-0.5 transition-colors"
+                onClick={() => removeMention(path)}
+                aria-label={`移除 ${path}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {imageError && <div className="composer-error">{imageError}</div>}
+      {speechError && <div className="composer-error">{speechError}</div>}
       <div className="composer-row">
         <textarea
           ref={taRef}
-          value={value}
+          value={text}
           placeholder={planning
             ? '描述你的目标…'
             : busy
@@ -532,7 +610,8 @@ export function Composer(props: {
             onClose={() => {}}
           />
         </div>
-        <ModelPicker sessionId={sessionId} disabled={busy} />
+        <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
+        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -560,23 +639,34 @@ export function Composer(props: {
 }
 
 /** Inline model selector in the composer bar (Codex-style). */
-function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: boolean }) {
+function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    setLoading(true)
-    listModels(sessionId)
-      .then((ms) => { if (alive) setModels(ms) })
-      .catch((err) => { if (alive) toast.error(`加载模型失败: ${(err as Error).message}`) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [open, sessionId])
+  const refresh = useCallback(async (withSpinner: boolean) => {
+    if (!sessionId) return
+    if (withSpinner) setLoading(true)
+    try {
+      const ms = await listModels(sessionId)
+      setModels(ms)
+    } catch (err) {
+      if (withSpinner) toast.error(`加载模型失败: ${(err as Error).message}`)
+    } finally {
+      if (withSpinner) setLoading(false)
+    }
+  }, [sessionId])
+
+  // Keep the (closed) trigger label live: refetch on mount, on session change,
+  // and whenever a model_switched / domain / skills SSE bumps menuRev. Without
+  // this the label lags a switch behind — e.g. switch to Pro still shows Flash —
+  // because the list was only ever fetched when the menu was open.
+  useEffect(() => { void refresh(false) }, [refresh, menuRev])
+
+  // Fresh list (with spinner) each time the menu opens.
+  useEffect(() => { if (open) void refresh(true) }, [open, refresh])
 
   useEffect(() => {
     if (!open) return
@@ -595,6 +685,9 @@ function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: bo
     setSwitchingId(m.id)
     try {
       await switchModel(sessionId, m.id)
+      // Optimistically re-flag current so the trigger label updates immediately;
+      // the model_switched SSE (menuRev bump) reconciles against the server next.
+      setModels((prev) => prev.map((x) => ({ ...x, current: x.id === m.id })))
       setOpen(false)
     } catch (err) {
       toast.error(`切换模型失败: ${(err as Error).message}`)
@@ -638,6 +731,105 @@ function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: bo
                 <span className="model-picker-desc">切换中…</span>
               ) : m.contextWindow ? (
                 <span className="model-picker-desc">{Math.round(m.contextWindow / 1000)}K</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Inline star-domain (星域) selector in the composer bar, beside the model picker. */
+function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
+  const [open, setOpen] = useState(false)
+  const [entries, setEntries] = useState<DomainEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [applyingKey, setApplyingKey] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const refresh = useCallback(async (withSpinner: boolean) => {
+    if (!sessionId) return
+    if (withSpinner) setLoading(true)
+    try {
+      const es = await listDomains(sessionId)
+      setEntries(es)
+    } catch (err) {
+      if (withSpinner) toast.error(`加载星域失败: ${(err as Error).message}`)
+    } finally {
+      if (withSpinner) setLoading(false)
+    }
+  }, [sessionId])
+
+  // Mirror ModelPicker: keep the closed trigger live via menuRev (domain_changed
+  // SSE bumps it), fetch on mount, and a spinnered fetch when the menu opens.
+  useEffect(() => { void refresh(false) }, [refresh, menuRev])
+  useEffect(() => { if (open) void refresh(true) }, [open, refresh])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const current = entries.find((e) => e.current)
+  const glyph = current?.uiPersona?.glyph || '✦'
+  const label = current?.name || '星域'
+
+  const select = async (e: DomainEntry) => {
+    if (disabled || e.current) return
+    setApplyingKey(e.key)
+    try {
+      await setDomain(sessionId, e.key)
+      setEntries((prev) => prev.map((x) => ({ ...x, current: x.key === e.key })))
+      setOpen(false)
+    } catch (err) {
+      toast.error(`切换星域失败: ${(err as Error).message}`)
+    } finally {
+      setApplyingKey(null)
+    }
+  }
+
+  return (
+    <div className="model-picker domain-picker" ref={ref}>
+      <button
+        className="model-picker-trigger"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled || !!applyingKey}
+        title={disabled ? '运行中不可切换星域' : '切换星域'}
+        aria-label="切换星域"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span aria-hidden>{glyph}</span>
+        <span className="model-picker-label">{applyingKey ? '切换中…' : label}</span>
+      </button>
+      {open && (
+        <div className="model-picker-menu" role="listbox">
+          {loading && (
+            <div className="model-picker-item" role="status" aria-busy>
+              <span className="model-picker-name">加载中…</span>
+            </div>
+          )}
+          {!loading && entries.map((e) => (
+            <button
+              key={e.key}
+              role="option"
+              aria-selected={e.current}
+              disabled={applyingKey === e.key}
+              className={`model-picker-item ${e.current ? 'active' : ''}`}
+              onClick={() => void select(e)}
+            >
+              <span className="model-picker-name">
+                {e.uiPersona?.glyph ? `${e.uiPersona.glyph} ` : ''}{e.name}
+              </span>
+              {applyingKey === e.key ? (
+                <span className="model-picker-desc">切换中…</span>
+              ) : (e.meta || e.motto) ? (
+                <span className="model-picker-desc">{e.meta || e.motto}</span>
               ) : null}
             </button>
           ))}

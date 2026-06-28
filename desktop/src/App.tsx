@@ -1,10 +1,13 @@
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { getRuntimeInfo } from './runtime/client'
 import { useHealth, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
+
+const MissionControlSurface = lazy(() => import('./surfaces/MissionControlSurface'))
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { Toaster } from 'sonner'
@@ -28,6 +31,22 @@ export function App() {
   const sidecarDown = health.isError
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
+  // Fatal start failure (Rust reported ready=false): the sidecar never came up,
+  // so the reconnect loop can never succeed. Distinguish it from a transient
+  // drop so we don't show misleading "正在重连…" copy forever.
+  const [sidecarFailed, setSidecarFailed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    getRuntimeInfo()
+      .then((info) => { if (!cancelled && info.ready === false) setSidecarFailed(true) })
+      .catch(() => { /* browser-dev fallback has no ready flag */ })
+    return () => { cancelled = true }
+  }, [])
+  const restartApp = () => {
+    void import('@tauri-apps/plugin-process')
+      .then((m) => m.relaunch())
+      .catch(() => window.location.reload())
+  }
   const defaultCwd = useMemo(() => {
     if (!ui.activeProject) return null
     const known = loadKnownProjects()
@@ -48,9 +67,14 @@ export function App() {
       <div className="shell">
         <WallpaperLayer />
       <div className="main">
-        {sidecarDown && (
+        {sidecarFailed ? (
+          <div className="banner error">
+            sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。
+            <button className="banner-action" onClick={restartApp}>重启应用</button>
+          </div>
+        ) : sidecarDown ? (
           <div className="banner error">sidecar 未启动，正在重连…</div>
-        )}
+        ) : null}
         {needsSetup && !setupDismissed && (
           <div className="banner warn">
             首次使用，请先配置 API Key
@@ -75,9 +99,9 @@ export function App() {
         )}
 
         <div className="surface">
-          <ErrorBoundary label="工作台">
+          <ErrorBoundary label={ui.surface === 'mission' ? '任务中控台' : '工作台'}>
             <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-              <WorkspaceSurface />
+              {ui.surface === 'mission' ? <MissionControlSurface /> : <WorkspaceSurface />}
             </Suspense>
           </ErrorBoundary>
         </div>

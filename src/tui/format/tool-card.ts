@@ -56,6 +56,19 @@ const READ_HEAD_LINES = 3
 const READ_TAIL_LINES = 5
 const DIFF_MAX_LINES = 20
 
+/** 按工具家族给不同默认展开高度，避免所有工具都挤在 4 行内。 */
+export function getDefaultMaxLines(toolName: string): number {
+  const family = getToolFamily(toolName).family
+  switch (family) {
+    case 'run': return 8
+    case 'find': return 6
+    case 'write': return DIFF_MAX_LINES
+    case 'read': return READ_HEAD_LINES + READ_TAIL_LINES
+    case 'other': return DEFAULT_MAX_LINES
+    default: return DEFAULT_MAX_LINES
+  }
+}
+
 const BODY_FIRST_PREFIX = '⎿  '
 const BODY_CONT_PREFIX = '   '
 
@@ -97,12 +110,15 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
 
   const family = getToolFamily(toolName)
   const indent = depth > 0 ? '  '.repeat(depth) : ''
+  const isQuestion = toolName === 'ask_user_question'
 
   // ── Header: ● Verb(arg) (elapsed) ───────────────────────────
-  const bulletColor = isError ? theme.error : streaming ? theme.dim : theme.success
+  // ask_user_question needs to stand out: use a '?' bullet and warning color.
+  const bulletColor = isError ? theme.error : isQuestion ? theme.warning : streaming ? theme.dim : theme.success
+  const bulletGlyph = isQuestion ? '?' : '●'
   const title = toolCardTitle(toolName, toolInput, rawPath)
-  const tColor = theme.toolColor(toolName)
-  let header = `${indent}${color('●', bulletColor)} ${color(title, tColor, { bold: true })}`
+  const tColor = isQuestion ? theme.warning : theme.toolColor(toolName)
+  let header = `${indent}${color(bulletGlyph, bulletColor)} ${color(title, tColor, { bold: true })}`
   if (streaming) {
     header += ` ${color('…', theme.dim)}`
   } else if (elapsedMs !== undefined) {
@@ -147,15 +163,17 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   // ── 普通输出分支 ─────────────────────────────────────────────
   const contentLines = trimmed.split('\n')
   const totalLines = contentLines.length
-  const maxLines = input.maxLines ?? DEFAULT_MAX_LINES
+  const maxLines = input.maxLines ?? getDefaultMaxLines(toolName)
   // 正文是「数据」(命令输出/文件列表/git status)，用可读的 muted 前景。
   // 绝不能用 theme.dim —— dim 是装饰专用色(分隔线/快捷键)，在墨夜底上 ~2:1
   // 对比度几乎不可见，会把真实数据染到看不清。
-  const bodyColor = isError ? theme.error : theme.muted
+  // ask_user_question 用 warning 色高亮，让用户一眼看到需要回复的问题。
+  const bodyColor = isError ? theme.error : isQuestion ? theme.warning : theme.muted
 
   const renderLine = (l: string) => color(l, bodyColor)
 
-  if (expanded || totalLines <= maxLines) {
+  // ask_user_question 必须完整展示问题和所有选项，禁止截断。
+  if (expanded || isQuestion || totalLines <= maxLines) {
     lines.push(...indentBody(contentLines.map(renderLine), indent, theme))
     if (rawPath && !expanded) {
       lines.push(`${indent}${BODY_CONT_PREFIX}${color(`raw: ${rawPath.split('/').pop() ?? rawPath}`, theme.muted)}`)
@@ -189,6 +207,8 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
 
 /** 判断该工具结果在折叠渲染下是否被截断（供 ctrl+o 展开记录用） */
 export function isToolCardTruncated(input: Pick<FormatToolCardInput, 'toolName' | 'content' | 'maxLines'>): boolean {
+  // ask_user_question is always rendered in full; no expand action needed.
+  if (input.toolName === 'ask_user_question') return false
   const trimmed = input.content.replace(/\n+$/, '')
   if (!trimmed) return false
   const totalLines = trimmed.split('\n').length
@@ -196,7 +216,7 @@ export function isToolCardTruncated(input: Pick<FormatToolCardInput, 'toolName' 
   if (family.family === 'write' && isDiffContent(trimmed)) {
     return totalLines > DIFF_MAX_LINES
   }
-  return totalLines > (input.maxLines ?? DEFAULT_MAX_LINES)
+  return totalLines > (input.maxLines ?? getDefaultMaxLines(input.toolName))
 }
 
 // ── Live 进行中工具行 ──────────────────────────────────────────
@@ -233,9 +253,13 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
 
   const lines: string[] = [header]
   const tail = (input.outputTail ?? '').replace(/\n+$/, '')
+  const tailCount = input.tailLines ?? 3
+  // BODY_FIRST_PREFIX = '⎿  ' (3 display columns) — content has columns-3 available.
+  const maxWidth = Math.max(10, input.columns - 3)
+
+  // 固定 tail 区域高度：内容不足时顶部补空行，避免卡片高度随输出变化而跳动。
+  const tailLines: string[] = []
   if (tail) {
-    const tailCount = input.tailLines ?? 3
-    const maxWidth = Math.max(10, input.columns - 6)
     const shown = tail.split('\n').slice(-tailCount).map(l => {
       // 按显示宽度截断（CJK 2 列、ambiguous 2 列）。… 自身 2 列，预算留给它。
       const ellW = displayWidth('…', WIDE)
@@ -244,8 +268,18 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
         : l
       return color(clipped, theme.muted)
     })
-    lines.push(...indentBody(shown, '', theme))
+    tailLines.push(...indentBody(shown, '', theme))
   }
+
+  // 无输出时显示占位符，保持固定高度
+  if (tailLines.length === 0) {
+    tailLines.push(`${color(BODY_FIRST_PREFIX, theme.dim)}${color('…', theme.dim)}`)
+  }
+  while (tailLines.length < tailCount) {
+    tailLines.unshift(BODY_CONT_PREFIX)
+  }
+
+  lines.push(...tailLines)
   return lines
 }
 

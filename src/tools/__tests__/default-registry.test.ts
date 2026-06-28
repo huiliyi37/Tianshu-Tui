@@ -69,4 +69,14 @@ describe('createDefaultToolRegistry', () => {
 
     assert.equal(primary.has('delegate_task'), true)
   })
+
+  it('plan tool does not require approval for close action', () => {
+    const registry = createDefaultToolRegistry()
+    const plan = registry.getAll().find(t => t.definition.name === 'plan')
+    assert.ok(plan)
+    assert.equal(
+      plan!.requiresApproval({ input: { action: 'close', apply: true }, toolUseId: 't1', cwd: '/fake' }),
+      false,
+    )
+  })
 })

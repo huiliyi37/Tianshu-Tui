@@ -77,6 +77,8 @@ import type { SensoriumEntry } from './retrospect.js'
 import { join } from 'node:path'
 import { writeFileSync } from 'node:fs'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
+import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
+import { createPermissionOverlay } from './permissions.js'
 import { recordToolHistory } from "./tool-history-recorder.js";
 import { requestThetaCheck } from "./theta-controller.js";
 import { createTurnStreamController, createTurnCompletionController, createToolExecutionController, createPlanTraceCoordinator, createCompactBoundaryCoordinator, createTurnOrchestrator, createTurnStepProducer, createReasoningEffortController, createIntentRetrievalRouteController, createAntiAnchoringController, createModelRoutingShadowController, createPrewarmController, createRuntimeHooksPipeline, buildRuntimeSnapshot } from "./loop-factory.js";
@@ -323,6 +325,9 @@ export class AgentLoop {
     cwd?: string,
   ) {
       this.config = config; this.session = session;
+    if (!this.config.permissionsOverlay) {
+      this.config.permissionsOverlay = createPermissionOverlay()
+    }
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
     this.traceStore = createTraceStore()
@@ -575,8 +580,8 @@ export class AgentLoop {
   /** U6/C1: seed the execution trace from the agent's first todo write.
    *  withPlanSteps is idempotent — only the first non-empty write populates
    *  the baseline; later status-update writes are a no-op on the trace. */
-  capturePlanSteps(descriptions: string[]): void {
-    this.planTraceCoordinator.capturePlanSteps(descriptions)
+  capturePlanSteps(steps: import('../tools/types.js').PlanStepInput[]): void {
+    this.planTraceCoordinator.capturePlanSteps(steps)
   }
 
   /** U6: build a StepResult from the tool events recorded for a given turn. */
@@ -653,6 +658,65 @@ export class AgentLoop {
 
   setApprovalMode(mode: ApprovalMode): void {
     this.config.approvalMode = mode
+  }
+
+  /** Return the current session permission overlay, initializing if needed. */
+  private getPermissionOverlay(): PermissionOverlay {
+    if (!this.config.permissionsOverlay) {
+      this.config.permissionsOverlay = createPermissionOverlay()
+    }
+    return this.config.permissionsOverlay
+  }
+
+  addAllowRule(rule: PermissionAllowRule): void {
+    this.getPermissionOverlay().allow.push(rule)
+  }
+
+  addDenyRule(rule: PermissionAllowRule): void {
+    this.getPermissionOverlay().deny.push(rule)
+  }
+
+  addBashAllowPrefix(prefix: string): void {
+    const overlay = this.getPermissionOverlay()
+    if (!overlay.bashAllow.includes(prefix)) overlay.bashAllow.push(prefix)
+  }
+
+  addBashDenyPrefix(prefix: string): void {
+    const overlay = this.getPermissionOverlay()
+    if (!overlay.bashDeny.includes(prefix)) overlay.bashDeny.push(prefix)
+  }
+
+  removePermissionRule(
+    kind: 'allow' | 'deny' | 'bashAllow' | 'bashDeny',
+    indexOrPattern: number | string,
+  ): boolean {
+    const overlay = this.getPermissionOverlay()
+    if (kind === 'allow' || kind === 'deny') {
+      const list = overlay[kind]
+      if (typeof indexOrPattern === 'number') {
+        if (indexOrPattern < 0 || indexOrPattern >= list.length) return false
+        list.splice(indexOrPattern, 1)
+        return true
+      }
+      const idx = list.findIndex(r => r.tool === indexOrPattern)
+      if (idx === -1) return false
+      list.splice(idx, 1)
+      return true
+    }
+    const list = overlay[kind]
+    if (typeof indexOrPattern === 'number') {
+      if (indexOrPattern < 0 || indexOrPattern >= list.length) return false
+      list.splice(indexOrPattern, 1)
+      return true
+    }
+    const idx = list.indexOf(indexOrPattern)
+    if (idx === -1) return false
+    list.splice(idx, 1)
+    return true
+  }
+
+  resetPermissionOverlay(): void {
+    this.config.permissionsOverlay = createPermissionOverlay()
   }
 
   /** Attach a GoalTracker to the current run. Owned by AgentLoop; the
@@ -840,6 +904,16 @@ export class AgentLoop {
   /** Read the per-session disabled skill set (consumed by turn-step-producer). */
   getDisabledSkills(): Set<string> {
     return this._disabledSkills
+  }
+
+  /** Mark a skill as explicitly invoked so its instructions survive compaction. */
+  markSkillInvoked(name: string): void {
+    this.config.promptEngine.markSkillInvoked(name)
+  }
+
+  /** Release an invoked skill so its instructions are no longer re-injected. */
+  markSkillCompleted(name: string): void {
+    this.config.promptEngine.markSkillCompleted(name)
   }
 
   getLatestPheromones() { return this.loadedPheromones }

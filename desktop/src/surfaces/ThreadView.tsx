@@ -2,6 +2,7 @@ import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useStat
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
+import type { StreamStatus } from '../state/use-session-events'
 import { basename } from '../lib/projects'
 import { ToolCard, toolNameOf } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
@@ -25,9 +26,11 @@ import {
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
-import { fetchSessionImageObjectUrl } from '../runtime/client'
+import type { ThemePref } from '../lib/theme'
+import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
+import { estimateBlockSize, estimateTimelineSize } from '../lib/thread-layout.js'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -64,8 +67,11 @@ export function ThreadView(props: {
   onSetApprovalMode: (mode: ApprovalMode) => void
   onSetPlanMode?: (state: PlanModeState) => void
   onClose: () => void
+  /** D2 — live SSE connection state; drives the "updates stopped" banner. */
+  streamStatus?: StreamStatus
+  onRetryStream?: () => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
@@ -76,6 +82,21 @@ export function ThreadView(props: {
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+
+  // Time-Travel Timeline Slider state
+  const [rewindPoints, setRewindPoints] = useState<import('../runtime/client').RewindPoint[]>([])
+  const [selectedTurnIndex, setSelectedTurnIndex] = useState<number>(-1)
+
+  useEffect(() => {
+    if (session.id) {
+      getRewindPoints(session.id)
+        .then(({ points }) => {
+          setRewindPoints(points)
+          setSelectedTurnIndex(points.length) // default to latest
+        })
+        .catch((err) => console.error(err))
+    }
+  }, [session.id])
   // 发消息失败时回填输入内容：useSendPrompt 的 onError 派发 'send-prompt-failed' 事件，
   // 此处监听并把失败的 prompt 塞回输入框，让用户能编辑后重发（而非因 submit 已清空而丢失）。
   // 仅当当前输入框为空时回填，避免覆盖用户失败后已手动输入的新内容。
@@ -102,7 +123,43 @@ export function ThreadView(props: {
 
   // Group consecutive tool/result blocks into one compact stream (Cursor 3.0).
   // U8: depend on blocksRev so in-place streaming text updates still recompute.
-  const rendered = useMemo(() => groupBlocks(view.blocks), [view.blocks, view.blocksRev])
+  const filteredBlocks = useMemo(() => {
+    // selectedTurnIndex === -1 (no selection) or === length (slider far right) =
+    // latest: show everything.
+    if (selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length) {
+      return view.blocks
+    }
+
+    // Historical: parked BEFORE rewind point `selectedTurnIndex`, so only the
+    // turns a fork here would keep are shown. Anchor on that point's `seq` — the
+    // exact `u-${seq}` block rewind() truncates from — so the preview is the
+    // byte-for-byte post-fork state (no drift from system/compaction/image turns
+    // that broke the old user-block-counting heuristic).
+    const point = rewindPoints[selectedTurnIndex]
+    if (!point) return view.blocks
+
+    if (typeof point.seq === 'number') {
+      const cutIdx = view.blocks.findIndex(
+        (b) => b.kind === 'user' && b.key === `u-${point.seq}`,
+      )
+      if (cutIdx >= 0) return view.blocks.slice(0, cutIdx)
+    }
+
+    // Fallback (event log trimmed → no seq): cut at the (selectedTurnIndex)-th
+    // user block. Equivalent to the seq path on a healthy 1:1 block/message log.
+    let userBlockCount = 0
+    for (let i = 0; i < view.blocks.length; i++) {
+      if (view.blocks[i]?.kind === 'user') {
+        if (userBlockCount === selectedTurnIndex) {
+          return view.blocks.slice(0, i)
+        }
+        userBlockCount++
+      }
+    }
+    return view.blocks
+  }, [view.blocks, selectedTurnIndex, rewindPoints])
+
+  const rendered = useMemo(() => groupBlocks(filteredBlocks), [filteredBlocks, view.blocksRev])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
@@ -110,7 +167,11 @@ export function ThreadView(props: {
   const virtualizer = useVirtualizer({
     count: rendered.length,
     getScrollElement: () => msgRef.current,
-    estimateSize: () => 80,
+    estimateSize: (index) => {
+      const item = rendered[index]!
+      if (item.kind === 'timeline') return estimateTimelineSize(item.items)
+      return estimateBlockSize(item.block)
+    },
     overscan: 8,
     getItemKey: (index) => {
       const item = rendered[index]!
@@ -122,10 +183,29 @@ export function ThreadView(props: {
   // stays constant while a reply streams in, so we pin the bottom on text growth.
   const lastBlockTextLen = view.blocks[view.blocks.length - 1]?.text.length ?? 0
 
-  // Auto-scroll only when the user is near the bottom (incl. streaming growth).
+  // Auto-scroll only when the user is near the bottom, throttled to ~10Hz. During
+  // streaming these deps change every rAF batch; an unthrottled scrollToIndex
+  // forces a layout (plus a measureElement remeasure of the growing last row) on
+  // every token — a feedback loop that janks hard on WebView2. A leading+trailing
+  // throttle keeps the bottom pinned without the per-token layout storm.
+  const scrolledUpRef = useRef(scrolledUp)
+  scrolledUpRef.current = scrolledUp
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastScrollAtRef = useRef(0)
+  useEffect(() => () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }, [])
   useEffect(() => {
-    if (!scrolledUp && rendered.length > 0) {
+    if (scrolledUp || rendered.length === 0) return
+    const SCROLL_THROTTLE_MS = 100
+    const run = () => {
+      scrollTimerRef.current = null
+      if (scrolledUpRef.current) return // user scrolled up while the tick was pending
+      lastScrollAtRef.current = performance.now()
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
+    }
+    const elapsed = performance.now() - lastScrollAtRef.current
+    if (elapsed >= SCROLL_THROTTLE_MS) run()
+    else if (scrollTimerRef.current === null) {
+      scrollTimerRef.current = setTimeout(run, SCROLL_THROTTLE_MS - elapsed)
     }
   }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
 
@@ -202,9 +282,9 @@ export function ThreadView(props: {
     },
     {
       name: '/theme',
-      desc: '切换主题 (system→light→dark→nebula)',
+      desc: '切换主题 (system→light→dark→nebula→sakura→cyberpunk→cupertino→light-classic)',
       run: () => {
-        const order = ['system', 'light', 'dark', 'nebula'] as const
+        const order: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic']
         const cur = loadThemePref()
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },
@@ -419,6 +499,37 @@ export function ThreadView(props: {
             </svg>
           </button>
         </div>
+
+        {rewindPoints.length > 0 && (
+          <div className="thread-timeline-slider-container px-4 py-2 border-t border-border bg-panel-2 flex items-center gap-3">
+            <span className="text-xs text-muted font-medium flex items-center gap-1 shrink-0">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+              时间旅行:
+            </span>
+            <input
+              type="range"
+              min="0"
+              max={rewindPoints.length}
+              value={selectedTurnIndex === -1 ? rewindPoints.length : selectedTurnIndex}
+              onChange={(e) => {
+                const val = Number(e.target.value)
+                setSelectedTurnIndex(val)
+              }}
+              className="timeline-slider flex-1 h-1 bg-border rounded-lg appearance-none cursor-pointer accent-accent"
+            />
+            <span className="text-xs font-mono text-muted bg-panel-3 px-1.5 py-0.5 rounded border border-border max-w-[220px] truncate shrink-0" title={selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length ? `分叉点（第 ${selectedTurnIndex + 1} 轮）：${rewindPoints[selectedTurnIndex]?.content}` : '最新'}>
+              {selectedTurnIndex === -1 || selectedTurnIndex >= rewindPoints.length ? (
+                '最新 (Latest)'
+              ) : (
+                `↩ 第 ${selectedTurnIndex + 1} 轮之前`
+              )}
+            </span>
+          </div>
+        )}
+
         <div className="thread-header-meta">
           {session.model && (
             <span className="model-chip" title={`当前模型: ${session.model}`}>
@@ -451,6 +562,25 @@ export function ThreadView(props: {
       </header>
 
       <div className="messages" ref={msgRef} onScroll={onScroll}>
+        {streamStatus === 'offline' && (
+          <div className="stream-banner offline" role="alert">
+            <span className="stream-banner-glyph" aria-hidden>⚠</span>
+            <span className="stream-banner-text">实时连接已断开，可能错过最新进度</span>
+            <button
+              className="stream-banner-retry"
+              onClick={() => onRetryStream?.()}
+              aria-label="重新连接实时更新"
+            >
+              重新连接
+            </button>
+          </div>
+        )}
+        {streamStatus === 'reconnecting' && (
+          <div className="stream-banner reconnecting" role="status">
+            <span className="stream-banner-glyph spin" aria-hidden>⟳</span>
+            <span className="stream-banner-text">连接中断，正在重连…</span>
+          </div>
+        )}
         {view.blocks.length === 0 && (
           <div className="empty welcome">
             <p className="welcome-title">开始对话</p>
@@ -486,7 +616,16 @@ export function ThreadView(props: {
                           onOpenImage={openImage}
                           domainGlyph={domainGlyph}
                           domainName={activeDomain?.name}
-                          isStreaming={false}
+                          // Live reasoning/text can land inside a timeline run too;
+                          // mark the tail block streaming (mirror of the top-level
+                          // branch) so it gets the ~10Hz throttle instead of
+                          // re-rendering plain text at full rAF rate.
+                          isStreaming={
+                            b.key === lastKey && (
+                              (b.kind === 'thinking' && view.private_thinkingOpen) ||
+                              (b.kind === 'assistant' && view.private_textOpen)
+                            )
+                          }
                         />
                       ))}
                     </TimelineGroup>
@@ -533,12 +672,65 @@ export function ThreadView(props: {
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className="composer-float-inner">
+          {selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length && (
+            <div className="historical-turn-banner flex items-center justify-between bg-warning-soft border border-warning/30 rounded-lg p-3 mb-2 text-xs">
+              <div className="flex items-center gap-2 text-warning">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <span className="font-medium">
+                  已回退到第 {selectedTurnIndex + 1} 轮之前（仅显示其前的 {selectedTurnIndex} 轮）。在此发送新消息将从这里分叉（Fork），截断第 {selectedTurnIndex + 1} 轮及其后的历史。
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  className="px-2.5 py-1 rounded bg-warning text-white hover:bg-warning/90 transition-colors font-medium"
+                  onClick={async () => {
+                    const point = rewindPoints[selectedTurnIndex]
+                    if (point) {
+                      try {
+                        await rewindSession(session.id, point.index)
+                        setSelectedTurnIndex(-1)
+                        const { points } = await getRewindPoints(session.id)
+                        setRewindPoints(points)
+                      } catch (err) {
+                        console.error(err)
+                      }
+                    }
+                  }}
+                >
+                  在此分叉 (Fork)
+                </button>
+                <button
+                  className="px-2.5 py-1 rounded bg-panel-3 hover:bg-panel-2 border border-border text-text transition-colors"
+                  onClick={() => setSelectedTurnIndex(-1)}
+                >
+                  返回最新
+                </button>
+              </div>
+            </div>
+          )}
           <Composer
             sessionId={session.id}
             value={input}
             onChange={setInput}
             busy={busy}
-            onSubmit={(text, images) => {
+            onSubmit={async (text, images) => {
+              if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
+                const point = rewindPoints[selectedTurnIndex]
+                if (point) {
+                  try {
+                    await rewindSession(session.id, point.index)
+                    setSelectedTurnIndex(-1)
+                    const { points } = await getRewindPoints(session.id)
+                    setRewindPoints(points)
+                  } catch (err) {
+                    console.error(err)
+                  }
+                }
+              }
               if (busy) onSteer(text)
               else onSend(text, images)
               setInput('')
@@ -856,10 +1048,27 @@ function AssistantText({ text, isStreaming }: { text: string; isStreaming: boole
   return <Markdown source={text} />
 }
 
+// Above this size the streaming tail is windowed (see below).
+const STREAM_TAIL_MAX = 8000
+
 // Plain-text fallback for the very-long streaming guard (md-streaming keeps the
 // pre-wrap styling until the final Markdown parse on turn completion).
+//
+// Only the trailing window is rendered while a long reply streams: a single
+// growing text node costs O(n) to diff/paint per throttle tick, so over a
+// 50k-char reply the naive full render is O(n^2). The user is pinned to the
+// bottom mid-stream (auto-scroll), so the tail is exactly what they read; the
+// full text + Markdown render the instant streaming completes (AssistantText
+// switches off this path). Bounds per-tick work to O(tail).
 function StreamingText({ source }: { source: string }) {
-  return <div className="md md-streaming">{source}</div>
+  const tail = source.length > STREAM_TAIL_MAX ? source.slice(-STREAM_TAIL_MAX) : source
+  const truncated = tail.length < source.length
+  return (
+    <div className="md md-streaming">
+      {truncated && <div className="md-stream-more">↑ 输出较长，完成后显示全文</div>}
+      {tail}
+    </div>
+  )
 }
 
 /** MsgBlock — message wrapper with a copy button that appears on hover. */
@@ -926,6 +1135,12 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
   const wasStreaming = useRef(streaming)
   const bodyRef = useRef<HTMLDivElement>(null)
 
+  // Reasoning is plain text with no Markdown throttle of its own, so a fast model
+  // otherwise dumps tokens straight into the DOM at full rAF rate (~60Hz). Reuse
+  // the assistant-text throttle to update the body / peek / scroll at ~10Hz, then
+  // snap to the full text the instant streaming stops.
+  const shown = useThrottledStreamingSource(block.text, streaming)
+
   // Auto-collapse when the reasoning run completes (unless user pinned it open).
   useEffect(() => {
     if (wasStreaming.current && !streaming && !manual.current) setOpen(false)
@@ -937,10 +1152,10 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
     if (streaming && open && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight
     }
-  }, [streaming, open, block.text])
+  }, [streaming, open, shown])
 
   const toggle = useCallback(() => { manual.current = true; setOpen((o) => !o) }, [])
-  const summary = useMemo(() => summarizeThinking(block.text), [block.text])
+  const summary = useMemo(() => summarizeThinking(shown), [shown])
 
   return (
     <div className={`reasoning${open ? ' open' : ''}${streaming ? ' streaming' : ''}`}>
@@ -951,7 +1166,7 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
         <span className="reasoning-caret" aria-hidden>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
-        <div className="reasoning-body" ref={bodyRef}>{block.text}</div>
+        <div className="reasoning-body" ref={bodyRef}>{shown}</div>
       )}
     </div>
   )

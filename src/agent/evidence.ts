@@ -5,6 +5,21 @@ import { buildFinalVerificationReport, type VerificationState } from './verifica
 export type DeliveryVerificationStatus = 'verified' | 'failed' | 'blocked' | 'unverified'
 export type VerificationLevel = 'tested' | 'typed' | 'linted' | 'pending'
 
+/**
+ * Gate state for the TDD gate. Consumed by evaluateTddGate to decide whether
+ * an edit should be allowed, suggested-against, or blocked.
+ */
+export interface TddGateState {
+  /** Count of distinct files modified by edit/write tools since last reset. */
+  filesModified: number
+  /** Number of test-command verifications recorded since last reset. */
+  verifications: number
+  /** Edits since the most recent test run (resets to 0 on any trackVerification). */
+  editsSinceLastTest: number
+  /** Whether any verification ended in failure. */
+  hasFailedTests: boolean
+}
+
 export interface EvidenceState {
   filesRead: Set<string>
   filesModified: Set<string>
@@ -31,6 +46,7 @@ export interface EvidenceTrackerPublic {
   trackVerification(result: VerificationMetadata): void
   getState(): EvidenceState
   getVerificationSummary(): VerificationSummary
+  getGateState(): TddGateState
   buildBadge(gateV2?: AuthoritativeGateView): string | null
   reset(): void
 }
@@ -46,6 +62,12 @@ export interface AuthoritativeGateView {
 
 export class EvidenceTracker implements EvidenceTrackerPublic {
   private state: EvidenceState
+  /**
+   * Consecutive edits since the most recent test run. Incremented on every
+   * trackFileModified; reset to 0 on trackVerification. Drives the TDD gate
+   * (evaluateTddGate) — after 3 unverified edits, the gate hard-blocks.
+   */
+  #editsSinceLastTest = 0
 
   constructor() {
     this.state = {
@@ -66,6 +88,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
   trackFileModified(path: string): void {
     this.state.filesModified.add(path)
     this.state.fileVerificationLevels?.set(path, 'pending')
+    this.#editsSinceLastTest++
     this.refreshDeliveryStatus()
   }
 
@@ -74,6 +97,9 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     if (this.state.verifications.length > MAX_VERIFICATIONS) {
       this.state.verifications = this.state.verifications.slice(-MAX_VERIFICATIONS)
     }
+    // TDD gate: any test run (pass, fail, or blocked) resets the consecutive-edit counter.
+    // The gate targets zero-verification editing, not test-pass enforcement.
+    this.#editsSinceLastTest = 0
     this.applyVerificationLevels(result)
     this.refreshDeliveryStatus()
   }
@@ -89,6 +115,16 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
       .map(path => ({ path, level: this.state.fileVerificationLevels?.get(path) ?? 'pending' }))
     const verified = files.filter(f => f.level !== 'pending').length
     return { total: files.length, verified, pending: files.length - verified, files }
+  }
+
+  /** Gate state for the TDD gate — pure-values snapshot, no Set refs. */
+  getGateState(): TddGateState {
+    return {
+      filesModified: this.state.filesModified.size,
+      verifications: this.state.verifications.length,
+      editsSinceLastTest: this.#editsSinceLastTest,
+      hasFailedTests: this.state.verifications.some(v => v.status === 'failed'),
+    }
   }
 
   private applyVerificationLevels(result: VerificationMetadata): void {
@@ -210,6 +246,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     this.state.impactedFiles.clear()
     this.state.impactedTests.clear()
     this.state.fileVerificationLevels?.clear()
+    this.#editsSinceLastTest = 0
   }
 
   getState(): EvidenceState { return this.state }

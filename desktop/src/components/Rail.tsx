@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Sun, Moon, Laptop, Scale, Plug, Sparkles, type LucideIcon,
+  LayoutDashboard, LayoutGrid, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Network, Settings, Sun, Moon, Laptop, Scale, Plug, Sparkles, Flower2, Zap, Apple, type LucideIcon,
 } from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 
 const ICONS: Record<Surface, LucideIcon> = {
   workspace: LayoutDashboard,
+  mission: LayoutGrid,
   automations: Clock,
   attention: Bell,
   skills: Puzzle,
@@ -21,12 +22,19 @@ const ICONS: Record<Surface, LucideIcon> = {
   settings: Settings,
 }
 
-const THEME_ICON: Record<ThemePref, LucideIcon> = {
+// Partial (not exhaustive) so adding a new ThemePref never breaks typecheck —
+// unknown themes fall back to the system glyph at the call site.
+const THEME_ICON: Partial<Record<ThemePref, LucideIcon>> = {
   system: Laptop,
   light: Sun,
   dark: Moon,
   nebula: Sparkles,
+  sakura: Flower2,
+  cyberpunk: Zap,
+  cupertino: Apple,
 }
+
+const THEME_CYCLE: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino']
 
 /** Renders a lucide icon at the rail's standard size/color. */
 function Icon({ icon: Ic }: { icon: LucideIcon }) {
@@ -34,7 +42,8 @@ function Icon({ icon: Ic }: { icon: LucideIcon }) {
 }
 
 function nextTheme(p: ThemePref): ThemePref {
-  return p === 'system' ? 'light' : p === 'light' ? 'dark' : p === 'dark' ? 'nebula' : 'system'
+  const i = THEME_CYCLE.indexOf(p)
+  return THEME_CYCLE[(i + 1) % THEME_CYCLE.length]!
 }
 
 export function Rail(props: {
@@ -47,7 +56,7 @@ export function Rail(props: {
   const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
+  const order: Surface[] = ['workspace', 'mission', 'automations', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)
@@ -80,7 +89,7 @@ export function Rail(props: {
             className="rail-item"
             onClick={cycleTheme}
           >
-            <Icon icon={THEME_ICON[theme]} />
+            <Icon icon={THEME_ICON[theme] ?? Laptop} />
           </TooltipTrigger>
           <TooltipContent side="right">{`${tTheme('label')}：${tTheme(theme)}`}</TooltipContent>
         </Tooltip>

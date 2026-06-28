@@ -32,11 +32,12 @@ import { SteerBuffer } from '../steer-buffer.js'
 import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
+import { formatAskUserQuestion } from '../format/ask-user-question.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
-import { renderApprovalPreview } from '../format/approval-renderers.js'
+import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
@@ -46,7 +47,7 @@ import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import { buildWorkerDetailContent } from '../worker-detail.js'
-import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
+import { renderSidePanel, resolveSidePanelWidth, SIDE_PANEL_MIN_COLUMNS, type SidePanelInput } from '../side-panel.js'
 import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
 import {
@@ -108,10 +109,6 @@ export function looksLikeFilePath(input: string): boolean {
   const spaceIdx = rest.indexOf(' ')
   return spaceIdx === -1 || slashIdx < spaceIdx
 }
-
-/** 右侧面板触发阈值与宽度。 */
-const SIDE_PANEL_MIN_COLUMNS = 120
-const SIDE_PANEL_WIDTH = 32
 
 /**
  * 输入框线框字符集（按 separator 主题）。纯字面量，提升到模块级避免 renderLive
@@ -267,6 +264,14 @@ export class TuiApp {
   private todosProvider?: () => TodoItem[]
   /** 当前已批准计划指针访问器（main-ansi 读 PromptEngine） */
   private activePlanProvider?: () => string | undefined
+  /** 当前 GoalTracker 快照访问器 */
+  private goalTrackerProvider?: () => import('../../agent/goal-tracker.js').GoalTracker | null
+  /** 当前 PlanExecutionTrace 访问器 */
+  private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
+  /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
+  private planModeProvider?: () => boolean
+  /** Side panel 状态变化回调（用于持久化到 session metadata） */
+  private onSidePanelChange?: (open: boolean) => void
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
@@ -684,21 +689,18 @@ export class TuiApp {
       const inputVal = this.inputLine.value
       const inputIsPath = looksLikeFilePath(inputVal)
       if (inputVal.startsWith('/') && !inputIsPath) {
-        // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
-        if (!inputVal.includes(' ')) {
-          const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
-          if (key.name === 'up' && filtered.length > 0) {
-            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
-            this.renderLive()
-            return
-          }
-          if (key.name === 'down' && filtered.length > 0) {
-            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
-            this.renderLive()
-            return
-          }
-          // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
+        const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
+        if (key.name === 'up' && filtered.length > 0) {
+          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
+          this.renderLive()
+          return
         }
+        if (key.name === 'down' && filtered.length > 0) {
+          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
+          this.renderLive()
+          return
+        }
+        // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           this.inputLine.setValue('')
@@ -1597,8 +1599,8 @@ export class TuiApp {
     const value = this.inputLine.value
     const cursor = this.inputLine.cursor
 
-    // slash 命令补全（排除 `/file/path` 这类绝对路径）
-    if (value.startsWith('/') && !value.includes(' ') && !looksLikeFilePath(value)) {
+    // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
+    if (value.startsWith('/') && !looksLikeFilePath(value)) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -1827,6 +1829,34 @@ export class TuiApp {
     this.activePlanProvider = provider
   }
 
+  /**
+   * 注入 GoalTracker 访问器，供 GlanceBar 展示目标迭代/预算状态。
+   */
+  setGoalTrackerProvider(provider: () => import('../../agent/goal-tracker.js').GoalTracker | null): void {
+    this.goalTrackerProvider = provider
+  }
+
+  /**
+   * 注入 PlanExecutionTrace 访问器，供右侧面板展示计划步骤进度。
+   */
+  setPlanTraceProvider(provider: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null): void {
+    this.planTraceProvider = provider
+  }
+
+  /**
+   * 注入 plan-mode 状态访问器，供 GlanceBar 显示 plan 指示灯。
+   */
+  setPlanModeProvider(provider: () => boolean): void {
+    this.planModeProvider = provider
+  }
+
+  /**
+   * 注册 side panel 状态变化回调，用于把展开状态持久化到会话元数据。
+   */
+  setSidePanelChangeCallback(cb: (open: boolean) => void): void {
+    this.onSidePanelChange = cb
+  }
+
   /** 直接设置任务面板内容（供测试与 provider 刷新复用）。 */
   setTodos(items: TodoItem[]): void {
     this.state.todos = items
@@ -1841,15 +1871,16 @@ export class TuiApp {
 
   /** 设置右侧面板展开状态；若终端太窄或 overlay 激活则静默不展开。 */
   setSidePanelOpen(open: boolean): void {
-    if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
+    if (open && resolveSidePanelWidth(this.columns) === 0) return
     if (this.overlay.isActive()) return
     this.state.sidePanelOpen = open
+    try { this.onSidePanelChange?.(open) } catch { /* persistence failure is non-fatal */ }
     this.renderLive()
   }
 
   /** 查询右侧面板是否展开（对齐可见状态——窄终端下面板不可见即为关闭）。 */
   isSidePanelOpen(): boolean {
-    return this.state.sidePanelOpen && this.columns >= SIDE_PANEL_MIN_COLUMNS
+    return this.state.sidePanelOpen && resolveSidePanelWidth(this.columns) > 0
   }
 
   /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
@@ -2044,6 +2075,16 @@ export class TuiApp {
         })
         return
       }
+    }
+
+    // ask_user_question 用模态化边框卡片渲染，确保问题和选项完整可见。
+    if (name === 'ask_user_question') {
+      const formatted = formatAskUserQuestion({ content: finalContent, columns: this.columns }, this.theme)
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
     }
 
     const cardInput = {
@@ -2446,8 +2487,8 @@ export class TuiApp {
       return
     }
 
-    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS && this.state.sidePanelOpen
-    const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
+    const sidePanelWidth = this.state.sidePanelOpen ? resolveSidePanelWidth(this.columns) : 0
+    const showSidePanel = sidePanelWidth > 0
     const contentCols = this.columns - sidePanelWidth
     // 局部 cols：侧栏展开时用压缩后的主区宽度，否则用原始终端宽度。
     // 不改写 this.columns，避免异步回调读到临时值。
@@ -2473,6 +2514,46 @@ export class TuiApp {
       glanceContextRatio = this.metricsGlanceController.lastContextRatio
       glanceCost = this.estimateSessionCost()
     }
+
+    // 实时状态快照：goal / plan-mode / plan-trace / todo-summary
+    const goalSnapshot = (() => {
+      try {
+        const gt = this.goalTrackerProvider?.()
+        if (gt && gt.getStatus() !== 'complete') {
+          const verdict = gt.getLastVerdict()
+          return {
+            active: gt.getStatus() === 'active',
+            status: gt.getStatus(),
+            goal: gt.getGoal(),
+            iteration: gt.getIteration(),
+            maxIterations: gt.getMaxIterations(),
+            elapsedMs: gt.getWallClockElapsedMs(),
+            wallClockBudgetMs: gt.getWallClockBudgetMs(),
+            criteria: gt.getSuccessCriteria(),
+            criteriaMet: verdict?.criteriaMet,
+            criteriaUnmet: verdict?.criteriaUnmet,
+            criteriaTotal: verdict?.criteriaTotal,
+          }
+        }
+      } catch { /* provider 失败不应中断渲染 */ }
+      return undefined
+    })()
+    const planModeActive = (() => {
+      try { return this.planModeProvider?.() ?? false } catch { return false }
+    })()
+    const planTrace = (() => {
+      try { return this.planTraceProvider?.() ?? null } catch { return null }
+    })()
+    const todoSummary = (() => {
+      const t = this.state.todos
+      const total = t.length
+      if (total === 0) return undefined
+      return {
+        total,
+        done: t.filter(x => x.status === 'completed').length,
+        inProgress: t.filter(x => x.status === 'in_progress').length,
+      }
+    })()
 
     let lines: LiveRegionLine[] = []
     lines = []
@@ -2624,14 +2705,11 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const preview = renderApprovalPreview(p.name, p.input, cols - 4, this.theme)
+        const promptLines = formatApprovalPrompt({ toolName: p.name, input: p.input, columns: cols }, this.theme)
         lines.push({ text: '' })
-        lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
-        lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
-        for (const pv of preview) {
-          lines.push({ text: this.clampLine(` │ ${pv}`) })
+        for (const promptLine of promptLines) {
+          lines.push({ text: this.clampLine(promptLine) })
         }
-        lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'approve')}  ${keyHint('n', 'deny')}  ${keyHint('e', 'edit')} ───────────────`) })
       }
     }
 
@@ -2713,6 +2791,10 @@ export class TuiApp {
         cost: glanceCost,
         elapsedMs: Date.now() - this.state.turnStartMs,
         turnCount: this.state.turnNumber,
+        approvalMode: this._approvalMode,
+        planMode: planModeActive,
+        goal: goalSnapshot,
+        todoSummary,
       }, this.theme)
 
       const plainLeft = stripAnsiLen(leftStr)
@@ -2765,8 +2847,8 @@ export class TuiApp {
       }
       lines.push({ text: botBorder })
 
-      // 5b. slash 命令提示（输入以 / 开头且未含空格）
-      if (isSlash && !inputVal.includes(' ')) {
+      // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
+      if (isSlash) {
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
           lines.push({ text: this.clampLine(hintLine) })
         }
@@ -2813,6 +2895,8 @@ export class TuiApp {
         cacheHitRate: glanceCacheHitRate,
         cost: glanceCost,
         activePlan,
+        planTrace,
+        goal: goalSnapshot,
       }
       const panelLines = renderSidePanel(sidePanelInput, this.theme)
       lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)

@@ -24,7 +24,7 @@ import {
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
 // automations (was schedule), attention (was inbox), settings, git.
-export type Surface = 'workspace' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
+export type Surface = 'workspace' | 'mission' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
 
 export interface UiState {
   activeSessionId: string | null
@@ -45,13 +45,14 @@ export interface UiState {
   /** True when the user explicitly toggled review panel open (Cmd+Shift+B).
    *  Resets when the workspace width recovers above the responsive threshold. */
   reviewManuallyToggled: boolean
+  newSessionPrompt: string | null
 }
 
 type UiAction =
   | { type: 'setActive'; id: string | null }
   | { type: 'setProject'; projectId: string | null }
   | { type: 'setSurface'; surface: Surface }
-  | { type: 'openNew'; open: boolean }
+  | { type: 'openNew'; open: boolean; prompt?: string }
   | { type: 'setError'; error: string | null }
   | { type: 'markSeen'; sigs: string[] }
   | { type: 'setToolDensity'; density: ToolDensity }
@@ -78,7 +79,7 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'setSurface':
       return { ...state, surface: action.surface }
     case 'openNew':
-      return { ...state, newSessionOpen: action.open }
+      return { ...state, newSessionOpen: action.open, newSessionPrompt: action.prompt ?? null }
     case 'setError':
       return { ...state, error: action.error }
     case 'markSeen': {
@@ -90,9 +91,9 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'setToolDensity':
       return { ...state, toolDensity: action.density }
     case 'setSidebar':
-      return { ...state, sidebarVisible: action.visible }
+      return { ...state, sidebarVisible: action.visible, zenMode: action.visible ? false : state.zenMode }
     case 'setReview':
-      return { ...state, reviewVisible: action.visible }
+      return { ...state, reviewVisible: action.visible, zenMode: action.visible ? false : state.zenMode }
     case 'toggleZen': {
       const next = !state.zenMode
       return {
@@ -138,6 +139,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     activeProject: loadActiveProject(),
     surface: 'workspace' as Surface,
     newSessionOpen: false,
+    newSessionPrompt: null,
     error: null,
     attentionSeen: loadAttentionSeen(),
     toolDensity: loadToolDensity(),

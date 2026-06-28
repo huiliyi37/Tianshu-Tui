@@ -143,6 +143,11 @@ export interface DelegationRequest {
    *  from that context instead of starting fresh. The objective should
    *  describe the continuation task. */
   resumeWorkOrderId?: string
+  /** Per-request provider/model override (highest routing precedence). Threaded
+   *  onto the WorkOrder; the runtime factory builds a dedicated client for it.
+   *  Used by heterogeneous council seats. Silently falls back to the session
+   *  model when the provider is unknown or lacks credentials. */
+  modelOverride?: { provider: string; model: string }
 }
 
 export interface CoordinatorRun {
@@ -247,8 +252,16 @@ export interface DelegationCoordinatorConfig {
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
-  const words = objective.trim().split(/\s+/).filter(Boolean).length
-  return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
+  const trimmed = objective.trim()
+  const words = trimmed.split(/\s+/).filter(Boolean).length
+  // CJK text carries no whitespace, so whitespace word-count drastically
+  // undercounts Chinese/Japanese objectives — a fully-detailed Chinese task (and
+  // even the patcher's Chinese instruction prefix) reads as ~1 "word" and would
+  // be wrongly skipped, silently dispatching zero workers. Count CJK characters
+  // as tokens so substantive non-Latin objectives clear the gate. Additive: pure
+  // OR branch, so existing Latin behavior is unchanged.
+  const cjkChars = (trimmed.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) ?? []).length
+  return words >= 6 || cjkChars >= 8 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
 }
 
 /**
@@ -587,6 +600,28 @@ export class DelegationCoordinator {
 
   getState(): CoordinatorState {
     return this.state
+  }
+
+  /** Resolve a capability card for an explicit model override. Prefers an
+   *  existing card (same model in the primary provider) so tier/telemetry stay
+   *  accurate; otherwise clones a base card's quality numbers and swaps the
+   *  model name — the override model may live in a different provider not present
+   *  in modelCards. The real provider/client is resolved by runtimeFactory. */
+  private cardForModelOverride(model: string): ModelCapabilityCard {
+    const existing = this.config.modelCards.find(c => c.model === model)
+    if (existing) return existing
+    const base = this.config.modelCards[0]
+    if (base) return { ...base, model }
+    return {
+      model,
+      toolUseReliability: 0.8,
+      jsonStability: 0.8,
+      editSuccessRate: 0.7,
+      testRepairRate: 0.6,
+      contextWindow: 128_000,
+      cacheEconomics: 'strong',
+      recommendedTasks: ['code_edit', 'risky_refactor', 'test_failure_diagnosis'],
+    }
   }
 
   private selectModelForTask(task: CapabilityTask, preferredTier?: ModelTier, profile?: string): ModelCapabilityCard {
@@ -933,6 +968,7 @@ export class DelegationCoordinator {
             riskTier: request.riskTier,
             sessionTurn: request.sessionTurn,
             budget: request.budget,
+            modelOverride: request.modelOverride,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -947,6 +983,7 @@ export class DelegationCoordinator {
             authority: request.authority,
             riskTier: request.riskTier,
             sessionTurn: request.sessionTurn,
+            modelOverride: request.modelOverride,
             budget: request.budget,
           })
 
@@ -1064,7 +1101,13 @@ export class DelegationCoordinator {
     const preferredTier = tierInfluence.gate.applied
       ? tierInfluence.gate.effectiveTier
       : tierRecommendation.tier
-    let selected = this.selectModelForTask(task, preferredTier, order.profile)
+    // Per-order modelOverride wins over all routing (review override, workers
+    // routing, EFE, tier). The card is mostly telemetry/reporting (the real
+    // client is built by runtimeFactory from order.modelOverride); synthesize
+    // one when the override model isn't in the primary provider's cards.
+    let selected = order.modelOverride
+      ? this.cardForModelOverride(order.modelOverride.model)
+      : this.selectModelForTask(task, preferredTier, order.profile)
     const selectedTier = inferModelTierFromCard(selected)
     const tierShadow = this.buildTierShadow(order, selected, tierRecommendation)
     const tierGatedDecision = buildModelTierGatedDecisionEvent({
@@ -1099,8 +1142,18 @@ export class DelegationCoordinator {
     persistModelTierShadow(this.config.modelTierShadowStore, tierShadow)
     persistModelTierGatedDecision(this.config.modelTierShadowStore, tierGatedDecision)
     persistGatedInfluenceAudit(this.config.gatedInfluenceAuditStore ?? this.config.modelTierShadowStore, gatedInfluenceAudit)
-    // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
-    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
+    // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets.
+    // A profile may allowlist a tool that isn't registered in THIS session — gated
+    // tools (web_search), MCP tools, or a host-trimmed registry. filterToolRegistry
+    // is fail-closed and throws on any unknown name, which would kill the whole
+    // worker over one missing tool. Degrade gracefully instead: keep the tools that
+    // exist, drop the absent ones (with a warning), so the worker still runs.
+    const presentTools = order.allowedTools.filter(name => this.config.baseToolRegistry.has(name))
+    const missingTools = order.allowedTools.filter(name => !this.config.baseToolRegistry.has(name))
+    if (missingTools.length > 0) {
+      debugLog(`[worker-tools] order ${order.id} (${order.profile}): dropping ${missingTools.length} unregistered tool(s) [${missingTools.join(', ')}] — not in base registry this session`)
+    }
+    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, presentTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
     // R3.1: the runtime factory returns a generic default maxTurns; clamp it to
     // the work order's per-profile budget so caps like reviewer=6 actually bite.
@@ -1714,6 +1767,7 @@ export class DelegationCoordinator {
             riskTier: r.riskTier,
             sessionTurn: r.sessionTurn,
             budget: r.budget,
+            modelOverride: r.modelOverride,
           })
         : createReadOnlyWorkOrder({
             id: stableId,
@@ -1729,6 +1783,7 @@ export class DelegationCoordinator {
             riskTier: r.riskTier,
             sessionTurn: r.sessionTurn,
             budget: r.budget,
+            modelOverride: r.modelOverride,
           })
       if (queue.enqueue(order)) {
         orders.push(order)

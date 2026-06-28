@@ -116,20 +116,34 @@ const VERB_INTENT_MAP: Record<string, IntentTaskKind> = {
 /**
  * 从上一轮 Assistant 回复中解析用户提及的编号（如 P1/P2/T1 等）所指向的具体任务/内容。
  * 如果 lastAssistantMessage 中未找到，则从持久化的 taskList 中回溯查找（跨多轮支持）。
+ * 也支持序数词引用（"第一个""第二项""第3个"），解析为对应顺序的列表条目。
  */
 export function resolveContextualIdentifier(
   userMessage: string,
   lastAssistantMessage?: string,
   taskList?: readonly TaskListItem[]
 ): ContextualTask[] {
+  const resolved: ContextualTask[] = []
+
+  // 0. 序数词引用解析（"第一个""第二项""第3个"）
+  const ordinalRefs = extractOrdinalReferences(userMessage)
+  if (ordinalRefs.length > 0) {
+    for (const ord of ordinalRefs) {
+      const item = resolveOrdinal(ord.index, lastAssistantMessage, taskList)
+      if (item) {
+        resolved.push({ identifier: `第${ord.index}项`, resolvedContent: item })
+      }
+    }
+  }
+
   // 1. 找出用户消息中所有的编号（不区分大小写）
   const idRegex = /\b([PpTtSs]\d+|TASK-\d+|ISSUE-\d+|BUG-\d+)\b/g
   const matches = userMessage.match(idRegex)
-  if (!matches) return []
+  if (!matches && resolved.length === 0) return resolved
+  if (!matches) return resolved
 
   const uniqueIds = [...new Set(matches.map(m => m.toUpperCase()))]
   const unresolved = new Set(uniqueIds)
-  const resolved: ContextualTask[] = []
 
   // 2. 优先从 lastAssistantMessage 中解析
   if (lastAssistantMessage) {
@@ -152,6 +166,93 @@ export function resolveContextualIdentifier(
   }
 
   return resolved
+}
+
+// 中文数字 → 阿拉伯数字映射
+const CN_NUM: Record<string, number> = {
+  '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+  '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+}
+
+/** 解析用户消息中的序数词引用，返回 (1-based) 索引列表 */
+function extractOrdinalReferences(text: string): Array<{ raw: string; index: number }> {
+  // 匹配 "第一个""第二项""第3个""第十条""第2步" 等
+  // 来源文本片段: "做第一个" / "就做第二项" / "第3个" — intent-sanitizer.ts:resolveContextualIdentifier 调用方
+  const regex = /第([一二三四五六七八九十]+|\d+)[个项条步]/g
+  const results: Array<{ raw: string; index: number }> = []
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(text)) !== null) {
+    const numStr = m[1]
+    if (numStr === undefined) continue
+    let index: number
+    if (/^\d+$/.test(numStr)) {
+      index = parseInt(numStr, 10)
+    } else {
+      index = parseChineseNumber(numStr)
+    }
+    if (index > 0) {
+      results.push({ raw: m[0], index })
+    }
+  }
+  return results
+}
+
+/** 解析中文数字字符串（支持 1-99，如 "十"→10, "十二"→12, "二十"→20） */
+function parseChineseNumber(s: string): number {
+  if (s === '十') return 10
+  if (s.startsWith('十')) return 10 + (CN_NUM[s[1]!] ?? 0)
+  if (s.endsWith('十')) return (CN_NUM[s[0]!] ?? 0) * 10
+  if (s.includes('十')) {
+    const parts = s.split('十')
+    const tens = CN_NUM[parts[0]!] ?? 1
+    const ones = CN_NUM[parts[1]!] ?? 0
+    return tens * 10 + ones
+  }
+  return CN_NUM[s] ?? 0
+}
+
+/**
+ * 从 lastAssistantMessage 的列表条目中按顺序取第 N 个（1-based）。
+ * 先尝试解析为结构化列表（- / * / 1. 等开头），失败则回退到 taskList。
+ */
+function resolveOrdinal(
+  index: number,
+  lastAssistantMessage?: string,
+  taskList?: readonly TaskListItem[]
+): string | null {
+  // 尝试从 lastAssistantMessage 提取列表条目
+  if (lastAssistantMessage) {
+    const items = extractListItems(lastAssistantMessage)
+    if (items.length > 0 && index <= items.length) {
+      return items[index - 1] ?? null
+    }
+  }
+  // 回退到 taskList
+  if (taskList && index <= taskList.length) {
+    return taskList[index - 1]?.content ?? null
+  }
+  return null
+}
+
+/** 从文本中提取列表条目内容（支持 - / * / 数字. / ### 开头的行） */
+function extractListItems(text: string): string[] {
+  const lines = text.split('\n')
+  const items: string[] = []
+  // 匹配: "- xxx", "* xxx", "1. xxx", "### xxx" 等 markdown 列表格式
+  // 来源文本片段: "- P1: 修复 loop.ts 内存泄露" / "1. 修复登录报错问题" — intent-sanitizer.ts 测试用例
+  const listLineRegex = /^\s*(?:[-*•]|\d+[.)]\s|#+\s)(.+)/
+  for (const line of lines) {
+    const m = line.match(listLineRegex)
+    if (m?.[1]) {
+      const content = m[1].trim()
+      // 过滤掉纯编号前缀（如 "P1: xxx" 取 "xxx"），保留有意义的内容
+      const cleaned = content.replace(/^(?:\*?\*?[A-Za-z]*\d+\*?\*?\s*[:：\-\.]\s*)/, '').trim()
+      if (cleaned.length > 2) {
+        items.push(cleaned)
+      }
+    }
+  }
+  return items
 }
 
 /** 从纯文本中按行匹配编号→内容映射 */
@@ -250,12 +351,36 @@ export function extractSemanticVerb(text: string): string | null {
 /**
  * 动词到 taskKind 的映射 — 当正则匹配产生多个候选时，
  * 用动词语义来决定主要 taskKind。
+ *
+ * 高优先级类型（security_safety, bug_fix）一旦匹配，不应被单动词
+ * 降级到次要位置——例如 "test the bug fix" 中动词 test 映射到
+ * verification，但 bug_fix 的实际意图权重更高。
  */
+// 不可被单动词降级的高优先级 taskKind 集合
+const UNDEMOTEABLE_KINDS: ReadonlySet<IntentTaskKind> = new Set([
+  'security_safety',
+  'bug_fix',
+])
+
 export function disambiguateByVerb(
   candidates: IntentTaskKind[],
   verb: string
 ): IntentTaskKind[] {
   const preferred = VERB_INTENT_MAP[verb.toLowerCase()]
+
+  // 如果候选中存在不可降级类型，优先保留它们在原顺序（按 KIND_RANK 排序后的顺序），
+  // 不让动词将其他类型提升到它们之上
+  const undemoteable = candidates.filter(c => UNDEMOTEABLE_KINDS.has(c))
+  if (undemoteable.length > 0) {
+    // 在不可降级类型中，如果动词映射到的类型恰在其中，可以调整它们之间的顺序
+    if (preferred && undemoteable.includes(preferred)) {
+      const rest = candidates.filter(c => c !== preferred)
+      return [preferred, ...rest]
+    }
+    // 否则保持原顺序，动词不影响高优先级类型的排位
+    return candidates
+  }
+
   if (preferred && candidates.includes(preferred)) {
     return [preferred, ...candidates.filter(c => c !== preferred)]
   }

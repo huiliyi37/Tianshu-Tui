@@ -7,8 +7,11 @@ import { SseStream } from '../sse-stream.js'
 function fakeRes(opts: { throwOnWrite?: boolean } = {}) {
   const writes: string[] = []
   let ended = false
+  let headers: Record<string, unknown> = {}
   const res = {
-    writeHead() {},
+    writeHead(_status: number, h?: Record<string, unknown>) {
+      if (h) headers = h
+    },
     write(chunk: string) {
       if (opts.throwOnWrite) throw new Error('EPIPE')
       writes.push(chunk)
@@ -18,8 +21,19 @@ function fakeRes(opts: { throwOnWrite?: boolean } = {}) {
       ended = true
     },
   }
-  return { res: res as unknown as ServerResponse, writes, isEnded: () => ended }
+  return { res: res as unknown as ServerResponse, writes, isEnded: () => ended, getHeaders: () => headers }
 }
+
+test('sets text/event-stream + CORS headers so the Tauri webview is not blocked', () => {
+  const { res, getHeaders } = fakeRes()
+  new SseStream(res)
+  const h = getHeaders()
+  assert.equal(h['Content-Type'], 'text/event-stream')
+  // Regression: the SSE response bypasses the router's CORS header (handled:true),
+  // so it must set Access-Control-Allow-Origin itself — otherwise the cross-origin
+  // webview blocks the stream and the client loops forever on "reconnecting".
+  assert.equal(h['Access-Control-Allow-Origin'], '*')
+})
 
 test('send emits an SSE event frame', () => {
   const { res, writes } = fakeRes()

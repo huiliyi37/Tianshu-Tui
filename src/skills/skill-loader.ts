@@ -300,6 +300,39 @@ export class SkillRegistry {
     parts.push('</skills>')
     return parts.join('\n')
   }
+
+  /**
+   * Build an `<invoked-skills>` block for skills explicitly loaded this session.
+   * Unlike the discovery block, this includes the FULL body so the model keeps
+   * following the protocol after context compaction. The block is rendered into
+   * the dynamic appendix (cache-safe tail), not the frozen base.
+   */
+  renderInvokedSkillsBlock(names: string[], cwd: string): string | null {
+    const skills: SkillDefinition[] = []
+    for (const name of [...new Set(names)]) {
+      const skill = this.get(name) ?? this.list().find(s => s.name.toLowerCase() === name.toLowerCase())
+      if (skill) skills.push(skill)
+    }
+    if (skills.length === 0) return null
+
+    const blocks: string[] = []
+    for (const skill of skills) {
+      let block = `<skill name="${skill.name}">\n${skill.body}\n</skill>`
+      if (skill.skillDir) {
+        const files = listSkillFiles(skill.skillDir)
+        if (files.length > 0) {
+          block += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
+        }
+      }
+      blocks.push(block)
+    }
+
+    return [
+      '<invoked-skills note="These skills were explicitly invoked this session. Continue following their instructions unless the user says otherwise. When a skill workflow is fully finished, call skill(name=\"<name>\", complete=true) to release it.">',
+      ...blocks,
+      '</invoked-skills>',
+    ].join('\n')
+  }
 }
 
 /**

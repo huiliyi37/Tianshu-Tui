@@ -13,6 +13,9 @@ import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
+/** 宽度口径：与 LiveEngine 一致，ambiguous 符号按宽处理。 */
+const WIDE = { ambiguousAsWide: true }
+
 export interface ApprovalRenderer {
   /** 渲染审批预览行（每行已做列宽控制，调用方直接显示） */
   render(toolName: string, input: Record<string, unknown>, columns: number, theme: RivetTheme): string[]
@@ -208,5 +211,69 @@ export function renderApprovalPreview(
 ): string[] {
   const renderer = getApprovalRenderer(toolName)
   return renderer.render(toolName, input, columns, theme)
+}
+
+const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
+
+/** 左对齐填充或截断到目标宽度（ANSI 安全）。 */
+function fitLine(text: string, width: number): string {
+  const plain = text.replace(ANSI_RE, '')
+  const pad = width - displayWidth(plain, WIDE)
+  if (pad < 0) return truncateToDisplayWidth(text, width, WIDE)
+  if (pad === 0) return text
+  return text + ' '.repeat(pad)
+}
+
+export interface FormatApprovalPromptInput {
+  toolName: string
+  input: Record<string, unknown>
+  columns: number
+}
+
+/**
+ * 渲染 approval 模态对话框。
+ *
+ * 把原来的 `[y] approve [n] deny [e] edit` 一行按键提示升级为带边框的选项列表，
+ * 默认推荐项（Approve）高亮并带箭头标记，让用户一眼看清可选操作。
+ */
+export function formatApprovalPrompt(input: FormatApprovalPromptInput, theme: RivetTheme): string[] {
+  const MIN_BOX_WIDTH = 40
+  const DEFAULT_BOX_WIDTH = 80
+  const boxWidth = Math.max(MIN_BOX_WIDTH, Math.min(DEFAULT_BOX_WIDTH, input.columns - 2))
+  const innerWidth = boxWidth - 4
+
+  const border = (text: string) => color(text, theme.warning)
+  const title = color('APPROVAL REQUIRED', theme.warning, { bold: true })
+
+  const lines: string[] = []
+  lines.push(border('┌' + '─'.repeat(boxWidth - 2) + '┐'))
+  lines.push(border('│') + ' ' + fitLine(title, innerWidth) + ' ' + border('│'))
+
+  lines.push(border('├' + '─'.repeat(boxWidth - 2) + '┤'))
+  lines.push(border('│') + ' ' + fitLine(color(`Tool: ${input.toolName}`, theme.muted), innerWidth) + ' ' + border('│'))
+
+  const previewLines = renderApprovalPreview(input.toolName, input.input, innerWidth, theme)
+  for (const pv of previewLines) {
+    lines.push(border('│') + ' ' + fitLine(pv, innerWidth) + ' ' + border('│'))
+  }
+
+  lines.push(border('├' + '─'.repeat(boxWidth - 2) + '┤'))
+
+  const options = [
+    { marker: '▶', keys: 'Enter / y', label: 'Approve', hint: 'default', color: theme.success },
+    { marker: ' ', keys: 'Esc / n', label: 'Deny', hint: '', color: theme.error },
+    { marker: ' ', keys: 'e', label: 'Edit', hint: 'edit JSON', color: theme.secondary },
+  ]
+
+  for (const opt of options) {
+    const keyColored = color(opt.keys, opt.color, { bold: true })
+    const labelColored = color(opt.label, opt.color)
+    const hintColored = opt.hint ? color(` (${opt.hint})`, theme.dim) : ''
+    const line = `${opt.marker} ${keyColored}  ${labelColored}${hintColored}`
+    lines.push(border('│') + ' ' + fitLine(line, innerWidth) + ' ' + border('│'))
+  }
+
+  lines.push(border('└' + '─'.repeat(boxWidth - 2) + '┘'))
+  return lines
 }
 

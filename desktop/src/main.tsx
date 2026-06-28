@@ -9,6 +9,7 @@ import { initFontWeight } from './lib/font-weight'
 import { initFontFamily } from './lib/font-family'
 import { initGlassMode } from './lib/glass'
 import { initGlassCustom } from './lib/glass-custom'
+import { initUiDensity } from './lib/ui-density'
 import { initI18n } from './i18n'
 import './styles/tokens.css'
 import './styles.css'
@@ -21,6 +22,7 @@ initFontWeight()
 initFontFamily()
 initGlassMode()
 initGlassCustom()
+initUiDensity()
 initI18n()
 
 const queryClient = new QueryClient({

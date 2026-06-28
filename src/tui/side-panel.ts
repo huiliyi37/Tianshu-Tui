@@ -10,8 +10,9 @@
 import type { RivetTheme } from './theme.js'
 import type { TodoItem } from '../tools/todo-store.js'
 import type { FleetWorkerView } from './fleet-registry.js'
+import type { PlanExecutionTrace, PlanStep } from '../agent/plan-execution-trace.js'
 import { color } from './engine/ansi.js'
-import { formatTokenProgressBar } from './format/glance-bar.js'
+import { formatTokenProgressBar, type GoalStateSnapshot } from './format/glance-bar.js'
 import { formatTaskList } from './format/task-list.js'
 import { formatWorkerRow } from './format/worker-fleet.js'
 import { displayWidth, truncateToDisplayWidth } from './width.js'
@@ -33,6 +34,10 @@ export interface SidePanelInput {
   cost?: number
   /** 当前已批准计划指针（XML 字符串），可选 */
   activePlan?: string
+  /** 当前计划执行轨迹，可选 */
+  planTrace?: PlanExecutionTrace | null
+  /** 当前目标状态快照，可选 */
+  goal?: GoalStateSnapshot
 }
 
 /** 最多展示的 worker 行数（超出截断）。 */
@@ -40,6 +45,16 @@ const MAX_WORKERS = 5
 
 /** 任务区最大行数（含标题与摘要）。 */
 const MAX_TASK_ROWS = 6
+
+/** 展开右侧面板所需的最小终端宽度。 */
+export const SIDE_PANEL_MIN_COLUMNS = 100
+
+/** 根据终端宽度选择侧栏宽度（100-119 用 24 列，≥120 用 32 列，<100 不展开）。 */
+export function resolveSidePanelWidth(columns: number): number {
+  if (columns >= 120) return 32
+  if (columns >= SIDE_PANEL_MIN_COLUMNS) return 24
+  return 0
+}
 
 /**
  * 渲染右侧面板为固定宽度的行数组。
@@ -101,6 +116,12 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(line(`${color('⚙', theme.secondary)} ${truncateStr(toolName, contentW - 4)}${dim(elapsed)}`))
   }
 
+  // ── Section: 目标（Goal）──
+  if (input.goal) {
+    lines.push(sectionDivider())
+    lines.push(...formatGoalSection(input.goal, contentW, theme))
+  }
+
   // ── Section: 任务列表（复用 formatTaskList）──
   lines.push(sectionDivider())
   const taskLines = formatTaskList(input.todos, theme, { width: contentW, maxRows: MAX_TASK_ROWS, showProgressBar: false })
@@ -130,11 +151,19 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   // ── Section: 当前已批准计划 ──
   const plan = parseActivePlan(input.activePlan)
-  if (plan) {
+  const planTrace = input.planTrace
+  if (plan || (planTrace && planTrace.steps.length > 0)) {
     lines.push(sectionDivider())
     lines.push(line(color('◈ 计划', theme.secondary, { bold: true })))
-    lines.push(line(truncateStr(plan.title, contentW)))
-    lines.push(line(dim(truncateStr(plan.path, contentW))))
+    if (plan) {
+      lines.push(line(truncateStr(plan.title, contentW)))
+      if (plan.path) lines.push(line(dim(truncateStr(plan.path, contentW))))
+    }
+    if (planTrace && planTrace.steps.length > 0) {
+      const { summary, stepLines } = formatPlanTrace(planTrace, contentW, theme)
+      lines.push(line(dim(summary)))
+      for (const sl of stepLines) lines.push(line(sl))
+    }
   }
 
   // ── Section: Token 仪表 ──
@@ -222,4 +251,66 @@ function formatElapsedShort(ms: number): string {
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return `${mins}m${secs}s`
+}
+
+function formatGoalSection(goal: GoalStateSnapshot, contentW: number, theme: RivetTheme): string[] {
+  const out: string[] = []
+  const statusLabels: Record<string, string> = {
+    active: '进行中',
+    paused: '已暂停',
+    blocked: '已阻塞',
+  }
+  const statusColor =
+    goal.status === 'blocked' ? theme.error
+      : goal.status === 'paused' ? theme.warning
+      : theme.secondary
+  out.push(color(`◆ 目标 · ${statusLabels[goal.status] ?? goal.status}`, statusColor, { bold: true }))
+  out.push(truncateStr(goal.goal, contentW))
+
+  const iterRatio = goal.maxIterations > 0 ? goal.iteration / goal.maxIterations : 0
+  const iterBar = formatTokenProgressBar(iterRatio, theme)
+  out.push(`${color('iter', theme.dim)} ${iterBar}`)
+
+  const elapsedStr = formatElapsedShort(goal.elapsedMs)
+  const budgetStr = goal.wallClockBudgetMs !== undefined
+    ? ` / ${formatElapsedShort(goal.wallClockBudgetMs)}`
+    : ''
+  out.push(color(`⏱ ${elapsedStr}${budgetStr}`, theme.dim))
+
+  if (goal.criteriaTotal !== undefined && goal.criteriaTotal > 0) {
+    out.push(color(`验收 ${goal.criteriaMet ?? 0}/${goal.criteriaTotal}`, theme.dim))
+  } else if (goal.criteria.length > 0) {
+    out.push(color(`验收项 ${goal.criteria.length} 项`, theme.dim))
+  }
+  return out
+}
+
+function formatPlanTrace(trace: PlanExecutionTrace, contentW: number, theme: RivetTheme) {
+  const icons: Record<PlanStep['status'], string> = {
+    pending: '○',
+    active: '◐',
+    done: '☒',
+    skip: '⊘',
+    replanned: '↻',
+  }
+  const colors: Record<PlanStep['status'], string> = {
+    pending: theme.muted,
+    active: theme.primary,
+    done: theme.dim,
+    skip: theme.dim,
+    replanned: theme.warning,
+  }
+  const done = trace.steps.filter(s => s.status === 'done').length
+  const summary = `${done}/${trace.steps.length} · ${trace.status}`
+  const maxDescW = Math.max(0, contentW - 4) // icon + space + left pad
+  const stepLines: string[] = []
+  for (const step of trace.steps.slice(0, 8)) {
+    const icon = color(icons[step.status], colors[step.status])
+    const desc = color(truncateStr(` ${step.description}`, maxDescW), colors[step.status])
+    stepLines.push(`  ${icon}${desc}`)
+  }
+  if (trace.steps.length > 8) {
+    stepLines.push(color(`  … +${trace.steps.length - 8}`, theme.muted))
+  }
+  return { summary, stepLines }
 }

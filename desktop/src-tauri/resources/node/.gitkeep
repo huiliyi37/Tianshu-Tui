@@ -1,0 +1,4 @@
+# Keep this directory in git. The platform Node.js binary is fetched here at
+# build time by scripts/fetch-node-runtime.js into <os>-<arch>/node[.exe] and
+# bundled via tauri.conf.json (bundle.resources: "resources/node" -> "node-runtime").
+# The binaries themselves are gitignored; only this placeholder is tracked.

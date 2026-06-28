@@ -2,7 +2,7 @@
  * T9 格式化函数 — spinner 状态行（运行态指示器）。
  *
  * 与 commit 37cbed7b 同步：spinner 只承担"正在跑"指示，词静态为 'thinking'，
- * 配合 elapsed 计时，例如 `⠹ thinking… 12s`。不再做花活词池轮换，也不再
+ * 配合 elapsed 计时，例如 `◐ thinking… 12s`。不再做花活词池轮换，也不再
  * 在末尾追加 esc 中断提示。
  * - stall（10s 无 token）时整行转琥珀色。
  * - 提供 ASCII fallback 兼容。
@@ -11,7 +11,7 @@
 import chalk from 'chalk'
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
-import { brailleSpinnerFrame } from '../braille-spinner.js'
+import { circleSpinnerFrame } from '../braille-spinner.js'
 
 export type SpinnerPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
 
@@ -19,7 +19,7 @@ const ASCII_FRAMES = ['-', '\\', '|', '/'] as const
 
 function spinnerFrame(tick: number, useAscii: boolean): string {
   if (useAscii) return ASCII_FRAMES[((tick % 4) + 4) % 4]!
-  return brailleSpinnerFrame(tick)
+  return circleSpinnerFrame(tick)
 }
 
 export function formatElapsedHuman(ms: number): string {
@@ -38,9 +38,9 @@ export interface SpinnerStatusInput {
 const PHASE_LABELS: Record<SpinnerPhase, string> = {
   idle: '',
   thinking: 'thinking…',
-  streaming: 'streaming…',
-  analyzing: 'analyzing…',
-  waiting: 'waiting…',
+  streaming: 'thinking…',
+  analyzing: 'thinking…',
+  waiting: 'thinking…',
 }
 
 export function formatSpinnerStatus(input: SpinnerStatusInput, theme: RivetTheme): string | null {

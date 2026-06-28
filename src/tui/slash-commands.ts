@@ -36,7 +36,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
-import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles, importSkillsIntoRivet } from '../skills/skill-loader.js'
 import { listSkillDrafts, approveSkillDraft, rejectSkillDraft } from '../agent/skill-distill.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
@@ -54,6 +54,10 @@ import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
 import { switchAgentRuntime, switchAgentSession } from '../bootstrap.js'
+import { loadTodos, setTodoSession } from '../tools/todo.js'
+import { restoreGoalTracker } from '../agent/goal-persist.js'
+import { setPlanSession } from '../agent/plan-store.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
 import type { ChangeSet } from '../agent/review-discipline.js'
@@ -67,6 +71,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
+/permission [status|mode|allow|deny|bash|remove|reset|test] — Manage permission mode and rules
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -89,10 +94,10 @@ const HELP_TEXT = `Available commands:
 /mcp — Show MCP server status
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
-/skill [list|<name>|review|approve <name>|reject <name>] — List/load skills; review auto-distilled drafts
+/skill [list|install <name>|import <name>|<name>|off <name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
-/plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
+/plan close <file> --tasks <range|all> [--preview] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
 /council <task> [--seats id1,id2,...] [--rounds 1-2] — Convene a star-domain council (single round; --rounds 2 enables a rebuttal round)
@@ -112,8 +117,12 @@ const HELP_TEXT = `Available commands:
 /todo [list|add <content>|done <id>|skip <id>|move <id> up|down] — Manage task list
 /plan-template [list|<name>|save <name>] — Reusable plan templates
 /team-resume [groupId] — Resume team execution from wave checkpoint
-/goal <objective> — Set autonomous goal for multi-turn execution
-/cancel-goal — Cancel autonomous goal
+/goal <objective> [--max N] [--budget M] [--criteria '["..."]'] — Set autonomous goal
+/goal-status — Show current goal state
+/goal-pause — Pause active goal
+/goal-resume — Resume paused/blocked goal
+/goal-cancel — Cancel autonomous goal
+/goal-criteria [set '["..."]'] — View or set success criteria
 /rollback [<N>] — Rollback file changes (alias of /undo)
 /write-plan — Write current plan to file
 Ctrl+C — Interrupt current turn (press twice to exit)`
@@ -195,6 +204,82 @@ async function collectDirtyFiles(cwd: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+interface ParsedGoalArgs {
+  goalText: string
+  maxIterations?: number
+  wallClockMs?: number
+  criteria?: string[]
+}
+
+/** 解析 /goal 命令行参数，支持 --max N / --budget M / --criteria '["..."]'
+ *  其余部分合并为目标描述。 */
+function parseGoalArgs(parts: string[]): ParsedGoalArgs {
+  const out: ParsedGoalArgs = { goalText: '' }
+  const textParts: string[] = []
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!
+    if (p === '--max' && parts[i + 1]) {
+      const n = Number(parts[i + 1])
+      if (Number.isInteger(n) && n > 0) out.maxIterations = n
+      i++
+      continue
+    }
+    if (p === '--budget' && parts[i + 1]) {
+      const n = Number(parts[i + 1])
+      if (!Number.isNaN(n) && n > 0) out.wallClockMs = Math.round(n * 60000)
+      i++
+      continue
+    }
+    if (p === '--criteria' && parts[i + 1]) {
+      try {
+        const parsed = JSON.parse(parts[i + 1]!)
+        if (Array.isArray(parsed) && parsed.every((c: unknown) => typeof c === 'string')) {
+          out.criteria = parsed as string[]
+        }
+      } catch { /* ignore invalid JSON */ }
+      i++
+      continue
+    }
+    textParts.push(p)
+  }
+  out.goalText = textParts.join(' ').trim()
+  return out
+}
+
+/** 把 GoalTracker 状态持久化到会话目录（best-effort）。 */
+async function persistGoalState(ctx: SlashHandlerContext, tracker: import('../agent/goal-tracker.js').GoalTracker): Promise<void> {
+  if (!ctx.currentSessionId) return
+  try {
+    const { saveGoalState } = await import('../agent/goal-persist.js')
+    const { getSessionDir } = await import('../agent/session-persist.js')
+    saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
+  } catch { /* best-effort */ }
+}
+
+/** 格式化当前 goal 状态供 /goal-status 使用。 */
+function formatGoalStatus(tracker: import('../agent/goal-tracker.js').GoalTracker): string {
+  const status = tracker.getStatus()
+  const statusLabels: Record<string, string> = { active: '进行中', paused: '已暂停', blocked: '已阻塞', complete: '已完成' }
+  const lines = [
+    `🎯 ${tracker.getGoal()}`,
+    `状态: ${statusLabels[status] ?? status}`,
+    `迭代: ${tracker.getIteration()}/${tracker.getMaxIterations()}`,
+    `已用时间: ${Math.round(tracker.getWallClockElapsedMs() / 1000)}s`,
+  ]
+  const budget = tracker.getWallClockBudgetMs()
+  if (budget !== undefined) lines.push(`时间预算: ${Math.round(budget / 60000)}m`)
+  const criteria = tracker.getSuccessCriteria()
+  if (criteria.length > 0) {
+    lines.push('验收项:')
+    criteria.forEach((c, i) => lines.push(`  ${i + 1}. ${c}`))
+  }
+  const verdict = tracker.getLastVerdict()
+  if (verdict) {
+    lines.push(`最近核验: ${verdict.overall} · ${verdict.criteriaMet}/${verdict.criteriaTotal} 项通过`)
+  }
+  return lines.join('\n')
 }
 
 function formatClaimLine(claim: import('../context/claims.js').ContextClaim): string {
@@ -283,6 +368,8 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   if (workflow) return workflow.prompt
   const custom = resolveCustomCommand(cwd, input)
   if (custom) return custom
+  const skillPrompt = resolveSkillPrompt(input, cwd)
+  if (skillPrompt !== null) return skillPrompt
   // /review [max] [focus description] — map to deliver_task instruction for the agent
   const reviewMatch = input.match(/^\/review(?:\s+(max))?(?:\s+(.*))?$/i)
   if (reviewMatch) {
@@ -299,6 +386,33 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   }
   // Unrecognized slash command — return null to signal "blocked"
   return null
+}
+
+/**
+ * Resolve `/skill <name> [user task...]` into the skill's full body prompt.
+ * Reserved subcommands (list/install/etc.) and unknown skills return null so
+ * they fall back to the slash handler's local behavior or error message.
+ */
+function resolveSkillPrompt(input: string, cwd: string): string | null {
+  const match = input.trim().match(/^\/skill\s+(\S+)(?:\s+(.*))?$/s)
+  if (!match) return null
+  const name = match[1]!
+  const userTask = match[2]?.trim() ?? ''
+  const reserved = new Set(['list', 'ls', 'install', 'import', 'review', 'drafts', 'approve', 'reject', 'off', 'complete'])
+  if (reserved.has(name.toLowerCase())) return null
+  const skill = skillRegistry.get(name) ?? skillRegistry.list().find(s => s.name.toLowerCase() === name.toLowerCase())
+  if (!skill) return null
+  let prompt = `[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`
+  if (skill.skillDir) {
+    const files = listSkillFiles(skill.skillDir)
+    if (files.length > 0) {
+      prompt += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
+    }
+  }
+  if (userTask) {
+    prompt += `\n\nUser task: ${userTask}`
+  }
+  return prompt
 }
 
 /**
@@ -653,44 +767,36 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const goalText = parts.slice(1).join(' ').trim()
-      if (!goalText) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description>\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the iteration budget is exhausted.\nCancel with /cancel-goal.' }))
+      const parsed = parseGoalArgs(parts.slice(1))
+      if (!parsed.goalText) {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description> [--max N] [--budget M] [--criteria \'["..."]\']\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the budget is exhausted.\nCancel with /goal-cancel.' }))
         setIsStreaming(false)
         return true
       }
-      // Dynamic import to avoid circular dependency
       const { GoalTracker, buildGoalModePrompt } = await import('../agent/goal-tracker.js')
-      const maxIterations = Math.max(50, Math.floor(ctx.maxTokens / 4000))
+      const maxIterations = parsed.maxIterations ?? Math.max(50, Math.floor(ctx.maxTokens / 4000))
       const tracker = new GoalTracker({
-        goal: goalText,
+        goal: parsed.goalText,
         maxIterations,
         contextWindow: ctx.maxTokens,
+        wallClockMs: parsed.wallClockMs,
         maxJudgeRuns: ctx.agent.config.goalJudge?.maxRuns,
       })
+      if (parsed.criteria) {
+        tracker.setSuccessCriteria(parsed.criteria)
+      }
       ctx.agent.setGoalTracker(tracker)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = tracker
-      // Persist initial goal state so it survives session restart.
-      if (ctx.currentSessionId) {
-        try {
-          const { saveGoalState } = await import('../agent/goal-persist.js')
-          const { getSessionDir } = await import('../agent/session-persist.js')
-          saveGoalState(getSessionDir(ctx.agent.cwd), ctx.currentSessionId, tracker)
-        } catch { /* best-effort */ }
-      }
-      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${goalText}\nMax iterations: ${maxIterations}. Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /cancel-goal to abort.\nUse /goal-resume to resume a paused/blocked goal.` }))
-      // Side-path: extract concrete success criteria the completion judge will
-      // verify against. Async (never blocks goal start); criteria default to a
-      // generic template on failure, and the judge does wide judgment if empty.
-      // Uses a dedicated cheap client to avoid sharing the main session's
-      // StreamClient (lifecycle controller / socket pool contention).
-      if (ctx.agent.config.goalJudge?.enabled !== false) {
+      await persistGoalState(ctx, tracker)
+      const budgetHint = parsed.wallClockMs !== undefined
+        ? `Wall-clock budget: ${Math.round(parsed.wallClockMs / 60000)}m. `
+        : ''
+      pushStatic(createLogEntry({ type: 'system', content: `🎯 Goal activated: ${parsed.goalText}\nMax iterations: ${maxIterations}. ${budgetHint}Output "GOAL ACHIEVED" to complete, "GOAL BLOCKED" for blockers, or /goal-cancel to abort.\nUse /goal-pause to pause, /goal-resume to resume.` }))
+      if (ctx.agent.config.goalJudge?.enabled !== false && !parsed.criteria) {
         void (async () => {
           try {
             const { extractGoalCriteria, completionFromClient, buildCheapClient } = await import('../agent/goal-criteria.js')
             const { loadConfig } = await import('../config/manager.js')
-            // Try dedicated cheap client first; fall back to main client.
             const cfg = await loadConfig()
             const cheapProfile = cfg.workers?.profiles?.cheap
             const allProviders = ctx.agent.config.allProviders ?? {}
@@ -703,18 +809,17 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
             } else {
               completion = completionFromClient(ctx.agent.config.client, ctx.agent.config.promptEngine.getModel())
             }
-            const criteria = await extractGoalCriteria(goalText, completion)
+            const criteria = await extractGoalCriteria(parsed.goalText, completion)
             tracker.setSuccessCriteria(criteria)
-            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
+            await persistGoalState(ctx, tracker)
+            pushStatic(createLogEntry({ type: 'system', content: `🔍 Judge 验收项（完成时独立核验）：\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}` }))
           } catch {
-            // extraction failure is non-fatal — judge falls back to wide judgment
             pushStatic(createLogEntry({ type: 'system', content: '🔍 验收项提取已降级为宽判模式（extraction failed）。' }))
           }
         })()
       }
       setIsStreaming(false)
-      // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
-      ctx.submitToAgent?.(buildGoalModePrompt(goalText))
+      ctx.submitToAgent?.(buildGoalModePrompt(parsed.goalText))
       return true
     },
   },
@@ -804,6 +909,45 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           pushStatic(createLogEntry({ type: 'system', content: `📋 Judge 验收项（${criteria.length} 项）:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}\n\n用 /goal-criteria set \'["..."]\' 覆盖。` }))
         }
       }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/goal-status',
+    immediate: true,
+    handler(ctx) {
+      const { pushStatic, setIsStreaming } = ctx
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No active goal. Use /goal <task> to start one.' }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: formatGoalStatus(tracker) }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/goal-pause',
+    immediate: true,
+    async handler(ctx) {
+      const { pushStatic, setIsStreaming } = ctx
+      const tracker = ctx.goalTrackerRef?.current
+      if (!tracker) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No active goal to pause. Use /goal <task> to start one.' }))
+        setIsStreaming(false)
+        return true
+      }
+      const status = tracker.getStatus()
+      if (status !== 'active') {
+        pushStatic(createLogEntry({ type: 'system', content: `Goal is ${status}, cannot pause.` }))
+        setIsStreaming(false)
+        return true
+      }
+      tracker.pause('Paused by user', 'user')
+      await persistGoalState(ctx, tracker)
+      pushStatic(createLogEntry({ type: 'system', content: `⏸ Goal paused: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | Use /goal-resume to continue.` }))
       setIsStreaming(false)
       return true
     },
@@ -907,6 +1051,219 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       ctx.setAutoSafe(next)
       ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
       pushStatic(createLogEntry({ type: 'system', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/permission',
+    immediate: true,
+    handler(ctx) {
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const sub = parts[1]?.toLowerCase()
+
+      const VALID_MODES = ['auto-accept', 'auto-safe', 'manual', 'dangerously-skip-permissions'] as const
+      type RuntimeMode = typeof VALID_MODES[number]
+      function isRuntimeMode(m: string): m is RuntimeMode {
+        return (VALID_MODES as readonly string[]).includes(m)
+      }
+      const MODE_LABELS: Record<RuntimeMode, string> = {
+        'auto-accept': 'auto-accept — 自动接受低风险工具调用',
+        'auto-safe': 'auto-safe — 低/无风险自动过，高风险仍弹确认',
+        'manual': 'manual — 所有需 approval 的工具都弹确认',
+        'dangerously-skip-permissions': 'yolo (dangerously-skip-permissions) — 跳过所有权限确认',
+      }
+
+      function parseKvPairs(tokens: string[]): Record<string, string> {
+        const out: Record<string, string> = {}
+        for (const t of tokens) {
+          const idx = t.indexOf('=')
+          if (idx > 0) {
+            let value = t.slice(idx + 1)
+            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+              value = value.slice(1, -1)
+            }
+            out[t.slice(0, idx)] = value
+          }
+        }
+        return out
+      }
+
+      function ruleSource(rules: unknown[], overlay: unknown[], index: number): string {
+        if (index < rules.length) return '[config]'
+        return '[session]'
+      }
+
+      function formatRules() {
+        const cfg = agent.config.permissions
+        const overlay = agent.config.permissionsOverlay
+        const allow = [...(cfg?.allow ?? []), ...(overlay?.allow ?? [])]
+        const deny = [...(cfg?.deny ?? []), ...(overlay?.deny ?? [])]
+        const bashAllow = [...(cfg?.bash?.allowlist ?? []), ...(overlay?.bashAllow ?? [])]
+        const bashDeny = [...(cfg?.bash?.denylist ?? []), ...(overlay?.bashDeny ?? [])]
+
+        const lines: string[] = []
+        const currentMode = agent.config.approvalMode ?? 'manual'
+        lines.push(`当前模式: ${currentMode}`)
+        lines.push('\n可选模式：')
+        for (const m of VALID_MODES) {
+          const marker = m === currentMode ? '→ ' : '  '
+          lines.push(`${marker}${MODE_LABELS[m]}`)
+        }
+
+        if (allow.length > 0) {
+          lines.push('\nAllow 规则：')
+          allow.forEach((r, i) => {
+            const params = r.params ? Object.entries(r.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+            lines.push(`  ${i}. ${ruleSource(cfg?.allow ?? [], overlay?.allow ?? [], i)} ${r.tool}${params ? ' ' + params : ''}`)
+          })
+        }
+        if (deny.length > 0) {
+          lines.push('\nDeny 规则：')
+          deny.forEach((r, i) => {
+            const params = r.params ? Object.entries(r.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+            lines.push(`  ${i}. ${ruleSource(cfg?.deny ?? [], overlay?.deny ?? [], i)} ${r.tool}${params ? ' ' + params : ''}`)
+          })
+        }
+        if (bashAllow.length > 0) {
+          lines.push(`\nBash 前缀白名单：${bashAllow.join(', ')}`)
+        }
+        if (bashDeny.length > 0) {
+          lines.push(`\nBash 前缀黑名单：${bashDeny.join(', ')}`)
+        }
+        if (allow.length === 0 && deny.length === 0 && bashAllow.length === 0 && bashDeny.length === 0) {
+          lines.push('\n当前没有任何 allow/deny 规则。')
+        }
+        lines.push('\n说明：deny 规则优先于 allow 和 approval mode；session 规则仅本次会话有效。')
+        return lines.join('\n')
+      }
+
+      if (!sub || sub === 'status') {
+        pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'mode') {
+        const mode = parts[2]
+        if (!mode || !isRuntimeMode(mode)) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /permission mode <${VALID_MODES.join('|')}>`, isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        agent.setApprovalMode(mode)
+        // Keep /auto toggle ref in sync for users who still use /auto.
+        ctx.setAutoSafe(mode === 'auto-safe')
+        pushStatic(createLogEntry({ type: 'system', content: `Approval mode → ${mode}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'allow' || sub === 'deny') {
+        const tool = parts[2]
+        if (!tool) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /permission ${sub} <tool> [param=value]...`, isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const rule = { tool, params: parseKvPairs(parts.slice(3)) }
+        if (Object.keys(rule.params).length === 0) delete (rule as { params?: Record<string, string> }).params
+        if (sub === 'allow') agent.addAllowRule(rule)
+        else agent.addDenyRule(rule)
+        const paramsStr = rule.params ? Object.entries(rule.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+        pushStatic(createLogEntry({ type: 'system', content: `已添加 ${sub} 规则: ${tool}${paramsStr ? ' ' + paramsStr : ''}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'bash') {
+        const action = parts[2]?.toLowerCase()
+        if (action !== 'allow' && action !== 'deny') {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission bash allow|deny <prefix>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const prefix = parts.slice(3).join(' ')
+        if (!prefix) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission bash allow|deny <prefix>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        if (action === 'allow') agent.addBashAllowPrefix(prefix)
+        else agent.addBashDenyPrefix(prefix)
+        pushStatic(createLogEntry({ type: 'system', content: `已添加 bash ${action === 'allow' ? '白名单' : '黑名单'}前缀: ${prefix}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'remove') {
+        const kindRaw = parts[2]?.toLowerCase()
+        const target = parts[3]
+        if (!kindRaw || !target || !['allow', 'deny', 'bashallow', 'bashdeny'].includes(kindRaw)) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission remove allow|deny|bashAllow|bashDeny <index|pattern>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const kind = kindRaw as 'allow' | 'deny' | 'bashAllow' | 'bashDeny'
+        const idx = parseInt(target, 10)
+        const key = Number.isNaN(idx) ? target : idx
+        const ok = agent.removePermissionRule(kind, key)
+        pushStatic(createLogEntry({ type: 'system', content: ok ? `已移除 ${kind} 规则: ${target}` : `未找到 ${kind} 规则: ${target}`, isError: !ok }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'reset') {
+        agent.resetPermissionOverlay()
+        pushStatic(createLogEntry({ type: 'system', content: '已清空本次会话所有运行时权限覆盖。' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'test') {
+        const tool = parts[2]
+        const json = parts.slice(3).join(' ')
+        if (!tool || !json) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission test <tool> <json input>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        let input: Record<string, unknown>
+        try {
+          input = JSON.parse(json) as Record<string, unknown>
+        } catch {
+          pushStatic(createLogEntry({ type: 'system', content: 'JSON 解析失败', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const allDeny = [...(agent.config.permissions?.deny ?? []), ...(agent.config.permissionsOverlay?.deny ?? [])]
+        const allAllow = [...(agent.config.permissions?.allow ?? []), ...(agent.config.permissionsOverlay?.allow ?? [])]
+        const bashDeny = [...(agent.config.permissions?.bash?.denylist ?? []), ...(agent.config.permissionsOverlay?.bashDeny ?? [])]
+        const bashAllow = [...(agent.config.permissions?.bash?.allowlist ?? []), ...(agent.config.permissionsOverlay?.bashAllow ?? [])]
+
+        const denied = tool === 'bash' && typeof input.command === 'string'
+          ? isBashCommandDenied(input.command, bashDeny)
+          : isToolDenied(tool, input, allDeny)
+        if (denied) {
+          pushStatic(createLogEntry({ type: 'system', content: `结果: deny（命中 deny 规则）` }))
+          setIsStreaming(false)
+          return true
+        }
+        const allowlisted = tool === 'bash' && typeof input.command === 'string'
+          ? isBashCommandAllowlisted(input.command, bashAllow)
+          : isToolAllowed(tool, input, allAllow)
+        if (allowlisted) {
+          pushStatic(createLogEntry({ type: 'system', content: '结果: allow（命中 allow 规则）' }))
+          setIsStreaming(false)
+          return true
+        }
+        const needsApproval = agent.config.toolRegistry.needsApproval(tool, { input, toolUseId: 'test', cwd: ctx.agent.cwd })
+        pushStatic(createLogEntry({ type: 'system', content: `结果: ask（需要 approval：${needsApproval ? '是' : '否'}）` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      pushStatic(createLogEntry({ type: 'system', content: '未知子命令。用法: /permission [status|mode|allow|deny|bash|remove|reset|test]', isError: true }))
       setIsStreaming(false)
       return true
     },
@@ -1728,7 +2085,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         } else {
           // Save current plan (if any) as template
           const { getStoredPlan } = await import('../agent/plan-store.js')
-          const currentPlan = getStoredPlan()
+          const currentPlan = getStoredPlan(ctx.currentSessionId)
           if (!currentPlan) {
             pushStatic(createLogEntry({ type: 'system', content: 'No active plan to save. Run /plan first.', isError: true }))
           } else {
@@ -2088,7 +2445,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview]\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }
@@ -2102,7 +2459,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview]\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }
@@ -2169,9 +2526,45 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      // /skill off <name> — manually release an invoked skill so its instructions
+      // are no longer re-injected into the dynamic appendix.
+      if (sub === 'off' || sub === 'complete') {
+        const name = parts[2]
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /skill ${sub} <name>\n停止持续注入该技能的完整指令。` }))
+          setIsStreaming(false)
+          return true
+        }
+        ctx.agent.markSkillCompleted?.(name)
+        pushStatic(createLogEntry({ type: 'system', content: `🛑 已停止技能: ${name}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // /skill install <name> [...] — copy from .claude/skills/ into .rivet/skills/
+      if (sub === 'install' || sub === 'import') {
+        const names = parts.slice(2).filter(Boolean)
+        if (names.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /skill ${sub} <name> [name2 ...]\n从 .claude/skills/<name> 复制到 .rivet/skills/<name>。` }))
+          setIsStreaming(false)
+          return true
+        }
+        const { copied, skipped, errors } = importSkillsIntoRivet(ctx.agent.cwd, names)
+        if (copied.length > 0) {
+          skillRegistry.loadFromDirectory(join(ctx.agent.cwd, '.rivet', 'skills'), 'rivet')
+        }
+        const lines: string[] = []
+        if (copied.length > 0) lines.push(`✅ 已安装: ${copied.join(', ')}`)
+        if (skipped.length > 0) lines.push(`⏭ 已存在/跳过: ${skipped.join(', ')}`)
+        if (errors.length > 0) lines.push(`❌ 失败:\n${errors.map(e => `  • ${e}`).join('\n')}`)
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') || '无变更。' }))
+        setIsStreaming(false)
+        return true
+      }
+
       if (!sub || sub === 'list' || sub === 'ls') {
         if (allSkills.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nCopy a skill in with:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nInstall one with:\n  /skill install <name>\nor copy manually:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
         } else {
           const lines = [...allSkills]
             .sort((a, b) => a.name.localeCompare(b.name))
@@ -2188,7 +2581,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      // /skill <name> — load the FULL body into the conversation (no truncation).
+      // /skill <name> — load the FULL body into the conversation and immediately
+      // invoke it as the current prompt. The slash handler just acknowledges the
+      // load; the actual body is expanded by resolveAppPromptInput so the agent
+      // sees the skill instructions as the user message and responds in this turn.
       const skill = skillRegistry.get(parts[1]!) ?? allSkills.find(s => s.name.toLowerCase() === sub)
       if (!skill) {
         pushStatic(createLogEntry({ type: 'system', content: `Skill "${parts[1]}" not found.\nUse /skill list to see available skills.` }))
@@ -2197,24 +2593,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       const sizeKb = (skill.body.length / 1024).toFixed(1)
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${sizeKb}KB from ${skill.source ?? 'rivet'})\nThe full skill instructions are now in the conversation.` }))
+      const taskHint = parts.slice(2).join(' ').trim()
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${sizeKb}KB from ${skill.source ?? 'rivet'})\nThe full skill instructions are now in the conversation.${taskHint ? `\nUser task: ${taskHint}` : ''}` }))
 
-      // Append-only one-shot: the complete body becomes a normal message in
-      // history (visible all session). We deliberately do NOT use a persistent
-      // anchor — that would re-render the whole body every turn and bloat the
-      // prefix. No slice(): the full body is preserved. For directory skills we
-      // also append the sub-file tree (Tier-3 entry points), matching the
-      // `skill` tool's behaviour.
-      let payload = `[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`
-      if (skill.skillDir) {
-        const files = listSkillFiles(skill.skillDir)
-        if (files.length > 0) {
-          payload += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
-        }
-      }
-      ctx.session.addUserMessage(payload)
-      setIsStreaming(false)
-      return true
+      // Remember that this skill was invoked so the prompt engine can re-inject
+      // its instructions into the dynamic appendix after context compaction.
+      ctx.agent.markSkillInvoked?.(skill.name)
+
+      // Fall through to the agent pipeline. resolveAppPromptInput will expand
+      // `/skill <name> [...]` into the skill body so the agent responds now.
+      return false
     },
   },
   {
@@ -2406,6 +2794,28 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         const res = switchAgentSession(ctx, targetId)
         if (res.ok) {
           app.setStreamingState(false)
+          // 切换后恢复目标、todo 列表与 side panel 状态，保持会话连续性。
+          try {
+            const restoredGoal = restoreGoalTracker(getSessionDir(ctx.cwd), targetId, {
+              maxJudgeRuns: ctx.config.agent.goal?.judge?.maxRuns,
+            })
+            if (restoredGoal) {
+              ctx.agent.setGoalTracker(restoredGoal)
+              ctx.refs.goalTrackerRef.current = restoredGoal
+            } else {
+              ctx.refs.goalTrackerRef.current = null
+            }
+          } catch { /* goal restore best-effort */ }
+          try {
+            loadTodos(targetId, ctx.cwd)
+            setTodoSession(targetId, ctx.cwd)
+            setPlanSession(targetId)
+          } catch { /* todo/plan restore best-effort */ }
+          try {
+            const meta = ctx.persist.loadMetadata()
+            if (meta?.sidePanelOpen) app.setSidePanelOpen(true)
+            else app.setSidePanelOpen(false)
+          } catch { /* panel restore best-effort */ }
         }
         return res
       },

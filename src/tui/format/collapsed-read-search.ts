@@ -12,6 +12,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -239,59 +240,50 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
   const elapsed = Date.now() - group.startMs
   const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(1)}s` : `${elapsed}ms`
 
-  // 摘要行
-  lines.push(color(`● ${summary} · ${elapsedStr}`, theme.primary))
+  // 摘要行：展开状态指示器 + 摘要 + 耗时
+  const indicator = expanded ? '▼' : '▶'
+  lines.push(color(`${indicator} ${summary} · ${elapsedStr}`, theme.primary))
 
   const completed = group.entries.filter(e => e.completed)
   const hasPending = group.entries.some(e => !e.completed)
 
   if (completed.length === 0) {
     if (hasPending) {
-      lines.push(color('  (results pending…)', theme.muted))
+      lines.push(color('│  (results pending…)', theme.muted))
     }
     return lines
   }
 
-  if (expanded) {
-    // 展开模式：显示所有 entry 的完整内容
-    for (const entry of completed) {
+  if (expanded || completed.length <= 3) {
+    // 展开模式 / 小折叠：树状连接符展示每个 entry
+    for (let i = 0; i < completed.length; i++) {
+      const entry = completed[i]!
+      const isLast = i === completed.length - 1
+      const connector = isLast ? '│  ╰─' : '│  ├─'
+      const childPrefix = isLast ? '│     ' : '│  │  '
       const lineCount = entry.content ? entry.content.split('\n').length : 0
       const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
-      lines.push(`  ⎿  ${color(entry.displayName, theme.muted)}${lc}`)
+      lines.push(`${connector} ${color(entry.displayName, theme.muted)}${lc}`)
       if (entry.content) {
-        const previewLines = entry.content.split('\n').slice(0, 30)
+        const maxWidth = Math.max(10, (input.columns ?? 80) - childPrefix.length)
+        const previewLines = entry.content.split('\n').slice(0, expanded ? 30 : 3)
         for (const pl of previewLines) {
-          const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
-          lines.push(`     ${color(trimmed, theme.muted)}`)
+          const trimmed = displayWidth(pl) > maxWidth ? truncateToDisplayWidth(pl, maxWidth - 2) + '…' : pl
+          lines.push(`${childPrefix}${color(trimmed, theme.muted)}`)
         }
-        if (lineCount > 30) {
-          lines.push(color(`     … +${lineCount - 30} more lines`, theme.muted))
-        }
-      }
-    }
-  } else if (completed.length <= 3) {
-    // 小折叠：显示全部 entry + 内容预览（最多 3 行/entry）
-    for (const entry of completed) {
-      const lineCount = entry.content ? entry.content.split('\n').length : 0
-      const lc = lineCount > 0 ? ` (${lineCount}L)` : ''
-      lines.push(`  ⎿  ${color(entry.displayName, theme.muted)}${lc}`)
-      if (entry.content) {
-        const previewLines = entry.content.split('\n').slice(0, 3)
-        for (const pl of previewLines) {
-          const trimmed = pl.length > 80 ? pl.slice(0, 79) + '…' : pl
-          lines.push(`     ${color(trimmed, theme.muted)}`)
-        }
-        if (lineCount > 3) {
-          lines.push(color(`     … +${lineCount - 3} more lines`, theme.muted))
+        const limit = expanded ? 30 : 3
+        if (lineCount > limit) {
+          lines.push(color(`${childPrefix}… +${lineCount - limit} more lines`, theme.muted))
         }
       }
     }
   } else {
     // 大折叠（>3 条）：紧凑路径列表 + ctrl+o 提示
     const files = completed.map(e => e.displayName).join(', ')
-    const preview = files.length > 80 ? files.slice(0, 79) + '…' : files
-    lines.push(`  ⎿  ${color(preview, theme.muted)}`)
-    lines.push(color(`     … +${completed.length - 3} more files [Ctrl+O]`, theme.secondary))
+    const maxWidth = Math.max(10, (input.columns ?? 80) - 9)
+    const preview = displayWidth(files) > maxWidth ? truncateToDisplayWidth(files, maxWidth - 2) + '…' : files
+    lines.push(`│  ╰─ ${color(preview, theme.muted)}`)
+    lines.push(color(`│     … +${completed.length - 3} more files [Ctrl+O]`, theme.secondary))
   }
 
   return lines

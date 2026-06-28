@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getArtifact,
   openFile,
@@ -9,6 +9,7 @@ import {
   type RollbackResult,
 } from '../runtime/client'
 import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
+import { useEnabledTabs } from '../lib/review-tabs'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
@@ -17,7 +18,7 @@ import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
-import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
+import { editableKey, previewOf, parseMcpToolName, getApprovalActionProps } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -31,7 +32,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files' | 'canvas'
 
 interface TabDef {
   id: ReviewTab
@@ -60,9 +61,11 @@ export function ReviewPanel(props: {
   todos?: TodoStateItem[]
   /** Source files touched by file-editing tools. */
   sources?: string[]
+  onCollapse?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [] } = props
+  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [], onCollapse } = props
   const autonomous = isAutonomous(approvalMode)
+  const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
 
   // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
@@ -82,6 +85,61 @@ export function ReviewPanel(props: {
   const [comment, setComment] = useState('')
   // 行级评论：在 diff 弹窗里逐行累积，随 artifact 级 comment 一起回灌
   const [lineComments, setLineComments] = useState<LineComment[]>([])
+
+  // Live Canvas state
+  const [selectedCanvasArtifact, setSelectedCanvasArtifact] = useState<ArtifactSummary | null>(null)
+  const [canvasContent, setCanvasContent] = useState<string>('')
+  const [canvasLoading, setCanvasLoading] = useState<boolean>(false)
+  const [canvasWidth, setCanvasWidth] = useState<'100%' | '768px' | '375px'>('100%')
+  // 自增触发「刷新」：进 content effect 依赖 → 重新从盘上拉取，同时作为 iframe key 强制重挂。
+  const [canvasKey, setCanvasKey] = useState<number>(0)
+  // 全屏预览：复用同一沙箱 iframe 做 app 内全屏覆盖层，取代未沙箱化的 blob
+  // window.open（后者在本 Tauri 配置下既是脚本逃逸入口、又打不开真正的外部浏览器）。
+  const [canvasFullscreen, setCanvasFullscreen] = useState<boolean>(false)
+
+  const canvasArtifacts = useMemo(() => {
+    return artifacts.filter((a) => a.kind === 'html' || a.kind === 'markdown' || a.target.endsWith('.html') || a.target.endsWith('.md') || a.target.endsWith('.css'))
+  }, [artifacts])
+
+  // Esc 退出全屏预览。
+  useEffect(() => {
+    if (!canvasFullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCanvasFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canvasFullscreen])
+
+  // 切会话或工件被移除时，当前选中项可能已不在列表里：回落到首个，避免拿旧会话的
+  // artifactId 去取（404）以及 <select> 显示一个不在选项中的越界值。
+  useEffect(() => {
+    if (canvasArtifacts.length === 0) {
+      if (selectedCanvasArtifact) setSelectedCanvasArtifact(null)
+      return
+    }
+    const stillPresent = selectedCanvasArtifact && canvasArtifacts.some((a) => a.id === selectedCanvasArtifact.id)
+    if (!stillPresent) setSelectedCanvasArtifact(canvasArtifacts[0]!)
+  }, [canvasArtifacts, selectedCanvasArtifact])
+
+  useEffect(() => {
+    if (selectedCanvasArtifact && sessionId) {
+      setCanvasLoading(true)
+      getArtifact(sessionId, selectedCanvasArtifact.id)
+        .then((res) => {
+          setCanvasContent(res.raw)
+        })
+        .catch((err) => {
+          console.error(err)
+        })
+        .finally(() => {
+          setCanvasLoading(false)
+        })
+    } else {
+      setCanvasContent('')
+    }
+    // canvasKey 进依赖：点「刷新」重新拉取盘上最新内容（而非仅重挂 iframe）。
+  }, [selectedCanvasArtifact, sessionId, canvasKey])
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
@@ -138,40 +196,202 @@ export function ReviewPanel(props: {
   const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
 
-  const tabs: TabDef[] = [
-    { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
-    { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
-    { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
-    { id: 'wt', label: 'Diff', glyph: '⟐' },
-    { id: 'files', label: 'Files', glyph: '📁' },
-    { id: 'github', label: 'PR', glyph: '🔀' },
-  ]
+  const tabs = useMemo<TabDef[]>(() => {
+    const all: TabDef[] = [
+      { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
+      { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
+      { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
+      { id: 'canvas', label: 'Canvas', glyph: '🎨' },
+      { id: 'wt', label: 'Diff', glyph: '⟐' },
+      { id: 'files', label: 'Files', glyph: '📁' },
+      { id: 'github', label: 'PR', glyph: '🔀' },
+    ]
+    const filtered = all.filter((t) => enabledTabs.includes(t.id))
+    return filtered.length > 0 ? filtered : [all[0]!]
+  }, [pendingCount, planMode, incompleteTasks, enabledTabs])
+
+  // Fallback active tab if current tab gets disabled
+  useEffect(() => {
+    const isCurrentTabEnabled = tabs.some((t) => t.id === tab)
+    if (!isCurrentTabEnabled && tabs[0]) {
+      setTab(tabs[0].id)
+    }
+  }, [tabs, tab])
 
   return (
-    <div className="review">
+    <div className="review flex flex-col h-full relative">
       <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
-        <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {tabs.map((t) => {
-            const badge = t.badge?.()
-            return (
-              <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
-                <span aria-hidden>{t.glyph}</span>
-                <span>{t.label}</span>
-                {badge != null && badge > 0 && (
-                  <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
-                    {badge}
-                  </span>
-                )}
-                {badge === -1 && (
-                  <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
-                )}
-              </TabsTrigger>
-            )
-          })}
-        </TabsList>
+        <div className="flex items-center justify-between pr-2">
+          <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1">
+            {tabs.map((t) => {
+              const badge = t.badge?.()
+              return (
+                <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                  <span aria-hidden>{t.glyph}</span>
+                  <span>{t.label}</span>
+                  {badge != null && badge > 0 && (
+                    <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
+                      {badge}
+                    </span>
+                  )}
+                  {badge === -1 && (
+                    <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                  )}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="review-collapse-capsule-btn flex items-center gap-1 text-[10px] text-muted hover:text-text bg-panel-3 hover:bg-panel-2 border border-border rounded-full px-2 py-0.5 transition-all shrink-0 ml-2"
+              title="收起审查面板 (Cmd+Shift+B)"
+            >
+              <span className="text-[9px]">收起</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         <TabsContent value="github" className="review-body">
           <GithubPanel />
+        </TabsContent>
+        <TabsContent value="canvas" className="review-body flex flex-col h-full">
+          <div className="canvas-container flex flex-col h-full gap-2 p-2">
+            {canvasArtifacts.length === 0 ? (
+              <div className="empty sm">没有可预览的 HTML 或 Markdown 工件</div>
+            ) : (
+              <>
+                <div className="canvas-selector flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">选择工件:</span>
+                  <select
+                    className="canvas-select bg-panel-2 border border-border rounded px-2 py-1 text-xs text-text flex-1"
+                    value={selectedCanvasArtifact?.id || ''}
+                    onChange={(e) => {
+                      const found = canvasArtifacts.find((a) => a.id === e.target.value)
+                      if (found) setSelectedCanvasArtifact(found)
+                    }}
+                  >
+                    {canvasArtifacts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.target} ({a.kind})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedCanvasArtifact && (
+                  <>
+                  <div className="canvas-preview-wrapper flex-1 flex flex-col border border-border rounded overflow-hidden bg-panel">
+                    <div className="canvas-toolbar flex items-center justify-between bg-panel-2 border-b border-border px-3 py-1.5 text-xs">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="canvas-btn flex items-center gap-1 hover:text-text-strong"
+                          onClick={() => setCanvasKey((k) => k + 1)}
+                          title="重新加载"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+                          </svg>
+                          刷新
+                        </button>
+                        <span className="text-border">|</span>
+                        <button
+                          className="canvas-btn flex items-center gap-1 hover:text-text-strong"
+                          onClick={() => setCanvasFullscreen(true)}
+                          title="全屏预览（应用内沙箱）"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
+                          </svg>
+                          全屏
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-panel-3 rounded p-0.5 border border-border">
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '100%' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasWidth('100%')}
+                        >
+                          Desktop
+                        </button>
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '768px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasWidth('768px')}
+                        >
+                          Tablet
+                        </button>
+                        <button
+                          className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '375px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
+                          onClick={() => setCanvasWidth('375px')}
+                        >
+                          Mobile
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="canvas-viewport flex-1 bg-white flex items-center justify-center overflow-auto p-4">
+                      {canvasLoading ? (
+                        <div className="text-xs text-muted-foreground">加载中...</div>
+                      ) : selectedCanvasArtifact.kind === 'markdown' ? (
+                        <div
+                          style={{ width: canvasWidth, transition: 'width 0.2s' }}
+                          className="canvas-content-box h-full bg-panel text-text p-4 rounded overflow-auto border border-border"
+                        >
+                          <Markdown source={canvasContent} />
+                        </div>
+                      ) : (
+                        <iframe
+                          key={canvasKey}
+                          style={{ width: canvasWidth, transition: 'width 0.2s' }}
+                          className="canvas-content-box h-full bg-white rounded shadow-sm border border-border"
+                          srcDoc={canvasContent}
+                          sandbox="allow-scripts"
+                          title={selectedCanvasArtifact.target}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {canvasFullscreen && (
+                    <div className="canvas-fullscreen-overlay" role="dialog" aria-modal="true">
+                      <div className="canvas-fs-toolbar">
+                        <span className="canvas-fs-title truncate" title={selectedCanvasArtifact.target}>
+                          {selectedCanvasArtifact.target} ({selectedCanvasArtifact.kind})
+                        </span>
+                        <div className="canvas-fs-actions">
+                          <button className="canvas-btn" onClick={() => setCanvasKey((k) => k + 1)} title="重新加载">
+                            刷新
+                          </button>
+                          <button className="canvas-btn" onClick={() => setCanvasFullscreen(false)} title="退出全屏 (Esc)">
+                            退出全屏
+                          </button>
+                        </div>
+                      </div>
+                      <div className="canvas-fs-body">
+                        {selectedCanvasArtifact.kind === 'markdown' ? (
+                          <div className="canvas-fs-content markdown">
+                            <Markdown source={canvasContent} />
+                          </div>
+                        ) : (
+                          <iframe
+                            key={`fs-${canvasKey}`}
+                            className="canvas-fs-content"
+                            srcDoc={canvasContent}
+                            sandbox="allow-scripts"
+                            title={selectedCanvasArtifact.target}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </TabsContent>
         <TabsContent value="wt" className="review-body">
           <ChangesTab sessionId={sessionId} />
@@ -365,6 +585,10 @@ function ApprovalReview(props: {
     else onDecision('approve')
   }
 
+  const rejectProps = getApprovalActionProps('reject')
+  const approveProps = getApprovalActionProps('approve', editing)
+  const editProps = getApprovalActionProps('edit', editing)
+
   // MCP connector opt-in card — never silently use a connector the user didn't
   // choose. Surfaces the connector identity + the tool/input, and frames the
   // approval as authorizing the connector (read-only tools won't re-prompt).
@@ -380,8 +604,11 @@ function ApprovalReview(props: {
         </div>
         <pre className="rp-preview">{preview.text}</pre>
         <div className="rp-actions">
-          <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
-          <button className="btn sm" onClick={() => onDecision('approve')}>授权连接器</button>
+          <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
+          <button className={approveProps.variant} onClick={() => onDecision('approve')}>
+            {approveProps.label}
+            <span className="rp-default-mark" aria-hidden>●</span>
+          </button>
         </div>
       </div>
     )
@@ -402,12 +629,13 @@ function ApprovalReview(props: {
       )}
       <div className="rp-actions">
         {editKey && (
-          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
-            {editing ? '取消编辑' : '编辑'}
-          </button>
+          <button className={editProps.variant} onClick={() => setEditing((v) => !v)}>{editProps.label}</button>
         )}
-        <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
-        <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
+        <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
+        <button className={approveProps.variant} onClick={approve}>
+          {approveProps.label}
+          <span className="rp-default-mark" aria-hidden>●</span>
+        </button>
       </div>
     </div>
   )

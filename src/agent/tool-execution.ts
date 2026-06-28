@@ -94,9 +94,13 @@ export interface ToolExecutionDeps {
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition (plan_steps) for the loop's PlanExecutionTrace. */
-  onPlanSteps?: (descriptions: string[]) => void
+  onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Called when the model explicitly loads a skill via the skill tool. */
+  onSkillInvoked?: (name: string) => void
+  /** Called when the model explicitly marks a skill as complete via the skill tool. */
+  onSkillCompleted?: (name: string) => void
   /** Whether goal mode is active — relaxes doom-loop thresholds when true. */
   isGoalActive?: () => boolean
 }
@@ -205,6 +209,8 @@ export class ToolExecutionController {
       onLeaveMark: this.deps.onLeaveMark,
       onPlanSteps: this.deps.onPlanSteps,
       onPlanClosed: this.deps.onPlanClosed,
+      onSkillInvoked: this.deps.onSkillInvoked,
+      onSkillCompleted: this.deps.onSkillCompleted,
       getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
       recordPrediction: (correct) => {
         this.deps.setPredictionAccumulator(

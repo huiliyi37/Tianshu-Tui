@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { resolveAppPromptInput, handleSlashCommand, formatVerificationStatus, type SlashHandlerContext } from '../slash-commands.js'
 import { loadConstellation } from '../../constellation/store.js'
 import { distillSkillDraft, persistSkillDraft, listSkillDrafts } from '../../agent/skill-distill.js'
@@ -25,7 +26,20 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
           wasteCandidates: [],
         },
       }),
+      config: {
+        approvalMode: 'manual',
+        permissions: { allow: [], deny: [], bash: { allowlist: [], denylist: [] } },
+        permissionsOverlay: { allow: [], deny: [], bashAllow: [], bashDeny: [] },
+        toolRegistry: { needsApproval: () => true },
+      },
+      cwd: '/cwd',
       setApprovalMode: () => {},
+      addAllowRule: () => {},
+      addDenyRule: () => {},
+      addBashAllowPrefix: () => {},
+      addBashDenyPrefix: () => {},
+      removePermissionRule: () => false,
+      resetPermissionOverlay: () => {},
       addAnchor: () => {},
       setPromptMode: () => {},
       getPromptMode: () => 'task',
@@ -126,23 +140,32 @@ describe('resolveAppPromptInput', () => {
     assert.ok(resolved.includes('收尾'))
   })
 
-  it('resolves /plan close into a plan_close workflow prompt', async () => {
+  it('resolves /plan close into a plan_close workflow prompt with apply by default', async () => {
     const resolved = resolveAppPromptInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7', '/cwd')
     assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('Use the plan_close tool'))
     assert.ok(resolved.includes('- file_path: docs/superpowers/plans/demo.md'))
     assert.ok(resolved.includes('- tasks: 1-7'))
-    assert.ok(resolved.includes('Preview only; do not write the file.'))
+    assert.ok(resolved.includes('- apply: true'))
+    assert.ok(!resolved.includes('Preview only'))
   })
 
-  it('resolves /plan-close into a plan_close workflow prompt', async () => {
-    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply', '/cwd')
+  it('resolves /plan-close into a plan_close workflow prompt with apply by default', async () => {
+    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all', '/cwd')
     assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('Use the plan_close tool'))
     assert.ok(resolved.includes('- tasks: all'))
     assert.ok(resolved.includes('- apply: true'))
+  })
+
+  it('supports --preview to keep plan_close in preview mode', async () => {
+    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --preview', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('- apply: false'))
+    assert.ok(resolved.includes('Preview only; do not write the file.'))
   })
 
   it('returns null for empty /plan (handled by handleSlashCommand before resolver)', async () => {
@@ -645,6 +668,141 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
       assert.equal(handled, true)
       assert.ok(entries[0]!.includes('已丢弃'), `应报告丢弃: ${entries[0]}`)
       assert.equal(listSkillDrafts(cwd).length, 0)
+    } finally {
+      cleanupTestDir(cwd)
+    }
+  })
+})
+
+describe('/permission', () => {
+  it('shows current mode and available modes', async () => {
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission'],
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]!.includes('当前模式: manual'), entries[0])
+    assert.ok(entries[0]!.includes('可选模式：'), entries[0])
+    assert.ok(entries[0]!.includes('→ manual'), entries[0])
+    assert.ok(entries[0]!.includes('yolo (dangerously-skip-permissions)'), entries[0])
+  })
+
+  it('switches approval mode', async () => {
+    let mode: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'mode', 'auto-safe'],
+      agent: {
+        ...makeCtx().agent,
+        setApprovalMode: (m: string) => { mode = m },
+      } as any,
+      setAutoSafe: (v: boolean) => {},
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(mode, 'auto-safe')
+    assert.ok(entries[0]!.includes('auto-safe'), entries[0])
+  })
+
+  it('adds an allow rule', async () => {
+    let added: unknown = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'allow', 'bash', 'command=git status*'],
+      agent: {
+        ...makeCtx().agent,
+        addAllowRule: (r: unknown) => { added = r },
+      } as any,
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.deepEqual(added, { tool: 'bash', params: { command: 'git status*' } })
+  })
+
+  it('adds a bash deny prefix', async () => {
+    let added: string | null = null
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'bash', 'deny', 'rm -rf'],
+      agent: {
+        ...makeCtx().agent,
+        addBashDenyPrefix: (p: string) => { added = p },
+      } as any,
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.equal(added, 'rm -rf')
+  })
+
+  it('tests a deny rule', async () => {
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/permission', 'test', 'bash', '{"command":"rm -rf /"}'],
+      agent: {
+        ...makeCtx().agent,
+        config: {
+          ...makeCtx().agent.config,
+          permissionsOverlay: { allow: [], deny: [], bashAllow: [], bashDeny: ['rm'] },
+        },
+      } as any,
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]!.includes('deny'), entries[0])
+  })
+})
+
+describe('/skill install — copy skills from .claude/skills into .rivet/skills', () => {
+  it('shows usage when no name is given', async () => {
+    const entries: string[] = []
+    const handled = await handleSlashCommand(makeCtx({
+      parts: ['/skill', 'install'],
+      pushStatic: (entry) => entries.push(entry.content),
+    }))
+    assert.equal(handled, true)
+    assert.ok(entries[0]!.includes('用法'), entries[0])
+  })
+
+  it('installs a skill directory from project .claude/skills', async () => {
+    const cwd = makeTestDir('skill-install-')
+    const projectClaude = join(cwd, '.claude', 'skills', 'test-skill')
+    try {
+      // Seed a fake Claude skill directory inside the project sandbox.
+      mkdirSync(projectClaude, { recursive: true })
+      writeFileSync(join(projectClaude, 'SKILL.md'), '---\nname: test-skill\n---\nTest skill body.')
+
+      const entries: string[] = []
+      const handled = await handleSlashCommand(makeCtx({
+        parts: ['/skill', 'install', 'test-skill'],
+        agent: { ...makeCtx().agent, cwd } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('已安装'), `expected install success: ${entries[0]}`)
+      assert.ok(existsSync(join(cwd, '.rivet', 'skills', 'test-skill', 'SKILL.md')))
+    } finally {
+      cleanupTestDir(cwd)
+    }
+  })
+
+  it('reports skip when skill already exists in .rivet/skills', async () => {
+    const cwd = makeTestDir('skill-install-skip-')
+    const projectClaude = join(cwd, '.claude', 'skills', 'test-skill-skip')
+    try {
+      mkdirSync(projectClaude, { recursive: true })
+      writeFileSync(join(projectClaude, 'SKILL.md'), '---\nname: test-skill-skip\n---\nBody.')
+      mkdirSync(join(cwd, '.rivet', 'skills', 'test-skill-skip'), { recursive: true })
+      writeFileSync(join(cwd, '.rivet', 'skills', 'test-skill-skip', 'SKILL.md'), '---\nname: test-skill-skip\n---\nExisting.')
+
+      const entries: string[] = []
+      const handled = await handleSlashCommand(makeCtx({
+        parts: ['/skill', 'install', 'test-skill-skip'],
+        agent: { ...makeCtx().agent, cwd } as any,
+        pushStatic: (entry) => entries.push(entry.content),
+      }))
+      assert.equal(handled, true)
+      assert.ok(entries[0]!.includes('跳过'), `expected skip: ${entries[0]}`)
     } finally {
       cleanupTestDir(cwd)
     }

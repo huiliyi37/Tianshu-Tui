@@ -23,7 +23,8 @@ import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
-import { getTodos } from './tools/todo.js'
+import { getTodos, loadTodos, setTodoSession } from './tools/todo.js'
+import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
@@ -31,6 +32,7 @@ import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
 import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
+import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
@@ -240,7 +242,10 @@ async function main() {
           isGoalAchieved: () => goalTrackerRef.current?.isGoalAchieved() ?? false,
           getLastVerdict: () => goalTrackerRef.current?.getLastVerdict() ?? null,
         })))
-        toolRegistry.register(createUpdateGoalTool(() => goalTrackerRef.current))
+        toolRegistry.register(createUpdateGoalTool(
+          () => goalTrackerRef.current,
+          () => ({ sessionId, cwd: process.cwd() }),
+        ))
 
         const agentCfg = createAgentConfig(createMainAgentConfigInput({
           apiKey: key,
@@ -420,6 +425,19 @@ async function main() {
     tuiApp.setSessionStarDomain(initialDomain)
   }
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
+
+  // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
+  const initialMeta = ctx!.persist.loadMetadata()
+  if (initialMeta?.sidePanelOpen) {
+    tuiApp.setSidePanelOpen(true)
+  }
+  loadTodos(ctx!.sessionId, ctx!.cwd)
+  setTodoSession(ctx!.sessionId, ctx!.cwd)
+  setPlanSession(ctx!.sessionId)
+  tuiApp.setSidePanelChangeCallback((open) => {
+    ctx!.persist.updateMetadata({ sidePanelOpen: open })
+  })
+
   // 命令面板的过滤列表：display 与 paletteExec 必须共用同一份（含实时 query 过滤 + 排序），
   // 否则选中索引会错位（Enter 执行到错误命令）。
   const filteredPaletteCommands = (): PaletteCommand[] => {
@@ -663,12 +681,15 @@ async function main() {
   // ── SlashRouter ──────────────────────────────────────────────
   registerTuiSlashCommands(app, ctx)
 
-  // slash 命令提示列表（仅 / 开头的 command 类，过滤 __surface: 面板项）
-  app.setSlashCommands(
-    getPaletteCommands()
-      .filter(c => c.name.startsWith('/'))
-      .map(c => ({ name: c.name, description: c.description })),
-  )
+  // slash 命令提示列表：静态 palette 命令 + 动态已加载 skill 的 /skill <name>
+  const paletteHints = getPaletteCommands()
+    .filter(c => c.name.startsWith('/'))
+    .map(c => ({ name: c.name, description: c.description }))
+  const skillHints = skillRegistry.list().map(s => ({
+    name: `/skill ${s.name}`,
+    description: s.description ? s.description.split('\n')[0]! : `Load skill: ${s.name}`,
+  }))
+  app.setSlashCommands([...paletteHints, ...skillHints])
 
   // ── 真实指标 provider（GlanceBar cache/ctx/cost）─────────────
   // 闭包动态读 module-level ctx：/model 切换时 switchAgentRuntime 原地改 ctx.agent，
@@ -707,6 +728,12 @@ async function main() {
   // ── 当前已批准计划指针 provider ─────────────────────────────
   // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。
   app.setActivePlanProvider(() => ctx!.agent.config.promptEngine?.getActivePlanPointer())
+
+  // ── Goal / plan-mode / plan-trace providers ──────────────────
+  // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
+  app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
+  app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  app.setPlanTraceProvider(() => ctx!.agent.planTrace)
 
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），

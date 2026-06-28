@@ -14,6 +14,12 @@ export interface CouncilSeat {
   tierHint?: ModelTier
   /** 瑶光门：true 时把 tierHint 升格为硬地板，final tier 不得低于它。 */
   noDowngrade?: boolean
+  /** 席位专属 provider（须在 config.provider.providers 中存在）。与 model 同时
+   *  设置时,该席位 worker 跑在独立 provider/model 上(独立服务端缓存),实现
+   *  异构议事会(如天权用 DeepSeek Pro、天府用 GLM)。缺失/无凭据时静默回退会话模型。 */
+  provider?: string
+  /** 席位专属 model（须在 provider 的 models 列表中）。需与 provider 同时设置。 */
+  model?: string
 }
 
 /** 缺省席位 —— 天权领航 · 天府护栏 · 天璇探索。调用方可经 seats 覆盖。

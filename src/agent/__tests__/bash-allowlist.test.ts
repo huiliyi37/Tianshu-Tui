@@ -108,20 +108,20 @@ describe('extractBashPrefix', () => {
 
 describe('learnBashPrefix', () => {
   it('appends prefix to allowlist', () => {
-    const config: PermissionConfig = { allow: [], bash: { allowlist: ['git'] } }
+    const config: PermissionConfig = { allow: [], deny: [], bash: { allowlist: ['git'], denylist: [] } }
     learnBashPrefix('docker build .', config)
     assert.deepEqual(config.bash!.allowlist, ['git', 'docker'])
   })
 
   it('creates bash config if missing', () => {
-    const config: PermissionConfig = { allow: [] }
+    const config: PermissionConfig = { allow: [], deny: [] }
     learnBashPrefix('make test', config)
     assert.ok(config.bash)
     assert.deepEqual(config.bash!.allowlist, ['make'])
   })
 
   it('deduplicates prefixes', () => {
-    const config: PermissionConfig = { allow: [], bash: { allowlist: ['git'] } }
+    const config: PermissionConfig = { allow: [], deny: [], bash: { allowlist: ['git'], denylist: [] } }
     learnBashPrefix('git status', config)
     learnBashPrefix('git log', config)
     assert.deepEqual(config.bash!.allowlist, ['git'])

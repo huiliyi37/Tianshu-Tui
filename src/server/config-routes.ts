@@ -18,6 +18,8 @@ import {
   setDefaultProvider,
   setApiKey,
   setApiKeyEnv,
+  getRoutingConfig,
+  setRoutingConfig,
 } from '../config/manager.js'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
@@ -132,6 +134,24 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       try {
         setDefaultProvider(name)
         return { status: 200, body: { ok: true, default: name } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // Sub-agent / review model routing (agent.review + workers blocks).
+    'GET /config/routing': withAuth(() => {
+      return { status: 200, body: getRoutingConfig() }
+    }, apiToken),
+
+    'PUT /config/routing': withAuth((body) => {
+      const { review, workers, council } = (body ?? {}) as { review?: unknown; workers?: unknown; council?: unknown }
+      if (review === undefined && workers === undefined && council === undefined) {
+        return { status: 400, body: { error: 'review, workers or council is required' } }
+      }
+      try {
+        const result = setRoutingConfig({ review, workers, council })
+        return { status: 200, body: { ok: true, ...result } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

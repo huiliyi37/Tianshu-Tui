@@ -4,15 +4,15 @@
 
 import { applyThemeJson } from './theme-loader'
 
-export type ThemePref = 'system' | 'light' | 'dark' | 'nebula'
-export type ResolvedTheme = 'light' | 'dark' | 'nebula'
+export type ThemePref = 'system' | 'light' | 'dark' | 'nebula' | 'sakura' | 'cyberpunk' | 'cupertino' | 'light-classic'
+export type ResolvedTheme = 'light' | 'dark' | 'nebula' | 'sakura' | 'cyberpunk' | 'cupertino' | 'light-classic'
 
 const KEY = 'tianshu.theme'
 
 export function loadThemePref(): ThemePref {
   try {
     const v = localStorage.getItem(KEY)
-    if (v === 'light' || v === 'dark' || v === 'system' || v === 'nebula') return v
+    if (v === 'light' || v === 'dark' || v === 'system' || v === 'nebula' || v === 'sakura' || v === 'cyberpunk' || v === 'cupertino' || v === 'light-classic') return v
   } catch {
     // disabled storage — fall through
   }

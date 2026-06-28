@@ -24,6 +24,14 @@ import type {
 export interface RuntimeInfo {
   port: number
   token: string
+  /** Which Node hosts the sidecar: 'bundled' (shipped binary) | 'env' | 'system'.
+   *  Reported by the Rust shell (runtime_info); absent in the browser-dev fallback. */
+  nodeSource?: string
+  /** False when the sidecar failed to spawn or never passed /health before launch
+   *  — the port/token point at nothing, so the UI shows a fatal "failed to start"
+   *  state instead of an endless transient-reconnect banner. Absent (treated as
+   *  ready) in the browser-dev fallback and on older shells. */
+  ready?: boolean
 }
 
 let cached: RuntimeInfo | null = null
@@ -353,6 +361,13 @@ export interface RewindPoint {
   index: number
   content: string
   timestamp: number
+  /**
+   * Seq of the originating `user` event, i.e. the `u-${seq}` block the rewind
+   * reducer cuts at. Lets the timeline preview anchor on the exact same block a
+   * fork will truncate, so preview == post-fork state. Absent when the event log
+   * was trimmed/diverged (client falls back to ordinal/text heuristics).
+   */
+  seq?: number
 }
 
 export function getRewindPoints(id: string): Promise<{ points: RewindPoint[] }> {
@@ -556,6 +571,65 @@ export function setProviderKey(
 
 export function setProviderAsDefault(name: string): Promise<{ ok: boolean }> {
   return apiPost(`/config/providers/${name}/default`, {})
+}
+
+// ── Config: Sub-agent / Review model routing ────────────────────────
+
+/** A single sub-agent override target: which provider + model to run on. */
+export interface RoutingTarget {
+  provider: string
+  model: string
+}
+
+/** agent.review block — review/verify/patch worker model routing + toggles. */
+export interface ReviewRoutingConfig {
+  /** Keyed by worker profile name (e.g. 'reviewer', 'adversarial_verifier'). */
+  profiles: Record<string, RoutingTarget>
+  /** Skip deliver_task post-commit auto review entirely. */
+  skipAuto: boolean
+  /** Docs/rename-only changes bypass review workers + unverified RED gate. */
+  mechanicalFastPath: boolean
+}
+
+/** workers block — general capability-task sub-agent routing. */
+export interface WorkersRoutingConfig {
+  /** Named profiles: profileName → provider+model. */
+  profiles: Record<string, RoutingTarget>
+  /** Capability task → profile name. */
+  routing: Record<string, string>
+}
+
+/** One council seat. provider+model (when both set) route that seat to a
+ *  dedicated model — enabling heterogeneous councils (e.g. one DeepSeek-Pro seat
+ *  + one GLM seat). Falls back to the session model when unset/credential-less. */
+export interface CouncilSeatConfig {
+  authority: string
+  charter?: string
+  tierHint?: 'cheap' | 'balanced' | 'strong'
+  noDowngrade?: boolean
+  provider?: string
+  model?: string
+}
+
+export interface CouncilRoutingConfig {
+  /** When non-empty, overrides the built-in tianquan/tianfu/tianxuan default. */
+  seats: CouncilSeatConfig[]
+}
+
+export interface RoutingConfig {
+  review: ReviewRoutingConfig
+  workers: WorkersRoutingConfig
+  council: CouncilRoutingConfig
+}
+
+export function getRoutingConfig(): Promise<RoutingConfig> {
+  return apiGet<RoutingConfig>('/config/routing')
+}
+
+export function setRoutingConfig(
+  input: { review?: ReviewRoutingConfig; workers?: WorkersRoutingConfig; council?: CouncilRoutingConfig },
+): Promise<{ ok: boolean } & RoutingConfig> {
+  return apiPut<{ ok: boolean } & RoutingConfig>('/config/routing', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

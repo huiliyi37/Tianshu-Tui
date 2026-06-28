@@ -86,6 +86,7 @@ test('strict mode promotes warnings to errors', () => {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',  // will trigger effort_control warn
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
   }
   addProviderEntry('strict_test', 'StrictTest', caps)
 
@@ -165,6 +166,7 @@ test('formatConformanceReport includes suggestions when issues found', () => {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
   }
   addProviderEntry('fmt_test', 'FmtTest', caps)
 

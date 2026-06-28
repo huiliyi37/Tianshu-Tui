@@ -1,5 +1,8 @@
 import { createTrace, appendResult, serializeTrace, detectDeviation, buildPlanSteps, withPlanSteps } from './plan-execution-trace.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
+import type { PlanStepInput } from '../tools/types.js'
+
+type PlanStepLike = PlanStepInput | string
 import { correctPlan, injectReplanContext } from './replan-loop.js'
 import { wrapSystemReminder } from '../prompt/system-reminder.js'
 import type { TaskDepthLayer } from '../context/task-contract.js'
@@ -19,11 +22,11 @@ export interface PlanTraceCoordinatorDeps {
 export class PlanTraceCoordinator {
   constructor(private deps: PlanTraceCoordinatorDeps) {}
 
-  /** U6/C1: seed the execution trace from the agent's first todo write. */
-  capturePlanSteps(descriptions: string[]): void {
+  /** U6/C1: seed or sync the execution trace from todo/plan_task step inputs. */
+  capturePlanSteps(steps: PlanStepLike[]): void {
     const pt = this.deps.getPlanTrace()
     if (!pt) return
-    this.deps.setPlanTrace(withPlanSteps(pt, buildPlanSteps(descriptions, pt.depthLayer)))
+    this.deps.setPlanTrace(withPlanSteps(pt, buildPlanSteps(steps, pt.depthLayer)))
   }
 
   /** U6: build a StepResult from the tool events recorded for a given turn. */

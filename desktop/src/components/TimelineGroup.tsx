@@ -1,9 +1,18 @@
-import { memo, useState, useMemo } from 'react'
+import { memo, useState, useMemo, Children } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 
+// A timeline run is collapsed by default (one tiny row). When expanded, only the
+// trailing window of steps is mounted so a long tool+thinking run doesn't inflate
+// into one giant DOM subtree inside a single virtual row — the outer virtualizer
+// measures/repaints the whole row on each change, so an unbounded expanded run
+// janks hard. The streaming tail is always within the window; "show earlier"
+// reveals the rest on demand.
+const TIMELINE_WINDOW = 30
+
 export function TimelineGroupImpl({ blocks, children }: { blocks: ConvoBlock[], children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(true)
+  const [showAll, setShowAll] = useState(false)
 
   const summary = useMemo(() => {
     // just a simple count
@@ -14,6 +23,11 @@ export function TimelineGroupImpl({ blocks, children }: { blocks: ConvoBlock[], 
     if (thinking > 0) return `Worked for ${blocks.length} steps (Thinking)`
     return `Worked for ${blocks.length} steps`
   }, [blocks])
+
+  const childArray = Children.toArray(children)
+  const hiddenCount = childArray.length - TIMELINE_WINDOW
+  const windowed = !showAll && hiddenCount > 0
+  const shown = windowed ? childArray.slice(childArray.length - TIMELINE_WINDOW) : childArray
 
   return (
     <div className={`timeline-group ${collapsed ? 'collapsed' : 'open'}`}>
@@ -26,7 +40,12 @@ export function TimelineGroupImpl({ blocks, children }: { blocks: ConvoBlock[], 
       </button>
       {!collapsed && (
         <div className="timeline-body">
-          {children}
+          {windowed && (
+            <button className="timeline-more" onClick={() => setShowAll(true)}>
+              显示更早的 {hiddenCount} 步
+            </button>
+          )}
+          {shown}
         </div>
       )}
     </div>

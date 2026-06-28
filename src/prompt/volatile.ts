@@ -29,7 +29,7 @@ import type { PlanMethodology } from '../context/task-contract.js'
 // against. Zero new tools; just nudges the model toward the existing todo tool.
 const METHODOLOGY_ADVISORY_TEMPLATES: Record<PlanMethodology, string> = {
   lightweight: '<plan-methodology route="lightweight">推荐使用轻量版计划模板（5阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md。本任务 scope 内聚，单模块边界内变更，轻量版足以覆盖。至少画一张架构或数据流图（Mermaid），哪怕只画核心 3-5 个节点。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
-  full: '<plan-methodology route="full">推荐使用完整版计划模板（9阶段），路径: docs/superpowers/plans/2026-06-14-plan-methodology-template.md。必须包含: 安全不变量、触发路径清单、双门对齐数据流图。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
+  full: '<plan-methodology route="full">推荐使用基础计划模板（Superpowers writing-plans），路径: docs/superpowers/plans/2026-06-28-plan-methodology-base.md。这是所有计划的默认基础：零上下文假设、任务粒度 2-5 分钟、禁止占位符、TDD、探针先行、瑶光反证、频繁提交。强制要求：① 至少一张 Mermaid 图（架构/数据流/状态图）；② 每个任务 RED→GREEN；③ 复杂实现前先打 30 秒探针；④ 用真实输入复现原问题再验修复，不取信声称取 exit code。如果任务涉及安全/权限/沙箱/多 enforcement gate，在基础模板之上追加安全附录（安全不变量、触发路径清单、双门对齐数据流图）。开工前先用 todo 列出有序步骤（即为执行计划基线）。</plan-methodology>',
 }
 
 export function renderPlanMethodologyAdvisory(
@@ -174,6 +174,8 @@ export interface VolatileContext {
   planMethodologyAdvisory?: string | null
   /** Matched .rivet/skills — cache-safe dynamic appendix. */
   skillAdvisoryBlock?: string | null
+  /** Explicitly invoked .rivet/skills (full body) — cache-safe dynamic appendix. */
+  invokedSkillsBlock?: string | null
   /** Cross-session memory recall — cache-safe dynamic appendix. */
   crossSessionMemoryBlock?: string | null
   /** @mention context hints — cache-safe dynamic appendix. */
@@ -360,6 +362,21 @@ export function appendixBlockName(content: string): string {
 export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: number): AppendixPart[] {
   const parts: string[] = []
 
+  // ── Protected blocks: must render whole even under appendix budget pressure ──
+  // Explicitly-invoked skill bodies are high-salience by user intent: they should
+  // only disappear when the model marks them complete, not because another
+  // appendix block consumed the budget.
+  const protectedParts: string[] = []
+  if (ctx.invokedSkillsBlock) {
+    protectedParts.push(ctx.invokedSkillsBlock)
+  }
+
+  // Budget for ordinary appendix blocks is what's left after protected blocks.
+  const protectedLen = protectedParts.reduce((sum, p) => sum + p.length, 0)
+  const regularMaxChars = maxChars !== undefined && maxChars > 0
+    ? Math.max(0, maxChars - protectedLen)
+    : maxChars
+
   // ── P1b: cache-friendly ordering — stable sections first, volatile last ──
   // DeepSeek exact-prefix cache matches byte-for-byte from the start.
   // Sections that rarely change go first so their bytes stay in cache;
@@ -471,6 +488,10 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(ctx.skillAdvisoryBlock)
   }
 
+  if (ctx.invokedSkillsBlock) {
+    parts.push(ctx.invokedSkillsBlock)
+  }
+
   if (ctx.crossSessionMemoryBlock) {
     parts.push(ctx.crossSessionMemoryBlock)
   }
@@ -545,19 +566,21 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(renderTersenessNudge(ctx.tersenessEscalate ?? false))
   }
 
-  if (parts.length === 0) return []
+  const protectedResult = protectedParts.map(content => ({ name: appendixBlockName(content), content }))
+
+  if (parts.length === 0) return protectedResult
 
   // ── GWT Top-K selection (when budget is set) ────────────────────
-  if (maxChars !== undefined && maxChars > 0) {
+  if (regularMaxChars !== undefined && regularMaxChars > 0) {
     const scored = parts.map(content => ({
       content,
       salience: assignSalience(content),
     }))
-    const selected = selectTopKBlocks(scored, maxChars)
-    return selected.map(content => ({ name: appendixBlockName(content), content }))
+    const selected = selectTopKBlocks(scored, regularMaxChars)
+    return [...protectedResult, ...selected.map(content => ({ name: appendixBlockName(content), content }))]
   }
 
-  return parts.map(content => ({ name: appendixBlockName(content), content }))
+  return [...protectedResult, ...parts.map(content => ({ name: appendixBlockName(content), content }))]
 }
 
 /** Backward-compatible wrapper: full <context-update> block (no seq). */

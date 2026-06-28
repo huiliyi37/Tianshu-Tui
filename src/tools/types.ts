@@ -62,6 +62,16 @@ export interface PlanClosedInput {
   totalChangedCheckboxes: number
 }
 
+/** U6/C1: a step input passed through onPlanSteps to seed/sync PlanExecutionTrace. */
+export interface PlanStepInput {
+  /** Optional stable identifier (e.g. todo id). */
+  id?: string
+  /** Step description shown in trace / UI. */
+  content: string
+  /** Current status from the todo list, if known. */
+  status?: 'pending' | 'in_progress' | 'completed'
+}
+
 /**
  * VSW: a resolved snapshot plan attached to a verification tool call. Built by
  * the session-scoped verification-snapshot-manager from the §6 policy decision.
@@ -88,7 +98,7 @@ export interface ToolCallParams {
   /** U6/C1: capture the goal decomposition (ordered step descriptions) produced
    *  by the plan_steps tool during planning. The loop maps these into the active
    *  PlanExecutionTrace. Absent in non-task / worker contexts → tool is a no-op. */
-  onPlanSteps?: (descriptions: string[]) => void
+  onPlanSteps?: (steps: PlanStepInput[]) => void
   /** T4: structured per-worker delegation updates (subagent panel). Optional —
    *  set by the tool pipeline; absent in non-server contexts (no-op). */
   onWorkerActivity?: (activity: DelegationActivity) => void
@@ -137,6 +147,10 @@ export interface ToolCallParams {
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */
   abortSignal?: AbortSignal
+  /** Called when the model explicitly loads a skill via the skill tool. */
+  onSkillInvoked?: (name: string) => void
+  /** Called when the model explicitly marks a skill as complete via the skill tool. */
+  onSkillCompleted?: (name: string) => void
 }
 
 export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'

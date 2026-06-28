@@ -216,8 +216,8 @@ describe('TODO_TOOL scope gate', () => {
 describe('TODO_TOOL onPlanSteps (U6/C1)', () => {
   beforeEach(() => setTodos([]))
 
-  it('write invokes onPlanSteps with the ordered content array', async () => {
-    const captured: string[][] = []
+  it('write invokes onPlanSteps with the ordered step inputs', async () => {
+    const captured: Array<{ id?: string; content: string; status?: string }>[] = []
     await TODO_TOOL.execute({
       input: {
         action: 'write',
@@ -231,7 +231,10 @@ describe('TODO_TOOL onPlanSteps (U6/C1)', () => {
       onPlanSteps: d => captured.push(d),
     })
     assert.equal(captured.length, 1)
-    assert.deepEqual(captured[0], ['读取 loop.ts 理解现状', '修改 detectDeviation'])
+    assert.deepEqual(
+      captured[0]!.map(s => s.content),
+      ['读取 loop.ts 理解现状', '修改 detectDeviation'],
+    )
   })
 
   it('read does not invoke onPlanSteps', async () => {

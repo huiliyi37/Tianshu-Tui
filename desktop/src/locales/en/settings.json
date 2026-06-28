@@ -4,7 +4,8 @@
     "appearance": "Appearance",
     "behavior": "Behavior",
     "integrations": "Integrations",
-    "system": "System"
+    "system": "System",
+    "help": "Help"
   },
   "appearance": "Appearance",
   "autonomy": "Default autonomy level for new threads",
