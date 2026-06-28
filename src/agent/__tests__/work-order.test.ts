@@ -201,6 +201,35 @@ describe('work-order contract', () => {
     assert.ok(order.dedupeKey.startsWith('write:'))
   })
 
+  it('threads modelOverride through read-only and write work orders', () => {
+    const ro = createReadOnlyWorkOrder({
+      id: 'wo_ov_ro',
+      parentTurnId: 'turn_1',
+      kind: 'plan',
+      profile: 'council_expert',
+      objective: 'council seat',
+      scope: {},
+      modelOverride: { provider: 'glm', model: 'glm-4.6' },
+    })
+    assert.deepEqual(ro.modelOverride, { provider: 'glm', model: 'glm-4.6' })
+
+    const rw = createWriteWorkOrder({
+      id: 'wo_ov_rw',
+      parentTurnId: 'turn_1',
+      kind: 'patch_proposal',
+      objective: 'patch',
+      scope: { files: ['a.ts'] },
+      modelOverride: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+    })
+    assert.deepEqual(rw.modelOverride, { provider: 'deepseek', model: 'deepseek-v4-pro' })
+
+    // Absent override → undefined (not an empty object).
+    const none = createReadOnlyWorkOrder({
+      id: 'wo_ov_none', parentTurnId: 'turn_1', kind: 'plan', profile: 'council_expert', objective: 'x', scope: {},
+    })
+    assert.equal(none.modelOverride, undefined)
+  })
+
   it('accepts patchSummary in worker result schema', () => {
     const result = parseWorkerResult(JSON.stringify({
       workOrderId: 'wo_1',

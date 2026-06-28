@@ -16,6 +16,10 @@ export interface CouncilFanoutRequest {
   profile: 'council_expert'
   scope: Record<string, never>
   authority: string
+  /** Per-seat provider/model override (highest routing precedence). Set when the
+   *  seat declares both provider+model; threaded to the worker so this seat runs
+   *  on an isolated provider/model — enables heterogeneous councils. */
+  modelOverride?: { provider: string; model: string }
 }
 export interface CouncilDeps {
   delegateBatch: (
@@ -130,6 +134,15 @@ function objectiveHash(s: string): string {
   return (h >>> 0).toString(16)
 }
 
+/** Per-seat model override fragment — only when the seat declares both
+ *  provider+model. Spread into the fanout request so heterogeneous seats run on
+ *  their own provider/model. */
+function seatModelOverride(seat: CouncilSeat): Pick<CouncilFanoutRequest, 'modelOverride'> {
+  return seat.provider && seat.model
+    ? { modelOverride: { provider: seat.provider, model: seat.model } }
+    : {}
+}
+
 /** 单轮会诊：恰一次 delegateBatch 扇出席位 → 裁决 → 渲染。绝不派 worker 执行 / 分波。 */
 export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promise<CouncilPlan> {
   const convenedAt = deps.now() // 全程只取一次时钟，喂 shadow / meta / md，杜绝双取不一致。
@@ -143,6 +156,7 @@ export async function runCouncil(input: CouncilInput, deps: CouncilDeps): Promis
     profile: 'council_expert',
     scope: {},
     authority: seat.authority,
+    ...seatModelOverride(seat),
   }))
 
   // 旁路：席位路由 shadow（推荐 vs 实际 tier）。默认缺省；提供时也绝不改派发结果。
@@ -200,6 +214,7 @@ export async function runCouncilDebate(input: CouncilInput, deps: CouncilDeps): 
     profile: 'council_expert',
     scope: {},
     authority: seat.authority,
+    ...seatModelOverride(seat),
   }))
   const run2 = await deps.delegateBatch(r2requests, 'all_required', input.abortSignal,
     deps.onSeatProgress

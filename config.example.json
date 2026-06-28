@@ -25,6 +25,13 @@
         "doc_scout": { "provider": "deepseek", "model": "deepseek-v4-flash" },
         "council_expert": { "provider": "deepseek", "model": "deepseek-v4-pro" }
       }
+    },
+    "council": {
+      "seats": [
+        { "authority": "tianquan", "charter": "架构与正确性", "provider": "deepseek", "model": "deepseek-v4-pro" },
+        { "authority": "tianfu", "charter": "风险与边界", "provider": "glm", "model": "glm-4.6" },
+        { "authority": "tianxuan", "charter": "实现可行性", "provider": "deepseek", "model": "deepseek-v4-pro" }
+      ]
     }
   },
   "workers": {

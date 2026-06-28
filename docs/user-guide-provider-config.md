@@ -717,6 +717,32 @@ rivet config providers  # 应该只显示内置 Provider
 
 > 桌面端「集成 → 子代理 / 审查模型路由」面板的「按 profile 覆盖子代理模型」一节已列出 `council_expert` / `code_scout` / `doc_scout`,上述配方可直接在 UI 完成,无需手改 JSON。
 
+### 异构议事会：每个席位用不同的强模型（一人一席）
+
+`council_expert` 这个 profile 覆盖是**全席统一**的——所有席位都拿同一个模型。如果你想要「天权席位用 DeepSeek Pro、天府席位用 GLM」这种**跨模型议事会**（不同模型 = 不同视角,议事质量更高,且各跑各的服务端缓存、互不挤兑),用 **`agent.council.seats`** 给每个席位单独指定 `provider` + `model`：
+
+```json
+{
+  "agent": {
+    "council": {
+      "seats": [
+        { "authority": "tianquan", "charter": "架构与正确性", "provider": "deepseek", "model": "deepseek-v4-pro" },
+        { "authority": "tianfu",   "charter": "风险与边界",   "provider": "glm",      "model": "glm-4.6" },
+        { "authority": "tianxuan", "charter": "实现可行性",   "provider": "deepseek", "model": "deepseek-v4-pro" }
+      ]
+    }
+  }
+}
+```
+
+要点：
+
+- **provider 必须在 `provider.providers` 里存在,model 必须在该 provider 的 `models` 列表里**;凭据缺失或拼错时该席位**静默回退会话模型**(和其它路由层规则一致,`RIVET_DEBUG=1` 看 `[worker-model] modelOverride` 日志确认是否命中)。
+- **`provider` 与 `model` 必须成对**——只写一个视为未配置,该席位走默认路由。
+- **优先级最高**:`agent.council.seats[].provider/model` > `agent.review.profiles["council_expert"]` > `workers.routing["code_edit"]` > 内置启发式。所以一旦给席位配了 provider/model,上面那套全席统一的 `council_expert` 覆盖对该席位不再生效。
+- **席位数即并行 worker 数**:配 3 个席位就并发派 3 个子代理,各自独立 provider/model/缓存。
+- **临时覆盖**:也可在调用 `council_convene` 时传 `seats:[{authority, provider, model}, …]`,逐次覆盖配置默认席位(per-call > config > 内置)。
+
 ### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
 
 仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查、team 侦察和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存；同时把 `council_expert` 单独留在 DeepSeek Pro，演示「议事会保强、其余走 Flash」的 profile 覆盖配方。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
