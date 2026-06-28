@@ -18,6 +18,7 @@ import { FontSettingsPanel } from '../components/FontSettingsPanel'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
+import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
@@ -259,6 +260,10 @@ export function SettingsSurface() {
             <section className="settings-group">
               <h4>{t('provider')}</h4>
               <ProviderSettings />
+            </section>
+            <section className="settings-group">
+              <h4>子代理 / 审查模型路由</h4>
+              <RoutingSettings />
             </section>
             <section className="settings-group">
               <McpSettingsManager />

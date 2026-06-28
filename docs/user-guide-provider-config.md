@@ -620,6 +620,75 @@ rivet config providers  # 应该只显示内置 Provider
 
 ---
 
+## 子代理 / 审查模型路由
+
+主会话和子代理（review worker、探索 worker、补丁 worker 等）可以用**不同的 provider + model**。最典型的用途：主会话用重型模型（GLM-5.2 / DeepSeek Pro），子代理用便宜快的 Flash。
+
+> **为什么要分开路由**：GLM / Kimi / Codex 这类 `prefixCache: "none"` 的 provider 没有 Rivet 侧前缀缓存，缓存完全依赖服务端隐式匹配。当子代理用**同一个 provider + 同一个 API Key** 发请求时，它不同的 prompt 会淘汰主会话的服务端缓存，导致主会话下一轮 `cacheRead` 归零、整段重算（提交后审查阶段尤其明显，表现为长时间卡在「提交后审查启动中」）。把子代理路由到**另一个 provider** 即可让它的缓存足迹和主会话彻底解耦。
+
+有两套独立的配置块，按用途选：
+
+| 配置块 | 作用对象 | 路由键 | 跨 provider |
+|--------|----------|--------|:-----------:|
+| `agent.review` | deliver_task 提交后审查 + 各级 review/verify/patch worker | worker profile 名（`reviewer` 等） | ✅ |
+| `workers` | 通用能力任务子代理（探索/编辑/诊断/重构等） | 能力任务名（`code_edit` 等） | ✅ |
+
+两者都遵循同一条**静默回退规则**：如果配置的 provider 不在 `provider.providers` 里、或 model 不在该 provider 的 `models` 列表里、或该 provider 的 API Key 解析不到，则该项**静默回退到主会话模型**（不会报错）。配 `RIVET_DEBUG=1` 启动可在日志看到 `[review-override]` / `[worker-model]` 的路由命中或跳过原因。
+
+### `agent.review` —— 审查 worker 模型路由
+
+```json
+{
+  "agent": {
+    "review": {
+      "profiles": {
+        "reviewer":             { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "adversarial_verifier": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "verifier":             { "provider": "deepseek", "model": "deepseek-v4-flash" },
+        "patcher":              { "provider": "deepseek", "model": "deepseek-v4-flash" }
+      },
+      "skipAuto": false,
+      "mechanicalFastPath": true
+    }
+  }
+}
+```
+
+- **`profiles`**：按 worker profile 名指定 `{ provider, model }`。提交后自动审查（`deliver_task` commit）实际用的是 **`reviewer`** 这个 profile，所以只想让提交审查走 Flash，配 `reviewer` 一项即可；要把对抗验证（L2）、补丁建议也一并下放就把 `adversarial_verifier` / `verifier` / `patcher` 也配上。profile 名必须是内置注册表里的（`reviewer` / `adversarial_verifier` / `verifier` / `patcher` / `council_expert` / `goal_judge` 等），拼错会被拒。
+- **`skipAuto`**（默认 `false`）：设为 `true` 完全关闭 `deliver_task` 的提交后自动审查（等价于环境变量 `RIVET_REVIEW_DISCIPLINE=0`，但限本配置文件）。急救用，不想要审查时最直接。
+- **`mechanicalFastPath`**（默认 `true`）：纯文档 / 纯重命名变更跳过审查 worker 和未验证 RED 闸门。
+
+### `workers` —— 通用子代理能力路由
+
+`workers` 是顶层配置块（不在 `agent` 下）。它分两步：先在 `profiles` 里定义命名档位 → `{ provider, model }`，再在 `routing` 里把**能力任务**映射到档位名。
+
+```json
+{
+  "workers": {
+    "profiles": {
+      "cheap-flash": { "provider": "deepseek", "model": "deepseek-v4-flash" },
+      "capable":     { "provider": "deepseek", "model": "deepseek-v4-pro" }
+    },
+    "routing": {
+      "repo_summarization":     "cheap-flash",
+      "code_edit":              "cheap-flash",
+      "test_failure_diagnosis": "cheap-flash",
+      "risky_refactor":         "cheap-flash"
+    }
+  }
+}
+```
+
+- **`routing` 的键**只能是这 5 个能力任务：`repo_summarization`、`code_edit`、`test_failure_diagnosis`、`compaction`、`risky_refactor`。值是 `profiles` 里的档位名。
+- **`routing` 的值**必须是 `workers.profiles` 里已定义的档位名。内置默认已经把上面 4 个任务都指向 `cheap-flash`（即 DeepSeek Flash），所以**主会话用 DeepSeek 时，子代理默认就已经在用 Flash 了**——通常无需额外配置；只有改用别的档位（如自定义 provider）时才需要覆盖。
+- 内置档位：`cheap`(MiniMax) / `cheap-flash`(DeepSeek Flash) / `capable`(DeepSeek Pro) / `mimo` / `mimo-pro` / `mimo-ultra`，可直接引用或在 `profiles` 里覆盖。
+
+### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
+
+仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
+
+---
+
 ## 调试
 
 查看完整配置：

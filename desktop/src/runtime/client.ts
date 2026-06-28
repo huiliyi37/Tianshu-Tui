@@ -573,6 +573,47 @@ export function setProviderAsDefault(name: string): Promise<{ ok: boolean }> {
   return apiPost(`/config/providers/${name}/default`, {})
 }
 
+// ── Config: Sub-agent / Review model routing ────────────────────────
+
+/** A single sub-agent override target: which provider + model to run on. */
+export interface RoutingTarget {
+  provider: string
+  model: string
+}
+
+/** agent.review block — review/verify/patch worker model routing + toggles. */
+export interface ReviewRoutingConfig {
+  /** Keyed by worker profile name (e.g. 'reviewer', 'adversarial_verifier'). */
+  profiles: Record<string, RoutingTarget>
+  /** Skip deliver_task post-commit auto review entirely. */
+  skipAuto: boolean
+  /** Docs/rename-only changes bypass review workers + unverified RED gate. */
+  mechanicalFastPath: boolean
+}
+
+/** workers block — general capability-task sub-agent routing. */
+export interface WorkersRoutingConfig {
+  /** Named profiles: profileName → provider+model. */
+  profiles: Record<string, RoutingTarget>
+  /** Capability task → profile name. */
+  routing: Record<string, string>
+}
+
+export interface RoutingConfig {
+  review: ReviewRoutingConfig
+  workers: WorkersRoutingConfig
+}
+
+export function getRoutingConfig(): Promise<RoutingConfig> {
+  return apiGet<RoutingConfig>('/config/routing')
+}
+
+export function setRoutingConfig(
+  input: { review?: ReviewRoutingConfig; workers?: WorkersRoutingConfig },
+): Promise<{ ok: boolean } & RoutingConfig> {
+  return apiPut<{ ok: boolean } & RoutingConfig>('/config/routing', input)
+}
+
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
 import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse } from './types'
