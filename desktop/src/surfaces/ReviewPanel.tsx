@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   getArtifact,
   openFile,
@@ -87,17 +87,23 @@ export function ReviewPanel(props: {
   const [selectedCanvasArtifact, setSelectedCanvasArtifact] = useState<ArtifactSummary | null>(null)
   const [canvasContent, setCanvasContent] = useState<string>('')
   const [canvasLoading, setCanvasLoading] = useState<boolean>(false)
-  const [canvasWidth, setCanvasContentWidth] = useState<'100%' | '768px' | '375px'>('100%')
+  const [canvasWidth, setCanvasWidth] = useState<'100%' | '768px' | '375px'>('100%')
+  // 自增触发「刷新」：进 content effect 依赖 → 重新从盘上拉取，同时作为 iframe key 强制重挂。
   const [canvasKey, setCanvasKey] = useState<number>(0)
 
   const canvasArtifacts = useMemo(() => {
     return artifacts.filter((a) => a.kind === 'html' || a.kind === 'markdown' || a.target.endsWith('.html') || a.target.endsWith('.md') || a.target.endsWith('.css'))
   }, [artifacts])
 
+  // 切会话或工件被移除时，当前选中项可能已不在列表里：回落到首个，避免拿旧会话的
+  // artifactId 去取（404）以及 <select> 显示一个不在选项中的越界值。
   useEffect(() => {
-    if (canvasArtifacts.length > 0 && !selectedCanvasArtifact) {
-      setSelectedCanvasArtifact(canvasArtifacts[0]!)
+    if (canvasArtifacts.length === 0) {
+      if (selectedCanvasArtifact) setSelectedCanvasArtifact(null)
+      return
     }
+    const stillPresent = selectedCanvasArtifact && canvasArtifacts.some((a) => a.id === selectedCanvasArtifact.id)
+    if (!stillPresent) setSelectedCanvasArtifact(canvasArtifacts[0]!)
   }, [canvasArtifacts, selectedCanvasArtifact])
 
   useEffect(() => {
@@ -116,7 +122,8 @@ export function ReviewPanel(props: {
     } else {
       setCanvasContent('')
     }
-  }, [selectedCanvasArtifact, sessionId])
+    // canvasKey 进依赖：点「刷新」重新拉取盘上最新内容（而非仅重挂 iframe）。
+  }, [selectedCanvasArtifact, sessionId, canvasKey])
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
@@ -251,11 +258,15 @@ export function ReviewPanel(props: {
                         <button
                           className="canvas-btn flex items-center gap-1 hover:text-text-strong"
                           onClick={() => {
-                            if (canvasContent) {
-                              const blob = new Blob([canvasContent], { type: 'text/html' })
-                              const url = URL.createObjectURL(blob)
-                              window.open(url, '_blank')
-                            }
+                            if (!canvasContent) return
+                            // markdown 用 text/plain 打开（避免把 .md 内联的 HTML 当文档执行）；
+                            // html 才用 text/html。revoke 释放 object URL，noopener 断开 opener。
+                            const mime =
+                              selectedCanvasArtifact?.kind === 'markdown' ? 'text/plain;charset=utf-8' : 'text/html'
+                            const blob = new Blob([canvasContent], { type: mime })
+                            const url = URL.createObjectURL(blob)
+                            window.open(url, '_blank', 'noopener,noreferrer')
+                            setTimeout(() => URL.revokeObjectURL(url), 60_000)
                           }}
                           title="在浏览器中打开"
                         >
@@ -269,19 +280,19 @@ export function ReviewPanel(props: {
                       <div className="flex items-center gap-1 bg-panel-3 rounded p-0.5 border border-border">
                         <button
                           className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '100%' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
-                          onClick={() => setCanvasContentWidth('100%')}
+                          onClick={() => setCanvasWidth('100%')}
                         >
                           Desktop
                         </button>
                         <button
                           className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '768px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
-                          onClick={() => setCanvasContentWidth('768px')}
+                          onClick={() => setCanvasWidth('768px')}
                         >
                           Tablet
                         </button>
                         <button
                           className={`px-2 py-0.5 rounded text-[10px] transition-colors ${canvasWidth === '375px' ? 'bg-accent text-accent-fg' : 'text-muted hover:text-text'}`}
-                          onClick={() => setCanvasContentWidth('375px')}
+                          onClick={() => setCanvasWidth('375px')}
                         >
                           Mobile
                         </button>

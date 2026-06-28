@@ -48,16 +48,8 @@ export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: R
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('graph')
 
   // 派生列表与计数放进 useMemo：仅 nodes 引用变化时才重算 Object.values + sort + filter。
+  // 流式帧间 nodes 不变 → 跳过全部计算，配合外层 memo 短路整个组件 reconcile。
   const list = useMemo(() => Object.values(nodes).sort((a, b) => a.updatedAt - b.updatedAt), [nodes])
-  if (list.length === 0) return null
-
-  const total = list.length
-  const running = list.filter((n) => n.status === 'running').length
-  const blocked = list.filter((n) => n.status === 'blocked').length
-  const escalated = list.filter((n) => n.status === 'escalated').length
-  const failed = list.filter((n) => n.status === 'failed').length
-  const done = list.filter((n) => n.status === 'passed' || n.status === 'completed').length
-  const attention = blocked + escalated + failed
 
   const byParent = useMemo(() => {
     const map = new Map<string | undefined, DelegationNode[]>()
@@ -115,6 +107,19 @@ export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: R
       height: (maxDepth + 1) * levelYGap + 80,
     }
   }, [list, byParent, viewMode])
+
+  // 早返回放在所有 hook 之后：空列表与非空列表必须调用相同数量的 hook，
+  // 否则 nodes 从无到有（首个 worker 出现）时 hook 数量变化会触发
+  // "Rendered more hooks than during the previous render" 崩溃。
+  if (list.length === 0) return null
+
+  const total = list.length
+  const running = list.filter((n) => n.status === 'running').length
+  const blocked = list.filter((n) => n.status === 'blocked').length
+  const escalated = list.filter((n) => n.status === 'escalated').length
+  const failed = list.filter((n) => n.status === 'failed').length
+  const done = list.filter((n) => n.status === 'passed' || n.status === 'completed').length
+  const attention = blocked + escalated + failed
 
   const renderList = (parentId: string | undefined, depth: number): React.ReactNode =>
     (byParent.get(parentId) ?? []).map((n) => {
