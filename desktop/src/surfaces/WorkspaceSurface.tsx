@@ -10,7 +10,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { TerminalTabs } from '../components/TerminalTabs'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
-import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
+import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout, shouldAutoCollapseReview } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
 
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
@@ -57,7 +57,8 @@ export function WorkspaceSurface() {
     const ro = new ResizeObserver(([entry]) => {
       if (!entry) return
       const w = entry.contentRect.width
-      if (w < 1200) {
+      const reviewWidthPx = reviewRef.current?.getSize().inPixels ?? 0
+      if (shouldAutoCollapseReview(w, reviewWidthPx)) {
         if (reviewVisibleRef.current && !reviewManualRef.current) {
           dispatch({ type: 'setReview', visible: false })
         }
@@ -268,7 +269,7 @@ export function WorkspaceSurface() {
           panelRef={reviewRef}
           collapsible
           defaultSize={`${layout.review}%`}
-          minSize="15%"
+          minSize="20%"
           maxSize="45%"
           onResize={(size, _id, prev) => {
             const pct = Math.round(size.asPercentage)

@@ -1787,6 +1787,7 @@ body {
   background: transparent; color: var(--text); border: none; cursor: pointer;
   padding: 3px 0; font-size: var(--text-sm); text-align: left; min-width: 0;
   border-radius: var(--radius-sm);
+  min-height: 28px;
 }
 .tool-row-head:hover { background: var(--panel-2); }
 .tool-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }

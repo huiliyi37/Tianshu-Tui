@@ -30,6 +30,7 @@ import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
+import { estimateBlockSize, estimateTimelineSize } from '../lib/thread-layout.js'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -166,7 +167,11 @@ export function ThreadView(props: {
   const virtualizer = useVirtualizer({
     count: rendered.length,
     getScrollElement: () => msgRef.current,
-    estimateSize: () => 80,
+    estimateSize: (index) => {
+      const item = rendered[index]!
+      if (item.kind === 'timeline') return estimateTimelineSize(item.items)
+      return estimateBlockSize(item.block)
+    },
     overscan: 8,
     getItemKey: (index) => {
       const item = rendered[index]!
