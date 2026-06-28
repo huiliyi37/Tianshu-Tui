@@ -286,6 +286,11 @@ export class TuiApp {
   /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
   private sidePanelLeaderPending = false
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
+  /** 清理 Ctrl+X leader 状态（overlay/模式切换时调用，防止后续按键误触 side panel）。 */
+  private clearSidePanelLeader(): void {
+    this.sidePanelLeaderPending = false
+    if (this.sidePanelLeaderTimer) { clearTimeout(this.sidePanelLeaderTimer); this.sidePanelLeaderTimer = null }
+  }
 
   // ── W4b: 输入辅助（W-B5: fields moved to InputController） ───
   /** W-B5: input state manager (slash/file-completion/history/ctrl+c/esc) */
@@ -448,7 +453,11 @@ export class TuiApp {
     })
 
     // Wire bracketed paste: 整段插入光标处，批渲染（避免逐 chunk 全量重写）
+    // 审批/意图/overlay 模式下不处理粘贴——粘贴文本会"穿透"到输入框，
+    // 退出模式后出现幽灵文本。
     this.input.onPaste((text) => {
+      const mode = this.input.getMode()
+      if (mode !== 'input') return
       this.inputLine.insertText(text)
       this.inputController.fileCompletion = null
       this.writeBatcher.schedule()
@@ -854,6 +863,8 @@ export class TuiApp {
     // 在激活任何全屏覆盖层之前，必须先干净地清除主屏幕底部的 live region（输入框和 GlanceBar），
     // 避免退出覆盖层后主屏幕残留旧的 live region 导致重影和重复行。
     this.live.clear()
+    // 清理 Ctrl+X leader 状态，防止 overlay 内的按键误触 side panel toggle
+    this.clearSidePanelLeader()
 
     switch (id) {
       case 'pager':
