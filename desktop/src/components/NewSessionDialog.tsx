@@ -16,33 +16,44 @@ import {
 } from '@/components/ui/dialog'
 
 /**
- * New thread in a project (P1). The folder typed/picked here becomes the session
- * cwd; the runtime's path-grants + self/world locus enforce the boundary at the
- * tool layer. cwd is prefilled with the active project so threads land in it.
+ * New thread in a project (P1). The folder(s) typed/picked here become the
+ * session roots; the first is the primary cwd the runtime runs in, additional
+ * roots are bound repos shown by the project sidebar (multi-repo workspace,
+ * matching Antigravity's multi-folder project). The runtime's path-grants +
+ * self/world locus enforce the boundary at the tool layer. cwd is prefilled
+ * with the active project so threads land in it.
  * The autonomy selector (S) sets the session's approval mode up front so an
  * unattended run can start without per-tool prompts.
  */
 export function NewSessionDialog(props: {
   defaultCwd?: string | null
-  onCreate: (input: { cwd?: string; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean }) => void
+  onCreate: (input: { cwd?: string; roots?: string[]; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean }) => void
   onClose: () => void
 }) {
   const { defaultCwd, onCreate, onClose } = props
   const [title, setTitle] = useState('')
-  const [cwd, setCwd] = useState(defaultCwd ?? '')
+  // roots[0] is the primary cwd; additional entries are bound repos.
+  const [roots, setRoots] = useState<string[]>(() => (defaultCwd ? [defaultCwd] : []))
   const [prompt, setPrompt] = useState('')
   const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [worktree, setWorktree] = useState(false)
 
   const browse = async () => {
     const picked = await pickFolder()
-    if (picked) setCwd(picked)
+    if (!picked) return
+    setRoots((prev) => (prev.includes(picked) ? prev : [...prev, picked]))
+  }
+
+  const removeRoot = (root: string) => {
+    setRoots((prev) => prev.filter((r) => r !== root))
   }
 
   const submit = () => {
+    const primary = roots[0]?.trim()
     onCreate({
       title: title.trim() || undefined,
-      cwd: cwd.trim() || undefined,
+      cwd: primary || undefined,
+      roots: roots.map((r) => r.trim()).filter(Boolean),
       prompt: prompt.trim() || undefined,
       approvalMode: levelToMode(level),
       isolatedWorktree: worktree || undefined,
@@ -68,16 +79,40 @@ export function NewSessionDialog(props: {
           </div>
 
           <div className="grid gap-1.5">
-            <label className="text-xs text-muted-foreground">项目目录 (cwd)</label>
-            <div className="flex gap-2">
-              <Input
-                value={cwd}
-                onChange={(e) => setCwd(e.target.value)}
-                placeholder="留空 = sidecar 启动目录"
-                className="flex-1"
-              />
-              <Button variant="outline" onClick={browse}>选择…</Button>
+            <label className="text-xs text-muted-foreground">项目目录（首个为主 cwd）</label>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {roots.map((root, i) => (
+                <span
+                  key={root}
+                  className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-0.5 text-xs"
+                  title={root}
+                >
+                  {i === 0 && <span className="text-[10px] font-semibold text-accent">主</span>}
+                  <span className="max-w-[180px] truncate font-mono">{root.split(/[/\\]/).pop() || root}</span>
+                  {roots.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => removeRoot(root)}
+                      aria-label={`移除 ${root}`}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+              {roots.length === 0 && (
+                <span className="text-xs text-muted-foreground">留空 = sidecar 启动目录</span>
+              )}
+              <Button variant="outline" size="sm" onClick={browse}>
+                {roots.length === 0 ? '选择…' : '+ 添加 repo'}
+              </Button>
             </div>
+            {roots.length > 1 && (
+              <p className="text-[11px] text-muted-foreground">
+                已绑定 {roots.length} 个仓库，主 cwd 为 {roots[0]?.split(/[/\\]/).pop()}。后端多 repo 编排即将支持，当前仅主 cwd 生效。
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
