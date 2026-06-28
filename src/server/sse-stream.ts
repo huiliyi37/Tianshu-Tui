@@ -10,6 +10,13 @@ export class SseStream {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+      // CORS: the SSE response takes over `res` (handled:true), bypassing the
+      // router's header logic in index.ts — so it must set the same
+      // Access-Control-Allow-Origin the REST responses do. Without it, the
+      // Tauri webview (origin tauri://localhost, cross-origin to 127.0.0.1:<port>)
+      // blocks the stream and the client loops forever on "reconnecting" while
+      // plain GETs (which DO get CORS via the router) keep working.
+      'Access-Control-Allow-Origin': '*',
     })
   }
 
