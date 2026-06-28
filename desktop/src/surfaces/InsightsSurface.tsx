@@ -29,8 +29,6 @@ function isToday(ts: number): boolean {
 }
 
 function recomputeCost(insights: InsightsResponse): InsightsResponse {
-  const rate: 'flash' | 'pro' = 'flash'
-
   const recalcWorker = (w: InsightsResponse['workers'][number]) => ({
     ...w,
     cost: computeDeepSeekCost(
@@ -40,7 +38,7 @@ function recomputeCost(insights: InsightsResponse): InsightsResponse {
         cacheReadTokens: w.cacheReadTokens,
         cacheWriteTokens: w.cacheWriteTokens,
       },
-      rate,
+      w.model,
     ),
   })
 
@@ -54,9 +52,10 @@ function recomputeCost(insights: InsightsResponse): InsightsResponse {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
       },
-      rate,
+      m.model,
     ),
   }))
+  // Provider breakdown lacks per-model detail; default to Flash for conservative display.
   const providerBreakdown = insights.providerBreakdown.map((p) => ({
     ...p,
     cost: computeDeepSeekCost(
@@ -66,7 +65,7 @@ function recomputeCost(insights: InsightsResponse): InsightsResponse {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
       },
-      rate,
+      'flash',
     ),
   }))
 
@@ -173,7 +172,7 @@ export function InsightsSurface() {
         <div className="insights-grid">
           <div className="insight-card primary">
             <div className="insight-value">{formatCny(data.totals.cost)}</div>
-            <div className="insight-label">总成本（DeepSeek V4-Flash）</div>
+            <div className="insight-label">总成本（DeepSeek V4-Flash/Pro）</div>
           </div>
           <div className="insight-card">
             <div className="insight-value">{formatTokens(data.totals.inputTokens)}</div>
