@@ -26,14 +26,27 @@ function ProviderRow({
 }) {
   const [editing, setEditing] = useState(false)
   const [keyInput, setKeyInput] = useState('')
+  const [keyError, setKeyError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const validateKey = (v: string): string | null => {
+    const trimmed = v.trim()
+    if (!trimmed) return 'API Key 不能为空'
+    if (trimmed.length < 4) return 'API Key 长度不足'
+    return null
+  }
+
   const saveKey = async () => {
-    if (!keyInput.trim()) return
+    const err = validateKey(keyInput)
+    if (err) {
+      setKeyError(err)
+      return
+    }
     setBusy(true)
     try {
       await setProviderKey(p.name, { apiKey: keyInput.trim() })
       setKeyInput('')
+      setKeyError(null)
       setEditing(false)
       onRefresh()
     } catch (e) {
@@ -52,7 +65,10 @@ function ProviderRow({
   }
 
   const remove = async () => {
-    if (p.isDefault) return
+    if (p.isDefault) {
+      toast.error('不能移除默认 Provider，请先切换默认')
+      return
+    }
     setBusy(true)
     try {
       await removeConfigProvider(p.name)
@@ -94,11 +110,12 @@ function ProviderRow({
             type="password"
             placeholder="sk-..."
             value={keyInput}
-            onChange={e => setKeyInput(e.target.value)}
+            onChange={e => { setKeyInput(e.target.value); setKeyError(null) }}
             onKeyDown={e => { if (e.key === 'Enter') saveKey() }}
             autoFocus
           />
-          <button className="btn-sm" disabled={busy || !keyInput.trim()} onClick={saveKey}>保存</button>
+          <button className="btn-sm" disabled={busy} onClick={saveKey}>保存</button>
+          {keyError && <span className="provider-key-error">{keyError}</span>}
         </div>
       )}
     </div>
@@ -112,23 +129,62 @@ function PresetCard({
   preset: UnconfiguredPreset
   onRefresh: () => void
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const [keyInput, setKeyInput] = useState('')
+  const [keyError, setKeyError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const validateKey = (v: string): string | null => {
+    const trimmed = v.trim()
+    if (!trimmed) return '添加 Provider 需要填写 API Key'
+    if (trimmed.length < 4) return 'API Key 长度不足'
+    return null
+  }
+
   const add = async () => {
+    const err = validateKey(keyInput)
+    if (err) {
+      setKeyError(err)
+      return
+    }
     setBusy(true)
     try {
-      await setupConfigProvider({ providerName: preset.key })
+      await setupConfigProvider({ providerName: preset.key, apiKey: keyInput.trim() })
+      setKeyInput('')
+      setKeyError(null)
+      setExpanded(false)
       onRefresh()
     } catch (e) {
       toast.error(`添加 Provider 失败: ${(e as Error).message}`)
     } finally { setBusy(false) }
   }
 
+  if (!expanded) {
+    return (
+      <button className="preset-card" disabled={busy} onClick={() => setExpanded(true)}>
+        <span className="preset-label">{preset.label}</span>
+        <span className="preset-model">{preset.defaultModelId}</span>
+      </button>
+    )
+  }
+
   return (
-    <button className="preset-card" disabled={busy} onClick={add}>
+    <div className="preset-card preset-card-input">
       <span className="preset-label">{preset.label}</span>
-      <span className="preset-model">{preset.defaultModelId}</span>
-    </button>
+      <div className="provider-key-form">
+        <input
+          type="password"
+          placeholder={`${preset.label} API Key…`}
+          value={keyInput}
+          onChange={e => { setKeyInput(e.target.value); setKeyError(null) }}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          autoFocus
+        />
+        <button className="btn-sm" disabled={busy} onClick={add}>添加</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={() => setExpanded(false)}>取消</button>
+      </div>
+      {keyError && <span className="provider-key-error">{keyError}</span>}
+    </div>
   )
 }
 
