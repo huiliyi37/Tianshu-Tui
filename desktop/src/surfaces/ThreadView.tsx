@@ -68,6 +68,9 @@ export function ThreadView(props: {
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [composerHeight, setComposerHeight] = useState(0)
+  const composerWrapRef = useRef<HTMLDivElement | null>(null)
+  const composerObserverRef = useRef<ResizeObserver | null>(null)
   const toolDensity = useUiState().toolDensity
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
@@ -113,6 +116,22 @@ export function ThreadView(props: {
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     }
   }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
+
+  // Measure the floating composer so the thread reserves bottom padding and
+  // the last message is never hidden behind the input card.
+  useEffect(() => {
+    const node = composerWrapRef.current
+    if (!node) return
+    composerObserverRef.current?.disconnect()
+    const ro = new ResizeObserver(() => setComposerHeight(node.offsetHeight))
+    ro.observe(node)
+    composerObserverRef.current = ro
+    setComposerHeight(node.offsetHeight)
+    return () => {
+      composerObserverRef.current?.disconnect()
+      composerObserverRef.current = null
+    }
+  }, [])
 
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
@@ -364,7 +383,7 @@ export function ThreadView(props: {
   }, [commands])
 
   return (
-    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator}>
+    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator} style={{ paddingBottom: composerHeight }}>
       <header className="thread-header">
         <div className="thread-header-main">
           <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
@@ -492,23 +511,27 @@ export function ThreadView(props: {
       <TaskList items={view.todos} />
       <DelegationTree nodes={view.delegation} />
 
-      <Composer
-        sessionId={session.id}
-        value={input}
-        onChange={setInput}
-        busy={busy}
-        onSubmit={(text, images) => {
-          if (busy) onSteer(text)
-          else onSend(text, images)
-          setInput('')
-        }}
-        onAbort={onAbort}
-        onDoubleEscape={() => setShowRewind(true)}
-        commands={commands}
-        planMode={view.planMode}
-        onSetPlanMode={onSetPlanMode}
-        menuRev={view.menuRev}
-      />
+      <div className="composer-float" ref={composerWrapRef}>
+        <div className="composer-float-inner">
+          <Composer
+            sessionId={session.id}
+            value={input}
+            onChange={setInput}
+            busy={busy}
+            onSubmit={(text, images) => {
+              if (busy) onSteer(text)
+              else onSend(text, images)
+              setInput('')
+            }}
+            onAbort={onAbort}
+            onDoubleEscape={() => setShowRewind(true)}
+            commands={commands}
+            planMode={view.planMode}
+            onSetPlanMode={onSetPlanMode}
+            menuRev={view.menuRev}
+          />
+        </div>
+      </div>
       {showRewind && (
         <RewindOverlay
           sessionId={session.id}

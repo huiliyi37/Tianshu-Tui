@@ -1,13 +1,11 @@
 import { useEffect } from 'react'
 import { useWallpaper } from './WallpaperContext'
+import { useGlassMode } from '../lib/glass'
 
-// WallpaperLayer — renders a full-viewport background image behind the app.
-// When a wallpaper is set, it activates glass mode (data-surface="glass" on
-// :root) so all surface tokens become translucent with backdrop blur.
-// When cleared, the app reverts to solid opaque surfaces.
-//
-// State is managed by WallpaperProvider (WallpaperContext.tsx) so that
-// SettingsSurface and this layer always stay in sync without custom events.
+// WallpaperLayer — renders a full-viewport background behind the app.
+// Glass mode activates when either a custom wallpaper is set OR the user has
+// toggled on glass mode in settings. In the latter case we fall back to a
+// subtle generated gradient so the translucent surfaces have something to blur.
 
 export type { WallpaperFit } from './WallpaperContext'
 export { useWallpaper } from './WallpaperContext'
@@ -26,29 +24,40 @@ export async function isGlassActive(): Promise<boolean> {
  */
 export function WallpaperLayer() {
   const { wallpaper, loading } = useWallpaper()
+  const [glassMode] = useGlassMode()
+
+  const active = Boolean(wallpaper) || glassMode
 
   // Toggle glass mode on document root
   useEffect(() => {
     const root = document.documentElement
-    if (wallpaper) root.setAttribute('data-surface', 'glass')
+    if (active) root.setAttribute('data-surface', 'glass')
     else root.removeAttribute('data-surface')
-  }, [wallpaper])
+  }, [active])
 
   const objectFit =
     wallpaper?.fit === 'contain' ? 'contain' : wallpaper?.fit === 'center' ? 'none' : 'cover'
 
-  if (loading || !wallpaper) return null
+  if (loading) return null
 
-  return (
-    <div
-      className="wallpaper-layer"
-      style={{
-        backgroundImage: `url("${wallpaper.url}")`,
-        backgroundSize: objectFit,
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }}
-      aria-hidden
-    />
-  )
+  if (wallpaper) {
+    return (
+      <div
+        className="wallpaper-layer"
+        style={{
+          backgroundImage: `url("${wallpaper.url}")`,
+          backgroundSize: objectFit,
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+        }}
+        aria-hidden
+      />
+    )
+  }
+
+  if (glassMode) {
+    return <div className="wallpaper-layer wallpaper-gradient" aria-hidden />
+  }
+
+  return null
 }

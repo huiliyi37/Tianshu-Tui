@@ -5,6 +5,7 @@ import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
+import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
@@ -352,6 +353,7 @@ function McpSettingsManager() {
 /** Wallpaper & frosted glass settings section. */
 function WallpaperSection() {
   const { wallpaper, fit, pick, clear, changeFit } = useWallpaper()
+  const [glassMode, setGlassMode] = useGlassMode()
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -418,8 +420,18 @@ function WallpaperSection() {
           )}
         </div>
       </div>
+      <div className="settings-field">
+        <label className="field-check">
+          <input
+            type="checkbox"
+            checked={glassMode}
+            onChange={(e) => setGlassMode(e.target.checked)}
+          />
+          <span>启用毛玻璃效果（无壁纸时使用默认渐变背景）</span>
+        </label>
+      </div>
       <div className="meta">
-        设置壁纸后，界面自动切换为半透明毛玻璃效果（类似 macOS vibrancy）。
+        设置壁纸或开启毛玻璃后，界面切换为半透明 backdrop-blur 效果（类似 macOS vibrancy）。
         壁纸经压缩后存在本地 IndexedDB，不会上传。
       </div>
     </section>

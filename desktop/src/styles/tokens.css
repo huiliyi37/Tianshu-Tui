@@ -109,6 +109,8 @@
   --main-surface-blur: 0px;
   --main-surface-saturation: 1;
   --compose-surface-bg: var(--panel-2);
+  --compose-surface-border: var(--border);
+  --compose-surface-shadow: var(--shadow-sm);
   --compose-surface-blur: 0px;
   --compose-surface-saturation: 1;
   --popup-surface-bg: var(--panel-2);
@@ -130,8 +132,10 @@
   --main-surface-bg: color-mix(in oklab, var(--bg) 88%, transparent);
   --main-surface-blur: 16px;
   --main-surface-saturation: 1.04;
-  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 82%, transparent);
-  --compose-surface-blur: 14px;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 78%, transparent);
+  --compose-surface-border: color-mix(in oklab, var(--border) 60%, transparent);
+  --compose-surface-shadow: 0 12px 40px color-mix(in oklab, var(--text) 8%, transparent), 0 2px 8px color-mix(in oklab, var(--text) 4%, transparent);
+  --compose-surface-blur: 16px;
   --compose-surface-saturation: 1.08;
   --popup-surface-bg: color-mix(in oklab, var(--panel-2) 92%, transparent);
   --popup-surface-blur: 20px;
@@ -148,6 +152,8 @@
     --sidebar-surface-blur: 0px;
     --main-surface-bg: var(--bg);
     --compose-surface-bg: var(--panel-2);
+    --compose-surface-border: var(--border);
+    --compose-surface-shadow: var(--shadow-sm);
     --popup-surface-bg: var(--panel-2);
     --modal-surface-bg: var(--panel);
   }
@@ -203,7 +209,9 @@
 :root[data-theme="light"][data-surface="glass"] {
   --sidebar-surface-bg: color-mix(in oklab, var(--bg) 62%, transparent);
   --main-surface-bg: color-mix(in oklab, var(--bg) 82%, transparent);
-  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 70%, transparent);
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 68%, transparent);
+  --compose-surface-border: color-mix(in oklab, var(--border) 55%, transparent);
+  --compose-surface-shadow: 0 12px 40px color-mix(in oklab, var(--text) 10%, transparent), 0 2px 8px color-mix(in oklab, var(--text) 5%, transparent);
   --popup-surface-bg: color-mix(in oklab, var(--panel-2) 90%, transparent);
   --modal-surface-bg: color-mix(in oklab, var(--panel) 92%, transparent);
 }
