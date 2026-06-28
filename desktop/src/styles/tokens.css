@@ -275,18 +275,18 @@ html[data-font-weight="bold"] {
 }
 
 :root[data-theme="nebula"][data-surface="glass"] {
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 78%, transparent);
-  --sidebar-surface-blur: 24px;
-  --sidebar-surface-saturation: 1.08;
-  --main-surface-bg: color-mix(in oklab, var(--bg) 88%, transparent);
-  --main-surface-blur: 16px;
-  --main-surface-saturation: 1.04;
-  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 78%, transparent);
-  --compose-surface-border: color-mix(in oklab, var(--border) 60%, transparent);
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 85%, transparent);
+  --sidebar-surface-blur: 32px;
+  --sidebar-surface-saturation: 1.1;
+  --main-surface-bg: color-mix(in oklab, var(--bg) 92%, transparent);
+  --main-surface-blur: 24px;
+  --main-surface-saturation: 1.05;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 88%, transparent);
+  --compose-surface-border: color-mix(in oklab, var(--border) 70%, transparent);
   --compose-surface-shadow: 0 12px 40px color-mix(in oklab, var(--text) 8%, transparent), 0 2px 8px color-mix(in oklab, var(--text) 4%, transparent);
-  --compose-surface-blur: 16px;
-  --compose-surface-saturation: 1.08;
-  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 92%, transparent);
-  --modal-surface-bg: color-mix(in oklab, var(--panel) 94%, transparent);
+  --compose-surface-blur: 24px;
+  --compose-surface-saturation: 1.1;
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 95%, transparent);
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 96%, transparent);
 }
 
