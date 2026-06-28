@@ -3,6 +3,7 @@ import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
 import { FilePath } from './FilePath'
 import { parseMcpToolName } from '../lib/approval-preview'
+import { shouldDefaultOpen } from '../lib/tool-family'
 
 const TOOL_BODY_MAX = 10000
 
@@ -53,7 +54,7 @@ function PreviewText({ text }: { text: string }) {
 
 // ── Pairing: merge tool_use + tool_result into single entries ───
 
-interface PairedEntry {
+export interface PairedEntry {
   tool?: ConvoBlock
   result?: ConvoBlock
   name: string
@@ -183,8 +184,16 @@ function McpBadge({ name }: { name: string }) {
   return <span className="mcp-badge" title={`MCP: ${parsed.serverId} · ${parsed.toolName}`}>[{parsed.serverId}]</span>
 }
 
+/** Pure helper: decide whether a paired tool/result row should default to open. */
+export function computePairedDefaultOpen(entry: PairedEntry): boolean {
+  if (entry.result?.isError) return true
+  const text = entry.result?.text ?? entry.tool?.text ?? ''
+  const lineCount = text.split('\n').length
+  return shouldDefaultOpen(entry.name, lineCount)
+}
+
 function PairedRowImpl({ entry }: { entry: PairedEntry }) {
-  const [open, setOpen] = useState(!!entry.result?.isError)
+  const [open, setOpen] = useState(computePairedDefaultOpen(entry))
   const name = entry.name
   const text = entry.result?.text ?? entry.tool?.text ?? ''
   const firstLine = text.split('\n', 1)[0] ?? ''
@@ -234,6 +243,16 @@ function ToolRowImpl({ block, defaultOpen = false }: { block: ConvoBlock; defaul
 
 const ToolRow = memo(ToolRowImpl, (a, b) => a.block === b.block && a.defaultOpen === b.defaultOpen)
 
+/** Pure helper: decide whether a standalone action-tool card should default to open. */
+export function computeToolCardDefaultOpen(block: ConvoBlock): boolean {
+  const name = toolNameOf(block)
+  if (block.isError) return true
+  const isSuccessfulRunTests =
+    block.kind === 'result' && !block.isError && name.toLowerCase() === 'run_tests'
+  if (isSuccessfulRunTests) return false
+  return shouldDefaultOpen(name, block.text.split('\n').length)
+}
+
 // Standalone action-tool card: rendered OUTSIDE the read/search fold and open by
 // default, so bash / edit / write / delegate payloads and errors are visible
 // without a click — matching the TUI's "action tools break the group".
@@ -242,12 +261,9 @@ const ToolRow = memo(ToolRowImpl, (a, b) => a.block === b.block && a.defaultOpen
 // aligns with Cursor's "Collapse Auto-Run Commands" and reduces the visual
 // clutter of repeated targeted test runs stacking up in the thread.
 function ToolCardImpl({ block }: { block: ConvoBlock }) {
-  const name = toolNameOf(block)
-  const isSuccessfulRunTests =
-    block.kind === 'result' && !block.isError && name.toLowerCase() === 'run_tests'
   return (
     <div className="tool-card">
-      <ToolRow block={block} defaultOpen={!isSuccessfulRunTests} />
+      <ToolRow block={block} defaultOpen={computeToolCardDefaultOpen(block)} />
     </div>
   )
 }
