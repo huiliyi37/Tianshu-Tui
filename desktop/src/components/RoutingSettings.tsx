@@ -6,6 +6,7 @@ import {
   listConfigProviders,
   type RoutingConfig,
   type RoutingTarget,
+  type CouncilSeatConfig,
   type ProviderListItem,
 } from '../runtime/client'
 import {
@@ -132,12 +133,29 @@ export function RoutingSettings() {
     setDirty(true)
   }
 
+  const mutateSeats = (fn: (seats: CouncilSeatConfig[]) => CouncilSeatConfig[]) => {
+    setConfig((prev) => (prev ? { ...prev, council: { ...prev.council, seats: fn(prev.council.seats) } } : prev))
+    setDirty(true)
+  }
+
+  const addSeat = () => mutateSeats((seats) => [...seats, { authority: '' }])
+  const removeSeat = (idx: number) => mutateSeats((seats) => seats.filter((_, i) => i !== idx))
+  const updateSeat = (idx: number, patch: Partial<CouncilSeatConfig>) =>
+    mutateSeats((seats) => seats.map((s, i) => (i === idx ? { ...s, ...patch } : s)))
+
+  /** Model select for a seat: clearing both provider+model means "no override"
+   *  (the seat inherits the session model). */
+  const setSeatModel = (idx: number, value: string) => {
+    const t = decodeTarget(value)
+    updateSeat(idx, t ? { provider: t.provider, model: t.model } : { provider: undefined, model: undefined })
+  }
+
   const save = async () => {
     if (!config) return
     setSaving(true)
     setError(null)
     try {
-      await setRoutingConfig({ review: config.review, workers: config.workers })
+      await setRoutingConfig({ review: config.review, workers: config.workers, council: config.council })
       toast.success('子代理路由已保存')
       setDirty(false)
     } catch (err) {
@@ -246,10 +264,76 @@ export function RoutingSettings() {
         })}
       </section>
 
+      {/* agent.council.seats — 异构议事会：每席独立 provider/model */}
+      <section className="flex flex-col gap-3">
+        <h5 className="text-xs font-semibold text-text">异构议事会席位（agent.council.seats）</h5>
+        <div className="meta">
+          给每个议事会席位单独指定模型,实现「天权用 DeepSeek Pro、天府用 GLM」这类<strong>跨模型会诊</strong>——不同模型不同视角,
+          且各跑各的服务端缓存互不挤兑。留空则用内置默认（tianquan / tianfu / tianxuan,全席同模型）。
+          席位级覆盖<strong>优先于</strong>上方 council_expert 的 profile 覆盖。
+        </div>
+
+        {config.council.seats.length === 0 && (
+          <div className="meta">未配置自定义席位 —— 使用内置默认 3 席。</div>
+        )}
+
+        {config.council.seats.map((seat, idx) => {
+          const seatModelValue = seat.provider && seat.model ? `${seat.provider}::${seat.model}` : INHERIT
+          return (
+            <div key={idx} className="flex flex-col gap-2 rounded border border-border p-2.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={seat.authority}
+                  onChange={(e) => updateSeat(idx, { authority: e.target.value })}
+                  placeholder="席位 authority（如 tianquan）"
+                  className="flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs font-mono text-text focus:border-accent focus:outline-none"
+                />
+                <Select value={seatModelValue} onValueChange={(v) => { if (v) setSeatModel(idx, v) }}>
+                  <SelectTrigger className="w-56 shrink-0">
+                    <SelectValue placeholder="继承主会话" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={INHERIT}>继承主会话（默认）</SelectItem>
+                    {options.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  className="shrink-0 rounded border border-border px-2 py-1 text-xs text-text hover:border-accent hover:text-accent"
+                  onClick={() => removeSeat(idx)}
+                  title="移除该席位"
+                  aria-label="移除该席位"
+                >
+                  ✕
+                </button>
+              </div>
+              <input
+                type="text"
+                value={seat.charter ?? ''}
+                onChange={(e) => updateSeat(idx, { charter: e.target.value || undefined })}
+                placeholder="席位职守 charter（可选，如：架构与正确性）"
+                className="rounded border border-border bg-transparent px-2 py-1 text-xs text-text focus:border-accent focus:outline-none"
+              />
+            </div>
+          )
+        })}
+
+        <button className="btn self-start" onClick={addSeat}>+ 添加席位</button>
+        {config.council.seats.some((s) => !s.authority.trim()) && (
+          <span className="meta warn">每个席位都需填 authority,否则无法保存。</span>
+        )}
+      </section>
+
       {error && <div className="meta warn">{error}</div>}
 
       <div className="flex items-center gap-3">
-        <button className="btn" onClick={save} disabled={saving || !dirty}>
+        <button
+          className="btn"
+          onClick={save}
+          disabled={saving || !dirty || config.council.seats.some((s) => !s.authority.trim())}
+        >
           {saving ? '保存中…' : '保存路由'}
         </button>
         {dirty && <span className="meta">有未保存的更改</span>}

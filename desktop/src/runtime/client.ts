@@ -599,9 +599,27 @@ export interface WorkersRoutingConfig {
   routing: Record<string, string>
 }
 
+/** One council seat. provider+model (when both set) route that seat to a
+ *  dedicated model — enabling heterogeneous councils (e.g. one DeepSeek-Pro seat
+ *  + one GLM seat). Falls back to the session model when unset/credential-less. */
+export interface CouncilSeatConfig {
+  authority: string
+  charter?: string
+  tierHint?: 'cheap' | 'balanced' | 'strong'
+  noDowngrade?: boolean
+  provider?: string
+  model?: string
+}
+
+export interface CouncilRoutingConfig {
+  /** When non-empty, overrides the built-in tianquan/tianfu/tianxuan default. */
+  seats: CouncilSeatConfig[]
+}
+
 export interface RoutingConfig {
   review: ReviewRoutingConfig
   workers: WorkersRoutingConfig
+  council: CouncilRoutingConfig
 }
 
 export function getRoutingConfig(): Promise<RoutingConfig> {
@@ -609,7 +627,7 @@ export function getRoutingConfig(): Promise<RoutingConfig> {
 }
 
 export function setRoutingConfig(
-  input: { review?: ReviewRoutingConfig; workers?: WorkersRoutingConfig },
+  input: { review?: ReviewRoutingConfig; workers?: WorkersRoutingConfig; council?: CouncilRoutingConfig },
 ): Promise<{ ok: boolean } & RoutingConfig> {
   return apiPut<{ ok: boolean } & RoutingConfig>('/config/routing', input)
 }

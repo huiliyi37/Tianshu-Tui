@@ -100,4 +100,39 @@ describe('sub-agent / review routing config', () => {
     })
     assert.deepEqual(result.review.profiles.verifier, { provider: 'deepseek', model: 'deepseek-v4-pro' })
   })
+
+  it('getRoutingConfig defaults council.seats to empty', () => {
+    const { council } = getRoutingConfig()
+    assert.deepEqual(council.seats, [])
+  })
+
+  it('persists heterogeneous council seats and round-trips them', () => {
+    const result = setRoutingConfig({
+      council: {
+        seats: [
+          { authority: 'tianquan', charter: '架构与正确性', provider: 'deepseek', model: 'deepseek-v4-pro' },
+          { authority: 'tianfu', provider: 'glm', model: 'glm-4.6' },
+        ],
+      },
+    })
+    assert.equal(result.council.seats.length, 2)
+    assert.deepEqual(result.council.seats[1], { authority: 'tianfu', provider: 'glm', model: 'glm-4.6' })
+    // round-trips through config.json
+    assert.deepEqual(loadConfig().agent.council.seats[0]?.provider, 'deepseek')
+    assert.deepEqual(getRoutingConfig().council.seats[0]?.authority, 'tianquan')
+  })
+
+  it('rejects a seat without authority (schema-validated, nothing persisted)', () => {
+    assert.throws(() =>
+      setRoutingConfig({ council: { seats: [{ provider: 'glm', model: 'glm-4.6' }] } } as unknown as Record<string, unknown>),
+    )
+    assert.deepEqual(loadConfig().agent.council.seats, [])
+  })
+
+  it('updating only council leaves review/workers untouched', () => {
+    setRoutingConfig({ review: { profiles: { reviewer: { provider: 'deepseek', model: 'deepseek-v4-flash' } }, skipAuto: false, mechanicalFastPath: true } })
+    setRoutingConfig({ council: { seats: [{ authority: 'tianquan', provider: 'glm', model: 'glm-4.6' }] } })
+    assert.deepEqual(loadConfig().agent.review.profiles.reviewer, { provider: 'deepseek', model: 'deepseek-v4-flash' })
+    assert.equal(loadConfig().agent.council.seats.length, 1)
+  })
 })

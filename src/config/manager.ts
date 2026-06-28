@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
@@ -160,18 +160,19 @@ export function setApprovalMode(mode: string): ApprovalModeConfig {
 
 // --- Sub-agent / review routing management ---
 
-/** Snapshot of the two sub-agent routing blocks for the desktop settings UI. */
-export function getRoutingConfig(): { review: ReviewConfig; workers: WorkersConfig } {
+/** Snapshot of the sub-agent routing blocks for the desktop settings UI.
+ *  `council` carries per-seat provider/model for heterogeneous councils. */
+export function getRoutingConfig(): { review: ReviewConfig; workers: WorkersConfig; council: CouncilConfig } {
   const cfg = loadConfig()
-  return { review: cfg.agent.review, workers: cfg.workers }
+  return { review: cfg.agent.review, workers: cfg.workers, council: cfg.agent.council }
 }
 
 /**
- * Persist sub-agent routing config. Accepts either or both blocks; each is
+ * Persist sub-agent routing config. Accepts any subset of blocks; each is
  * validated through its own schema before being written, so a malformed payload
  * never lands in config.json. Returns the resulting normalized blocks.
  */
-export function setRoutingConfig(input: { review?: unknown; workers?: unknown }): { review: ReviewConfig; workers: WorkersConfig } {
+export function setRoutingConfig(input: { review?: unknown; workers?: unknown; council?: unknown }): { review: ReviewConfig; workers: WorkersConfig; council: CouncilConfig } {
   const cfg = loadConfig()
   if (input.review !== undefined) {
     cfg.agent.review = reviewConfigSchema.parse(input.review)
@@ -179,8 +180,11 @@ export function setRoutingConfig(input: { review?: unknown; workers?: unknown })
   if (input.workers !== undefined) {
     cfg.workers = workersSchema.parse(input.workers)
   }
+  if (input.council !== undefined) {
+    cfg.agent.council = councilConfigSchema.parse(input.council)
+  }
   saveConfig(cfg)
-  return { review: cfg.agent.review, workers: cfg.workers }
+  return { review: cfg.agent.review, workers: cfg.workers, council: cfg.agent.council }
 }
 
 // --- API key management ---
