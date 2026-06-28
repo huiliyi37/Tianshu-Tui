@@ -21,16 +21,16 @@ g.window = {
   dispatchEvent: (e: Event) => { dispatchedEvent = e.type; return true },
   matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
 }
-g.document = {
-  documentElement: {
-    _attrs: {} as Record<string, string>,
-    dataset: {} as Record<string, string>,
-    setAttribute(k: string, v: string) { this._attrs[k] = v },
-    getAttribute(k: string) { return this._attrs[k] ?? null },
-    removeAttribute(k: string) { delete this._attrs[k] },
-    style: { setProperty(k: string, v: string) { styleProps.set(k, v) } },
-  },
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const docEl: any = {
+  _attrs: {} as Record<string, string>,
+  dataset: {} as Record<string, string>,
+  setAttribute(k: string, v: string) { this._attrs[k] = v },
+  getAttribute(k: string) { return this._attrs[k] ?? null },
+  removeAttribute(k: string) { delete this._attrs[k] },
+  style: { setProperty(k: string, v: string) { styleProps.set(k, v) } },
 }
+g.document = { documentElement: docEl }
 
 const { loadGlassMode, saveGlassMode, applyGlassMode, initGlassMode } = await import('../glass.ts')
 

@@ -4,7 +4,11 @@ import dark from '../styles/themes/dark.json'
 import light from '../styles/themes/light.json'
 import nebula from '../styles/themes/nebula.json'
 
-const THEMES: Record<ResolvedTheme, ThemeJson> = { dark, light, nebula }
+const THEMES: Record<ResolvedTheme, ThemeJson> = {
+  dark: dark as ThemeJson,
+  light: light as ThemeJson,
+  nebula: nebula as ThemeJson,
+}
 
 export function loadThemeJson(resolved: ResolvedTheme): ThemeJson {
   return THEMES[resolved]
