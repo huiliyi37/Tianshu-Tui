@@ -273,6 +273,8 @@ export class TuiApp {
   private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
   /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
   private planModeProvider?: () => boolean
+  /** Side panel 状态变化回调（用于持久化到 session metadata） */
+  private onSidePanelChange?: (open: boolean) => void
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
@@ -1854,6 +1856,13 @@ export class TuiApp {
     this.planModeProvider = provider
   }
 
+  /**
+   * 注册 side panel 状态变化回调，用于把展开状态持久化到会话元数据。
+   */
+  setSidePanelChangeCallback(cb: (open: boolean) => void): void {
+    this.onSidePanelChange = cb
+  }
+
   /** 直接设置任务面板内容（供测试与 provider 刷新复用）。 */
   setTodos(items: TodoItem[]): void {
     this.state.todos = items
@@ -1871,6 +1880,7 @@ export class TuiApp {
     if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
     if (this.overlay.isActive()) return
     this.state.sidePanelOpen = open
+    try { this.onSidePanelChange?.(open) } catch { /* persistence failure is non-fatal */ }
     this.renderLive()
   }
 

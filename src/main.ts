@@ -23,7 +23,8 @@ import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
-import { getTodos } from './tools/todo.js'
+import { getTodos, loadTodos, setTodoSession } from './tools/todo.js'
+import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
@@ -423,6 +424,19 @@ async function main() {
     tuiApp.setSessionStarDomain(initialDomain)
   }
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
+
+  // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
+  const initialMeta = ctx!.persist.loadMetadata()
+  if (initialMeta?.sidePanelOpen) {
+    tuiApp.setSidePanelOpen(true)
+  }
+  loadTodos(ctx!.sessionId, ctx!.cwd)
+  setTodoSession(ctx!.sessionId, ctx!.cwd)
+  setPlanSession(ctx!.sessionId)
+  tuiApp.setSidePanelChangeCallback((open) => {
+    ctx!.persist.updateMetadata({ sidePanelOpen: open })
+  })
+
   // 命令面板的过滤列表：display 与 paletteExec 必须共用同一份（含实时 query 过滤 + 排序），
   // 否则选中索引会错位（Enter 执行到错误命令）。
   const filteredPaletteCommands = (): PaletteCommand[] => {
