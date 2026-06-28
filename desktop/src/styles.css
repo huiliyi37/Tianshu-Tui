@@ -2227,7 +2227,20 @@ body {
   line-height: 1.5;
   white-space: pre;
   color: var(--text-secondary);
+  min-height: 0;
 }
+.git-meta { font-size: var(--text-xs); color: var(--muted); margin-top: var(--space-1); }
+.git-empty { padding: var(--space-8); text-align: center; color: var(--muted); font-size: var(--text-sm); }
+.git-pagination {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
+  font-size: var(--text-xs); color: var(--muted); flex-wrap: wrap;
+}
+.git-page-range { font-family: var(--font-mono); }
+.git-page-controls { display: flex; align-items: center; gap: var(--space-1); }
+.git-page-info { padding: 0 var(--space-2); font-family: var(--font-mono); color: var(--text); }
+.git-page-size { display: flex; align-items: center; gap: var(--space-2); }
 
 /* Changes tab (working-tree diff) */
 .changes-tab { display: flex; height: 100%; min-height: 0; }
