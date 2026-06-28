@@ -72,9 +72,19 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
       const keys = Object.keys(params.input).sort()
       const keySummary = keys.length > 0 ? keys.join(', ') : '(none)'
       const patternType = typeof params.input.pattern
+      // Foreign keys (file_path, section, command, ...) are the fingerprint of
+      // streaming argument pollution: a parallel tool_call's args got grafted
+      // onto this grep call. Flag it so the root cause is visible at the tool
+      // layer instead of a generic "pattern is required".
+      const knownKeys = new Set(['pattern', 'path', 'glob', 'max_results', 'literal', 'context_lines'])
+      const foreignKeys = keys.filter(k => !knownKeys.has(k))
+      const pollutionHint = foreignKeys.length > 0
+        ? ` Input contains foreign keys (${foreignKeys.join(', ')}) — likely streaming tool_call argument pollution, not a malformed grep call.`
+        : ''
       return {
         content: `Error: pattern is required (non-empty string). Received input keys: ${keySummary}. pattern type: ${patternType}.` +
-          (keys.length === 0 ? ' Input is empty — arguments may have failed to parse during streaming.' : ''),
+          (keys.length === 0 ? ' Input is empty — arguments may have failed to parse during streaming.' : '') +
+          pollutionHint,
         isError: true,
       }
     }

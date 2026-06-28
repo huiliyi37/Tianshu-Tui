@@ -147,6 +147,9 @@ export class InputHandler {
   private escapeSeq = ''
   private escapeTimeoutMs: number
   private escapeTimer: ReturnType<typeof setTimeout> | null = null
+  /** 当为 true 时，单独的 ESC 字节立即派发为 escape，不等待超时。
+   *  用于 overlay 激活场景，避免 ESC 关闭/退出有 40ms 可感知延迟。 */
+  private escapeImmediate = false
   private pasteActive = false
   private pasteBuffer = ''
   /**
@@ -198,6 +201,14 @@ export class InputHandler {
   /** 获取当前输入模式 */
   getMode(): InputMode {
     return this.mode
+  }
+
+  /**
+   * 设置单独 ESC 字节是否立即派发。
+   * overlay 激活时设为 true，避免 ESC 关闭/退出等待超时。
+   */
+  setEscapeImmediate(immediate: boolean): void {
+    this.escapeImmediate = immediate
   }
 
   /** 关闭 raw mode，恢复终端默认行为。 */
@@ -260,6 +271,15 @@ export class InputHandler {
     }
 
     const parsed = this.parseInput(data)
+
+    // overlay 激活时，单独 ESC 立即派发，不等 40ms 超时。
+    if (data === '\x1B' && this.escapeImmediate) {
+      this.escaped = false
+      this.escapeSeq = ''
+      this.dispatch({ raw: '\x1B', char: '', name: 'escape', ctrl: false, meta: false, shift: false })
+      return
+    }
+
     if (parsed.key) {
       this.dispatch(parsed.key)
       // 关键：parseInput 只取首字符/首序列；剩余部分递归派发。

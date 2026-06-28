@@ -8,7 +8,7 @@ import { buildIntentPreview, type IntentPreview, type IntentPreviewAction } from
 export type IntentEvalResult = 'continue' | 'veto' | 'alternative'
 
 export interface TurnIntentDeps {
-  depositDeadEnd(deposit: { path: string; signal: 'dead-end'; strength: number; context: string }): Promise<void>
+  depositDeadEnd(deposit: { path: string; signal: 'dead-end'; strength: number; context: string; taskId?: string }): Promise<void>
   addUserMessage(message: string): void
 }
 
@@ -20,6 +20,8 @@ export interface IntentEvalInput {
   pressureResult: PressureResult
   recentToolHistory: ToolHistoryEntry[]
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
+  /** Task contract ID for structured dead-end matching (P2). */
+  taskContractId?: string
 }
 
 const MAX_INTENT_PREVIEWS = 3
@@ -40,15 +42,17 @@ export class TurnIntentController {
       return 'continue'
     }
 
+    const recentTargets = input.recentToolHistory
+      .map(h => h.target)
+      .filter((target): target is string => Boolean(target))
     const preview = buildIntentPreview({
       strategy: input.strategy,
       vigor: input.vigor,
       sensorium: input.sensorium,
       pheromones: input.pheromones,
       thrashingSuggestion: input.pressureResult.suggestion ?? null,
-      recentTargets: input.recentToolHistory
-        .map(h => h.target)
-        .filter((target): target is string => Boolean(target)),
+      recentTargets,
+      taskContractId: input.taskContractId,
     })
     if (!preview) return 'continue'
 
@@ -56,12 +60,22 @@ export class TurnIntentController {
     const action = await input.onIntentPreview(preview)
 
     if (action === 'veto') {
-      await this.deps.depositDeadEnd({
-        path: preview.summary,
-        signal: 'dead-end',
-        strength: 0.9,
-        context: 'intent veto',
-      })
+      // 沉积 dead-end 标记，供未来同目标任务关联预警。
+      // path 存【原始 target】而非 preview.summary 摘要：摘要带「处理 」前缀且会截断，
+      // 让匹配层必须依赖文案常量；存原始 target（文件路径/命令）即可直接与未来
+      // recentTargets 子串比对，绕开文案耦合（开源项目文案可能本地化）。
+      // 无具体目标（全为 `<...` 伪目标或空）时不沉积——没有可复用的死路标记，
+      // 避免产生「继续执行当前计划」这类永不匹配的永久噪声 dead-end。
+      const firstTarget = recentTargets.find(t => t && !t.startsWith('<'))
+      if (firstTarget) {
+        await this.deps.depositDeadEnd({
+          path: firstTarget,
+          signal: 'dead-end',
+          strength: 0.9,
+          context: 'intent veto',
+          taskId: input.taskContractId,
+        })
+      }
       this.deps.addUserMessage('<intent-veto>User vetoed the previous plan. Re-plan from the nearest safe branch point before using tools.</intent-veto>')
       return 'veto'
     }

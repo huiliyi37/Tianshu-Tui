@@ -131,13 +131,6 @@ export function summaryOutputBudgetChars(contextWindow: number): { full: number;
   return { full: 3_000, partial: 2_000 }
 }
 
-/** Cache-aligned summary keeps 85% of context budget */
-export const CACHE_ALIGNED_BUDGET_PERCENT = 85
-
-/** Maximum output tokens for compaction summary (used when calling compaction model in future integration) */
-// TODO: Wire into auto-compact API call when integrating LLM-based compaction
-export const COMPACTION_SUMMARY_MAX_TOKENS = 1_024
-
 export interface CompactionConfig {
   enabled: boolean
   autoThreshold: number
@@ -181,6 +174,41 @@ export function adaptiveCompactPolicyRatios(
     }
   }
   return base
+}
+
+/**
+ * Precision ceiling: the context-fraction at which compaction MUST trigger,
+ * regardless of how favourable the prefix cache is. A model's labelled context
+ * window is the *capacity* it can hold, not the range over which its attention
+ * stays accurate — needle-in-the-haystack recall degrades well below the
+ * labelled window, so pushing compaction to ~0.86 of the window (as
+ * cache-economics-only strategies do) leaves the model working in an
+ * accuracy-attenuated zone for most of a long session.
+ *
+ * Unlike the cache-economic ratios above (which may be nudged by hit rate), the
+ * precision ceiling is a hard guard: cache strategy may only optimise *under*
+ * it. The ceiling is derived from the window size because the degradation curve
+ * differs — small windows tolerate a higher fraction before precision drops,
+ * large windows hit it sooner.
+ *
+ * @param contextWindow  the model's labelled context window (tokens)
+ * @param override        optional explicit ratio (e.g. from user config); when
+ *                        provided and in (0,1), it replaces the derived value.
+ */
+export function precisionCeilingRatio(contextWindow: number, override?: number): number {
+  if (typeof override === 'number' && Number.isFinite(override) && override > 0 && override < 1) {
+    return override
+  }
+  // Only large windows get a precision ceiling. On small/medium windows the
+  // cache-economic ratios already compact early enough that model-accuracy
+  // degradation isn't the binding constraint, and imposing a ceiling there
+  // would fight the cache strategy (e.g. forcing tier 2 at 0.65 of a 1K test
+  // window, below the cache-preserving compact ratio of 0.86). The ceiling
+  // exists for the 1M-window regime where cache-economics-only defers compaction
+  // well past the accuracy cliff. Returning 1 = no ceiling (cache strategy rules).
+  if (contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS) return 0.5
+  if (contextWindow >= 200_000) return 0.55
+  return 1
 }
 
 /** Prune: number of recent messages to protect from clearing.

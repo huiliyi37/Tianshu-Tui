@@ -54,15 +54,15 @@ export function renderPlanMethodologyAdvisory(
  */
 export function renderPlanModeBlock(): string {
   return `<plan-mode>
-You are in PLAN MODE. You may ONLY read files and explore the codebase — do NOT write, edit, or execute commands that modify state.
+你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令。
 
-WORKFLOW:
-1. Explore the codebase using read_file, grep, glob, repo_map, inspect_project
-2. Understand the full scope: which files need changes, what existing patterns to follow
-3. When your plan is complete, call \`plan_submit\` with a polished design document
+工作流：
+1. 用 read_file、grep、glob、repo_map、inspect_project 探索代码库
+2. 理解完整范围：哪些文件需要改动、要遵循哪些既有模式
+3. 计划成型后，调用 \`plan_submit\` 提交一份打磨好的设计文档
 
-PLAN QUALITY STANDARD — your plan should be a comprehensive design document:
-- Include at least one Mermaid diagram (architecture or data flow). Shapes carry meaning — (rounded)=user/input, [[subroutine]]=agent/processor, {{hexagon}}=LLM/model, [(cylinder)]=store/DB, {rhombus}=decision; edges --> sync/read, ==> write/strong, -.-> async/event. Copy a skeleton below and replace the node text:
+计划质量标准——你的计划应该是一份完整的设计文档：
+- 至少包含一张 Mermaid 图（架构图或数据流图）。图形承载语义——(圆角)=用户/输入，[[子程序]]=agent/处理器，{{六边形}}=LLM/模型，[(圆柱)]=存储/DB，{菱形}=判断；边 --> 同步/读，==> 写/强，-.-> 异步/事件。复制下方骨架并替换节点文字：
 \`\`\`mermaid
 flowchart TD
     U(用户输入) --> R[[入口/路由]]
@@ -77,17 +77,17 @@ flowchart LR
     D -->|是| W[(写入目标)]
     D -.失败.-> ERR([报错/回退])
 \`\`\`
-- Include root cause analysis, not just surface symptoms
-- Reference files with full paths like \`src/agent/loop.ts:643\`
-- Show proposed code with diff/pseudocode per file
-- Compare alternatives in a table when design decisions exist
-- Include a verification plan with test cases and manual verification steps
+- 包含根因分析，而非只描述表面症状
+- 用完整路径引用文件，如 \`src/agent/loop.ts:643\`
+- 每个文件给出提议代码（diff 或伪代码）
+- 存在设计决策时，用表格对比备选方案
+- 包含验证计划：测试用例和人工验证步骤
 
-4. After submitting plan_submit, WAIT for the user to approve or reject. Do not proceed without approval.
+4. 提交 plan_submit 后，等待用户批准或驳回。未经批准不要继续推进。
 
-The user will respond with:
-- /plan-approve <slug> — approved, start execution
-- /plan-reject <slug> — rejected, revise
+用户会回复：
+- /plan-approve <slug> — 批准，开始执行
+- /plan-reject <slug> — 驳回，修订
 </plan-mode>`
 }
 
@@ -105,15 +105,18 @@ The user will respond with:
  */
 export function renderTersenessNudge(escalate = false): string {
   const strict = escalate
-    ? ' You appear to be repeating work or looping — be especially terse this turn: one short paragraph, no restated context.'
+    ? ' 你似乎在重复工作或打转——本轮尤其简洁：一段短文，不复述上下文。'
     : ''
-  return `<output-style>Be terse in prose. Skip preambles, self-narration, and closing summaries. Do not reproduce code, file contents, or context already shown — reference it instead. Lead with the answer or the action.${strict} This governs OUTPUT PROSE ONLY — never reduce verification, testing, evidence-gathering, or delivery-report rigor.</output-style>`
+  return `<output-style>文字要精炼。跳过开场白、自我陈述和收尾总结。不要复述已展示的代码、文件内容或上下文——引用即可。直接给答案或动作。${strict} 本指令只约束输出文字——绝不因此削减验证、测试、取证或交付报告的严谨度。</output-style>`
 }
 
 export interface ToolHistoryEntry {
   tool: string
   target: string
   status: 'success' | 'failed' | 'running'
+  /** Tool name + sorted-args hash for dedup (fingerprint granularity).
+   *  edit_file(a.ts, "x", "y") and edit_file(a.ts, "y", "z") get different hashes. */
+  argsHash?: string
   error?: string
 }
 

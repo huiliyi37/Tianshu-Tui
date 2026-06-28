@@ -1,6 +1,7 @@
 import { useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { deriveAttention, type AttentionItem, type AttentionReason } from '../lib/attention'
+import { projectId } from '../lib/projects'
 
 const REASON_LABEL: Record<AttentionReason, string> = {
   approval: '待审批',
@@ -18,7 +19,7 @@ export function InboxSurface() {
   const view = deriveAttention(sessions.data ?? [], new Set(ui.attentionSeen))
 
   const open = (it: AttentionItem) => {
-    dispatch({ type: 'setProject', cwd: it.cwd })
+    dispatch({ type: 'setProject', projectId: projectId(it.cwd) })
     dispatch({ type: 'setActive', id: it.sessionId })
     dispatch({ type: 'setSurface', surface: 'workspace' })
     dispatch({ type: 'markSeen', sigs: [it.sig] })

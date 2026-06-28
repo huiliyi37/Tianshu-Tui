@@ -93,4 +93,54 @@ describe('SteerBuffer', () => {
     const second = buf.drain()
     assert.equal(second, '[User guidance]: second batch')
   })
+
+  it('drains by priority: now > next > later', () => {
+    const buf = new SteerBuffer()
+    buf.push('later-1')
+    buf.pushNext('next-1')
+    buf.push('later-2')
+    buf.pushNow('now-1')
+    buf.pushNext('next-2')
+
+    const drained = buf.drain()
+    assert.equal(
+      drained,
+      '[User guidance]:\n1. now-1\n2. next-1\n3. next-2\n4. later-1\n5. later-2',
+    )
+    assert.equal(buf.hasPending(), false)
+  })
+
+  it('drain(maxPriority) leaves lower-priority items queued', () => {
+    const buf = new SteerBuffer()
+    buf.pushNow('now-1')
+    buf.pushNext('next-1')
+    buf.push('later-1')
+
+    assert.equal(buf.drain('next'), '[User guidance]:\n1. now-1\n2. next-1')
+    assert.equal(buf.hasPending(), true)
+    assert.deepEqual([...buf.getPending()], ['later-1'])
+
+    assert.equal(buf.drain('later'), '[User guidance]: later-1')
+    assert.equal(buf.hasPending(), false)
+  })
+
+  it('peek returns highest-priority text without draining', () => {
+    const buf = new SteerBuffer()
+    buf.push('later-1')
+    buf.pushNext('next-1')
+    assert.equal(buf.peek(), 'next-1')
+    assert.equal(buf.hasPending(), true)
+  })
+
+  it('hasPending(maxPriority) ignores lower-priority items', () => {
+    const buf = new SteerBuffer()
+    buf.push('later-1')
+    assert.equal(buf.hasPending('now'), false)
+    assert.equal(buf.hasPending('next'), false)
+    assert.equal(buf.hasPending('later'), true)
+
+    buf.pushNext('next-1')
+    assert.equal(buf.hasPending('now'), false)
+    assert.equal(buf.hasPending('next'), true)
+  })
 })

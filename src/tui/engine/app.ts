@@ -29,11 +29,14 @@ import { InputController } from './input-controller.js'
 import { color, fg, bg } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
+import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
+import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
+import { renderApprovalPreview } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
@@ -42,6 +45,10 @@ import type { TodoItem } from '../../tools/todo-store.js'
 import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
+import { buildWorkerDetailContent } from '../worker-detail.js'
+import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
+import { loadWorkerSession } from '../../agent/worker-session-persist.js'
+import type { TasksFilter } from '../format/overlay.js'
 import {
   delegationObjectiveFromInput,
   delegationProfileFromInput,
@@ -52,10 +59,11 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
-import { truncateToDisplayWidth } from '../width.js'
+import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
+import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -87,6 +95,23 @@ export function truncateToWidth(text: string, maxWidth: number): string {
   }
   return out
 }
+
+/** 判断输入是否更像文件路径而非 slash 命令。
+ *  例如 `/src/main.ts` 或 `/tmp/foo bar` 应走普通文本流程，
+ *  避免被当作未知 slash 命令报失败。 */
+export function looksLikeFilePath(input: string): boolean {
+  if (input.startsWith('~/')) return true
+  if (!input.startsWith('/')) return false
+  const rest = input.slice(1)
+  const slashIdx = rest.indexOf('/')
+  if (slashIdx === -1) return false
+  const spaceIdx = rest.indexOf(' ')
+  return spaceIdx === -1 || slashIdx < spaceIdx
+}
+
+/** 右侧面板触发阈值与宽度。 */
+const SIDE_PANEL_MIN_COLUMNS = 120
+const SIDE_PANEL_WIDTH = 28
 
 // ── State types ────────────────────────────────────────────────
 
@@ -153,8 +178,10 @@ export interface AgentCallbacks {
  * 全部为「当前会话累计 / 估算」的真实值，避免 TUI 端自行 += 累加导致膨胀。
  */
 export interface TuiMetrics {
-  /** 当前估算 prompt token（含 prefix overhead） */
+  /** 当前估算 prompt token（含 prefix overhead，API 实际占用） */
   estimatedTokens: number
+  /** 仅可见对话消息的本地 token 估算（不含系统提示/工具 schema/prefix overhead） */
+  conversationTokens: number
   /** 模型上下文窗口 token 上限 */
   maxTokens: number
   /** 缓存命中率 0-1（近 N 回合优先，回退会话累计）；无数据为 null */
@@ -206,6 +233,8 @@ export class TuiApp {
   /** team_orchestrate 运行中的实时 TeamPanel（计划 DAG，运行态由 fleet 叠加）。
    *  从流式块中拦截的初始编码面板解码而来；终态委派到 scrollback 后清空。 */
   private liveTeamModel: TeamPanelModel | null = null
+  /** 当前在 pager overlay 中查看的 worker detail workerId；null 表示查看主 scrollback。 */
+  private workerDetailWorkerId: string | null = null
 
   // ── W3: 渲染 ticker + 指标 ───────────────────────────────────
   /** W-B3: stream render state manager (ticker/tick/lastActivity/header) */
@@ -228,8 +257,10 @@ export class TuiApp {
   private onSubmitCallback?: (text: string) => void
   private onAbortCallback?: () => void
   private onExitCallback?: () => void
-  /** External slash command handler. If set, handleSlashCommand delegates here. */
+  /** External slash command handler. If set, it is tried before the registry. */
   private slashHandler?: (input: string) => boolean | Promise<boolean>
+  /** Metadata-driven slash command registry (unified command framework). */
+  private slashRegistry = new SlashCommandRegistry()
   /** 消息队列（W4a：streaming 时 Enter 入队，turn 边界 drain 注入） */
   readonly steerBuffer = new SteerBuffer()
   /** agent 是否正在执行（submit → final turn complete 之间） */
@@ -319,14 +350,15 @@ export class TuiApp {
         // 跨 run steer 收口：上一 run 结束（text-only 收尾从不 drain）或
         // busy 闩残留时排队的 guidance 会滞留到这里。若放任不管，它会在
         // 下一次工具回合作为 [User guidance] 注入 —— 旧指令混进新任务上下文。
-        // 归并进本次 prompt（排队内容本就是用户意图，按时间序拼在新消息前）。
+        // 归并进本次 prompt（排队内容本就是用户意图，按优先级/时间序拼在新消息前）。
         // 注意：steer 路径已为每条 queued 消息单独 commit 了用户气泡，
         // 此处不再重复 commit，仅输出合并提示并归并文本。
         let submitText = text
         let steerMerged = false
         if (trimmed && this.steerBuffer.hasPending()) {
-          const pending = [...this.steerBuffer.getPending()]
+          const pendingEntries = [...this.steerBuffer.getPendingEntries()]
           this.steerBuffer.clear()
+          const pending = pendingEntries.map(entry => entry.text)
           submitText = [...pending, trimmed].join('\n\n')
           steerMerged = true
           this.commitAbove(() => {
@@ -583,7 +615,8 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      if (inputVal.startsWith('/')) {
+      const inputIsPath = looksLikeFilePath(inputVal)
+      if (inputVal.startsWith('/') && !inputIsPath) {
         // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
         if (!inputVal.includes(' ')) {
           const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
@@ -671,6 +704,8 @@ export class TuiApp {
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
 
+    this.registerBuiltinSlashCommands()
+
     // 审批按键统一在 onAnyKey 顶部短路处理（见上），不再注册 mode-bound 处理器，
     // 避免与 onAnyKey 双触发。
   }
@@ -728,6 +763,11 @@ export class TuiApp {
     return this.agentBusy
   }
 
+  /** 当前激活的 overlay id（无则 null）。 */
+  activeOverlayId(): string | null {
+    return this.overlay.activeId()
+  }
+
   /**
    * 拒绝当前提交：撤销 submitSlashCommand 已设置的 agentBusy。
    * main.ts 在 resolveAppPromptInput 返回 null 时调用，避免 agentBusy 卡死。
@@ -780,6 +820,8 @@ export class TuiApp {
 
   /** 激活 overlay */
   activateOverlay(id: string): boolean {
+    // overlay 内 ESC 应即时响应，关闭输入处理器的 lone-ESC 超时。
+    this.input.setEscapeImmediate(true)
     // 在激活任何全屏覆盖层之前，必须先干净地清除主屏幕底部的 live region（输入框和 GlanceBar），
     // 避免退出覆盖层后主屏幕残留旧的 live region 导致重影和重复行。
     this.live.clear()
@@ -826,12 +868,14 @@ export class TuiApp {
 
   /** 停用 overlay */
   deactivateOverlay(): void {
+    this.input.setEscapeImmediate(false)
     this.overlay.deactivate()
     // Alt screen exit restores cursor to where it was before overlay activate.
     // activateOverlay called live.clear() which: (1) moved cursor to live region
     // top and erased it, (2) set lastDisplayRows=0. After alt screen exit,
     // cursor is at that same cleared position (end of scrollback).
     // Erase any residual chars on this line, reset render state, append fresh.
+    this.workerDetailWorkerId = null
     this.stdout.write('\r\x1B[0J')
     this.live.reset()
     this.renderLive()
@@ -848,18 +892,24 @@ export class TuiApp {
   }
 
   /**
-   * Get running delegation workers for the `/tasks` overlay.
+   * Get workers for the `/tasks` overlay.
    * Reads per-worker state from the fleet read model (fed by onDelegationActivity),
    * grouped by the spawning delegation tool. Falls back to an empty fleet when no
    * delegation is in flight.
    */
-  getRunningWorkers(): TasksData {
+  getTasksData(filter?: TasksFilter): TasksData {
+    const activeFilter = filter ?? this.overlayController.nav().tasksFilter ?? 'running'
     const now = Date.now()
-    const active = this.fleet.getActiveWorkers(now)
+    const source = activeFilter === 'running'
+      ? this.fleet.getActiveWorkers(now)
+      : activeFilter === 'completed'
+        ? this.fleet.getCompletedWorkers(now)
+        : this.fleet.getAllWorkers(now, 'all')
     const byParent = new Map<string, TasksWorkerRow[]>()
-    for (const w of active) {
+    for (const w of source) {
       const arr = byParent.get(w.parentToolId) ?? []
       arr.push({
+        workerId: w.workerId,
         shortLabel: w.shortLabel,
         profile: w.profile,
         status: w.status,
@@ -870,10 +920,70 @@ export class TuiApp {
     }
     const groups: TasksGroup[] = []
     for (const [parentToolId, workers] of byParent) {
-      const p = this.fleet.getGroupProgress(parentToolId)
+      const p = activeFilter === 'completed'
+        // completed 分组进度从归档区重新计算
+        ? this.deriveGroupProgress(parentToolId, workers)
+        : this.fleet.getGroupProgress(parentToolId)
       groups.push({ parentToolId, total: p.total, done: p.done, failed: p.failed, running: p.running, workers })
     }
-    return { groups }
+    return { groups, filter: activeFilter, completedCount: this.fleet.completedSize() }
+  }
+
+  private deriveGroupProgress(parentToolId: string, workers: TasksWorkerRow[]): import('../fleet-registry.js').FleetGroupProgress {
+    const total = workers.length
+    const done = workers.filter(w => w.status === 'passed').length
+    const failed = workers.filter(w => w.status !== 'passed' && w.status !== 'running').length
+    const running = workers.filter(w => w.status === 'running').length
+    return { total, done, failed, running }
+  }
+
+  /** 当前是否在 pager 中查看某个 worker 的 detail。 */
+  getWorkerDetailId(): string | null {
+    return this.workerDetailWorkerId
+  }
+
+  /** 获取当前在 fleet（含归档区）中的 worker 实时视图。 */
+  getWorkerDetailView(workerId: string): import('../fleet-registry.js').FleetWorkerView | undefined {
+    return this.fleet.getWorkerById(workerId)
+  }
+
+  /**
+   * 解析用户输入的 worker 标识（完整 workOrderId 或短标签），返回可续作的 worker。
+   * 先查 fleet（活跃 + 已归档），再查持久化的 worker session 文件。
+   */
+  resolveWorkerId(query: string): { workerId: string; profile: string; objective?: string } | null {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return null
+    const all = [...this.fleet.getActiveWorkers(), ...this.fleet.getCompletedWorkers()]
+    const found = all.find(
+      (w) => w.workerId.toLowerCase() === normalized || w.shortLabel.toLowerCase() === normalized,
+    )
+    if (found) {
+      return { workerId: found.workerId, profile: found.profile, objective: found.activity }
+    }
+    // 未在 fleet 命中时，尝试读持久化 session（resume 场景）
+    const persisted = loadWorkerSession(query)
+    if (persisted) {
+      return { workerId: persisted.workOrderId, profile: persisted.profile, objective: persisted.objective }
+    }
+    return null
+  }
+
+  /** 兼容旧名：返回 running worker 列表。 */
+  getRunningWorkers(): TasksData {
+    return this.getTasksData('running')
+  }
+
+  /** 打开指定 worker 的 detail pager。 */
+  openWorkerDetail(workerId: string): void {
+    this.workerDetailWorkerId = workerId
+    const nav = this.overlayController.nav()
+    nav.pagerPage = 0
+    nav.pagerMode = 'page'
+    nav.pagerSearchQuery = ''
+    nav.pagerSearchCurrent = 0
+    nav.pagerSelectedMessage = 0
+    this.activateOverlay('pager')
   }
 
   /**
@@ -911,9 +1021,142 @@ export class TuiApp {
       return true
     }
 
+    if (id === 'tasks') {
+      const nav = this.overlayController.nav()
+      const data = this.getTasksData(nav.tasksFilter)
+      const selectable = data.groups.flatMap(g => g.workers.map(w => w.workerId))
+      const count = selectable.length
+
+      if (key.name === 'tab') {
+        const filters: TasksFilter[] = ['running', 'completed', 'all']
+        const next = (filters.indexOf(nav.tasksFilter) + 1) % filters.length
+        nav.tasksFilter = filters[next]!
+        nav.tasksIndex = 0
+        this.overlay.rerender()
+        return true
+      }
+      if (key.name === 'down' || c === 'j') {
+        if (count > 0) {
+          nav.tasksIndex = (nav.tasksIndex + 1) % count
+          this.overlay.rerender()
+        }
+        return true
+      }
+      if (key.name === 'up' || c === 'k') {
+        if (count > 0) {
+          nav.tasksIndex = (nav.tasksIndex - 1 + count) % count
+          this.overlay.rerender()
+        }
+        return true
+      }
+      if (key.name === 'return' && count > 0) {
+        const workerId = selectable[nav.tasksIndex]
+        if (workerId) {
+          this.openWorkerDetail(workerId)
+        }
+        return true
+      }
+      return false
+    }
+
     if (id === 'pager') {
+      const nav = this.overlayController.nav()
       const total = this.pagerTotalPages()
-      const cur = this.overlayController.nav().pagerPage
+      const mode = nav.pagerMode
+      const messages = this.overlayController.getData()?.pagerContent?.().messages ?? []
+
+      // Search mode: character input
+      if (mode === 'search') {
+        if (key.name === 'escape') {
+          nav.pagerMode = 'page'
+          nav.pagerSearchQuery = ''
+          nav.pagerSearchCurrent = 0
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'backspace') {
+          this.editOverlayQuery(null)
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'return') {
+          // Confirm search and jump to first match
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'down' || c === 'j' || key.name === 'pagedown') {
+          const next = findNextMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+          nav.pagerSearchCurrent = next + 1
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'up' || c === 'k' || key.name === 'pageup') {
+          const next = findPrevMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+          nav.pagerSearchCurrent = next + 1
+          this.overlay.rerender()
+          return true
+        }
+        if (this.isPrintableKey(key)) {
+          this.editOverlayQuery(key.char)
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        return false
+      }
+
+      // Message mode: navigate by message
+      if (mode === 'message') {
+        if (key.name === 'escape') {
+          nav.pagerMode = 'page'
+          this.overlay.rerender()
+          return true
+        }
+        const count = messages.length
+        let idx = nav.pagerSelectedMessage
+        if (key.name === 'down' || c === 'j') idx = Math.min(idx + 1, count - 1)
+        else if (key.name === 'up' || c === 'k') idx = Math.max(idx - 1, 0)
+        else if (key.name === 'home') idx = 0
+        else if (key.name === 'end') idx = count - 1
+        else return false
+        nav.pagerSelectedMessage = idx
+        this.overlay.rerender()
+        return true
+      }
+
+      // Page mode
+      if (c === '/') {
+        nav.pagerMode = 'search'
+        nav.pagerSearchQuery = ''
+        nav.pagerSearchCurrent = 0
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'm' && messages.length > 0) {
+        nav.pagerMode = 'message'
+        // Select the message nearest to the current page start
+        const pageSize = Math.max(1, this.rows - 4)
+        nav.pagerSelectedMessage = Math.min(nav.pagerPage * pageSize, messages.length - 1)
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'n' && nav.pagerSearchQuery) {
+        nav.pagerMode = 'search'
+        const next = findNextMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+        nav.pagerSearchCurrent = next + 1
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'N' && nav.pagerSearchQuery) {
+        nav.pagerMode = 'search'
+        const next = findPrevMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+        nav.pagerSearchCurrent = next + 1
+        this.overlay.rerender()
+        return true
+      }
+      const cur = nav.pagerPage
       let next = cur
       if (key.name === 'down' || key.name === 'pagedown' || c === 'j') next = cur + 1
       else if (key.name === 'up' || key.name === 'pageup' || c === 'k') next = cur - 1
@@ -922,7 +1165,7 @@ export class TuiApp {
       else return false
       next = Math.max(0, Math.min(total - 1, next))
       if (next !== cur) {
-        this.overlayController.nav().pagerPage = next
+        nav.pagerPage = next
         this.overlay.rerender()
       }
       return true
@@ -1115,6 +1358,15 @@ export class TuiApp {
     this.overlay.rerender()
   }
 
+  /** 同步 pager 搜索 query 与匹配状态。 */
+  private updatePagerSearch(messages: readonly import('../scrollback-transcript.js').TranscriptMessage[]): void {
+    const nav = this.overlayController.nav()
+    const query = this.overlayController.getQuery()
+    nav.pagerSearchQuery = query
+    const matches = searchTranscript(messages, query)
+    nav.pagerSearchCurrent = matches.length > 0 ? matches[0]! + 1 : 0
+  }
+
   /** pager 总页数（与 renderPager 同口径：pageSize = rows - 4）。 */
   private pagerTotalPages(): number {
     const content = this.overlayController.getData()?.pagerContent?.().content ?? ''
@@ -1155,7 +1407,18 @@ export class TuiApp {
   forceRedraw(): void {
     // 主题/域/模型变更会改变颜色码，记忆化的 thinking 行需失效以用新主题重算。
     this.thinkingLinesMemo = null
-    this.live.clear()
+    // 不走 live.clear() + append 路径——clear 置 lastDisplayRows=0 后 renderLive
+    // 走 append 模式不擦除（live-engine.ts:136），若 clear 的 erase 因
+    // lastDisplayRows 不准（域/主题/模型切换导致 wrap 行数变化）覆盖不全，
+    // 旧帧残留在屏上 → 输入框重影（〉 提示符/边框重复渲染）。
+    // 改为直接 renderLive：lineCache 内容变了（颜色/domain），render 的 diff 资格
+    // 检测到行不匹配 → 走 buildFullRewrite（moveToTop+ERASE_SCREEN_END+重写），
+    // 用真实的 prevDisplayRows 原子覆盖旧帧。
+    //
+    // picker Enter 路径的 exec→deactivate 顺序（bb6a9329）独立保证 picker 场景：
+    // forceRedraw 画在 alt-screen 上，随后 deactivateOverlay 退出 alt-screen
+    // 丢弃整个 alt buffer 并重画，所以 forceRedraw 在 picker 路径里走哪条分支
+    // 都不影响最终结果——这里的安全性不依赖 clear()。
     this.renderLive()
   }
 
@@ -1262,8 +1525,8 @@ export class TuiApp {
     const value = this.inputLine.value
     const cursor = this.inputLine.cursor
 
-    // slash 命令补全
-    if (value.startsWith('/') && !value.includes(' ')) {
+    // slash 命令补全（排除 `/file/path` 这类绝对路径）
+    if (value.startsWith('/') && !value.includes(' ') && !looksLikeFilePath(value)) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -1332,6 +1595,70 @@ export class TuiApp {
   /** 设置外部 slash command 处理器（如 SlashRouter） */
   setSlashHandler(handler: (input: string) => boolean | Promise<boolean>): void {
     this.slashHandler = handler
+  }
+
+  /** 注册一条 metadata-driven slash 命令。 */
+  registerSlashCommand(command: import('../slash-command-registry.js').SlashCommand): void {
+    this.slashRegistry.register(command)
+  }
+
+  /** 注册内置 slash 命令（/clear、/starmap、/chronicle、/exit）。 */
+  private registerBuiltinSlashCommands(): void {
+    this.slashRegistry.registerMany([
+      {
+        name: '/clear',
+        description: 'Clear screen',
+        immediate: true,
+        handler: () => {
+          process.stdout.write('\x1B[2J\x1B[H')
+          this.live.reset()
+          this.renderLive()
+          return true
+        },
+      },
+      {
+        name: '/starmap',
+        description: 'Open starmap overlay',
+        immediate: true,
+        overlay: 'starmap',
+        handler: () => true,
+      },
+      {
+        name: '/chronicle',
+        description: 'Open chronicle overlay',
+        immediate: true,
+        overlay: 'chronicle',
+        handler: () => true,
+      },
+      {
+        name: '/exit',
+        description: 'Exit Rivet',
+        immediate: true,
+        handler: () => {
+          this.dispose()
+          if (this.onExitCallback) {
+            this.onExitCallback()
+          } else {
+            process.exit(0)
+          }
+          return true
+        },
+      },
+      {
+        name: '/quit',
+        description: 'Exit Rivet',
+        immediate: true,
+        handler: () => {
+          this.dispose()
+          if (this.onExitCallback) {
+            this.onExitCallback()
+          } else {
+            process.exit(0)
+          }
+          return true
+        },
+      },
+    ])
   }
 
   /**
@@ -1464,11 +1791,17 @@ export class TuiApp {
       }
     }
 
-    // 工具折叠组：collapsible → push entry；non-collapsible → 先 flush 再单独走 tool card
+    // 工具折叠组：read/search 与可折叠 bash 各走各的 buffer，互相打断。
+    // non-collapsible（含变更型 bash）到达时 flush 两个组。
     if (isCollapsibleTool(name)) {
+      if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
       this.toolGroupController.pushUse(id, name, input)
+    } else if (name === 'bash' && isCollapsibleBashCommand(input.command as string)) {
+      if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+      this.toolGroupController.pushBashUse(id, input.command as string, Date.now())
     } else {
       if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+      if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     }
 
     // Commit thinking if any
@@ -1478,13 +1811,22 @@ export class TuiApp {
       this.renderLive()
     }
   }
-  /** 将折叠组 buffer 刷新到 scrollback */
+  /** 将 read/search 折叠组 buffer 刷新到 scrollback */
   private flushToolGroup(): void {
     const group = this.toolGroupController.flushGroup()
     if (!group || group.entries.length === 0) return
-    // 记录最近 flush 的组供 ctrl+o 展开
-    this.toolGroupController.flushGroup()
     const formatted = formatCollapsedGroup({ group, theme: this.theme })
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
+  }
+
+  /** 将 bash 折叠组 buffer 刷新到 scrollback */
+  private flushBashGroup(): void {
+    const group = this.toolGroupController.flushBashGroup()
+    if (!group || group.entries.length === 0) return
+    const formatted = formatCollapsedBashGroup({ group, theme: this.theme })
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
@@ -1565,6 +1907,17 @@ export class TuiApp {
       return
     }
 
+    // 可折叠 bash：成功则绑定到组延迟渲染；错误则把前面成功命令摘要后单独渲染错误卡片
+    if (name === 'bash' && this.toolGroupController.hasBashEntry(id)) {
+      if (isError) {
+        this.toolGroupController.detachBashEntry(id)
+        this.flushBashGroup()
+      } else {
+        this.toolGroupController.attachBashResult(id, finalContent, isError)
+        return
+      }
+    }
+
     // team_orchestrate：把编码串 rivet:team-panel:v1:{...} 解码为 TeamPanel 面板，
     // 而非把裸编码串当工具卡片输出（对齐 Ink decodeTeamPanelModel + TeamPanel）。
     if (name === 'team_orchestrate') {
@@ -1617,12 +1970,24 @@ export class TuiApp {
 
   /** ctrl+o：展开最近被截断的工具结果或折叠组 */
   private expandLastTruncatedTool(): void {
-    // 优先展开折叠组
+    // 优先展开 read/search 折叠组
     const collapsed = this.toolGroupController.getLastCollapsedGroup()
     if (collapsed) {
       const g = collapsed
       this.toolGroupController.clearLastCollapsedGroup()
       const formatted = formatCollapsedGroup({ group: g, expanded: true, theme: this.theme })
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
+    }
+    // 其次展开 bash 折叠组
+    const collapsedBash = this.toolGroupController.getLastCollapsedBashGroup()
+    if (collapsedBash) {
+      const g = collapsedBash
+      this.toolGroupController.clearLastCollapsedBashGroup()
+      const formatted = formatCollapsedBashGroup({ group: g, expanded: true, theme: this.theme })
       this.commitAbove(() => {
         this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
         this.state.committedCount++
@@ -1667,6 +2032,7 @@ export class TuiApp {
 
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -1749,6 +2115,9 @@ export class TuiApp {
     this.setPhase('idle')
     this.state.isStreaming = false
     this.state.isThinking = false
+    // 与 abort 同口径 flush 折叠组，避免错误后孤儿结果滞留组内无法提交。
+    if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     // 与 abort 同口径回收 run 本地状态：provider 在工具/委派回合中报错走 onError，
     // 此时 pendingTools/toolAccumulator 可能持有半成品数据。只清 fleet 而漏清这两者，
     // 下一轮会读到上轮孤儿条目（live 区显示已死工具卡片、累加器跨 run 污染）。
@@ -1798,6 +2167,7 @@ export class TuiApp {
     if (this.approvalIntentController.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
@@ -1882,25 +2252,96 @@ export class TuiApp {
    * 顶框泄漏进 scrollback（输入框重影）。多行内容（流式 tail/思考/工具卡片）
    * 是有意换行的，不走此钳制。
    */
-  private clampLine(text: string): string {
+  private clampLine(text: string, maxWidth = this.columns): string {
     // 留 1 列余量：吸收 get-east-asian-width 判为 neutral、但个别 CJK 终端仍按 2 列
     // 渲染的几何符（如 ◧）带来的 +1 残余误差。
-    return truncateToDisplayWidth(text, Math.max(1, this.columns - 1), { ambiguousAsWide: true })
+    return truncateToDisplayWidth(text, Math.max(1, maxWidth - 1), { ambiguousAsWide: true })
+  }
+
+  /**
+   * 构造输入框的一行（左右竖边框 + 内容 + padding 到 innerWidth）。
+   *
+   * 与 clampLine 同口径（wide 上界）：截断与 padding 都按 ambiguousAsWide 度量，
+   * 保证含 `— … · → ↑ ↓` 等 East-Asian Ambiguous 符号的输入行在 CJK 终端
+   * （这些符号按 2 列渲染）也严格 ≤ columns → 不折行 → rowsForLine 计数正确，
+   * 避免 fullRewrite 回顶欠擦导致的输入框重影（paste / 历史导航）。
+   * box-drawing（│）恒按 1 列（width.ts isBoxOrBlock），不受影响。
+   */
+  private renderInputRow(content: string, innerWidth: number, leftBar: string, rightBar: string): string {
+    const opts = { ambiguousAsWide: true }
+    const truncated = truncateToDisplayWidth(content, innerWidth, opts)
+    const pad = Math.max(0, innerWidth - displayWidth(truncated, opts))
+    return `${leftBar}${truncated}${' '.repeat(pad)}${rightBar}`
   }
 
   /** 渲染一条全宽反色提示条（用于审批/意图框顶部隔离）。 */
-  private renderBanner(text: string, bgColor: string, fgColor: string = '#000000'): string {
+  private renderBanner(text: string, bgColor: string, fgColor: string = '#000000', width = this.columns): string {
     const label = ` ${text} `
     const labelWidth = stringWidth(label)
-    const maxWidth = Math.max(1, this.columns - 1)
+    const maxWidth = Math.max(1, width - 1)
     const padWidth = Math.max(0, maxWidth - labelWidth)
     return `${bg(bgColor)}${fg(fgColor)}${label}${' '.repeat(padWidth)}\x1B[0m`
   }
 
-  private renderLive(): void {
-    const lines: LiveRegionLine[] = []
+  private mergeSidePanel(lines: LiveRegionLine[], panelLines: string[], contentCols: number, panelWidth: number): LiveRegionLine[] {
+    const merged: LiveRegionLine[] = []
+    const totalRows = Math.max(lines.length, panelLines.length)
+    const RESET = '\x1B[0m'
+    for (let i = 0; i < totalRows; i++) {
+      const mainRaw = lines[i]?.text ?? ''
+      const mainTrunc = truncateToDisplayWidth(mainRaw, contentCols, { ambiguousAsWide: true })
+      const mainPad = Math.max(0, contentCols - displayWidth(mainTrunc, { ambiguousAsWide: true }))
+      const panelRaw = panelLines[i] ?? ''
+      const panelPad = panelRaw ? '' : ' '.repeat(panelWidth)
+      merged.push({ text: `${mainTrunc}${RESET}${' '.repeat(mainPad)}${panelRaw}${panelPad}` })
+    }
+    return merged
+  }
 
-    // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
+  private renderLive(): void {
+    // 全屏覆盖层（命令面板 / splash / 详情页）激活时，Live 区域由覆盖层引擎
+    // 负责渲染，避免再次绘制内容产生右下角残留。
+    if (this.overlay.isActive()) {
+      return
+    }
+
+    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS
+    const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
+    const savedColumns = this.columns
+    const contentCols = savedColumns - sidePanelWidth
+
+    // Metrics 供 side panel 与 GlanceBar 共享，提前计算。
+    const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
+    let glanceCacheHitRate: number | undefined
+    let glanceContextRatio: number | undefined
+    let glanceCost: number
+    let glanceEstimatedTokens: number | undefined
+    let glanceConversationTokens: number | undefined
+    let glanceMaxTokens: number | undefined
+    if (metrics) {
+      glanceCacheHitRate = metrics.cacheHitRate ?? undefined
+      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
+      glanceCost = metrics.cost
+      glanceEstimatedTokens = metrics.estimatedTokens
+      glanceConversationTokens = metrics.conversationTokens
+      glanceMaxTokens = metrics.maxTokens
+    } else {
+      glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
+      glanceContextRatio = this.metricsGlanceController.lastContextRatio
+      glanceCost = this.estimateSessionCost()
+    }
+
+    // 让 live 内容按主区域宽度排版；后续再把 side panel 拼到右侧。
+    if (showSidePanel) {
+      (this as any).columns = contentCols
+    }
+
+    let lines: LiveRegionLine[] = []
+    let chromeStart = 0
+    try {
+      lines = []
+
+      // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
     const stalled = this.streamRenderController.lastActivityMs > 0 && Date.now() - this.streamRenderController.lastActivityMs > 10_000
     const spinnerLine = formatSpinnerStatus({
       tick: this.streamRenderController.tick,
@@ -1909,7 +2350,9 @@ export class TuiApp {
       stalled,
     }, this.theme)
     if (spinnerLine) {
-      lines.push({ text: spinnerLine })
+      // spinner 行含 …/·（East-Asian Ambiguous），CJK 终端按 2 列渲染 → 长行会折行而
+      // rowsForLine 低估 → 重影。clampLine 用 wide 上界截断到 columns-1，保证不折行。
+      lines.push({ text: this.clampLine(spinnerLine) })
     }
 
     // 1b. Thinking 展开内容（状态行已由 spinner 承担）。split 结果记忆化见 getThinkingLines。
@@ -1937,50 +2380,53 @@ export class TuiApp {
     //  - team_orchestrate 运行中：渲染 wave/task DAG（运行态由 fleet 叠加）。
     //  - delegate_*：渲染 FleetRegistry 驱动的 per-worker 结构化总览。
     //  - 刚启动、活动未上行的窗口期：回退工具级 pill，避免空白。
-    if (this.liveTeamModel) {
-      const model = this.teamModelWithLiveStatus(this.liveTeamModel)
-      for (const line of formatTeamPanel(model, this.theme, this.columns)) {
-        lines.push({ text: line })
-      }
-    } else {
-    const activeWorkers = this.fleet.getActiveWorkers()
-    if (activeWorkers.length > 0) {
-      const summary = activeWorkers.reduce(
-        (acc, w) => {
-          const p = this.fleet.getGroupProgress(w.parentToolId)
-          if (!acc.seen.has(w.parentToolId)) {
-            acc.seen.add(w.parentToolId)
-            acc.total += p.total
-            acc.done += p.done
+    // 宽屏时这些汇总信息已移到右侧 side panel，避免主区重复。
+    if (!showSidePanel) {
+      if (this.liveTeamModel) {
+        const model = this.teamModelWithLiveStatus(this.liveTeamModel)
+        for (const line of formatTeamPanel(model, this.theme, this.columns)) {
+          lines.push({ text: line })
+        }
+      } else {
+        const activeWorkers = this.fleet.getActiveWorkers()
+        if (activeWorkers.length > 0) {
+          const summary = activeWorkers.reduce(
+            (acc, w) => {
+              const p = this.fleet.getGroupProgress(w.parentToolId)
+              if (!acc.seen.has(w.parentToolId)) {
+                acc.seen.add(w.parentToolId)
+                acc.total += p.total
+                acc.done += p.done
+              }
+              acc.running += 1
+              return acc
+            },
+            { total: 0, done: 0, running: 0, seen: new Set<string>() },
+          )
+          const fleetLines = formatWorkerFleet(
+            activeWorkers,
+            this.theme,
+            this.columns,
+            { done: summary.done, total: summary.total, running: summary.running },
+          )
+          for (const line of fleetLines) lines.push({ text: line })
+        } else {
+          const delegationTools = [...this.toolGroupController.getPendingEntries()]
+            .filter(([, meta]) => isDelegationTool(meta.name))
+          if (delegationTools.length > 0) {
+            const pills = delegationTools.map(([, meta]) => {
+              const elapsed = Date.now() - meta.startMs
+              const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+              const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
+                ? color('[auto]', this.theme.success)
+                : color('[ask]', this.theme.warning)
+              const profile = delegationProfileFromInput(meta.name, meta.input)
+              return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
+            })
+            lines.push({ text: this.clampLine(` ${pills.join('  ')}`) })
           }
-          acc.running += 1
-          return acc
-        },
-        { total: 0, done: 0, running: 0, seen: new Set<string>() },
-      )
-      const fleetLines = formatWorkerFleet(
-        activeWorkers,
-        this.theme,
-        this.columns,
-        { done: summary.done, total: summary.total, running: summary.running },
-      )
-      for (const line of fleetLines) lines.push({ text: line })
-    } else {
-      const delegationTools = [...this.toolGroupController.getPendingEntries()]
-        .filter(([, meta]) => isDelegationTool(meta.name))
-      if (delegationTools.length > 0) {
-        const pills = delegationTools.map(([, meta]) => {
-          const elapsed = Date.now() - meta.startMs
-          const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-          const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
-            ? color('[auto]', this.theme.success)
-            : color('[ask]', this.theme.warning)
-          const profile = delegationProfileFromInput(meta.name, meta.input)
-          return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
-        })
-        lines.push({ text: this.clampLine(` ${pills.join('  ')}`) })
+        }
       }
-    }
     }
 
     // 2c. Collapsible 探索工具聚合行（避免 read×5 + grep×3 刷屏 live 区）
@@ -1994,11 +2440,24 @@ export class TuiApp {
       }
     }
 
+    // 2c-bis. 可折叠 bash 聚合行
+    if (this.toolGroupController.isActiveBashGroup()) {
+      const activeBashGroup = this.toolGroupController.getActiveBashGroup()
+      if (activeBashGroup && activeBashGroup.entries.length > 0) {
+        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, this.columns)
+        for (const line of groupLines) {
+          lines.push({ text: line })
+        }
+      }
+    }
+
     // 2d. 进行中非 collapsible 工具：● 标题行 + 末 3 行输出（⎿ 缩进）
     if (this.toolGroupController.getPendingSize() > 0) {
       for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
         // 跳过已归入折叠组的 collapsible 工具（它们在 2c 聚合行中显示）
         if (isCollapsibleTool(meta.name)) continue
+        // 跳过已归入 bash 折叠组的 bash 工具
+        if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
         const toolLines = formatToolCardLive({
           toolName: meta.name,
           toolInput: meta.input,
@@ -2029,11 +2488,13 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const inputSummary = JSON.stringify(p.input).slice(0, 80)
+        const preview = renderApprovalPreview(p.name, p.input, this.columns - 4, this.theme)
         lines.push({ text: '' })
         lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
-        lines.push({ text: this.clampLine(` │ Input: ${inputSummary}${JSON.stringify(p.input).length > 80 ? '...' : ''}`) })
+        for (const pv of preview) {
+          lines.push({ text: this.clampLine(` │ ${pv}`) })
+        }
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'approve')}  ${keyHint('n', 'deny')}  ${keyHint('e', 'edit')} ───────────────`) })
       }
     }
@@ -2062,43 +2523,24 @@ export class TuiApp {
     //    不会裁掉任务面板与输入框。
     const chromeStart = lines.length
 
-    // 3b. 常驻任务面板（todo 列表）——空列表不渲染。
-    const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
-    if (taskLines.length > 0) {
-      lines.push({ text: '' })
-      for (const taskLine of taskLines) lines.push({ text: taskLine })
+    // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
+    if (!showSidePanel) {
+      const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
+      if (taskLines.length > 0) {
+        lines.push({ text: '' })
+        for (const taskLine of taskLines) lines.push({ text: taskLine })
+      }
     }
 
-    // 4. GlanceBar（context% / cache / cost / git branch） metrics 计算
-    // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
-    // 运行态相位已收敛到顶部 spinner 状态行，GlanceBar 不再重复显示 phase。
-    const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
-    let glanceCacheHitRate: number | undefined
-    let glanceContextRatio: number | undefined
-    let glanceCost: number
-    let glanceEstimatedTokens: number | undefined
-    let glanceMaxTokens: number | undefined
-    if (metrics) {
-      glanceCacheHitRate = metrics.cacheHitRate ?? undefined
-      // estimatedTokens is now calibrated against real API prompt_tokens in
-      // SessionContext, so it reflects current context occupancy rather than a
-      // stale single-turn request size. Use it as the progress numerator.
-      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
-      glanceCost = metrics.cost
-      glanceEstimatedTokens = metrics.estimatedTokens
-      glanceMaxTokens = metrics.maxTokens
-    } else {
-      glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
-      glanceContextRatio = this.metricsGlanceController.lastContextRatio
-      glanceCost = this.estimateSessionCost()
-    }
+    // 4. GlanceBar（context% / cache / cost / git branch） metrics 已在顶部计算，
+    //    与 side panel 共享同一份 glanceCacheHitRate / glanceEstimatedTokens / glanceCost。
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.inputController.ctrlCPendingSince > 0) {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
-      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n')
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal)
       const isStreaming = this.state.phase !== 'idle'
 
       // Domain-accent border color: slash=primary, streaming=dim, else domain accent
@@ -2136,6 +2578,7 @@ export class TuiApp {
         modelName: this.state.modelName,
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
+        conversationTokens: glanceConversationTokens,
         maxTokens: glanceMaxTokens,
         cost: glanceCost,
         elapsedMs: Date.now() - this.state.turnStartMs,
@@ -2180,16 +2623,13 @@ export class TuiApp {
 
       lines.push({ text: topBorder })
       if (this.inputLine.vimEnabled && this.inputLine.vimMode === 'normal') {
-        const firstLine = truncateToWidth(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth)
-        lines.push({ text: `${leftBar}${firstLine}${' '.repeat(Math.max(0, innerWidth - stringWidth(firstLine)))}${rightBar}` })
+        lines.push({ text: this.renderInputRow(`-- NORMAL -- ${colorizeInputLine(inputLines[0] ?? '')}`, innerWidth, leftBar, rightBar) })
         for (const extra of inputLines.slice(1)) {
-          const t = truncateToWidth(colorizeInputLine(extra), innerWidth)
-          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(extra), innerWidth, leftBar, rightBar) })
         }
       } else {
         for (const inputDisplayLine of inputLines) {
-          const t = truncateToWidth(colorizeInputLine(inputDisplayLine), innerWidth)
-          lines.push({ text: `${leftBar}${t}${' '.repeat(Math.max(0, innerWidth - stringWidth(t)))}${rightBar}` })
+          lines.push({ text: this.renderInputRow(colorizeInputLine(inputDisplayLine), innerWidth, leftBar, rightBar) })
         }
       }
       lines.push({ text: botBorder })
@@ -2212,6 +2652,38 @@ export class TuiApp {
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
       }
+    }
+
+    } finally {
+      if (showSidePanel) {
+        this.columns = savedColumns
+      }
+    }
+
+    if (showSidePanel) {
+      const currentTool = (() => {
+        for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
+          if (isCollapsibleTool(meta.name)) continue
+          if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
+          return { name: meta.name, elapsedMs: Date.now() - meta.startMs }
+        }
+        return undefined
+      })()
+      const sidePanelInput: SidePanelInput = {
+        columns: sidePanelWidth,
+        todos: this.state.todos,
+        workers: this.fleet.getActiveWorkers(),
+        currentTool,
+        modelName: this.state.modelName,
+        domainGlyph: this.state.domainGlyph,
+        domainName: this.state.domainName,
+        estimatedTokens: glanceEstimatedTokens,
+        maxTokens: glanceMaxTokens,
+        cacheHitRate: glanceCacheHitRate,
+        cost: glanceCost,
+      }
+      const panelLines = renderSidePanel(sidePanelInput, this.theme)
+      lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)
     }
 
     this.live.render(lines, { reservedTail: lines.length - chromeStart })
@@ -2297,12 +2769,22 @@ export class TuiApp {
         handled = true
       }
     } else {
-      handled = this.handleSlashCommand(input)
+      const ctx: SlashCommandContext = { app: this, input, trimmed: input.trim() }
+      const result = await this.slashRegistry.execute(ctx)
+      handled = result.handled
     }
     if (!handled) {
       // 透传给 agent 前 commit 用户消息到 scrollback，确保 slash 命令
       // 也能在终端历史中看到（之前只有 agent 回复无用户气泡）。
       this.commitUserPrompt(input)
+
+      if (this.agentBusy) {
+        // 当前 run 仍在执行：把透传 slash 命令按高优先级排进 steer 队列，
+        // 避免与正在进行的 turn 冲突，同时保证它比普通的 later guidance 先 drain。
+        this.steerBuffer.push(input, 'next')
+        return
+      }
+
       this.blockWriter.discard()
       this.streamRenderer.reset()
       this.streamRenderController.assistantHeaderDone = false
@@ -2310,38 +2792,6 @@ export class TuiApp {
       this.state.turnStartMs = Date.now()
       this.streamRenderController.lastActivityMs = Date.now()
       this.onSubmitCallback?.(input)
-    }
-  }
-
-  /** 处理内置斜杠命令（无外部 handler 时的兜底），返回 true 表示已处理 */
-  private handleSlashCommand(input: string): boolean {
-    // Fallback: basic built-in commands
-    const trimmed = input.trim()
-    switch (trimmed) {
-      case '/clear':
-        process.stdout.write('\x1B[2J\x1B[H')
-        this.live.reset()
-        this.renderLive()
-        return true
-      case '/starmap':
-        this.activateOverlay('starmap')
-        return true
-      case '/chronicle':
-        this.activateOverlay('chronicle')
-        return true
-      case '/exit':
-      case '/quit':
-        this.dispose()
-        // Delegate to graceful shutdown (session persist, agent abort, MCP teardown)
-        // instead of process.exit(0) which skips all cleanup.
-        if (this.onExitCallback) {
-          this.onExitCallback()
-        } else {
-          process.exit(0)
-        }
-        return true
-      default:
-        return false
     }
   }
 
@@ -2365,7 +2815,8 @@ export class TuiApp {
     domainPickerData?: () => DomainPickerData
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void): void {
+    choicePanelData?: () => ChoicePanelData
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -2373,11 +2824,25 @@ export class TuiApp {
     this.overlayController.setDomainPickerExec(domainPickerExec)
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
-    // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
+    this.overlayController.setChoicePanelExec(choicePanelExec)
+    // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
     this.overlay.register('pager', {
       render: (_w, _h) => {
         const data = overlayData?.pagerContent?.() ?? { content: '(no content)', page: 0 }
-        return renderPager({ ...data, page: this.overlayController.nav().pagerPage }, this.columns, this.rows, this.theme)
+        const nav = this.overlayController.nav()
+        const messages = data.messages ?? []
+        const searchMatches = nav.pagerMode === 'search' && nav.pagerSearchQuery
+          ? searchTranscript(messages, nav.pagerSearchQuery).length
+          : 0
+        return renderPager({
+          ...data,
+          page: nav.pagerPage,
+          mode: nav.pagerMode,
+          searchQuery: nav.pagerSearchQuery,
+          searchMatches,
+          searchCurrent: nav.pagerSearchCurrent,
+          selectedMessageIndex: nav.pagerSelectedMessage,
+        }, this.columns, this.rows, this.theme)
       },
     })
 
@@ -2430,11 +2895,11 @@ export class TuiApp {
       },
     })
 
-    // Tasks — /tasks 显示运行中子代理
+    // Tasks — /tasks 显示运行中子代理（支持选中/进入 detail）
     this.overlay.register('tasks', {
       render: (_w, _h) => {
-        const data = overlayData?.tasksData?.() ?? { groups: [] }
-        return renderTasks(data, this.columns, this.rows, this.theme)
+        const data = overlayData?.tasksData?.() ?? { groups: [], filter: 'running' as const, completedCount: 0 }
+        return renderTasks(data, this.columns, this.rows, this.theme, this.overlayController.nav().tasksIndex)
       },
     })
 
@@ -2459,6 +2924,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.themePickerData?.() ?? { entries: [], selectedIndex: 0 }
         return renderThemePicker({ ...data, selectedIndex: this.overlayController.nav().themePickerIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Choice Panel — 通用选项选择弹窗；selectedIndex 由 overlayNav 注入
+    this.overlay.register('choice-panel', {
+      render: (_w, _h) => {
+        const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
+        return renderChoicePanel({ ...data, selectedIndex: this.overlayController.nav().choicePanelIndex }, this.columns, this.rows, this.theme)
       },
     })
   }

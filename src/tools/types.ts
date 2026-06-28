@@ -1,5 +1,7 @@
 import type { ToolDefinition } from '../api/types.js'
 import type { ArtifactStore } from '../artifact/store.js'
+import type { PrewarmCache } from '../agent/prewarm.js'
+import type { ReadRefStats } from './read-file.js'
 import type { ProviderProfile } from '../api/provider-profile.js'
 
 /**
@@ -19,6 +21,25 @@ export interface DelegationActivity {
   status: 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
   /** Latest worker activity line (running) or terminal summary. */
   progressLine?: string
+  /** Actual model dispatched for this worker (insights / cost visualization). */
+  model?: string
+  /** Provider name for this worker (insights / cost visualization). */
+  provider?: string
+  /** Token usage for this worker (insights / cost visualization). */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    reasoning_tokens?: number
+    total_tokens?: number
+  }
+  /** Persisted diff artifact id (in the worker's fallback session). Lets the UI
+   *  fetch this worker's diff for independent review. Absent when the worker
+   *  produced no diff or persistence failed (降级：UI 隐藏 diff 入口). */
+  artifactId?: string
+  /** Files this worker changed (for diff review entry hints). */
+  changedFiles?: string[]
 }
 
 /**
@@ -57,6 +78,9 @@ export interface ToolCallParams {
   toolUseId: string
   cwd: string
   onOutput?: (chunk: string) => void
+  /** Register a file written internally by a tool (e.g. ast-edit via writeFileAtomicAsync).
+   *  Ensures evidence/filesModified and cerebellar gate are aware of the write. */
+  onFileWrite?: (filePath: string) => void
   /** Capture an agent's departure mark for 主控 to record at session close. */
   onLeaveMark?: (mark: LeaveMarkInput) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
@@ -72,6 +96,12 @@ export interface ToolCallParams {
   sessionModifiedFiles?: string[]
   /** Artifact store for persisting tool output — no global setter, always inject via params */
   artifactStore?: ArtifactStore
+  /** Prewarm cache for speculative file reads — injected so read_file can hit
+   *  warmed entries (mtime-verified) instead of a cold fs read. Per-session. */
+  prewarmCache?: PrewarmCache
+  /** Per-session read-ref telemetry accumulator. When injected, read-ref
+   *  savings scope to this session instead of accumulating process-wide. */
+  readRefStats?: ReadRefStats
   /** B1: Task identifier for ownership attribution */
   taskId?: string
   /** B1: Files owned by the current task (subset of sessionModifiedFiles, excluding externals) */
@@ -93,6 +123,11 @@ export interface ToolCallParams {
   providerProfile?: Pick<ProviderProfile, 'cacheType' | 'persistent'>
   /** Current session turn count — enables progressive timeout strategies. */
   sessionTurnCount?: number
+  /** Session identifier — used to isolate per-session state (read history,
+   *  dedup tracking) so concurrent sessions in the same cwd don't cross-
+   *  contaminate (e.g. a forked session seeing "already read" for a file
+   *  only the parent read). */
+  sessionId?: string
   /** Review-router re-entrancy depth propagated into worker contexts. */
   reviewDepth?: number
   /** B3: delegation nesting depth of the calling agent (primary=0, worker=1).
@@ -126,6 +161,8 @@ export interface VerificationMetadata {
   /** VSW two-phase: 'isolated' = Phase A on baseline.head + owned diff (blocking
    *  gate); 'integration' = Phase B on current HEAD + owned diff (advisory). */
   verificationPhase?: 'isolated' | 'integration'
+  /** Unix ms timestamp when this verification was recorded. */
+  timestamp?: number
 }
 
 export interface ToolResult {

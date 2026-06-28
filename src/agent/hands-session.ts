@@ -44,6 +44,12 @@ export interface HandsSessionConfig {
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Base git ref to diff worker changes against. Defaults to current branch/HEAD of cwd. */
   baseRef?: string
+  /** Optional artifact store to persist the worker diff for independent review.
+   *  When provided, the diff is saved (into the worker's fallback session) and the
+   *  resulting artifactId is attached to the WorkerResult, so the UI can fetch it.
+   *  Persistence failure is non-fatal — diffArtifactId is left undefined and the
+   *  diff still travels in result.artifacts as before. */
+  artifactStore?: { save(input: { tool: string; target: string; rawContent: string; summary: string; sections?: unknown[] }): Promise<string> }
   /**
    * Run the worker agent in the worktree.
    * Receives the worker prompt and AgentCallbacks; returns the full text output
@@ -140,7 +146,22 @@ export async function runHandsSession(config: HandsSessionConfig): Promise<Hands
 
     if (diff) {
       result.artifacts.push(formatDiffArtifact(diff, config.order.profile))
-   }
+      // Persist the diff so the UI can review it independently. Saved into the
+      // worker's fallback session (worker-<orderId>); fetchable by artifactId.
+      // Failure is non-fatal: diffArtifactId stays undefined, diff still in artifacts.
+      if (config.artifactStore) {
+        try {
+          result.diffArtifactId = await config.artifactStore.save({
+            tool: 'hands_session',
+            target: config.order.id,
+            rawContent: diff,
+            summary: `Patch: ${config.order.profile ?? 'worker'}`,
+          })
+        } catch {
+          // 落盘失败（磁盘满/store 未注入正确 session 等）— 降级，前端隐藏 diff 入口
+        }
+      }
+    }
 
     return { result, usage: turnUsage }
  } finally {

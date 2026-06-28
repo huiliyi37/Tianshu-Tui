@@ -90,24 +90,55 @@ function writeOwnerMarker(path: string, sessionId: string): void {
   } catch { /* best-effort */ }
 }
 
-function git(cwd: string, args: string[]): { ok: boolean; stdout: string } {
+function git(cwd: string, args: string[]): { ok: boolean; stdout: string; stderr: string } {
   const result = spawnSync('git', args, {
     cwd,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  return { ok: result.status === 0, stdout: typeof result.stdout === 'string' ? result.stdout : '' }
+  return {
+    ok: result.status === 0,
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+  }
+}
+
+function branchExists(cwd: string, branch: string): boolean {
+  return git(cwd, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).ok
+}
+
+function uniqueBranch(cwd: string, baseBranch: string): string {
+  if (!branchExists(cwd, baseBranch)) return baseBranch
+  // Append a random suffix to avoid collisions with stale branches left by
+  // previous crashed runs. The random part keeps concurrent workers unlikely
+  // to pick the same name even if they race.
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const candidate = `${baseBranch}-${suffix}`
+    if (!branchExists(cwd, candidate)) return candidate
+  }
+  return `${baseBranch}-${Date.now()}`
 }
 
 export function createWorktree(cwd: string, sessionId: string, branch = `rivet-hands-${sessionId.slice(0, 8)}`): CreatedWorktree {
-  const wtPath = mkdtempSync(join(tmpdir(), `rivet-wt-${sessionId.slice(0, 8)}-`))
-  const result = git(cwd, buildWorktreeArgs(wtPath, branch))
-  if (!result.ok) {
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '-')
+  branch = uniqueBranch(cwd, branch)
+  let lastError = ''
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const wtPath = mkdtempSync(join(tmpdir(), `rivet-wt-${safeSessionId.slice(0, 8)}-${attempt}-`))
+    const result = git(cwd, buildWorktreeArgs(wtPath, branch))
+    if (result.ok) {
+      writeOwnerMarker(wtPath, sessionId)
+      return { path: wtPath, branch }
+    }
+    lastError = result.stderr || result.stdout || '(git produced no output)'
     try { rmSync(wtPath, { recursive: true, force: true }) } catch {}
-    throw new Error(`failed to create git worktree for ${sessionId}`)
+    // If the branch somehow appeared mid-flight, pick a fresh unique one.
+    if (branchExists(cwd, branch)) {
+      branch = uniqueBranch(cwd, `rivet-hands-${safeSessionId.slice(0, 8)}`)
+    }
   }
-  writeOwnerMarker(wtPath, sessionId)
-  return { path: wtPath, branch }
+  throw new Error(`failed to create git worktree for ${sessionId}: ${lastError}`)
 }
 
 /**
@@ -130,6 +161,36 @@ export function removeWorktree(cwd: string, wtPath: string, branch?: string): vo
   if (branch) git(cwd, ['branch', '-D', branch])
   // Clean up owner marker so the reaper doesn't try to reap an already-removed worktree
   try { rmSync(join(wtPath, OWNER_FILE), { force: true }) } catch {}
+}
+
+/**
+ * Remove stale `rivet-hands-*` branches that are not associated with any
+ * registered worktree. These are typically left behind when a previous run
+ * crashed between worktree creation and branch deletion. Returns the list of
+ * removed branch names (best-effort).
+ */
+export function cleanupStaleHandsBranches(cwd: string): string[] {
+  const removed: string[] = []
+  const wtResult = git(cwd, ['worktree', 'list', '--porcelain'])
+  if (!wtResult.ok) return removed
+
+  const activeBranches = new Set(
+    parseWorktreeList(wtResult.stdout)
+      .map(e => e.branch)
+      .filter((b): b is string => !!b && b.startsWith('rivet-hands-')),
+  )
+
+  const branchResult = git(cwd, ['branch', '--list', 'rivet-hands-*'])
+  if (!branchResult.ok) return removed
+
+  for (const raw of branchResult.stdout.split('\n')) {
+    const branch = raw.replace(/^\*\s*/, '').trim()
+    if (!branch.startsWith('rivet-hands-')) continue
+    if (activeBranches.has(branch)) continue
+    const del = git(cwd, ['branch', '-D', branch])
+    if (del.ok) removed.push(branch)
+  }
+  return removed
 }
 
 export function getCurrentGitRef(cwd: string): string | undefined {

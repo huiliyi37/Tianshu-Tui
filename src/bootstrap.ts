@@ -52,6 +52,7 @@ import { createVerificationAttribution } from './agent/verification-attribution.
 import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
+import { cleanupStaleHandsBranches } from './agent/worktree.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { buildReviewOverrideState } from './agent/review-model-override.js'
 import type { ResolvedReviewOverride } from './agent/review-model-override.js'
@@ -484,6 +485,7 @@ export function createInteractiveToolRegistry(
   // so behavior is unchanged unless the baseline is dirty or RIVET_VSW=1 forces it.
   try { reapOrphanSnapshots({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
   try { reapOrphanHandsWorktrees({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
+  try { cleanupStaleHandsBranches(cwd) } catch { /* best-effort */ }
   const b1SnapshotManager = createVerificationSnapshotManager({
     baseCwd: cwd,
     sessionId: refs.sessionId ?? getOrCreateSessionId(),
@@ -561,6 +563,8 @@ export function createAgentRuntime(deps: {
    * 幂等不会重置已有状态。TUI 单 session 路径不传，保持原行为。
    */
   sharedProviderHealth?: ProviderHealthTracker
+  /** I4: optional callback to surface user hook results to the desktop event stream. */
+  emitHookResult?: import('./agent/loop-types.js').AgentConfig['emitHookResult']
 }): { agent: AgentLoop } {
   const {
     provider, apiKey, auth, config, sessionId, cwd,
@@ -683,11 +687,13 @@ export function createAgentRuntime(deps: {
           ? Math.min(8192, overrideSpec?.maxTokens ?? overrideContextWindow)
           : Math.min(4096, overrideSpec?.maxTokens ?? overrideContextWindow)
         debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${overrideResolved.modelId} isWrite=${isWrite}`)
+        const overrideCapabilities = resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities)
         return {
           order: _order,
+          providerName: overrideResolved.providerName,
           client: createProviderClient(
             overrideResolved.providerConfig,
-            resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities),
+            overrideCapabilities,
             {
               apiKey: overrideApiKey,
               model: overrideResolved.modelId,
@@ -709,6 +715,7 @@ export function createAgentRuntime(deps: {
           compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
           activeClaims: claimStore.listActiveClaims(),
           domainKnowledgeStore,
+          forceJsonRepair: overrideCapabilities.supportsResponseFormat,
         }
       }
     }
@@ -723,7 +730,15 @@ export function createAgentRuntime(deps: {
       if (routeName && workerRouting.profiles[routeName]) {
         const routeProfile = workerRouting.profiles[routeName]
         const resolved = config.provider.providers[routeProfile.provider]
-        if (resolved && routeProfile.model === card.model) {
+        // Route to the configured provider+model as long as the provider exists and
+        // actually offers the configured model. The previous guard required
+        // `routeProfile.model === card.model`, which defeated the whole point of
+        // worker routing (independent model → isolated server-side prefix cache):
+        // any profile configured with a DIFFERENT model was silently skipped and
+        // workers fell back to the primary model, competing with the primary
+        // session's cache entries. Now we allow a distinct model and set it on
+        // workerModel so the worker actually runs on the routed model.
+        if (resolved && resolved.models.some(m => m.id === routeProfile.model || m.alias === routeProfile.model)) {
           try {
             if (resolved.auth?.type === 'oauth') {
               const routedAuth = resolved.name === provider.name
@@ -731,11 +746,13 @@ export function createAgentRuntime(deps: {
                 : createAuthProvider(resolved.auth, process.env)
               if (routedAuth?.isAuthenticated()) {
                 workerProvider = resolved
+                workerModel = routeProfile.model
                 workerApiKey = ''
                 workerAuth = routedAuth
               }
             } else {
               workerProvider = resolved
+              workerModel = routeProfile.model
               workerApiKey = resolveApiKey(resolved)
               workerAuth = undefined
             }
@@ -759,9 +776,11 @@ export function createAgentRuntime(deps: {
 
     debugLog(`[worker-model] runtimeFactory: kind=${_order.kind} profile=${_order.profile} model=${workerModel} provider=${workerProvider.name} contextWindow=${workerContextWindow}`)
 
+    const workerCapabilities = resolveCapabilities(workerProvider.name, workerProvider.capabilities)
     return {
       order: _order,
-      client: createProviderClient(workerProvider, resolveCapabilities(workerProvider.name, workerProvider.capabilities), {
+      providerName: workerProvider.name,
+      client: createProviderClient(workerProvider, workerCapabilities, {
         apiKey: workerApiKey,
         model: workerModel,
         reasoningEffort: undefined,
@@ -782,11 +801,17 @@ export function createAgentRuntime(deps: {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       activeClaims: claimStore.listActiveClaims(),
       domainKnowledgeStore,
+      // Use response_format: json_object on repair turns when the provider
+      // supports it — forces valid JSON output, eliminating the most common
+      // worker-result parse-failure cause (free-text prose / truncation).
+      // Only applied to the tool-free repair turn, so it never conflicts with
+      // function calling on normal turns.
+      forceJsonRepair: workerCapabilities.supportsResponseFormat,
     }
   }
 
-  // EFE routing pulls per-turn signals from the agent, which is constructed
-  // after the coordinator — bridge via late-bound reference.
+  // EFE routing pulls per-turn signals from the agent. Build the agent first so
+  // its ArtifactStore can be wired into the coordinator for worker artifact fallback.
   let agentForSignals: AgentLoop | undefined
 
   // Track 1: unified shadow→gated promotion gate. Evidence is evaluated once
@@ -818,28 +843,6 @@ export function createAgentRuntime(deps: {
     totalShadowSamples: g.evidence.totalShadowSamples,
   }))
 
-  refs.coordinator = new DelegationCoordinator({
-    baseToolRegistry: toolRegistry,
-    modelCards,
-    maxWorkers: 3,
-    runtimeFactory,
-    routing: workerRouting,
-    providerHealth,
-    domainKnowledgeStore,
-    modelTierShadowStore: refs.meridianIndexer?.getDb(),
-    modelTierBanditEnabled: modelTierGate.enabled,
-    gatedInfluenceAuditStore: refs.meridianIndexer?.getDb(),
-    efeRouting: {
-      enabled: modelRoutingGate.enabled,
-      getSignals: () => agentForSignals?.getPolicySignals(),
-    },
-    sessionRegistry: refs.sessionRegistry ?? undefined,
-    sessionId: refs.sessionId ?? undefined,
-    resumeEnabled: true,
-    reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
-    maxDelegationDepth: config.agent.maxDelegationDepth,
-  })
-
   const agent = new AgentLoop(
     {
       ...agentCfg,
@@ -864,11 +867,35 @@ export function createAgentRuntime(deps: {
       meridianIndexer: refs.meridianIndexer,
       modelRoutingShadowModelCards: modelCards,
       domainKnowledgeStore,
+      emitHookResult: deps.emitHookResult,
     },
     deps.session,
     cwd,
   )
   agentForSignals = agent
+
+  refs.coordinator = new DelegationCoordinator({
+    baseToolRegistry: toolRegistry,
+    modelCards,
+    maxWorkers: 3,
+    runtimeFactory,
+    routing: workerRouting,
+    providerHealth,
+    domainKnowledgeStore,
+    modelTierShadowStore: refs.meridianIndexer?.getDb(),
+    modelTierBanditEnabled: modelTierGate.enabled,
+    gatedInfluenceAuditStore: refs.meridianIndexer?.getDb(),
+    efeRouting: {
+      enabled: modelRoutingGate.enabled,
+      getSignals: () => agentForSignals?.getPolicySignals(),
+    },
+    sessionRegistry: refs.sessionRegistry ?? undefined,
+    sessionId: refs.sessionId ?? undefined,
+    artifactStore: agent.artifactStore,
+    resumeEnabled: true,
+    reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
+    maxDelegationDepth: config.agent.maxDelegationDepth,
+  })
 
   return { agent }
 }

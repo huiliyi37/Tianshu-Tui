@@ -45,6 +45,14 @@ export interface WorkerSessionConfig {
   maxTurns: number
   contextWindow: number
   compact: CompactionConfig
+  /** Provider key used for this worker run (e.g. 'deepseek', 'openai'). */
+  providerName?: string
+  /** Whether to use response_format: json_object on the repair turn (when the
+   *  provider supports it) to force valid JSON output. The repair turn is a
+   *  tool-free single-shot request, so json_object does not conflict with
+   *  function calling (unlike normal turns where tools + json_object cause
+   *  duplicate/spurious output). */
+  forceJsonRepair?: boolean
   activeClaims?: import('../context/claims.js').ContextClaim[]
   /** Review-router re-entrancy depth propagated to worker tool calls. */
   reviewDepth?: number
@@ -104,6 +112,34 @@ function emptyTranscript(): WorkerTranscript {
   }
 }
 
+/**
+ * Detect streaming-layer tool-call argument pollution from the worker transcript.
+ *
+ * Signature of the cross-tool pollution bug (openai-client.ts resolveToolCallIndex):
+ * a read tool (grep/glob) repeatedly fails with a "required argument missing"
+ * error that also names a FOREIGN field — e.g. grep reporting
+ * `Received input keys: file_path, path` (file_path belongs to read_section),
+ * or the explicit "streaming tool_call argument pollution" marker grep emits.
+ * When the model did the real work but got stuck retrying these poisoned calls,
+ * it never reaches the final JSON → the worker is reported as "Parse failed" /
+ * "aborted", masking the upstream streaming root cause.
+ *
+ * Returns a diagnostic hint to surface in the blocked result so the operator
+ * does not chase "model can't output JSON" when the real cause is streaming.
+ */
+function detectPollutionFailure(transcript: WorkerTranscript): string | null {
+  const errs = transcript.errors
+  if (errs.length === 0) return null
+  // Either the explicit pollution marker (grep.ts), or a "required" error that
+  // also names a foreign key (file_path on a non-file tool, etc.).
+  const hits = errs.filter(e =>
+    e.includes('argument pollution')
+    || (/\brequired\b/i.test(e) && /file_path|section|command\b/.test(e) && /pattern|path|glob\b/.test(e)),
+  )
+  if (hits.length < 2) return null  // a single transient blip is not a pattern
+  return `Worker stalled on ${hits.length} streaming-polluted tool calls (foreign arguments grafted onto read tools). The review work above is likely real; the missing JSON is a symptom of the upstream OpenAIClient parallel-tool_call parsing bug, not a model failure. See .rivet/tool-stream-*.jsonl.`
+}
+
 /** Minimal agent surface needed by the retry layer — injectable so tests can
  *  exercise the real retry→blocked path without constructing a full AgentLoop. */
 export interface RunnableAgent {
@@ -156,6 +192,52 @@ async function runOnce(
   // return the partial text and let the parse/blocked path handle it.
   if (streamError && !aborted) throw streamError
   return text
+}
+
+/**
+ * Single-shot repair request with response_format: json_object and NO tools.
+ *
+ * Normal worker turns carry tool definitions, and combining response_format:
+ * json_object with tools is a known-broken combination (duplicate JSON, spurious
+ * tool_calls, empty content — see OpenAI community reports). The repair turn,
+ * however, only needs the model to re-emit its result as valid JSON from the
+ * repair prompt (which embeds the previous broken output). It carries no tools,
+ * so json_object is safe here and forces the model to emit parseable JSON,
+ * eliminating the most common parse-failure cause (free-text prose / truncation).
+ *
+ * Bypasses AgentLoop entirely (no tool-calling loop) — just one client.stream
+ * call. Returns the accumulated text or '' on stream error (caller falls back
+ * to the blocked-result path).
+ */
+async function repairWithJsonMode(
+  client: StreamClient,
+  model: string,
+  repairPrompt: string,
+  maxTokens: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  let text = ''
+  let failed = false
+  await client.stream(
+    {
+      model,
+      messages: [{ role: 'user' as const, content: repairPrompt }],
+      max_tokens: maxTokens,
+      stream: true,
+      // Force JSON output. The repair prompt already mentions "json" (required
+      // by DeepSeek/GLM when response_format is set).
+      response_format: { type: 'json_object' as const },
+    },
+    {
+      onTextDelta: (delta) => { text += delta },
+      onThinkingDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: () => {},
+      onError: () => { failed = true },
+    },
+    signal,
+  ).catch(() => { failed = true })
+  return failed ? '' : text
 }
 
 /** Run a single agent turn, retrying transient network/API errors with backoff.
@@ -280,9 +362,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           partialResult: latestText.slice(0, 8000),
           completedTools: [...transcript.toolUses],
         }
+        const pollutionHint = detectPollutionFailure(transcript)
         return {
           result: {
-            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}`),
+            ...buildBlockedWorkerResult(config.order, `Worker aborted (budget timeout or parent signal). Partial output: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
             artifacts: [
               { kind: 'note' as const, title: 'Aborted worker partial output', content: latestText.slice(0, 2000) },
             ],
@@ -316,9 +399,10 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
         mbox?.escalate(`Parse failed (attempt ${attempt + 1}): ${message.slice(0, 100)}`)
         if (attempt === config.order.budget.maxRetries) {
           const partialSummary = latestText.slice(0, 300)
+          const pollutionHint = detectPollutionFailure(transcript)
           return {
             result: {
-              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}`),
+              ...buildBlockedWorkerResult(config.order, `Parse failed after ${attempt + 1} attempts: ${message}. Partial: ${partialSummary}${pollutionHint ? ` ${pollutionHint}` : ''}`),
               artifacts: [
                 { kind: 'note' as const, title: 'Unparseable worker output', content: latestText.slice(0, 2000) },
               ],
@@ -329,6 +413,25 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
         }
         transcript.repairAttempts++
+        // JSON-mode repair: provider supports response_format: json_object and
+        // the combination is safe here (no tools on this turn). Prefer it over
+        // the AgentLoop repair loop — it directly forces valid JSON output,
+        // short-circuiting the most common parse-failure cause.
+        if (config.forceJsonRepair && !abortLatched) {
+          const jsonText = await repairWithJsonMode(
+            config.client,
+            config.promptEngine.getModel(),
+            buildWorkerRepairPrompt(config.order, latestText, message),
+            Math.min(8192, config.order.budget.maxTokens ?? config.contextWindow),
+            config.abortSignal,
+          )
+          if (jsonText) {
+            latestText = jsonText
+            // Skip the AgentLoop repair — go straight to re-parse at loop top.
+            continue
+          }
+          // json-mode repair produced nothing (stream error) → fall through to AgentLoop repair
+        }
         latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity)
       }
     }

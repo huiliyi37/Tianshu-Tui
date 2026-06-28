@@ -8,7 +8,7 @@
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { color } from '../engine/ansi.js'
-import stringWidth from 'string-width'
+import { displayWidth } from '../width.js'
 import { getActiveThemeName, type RivetTheme } from '../theme.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
@@ -54,8 +54,10 @@ export interface GlanceBarInput {
   cacheHitRate?: number
   /** 上下文占比 0-1 */
   contextRatio?: number
-  /** 估算已用 token（用于 ◧ Xk/Yk 显示，对齐 Ink） */
+  /** API 实际 prompt token（用于颜色阈值，反映真实窗口压力） */
   estimatedTokens?: number
+  /** 可见对话消息的 token 估算（用于 ◧ Xk/Yk 显示，不含系统提示/工具） */
+  conversationTokens?: number
   /** 模型上下文窗口 token 上限（与 estimatedTokens 配套） */
   maxTokens?: number
   /** 本轮费用（美元） */
@@ -100,9 +102,10 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   }
   const ratio = (input.estimatedTokens && input.maxTokens && input.maxTokens > 0)
     ? input.estimatedTokens / input.maxTokens : 0
-  if (!narrow && input.estimatedTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
+  const displayTokens = input.conversationTokens !== undefined ? input.conversationTokens : input.estimatedTokens
+  if (!narrow && displayTokens !== undefined && input.maxTokens && input.maxTokens > 0) {
     const tokenColor = ratio >= 0.9 ? theme.error : ratio >= 0.75 ? theme.warning : theme.muted
-    parts.push(color(`◧${formatTokensK(input.estimatedTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
+    parts.push(color(`◧${formatTokensK(displayTokens)}/${formatTokensK(input.maxTokens)}`, tokenColor))
   }
   if (input.cost !== undefined && input.cost > 0) {
     // cost > 0 用 secondary 高亮，让用户感知到花费
@@ -166,7 +169,9 @@ export function stripAnsiLen(s: string): number {
   // 必须用 display width（非 .length）：CJK(天枢)/全角符号每字符占 2 列但 .length 计 1。
   // 用 .length 会让 padding/截断欠估 → 状态行被撑到 ≥ 终端宽度 → 末列自动换行 →
   // LiveEngine 行数计算与终端实际换行错位 → clear() 欠擦 → chrome 残留进 scrollback(重复渲染)。
-  return stringWidth(s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, ''))
+  // 口径须与 rowsForLine 一致（ambiguousAsWide）：星域 glyph(◇☆)/· 等在 CJK 终端按
+  // 2 列渲染，narrow(stringWidth) 会欠估 → gap 偏大 → 状态行仍可能溢出折行。
+  return displayWidth(s, { ambiguousAsWide: true })
 }
 
 /** token 用量进度条：0-1 比例 → 10 格填充条 + 百分比，按水位变色（≥90% error / ≥75% warning）。

@@ -15,8 +15,8 @@ import stringWidth from 'string-width'
 import { ANSI, color } from '../engine/ansi.js'
 import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
+import type { TranscriptMessage } from '../scrollback-transcript.js'
 
-// ── Shared Layout Helpers ─────────────────────────────────────
 
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
   const tabDomain = activeTab === 'domain' ? color(' 🎛  Domain ', theme.primary, { bold: true }) : color('    Domain ', theme.dim)
@@ -51,7 +51,22 @@ function formatTitleBar(title: string, width: number, theme: RivetTheme): string
 }
 
 function formatFooter(hint: string, width: number, theme: RivetTheme): string {
-  const padded = ` ${hint} `
+  const maxHintWidth = Math.max(0, width - 4) // 2 borders + 1 space each side
+  let visibleHint = hint
+  if (stringWidth(visibleHint) > maxHintWidth) {
+    // Preserve the right-hand side (close hints are usually at the tail).
+    let suffix = ''
+    let suffixWidth = 0
+    const chars = Array.from(hint)
+    for (let i = chars.length - 1; i >= 0; i--) {
+      const cw = stringWidth(chars[i]!)
+      if (suffixWidth + cw + 1 > maxHintWidth) break // +1 for leading ellipsis
+      suffix = chars[i]! + suffix
+      suffixWidth += cw
+    }
+    visibleHint = '…' + suffix
+  }
+  const padded = ` ${visibleHint} `
   const remaining = width - 2 - stringWidth(padded)
   return color('│' + padded + ' '.repeat(Math.max(0, remaining)) + '│', theme.dim)
 }
@@ -72,36 +87,143 @@ export interface PagerData {
   page: number
   /** 标题 */
   title?: string
+  /** 当前模式 */
+  mode?: 'page' | 'search' | 'message'
+  /** 搜索 query */
+  searchQuery?: string
+  /** 搜索总匹配数 */
+  searchMatches?: number
+  /** 当前匹配序号（1-based） */
+  searchCurrent?: number
+  /** 消息列表（用于搜索/消息视图） */
+  messages?: TranscriptMessage[]
+  /** 当前选中的消息索引（message 模式） */
+  selectedMessageIndex?: number
+}
+
+const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '')
+}
+
+function lineMatchesQuery(line: string, query: string): boolean {
+  return stripAnsi(line).toLowerCase().includes(query.toLowerCase())
+}
+
+function highlightMatch(line: string, query: string, width: number, theme: RivetTheme): string {
+  if (!query) return line
+  const plain = stripAnsi(line)
+  const q = query.toLowerCase()
+  const idx = plain.toLowerCase().indexOf(q)
+  if (idx === -1) return line
+  const before = plain.slice(0, idx)
+  const match = plain.slice(idx, idx + q.length)
+  const after = plain.slice(idx + q.length)
+  const highlighted = `${before}${color(match, theme.primary, { bold: true })}${after}`
+  // Re-pad to width; highlighted line may have different display width due to ANSI,
+  // but padLine uses stringWidth which strips ANSI, so it's safe.
+  const padding = Math.max(0, width - 2 - stringWidth(highlighted))
+  return color('│', theme.dim) + highlighted + ' '.repeat(padding) + color('│', theme.dim)
+}
+
+function pageForMessage(messages: readonly TranscriptMessage[], messageIndex: number, pageSize: number): number {
+  if (messageIndex < 0 || messageIndex >= messages.length || pageSize <= 0) return 0
+  let rows = 0
+  for (let i = 0; i < messageIndex; i++) {
+    rows += messages[i]!.lines.length
+  }
+  return Math.floor(rows / pageSize)
 }
 
 /**
  * 渲染 Pager overlay（分页文本查看器）。
+ *
+ * 支持三种模式：
+ * - page：传统分页
+ * - search：高亮匹配行，标题显示匹配计数
+ * - message：聚焦单条消息
  */
 export function renderPager(data: PagerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   const contentLines = data.content.split('\n')
   const pageSize = height - 4 // 1 border top + 1 title + 1 footer + 1 border bottom = 4
   const totalPages = Math.max(1, Math.ceil(contentLines.length / pageSize))
-  const safePage = Math.min(data.page, totalPages - 1)
+  const mode = data.mode ?? 'page'
+  const messages = data.messages ?? []
+
+  let effectivePage = Math.min(data.page, totalPages - 1)
+  let title: string
+  let footer = '↑↓/j/k scroll  PgUp/PgDn  /search  m message  q/Esc close'
+
+  if (mode === 'search') {
+    const current = data.searchCurrent ?? 0
+    const total = data.searchMatches ?? 0
+    const query = data.searchQuery ?? ''
+    title = data.title
+      ? `${data.title} — Search "${query}" (${current}/${total})`
+      : `Search "${query}" (${current}/${total})`
+    footer = 'n/N next/prev  Esc clear search  q close'
+    if (messages.length > 0 && current > 0) {
+      const msgIdx = current - 1 < messages.length ? current - 1 : 0
+      effectivePage = pageForMessage(messages, msgIdx, pageSize)
+      effectivePage = Math.min(effectivePage, totalPages - 1)
+    }
+  } else if (mode === 'message' && messages.length > 0) {
+    const idx = Math.min(Math.max(0, data.selectedMessageIndex ?? 0), messages.length - 1)
+    title = data.title
+      ? `${data.title} — Message ${idx + 1}/${messages.length}`
+      : `Message ${idx + 1}/${messages.length}`
+    footer = '↑↓/j/k prev/next message  Esc back  q close'
+    effectivePage = pageForMessage(messages, idx, pageSize)
+    effectivePage = Math.min(effectivePage, totalPages - 1)
+  } else {
+    title = data.title ? `${data.title} (${effectivePage + 1}/${totalPages})` : `Page ${effectivePage + 1}/${totalPages}`
+  }
 
   // Top border + title
   lines.push(formatBorder(width, theme))
-  const title = data.title ? `${data.title} (${safePage + 1}/${totalPages})` : `Page ${safePage + 1}/${totalPages}`
   lines.push(formatTitleBar(title, width, theme))
 
   // Content
-  const start = safePage * pageSize
+  const start = effectivePage * pageSize
   const pageLines = contentLines.slice(start, start + pageSize)
-  for (const line of pageLines) {
-    lines.push(padLine(line, width, theme))
-  }
-  // Pad remaining
-  for (let i = pageLines.length; i < pageSize; i++) {
-    lines.push(padLine('', width, theme))
+
+  if (mode === 'message' && messages.length > 0) {
+    const idx = Math.min(Math.max(0, data.selectedMessageIndex ?? 0), messages.length - 1)
+    const msg = messages[idx]!
+    const header = msg.isTruncated
+      ? color(`〔message ${idx + 1}/${messages.length} — truncated in scrollback〕`, theme.warning)
+      : color(`〔message ${idx + 1}/${messages.length}〕`, theme.dim)
+    lines.push(padLine(header, width, theme))
+    for (const line of msg.lines.slice(0, pageSize - 1)) {
+      lines.push(padLine(line, width, theme))
+    }
+    for (let i = msg.lines.length + 1; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
+  } else if (mode === 'search') {
+    for (let i = 0; i < pageLines.length; i++) {
+      const line = pageLines[i]!
+      if (data.searchQuery && lineMatchesQuery(line, data.searchQuery)) {
+        lines.push(highlightMatch(line, data.searchQuery, width, theme))
+      } else {
+        lines.push(padLine(line, width, theme))
+      }
+    }
+    for (let i = pageLines.length; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
+  } else {
+    for (const line of pageLines) {
+      lines.push(padLine(line, width, theme))
+    }
+    for (let i = pageLines.length; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
   }
 
   // Footer + bottom border
-  lines.push(formatFooter('↑↓/j/k scroll  PgUp/PgDn  q/Esc close', width, theme))
+  lines.push(formatFooter(footer, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -336,6 +458,8 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
 export type TasksWorkerStatus = 'running' | 'passed' | 'failed' | 'blocked' | 'escalated'
 
 export interface TasksWorkerRow {
+  /** 稳定的 per-worker id（work order id），用于进入 detail pager。 */
+  workerId: string
   /** 短标签，例如 "wo_team:T1" → "T1"。 */
   shortLabel: string
   profile: string
@@ -344,6 +468,8 @@ export interface TasksWorkerRow {
   activity?: string
   elapsedMs: number
 }
+
+export type TasksFilter = 'running' | 'completed' | 'all'
 
 export interface TasksGroup {
   /** 派生这组 worker 的委派工具调用 id（不直接展示，仅用于分组/序号）。 */
@@ -358,6 +484,10 @@ export interface TasksGroup {
 
 export interface TasksData {
   groups: TasksGroup[]
+  /** 当前 filter 模式。 */
+  filter: TasksFilter
+  /** 已终态 worker 总数（用于 footer 提示）。 */
+  completedCount: number
 }
 
 const TASK_STATUS_GLYPH: Record<TasksWorkerStatus, string> = {
@@ -532,17 +662,26 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
   return lines
 }
 
-export function renderTasks(data: TasksData, width: number, height: number, theme: RivetTheme): string[] {
+export function renderTasks(
+  data: TasksData,
+  width: number,
+  height: number,
+  theme: RivetTheme,
+  selectedIndex = -1,
+): string[] {
   const lines: string[] = []
+  const title = data.filter === 'completed' ? 'Completed Agents'
+    : data.filter === 'all' ? 'All Agents'
+      : 'Running Agents'
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar('Running Agents', width, theme))
+  lines.push(formatTitleBar(title, width, theme))
 
   const maxEntries = Math.max(1, height - 5)
-  const totalActive = data.groups.reduce((n, g) => n + g.workers.length, 0)
 
-  // 逐组渲染：组头（进度条 + done/total）后跟该组在跑 worker 行。多组时以
+  // 逐组渲染：组头（进度条 + done/total）后跟 worker 行。多组时以
   // 序号区分（parentToolId 是不透明的 tool id，不直接展示）。
   const body: string[] = []
+  const selectable: { workerId: string; bodyIndex: number }[] = []
   const multiGroup = data.groups.length > 1
   data.groups.forEach((g, gi) => {
     const bar = color(tasksProgressBar(g.done, g.total), theme.muted)
@@ -551,6 +690,7 @@ export function renderTasks(data: TasksData, width: number, height: number, them
     const groupTitle = multiGroup ? `group ${gi + 1}` : 'fleet'
     body.push(` ${color('◆', theme.primary)} ${groupTitle}  ${bar} ${counts}${failedNote}`)
     for (const w of g.workers) {
+      selectable.push({ workerId: w.workerId, bodyIndex: body.length })
       const glyph = TASK_STATUS_GLYPH[w.status] ?? '·'
       const glyphColored = w.status === 'running'
         ? color(glyph, theme.primary)
@@ -566,20 +706,42 @@ export function renderTasks(data: TasksData, width: number, height: number, them
     }
   })
 
-  if (totalActive === 0) {
-    body.push(color(' (no running workers)', theme.dim))
+  if (selectable.length === 0) {
+    const emptyText = data.filter === 'completed' ? ' (no completed workers)'
+      : data.filter === 'all' ? ' (no workers)'
+        : ' (no running workers)'
+    body.push(color(emptyText, theme.dim))
   }
 
+  const selectedBodyIndex = selectedIndex >= 0 && selectedIndex < selectable.length
+    ? selectable[selectedIndex]!.bodyIndex
+    : -1
+
   const visible = body.slice(0, maxEntries)
-  for (const line of visible) {
+  for (let i = 0; i < visible.length; i++) {
+    let line = visible[i]!
+    if (i === selectedBodyIndex) {
+      // 把前导三个空格替换为光标 + 两个空格，保持宽度一致
+      line = `${color('▶', theme.primary, { bold: true })}  ${line.slice(3)}`
+    }
     lines.push(padLine(line, width, theme))
   }
   for (let i = visible.length; i < maxEntries; i++) {
     lines.push(padLine('', width, theme))
   }
 
-  const summary = totalActive === 1 ? '1 worker running' : `${totalActive} workers running`
-  lines.push(formatFooter(`${summary}  ·  q/Esc close`, width, theme))
+  const runningCount = data.groups.reduce((n, g) => n + g.workers.filter(w => w.status === 'running').length, 0)
+  const visibleCount = data.groups.reduce((n, g) => n + g.workers.length, 0)
+  const summaryParts: string[] = []
+  if (data.filter === 'running' || data.filter === 'all') {
+    summaryParts.push(`${runningCount} running`)
+  }
+  if (data.filter === 'completed' || data.filter === 'all') {
+    summaryParts.push(`${data.completedCount} completed`)
+  }
+  if (summaryParts.length === 0) summaryParts.push(`${visibleCount} workers`)
+  const summary = summaryParts.join(' · ')
+  lines.push(formatFooter(`${summary}  ·  ↑↓ select  Enter detail  Tab filter  q/Esc close`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -704,6 +866,136 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
   }
 
   lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
+// ── Choice Panel (通用选项选择弹窗) ──────────────────────────────
+// A question + N choices (each with optional description + recommended flag).
+// Used when the agent needs the user to pick one of several strategies,
+// confirm a risky action, or select a star domain — the TUI equivalent of
+// the desktop "ask" overlay.
+
+export interface ChoiceEntry {
+  id: string
+  label: string
+  description?: string
+  /** Marked with ★ to guide the user toward the agent's suggestion. */
+  recommended?: boolean
+}
+
+export interface ChoicePanelData {
+  /** Question / prompt shown as the title bar. */
+  title: string
+  choices: ChoiceEntry[]
+  selectedIndex: number
+}
+
+export function renderChoicePanel(data: ChoicePanelData, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  lines.push(formatTitleBar(data.title, width, theme))
+  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+
+  const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
+  const contentRows = Math.max(1, height - 5) // border + title + separator + footer + bottom
+
+  if (data.choices.length === 0) {
+    lines.push(padLine(color('  （无可用选项）', theme.dim), width, theme))
+    lines.push(formatFooter('Esc close', width, theme))
+    lines.push(formatBottomBorder(width, theme))
+    return lines
+  }
+
+  // Each choice takes 1-2 lines (label + optional description). Calculate
+  // how many fit, with wrapping for long descriptions.
+  let rowsUsed = 0
+  for (let i = 0; i < data.choices.length; i++) {
+    if (rowsUsed >= contentRows) break
+    const c = data.choices[i]!
+    const selected = i === data.selectedIndex
+    const accent = selected ? theme.primary : theme.dim
+
+    // Label line: cursor + recommended star + label
+    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const star = c.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
+    const labelColor = selected ? theme.primary : theme.secondary
+    const labelText = selected ? color(c.label, labelColor, { bold: true }) : color(c.label, labelColor)
+    lines.push(padLine(` ${cursor} ${star} ${labelText}`, width, theme))
+    rowsUsed++
+
+    // Description line(s)
+    if (c.description && rowsUsed < contentRows) {
+      const descWrapped = wrapToWidth(c.description, innerWidth, 2)
+      for (const d of descWrapped) {
+        if (rowsUsed >= contentRows) break
+        lines.push(padLine(`     ${color(d, theme.muted)}`, width, theme))
+        rowsUsed++
+      }
+    }
+  }
+
+  // Pad remaining rows
+  while (rowsUsed < contentRows) {
+    lines.push(padLine('', width, theme))
+    rowsUsed++
+  }
+
+  lines.push(formatFooter('↑↓ select  Enter confirm  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
+// ── Fleet Detail (子代理详情弹窗) ───────────────────────────────
+// Shows expanded details for a single delegation worker: profile, status,
+// current activity, elapsed, authority. Triggered by pressing Enter on a
+// worker row in the fleet panel.
+
+import type { FleetWorkerView } from '../fleet-registry.js'
+
+export function renderFleetDetail(worker: FleetWorkerView, width: number, height: number, theme: RivetTheme): string[] {
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+
+  // Title: status glyph + worker label
+  const statusGlyph = worker.terminal
+    ? (worker.status === 'passed' ? '✓' : worker.status === 'failed' ? '✗' : '⚠')
+    : '◐'
+  const statusColor = worker.terminal
+    ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
+    : theme.primary
+  lines.push(formatTitleBar(`${color(statusGlyph, statusColor)} ${worker.shortLabel}`, width, theme))
+  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+
+  // Detail rows
+  const rows: [string, string][] = []
+  rows.push(['Profile', worker.profile])
+  rows.push(['Status', worker.status])
+  if (worker.authority) rows.push(['Authority', worker.authority])
+  rows.push(['Parent', worker.parentToolId])
+  rows.push(['Elapsed', worker.elapsedMs > 1000 ? `${(worker.elapsedMs / 1000).toFixed(1)}s` : `${worker.elapsedMs}ms`])
+
+  for (const [label, value] of rows) {
+    lines.push(padLine(` ${color(label, theme.muted)}: ${color(value, theme.secondary)}`, width, theme))
+  }
+
+  // Activity log (ring buffer — newest last; fallback to single activity line)
+  const activityLog = worker.activityLog ?? (worker.activity ? [worker.activity] : [])
+  if (activityLog.length > 0) {
+    lines.push(padLine('', width, theme))
+    lines.push(padLine(` ${color('Activity Log:', theme.muted)}`, width, theme))
+    for (const entry of activityLog) {
+      lines.push(padLine(`   ${color('⎿', theme.dim)} ${color(entry, theme.secondary)}`, width, theme))
+    }
+  }
+
+  // Pad to fill height
+  const remaining = Math.max(0, height - lines.length - 3)
+  for (let i = 0; i < remaining; i++) {
+    lines.push(padLine('', width, theme))
+  }
+
+  lines.push(formatFooter('Esc close', width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }

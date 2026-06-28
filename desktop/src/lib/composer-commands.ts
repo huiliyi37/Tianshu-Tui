@@ -9,6 +9,8 @@ export interface ComposerCommand {
   name: string
   /** Short description shown on the right of the menu row. */
   desc: string
+  /** Optional usage example shown under the name (e.g. '/plan <feature description>'). */
+  example?: string
   /** Action to run when selected. */
   run: () => void
 }
@@ -41,4 +43,22 @@ export function detectSlash(text: string, caret: number): SlashToken | null {
   if (/\s/.test(text)) return null
   if (caret < 1 || caret > text.length) return null
   return { query: text.slice(1, caret), start: 0, end: text.length }
+}
+
+/**
+ * Guard: is `input` a recognized slash command (or non-slash text)?
+ * Returns false only for inputs that START with '/' but don't match any known
+ * command name (exact or prefix-with-args). Non-slash input returns true —
+ * the guard only protects against accidentally sending unknown `/...` tokens
+ * to the agent, which would be misinterpreted as a literal request.
+ * Mirrors TUI's resolveAppPromptInput returning null for unknown slashes.
+ * Pure.
+ */
+export function isKnownSlashCommand(input: string, commands: ComposerCommand[]): boolean {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith('/')) return true
+  // Only the command name (first token) participates in matching.
+  // Arguments such as "/rewind 5" or "/review max" are passed through.
+  const name = trimmed.split(/\s/)[0]!
+  return commands.some((c) => c.name === name || c.name.startsWith(`${name} `))
 }

@@ -6,6 +6,7 @@ import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTracker } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
+import { fingerprintToolCall } from './trace-store.js'
 import type { RepairHintTracker } from './repair-hint.js'
 import type { RepairPipeline } from './repair-pipeline.js'
 import type { ImportGraph } from './import-graph.js'
@@ -158,6 +159,78 @@ export class ToolExecutionController {
     }
   }
 
+  /**
+   * Build the ToolPipelineDeps bag for a single executeToolUse call.
+   *
+   * Extracted from the two verbatim-duplicated inline blocks (parallel makeDeps
+   * closure + sequential pipelineDeps literal) that previously lived in
+   * executeBatch. The per-batch mutable state (traceStore/importGraph/etc.)
+   * evolves across the loop, so it is passed in as a snapshot each call; the
+   * rest is forwarded from this.deps.
+   *
+   * The abortSignal threading is load-bearing: without it, deps.abortSignal
+   * stays undefined, delegate_task passes undefined to coordinator.delegate,
+   * and the coordinator abort path becomes dead code — workers hang past the
+   * caller timeout and leak detached bash children. (root-cause 2026-06-05)
+   */
+  private buildDeps(state: {
+    traceStore: TraceStore
+    importGraph: ImportGraph | null
+    lastConflictCheckCount: number
+    latestRisk: RiskAssessment
+    artifactIdsEvicted: string[]
+    artifactIdsAccessed: string[]
+    abortSignal: AbortSignal
+  }): ToolPipelineDeps {
+    return {
+      config: this.deps.config,
+      cwd: this.deps.cwd,
+      harness: this.deps.harness,
+      prewarm: this.deps.prewarm,
+      evidence: this.deps.evidence,
+      traceStore: state.traceStore,
+      repairHintTracker: this.deps.repairHintTracker,
+      repairPipeline: this.deps.repairPipeline,
+      importGraph: state.importGraph,
+      meridianIndexer: this.deps.config.meridianIndexer,
+      lastConflictCheckCount: state.lastConflictCheckCount,
+      trajectory: this.deps.trajectory,
+      getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
+      isGoalActive: this.deps.isGoalActive?.() ?? false,
+      latestRisk: state.latestRisk,
+      sessionTurnCount: this.deps.getSessionTurnCount(),
+      sessionId: this.deps.getSessionId(),
+      recordToolHistory: (name, input_, isError, content) =>
+        this.deps.recordToolHistory(name, input_, isError, content),
+      onLeaveMark: this.deps.onLeaveMark,
+      onPlanSteps: this.deps.onPlanSteps,
+      onPlanClosed: this.deps.onPlanClosed,
+      getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
+      recordPrediction: (correct) => {
+        this.deps.setPredictionAccumulator(
+          recordPrediction(this.deps.getPredictionAccumulator(), correct),
+        )
+      },
+      getSensorium: () => this.deps.getSensorium(),
+      getReliabilityDecision: () => this.deps.getReliabilityDecision(),
+      turnBudget: this.deps.getTurnBudget(),
+      artifactStore: this.deps.artifactStore,
+      cacheAdvisor: this.deps.cacheAdvisor,
+      taskLedger: this.deps.config.taskLedger,
+      ownershipLedger: this.deps.config.ownershipLedger,
+      verificationSnapshotManager: this.deps.config.verificationSnapshotManager,
+      sessionRegistry: this.deps.config.sessionRegistry,
+      p3: this.deps.p3,
+      immuneHook: this.deps.immuneHook,
+      phaseHint: this.deps.getPhaseHint?.(),
+      artifactIdsEvicted: state.artifactIdsEvicted,
+      artifactIdsAccessed: state.artifactIdsAccessed,
+      lspManager: this.deps.lspManager,
+      getLspManager: this.deps.getLspManager,
+      abortSignal: state.abortSignal,
+    }
+  }
+
   async executeBatch(input: ToolExecBatchInput): Promise<ToolExecBatchResult> {
     const toolResults: ContentBlock[] = []
     let checkpointCreatedThisTurn = input.checkpointCreatedThisTurn
@@ -183,61 +256,14 @@ export class ToolExecutionController {
         while (cursor < indexed.length && indexed[cursor]!.safe) cursor++
         const batch = indexed.slice(batchStart, cursor)
 
-        const makeDeps = (): ToolPipelineDeps => ({
-          config: this.deps.config,
-          cwd: this.deps.cwd,
-          harness: this.deps.harness,
-          prewarm: this.deps.prewarm,
-          evidence: this.deps.evidence,
-          traceStore,
-          repairHintTracker: this.deps.repairHintTracker,
-          repairPipeline: this.deps.repairPipeline,
-          importGraph,
-          meridianIndexer: this.deps.config.meridianIndexer,
-          lastConflictCheckCount,
-          trajectory: this.deps.trajectory,
-          getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
-          isGoalActive: this.deps.isGoalActive?.() ?? false,
-          latestRisk,
-          sessionTurnCount: this.deps.getSessionTurnCount(),
-          sessionId: this.deps.getSessionId(),
-          recordToolHistory: (name, input_, isError, content) =>
-            this.deps.recordToolHistory(name, input_, isError, content),
-          onLeaveMark: this.deps.onLeaveMark,
-          onPlanSteps: this.deps.onPlanSteps,
-          onPlanClosed: this.deps.onPlanClosed,
-          getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
-          recordPrediction: (correct) => {
-            this.deps.setPredictionAccumulator(
-              recordPrediction(this.deps.getPredictionAccumulator(), correct),
-            )
-         },
-          getSensorium: () => this.deps.getSensorium(),
-          getReliabilityDecision: () => this.deps.getReliabilityDecision(),
-          turnBudget: this.deps.getTurnBudget(),
-          artifactStore: this.deps.artifactStore,
-          cacheAdvisor: this.deps.cacheAdvisor,
-          taskLedger: this.deps.config.taskLedger,
-          ownershipLedger: this.deps.config.ownershipLedger,
-          verificationSnapshotManager: this.deps.config.verificationSnapshotManager,
-          sessionRegistry: this.deps.config.sessionRegistry,
-          p3: this.deps.p3,
-          immuneHook: this.deps.immuneHook,
-          phaseHint: this.deps.getPhaseHint?.(),
-          artifactIdsEvicted,
-          artifactIdsAccessed,
-          lspManager: this.deps.lspManager,
-          getLspManager: this.deps.getLspManager,
-          // Thread the batch-level abort signal into per-tool deps. Without this,
-          // deps.abortSignal stays undefined, delegate_task passes undefined to
-          // coordinator.delegate, and the entire coordinator abort path becomes
-          // dead code — workers hang past the caller timeout ("No response 3m")
-          // and leak detached bash children. (root-cause analysis 2026-06-05)
-          abortSignal: input.abortSignal,
-       })
-
         const results = await Promise.all(
-          batch.map(({ tu }) => executeToolUse(tu, makeDeps(), input.callbacks, input.turn, checkpointCreatedThisTurn)),
+          batch.map(({ tu }) => executeToolUse(
+            tu,
+            this.buildDeps({ traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, abortSignal: input.abortSignal }),
+            input.callbacks,
+            input.turn,
+            checkpointCreatedThisTurn,
+          )),
         )
         for (const result of results) {
           traceStore = result.traceStore
@@ -247,63 +273,19 @@ export class ToolExecutionController {
           if (result.checkpointCreated) checkpointCreatedThisTurn = true
           if (result.endTurn) endTurn = true
           toolResults.push(result.toolResult)
-       }
-     } else {
+        }
+      } else {
         // Sequential execution for non-safe tools
         const { tu } = indexed[cursor]!
         cursor++
 
-        const pipelineDeps: ToolPipelineDeps = {
-          config: this.deps.config,
-          cwd: this.deps.cwd,
-          harness: this.deps.harness,
-          prewarm: this.deps.prewarm,
-          evidence: this.deps.evidence,
-          traceStore,
-          repairHintTracker: this.deps.repairHintTracker,
-          repairPipeline: this.deps.repairPipeline,
-          importGraph,
-          meridianIndexer: this.deps.config.meridianIndexer,
-          lastConflictCheckCount,
-          trajectory: this.deps.trajectory,
-          getDoomLoopLevel: () => this.deps.getDoomLoopLevel(),
-          isGoalActive: this.deps.isGoalActive?.() ?? false,
-          latestRisk,
-          sessionTurnCount: this.deps.getSessionTurnCount(),
-          sessionId: this.deps.getSessionId(),
-          recordToolHistory: (name, input_, isError, content) =>
-            this.deps.recordToolHistory(name, input_, isError, content),
-          onLeaveMark: this.deps.onLeaveMark,
-          onPlanSteps: this.deps.onPlanSteps,
-          onPlanClosed: this.deps.onPlanClosed,
-          getInterventionLevel: () => getInterventionLevel(this.deps.getPredictionAccumulator()),
-          recordPrediction: (correct) => {
-            this.deps.setPredictionAccumulator(
-              recordPrediction(this.deps.getPredictionAccumulator(), correct),
-            )
-         },
-          getSensorium: () => this.deps.getSensorium(),
-          getReliabilityDecision: () => this.deps.getReliabilityDecision(),
-          turnBudget: this.deps.getTurnBudget(),
-          artifactStore: this.deps.artifactStore,
-          cacheAdvisor: this.deps.cacheAdvisor,
-          taskLedger: this.deps.config.taskLedger,
-          ownershipLedger: this.deps.config.ownershipLedger,
-          verificationSnapshotManager: this.deps.config.verificationSnapshotManager,
-          sessionRegistry: this.deps.config.sessionRegistry,
-          p3: this.deps.p3,
-          immuneHook: this.deps.immuneHook,
-          phaseHint: this.deps.getPhaseHint?.(),
-          artifactIdsEvicted,
-          artifactIdsAccessed,
-          lspManager: this.deps.lspManager,
-          getLspManager: this.deps.getLspManager,
-          // See makeDeps above — same abort-signal threading for the sequential
-          // (non-safe) tool path. (root-cause analysis 2026-06-05)
-          abortSignal: input.abortSignal,
-       }
-
-        const result = await executeToolUse(tu, pipelineDeps, input.callbacks, input.turn, checkpointCreatedThisTurn)
+        const result = await executeToolUse(
+          tu,
+          this.buildDeps({ traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, abortSignal: input.abortSignal }),
+          input.callbacks,
+          input.turn,
+          checkpointCreatedThisTurn,
+        )
         traceStore = result.traceStore
         importGraph = result.importGraph
         lastConflictCheckCount = result.lastConflictCheckCount
@@ -311,8 +293,8 @@ export class ToolExecutionController {
         if (result.checkpointCreated) checkpointCreatedThisTurn = true
         if (result.endTurn) endTurn = true
         toolResults.push(result.toolResult)
-     }
-   }
+      }
+    }
 
     // Enforce per-tool-type cumulative budget before aggregate budget.
     const budgetEntries = toolResults
@@ -381,7 +363,7 @@ export class ToolExecutionController {
       if (tr && tr.type === 'tool_result') {
         const content = typeof tr.content === 'string' ? tr.content : ''
         this.accumulator.record({ toolName: tu.name, toolUseId: tu.id, content, turn: input.turn })
-        this.deps.recordToolNamedFingerprint?.(tu.id, tu.name)
+        this.deps.recordToolNamedFingerprint?.(fingerprintToolCall(tu.name, tu.input, 'running'), tu.name)
       }
     }
     if (input.toolUses.length > 0) {

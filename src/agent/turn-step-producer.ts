@@ -101,7 +101,13 @@ export class TurnStepProducer {
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
-      hardStallMs: 240_000,
+      // GLM independent reasoning mode: no preserved thinking context, and the
+      // stream-level timeouts (read 720s / hard-cap 20min) are authoritative.
+      // Per-turn hardStall is counterproductive — GLM's legitimate deep reasoning
+      // spans multiple minutes; aborting mid-turn causes the exact "restart from
+      // scratch" symptom we're trying to avoid. Disable hardStall abort entirely
+      // for GLM; keep informational heartbeats.
+      hardStallMs: this.self.config.providerName === 'glm' ? 0 : 240_000,
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {
@@ -283,6 +289,7 @@ export class TurnStepProducer {
       pressureResult,
       recentToolHistory: this.self.recentToolHistory,
       onIntentPreview: callbacks.onIntentPreview,
+      taskContractId: this.self.taskContract?.id,
     })
     debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
     if (intentResult === 'veto') {
@@ -389,6 +396,8 @@ export class TurnStepProducer {
       season: pressureResult.shouldThrottleCvm ? null : this.self.currentSeason,
       seasonIntensity: pressureResult.shouldThrottleCvm ? undefined : (this.self.currentSeasonIntensity ?? undefined),
       riskLevel: this.self.latestRisk.level,
+      convergencePrecision: this.self.latestConvergenceResult?.score,
+      outputEfficiency: this.self.latestConvergenceResult?.signals.tokenEfficiency,
     })
     this.self.latestCognitiveSnapshot = getCognitivePhaseSnapshot(cognitiveLedger)
 

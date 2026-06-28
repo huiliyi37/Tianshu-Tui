@@ -21,7 +21,7 @@
     "url": "https://github.com/user/rivet/issues"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.23.1"
   },
   "files": [
     "dist/",
@@ -50,6 +50,9 @@
     "benchmark": "tsx scripts/run-benchmark.ts"
   },
   "dependencies": {
+    "@ast-grep/lang-json": "^0.0.7",
+    "@ast-grep/lang-python": "^0.0.6",
+    "@ast-grep/napi": "^0.44.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "diff": "^9.0.0",
     "get-east-asian-width": "^1.6.0",

@@ -18,13 +18,10 @@ import { getGitChangeRate, smoothChangeRate } from './git-freshness.js'
 import { rejectOnAbort } from './turn-boundary-abort.js'
 import { abortableDelay } from '../api/retry-engine.js'
 import { classifyApiError } from '../api/error-classifier.js'
-import { evaluateThinkingRetry } from './thinking-retry.js'
-import { evaluatePhantomContinuation } from './phantom-continuation.js'
+import type { GoalContinuationController } from './goal-continuation.js'
+import type { PostTurnDecisionController } from './post-turn-decision.js'
+import type { TelemetryRecord } from './telemetry-writer.js'
 import { debugLog } from '../utils/debug.js'
-import type { GoalTracker } from './goal-tracker.js'
-import { saveGoalState } from './goal-persist.js'
-import { getSessionDir } from './session-persist.js'
-import { runGoalJudge, type GoalJudgeDeps } from './goal-judge.js'
 
 // ── Types re-exported for deps interface ──
 
@@ -97,6 +94,30 @@ export interface CacheTurnEndParams {
   artifactIdsAccessed: string[]
 }
 
+// ── TurnStateBag: getter/setter view into AgentLoop mutable fields ──
+
+export interface TurnStateBag {
+  streamedText: string
+  lastPrewarmAt: number
+  gitChangeRate: number
+  turnBudget: TurnBudget
+  latestFsWatcherState: FsWatcherState
+  consecutiveNoToolTurns: number
+  autoContinueCount: number
+  thinkingOnlyRetries: number
+  lastThinkingContent: string
+  lastTurnTextFingerprint: string
+  lastTurnThinkingFingerprint: string
+  recentTextFingerprints: string[]
+  turnsSinceLastObjection: number
+  traceStore: TraceStore
+  importGraph: ImportGraph | null
+  lastConflictCheckCount: number
+  latestRisk: RiskAssessment
+  thetaRequestsThisTurn: number
+  taskContract: import('../context/task-contract.js').TaskContract | undefined
+}
+
 // ── Deps interface ──
 
 export interface TurnOrchestratorDeps {
@@ -165,7 +186,7 @@ export interface TurnOrchestratorDeps {
   onCacheAdvisorTurnEnd: (params: CacheTurnEndParams) => void
 
   // === Telemetry ===
-  writeTelemetry: (entry: any) => void
+  writeTelemetry: (entry: TelemetryRecord) => void
   resetEvidence: () => void
 
   // === Abort signal ===
@@ -184,48 +205,14 @@ export interface TurnOrchestratorDeps {
   // === FsWatcher ===
   getFsWatcherState: () => FsWatcherState
 
-  // === Per-run state (mirrored on AgentLoop, survives across runs) ===
-  getStreamedText: () => string
-  setStreamedText: (v: string) => void
-  getLastPrewarmAt: () => number
-  setLastPrewarmAt: (v: number) => void
-  getGitChangeRate: () => number
-  setGitChangeRate: (v: number) => void
-  setTurnBudget: (v: TurnBudget) => void
-  getLatestFsWatcherState: () => FsWatcherState
-  setLatestFsWatcherState: (v: FsWatcherState) => void
-  getConsecutiveNoToolTurns: () => number
-  setConsecutiveNoToolTurns: (v: number) => void
-  getAutoContinueCount: () => number
-  setAutoContinueCount: (v: number) => void
+  // === Per-run state (getter/setter view into AgentLoop mutable fields) ===
+  state: TurnStateBag
   getMaxAutoContinue: () => number
-  getActiveContract: () => import('../context/task-contract.js').TaskContract | undefined
   getDoomLoopLevel: () => 'none' | 'warn' | 'blocked'
-  getThinkingOnlyRetries: () => number
-  setThinkingOnlyRetries: (v: number) => void
-  getLastThinkingContent: () => string
-  setLastThinkingContent: (v: string) => void
-  getLastTurnTextFingerprint: () => string
-  setLastTurnTextFingerprint: (v: string) => void
-  getLastTurnThinkingFingerprint: () => string
-  setLastTurnThinkingFingerprint: (v: string) => void
-  getRecentTextFingerprints: () => string[]
-  setTurnsSinceLastObjection: (v: number) => void
-  getTraceStore: () => TraceStore
-  setTraceStore: (v: TraceStore) => void
-  getImportGraph: () => ImportGraph | null
-  setImportGraph: (v: ImportGraph | null) => void
-  getLastConflictCheckCount: () => number
-  setLastConflictCheckCount: (v: number) => void
-  getLatestRisk: () => RiskAssessment
-  setLatestRisk: (v: RiskAssessment) => void
-  setThetaRequestsThisTurn: (v: number) => void
 
-  // === Goal completion judge (optional) ===
-  /** Provides judge spawn deps. Undefined → judge disabled (legacy accept-on-marker). */
-  getGoalJudgeDeps?: () => GoalJudgeDeps | undefined
-  /** Formatted evidence snapshot + modified files for scoping the judge worker. */
-  getGoalJudgeEvidence?: () => { text: string; modifiedFiles: string[] }
+  // === Sub-controllers ===
+  goalContinuation: GoalContinuationController
+  postTurnDecision: PostTurnDecisionController
 }
 
 // ── Standalone: wrapCallbacksWithHeartbeat ──
@@ -265,117 +252,7 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
 const MAX_RULE_RETRIES = 2
 
 export class TurnOrchestrator {
-  goalTracker: GoalTracker | null = null
-
-  setGoalTracker(tracker: GoalTracker | null): void {
-    this.goalTracker = tracker
-  }
-
   constructor(private deps: TurnOrchestratorDeps) {}
-
-  /**
-   * Gate a self-declared goal completion through the independent judge.
-   *
-   * Returns `accept` (with a closing reminder) when the judge verifies the goal,
-   * when the judge run cap is reached, or when the verdict is inconclusive
-   * (fail-open). Returns `continue` (with a tailored reminder listing the unmet
-   * criteria) only when the judge concretely rejects AND the cap is not yet hit.
-   *
-   * Backward-compatible: when no judge deps are wired the legacy accept-on-marker
-   * behavior is preserved exactly.
-   */
-  private async judgeGoalCompletion(
-    tracker: GoalTracker,
-    signal: AbortSignal | undefined,
-  ): Promise<{ action: 'accept' | 'continue'; reminder: string }> {
-    const achievedReminder = (suffix = ''): string =>
-      `[GOAL] 目标已达成（${tracker.getIteration()} 次迭代）。Goal tracker 已关闭。${suffix}\n` +
-      `运行 deliver_task commit=true 提交最终改动，系统将自动触发 L3 审查。`
-
-    const judgeDeps = this.deps.getGoalJudgeDeps?.()
-    if (!judgeDeps) {
-      // Judge disabled (config off or not wired) — legacy accept-on-marker.
-      return { action: 'accept', reminder: achievedReminder() }
-    }
-
-    tracker.recordJudgeRun()
-    const evidence = this.deps.getGoalJudgeEvidence?.() ?? { text: '', modifiedFiles: [] }
-    const verdict = await rejectOnAbort(
-      runGoalJudge(judgeDeps, {
-        objective: tracker.getGoal(),
-        criteria: tracker.getSuccessCriteria(),
-        evidence: evidence.text,
-        finalClaim: this.deps.getStreamedText(),
-        scopeFiles: evidence.modifiedFiles,
-        signal,
-      }),
-      signal!,
-      'goal-judge',
-    )
-
-    // Single-exit: compute action + reminder, then emit telemetry on accept.
-    let action: 'accept' | 'continue'
-    let reminder: string
-    let acceptedUnverified = false
-
-    if (verdict.overall === 'verified') {
-      action = 'accept'
-      reminder = achievedReminder(' Judge 已独立核验全部验收项。')
-    } else if (verdict.overall === 'rejected') {
-      if (tracker.getJudgeRuns() < tracker.getMaxJudgeRuns()) {
-        const unmet = verdict.criteria
-          .filter(c => c.met === false)
-          .map(c => `- ${c.criterion}${c.evidence ? `（证据: ${c.evidence}）` : ''}`)
-        const iter = tracker.getIteration()
-        const maxIter = tracker.getMaxIterations()
-        action = 'continue'
-        reminder =
-          `[GOAL JUDGE 驳回 ${tracker.getJudgeRuns()}/${tracker.getMaxJudgeRuns()}] 完成声明未通过独立核验，继续执行。\n` +
-          `目标: ${tracker.getGoal()}\n` +
-          `未达成的验收项:\n${unmet.length > 0 ? unmet.join('\n') : `- ${verdict.summary || '判定未达成'}`}\n` +
-          `请修复后再次输出 "GOAL ACHIEVED"。（迭代 ${iter}/${maxIter}）`
-      } else {
-        // Cap reached: stop re-judging to avoid burning the budget in a reject loop.
-        action = 'accept'
-        reminder = achievedReminder(
-          ` ⚠️ Judge 仍判定未完全达成（已达 ${tracker.getMaxJudgeRuns()} 次核验上限，接受为未完全验证）。残留: ${verdict.summary || '见上轮判定'}。`,
-        )
-        acceptedUnverified = true
-      }
-    } else {
-      // inconclusive — fail-open: accept but flag as unverified.
-      action = 'accept'
-      reminder = achievedReminder(` ⚠️ Judge 未能独立验证（${verdict.summary || '原因未知'}），接受为未验证完成。`)
-      acceptedUnverified = true
-    }
-
-    // Emit telemetry on accept paths (continue = not a completion decision yet).
-    if (action === 'accept') {
-      const criteriaMet = verdict.criteria.filter(c => c.met === true).length
-      const criteriaUnmet = verdict.criteria.filter(c => c.met === false).length
-      // Store verdict on tracker for deliver_task to read as evidence.
-      tracker.setLastVerdict({
-        overall: verdict.overall,
-        criteriaMet,
-        criteriaUnmet,
-        criteriaTotal: verdict.criteria.length,
-        summary: verdict.summary,
-      })
-      this.deps.writeTelemetry({
-        kind: 'goal_judge_verdict',
-        overall: verdict.overall,
-        judgeRuns: tracker.getJudgeRuns(),
-        maxJudgeRuns: tracker.getMaxJudgeRuns(),
-        criteriaTotal: verdict.criteria.length,
-        criteriaMet,
-        criteriaUnmet,
-        acceptedUnverified,
-        iteration: tracker.getIteration(),
-      })
-    }
-
-    return { action, reminder }
-  }
 
   /**
    * Execute the full turn loop for a single run() invocation.
@@ -416,7 +293,7 @@ export class TurnOrchestrator {
 
     try {
       for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
-        this.deps.setThetaRequestsThisTurn(0)
+        this.deps.state.thetaRequestsThisTurn = 0
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.deps.syncPlanModeToConfig()
         const signal = this.deps.getAbortSignal()
@@ -432,7 +309,7 @@ export class TurnOrchestrator {
         const rssRatio = snap
           ? snap.memory.rssBytes / snap.memory.memoryLimitBytes
           : 0
-        this.deps.setTurnBudget(createTurnBudget(rssRatio))
+        this.deps.state.turnBudget = createTurnBudget(rssRatio)
 
         // Step 6b: run compaction (session split, maybeCompact, stale rounds, heap)
         {
@@ -450,8 +327,8 @@ export class TurnOrchestrator {
           if (compactionResult.userMessageConsumed) userMessageConsumed = true
         }
 
-        this.deps.setStreamedText('')
-        this.deps.setLastPrewarmAt(0)
+        this.deps.state.streamedText = ''
+        this.deps.state.lastPrewarmAt = 0
         let _tb = Date.now()
         this.deps.getHeartbeat()?.tick('prewarm')
         await rejectOnAbort(this.deps.prewarmRecentReads(), signal!, 'prewarm')
@@ -459,11 +336,11 @@ export class TurnOrchestrator {
 
         // ── Git freshness: file change rate (Zeitgeber signal) ──
         getGitChangeRate(this.deps.getCwd()).then(rate => {
-          this.deps.setGitChangeRate(smoothChangeRate(rate, this.deps.getGitChangeRate()))
+          this.deps.state.gitChangeRate = smoothChangeRate(rate, this.deps.state.gitChangeRate)
         }).catch(() => {})
 
         // ── FS freshness: realtime external Zeitgeber signal ──
-        this.deps.setLatestFsWatcherState(this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false })
+        this.deps.state.latestFsWatcherState = this.deps.getFsWatcherState() ?? { eventRate: 0, eventCount: 0, active: false }
 
         // Step 6c: run perception (sensorium, season, phase class, contract)
         this.deps.getHeartbeat()?.tick('perception')
@@ -522,10 +399,10 @@ export class TurnOrchestrator {
         let turnThinkingAccum = ''
         let rateLimitOccurred = false
         let rateLimitRetryMs = 0
-        const prevThinkingFingerprint = this.deps.getLastTurnThinkingFingerprint()
+        const prevThinkingFingerprint = this.deps.state.lastTurnThinkingFingerprint
         let turnDedupState: 'tracking' | 'flushed' = 'tracking'
         let pendingFlush = ''
-        const prevFingerprint = this.deps.getLastTurnTextFingerprint()
+        const prevFingerprint = this.deps.state.lastTurnTextFingerprint
 
         // L0 streaming-executor telemetry: measure stream + tool execution latency.
         const turnStartMs = Date.now()
@@ -533,7 +410,7 @@ export class TurnOrchestrator {
         const streamOnce = () => this.deps.streamTurn({
           request,
           turn,
-          lastTurnTextFingerprint: this.deps.getLastTurnTextFingerprint(),
+          lastTurnTextFingerprint: this.deps.state.lastTurnTextFingerprint,
           streamRules: this.deps.getStreamRules(),
           disabledRulePatterns,
           callbacks: {
@@ -621,7 +498,7 @@ export class TurnOrchestrator {
               classifyApiError(streamResult.streamError).shouldReconnect
             ) {
               attempt++
-              this.deps.setStreamedText('')
+              this.deps.state.streamedText = ''
               turnTextAccum = ''
               turnThinkingAccum = ''
               pendingFlush = ''
@@ -650,17 +527,17 @@ export class TurnOrchestrator {
           }
         }
         const { collectedBlocks, thinkingAccum, toolUses, stopReason, streamError } = streamResult
-        this.deps.setLastTurnTextFingerprint(streamResult.lastTurnTextFingerprint)
-        this.deps.setLastTurnThinkingFingerprint(streamResult.lastTurnThinkingFingerprint)
+        this.deps.state.lastTurnTextFingerprint = streamResult.lastTurnTextFingerprint
+        this.deps.state.lastTurnThinkingFingerprint = streamResult.lastTurnThinkingFingerprint
         // Track text fingerprints for cross-turn repetition detection
         if (streamResult.lastTurnTextFingerprint.length >= 50) {
-          const fps = this.deps.getRecentTextFingerprints()
+          const fps = this.deps.state.recentTextFingerprints
           fps.push(streamResult.lastTurnTextFingerprint)
           if (fps.length > 8) fps.shift()
         }
         // Anti-habituation: detect model-initiated objections to reset staleness counter.
         if (turnTextAccum.includes('⚠') || turnTextAccum.includes('风险评估') || turnTextAccum.includes('遗留项')) {
-          this.deps.setTurnsSinceLastObjection(0)
+          this.deps.state.turnsSinceLastObjection = 0
         }
 
         // TTSR: stream rule triggered — inject reminder and retry, governed
@@ -709,13 +586,14 @@ export class TurnOrchestrator {
         const streamEndMs = Date.now()
         if (toolUses.length > 0) {
           this.deps.writeTelemetry({
+            kind: 'stream-complete',
             ts: streamEndMs,
             turn,
             phase: 'stream-complete',
             streamDurationMs: streamEndMs - turnStartMs,
             toolCount: toolUses.length,
             toolNames: toolUses.map(tu => tu.name).join(','),
-          } as any)
+          })
         }
 
         // Feed CacheAdvisor with turn metrics after API call completes
@@ -727,7 +605,7 @@ export class TurnOrchestrator {
         if (signal?.aborted) {
           // P0: skip addAssistantBlocks — partial blocks from an aborted
           // stream must not pollute the message list and break prefix cache.
-          if (this.deps.getStreamedText().length > 0) this.deps.addUsage({ output_tokens: Math.ceil(this.deps.getStreamedText().length / 4) })
+          if (this.deps.state.streamedText.length > 0) this.deps.addUsage({ output_tokens: Math.ceil(this.deps.state.streamedText.length / 4) })
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
           // runPostSession is best-effort cleanup — its failure must not cause
           // the outer catch to double-delete an unrelated message.
@@ -752,8 +630,8 @@ export class TurnOrchestrator {
         // content block, synthesize one from the accumulated streamedText.
         // Otherwise the reply is visible in the TUI but absent from history,
         // and the model re-answers this turn's question on the next run.
-        if (this.deps.getStreamedText() && !collectedBlocks.some(b => b.type === 'text')) {
-          collectedBlocks.push({ type: 'text', text: this.deps.getStreamedText() })
+        if (this.deps.state.streamedText && !collectedBlocks.some(b => b.type === 'text')) {
+          collectedBlocks.push({ type: 'text', text: this.deps.state.streamedText })
         }
 
         if (collectedBlocks.length > 0) { this.deps.addAssistantBlocks(collectedBlocks); assistantResponded = true }
@@ -765,18 +643,19 @@ export class TurnOrchestrator {
 
         if (toolUses.length > 0) {
           // Reset no-tool counter — model is taking action
-          this.deps.setConsecutiveNoToolTurns(0)
+          this.deps.state.consecutiveNoToolTurns = 0
           // ── Pre-execution diagnostic snapshot ──
           // Write sensorium before tool execution so freeze analysis can
           // identify which tools were about to run, even if executeBatch hangs.
           const toolNames = toolUses.map(tu => tu.name).join(',')
           this.deps.writeTelemetry({
+            kind: 'tool-executing',
             ts: Date.now(),
             turn,
             phase: 'tool-executing',
             tools: toolNames,
             toolCount: toolUses.length,
-          } as any)
+          })
 
           // 工具批整体 abort-race：executeBatch 内部虽对单工具有 withToolTimeout，
           // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
@@ -786,16 +665,16 @@ export class TurnOrchestrator {
             this.deps.executeBatch({
               toolUses, callbacks, turn, checkpointCreatedThisTurn,
               abortSignal: signal!,
-              traceStore: this.deps.getTraceStore(), importGraph: this.deps.getImportGraph(),
-              lastConflictCheckCount: this.deps.getLastConflictCheckCount(), latestRisk: this.deps.getLatestRisk(),
+              traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
+              lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
             }),
             signal!,
             'tools',
           )
-          this.deps.setTraceStore(r.traceStore)
-          this.deps.setImportGraph(r.importGraph)
-          this.deps.setLastConflictCheckCount(r.lastConflictCheckCount)
-          this.deps.setLatestRisk(r.latestRisk)
+          this.deps.state.traceStore = r.traceStore
+          this.deps.state.importGraph = r.importGraph
+          this.deps.state.lastConflictCheckCount = r.lastConflictCheckCount
+          this.deps.state.latestRisk = r.latestRisk
           if (r.checkpointCreated) checkpointCreatedThisTurn = true
 
           // U6: record this tool-turn into the execution trace.
@@ -803,13 +682,14 @@ export class TurnOrchestrator {
 
           // L0 telemetry: tools duration
           this.deps.writeTelemetry({
+            kind: 'tools-complete',
             ts: Date.now(),
             turn,
             phase: "tools-complete",
             toolsDurationMs: Date.now() - streamEndMs,
             totalTurnMs: Date.now() - turnStartMs,
             toolCount: toolUses.length,
-          } as any)
+          })
 
           // Feed CacheAdvisor with cache metrics + artifact eviction/access data
           if (latestTurnCache && latestTurnCache.turn === turn) {
@@ -856,124 +736,40 @@ export class TurnOrchestrator {
             artifactIdsAccessed: [],
           })
         }
-        const thinkingResult = evaluateThinkingRetry({
-          streamedText: this.deps.getStreamedText(), collectedBlockCount: collectedBlocks.length,
-          thinkingAccum, thinkingOnlyRetries: this.deps.getThinkingOnlyRetries(),
-          lastThinkingContent: this.deps.getLastThinkingContent(),
+        const thinkingResult = await this.deps.postTurnDecision.evaluateThinkingRetry({
+          collectedBlockCount: collectedBlocks.length,
+          thinkingAccum,
+          turn,
+          callbacks,
+          signal: signal!,
         })
-        this.deps.setLastThinkingContent(thinkingResult.nextState.lastThinkingContent)
-        this.deps.setThinkingOnlyRetries(thinkingResult.nextState.thinkingOnlyRetries)
-        if (thinkingResult.shouldRetry) {
-          this.deps.appendSystemReminder(thinkingResult.retryMessage)
-          // Archive any partial streamed text before retrying (same rationale as TTSR above)
-          callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), false)
-          continue
-        }
+        if (thinkingResult.shouldRetry) continue
 
         // No tool calls this turn — increment the counter for convergence detection
-        this.deps.setConsecutiveNoToolTurns(this.deps.getConsecutiveNoToolTurns() + 1)
+        this.deps.state.consecutiveNoToolTurns = this.deps.state.consecutiveNoToolTurns + 1
 
         // ── Goal continuation check ──
-        // Must run BEFORE completeTurn so we can choose isFinal:true vs isFinal:false.
-        const tracker = this.goalTracker
-        let shouldContinueGoal = false
-        // When the judge rejects a self-declared completion, it supplies a
-        // tailored continuation reminder (unmet criteria + evidence) that
-        // overrides the generic goal-continuation message below.
-        let judgeContinuationReminder: string | null = null
-        if (tracker?.isActive()) {
-          const goalResult = tracker.check(
-            this.deps.getStreamedText(),
-            this.deps.getEstimatedTokens(),
-            signal?.aborted === true,
-          )
-          if (goalResult.shouldContinue) {
-            shouldContinueGoal = true
-            tracker.advanceIteration()
-          } else if (goalResult.reason === 'achieved') {
-            // Self-declared completion: gate it through the independent judge
-            // before accepting. The judge may reject and demand a continuation.
-            const decision = await this.judgeGoalCompletion(tracker, signal)
-            if (decision.action === 'continue') {
-              shouldContinueGoal = true
-              judgeContinuationReminder = decision.reminder
-              tracker.advanceIteration()
-            } else {
-              this.deps.appendSystemReminder(decision.reminder)
-              tracker.deactivate('achieved')
-            }
-          } else {
-            // budget/context/wall-clock/cancelled: deactivate so later turns aren't checked.
-            const deactivationReason = goalResult.reason === 'budget_exhausted' ? 'budget_exhausted'
-              : goalResult.reason === 'context_limit' ? 'context_limit'
-              : goalResult.reason === 'wall_clock_exhausted' ? 'budget_exhausted'
-              : 'cancelled'
-            tracker.deactivate(deactivationReason)
-          }
-        }
-
-        // Persist goal state after any status/iteration change (best-effort).
-        if (tracker) {
-          const sid = this.deps.getSessionId()
-          if (sid) {
-            try { saveGoalState(getSessionDir(this.deps.getCwd()), sid, tracker) } catch { /* best-effort */ }
-          }
-        }
-
-        this.deps.flushMeridianTurn()
-        if (shouldContinueGoal) {
-          // Non-final completion: archive this turn's output and inject continuation.
-          await rejectOnAbort(
-            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
-            signal!,
-            'goal-continue-complete',
-          )
-          if (judgeContinuationReminder) {
-            this.deps.appendSystemReminder(judgeContinuationReminder)
-          } else {
-            const iter = tracker!.getIteration()
-            const maxIter = tracker!.getMaxIterations()
-            const wallElapsed = Math.round(tracker!.getWallClockElapsedMs() / 1000)
-            const wallBudget = tracker!.getWallClockBudgetMs()
-            const wallInfo = wallBudget
-              ? ` ⏱${wallElapsed}s/${Math.round(wallBudget / 1000)}s`
-              : ` ⏱${wallElapsed}s`
-            this.deps.appendSystemReminder(
-              `[GOAL CONTINUATION ${iter}/${maxIter}${wallInfo}] 目标尚未达成。继续执行。\n` +
-              `目标: ${tracker!.getGoal()}\n` +
-              `上轮输出摘要: ${this.deps.getStreamedText().slice(-500)}\n` +
-              `完成后输出 "GOAL ACHIEVED" 声明完成。遇到无法解决的阻塞时输出 "GOAL BLOCKED"。`
-            )
-          }
-          continue  // re-enter the for loop for the next iteration
-        }
+        // Delegated to GoalContinuationController — it handles tracker.check,
+        // judge gating, saveGoalState, flushMeridianTurn, completeTurn, and
+        // continuation reminder injection internally.
+        const goalCheckResult = await this.deps.goalContinuation.handleGoalCheck({
+          streamedText: this.deps.state.streamedText,
+          estimatedTokens: this.deps.getEstimatedTokens(),
+          isAborted: signal?.aborted === true,
+          turn,
+          callbacks,
+          signal: signal!,
+        })
+        if (goalCheckResult.kind === 'continue') continue
 
         // ── Phantom continuation check ──
-        // The model produced a no-tool turn but its text describes an action it
-        // never actually took (emitted a tool call as prose), or an open task
-        // contract is still in progress. Auto-continue ONE bounded iteration
-        // instead of ending the turn and forcing the user to nudge. Skipped when
-        // /goal is active (handled above), when convergence/doom-loop already
-        // steers, or when the per-run budget is exhausted.
-        if (!tracker?.isActive()) {
-          const phantom = evaluatePhantomContinuation({
-            streamedText: this.deps.getStreamedText(),
-            activeContract: this.deps.getActiveContract(),
-            autoContinueCount: this.deps.getAutoContinueCount(),
-            maxAutoContinue: this.deps.getMaxAutoContinue(),
-            convergenceEscalated: this.deps.getDoomLoopLevel() !== 'none',
-          })
-          if (phantom.shouldContinue) {
-            this.deps.setAutoContinueCount(this.deps.getAutoContinueCount() + 1)
-            await rejectOnAbort(
-              this.deps.completeTurn({ turn, isFinal: false, callbacks }),
-              signal!,
-              'phantom-continue-complete',
-            )
-            this.deps.appendSystemReminder(phantom.message)
-            continue  // re-enter the for loop for one more iteration
-          }
-        }
+        // Only reached when goal check returned accept/finalize (goal not continuing).
+        const phantomResult = await this.deps.postTurnDecision.evaluatePhantomContinuation({
+          turn,
+          callbacks,
+          signal: signal!,
+        })
+        if (phantomResult.shouldContinue) continue
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
         await rejectOnAbort(

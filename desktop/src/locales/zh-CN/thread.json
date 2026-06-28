@@ -1,0 +1,17 @@
+{
+  "empty": "选择左侧线程，或在当前项目新建一个线程开始对话。",
+  "newThread": "+ 新线程",
+  "tabs": "对话标签",
+  "titleNew": "新建线程",
+  "titleLabel": "标题",
+  "titleOptional": "可选",
+  "cwd": "项目目录 (cwd)",
+  "cwdPlaceholder": "留空 = sidecar 启动目录",
+  "browse": "选择…",
+  "firstTask": "首条任务",
+  "firstTaskPlaceholder": "可选，留空则先创建空闲线程",
+  "autonomyLevel": "自治档位",
+  "worktree": "隔离 Worktree",
+  "worktreeHint": "独立 Git 分支，并行工作互不冲突",
+  "returnToWorkspace": "返回工作台"
+}

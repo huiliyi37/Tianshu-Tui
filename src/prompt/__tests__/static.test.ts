@@ -86,12 +86,32 @@ describe('buildSystemPrompt', () => {
     assert.ok(prompt.includes('不等于已验证事实'), '应明确审查标记不等于已验证')
   })
 
-  it('includes self-verification rule — 复现即证 standing across all domains', () => {
+  it('evidence-scope carries the self-verification kernel (merged from self-verification rule)', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    // 瑶光的"复现即证"必须常驻在 base 护栏,而非仅在瑶光域或按需 advisory。
-    assert.ok(prompt.includes('self-verification'), '应有独立的自我验证规则')
-    assert.ok(prompt.includes('绿非证明'), '应含"绿非证明"核心')
-    assert.ok(prompt.includes('你自己刚下的结论'), '应把验证标准转向自身结论(反身之道)')
+    // self-verification 规则已并入 evidence-scope（减少重叠规则的认知负担）。
+    // 约束内核必须有落点——这是合并不是删减。
+    assert.ok(prompt.includes('自己的结论和外部声称适用同一验证标准'), 'evidence-scope 应含"自己的结论适用同一验证标准"内核')
+    assert.ok(prompt.includes('我推过所以可信'), '应保留"我推过所以可信"反身验证核心')
+    assert.ok(prompt.includes('物理事实'), '应含物理事实 vs 脑补模型的自检要求')
+    assert.ok(prompt.includes('异常信号'), '应保留"异常信号比内容可信"差异化内核')
+  })
+
+  it('evidence-scope carries the cross-layer claim discipline kernel (merged)', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // cross-layer-claim-discipline 已并入 evidence-scope。
+    assert.ok(prompt.includes('我没看到'), '应含"我没看到≠不存在"内核')
+    assert.ok(prompt.includes('穷尽查证'), '声称缺失需穷尽查证的内核必须有落点')
+    assert.ok(prompt.includes('所有层的入口'), 'grep 所有层入口的方法必须保留')
+  })
+
+  it('delivery-contract carries the consolidated delivery discipline', () => {
+    const prompt = buildSystemPrompt({ tools: [] })
+    // no-fabricated-tests 门禁 + output-style 已并入 <delivery-contract>。
+    assert.ok(prompt.includes('<delivery-contract>'), '应有统一的交付契约块')
+    assert.ok(prompt.includes('0 passed 当成功'), '诚实门禁内核（未运行=未验证）必须有落点')
+    assert.ok(prompt.includes('交付物'), '三项报告内核必须有落点')
+    assert.ok(prompt.includes('遗留项'), '遗留项报告必须保留')
+    assert.ok(prompt.includes('自我设限'), 'NEVER narrate session limits 必须有落点')
   })
 
   it('wraps security in <security> tags', () => {

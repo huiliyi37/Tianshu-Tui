@@ -1,4 +1,6 @@
 import { APPLY_PATCH_TOOL } from './apply-patch.js'
+import { AST_EDIT_TOOL } from './ast-edit.js'
+import { AST_GREP_TOOL } from './ast-grep.js'
 import { IMPORT_RESOURCE_TOOL } from './import-resource.js'
 import { FILE_INFO_TOOL } from './file-info.js'
 import { CREATE_DOCUMENT_TOOL } from './create-document.js'
@@ -64,6 +66,8 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(EDIT_FILE_TOOL)
   registry.register(HASH_EDIT_TOOL)
   registry.register(GREP_TOOL)
+  registry.register(AST_GREP_TOOL)
+  registry.register(AST_EDIT_TOOL)
   registry.register(GLOB_TOOL)
   registry.register(DIFF_TOOL)
   registry.register(RUN_TESTS_TOOL)

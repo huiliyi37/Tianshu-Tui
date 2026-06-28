@@ -4,7 +4,7 @@ import { PrewarmCache } from '../prewarm.js'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildPrewarmValue, canUsePrewarmForRead, batchPrewarm } from '../prewarm-file.js'
+import { buildPrewarmValue, canUsePrewarmForRead, batchPrewarm, consumePrewarm } from '../prewarm-file.js'
 
 describe('buildPrewarmValue', () => {
   let dir: string
@@ -78,4 +78,45 @@ it('batchPrewarm caches up to five files and skips existing entries', async () =
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+describe('consumePrewarm', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'prewarm-consume-'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('returns cached full content when mtime matches', async () => {
+    writeFileSync(join(dir, 'a.ts'), 'export const a = 1\n')
+    const cache = new PrewarmCache()
+    const value = await buildPrewarmValue(dir, 'a.ts')
+    assert.ok(value)
+    cache.set(value.canonicalPath, value)
+    const hit = consumePrewarm(cache, value.canonicalPath)
+    assert.ok(hit, 'expected a prewarm hit')
+    assert.ok(hit.content.includes('export const a = 1'))
+  })
+
+  it('returns null on miss (never prewarmed)', () => {
+    const cache = new PrewarmCache()
+    assert.equal(consumePrewarm(cache, join(dir, 'absent.ts')), null)
+  })
+
+  it('returns null and invalidates after external edit (mtime change)', async () => {
+    writeFileSync(join(dir, 'b.ts'), 'v1\n')
+    const cache = new PrewarmCache()
+    const value = await buildPrewarmValue(dir, 'b.ts')
+    assert.ok(value)
+    cache.set(value.canonicalPath, value)
+    // Force an mtime bump: coarse-resolution filesystems need a delay.
+    await new Promise<void>(resolve => setTimeout(resolve, 1100))
+    writeFileSync(join(dir, 'b.ts'), 'v2\n')
+    assert.equal(consumePrewarm(cache, value.canonicalPath), null)
+    // The stale entry should have been invalidated.
+    assert.equal(cache.has(value.canonicalPath), false)
+  })
 })

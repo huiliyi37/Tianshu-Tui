@@ -11,7 +11,10 @@ import {
   setDomain,
   listSkills,
   setSkillEnabled,
+  getHooks,
+  setHooks,
 } from '../client.ts'
+import type { HookEntry } from '../types.ts'
 
 // No Tauri here, so getRuntimeInfo() resolves via the env fallback (port 3100,
 // empty token). We stub global fetch to drive rivetFetch's invalidation paths.
@@ -149,6 +152,38 @@ test('setSkillEnabled POSTs name + enabled', async () => {
     const parsed = JSON.parse(calls[0]!.body!)
     assert.equal(parsed.name, 'x')
     assert.equal(parsed.enabled, false)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+// ── Hooks (I4) ──────────────────────────────────────────────────────
+
+test('getHooks GETs /hooks and returns the config', async () => {
+  clearRuntimeCache()
+  const config = { hooks: [{ event: 'postTool', script: './x.sh' }] }
+  const { calls } = stubFetch(config)
+  try {
+    const res = await getHooks('s1')
+    assert.deepEqual(res, config)
+    assert.match(calls[0]!.url, /\/sessions\/s1\/hooks$/)
+    assert.equal(calls[0]!.method, 'GET')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('setHooks PUTs the hooks array', async () => {
+  clearRuntimeCache()
+  const hooks: HookEntry[] = [{ event: 'onError', script: './err.sh', timeoutMs: 3000 }]
+  const { calls } = stubFetch({ hooks })
+  try {
+    const res = await setHooks('s1', hooks)
+    assert.deepEqual(res, { hooks })
+    assert.match(calls[0]!.url, /\/sessions\/s1\/hooks$/)
+    assert.equal(calls[0]!.method, 'PUT')
+    const parsed = JSON.parse(calls[0]!.body!)
+    assert.deepEqual(parsed.hooks, hooks)
   } finally {
     globalThis.fetch = realFetch
   }

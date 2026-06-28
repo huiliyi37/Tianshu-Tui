@@ -1,6 +1,6 @@
 import { formatDiagnostics, parseDiagnosticOutput, type Diagnostic } from './diagnostics.js'
 import { isAbsolute, relative, join } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 
 export interface LspCheckResult {
@@ -14,18 +14,18 @@ export interface LspCheckResult {
 
 /**
  * Run a real TypeScript type check using the project-local tsc binary
- * (node_modules/.bin/tsc) via spawnSync.
+ * (node_modules/.bin/tsc) via an **async** spawn.
  *
- * Previously this used the TypeScript compiler API (require('typescript') +
- * ts.createProgram) in-process. That loaded and parsed ALL project files into
- * the main V8 heap, allocating 500 MB–1 GB per call on mid-sized repos.
- * Repeated deliver_task calls drove the heap to the 1.5 GB default limit,
- * triggering "Ineffective mark-compacts near heap limit" OOM kills.
+ * Previously this used spawnSync, which blocks the Node event loop for the
+ * full duration of tsc (tens of seconds on mid-sized repos). Because
+ * deliver_task runs typecheck synchronously inside a tool execution, this
+ * froze the TUI render loop — the spinner ticker (120ms setInterval) could
+ * not fire, so `⠴ analyzing… Nm Ns` appeared frozen during every commit.
  *
- * spawnSync runs tsc as a subprocess — its heap is separate and reclaimed by
- * the OS on exit. The local node_modules/.bin/tsc absolute path avoids the
- * PATH hijacking risk that the original spawnSync('npx', ...) had: a global
- * tsc wrapper cannot intercept a direct filesystem path.
+ * Async spawn lets tsc run in a subprocess while the event loop keeps turning:
+ * the spinner animates, streaming continues, the UI stays responsive. The
+ * local node_modules/.bin/tsc absolute path avoids the PATH hijacking risk
+ * that spawnSync('npx', ...) had.
  *
  * Falls back to in-process require('typescript') when node_modules/.bin/tsc is
  * missing (e.g. production bundle without devDependencies).
@@ -44,7 +44,7 @@ function resolveTscPath(cwd: string): string | null {
   return null
 }
 
-export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
+export async function runTypeCheck(cwd: string, filePath: string): Promise<LspCheckResult> {
   const tscPath = resolveTscPath(cwd)
 
   if (!tscPath) {
@@ -60,23 +60,18 @@ export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
     return runTypeCheckInProcess(cwd, filePath)
   }
 
-  // Run tsc as a subprocess — its heap is OS-reclaimed on exit.
+  // Run tsc as an async subprocess — its heap is OS-reclaimed on exit, and the
+  // event loop stays free so the TUI render loop keeps animating during commit.
   // --noEmit: type-check only, no output files.
   // --pretty false: machine-parseable format (file(line,col): error TSxxxx: msg).
-  const result = spawnSync(tscPath, ['--noEmit', '--pretty', 'false'], {
-    cwd,
-    encoding: 'utf-8',
-    timeout: 120_000, // 2 min — generous for large projects, fail-open on timeout
-    maxBuffer: 10 * 1024 * 1024, // 10 MB — enough for thousands of errors
-    env: { ...process.env },
-  })
+  const result = await runTscSubprocess(tscPath, cwd)
 
   // tsc writes diagnostics to stdout when --pretty false (not stderr).
   // Exit code 0 = no errors; exit code 1 = type errors found; exit code 2+ = crash/panic.
   // We treat exit 0 and exit 1 as "ran ok" (the compiler completed).
   // Signal / timeout / spawn failure → ranOk = false.
   const ranOk = result.status === 0 || result.status === 1
-  const output = (result.stdout ?? '') + (result.stderr ?? '')
+  const output = result.stdout + result.stderr
 
   const allDiagnostics = ranOk ? parseDiagnosticOutput(output, 'ts') : []
 
@@ -90,6 +85,49 @@ export function runTypeCheck(cwd: string, filePath: string): LspCheckResult {
     formatted: formatDiagnostics(filtered),
     ranOk,
   }
+}
+
+/**
+ * Spawn tsc as an async subprocess, collecting stdout/stderr and enforcing a
+ * 2-minute timeout. Resolves to { status, stdout, stderr } mirroring spawnSync's
+ * shape so the parsing logic above is unchanged. status is null on signal/timeout.
+ */
+function runTscSubprocess(tscPath: string, cwd: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn(tscPath, ['--noEmit', '--pretty', 'false'], {
+      cwd,
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    let stdout = ''
+    let stderr = ''
+    // Cap accumulation at 10 MB (parity with the old spawnSync maxBuffer).
+    const MAX = 10 * 1024 * 1024
+    let killed = false
+
+    const timer = setTimeout(() => {
+      killed = true
+      child.kill('SIGKILL')
+    }, 120_000)
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (stdout.length < MAX) stdout += chunk.toString('utf8').slice(0, MAX - stdout.length)
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (stderr.length < MAX) stderr += chunk.toString('utf8').slice(0, MAX - stderr.length)
+    })
+
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolve({ status: null, stdout, stderr })
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      // killed by timeout → treat as inconclusive (null status, same as spawnSync timeout)
+      resolve({ status: killed ? null : code, stdout, stderr })
+    })
+  })
 }
 
 // ── In-process fallback (only when node_modules/.bin/tsc is missing) ──────
@@ -111,7 +149,7 @@ function loadTsModule(): typeof import('typescript') | undefined {
   return _tsModule
 }
 
-function runTypeCheckInProcess(cwd: string, filePath: string): LspCheckResult {
+async function runTypeCheckInProcess(cwd: string, filePath: string): Promise<LspCheckResult> {
   const ts = loadTsModule()
   if (!ts) {
     return { diagnostics: [], formatted: '', ranOk: false }

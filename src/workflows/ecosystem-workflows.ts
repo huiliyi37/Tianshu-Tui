@@ -302,12 +302,24 @@ ${planInstruction}
 - MVP safety boundary: workers do NOT auto-commit/auto-merge. Treat worker output as patchSummary/diff evidence; integrate deliberately.
 - patcher workers as 天梁 executors remain bounded helpers: objective must say "只执行本 task，不扩展范围，不重写计划".
 
-Suggested phases:
-1. Call the team_orchestrate tool with { mode: '${options.mode}', objective, planPath? } to deterministically parse/group and dispatch the first wave. It serializes same-file writes and validates dependencies for you.
-2. Inspect the returned worker diffs/findings (these come from delegate_batch workers under the hood); integrate the changes into the working tree.
-3. To run the next wave, call team_orchestrate again with the same args plus fromWave: <previous+1> AFTER integrating the prior wave's diffs.
-4. On the final wave, team_orchestrate runs the review gate automatically (L1/L2/L3 by change scale); address any blocking findings.
-5. Verify with evidence (targeted tests + npx tsc --noEmit), then deliver_task with a checklist.
+Execution flow — follow these exact steps:
+
+If the objective IS a Markdown plan file path (e.g. .rivet/knowledge/...md or docs/superpowers/plans/...md):
+  1. Read the plan file and note its implementation checklist.
+  2. Call plan_task with { objective, files: [planPath, plus the source files mentioned in the plan], execute: true }.
+     plan_task will auto-detect the plan file, parse the - [ ] checklist items, create one patcher worker per item,
+     and store the plan internally so team_orchestrate can pick it up automatically.
+  3. After plan_task dispatches the first wave, integrate the returned worker diffs into the working tree.
+  4. If the output shows remaining waves, call team_orchestrate with { mode: 'standard', objective, fromWave: <next wave index> }.
+     (No need to pass planJson — team_orchestrate reads it from the internal plan store.)
+
+If the objective is a free-form task description (no plan file):
+  1. Call plan_task with { objective, execute: true } to decompose and dispatch the first wave.
+  2. Follow the same integrate-then-continue pattern as above (team_orchestrate without planJson).
+
+After ALL waves complete:
+  1. Run targeted tests + npx tsc --noEmit.
+  2. Call deliver_task with commit=true and a checklist covering each completed item.
 `
 }
 

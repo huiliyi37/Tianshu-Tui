@@ -3,16 +3,27 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
-import { ToolGroup, ToolCard, isCollapsibleTool, isRunTestsTool, toolNameOf } from '../components/ToolGroup'
+import { ToolCard, toolNameOf } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
+import { TimelineGroup } from '../components/TimelineGroup'
+import { ArtifactCard } from '../components/ArtifactCard'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { RewindOverlay } from '../components/RewindOverlay'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
-import { useUiState } from '../state/store'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
@@ -26,9 +37,10 @@ const STATUS_LABEL: Record<string, string> = {
   aborted: '已中止',
 }
 
-/** Resolve the active star domain for this session. Desktop currently defaults
- *  to 天枢 (tianshu) — real-time domain events will make this dynamic later. */
-function resolveActiveDomain(_session: SessionRecord, _view: EventViewState): StarDomainId {
+/** Resolve the active star domain for this session. Uses the session's pinned
+ *  domain when known; otherwise falls back to 天枢 (tianshu). */
+function resolveActiveDomain(session: SessionRecord, _view: EventViewState): StarDomainId {
+  if (session.domain && session.domain in STAR_DOMAINS) return session.domain as StarDomainId
   return 'tianshu'
 }
 
@@ -56,7 +68,10 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
-  const toolDensity = useUiState().toolDensity
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [composerHeight, setComposerHeight] = useState(0)
+  const composerWrapRef = useRef<HTMLDivElement | null>(null)
+  const composerObserverRef = useRef<ResizeObserver | null>(null)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
@@ -65,7 +80,7 @@ export function ThreadView(props: {
   const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
   const activeDomain = STAR_DOMAINS[activeDomainId]
-  const domainGlyph = activeDomain?.uiPersona.glyph ?? '✹'
+  const domainGlyph = session.domainGlyph ?? activeDomain?.uiPersona.glyph ?? '✹'
   const domainSeparator = activeDomain?.uiPersona.separator ?? 'thin'
 
   const isNearBottom = useCallback(() => {
@@ -85,9 +100,9 @@ export function ThreadView(props: {
     getScrollElement: () => msgRef.current,
     estimateSize: () => 80,
     overscan: 8,
-    getItemKey: (i) => {
-      const item = rendered[i]!
-      return item.kind !== 'block' ? item.key : item.block.key
+    getItemKey: (index) => {
+      const item = rendered[index]!
+      return item.kind === 'timeline' ? item.key : item.block.key
     },
   })
 
@@ -101,6 +116,22 @@ export function ThreadView(props: {
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     }
   }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
+
+  // Measure the floating composer so the thread reserves bottom padding and
+  // the last message is never hidden behind the input card.
+  useEffect(() => {
+    const node = composerWrapRef.current
+    if (!node) return
+    composerObserverRef.current?.disconnect()
+    const ro = new ResizeObserver(() => setComposerHeight(node.offsetHeight))
+    ro.observe(node)
+    composerObserverRef.current = ro
+    setComposerHeight(node.offsetHeight)
+    return () => {
+      composerObserverRef.current?.disconnect()
+      composerObserverRef.current = null
+    }
+  }, [])
 
   // Track scroll position: when user scrolls into the "near bottom" zone,
   // clear the scrolled-up flag so auto-scroll resumes.
@@ -154,18 +185,20 @@ export function ThreadView(props: {
     {
       name: '/review',
       desc: 'L2 审查 · 单审查员',
+      example: '/review [关注点描述]',
       run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L2". This triggers L2 adversarial verifier.'),
     },
     {
       name: '/review max',
       desc: 'L3 审查 · 编队 5 审查员',
+      example: '/review max [关注点描述]',
       run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L3". This triggers L3 Review Squadron (5 inspectors).'),
     },
     {
       name: '/theme',
-      desc: '切换主题 (system→light→dark)',
+      desc: '切换主题 (system→light→dark→nebula)',
       run: () => {
-        const order = ['system', 'light', 'dark'] as const
+        const order = ['system', 'light', 'dark', 'nebula'] as const
         const cur = loadThemePref()
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },
@@ -173,11 +206,13 @@ export function ThreadView(props: {
     {
       name: '/plan',
       desc: '创建实施方案',
+      example: '/plan <功能描述>',
       run: () => onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.'),
     },
     {
       name: '/team',
       desc: '团队模式 · 多 agent 协作',
+      example: '/team <任务描述>',
       run: () => onSend('Run team-mode workflow through team_orchestrate for the task I will describe next.'),
     },
     {
@@ -230,6 +265,113 @@ export function ThreadView(props: {
       desc: '认知自感知',
       run: () => onSend('Show the cognitive sensorium state: task status, verification gaps, delivery readiness, and active signals.'),
     },
+    {
+      name: '/council',
+      desc: '议事会 · 星域专家审查',
+      example: '/council <目标描述>',
+      run: () => onSend('Convene a star-domain council to review this objective. Use council_convene with the task I will describe next.'),
+    },
+    {
+      name: '/goal',
+      desc: '设定自主目标 · 跨 turn 执行',
+      example: '/goal <高层目标>',
+      run: () => onSend('Set an autonomous goal and execute across multiple turns until complete. Goal: the task I will describe next.'),
+    },
+    {
+      name: '/cancel-goal',
+      desc: '取消自主目标',
+      run: () => onSend('Cancel the current autonomous goal if one is active.'),
+    },
+    {
+      name: '/effort',
+      desc: '设置推理强度 (off/low/medium/high/max)',
+      run: () => onSend('Show current reasoning effort level. Available: off, low, medium, high, max.'),
+    },
+    {
+      name: '/model',
+      desc: '切换模型',
+      run: () => onSend('Show available models for switching.'),
+    },
+    {
+      name: '/domain',
+      desc: '切换星域人格',
+      run: () => onSend('Show available star domains for switching.'),
+    },
+    {
+      name: '/todo',
+      desc: '任务清单管理 (list/add/done/skip/move)',
+      run: () => onSend('Show current todo list. Use /todo add/done/skip/move to manage tasks.'),
+    },
+    {
+      name: '/undo',
+      desc: '撤销文件更改',
+      run: () => onSend('Undo the last file change. Use /undo preview N to preview before undoing.'),
+    },
+    {
+      name: '/rollback',
+      desc: '回滚文件更改（/undo 别名）',
+      run: () => onSend('Rollback recent file changes.'),
+    },
+    {
+      name: '/workflow',
+      desc: 'YAML 工作流编排 (list/<name>/replay)',
+      run: () => onSend('Show available workflows from .rivet/workflows/*.yaml.'),
+    },
+    {
+      name: '/plan-template',
+      desc: '计划模板库 (list/save/<name>)',
+      run: () => onSend('Show available plan templates from .rivet/plan-templates/*.md.'),
+    },
+    {
+      name: '/team-resume',
+      desc: '从 wave checkpoint 恢复团队执行',
+      run: () => onSend('Show available team checkpoints for resume.'),
+    },
+    {
+      name: '/fork',
+      desc: 'Fork 当前会话',
+      run: () => onSend('Fork the current session into a new branch.'),
+    },
+    {
+      name: '/branch',
+      desc: '分支树 · 查看父/子会话',
+      run: () => onSend('Show the session branch tree: parent and child sessions.'),
+    },
+    {
+      name: '/sessions',
+      desc: '列出所有会话',
+      run: () => onSend('List all saved sessions.'),
+    },
+    {
+      name: '/skill',
+      desc: '技能管理 (list/<name>)',
+      run: () => onSend('Show available skills.'),
+    },
+    {
+      name: '/evidence',
+      desc: '验证证据摘要',
+      run: () => onSend('Show evidence summary: last 10 verifications and pass rate.'),
+    },
+    {
+      name: '/status',
+      desc: 'Agent 状态总览',
+      run: () => onSend('Show agent status: model, domain, cache hit rate, token usage, cost.'),
+    },
+    {
+      name: '/mcp',
+      desc: 'MCP 服务器状态',
+      run: () => onSend('Show MCP server connection status.'),
+    },
+    {
+      name: '/leave',
+      desc: '在星图留下标记',
+      run: () => onSend('Leave a mark in the starmap summarizing this session.'),
+    },
+    {
+      name: '/diagram',
+      desc: '生成 Mermaid 图表骨架',
+      run: () => onSend('Generate a mermaid diagram skeleton. Types: architecture, dataflow, sequence, flowchart, comparison, state.'),
+    },
   ], [onSetApprovalMode, onSend])
 
   // Lookup map for welcome cards/pills to call the actual slash command
@@ -241,7 +383,7 @@ export function ThreadView(props: {
   }, [commands])
 
   return (
-    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator}>
+    <div className={`thread domain-${activeDomainId}`} data-separator={domainSeparator} style={{ paddingBottom: composerHeight }}>
       <header className="thread-header">
         <div className="thread-header-main">
           <span className={`thread-glyph${busy ? ' breathing' : ''}`} aria-hidden>
@@ -264,7 +406,7 @@ export function ThreadView(props: {
           )}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
-          <button className="icon-btn thread-close" title="关闭会话" onClick={onClose} aria-label="关闭会话">
+          <button className="icon-btn thread-close" title="关闭会话" onClick={() => setShowCloseConfirm(true)} aria-label="关闭会话">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M18 6 6 18M6 6l12 12" />
@@ -328,13 +470,29 @@ export function ThreadView(props: {
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
-                  {item.kind !== 'block' ? (
-                    <ToolGroup items={item.items} density={toolDensity} />
+                  {item.kind === 'timeline' ? (
+                    <TimelineGroup blocks={item.items}>
+                      {item.items.map(b => (
+                        <Block
+                          key={b.key}
+                          block={b}
+                          sessionId={session.id}
+                          onOpenImage={openImage}
+                          domainGlyph={domainGlyph}
+                          domainName={activeDomain?.name}
+                          isStreaming={false}
+                        />
+                      ))}
+                    </TimelineGroup>
+                  ) : item.kind === 'artifact' ? (
+                    <ArtifactCard block={item.block} />
                   ) : (
                     <Block
                       block={item.block}
                       sessionId={session.id}
                       onOpenImage={openImage}
+                      domainGlyph={domainGlyph}
+                      domainName={activeDomain?.name}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -367,23 +525,27 @@ export function ThreadView(props: {
       <TaskList items={view.todos} />
       <DelegationTree nodes={view.delegation} />
 
-      <Composer
-        sessionId={session.id}
-        value={input}
-        onChange={setInput}
-        busy={busy}
-        onSubmit={(text, images) => {
-          if (busy) onSteer(text)
-          else onSend(text, images)
-          setInput('')
-        }}
-        onAbort={onAbort}
-        onDoubleEscape={() => setShowRewind(true)}
-        commands={commands}
-        planMode={view.planMode}
-        onSetPlanMode={onSetPlanMode}
-        menuRev={view.menuRev}
-      />
+      <div className="composer-float" ref={composerWrapRef}>
+        <div className="composer-float-inner">
+          <Composer
+            sessionId={session.id}
+            value={input}
+            onChange={setInput}
+            busy={busy}
+            onSubmit={(text, images) => {
+              if (busy) onSteer(text)
+              else onSend(text, images)
+              setInput('')
+            }}
+            onAbort={onAbort}
+            onDoubleEscape={() => setShowRewind(true)}
+            commands={commands}
+            planMode={view.planMode}
+            onSetPlanMode={onSetPlanMode}
+            menuRev={view.menuRev}
+          />
+        </div>
+      </div>
       {showRewind && (
         <RewindOverlay
           sessionId={session.id}
@@ -396,6 +558,21 @@ export function ThreadView(props: {
         />
       )}
       {lightbox && <ImageLightbox src={lightbox} onClose={() => setLightbox(null)} />}
+
+      <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>关闭会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              关闭后该线程将从标签栏移除，未保存的上下文将丢失。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={onClose}>关闭</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -448,39 +625,70 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
   )
 }
 
+function isArtifactTool(b: ConvoBlock): boolean {
+  if (b.kind !== 'tool' && b.kind !== 'result') return false;
+  const name = toolNameOf(b);
+  if (name === 'write_file' || name === 'write_to_file' || name === 'edit_file') {
+    try {
+      const text = b.kind === 'tool' ? b.text : '';
+      if (text.includes('ArtifactMetadata') || text.includes('implementation_plan.md') || text.includes('task.md') || text.includes('walkthrough.md')) {
+        return true;
+      }
+    } catch(e) {}
+  }
+  return false;
+}
+
 type RenderItem =
-  | { kind: 'tools'; key: string; items: ConvoBlock[] }
-  | { kind: 'run_tests'; key: string; items: ConvoBlock[] }
+  | { kind: 'timeline'; key: string; items: ConvoBlock[] }
+  | { kind: 'artifact'; block: ConvoBlock }
   | { kind: 'block'; block: ConvoBlock }
 
-/** Only exploration tools (read/search/list) that succeeded fold into the
- *  compact group; action tools and errors render expanded as standalone cards. */
-function isFoldable(b: ConvoBlock): boolean {
-  return (b.kind === 'tool' || b.kind === 'result') && !b.isError && isCollapsibleTool(toolNameOf(b))
-}
-
-/** run_tests tool/result blocks eligible for action grouping (success or failure). */
-function isRunTestsFoldable(b: ConvoBlock): boolean {
-  return (b.kind === 'tool' || b.kind === 'result') && isRunTestsTool(toolNameOf(b))
-}
-
-/** Collapse runs of collapsible tool/result blocks into grouped render items.
- *  Exploration tools (read/search/list) and run_tests each form their own group
- *  type; everything else stays standalone. */
+/** Collapse contiguous agent reasoning and background tools into a unified timeline.
+ *  Artifacts and conversational turns break the timeline. */
 function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
   const out: RenderItem[] = []
   let run: ConvoBlock[] | null = null
-  let runKind: 'tools' | 'run_tests' | null = null
-  for (const b of blocks) {
-    const foldKind = isFoldable(b) ? 'tools' as const : isRunTestsFoldable(b) ? 'run_tests' as const : null
-    if (foldKind) {
-      if (!run || runKind !== foldKind) { run = []; runKind = foldKind; out.push({ kind: foldKind, key: `tg-${b.key}`, items: run }) }
-      run.push(b)
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!
+    if (
+      b.kind === 'user' ||
+      (b.kind === 'assistant' && b.text.trim()) ||
+      b.kind === 'phase' ||
+      b.kind === 'turn' ||
+      b.kind === 'steer' ||
+      b.kind === 'decision_shift' ||
+      isArtifactTool(b)
+    ) {
+      if (run) {
+        out.push({ kind: 'timeline', key: `tl-${run[0]!.key}`, items: run })
+        run = null
+      }
+      
+      if (isArtifactTool(b)) {
+        if (b.kind === 'tool') {
+          // If the next block is the corresponding result, skip it so we don't render it separately
+          const next = blocks[i+1]
+          if (next && next.kind === 'result' && toolNameOf(next) === toolNameOf(b)) {
+            out.push({ kind: 'artifact', block: b })
+            i++ // skip next
+          } else {
+            out.push({ kind: 'artifact', block: b })
+          }
+        } else {
+          // It's a result block of an artifact tool without a preceding tool block in this context
+          out.push({ kind: 'artifact', block: b })
+        }
+      } else {
+        out.push({ kind: 'block', block: b })
+      }
     } else {
-      run = null
-      runKind = null
-      out.push({ kind: 'block', block: b })
+      if (!run) run = []
+      run.push(b)
     }
+  }
+  if (run) {
+    out.push({ kind: 'timeline', key: `tl-${run[0]!.key}`, items: run })
   }
   return out
 }
@@ -490,18 +698,21 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 // only the actively-growing last block re-renders during streaming.
 const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
-  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage
+  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
+  a.domainGlyph === b.domainGlyph && a.domainName === b.domainName
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
   onOpenImage?: (src: string) => void
+  domainGlyph?: string
+  domainName?: string
 }) {
   if (block.kind === 'user') {
     return (
-      <MsgBlock role="你">
+      <MsgBlock role="你" roleGlyph="user">
         <Markdown source={block.text} />
         {block.imageIds && block.imageIds.length > 0 && sessionId ? (
           <div className="msg-images">
@@ -548,7 +759,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
   }
   if (block.kind === 'steer') {
     return (
-      <MsgBlock role="引导 · 已排队">
+      <MsgBlock role="引导" roleGlyph="steer">
         <Markdown source={block.text} />
       </MsgBlock>
     )
@@ -579,7 +790,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage }: {
     )
   }
   return (
-    <MsgBlock role={STAR_DOMAINS.tianshu.name}>
+    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} />
     </MsgBlock>
   )
@@ -648,11 +859,12 @@ function StreamingText({ source }: { source: string }) {
 /** MsgBlock — message wrapper with a copy button that appears on hover. */
 function MsgBlock(props: {
   role?: string
+  roleGlyph?: string | 'user' | 'steer'
   isError?: boolean
   className?: string
   children: React.ReactNode
 }) {
-  const { role, isError, className, children } = props
+  const { role, roleGlyph, isError, className, children } = props
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -667,11 +879,20 @@ function MsgBlock(props: {
 
   const kind = className
     ? ` ${className}`
-    : isError ? ' error' : role === '引导 · 已排队' ? ' steer' : role === '你' ? ' user' : ' assistant'
+    : isError ? ' error' : role === '引导' ? ' steer' : role === '你' ? ' user' : ' assistant'
 
   return (
     <div className={`msg${kind}`}>
-      {role && <div className="msg-role">{role}</div>}
+      {role && (
+        <div className="msg-role" title={role}>
+          {roleGlyph === 'user' && <span className="msg-role-dot" />}
+          {roleGlyph === 'steer' && <span className="msg-role-glyph">↳</span>}
+          {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' && (
+            <span className="msg-role-glyph">{roleGlyph}</span>
+          )}
+          <span className="msg-role-label">{role}</span>
+        </div>
+      )}
       <div className="msg-body" ref={ref}>
         <button
           className="msg-copy-btn"

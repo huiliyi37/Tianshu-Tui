@@ -16,10 +16,17 @@ import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { getToolFamily } from '../tool-family.js'
 import { toolArgSummary } from '../tool-label.js'
+import { isDelegationTool } from './tool-domain.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import { formatDiff, isDiffContent } from './diff.js'
 import { brailleSpinnerFrame } from '../braille-spinner.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import chalk from 'chalk'
+
+/** 宽度口径：与 LiveEngine.rowsForLine 一致。工具输出（git diff/代码/日志）常含
+ *  `— … │ →` 等 ambiguous 符号 + CJK，按 .length/stringWidth(narrow) 截断会低估
+ *  实际列宽 → 尾行溢出终端宽度折行 → rowsForLine 低估 → chrome 残留重影。 */
+const WIDE = { ambiguousAsWide: true }
 
 export interface FormatToolCardInput {
   /** 工具名称 */
@@ -103,6 +110,20 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   }
 
   const lines: string[] = [header]
+
+  // ── Streaming delegation preview ──────────────────────────────
+  // When a delegate_batch/delegate_task call is streaming its args (no result
+  // yet), show the task list / objective as a live preview so the user sees
+  // the delegation scope growing token-by-token. Mirrors pi's
+  // renderTaskItemLines — once a result arrives, the worker fleet panel
+  // takes over and this preview is skipped (non-streaming).
+  if (streaming && isDelegationTool(toolName) && toolInput) {
+    const preview = renderDelegationPreview(toolName, toolInput, theme, indent)
+    if (preview.length > 0) {
+      lines.push(...preview)
+      return lines
+    }
+  }
 
   const trimmed = content.replace(/\n+$/, '')
   if (!trimmed) {
@@ -215,9 +236,79 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
   if (tail) {
     const tailCount = input.tailLines ?? 3
     const maxWidth = Math.max(10, input.columns - 6)
-    const shown = tail.split('\n').slice(-tailCount).map(l =>
-      color(l.length > maxWidth ? l.slice(0, maxWidth - 1) + '…' : l, theme.muted))
+    const shown = tail.split('\n').slice(-tailCount).map(l => {
+      // 按显示宽度截断（CJK 2 列、ambiguous 2 列）。… 自身 2 列，预算留给它。
+      const ellW = displayWidth('…', WIDE)
+      const clipped = displayWidth(l, WIDE) > maxWidth
+        ? `${truncateToDisplayWidth(l, maxWidth - ellW, WIDE)}…`
+        : l
+      return color(clipped, theme.muted)
+    })
     lines.push(...indentBody(shown, '', theme))
   }
   return lines
+}
+
+// ── Streaming delegation preview ───────────────────────────────
+// Renders a live task-list preview while delegate_batch/delegate_task
+// args stream in. Mirrors pi's renderTaskItemLines: each task appears
+// as `• ID: description` as the JSON tokens arrive. Once a result
+// arrives, the worker fleet panel takes over and this preview is skipped.
+
+const DELEGATION_PREVIEW_MAX = 8
+
+function renderDelegationPreview(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  theme: RivetTheme,
+  indent: string,
+): string[] {
+  const lines: string[] = []
+  const bullet = color('•', theme.dim)
+  const prefix = `${indent}${BODY_FIRST_PREFIX}`
+
+  // delegate_batch: render tasks[] list
+  if (toolName === 'delegate_batch') {
+    const tasks = Array.isArray(toolInput.tasks) ? toolInput.tasks : []
+    if (tasks.length === 0) {
+      lines.push(`${prefix}${color('… 等待任务列表', theme.dim)}`)
+      return lines
+    }
+    const cap = Math.min(tasks.length, DELEGATION_PREVIEW_MAX)
+    for (let i = 0; i < cap; i++) {
+      const task = tasks[i] as Record<string, unknown> | undefined
+      const rawId = typeof task?.id === 'string' ? task.id.trim() : ''
+      const idLabel = rawId || `#${i + 1}`
+      const desc = typeof task?.description === 'string' ? task.description.trim() : ''
+      let line = `${prefix}${bullet} ${color(idLabel, theme.secondary, { bold: true })}`
+      if (desc) {
+        line += color(`: ${truncatePreview(desc, 60)}`, theme.muted)
+      }
+      lines.push(line)
+    }
+    if (cap < tasks.length) {
+      lines.push(`${prefix}${color(`… +${tasks.length - cap} more`, theme.dim)}`)
+    }
+    return lines
+  }
+
+  // delegate_task (single): render objective
+  if (toolName === 'delegate_task') {
+    const objective = typeof toolInput.objective === 'string' ? toolInput.objective.trim() : ''
+    const agent = typeof toolInput.agent === 'string' ? toolInput.agent : ''
+    if (objective) {
+      lines.push(`${prefix}${color(truncatePreview(objective, 72), theme.muted)}`)
+    } else if (agent) {
+      lines.push(`${prefix}${color(`… 派发 ${agent}`, theme.dim)}`)
+    } else {
+      lines.push(`${prefix}${color('… 派发中', theme.dim)}`)
+    }
+    return lines
+  }
+
+  return lines
+}
+
+function truncatePreview(text: string, max: number): string {
+  return text.length > max ? text.slice(0, max - 1) + '…' : text
 }

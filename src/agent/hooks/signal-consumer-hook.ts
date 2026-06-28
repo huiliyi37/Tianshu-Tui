@@ -32,7 +32,12 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       if (strategy?.explorationBreadth !== undefined && strategy.explorationBreadth > 0.6) {
         once('search-breadth:wide', () => {
-          ctx.effects.injectUserMessage('<search-breadth mode="wide" />')
+          const content = '搜索广度建议：当前策略偏窄，建议扩大搜索范围（wide mode）'
+          if (options.advisoryBus) {
+            options.advisoryBus.submit({ key: 'search-breadth:wide', priority: 0.45, category: 'discipline', content })
+          } else {
+            ctx.effects.injectUserMessage('<search-breadth mode="wide" />')
+          }
         })
       }
 
@@ -44,7 +49,12 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
 
       if (pressure?.suggestion === 'task_decomposition') {
         once('pressure:task-decomposition', () => {
-          ctx.effects.injectUserMessage('<天梁-感知 type="decomposition">检测到任务过大，建议拆分为子步骤后逐一完成。天梁的分波执行节奏：先完成一个子目标并验证，再推进下一步。</天梁-感知>')
+          const content = '【天梁-感知】检测到任务过大，建议拆分为子步骤后逐一完成。天梁的分波执行节奏：先完成一个子目标并验证，再推进下一步。'
+          if (options.advisoryBus) {
+            options.advisoryBus.submit({ key: 'pressure:task-decomposition', priority: 0.6, tier: 'operational', category: 'discipline', content })
+          } else {
+            ctx.effects.injectUserMessage('<天梁-感知 type="decomposition">检测到任务过大，建议拆分为子步骤后逐一完成。天梁的分波执行节奏：先完成一个子目标并验证，再推进下一步。</天梁-感知>')
+          }
         })
       }
 

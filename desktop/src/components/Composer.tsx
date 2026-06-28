@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
-import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
-import type { PlanModeState } from '../runtime/types'
-import type { ModelEntry } from '../runtime/types'
+import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
+import { toast } from 'sonner'
+import type { ModelEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
 
@@ -14,9 +14,64 @@ import { compressImage } from '../lib/image-compress'
 // Controlled value: the parent owns input state so rewind/clear can set it.
 // Vision: paste/drop/select images → base64 data URLs → sent as image_url parts.
 
+// Web Speech API types are not in all lib DOM sets; declare minimally.
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number
+  results: SpeechRecognitionResultList
+}
+interface SpeechRecognitionResultList {
+  length: number
+  item(index: number): SpeechRecognitionResult
+}
+interface SpeechRecognitionResult {
+  isFinal: boolean
+  [index: number]: SpeechRecognitionAlternative
+}
+interface SpeechRecognitionAlternative {
+  transcript: string
+}
+interface SpeechRecognition extends EventTarget {
+  lang: string
+  continuous: boolean
+  interimResults: boolean
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onresult: ((event: SpeechRecognitionEvent) => void) | null
+  onerror: ((event: Event) => void) | null
+  start(): void
+  stop(): void
+}
+
+interface SpeechRecognitionConstructor {
+  new (): SpeechRecognition
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor
+    webkitSpeechRecognition?: SpeechRecognitionConstructor
+  }
+}
+
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const MAX_IMAGES = 4
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 220
+
+/** Highlight placeholder arguments like `<描述>` in slash command examples. */
+function HighlightedExample({ text }: { text: string }) {
+  const parts = text.split(/(<[^>]+>)/g)
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.startsWith('<') && part.endsWith('>') ? (
+          <span key={i} className="suggest-arg">{part}</span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  )
+}
 
 export function computeComposerTextareaStyle(scrollHeight: number, maxHeight = COMPOSER_TEXTAREA_MAX_HEIGHT): { height: string; overflowY: 'hidden' | 'auto' } {
   const height = Math.min(Math.max(0, scrollHeight), maxHeight)
@@ -40,7 +95,7 @@ function isImageFileName(name: string): boolean {
 
 type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
-  | { mode: 'command'; items: ComposerCommand[]; index: number }
+  | { mode: 'command'; items: ComposerCommand[]; index: number; matched: boolean }
 
 export function Composer(props: {
   sessionId: string
@@ -58,13 +113,16 @@ export function Composer(props: {
 }) {
   const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, menuRev } = props
   const planning = planMode === 'planning'
+
+  useEffect(() => {
+    const win = window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    setSpeechSupported(!!(win.SpeechRecognition || win.webkitSpeechRecognition))
+  }, [])
   const togglePlan = useCallback(() => {
     onSetPlanMode?.(planning ? 'off' : 'planning')
   }, [planning, onSetPlanMode])
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const plusRef = useRef<HTMLDivElement>(null)
-  const [plusOpen, setPlusOpen] = useState(false)
   const lastEscAt = useRef(0)
   const reqSeq = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout>>()
@@ -73,6 +131,9 @@ export function Composer(props: {
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [imageError, setImageError] = useState<string | null>(null)
+  const [recording, setRecording] = useState(false)
+  const [speechSupported, setSpeechSupported] = useState(false)
+  const recognitionRef = useRef<SpeechRecognition | null>(null)
 
   // Restore caret after a programmatic value change (mention insertion).
   useLayoutEffect(() => {
@@ -93,17 +154,6 @@ export function Composer(props: {
   }, [value])
 
   useEffect(() => () => clearTimeout(debounce.current), [])
-
-  // Close the "+" menu when clicking outside its wrapper (which includes the
-  // trigger button, so toggling on the button doesn't immediately re-close).
-  useEffect(() => {
-    if (!plusOpen) return
-    const onDown = (e: MouseEvent) => {
-      if (plusRef.current && !plusRef.current.contains(e.target as Node)) setPlusOpen(false)
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [plusOpen])
 
   const closeSuggest = () => setSuggest(null)
 
@@ -152,8 +202,12 @@ export function Composer(props: {
       const slash = detectSlash(text, caret)
       if (slash) {
         clearTimeout(debounce.current)
-        const items = filterCommands(commands, slash.query)
-        setSuggest(items.length > 0 ? { mode: 'command', items, index: 0 } : null)
+        const filtered = filterCommands(commands, slash.query)
+        const matched = filtered.length > 0
+        // If the user typed something with no match, still show the full list
+        // grayed-out so they see available commands instead of a blank menu.
+        const items = matched ? filtered : commands
+        setSuggest({ mode: 'command', items, index: matched ? 0 : -1, matched })
         return
       }
     }
@@ -184,11 +238,17 @@ export function Composer(props: {
   const accept = () => {
     if (!suggest) return
     if (suggest.mode === 'file') selectFile(suggest.token, suggest.items[suggest.index]!)
-    else runCommand(suggest.items[suggest.index]!)
+    else if (suggest.index >= 0 && suggest.matched) runCommand(suggest.items[suggest.index]!)
+    else {
+      // No matching command — toast and keep the menu open briefly so the user sees the hint.
+      const firstToken = value.trim().split(/\s/)[0]
+      toast.error(`未知命令 "${firstToken}" — 输入 / 查看可用命令`)
+    }
   }
 
   const move = (delta: number) => {
     if (!suggest) return
+    if (suggest.mode === 'command' && !suggest.matched) return
     const n = suggest.items.length
     const index = (suggest.index + delta + n) % n
     setSuggest({ ...suggest, index } as Suggest)
@@ -197,8 +257,51 @@ export function Composer(props: {
   const submit = () => {
     const text = value.trim()
     if (!text && images.length === 0) return
+    // Guard: reject unknown slash commands instead of sending them to the agent
+    // (which would misinterpret the /token as a literal request). Mirrors TUI
+    // resolveAppPromptInput returning null for unrecognized slashes.
+    if (commands && commands.length > 0 && !isKnownSlashCommand(text, commands)) {
+      toast.error(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
+      return
+    }
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
+  }
+
+  const toggleRecording = () => {
+    if (recording) {
+      recognitionRef.current?.stop()
+      return
+    }
+    const win = window as unknown as { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor }
+    const SpeechRecognitionCtor = win.SpeechRecognition || win.webkitSpeechRecognition
+    if (!SpeechRecognitionCtor) return
+    const recognition = new SpeechRecognitionCtor()
+    recognition.lang = 'zh-CN'
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.onstart = () => setRecording(true)
+    recognition.onend = () => {
+      setRecording(false)
+      recognitionRef.current = null
+    }
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      let final = ''
+      let interim = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results.item(i)
+        if (result.isFinal) final += result[0]?.transcript ?? ''
+        else interim += result[0]?.transcript ?? ''
+      }
+      if (final) {
+        onChange(value ? `${value} ${final}`.trim() : final)
+      } else if (interim) {
+        onChange(value ? `${value} ${interim}`.trim() : interim)
+      }
+    }
+    recognition.onerror = () => setRecording(false)
+    recognitionRef.current = recognition
+    recognition.start()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -329,19 +432,27 @@ export function Composer(props: {
                   <span className="suggest-path">{path}</span>
                 </li>
               ))
-            : suggest.items.map((cmd, i) => (
-                <li
-                  key={cmd.name}
-                  role="option"
-                  aria-selected={i === suggest.index}
-                  className={`suggest-item ${i === suggest.index ? 'active' : ''}`}
-                  onMouseDown={(e) => { e.preventDefault(); runCommand(cmd) }}
-                >
-                  <span className="suggest-glyph" aria-hidden>/</span>
-                  <span className="suggest-path">{cmd.name}</span>
-                  <span className="suggest-desc">{cmd.desc}</span>
-                </li>
-              ))}
+            : suggest.items.map((cmd, i) => {
+                const disabled = !suggest.matched
+                return (
+                  <li
+                    key={cmd.name}
+                    role="option"
+                    aria-selected={i === suggest.index}
+                    aria-disabled={disabled}
+                    className={`suggest-item ${i === suggest.index && !disabled ? 'active' : ''} ${disabled ? 'disabled' : ''}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      if (!disabled) runCommand(cmd)
+                    }}
+                  >
+                    <span className="suggest-glyph" aria-hidden>/</span>
+                    <span className="suggest-path">{cmd.name}</span>
+                    <span className="suggest-desc">{cmd.desc}</span>
+                    {cmd.example && <span className="suggest-example"><HighlightedExample text={cmd.example} /></span>}
+                  </li>
+                )
+              })}
         </ul>
       )}
       {images.length > 0 && (
@@ -386,31 +497,30 @@ export function Composer(props: {
           title="选择图片"
           aria-label="选择图片"
         >📎</button>
+        {speechSupported && (
+          <button
+            className={`btn ghost icon-btn ${recording ? 'recording' : ''}`}
+            onClick={toggleRecording}
+            disabled={busy}
+            title={recording ? '停止录音' : '语音输入'}
+            aria-label={recording ? '停止录音' : '语音输入'}
+          >🎤</button>
+        )}
       </div>
       <div className="composer-actions">
-        <div className="plus-wrap" ref={plusRef}>
-          <button
-            className={`plus-btn ${plusOpen ? 'open' : ''}`}
-            onClick={() => setPlusOpen((o) => !o)}
-            title="添加模式 / 图片 / 命令"
-            aria-label="添加"
-            aria-haspopup="menu"
-            aria-expanded={plusOpen}
-          >+</button>
-          {plusOpen && (
-            <PlusMenu
-              sessionId={sessionId}
-              menuRev={menuRev}
-              sessionRunning={busy}
-              planMode={planMode}
-              onSetPlanMode={onSetPlanMode}
-              onPickImage={() => fileInputRef.current?.click()}
-              imageDisabled={images.length >= MAX_IMAGES}
-              commands={commands}
-              onRunCommand={runCommand}
-              onClose={() => setPlusOpen(false)}
-            />
-          )}
+        <div className="plus-wrap">
+          <PlusMenu
+            sessionId={sessionId}
+            menuRev={menuRev}
+            sessionRunning={busy}
+            planMode={planMode}
+            onSetPlanMode={onSetPlanMode}
+            onPickImage={() => fileInputRef.current?.click()}
+            imageDisabled={images.length >= MAX_IMAGES}
+            commands={commands}
+            onRunCommand={runCommand}
+            onClose={() => {}}
+          />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} />
         {onSetPlanMode && (

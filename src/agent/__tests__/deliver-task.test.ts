@@ -1832,12 +1832,12 @@ Do not declare a streamed response duplicate in the middle of the stream.
   })
 
   describe('typecheck backstop gate', () => {
-    const brokenRunner: import('../typecheck-gate.js').TypecheckRunner = () => ({
+    const brokenRunner: import('../typecheck-gate.js').TypecheckRunner = async () => ({
       diagnostics: [{ file: 'src/foo.ts', line: 12, col: 1, severity: 'error', message: 'TS1117: duplicate property' }],
       formatted: '',
       ranOk: true,
     })
-    const cleanRunner: import('../typecheck-gate.js').TypecheckRunner = () => ({ diagnostics: [], formatted: '', ranOk: true })
+    const cleanRunner: import('../typecheck-gate.js').TypecheckRunner = async () => ({ diagnostics: [], formatted: '', ranOk: true })
 
     it('escalates to L3 and prefixes focusHint with Typecheck on a type error', async () => {
       let captured: ChangeSet | undefined

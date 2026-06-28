@@ -90,6 +90,9 @@ test('handleError 后旧累加器不跨 run 泄露——终态提交不含上轮
   app.callbacks.onToolUse('old-tool', 'bash', { command: 'echo new' })
   app.callbacks.onToolResult('old-tool', 'bash', 'NEW_FINAL_RESULT', false)
   await tick()
+  // bash 已改为可折叠，终态绑定到折叠组；触发 turn 边界 flush 使其提交。
+  app.callbacks.onTurnComplete({}, 1, true)
+  await tick()
 
   const committed = stripAnsi(app.getScrollbackContent())
   // 终态结果应提交，旧数据不应泄露

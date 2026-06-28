@@ -159,7 +159,8 @@ export function renderAllCapsulesBlock(cwd: string): string | undefined {
  * 完整正文经 recall_capsule(star) 按需拉取。
  * 天璇的换视角核心思维已蒸馏进 static.ts BASE_PROMPT，天权的规划原则
  * 已由 evidence-scope / workflow 规则覆盖，CORE_GUARDRAILS 的 5 条护栏
- * 已由 self-verification / external-source-verification / evidence-scope 覆盖。
+ * 已由 evidence-scope（含原 self-verification / cross-layer 证据内核）/
+ * external-source-verification / delivery-contract 覆盖。
  * 不再在冻结前缀常驻任何胶囊全文或护栏——省 ~6K tokens。
  */
 
@@ -194,31 +195,6 @@ export function getCapsuleByStar(cwd: string, star: string): SeedCapsule | undef
 /** 已加载胶囊的星名列表（供工具枚举可选值 / 模糊匹配兜底）。 */
 export function listCapsuleStars(cwd: string): string[] {
   return loadAllCapsules(cwd).map(c => c.star)
-}
-
-// ─── 向后兼容（供旧调用方或 volatile-snapshot 迁移期使用） ───
-
-export interface SeedCapsuleL1 {
-  block: string
-  raw: string
-}
-
-/**
- * @deprecated 使用 loadAllCapsules / renderAllCapsulesBlock 代替。
- * 仅保留向后兼容——只加载天璇胶囊。
- */
-export function loadTianxuanCapsule(cwd: string): SeedCapsuleL1 | null {
-  const capsules = loadAllCapsules(cwd)
-  const tianxuan = capsules.find(c => c.star === '天璇')
-  if (!tianxuan) return null
-  return { block: tianxuan.block, raw: tianxuan.raw }
-}
-
-/**
- * @deprecated 单胶囊渲染已被合并渲染替代。保留接口以兼容。
- */
-export function renderCapsuleBlock(l1: SeedCapsuleL1): string {
-  return l1.block
 }
 
 // ─── Phase 2: Principle Extraction ─────────────────────────────

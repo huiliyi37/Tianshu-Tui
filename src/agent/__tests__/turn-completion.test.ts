@@ -12,7 +12,6 @@ function makeConfig(): AgentConfig {
     client: { stream: async () => {} },
     promptEngine: {
       setTaskProgress: () => {},
-      setBehaviorMirror: () => {},
       setDecisions: () => {},
     } as unknown as AgentConfig['promptEngine'],
     toolRegistry: {} as AgentConfig['toolRegistry'],

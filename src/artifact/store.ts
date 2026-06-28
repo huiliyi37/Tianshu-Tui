@@ -51,16 +51,39 @@ export class ArtifactCorruptionError extends Error {
 export class ArtifactStore {
   private readonly artifacts = new Map<string, Artifact>()
   private readonly dir: string
+  private readonly baseDir: string
   private readonly sessionId: string
   private readonly now: () => number
   private readonly idGenerator: () => string
+  /** Other artifact session directories that this store can read from.
+   *  Used to resolve artifacts produced by worker sessions without copying them. */
+  private readonly fallbackSessionIds: string[] = []
+  private readonly fallbackArtifacts = new Map<string, Artifact>()
 
   constructor(baseDir: string, sessionId: string, options: ArtifactStoreOptions = {}) {
+    this.baseDir = baseDir
     this.dir = join(baseDir, sessionId)
     this.sessionId = sessionId
     this.now = options.now ?? Date.now
     this.idGenerator = options.idGenerator ?? (() => randomUUID().slice(0, 8))
     this.loadIndex()
+  }
+
+  /** Allow the store to resolve artifacts from another session directory
+   *  (e.g. `worker-<orderId>`) without copying files. Safe to call multiple
+   *  times with the same session id. */
+  addFallbackSession(sessionId: string): void {
+    if (!this.fallbackSessionIds.includes(sessionId)) {
+      this.fallbackSessionIds.push(sessionId)
+    }
+  }
+
+  /** Derive a store bound to a different session id, sharing the same baseDir,
+   *  clock, and id generator. Used by the coordinator to persist worker diffs
+   *  into a per-worker session directory (worker-<orderId>) so the primary
+   *  store can resolve them via addFallbackSession. */
+  forSession(sessionId: string): ArtifactStore {
+    return new ArtifactStore(this.baseDir, sessionId, { now: this.now, idGenerator: this.idGenerator })
   }
 
   async save(input: SaveArtifactInput): Promise<string> {
@@ -90,7 +113,42 @@ export class ArtifactStore {
   }
 
   get(id: string): Artifact | null {
-    return this.artifacts.get(id) ?? null
+    const primary = this.artifacts.get(id)
+    if (primary) return primary
+    const cached = this.fallbackArtifacts.get(id)
+    if (cached) return cached
+    for (const sessionId of this.fallbackSessionIds) {
+      const artifact = this.loadArtifactFromSessionIndex(sessionId, id)
+      if (artifact) {
+        this.fallbackArtifacts.set(id, artifact)
+        return artifact
+      }
+    }
+    return null
+  }
+
+  private loadArtifactFromSessionIndex(sessionId: string, id: string): Artifact | null {
+    const indexPath = join(this.baseDir, sessionId, '_index.jsonl')
+    if (!existsSync(indexPath)) return null
+    try {
+      const lines = readFileSync(indexPath, 'utf-8').split('\n')
+      for (const line of lines) {
+        if (line.trim().length === 0) continue
+        try {
+          const artifact = JSON.parse(line) as Artifact
+          if (artifact.id === id && isArtifactForSession(artifact, sessionId)) {
+            // Re-anchor rawPath to the fallback session directory so reads work.
+            artifact.rawPath = join(this.baseDir, sessionId, `${safeArtifactFileStem(id)}.raw`)
+            return artifact
+          }
+        } catch {
+          // skip malformed line
+        }
+      }
+    } catch {
+      // ignore unreadable fallback index
+    }
+    return null
   }
 
   listByTarget(target: string): Artifact[] {
@@ -102,7 +160,7 @@ export class ArtifactStore {
   }
 
   async readRaw(id: string): Promise<string | null> {
-    const artifact = this.artifacts.get(id)
+    const artifact = this.get(id)
     if (!artifact) return null
     const raw = await readFile(artifact.rawPath, 'utf-8')
     this.assertIntegrity(artifact, raw)
@@ -136,7 +194,7 @@ export class ArtifactStore {
     startLine: number,
     endLine: number,
   ): Promise<{ content: string; totalLines: number; capped: boolean } | null> {
-    const artifact = this.artifacts.get(id)
+    const artifact = this.get(id)
     if (!artifact) return null
 
     const start = Math.max(1, Math.trunc(startLine))

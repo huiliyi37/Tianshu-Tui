@@ -62,6 +62,7 @@ import { buildHistoricalModelRewards } from './model-reward-summary.js'
 import type { EFEComponents } from './prediction-error.js'
 import type { Sensorium } from './sensorium.js'
 import type { OaiMessage } from '../api/oai-types.js'
+import type { Usage } from '../api/types.js'
 
 /** Per-turn free-energy signals pulled from the primary loop at delegation time. */
 export interface EFERoutingSignals {
@@ -197,6 +198,10 @@ export interface DelegationCoordinatorConfig {
   sessionRegistry?: import('./session-registry.js').SessionRegistry
   /** Current session ID for claim management. */
   sessionId?: string
+  /** Primary session artifact store. When set, worker artifacts are made resolvable
+   *  by registering their session directories as fallbacks, and large worker
+   *  packets can be offloaded into the primary store. */
+  artifactStore?: import('../artifact/store.js').ArtifactStore
   /** Optional collaboration protocol for semantic locking and merge coordination. */
   collaboration?: CollaborationConfig
   /** AbortSignal to propagate to workers — fires when the tool-level timeout
@@ -454,6 +459,16 @@ export class DelegationCoordinator {
     })
     this.circuitBreaker = config.circuitBreaker ?? new CircuitBreakerManager()
     this.mailbox = new InMemoryMailbox()
+  }
+
+  /** Artifact session id used by a worker for its own ArtifactStore. */
+  private workerArtifactSessionId(orderId: string): string {
+    return `worker-${orderId.replace(/:/g, '-')}`
+  }
+
+  /** Make worker-produced artifacts resolvable from the primary session store. */
+  private registerWorkerArtifacts(orderId: string): void {
+    this.config.artifactStore?.addFallbackSession(this.workerArtifactSessionId(orderId))
   }
 
   /** Lazily start the stall sweep; stop it when no workers are in flight. */
@@ -731,6 +746,29 @@ export class DelegationCoordinator {
     else health.recordFailure(providerId)
   }
 
+  /** Attach runtime model/provider/usage metadata to a worker result so that
+   *  downstream insights panels can render per-delegation costs and routing. */
+  private enrichResult(
+    result: WorkerResult,
+    model: string,
+    provider: string | undefined,
+    usage?: Usage | Partial<Usage>,
+  ): WorkerResult {
+    return {
+      ...result,
+      model: result.model ?? model,
+      provider: result.provider ?? provider,
+      usage: result.usage ?? (usage ? {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read_input_tokens: usage.cache_read_input_tokens,
+        cache_creation_input_tokens: usage.cache_creation_input_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        total_tokens: (usage.input_tokens ?? 0) + (usage.output_tokens ?? 0),
+      } : undefined),
+    }
+  }
+
   private buildTierRecommendation(order: WorkOrder): ModelTierRecommendation {
     return recommendModelTier({
       authority: order.authority,
@@ -825,7 +863,7 @@ export class DelegationCoordinator {
             nextActions: ['Perform the objective directly in this worker session'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
 
@@ -833,7 +871,7 @@ export class DelegationCoordinator {
         return {
           status: 'skipped',
           results: [],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
 
@@ -856,7 +894,7 @@ export class DelegationCoordinator {
               nextActions: ['Wait for cooldown or use a different profile'],
               evidenceStatus: 'blocked',
             }],
-            packet: await buildPrimaryWorkerPacket([]),
+            packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
           }
         }
       }
@@ -874,7 +912,7 @@ export class DelegationCoordinator {
           modelTierGatedDecisions: [],
           gatedInfluenceAudits: [],
           results: [resumeHit],
-          packet: await buildPrimaryWorkerPacket([resumeHit]),
+          packet: await buildPrimaryWorkerPacket([resumeHit], this.config.artifactStore),
         }
       }
 
@@ -989,7 +1027,7 @@ export class DelegationCoordinator {
         status: 'completed',
         order,
         results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'))],
-        packet: await buildPrimaryWorkerPacket([]),
+        packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
       }
     }
 
@@ -1016,7 +1054,7 @@ export class DelegationCoordinator {
             nextActions: ['Reduce file scope or increase maxFiles budget'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
     }
@@ -1104,7 +1142,7 @@ export class DelegationCoordinator {
 
     this.state.recordEvent({ type: 'running', workOrderId: order.id, timestamp: Date.now() })
 
-    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[] } | undefined
+    let run: { result: WorkerResult; transcript?: WorkerSessionRun['transcript']; sessionMessages?: readonly OaiMessage[]; usage?: Usage | Partial<Usage>; providerName?: string } | undefined
 
     // T3: escalation shadow events collected during retry
     const escalationShadows: ModelTierShadowEvent[] = []
@@ -1173,7 +1211,7 @@ export class DelegationCoordinator {
             nextActions: ['Wait for other session to release locks, or use non-overlapping file scope'],
             evidenceStatus: 'blocked',
           }],
-          packet: await buildPrimaryWorkerPacket([]),
+          packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
         }
       }
       semanticLockAcquired = true
@@ -1222,7 +1260,7 @@ export class DelegationCoordinator {
                 modelTierGatedDecisions: [tierGatedDecision],
                 gatedInfluenceAudits: [gatedInfluenceAudit],
                 results: [degraded],
-                packet: await buildPrimaryWorkerPacket([degraded]),
+                packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
               }
             }
           }
@@ -1238,6 +1276,11 @@ export class DelegationCoordinator {
           // subagent write operations (edit_file/write_file/bash) even when Rivet
           // correctly provisions write tools and worktree isolation. This is a
           // host-layer constraint, not a Rivet work-order or worktree bug.
+          // Register the worker's fallback session BEFORE runHands so any diff
+          // persisted during the run is resolvable by the primary store, and hand
+          // a worker-scoped store to runHands for persistence.
+          this.registerWorkerArtifacts(order.id)
+          const workerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
           const handsRun = await wrapAbort(this.runHands({
             order,
             wtCoordinator: new WorktreeCoordinator(cwd),
@@ -1247,6 +1290,7 @@ export class DelegationCoordinator {
             compact: workerConfig.compact,
             activeClaims,
             domainKnowledgeStore: this.config.domainKnowledgeStore,
+            artifactStore: workerStore,
             runAgent: async (prompt, callbacks, workerCwd) => {
               const sessionRun = await this.runWorker({
                 ...workerConfig,
@@ -1262,7 +1306,7 @@ export class DelegationCoordinator {
               return JSON.stringify(sessionRun.result)
             },
           }))
-          run = { result: handsRun.result, sessionMessages: handsSessionMessages }
+          run = { result: handsRun.result, sessionMessages: handsSessionMessages, usage: handsRun.usage, providerName: workerConfig.providerName }
         } finally {
           if (this.config.sessionRegistry && this.config.sessionId) {
             for (const file of acquiredClaimFiles) {
@@ -1275,7 +1319,8 @@ export class DelegationCoordinator {
         const sessionMessages = typeof workerRun.session?.getMessages === 'function'
           ? workerRun.session.getMessages()
           : undefined
-        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+        run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: workerConfig.providerName }
+        this.registerWorkerArtifacts(order.id)
       }
     } catch (error) {
       // Physarum health: worker run threw (API/runtime fault, not task outcome).
@@ -1322,6 +1367,11 @@ export class DelegationCoordinator {
                 }
                 const retryCwd = this.config.cwd ?? workerConfig.cwd
                 let retryHandsMessages: readonly OaiMessage[] | undefined
+                // Retry reuses the same order.id, so the fallback session is
+                // already registered by the primary branch above. Re-derive the
+                // worker-scoped store so retry diffs also persist (otherwise the
+                // delegation diff review would silently miss retry/escalation paths).
+                const retryWorkerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
                 const retryHandsRun = await wrapAbort(this.runHands({
                   order,
                   wtCoordinator: new WorktreeCoordinator(retryCwd),
@@ -1331,6 +1381,7 @@ export class DelegationCoordinator {
                   compact: workerConfig.compact,
                   activeClaims: this.config.activeClaims?.() ?? workerConfig.activeClaims ?? [],
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  artifactStore: retryWorkerStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({
                       ...workerConfig,
@@ -1346,7 +1397,7 @@ export class DelegationCoordinator {
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages }
+                run = { result: retryHandsRun.result, sessionMessages: retryHandsMessages, usage: retryHandsRun.usage, providerName: workerConfig.providerName }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId) {
                   for (const f of retryClaimFiles) this.config.sessionRegistry.releaseClaim(this.config.sessionId, f)
@@ -1357,7 +1408,7 @@ export class DelegationCoordinator {
               const sessionMessages = typeof workerRun.session?.getMessages === 'function'
                 ? workerRun.session.getMessages()
                 : undefined
-              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: workerConfig.providerName }
             }
             // Retry succeeded — record provider health and exit loop
             this.recordProviderOutcome(selected.model, true)
@@ -1427,8 +1478,12 @@ export class DelegationCoordinator {
                   }
                   if (conflictedFiles.length > 0) {
                     for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
-                    const degraded = workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`))
-                    return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded]) }
+                    const degraded = this.enrichResult(
+                      workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`)),
+                      strongCard.model,
+                      upgradedConfig.providerName,
+                    )
+                    return { status: 'completed' as const, order, selectedModel: strongCard.model, modelTierShadows: [tierShadow, ...escalationShadows], modelTierGatedDecisions: [tierGatedDecision], gatedInfluenceAudits: [gatedInfluenceAudit], results: [degraded], packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore) }
                   }
                 }
 
@@ -1436,6 +1491,10 @@ export class DelegationCoordinator {
                 escalationShadows.push(this.recordEscalation(order, strongCard, msg))
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
                 let retryHandsMessages: readonly OaiMessage[] | undefined
+                // Escalation retries with the same order.id → fallback session already
+                // registered. Re-derive worker store so the escalated run's diff persists
+                // (parity with primary + retry branches).
+                const escalateWorkerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
                   maxTurns: upgradedConfig.maxTurns,
@@ -1443,6 +1502,7 @@ export class DelegationCoordinator {
                   compact: upgradedConfig.compact,
                   activeClaims: upgradedConfig.activeClaims ?? [],
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  artifactStore: escalateWorkerStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({ ...upgradedConfig, order, cwd: workerCwd, activeClaims: upgradedConfig.activeClaims ?? [], domainKnowledgeStore: this.config.domainKnowledgeStore })
                     if (typeof sessionRun.session?.getMessages === 'function') {
@@ -1452,7 +1512,7 @@ export class DelegationCoordinator {
                     return JSON.stringify(sessionRun.result)
                   },
                 }))
-                run = { result: handsRun.result, sessionMessages: retryHandsMessages }
+                run = { result: handsRun.result, sessionMessages: retryHandsMessages, usage: handsRun.usage, providerName: upgradedConfig.providerName }
               } finally {
                 if (this.config.sessionRegistry && this.config.sessionId)
                   for (const f of retryClaimFiles)
@@ -1465,7 +1525,7 @@ export class DelegationCoordinator {
               const sessionMessages = typeof workerRun.session?.getMessages === 'function'
                 ? workerRun.session.getMessages()
                 : undefined
-              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages }
+              run = { result: workerRun.result, transcript: workerRun.transcript, sessionMessages, usage: workerRun.usage, providerName: upgradedConfig.providerName }
             }
             // Upgrade succeeded — record provider outcome; circuit recovery for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, true)
@@ -1480,7 +1540,7 @@ export class DelegationCoordinator {
             // Pro upgrade also failed — record provider outcome; circuit failure for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, false)
             if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-            const degraded = workerFailureResult(order, error)
+            const degraded = this.enrichResult(workerFailureResult(order, error), strongCard.model, upgradedConfig.providerName)
             return {
               status: 'completed' as const,
               order,
@@ -1489,7 +1549,7 @@ export class DelegationCoordinator {
               modelTierGatedDecisions: [tierGatedDecision],
               gatedInfluenceAudits: [gatedInfluenceAudit],
               results: [degraded],
-              packet: await buildPrimaryWorkerPacket([degraded]),
+              packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
             }
           }
         }
@@ -1498,7 +1558,7 @@ export class DelegationCoordinator {
       // If retry didn't happen, return degraded — circuit records failure for tier-locked profiles
       if (!run) {
         if (!isAbort && profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-        const degraded = workerFailureResult(order, error)
+        const degraded = this.enrichResult(workerFailureResult(order, error), selected.model, workerConfig.providerName)
         return {
           status: 'completed' as const,
           order,
@@ -1507,7 +1567,7 @@ export class DelegationCoordinator {
           modelTierGatedDecisions: [tierGatedDecision],
           gatedInfluenceAudits: [gatedInfluenceAudit],
           results: [degraded],
-          packet: await buildPrimaryWorkerPacket([degraded]),
+          packet: await buildPrimaryWorkerPacket([degraded], this.config.artifactStore),
         }
       }
     } finally {
@@ -1523,6 +1583,7 @@ export class DelegationCoordinator {
     }
 
     // Run completed — regardless of task verdict, the provider's API delivered.
+    run.result = this.enrichResult(run.result, selected.model, run.providerName ?? workerConfig.providerName, run.usage)
     this.recordProviderOutcome(selected.model, true)
 
     // Circuit breaker: record outcome for tier-locked profiles (Flash army)
@@ -1547,7 +1608,7 @@ export class DelegationCoordinator {
         modelTierGatedDecisions: [tierGatedDecision],
         gatedInfluenceAudits: [gatedInfluenceAudit],
         results: [{ ...run.result, status: 'blocked' as const, summary: `Escalated: ${this.state.getSummary().failed} consecutive failures` }],
-        packet: await buildPrimaryWorkerPacket([run.result]),
+        packet: await buildPrimaryWorkerPacket([run.result], this.config.artifactStore),
       }
     }
 
@@ -1590,7 +1651,7 @@ export class DelegationCoordinator {
       modelTierGatedDecisions: [tierGatedDecision],
       gatedInfluenceAudits: [gatedInfluenceAudit],
       results,
-      packet: await buildPrimaryWorkerPacket(results),
+      packet: await buildPrimaryWorkerPacket(results, this.config.artifactStore),
     }
   }
 
@@ -1622,10 +1683,10 @@ export class DelegationCoordinator {
       const runnables = requests.filter(r =>
         (r.delegationDepth ?? 0) < depthCap && shouldDelegateObjective(r.objective, r.scope))
       if (runnables.length === 0 && depthCapped.length === 0) {
-        return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([]) }
+        return { status: 'skipped', results: [], packet: await buildPrimaryWorkerPacket([], this.config.artifactStore) }
       }
       if (runnables.length === 0) {
-        return { status: 'completed', results: depthCapped, packet: await buildPrimaryWorkerPacket(depthCapped) }
+        return { status: 'completed', results: depthCapped, packet: await buildPrimaryWorkerPacket(depthCapped, this.config.artifactStore) }
       }
 
     const queue = new WorkOrderQueue(this.config.maxWorkers, {
@@ -1743,7 +1804,7 @@ export class DelegationCoordinator {
     const baseRun: CoordinatorRun = {
       status: 'completed',
       results: aggregated,
-      packet: await buildPrimaryWorkerPacket(aggregated),
+      packet: await buildPrimaryWorkerPacket(aggregated, this.config.artifactStore),
       aggregationPolicy: policy,
       ...(workerModels.length > 0 ? { workerModels } : {}),
       ...(modelTierShadows.length > 0 ? { modelTierShadows } : {}),

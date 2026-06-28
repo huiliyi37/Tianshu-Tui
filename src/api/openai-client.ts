@@ -112,6 +112,10 @@ export interface OpenAIClientConfig {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
     hasToolJsonInContentBug?: boolean
   }
+  /** Force JSON output mode (response_format: json_object) for every request.
+   *  Worker sessions use per-request response_format instead, but this flag is
+   *  available for clients that always want JSON. */
+  jsonMode?: boolean
   /**
    * Provider usage calibration factor for `prompt_tokens` (0–1).
    * 1.0 (default) = trust the API's prompt_tokens as-is.
@@ -140,6 +144,14 @@ const SLOW_READ_TIMEOUT_MS = 300_000
 const GLM_READ_TIMEOUT_MS = 720_000
 /** Providers whose thinking mode can exceed 90s before first token. */
 const SLOW_THINKING_PROVIDERS = new Set(['glm', 'mimo', 'deepseek', 'codex', 'minimax'])
+/**
+ * Per-process cap on the always-on tool-stream event log (logToolStreamEvent).
+ * These events fire only on rare streaming pathologies (ambiguous continuation
+ * chunks dropped, final-flush empty tool_use), so a long healthy session writes
+ * zero lines. Hitting the cap means the provider is misbehaving — stop logging
+ * rather than fill disk.
+ */
+const TOOL_STREAM_LOG_MAX_LINES = 2000
 // Thinking-stall timeout 现由 config.thinkingStallTimeoutMs 控制（默认禁用，见
 // resetIdleTimer 与 OpenAIClientConfig 注释）。旧的模块级常量已移除——它恒等于
 // SLOW_READ_TIMEOUT_MS（实为禁用），且配套错误文案硬编码"90s"与实际值不符。
@@ -193,6 +205,15 @@ export class OpenAIClient implements StreamClient {
   private _textAccum = ''
   /** Stable suffix appended to system message for Chinese thinking (computed once, cache-safe). */
   private readonly systemSuffix: string
+  /**
+   * Resolved path for the lightweight tool-stream event log (always-on, best-effort).
+   * undefined = unresolved, null = disabled/failed. Appends one JSON line per
+   * notable streaming event (pollution-risk drops, final-flush empties) so the
+   * cross-tool argument corruption class of bug leaves a trace WITHOUT requiring
+   * RIVET_DEBUG. Capped at TOOL_STREAM_LOG_MAX_LINES per process to bound disk.
+   */
+  private toolStreamLogPath: string | null | undefined = undefined
+  private toolStreamLogLines = 0
 
   constructor(private config: OpenAIClientConfig) {
     this.systemSuffix = (config.providerName === 'mimo' || config.providerName === 'deepseek') && config.thinking === 'enabled'
@@ -225,15 +246,15 @@ export class OpenAIClient implements StreamClient {
     signal?: AbortSignal,
   ): Promise<void> {
     this.lastRequestMessages = request.messages
-    // DeepSeek thinking mode reasoning_content rules (official docs):
-    // - Tool-call turns: reasoning_content MUST be echoed in all subsequent requests.
-    // - Pure text turns (no tool_calls): reasoning_content is ignored by the API;
-    //   strip it to avoid bloating context and potentially triggering repetition.
-    // - Thinking disabled: strip all reasoning_content.
+    // reasoning_content stripping rules:
+    // - DeepSeek (preserved thinking): keep for tool-call turns, strip for pure-text
+    // - GLM (independent reasoning): always strip — no preserved thinking context
+    // - Thinking disabled: always strip
     const messages = request.messages.map(m => {
       if (m.role !== 'assistant' || !('reasoning_content' in m)) return m
+      const isGlm = this.config.providerName === 'glm'
       const hasToolCalls = Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0
-      if (this.config.thinking === 'enabled' && hasToolCalls) return m
+      if (this.config.thinking === 'enabled' && hasToolCalls && !isGlm) return m
       const { reasoning_content: _, ...rest } = m
       // DeepSeek requires assistant messages to have `content` or `tool_calls`.
       // After stripping reasoning_content, ensure `content` exists.
@@ -267,6 +288,16 @@ export class OpenAIClient implements StreamClient {
       if (request.tool_choice) body.tool_choice = request.tool_choice
     }
 
+    // JSON output mode: force the model to emit valid JSON. Per-request
+    // response_format (worker final turn) takes precedence; config.jsonMode is a
+    // fallback for always-JSON clients. DeepSeek/GLM require the prompt to
+    // mention "json" when this is set — worker prompts already satisfy this.
+    if (request.response_format) {
+      body.response_format = request.response_format
+    } else if (this.config.jsonMode) {
+      body.response_format = { type: 'json_object' }
+    }
+
     if (request.temperature !== undefined) body.temperature = request.temperature
 
     // MiniMax: reasoning_split separates thinking into reasoning_content field
@@ -290,14 +321,10 @@ export class OpenAIClient implements StreamClient {
         if (this.config.providerName === 'minimax') {
           body.thinking = { type: 'adaptive' }
         }
-        // GLM Preserved Thinking: retain previous reasoning across turns.
-        // Reduces thinking time (incremental vs. full re-reasoning), improves
-        // cache hit rate, and is officially recommended for Coding/Agent use.
-        // Requires echoing reasoning_content back in subsequent requests
-        // (already handled by echoReasoning logic above).
-        if (this.config.providerName === 'glm') {
-          (body.thinking as Record<string, unknown>)['clear_thinking'] = false
-        }
+        // GLM: independent reasoning mode (no preserved thinking).
+        // Prior reasoning is NOT echoed — each turn is a fresh reasoning start.
+        // This avoids the cross-API-call context discontinuity that causes GLM
+        // to restart reasoning mid-turn after a stream abort/timeout.
         if (this.config.providerName === 'claude' && this.config.reasoningEffort) {
           const budgetMap: Record<string, number> = {
             max: this.config.maxTokens,
@@ -461,7 +488,7 @@ export class OpenAIClient implements StreamClient {
 
       await this.parseStreamFromReader(reader, callbacks, signal, reasoningRef, lifecycle)
     }, signal, {
-      maxTotalDurationMs: 10 * 60_000,
+      maxTotalDurationMs: this.config.providerName === 'glm' ? 20 * 60_000 : 10 * 60_000,
       maxTotalRetries: isThinking ? 1 : undefined,
       onRetry: (info) => {
         if (info.classified.category === 'rate_limit') {
@@ -512,11 +539,11 @@ export class OpenAIClient implements StreamClient {
     // 改为按输出进度续期：到达基础硬顶时若最近 30s 内仍有 data 事件，
     // 续 60s 一档，绝对上限 3×基础（30min）兜底 runaway。
     const timeoutController = new AbortController()
-    const baseStreamMs = 10 * 60_000
+    const isGlm = this.config.providerName === 'glm'
+    const baseStreamMs = isGlm ? 20 * 60_000 : 10 * 60_000
     const streamStartedAt = Date.now()
     let lastDataEventAt = streamStartedAt
     let hardCapExtended = false
-    const isGlm = this.config.providerName === 'glm'
     const progressWindowMs = isGlm ? GLM_HARD_CAP_PROGRESS_WINDOW_MS : HARD_CAP_PROGRESS_WINDOW_MS
     const checkHardCap = (): void => {
       const action = decideStreamHardCap({
@@ -722,6 +749,57 @@ export class OpenAIClient implements StreamClient {
     }
   }
 
+  /**
+   * Resolve which toolCallBuffer slot a streaming chunk belongs to.
+   *
+   * Returns the slot index, or null to DROP the chunk. Dropping is the
+   * fail-safe choice when a continuation chunk carries no `index`/`id` and more
+   * than one buffer is open — misgrafting it onto another tool's arguments
+   * corrupts both (the parallel tool_call pollution bug). A dropped trailing
+   * fragment at worst leaves one call's JSON incomplete, which the existing
+   * final-flush + salvageFirstJsonObject path already handles.
+   */
+  private resolveToolCallIndex(tc: ToolCallChunk): number | null {
+    if (tc.index !== undefined) return tc.index
+    // Continuation chunk (typically a trailing-arguments delta after
+    // finish_reason). Providers omit index here; reattach by identity.
+    if (tc.id !== undefined) {
+      for (const [idx, buf] of this.toolCallBuffer) {
+        if (buf.id === tc.id) {
+          this.logToolStreamEvent({
+            phase: 'reattach-by-id', openBuffers: this.toolCallBuffer.size,
+            id: tc.id, name: buf.function.name,
+            argsLen: tc.function?.arguments?.length, argsPreview: tc.function?.arguments?.slice(0, 80),
+          })
+          return idx
+        }
+      }
+    }
+    // No identity on the chunk: if exactly one buffer is open, it must be the
+    // target (the common single-call trailing-args case). With multiple open we
+    // cannot know — drop rather than guess and pollute.
+    if (this.toolCallBuffer.size === 1) {
+      const idx = this.toolCallBuffer.keys().next().value!
+      this.logToolStreamEvent({
+        phase: 'reattach-sole', openBuffers: 1,
+        argsLen: tc.function?.arguments?.length, argsPreview: tc.function?.arguments?.slice(0, 80),
+      })
+      return idx
+    }
+    // Fallback: preserve historical behavior for the degenerate "no buffer open
+    // yet" case (a first chunk with no index) by seeding slot 0; otherwise drop.
+    if (this.toolCallBuffer.size === 0) return 0
+    // Ambiguous: multiple open buffers, no index/id. Dropping is the fail-safe
+    // choice (one call's JSON may be incomplete) vs. the old `?? 0` which grafted
+    // onto a different tool and corrupted both. Log so this provider pathology
+    // is visible without RIVET_DEBUG.
+    this.logToolStreamEvent({
+      phase: 'drop-ambiguous', openBuffers: this.toolCallBuffer.size,
+      argsLen: tc.function?.arguments?.length, argsPreview: tc.function?.arguments?.slice(0, 80),
+    })
+    return null
+  }
+
   /** Process a single SSE delta chunk — exposed for testing */
   processDelta(
     chunk: {
@@ -771,7 +849,19 @@ export class OpenAIClient implements StreamClient {
 
     if (delta.tool_calls) {
       for (const tc of delta.tool_calls) {
-        const idx = tc.index ?? 0
+        // Resolve the buffer slot for this chunk. Naive `tc.index ?? 0` was the
+        // root cause of cross-tool argument pollution (oh-my-pi/384919c7): when a
+        // provider (DeepSeek/GLM) streams trailing argument deltas AFTER
+        // finish_reason, those continuation chunks frequently omit `index`. `?? 0`
+        // routed them onto index 0's buffer — a DIFFERENT tool (e.g. read_section),
+        // grafting `{"path":...,"pattern":...}` onto its `{"file_path":...}`. grep
+        // then received `{file_path}` or `{}` and failed "pattern is required" in a
+        // tight loop, draining the reviewer worker's budget before it could emit
+        // JSON. resolveToolCallIndex attaches index-less continuation chunks to the
+        // correct slot by id / single-open-buffer, and drops them rather than
+        // misgrafting when ambiguous (fail-safe beats fail-loud pollution).
+        const idx = this.resolveToolCallIndex(tc)
+        if (idx === null) continue
         const buf = this.toolCallBuffer.get(idx) ?? { function: { arguments: '' } }
         if (tc.id) buf.id = tc.id
         if (tc.type) buf.type = tc.type
@@ -853,6 +943,11 @@ export class OpenAIClient implements StreamClient {
         // Final flush and still unparseable — surface it loudly instead of
         // silently feeding {} into the tool (the misleading "X is required").
         this.warnToolArgParseFailure(buf)
+        this.logToolStreamEvent({
+          phase: 'final-flush-empty', openBuffers: this.toolCallBuffer.size,
+          id: buf.id, name: buf.function.name,
+          argsLen: buf.function.arguments.length, argsPreview: buf.function.arguments.slice(0, 120),
+        })
         callbacks.onContentBlock?.({ type: 'tool_use', id: buf.id, name: buf.function.name, input: {} })
         this.toolCallBuffer.delete(idx)
         continue
@@ -899,6 +994,55 @@ export class OpenAIClient implements StreamClient {
       `[tool-stream] phase=${phase} idx=${idx} id=${buf.id ?? '?'} name=${buf.function.name ?? '?'}` +
       ` argsLen=${buf.function.arguments.length} args=${JSON.stringify(buf.function.arguments.slice(0, 200))}`,
     )
+  }
+
+  /**
+   * Append one notable tool-stream event to the always-on session log. Unlike
+   * maybeTraceToolStream (gated, stderr), this writes to disk by default so the
+   * cross-tool argument-pollution class of bug leaves a trace without anyone
+   * having to enable RIVET_DEBUG up front. Best-effort: any IO failure disables
+   * further logging for this client (sets path to null), never throws.
+   *
+   * Capped at TOOL_STREAM_LOG_MAX_LINES per process — once hit, logging stops to
+   * bound disk on long sessions. The cap is generous: these events are rare
+   * (only fire on ambiguous continuation chunks / final-flush empties), so
+   * hitting the cap itself signals a provider streaming pathology worth flagging.
+   */
+  private logToolStreamEvent(event: {
+    phase: 'drop-ambiguous' | 'reattach-by-id' | 'reattach-sole' | 'final-flush-empty'
+    openBuffers?: number
+    id?: string
+    name?: string
+    argsLen?: number
+    argsPreview?: string
+  }): void {
+    if (this.toolStreamLogPath === null) return
+    if (this.toolStreamLogLines >= TOOL_STREAM_LOG_MAX_LINES) return
+    if (this.toolStreamLogPath === undefined) {
+      try {
+        const file = join(
+          process.cwd(), '.rivet',
+          `tool-stream${this.config.sessionId ? `-${this.config.sessionId}` : ''}.jsonl`,
+        )
+        mkdirSync(dirname(file), { recursive: true })
+        this.toolStreamLogPath = file
+      } catch {
+        this.toolStreamLogPath = null
+        return
+      }
+    }
+    try {
+      appendFileSync(this.toolStreamLogPath, `${JSON.stringify({
+        t: new Date().toISOString(),
+        model: this.config.model,
+        provider: this.config.providerName ?? null,
+        session: this.config.sessionId ?? null,
+        ...event,
+      })}\n`)
+      this.toolStreamLogLines++
+    } catch {
+      this.toolStreamLogPath = null
+    }
   }
 
   /** Always-on warning when a tool call's arguments never became valid JSON. */

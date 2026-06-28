@@ -500,6 +500,124 @@ describe('evaluateConvergence', () => {
     assert.equal(result.signals.oscillationPenalty, 1.0)
   })
 
+  // ── Change 1: argsHash granularity ──
+
+  it('targetNovelty uses argsHash when available (same file, different edits)', () => {
+    // edit_file(a.ts, old="x", new="y") vs edit_file(a.ts, old="y", new="z")
+    // — same target path, different argsHash → higher novelty
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-xy' },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-yz' },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const, argsHash: 'hash-xy' },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+    }))
+    // 2 unique argsHash values among 3 entries → novelty = (2-1)/(3-1) = 0.5
+    assert.equal(result.signals.targetNovelty, 0.5)
+  })
+
+  it('targetNovelty falls back to target when argsHash is absent', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+    }))
+    // Fallback to target: 2 unique targets among 3 → (2-1)/(3-1) = 0.5
+    assert.equal(result.signals.targetNovelty, 0.5)
+  })
+
+  // ── Change 2: tokenEfficiency exponential decay ──
+
+  it('tokenEfficiency uses exponential decay when outputTokens is provided', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'c.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'd.ts', status: 'success' as const },
+      { tool: 'grep', target: 'foo', status: 'success' as const },
+      { tool: 'glob', target: '*.ts', status: 'success' as const },
+    ]
+    // 6 tools, 3000 output tokens → 500 tokens/tool → exp(-1) ≈ 0.368
+    const result = evaluateConvergence(baseInput({
+      turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      outputTokens: 3000,
+    }))
+    const expected = Math.exp(-1)
+    assert.ok(
+      Math.abs(result.signals.tokenEfficiency - expected) < 0.01,
+      `tokenEfficiency should be ~${expected.toFixed(3)}, got ${result.signals.tokenEfficiency.toFixed(3)}`,
+    )
+  })
+
+  it('tokenEfficiency falls back to heuristic when outputTokens is absent', () => {
+    const history = [
+      { tool: 'edit_file', target: 'a.ts', status: 'success' as const },
+      { tool: 'edit_file', target: 'b.ts', status: 'success' as const },
+      { tool: 'read_file', target: 'c.ts', status: 'success' as const },
+    ]
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      // outputTokens intentionally omitted
+    }))
+    // Old heuristic: writes=2, reads=1 → productive/total = 2/3, ratio=0.5 → bonus=0.2 → 0.867
+    assert.ok(result.signals.tokenEfficiency > 0.5, 'fallback should still give reasonable efficiency')
+  })
+
+  // ── Change 3: oscillation positional reversal (multi-value) ──
+
+  it('oscillation detects A→B→A→C→A→B multi-value pattern (old algorithm silently ignored it)', () => {
+    // Old algorithm: Set.size===3 → returns 1.0 (missed oscillation)
+    // New algorithm: reversals via hash[i]===hash[i-2] && !== hash[i-1]
+    const fingerprints = ['a', 'b', 'a', 'c', 'a', 'b', 'c', 'b']
+    const history = makeHistory(fingerprints.map((fp, i) => ({
+      tool: `tool-${i % 3}`, target: `file-${i}`,
+    })))
+    const result = evaluateConvergence(baseInput({
+      turn: 10, phaseClass: 'verify', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    // Reversals at i=2(a→b→a), i=4(a→c→a), i=7(b→c→b) = 3 out of 6 possible
+    // → rate=3/6=0.5 → penalty=0.5 (old algorithm would return 1.0)
+    assert.ok(
+      result.signals.oscillationPenalty > 0.4 && result.signals.oscillationPenalty < 0.6,
+      `oscillation penalty should be ~0.50 for multi-value pattern, got ${result.signals.oscillationPenalty.toFixed(2)}`,
+    )
+  })
+
+  it('oscillation: severe A-B-A-B-A-B-A-B yields near-zero penalty', () => {
+    const fingerprints = ['a', 'b', 'a', 'b', 'a', 'b', 'a', 'b']
+    const history = makeHistory(fingerprints.map((fp, i) => ({
+      tool: fp === 'a' ? 'bash' : 'ls', target: `file-${i}`,
+    })))
+    const result = evaluateConvergence(baseInput({
+      turn: 10, phaseClass: 'verify', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    // Every step from i=2 is a reversal → 6 reversals / 6 possible = 1.0 → penalty = 0
+    assert.ok(
+      result.signals.oscillationPenalty < 0.1,
+      `severe A-B oscillation should yield near-0 penalty, got ${result.signals.oscillationPenalty.toFixed(2)}`,
+    )
+  })
+
+  it('oscillation: < 4 fingerprints returns 1.0 (insufficient data)', () => {
+    const fingerprints = ['a', 'b', 'a']
+    const history = makeHistory([
+      { tool: 'bash', target: '1' },
+      { tool: 'bash', target: '2' },
+      { tool: 'bash', target: '3' },
+    ])
+    const result = evaluateConvergence(baseInput({
+      turn: 5, phaseClass: 'execute', contextWindow: 200_000,
+      recentToolHistory: history, toolFingerprints: fingerprints,
+    }))
+    assert.equal(result.signals.oscillationPenalty, 1.0)
+  })
+
   // ── Delivery-aware completion nudge ──
 
   it('verified deliveryStatus triggers completion nudge message', () => {
@@ -818,6 +936,197 @@ describe('evaluateConvergence', () => {
       // Too few tools — should not trigger stagnation
       assert.equal(result.level, 0,
         `expected level 0 for short window, got ${result.level}`)
+    })
+  })
+
+  // ── targetNovelty formula + editRatio novelty-gating regression ────────
+  // Regression for the "原地打转 (editing the same file) scored as progress"
+  // doom-loop misjudgment. Before the fix: targetNovelty used distinct/total
+  // (N identical → 1/N ≈ 0.17, not 0), and editRatio entered the score
+  // independently — so 10 successful edits to ONE file got the full 0.40
+  // execute weight AND a non-zero novelty residual. Both fixed together:
+  // novelty now (unique-1)/(total-1), and editRatio is gated by max(novelty,0.1).
+
+  describe('targetNovelty formula (defect 1)', () => {
+    it('all-identical targets → novelty exactly 0', () => {
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'a.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 0,
+        `5 identical targets must give novelty 0, got ${result.signals.targetNovelty}`)
+    })
+
+    it('all-distinct targets → novelty 1', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 1,
+        `5 distinct targets must give novelty 1, got ${result.signals.targetNovelty}`)
+    })
+
+    it('single-element window → novelty 1.0 (fully novel)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 2, phaseClass: 'explore', contextWindow: 200_000,
+        recentToolHistory: makeHistory([{ tool: 'read_file', target: 'a.ts' }]),
+      }))
+      assert.equal(result.signals.targetNovelty, 1.0)
+    })
+
+    it('empty window → novelty 1.0 (open frontier)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 0, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: [],
+      }))
+      assert.equal(result.signals.targetNovelty, 1.0)
+    })
+
+    it('partial overlap is continuous, not the old 1/N residual', () => {
+      // 5 calls: 3 distinct + 2 repeats. Old formula: 3/5 = 0.6.
+      // New formula: (3-1)/(5-1) = 0.5. The repeat fraction is now fully counted.
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'a.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 6, phaseClass: 'explore', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      assert.equal(result.signals.targetNovelty, 0.5,
+        `3 unique of 5 must give (3-1)/(5-1)=0.5, got ${result.signals.targetNovelty}`)
+    })
+  })
+
+  describe('editRatio novelty-gating (defect 2)', () => {
+    it('editing the SAME file repeatedly scores far lower than editing DISTINCT files', () => {
+      // Both windows: 6 successful edit_file calls, identical editRatio=1.0.
+      // Difference: targets. Same-file → novelty 0 → editRatio gated to ~0.
+      // Distinct-file → novelty 1 → editRatio contributes fully.
+      const sameFile = makeHistory(
+        Array.from({ length: 6 }, () => ({ tool: 'edit_file', target: 'a.ts' })),
+      )
+      const distinctFiles = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'edit_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'edit_file', target: 'e.ts' },
+        { tool: 'edit_file', target: 'f.ts' },
+      ])
+      const sameResult = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: sameFile,
+      }))
+      const distinctResult = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: distinctFiles,
+      }))
+      assert.ok(
+        distinctResult.score > sameResult.score,
+        `distinct edits (score=${distinctResult.score.toFixed(2)}) must out-score same-file edits (score=${sameResult.score.toFixed(2)})`,
+      )
+      // Same-file edits should be flagged as stuck (the doom-loop signal),
+      // not rewarded as high progress.
+      assert.ok(sameResult.level >= distinctResult.level,
+        `same-file edits (level=${sameResult.level}) should be >= distinct edits (level=${distinctResult.level})`)
+    })
+
+    it('0.1 floor keeps a baseline for legitimately iterative single-file edits', () => {
+      // Editing one file 6 times is not ALWAYS a doom-loop — e.g. building up
+      // a large module. The floor ensures editRatio contributes 0.40×0.1=0.04,
+      // not zero. Combined with other signals (no errors, some entropy) the
+      // score should not collapse to near-zero the way all-failures would.
+      const iterative = makeHistory(
+        Array.from({ length: 6 }, () => ({ tool: 'edit_file', target: 'a.ts' })),
+      )
+      const result = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: iterative,
+      }))
+      // Not rewarded as strong progress, but not catastrophically low either.
+      assert.ok(result.score > 0.0 && result.score < 0.6,
+        `iterative single-file edit score should be in a middling range, got ${result.score.toFixed(2)}`)
+    })
+  })
+
+  // ── No-data weight re-allocation (defect 4) ───────────────────────────
+  // textRepetitionPenalty + oscillationPenalty default to 1.0 when they lack
+  // enough fingerprints (window period). Previously that 1.0 entered the score
+  // at full weight, inflating it by ~0.18 in execute phase. Now the weight is
+  // re-allocated to data-carrying signals so "no data" does not look healthy.
+
+  describe('no-data weight re-allocation (defect 4)', () => {
+    it('score without fingerprint data is NOT inflated vs with-data baseline', () => {
+      // Same tool history in both cases. The difference is only whether the
+      // penalty signals HAVE data. A no-data window should not score HIGHER
+      // than a with-data window for the same trajectory — that would mean
+      // "no evidence" is being rewarded as health.
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'grep', target: 'x' },
+        { tool: 'run_tests', target: 't' },
+      ])
+      const base = {
+        turn: 8, phaseClass: 'execute' as PhaseClass,
+        contextWindow: 200_000, recentToolHistory: history,
+      }
+      // No fingerprints → both penalty signals are in no-data sentinel state.
+      const noData = evaluateConvergence(baseInput(base))
+      // With diverse fingerprints → both signals have data and return their
+      // real (non-sentinel) values, which for a healthy diverse trajectory are
+      // high but NOT artificially maxed.
+      const withData = evaluateConvergence(baseInput({
+        ...base,
+        toolFingerprints: ['fa', 'fb', 'fc', 'fd', 'fe', 'ff', 'fg', 'fh'],
+        textFingerprints: [
+          'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu',
+          'nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two',
+          'three four five six seven eight nine ten eleven twelve thirteen fourteen',
+        ],
+      }))
+      // The no-data score must not exceed the with-data score by the old
+      // inflation margin. Allow a small tolerance since re-allocation shifts
+      // weight onto signals whose values differ — the point is no LARGE inflation.
+      assert.ok(
+        noData.score <= withData.score + 0.05,
+        `no-data score (${noData.score.toFixed(2)}) should not inflate above with-data (${withData.score.toFixed(2)})`,
+      )
+    })
+
+    it('errorPenalty empty-window 1.0 is NOT re-allocated (semantically correct)', () => {
+      // errorPenalty returns 1.0 on empty window meaning "no errors = full
+      // marks", which is a legitimate score, not a no-data sentinel. The
+      // re-allocation must be scoped to oscillation/textRep only — verify a
+      // healthy all-success window still scores high (errorPenalty keeps its
+      // weight), not drained because errorPenalty was mis-classified.
+      const history = makeHistory([
+        { tool: 'edit_file', target: 'a.ts' },
+        { tool: 'edit_file', target: 'b.ts' },
+        { tool: 'edit_file', target: 'c.ts' },
+        { tool: 'edit_file', target: 'd.ts' },
+        { tool: 'run_tests', target: 't' },
+        { tool: 'run_tests', target: 'u' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 8, phaseClass: 'execute', contextWindow: 200_000, recentToolHistory: history,
+      }))
+      // All successes, diverse targets → high errorPenalty retained, score
+      // should reflect a healthy trajectory (not drained by mis-allocation).
+      assert.ok(result.signals.errorPenalty === 1.0, `errorPenalty should be 1.0 for all-success window`)
     })
   })
 })

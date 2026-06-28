@@ -48,14 +48,17 @@ const inputSchema = z.object({
   draftItems: z.array(planItemSchema).optional(),
   seats: z.array(seatSchema).optional(),
   rounds: z.number().int().min(1).max(2).optional(),
+  /** When true, automatically dispatch the council-approved plan to team_orchestrate.
+   *  Saves a model round-trip — the council result directly triggers execution
+   *  instead of waiting for the model to extract planJson and call team_orchestrate. */
+  autoExecute: z.boolean().optional(),
 })
-
 export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator): Tool {
   return {
     definition: {
       name: 'council_convene',
       description:
-        'Convene a star-domain council to review a plan draft. Default is a single advisory round; pass rounds:2+ to enable a rebuttal/debate round (round 2 only fires when round 1 surfaces conflicts). Fans out to seat experts (advisory only, no execution), deterministically adjudicates, and returns an auditable Markdown plan. Decoupled from team_orchestrate — NEVER dispatches execution work. Disabled when COUNCIL=0.',
+        'Convene a star-domain council to review a plan draft. Default is a single advisory round; pass rounds:2+ to enable a rebuttal/debate round (round 2 only fires when round 1 surfaces conflicts). Fans out to seat experts (advisory only, no execution), deterministically adjudicates, and returns an auditable Markdown plan. Pass autoExecute:true to automatically dispatch the approved plan to team_orchestrate — the plan executes immediately after review without a model round-trip. Disabled when COUNCIL=0.',
       input_schema: {
         type: 'object',
         properties: {
@@ -89,18 +92,18 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
             },
           },
           rounds: { type: 'number', description: 'Max debate rounds (1-2, default 1 = single round). Pass 2 to enable a rebuttal round; round 2 only fires when round 1 surfaces conflicts.' },
+          autoExecute: { type: 'boolean', description: 'When true, automatically dispatch the council-approved plan to team_orchestrate. Saves a model round-trip — the plan executes immediately after council review instead of waiting for manual extraction.' },
         },
         required: ['objective'],
       },
     },
     async execute(params: ToolCallParams): Promise<ToolResult> {
-      // Kill switch — defensive guard (isEnabled also hides the tool when off).
       if (!isCouncilEnabled()) {
         return { content: 'council_convene disabled (COUNCIL=0) — no seats dispatched', isError: false }
       }
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { objective, draftItems, seats, rounds } = parsed.data
+      const { objective, draftItems, seats, rounds, autoExecute } = parsed.data
 
       const items: PlanItem[] = draftItems ?? []
       const councilSeats: CouncilSeat[] = (seats && seats.length > 0 ? seats : [...DEFAULT_COUNCIL_SEATS]).map(s => ({
@@ -157,6 +160,37 @@ export function createCouncilConveneTool(coordinator: CouncilConveneCoordinator)
       if (plan.aggregate.mergedItems.length > 0) {
         parts.push('', '```council-plan-json', serializeUnifiedPlan(councilPlanToUnifiedPlan(plan)), '```')
       }
+
+      // autoExecute: if council produced actionable items, dispatch them directly
+      // via coordinator.delegateBatch (same path team_orchestrate uses). This saves
+      // a model round-trip — the plan executes immediately after review.
+      if (autoExecute && plan.aggregate.mergedItems.length > 0) {
+        try {
+          const unifiedPlan = councilPlanToUnifiedPlan(plan)
+          const { unifiedPlanToTeamTasks } = await import('../agent/unified-plan.js')
+          const teamTasks = unifiedPlanToTeamTasks(unifiedPlan)
+          if (teamTasks.length > 0) {
+            // Convert TeamTask[] to DelegationRequest[] — TeamTask already has
+            // profile/kind/objective/files, matching DelegationRequest's shape.
+            const teamRequests = teamTasks.map(t => ({
+              parentTurnId: params.toolUseId ?? 'council-autoexec',
+              objective: t.objective,
+              profile: t.profile,
+              kind: t.kind,
+              scope: { files: t.files, verification: t.verification },
+            }))
+            const run = await coordinator.delegateBatch(teamRequests, 'all_required', params.abortSignal)
+            parts.push('', `## Auto-Executed (${run.results.length} workers)`)
+            for (const r of run.results) {
+              parts.push(`- ${r.workOrderId}: ${r.status === 'passed' ? '✓' : r.status === 'failed' ? '✗' : '⚠'} ${r.summary}`)
+            }
+          }
+        } catch (err) {
+          parts.push('', `## Auto-Execution Failed\n${err instanceof Error ? err.message : String(err)}`)
+          parts.push('', '⚠ Council plan reviewed but auto-execution failed. Use the council-plan-json above with team_orchestrate manually.')
+        }
+      }
+
       return { content: parts.join('\n'), uiContent: summarizeCouncilPlan(plan), isError: false }
     },
     requiresApproval: () => false,

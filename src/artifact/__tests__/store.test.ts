@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { ArtifactCorruptionError, ArtifactStore, MAX_RANGE_LINES } from '../store.js'
 import { formatArtifactRef } from '../types.js'
 
@@ -194,5 +194,97 @@ describe('ArtifactStore', () => {
           && error.expectedSha256 === artifact.sha256,
       )
     })
+  })
+})
+
+describe('ArtifactStore fallback sessions', () => {
+  it('resolves artifacts from a fallback session directory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'artifact-fallback-test-'))
+    try {
+      const workerStore = new ArtifactStore(dir, 'worker-order-1', {
+        now: () => 1_700_000_000_000,
+        idGenerator: () => 'abc12345',
+      })
+      const id = await workerStore.save({
+        tool: 'read_file',
+        target: '/src/worker.ts',
+        rawContent: 'line1\nline2\nline3',
+        summary: 'Worker artifact',
+        sections: [],
+      })
+
+      const primary = new ArtifactStore(dir, 'primary-session')
+      primary.addFallbackSession('worker-order-1')
+
+      assert.equal(primary.get(id)?.id, id)
+      assert.equal(await primary.readRaw(id), 'line1\nline2\nline3')
+      assert.equal(await primary.readLines(id, 2, 3), 'line2\nline3')
+      const ranged = await primary.readLineRange(id, 1, 2)
+      assert.ok(ranged)
+      assert.equal(ranged.content, 'line1\nline2')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('re-anchors rawPath to the fallback session directory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'artifact-fallback-test-'))
+    try {
+      const workerStore = new ArtifactStore(dir, 'worker-order-1', {
+        now: () => 1_700_000_000_000,
+        idGenerator: () => 'abc12345',
+      })
+      const id = await workerStore.save({
+        tool: 'read_file',
+        target: '/src/worker.ts',
+        rawContent: 'worker content',
+        summary: 'Worker artifact',
+        sections: [],
+      })
+
+      const primary = new ArtifactStore(dir, 'primary-session')
+      primary.addFallbackSession('worker-order-1')
+      const artifact = primary.get(id)
+      assert.ok(artifact)
+      assert.ok(artifact.rawPath.includes(`${dir}${sep}worker-order-1${sep}`))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores unknown fallback sessions', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'artifact-fallback-test-'))
+    try {
+      const primary = new ArtifactStore(dir, 'primary-session')
+      primary.addFallbackSession('missing-worker')
+      assert.equal(primary.get('nonexistent'), null)
+      assert.equal(await primary.readRaw('nonexistent'), null)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('deduplicates fallback session registrations', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'artifact-fallback-test-'))
+    try {
+      const workerStore = new ArtifactStore(dir, 'worker-order-1', {
+        now: () => 1_700_000_000_000,
+        idGenerator: () => 'abc12345',
+      })
+      const id = await workerStore.save({
+        tool: 'read_file',
+        target: '/src/worker.ts',
+        rawContent: 'worker content',
+        summary: 'Worker artifact',
+        sections: [],
+      })
+
+      const primary = new ArtifactStore(dir, 'primary-session')
+      primary.addFallbackSession('worker-order-1')
+      primary.addFallbackSession('worker-order-1')
+      assert.equal(primary.get(id)?.id, id)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

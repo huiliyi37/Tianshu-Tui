@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree } from '../agent/worktree.js'
+import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree, cleanupStaleHandsBranches } from '../agent/worktree.js'
 
 function git(dir: string, args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -78,6 +78,7 @@ describe('getCurrentGitRef', () => {
 
 describe('createWorktree failure cleanup (S1a)', () => {
   const _savedTmpdir = process.env.TMPDIR
+  const _originalTmp = tmpdir()
   let _testTmp: string
 
   // Redirect TMPDIR to workspace — agent Seatbelt sandbox blocks writes to /var/folders T/.
@@ -92,8 +93,9 @@ describe('createWorktree failure cleanup (S1a)', () => {
   })
 
   it('cleans up mkdtemp directory when git worktree add fails', () => {
-    // Non-git directory → git worktree add will fail
-    const nonGit = mkdtempSync(join(tmpdir(), 'rivet-test-nongit-'))
+    // Non-git directory → git worktree add will fail.
+    // Put it outside the project so git cannot find a parent .git directory.
+    const nonGit = mkdtempSync(join(_originalTmp, 'rivet-test-nongit-'))
     const sessionId = 'cleanup-t1' // slice(0,8) = 'cleanup-'
     const wtPrefix = 'rivet-wt-cleanup-'
 
@@ -113,6 +115,95 @@ describe('createWorktree failure cleanup (S1a)', () => {
       assert.equal(after.length, 0, 'mkdtemp dir must be cleaned up after git worktree add failure')
     } finally {
       try { rmSync(nonGit, { recursive: true, force: true }) } catch {}
+    }
+  })
+})
+
+describe('createWorktree branch uniqueness (S1b)', () => {
+  let repo: string
+  let wt: { path: string; branch: string } | null = null
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'rivet-branch-uniq-'))
+    initGitRepo(repo, 'main')
+  })
+
+  after(() => {
+    if (wt) {
+      try { git(repo, ['worktree', 'remove', '--force', wt.path]) } catch {}
+      try { git(repo, ['branch', '-D', wt.branch]) } catch {}
+    }
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('picks a unique branch when the base branch name already exists', () => {
+    const sessionId = 'collide-1'
+    const baseBranch = `rivet-hands-${sessionId}`
+    git(repo, ['checkout', '-b', baseBranch])
+    git(repo, ['checkout', 'main'])
+
+    wt = createWorktree(repo, sessionId, baseBranch)
+    assert.notEqual(wt.branch, baseBranch, 'must not reuse existing branch')
+    assert.ok(wt.branch.startsWith(baseBranch), 'unique branch keeps base prefix')
+
+    const list = git(repo, ['worktree', 'list', '--porcelain'])
+    assert.ok(list.includes(wt.path), 'worktree is registered')
+  })
+
+  it('includes git stderr in the thrown error', () => {
+    const badRepo = mkdtempSync(join(tmpdir(), 'rivet-bad-repo-'))
+    try {
+      assert.throws(
+        () => createWorktree(badRepo, 'stderr-test'),
+        /不是 git 仓库|not a git repository|failed to create git worktree/,
+      )
+    } finally {
+      rmSync(badRepo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('cleanupStaleHandsBranches', () => {
+  let repo: string
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'rivet-stale-branch-'))
+    initGitRepo(repo, 'main')
+  })
+
+  after(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('removes rivet-hands branches that are not attached to a worktree', () => {
+    git(repo, ['checkout', '-b', 'rivet-hands-stale-1'])
+    git(repo, ['checkout', 'main'])
+    git(repo, ['checkout', '-b', 'rivet-hands-stale-2'])
+    git(repo, ['checkout', 'main'])
+
+    const removed = cleanupStaleHandsBranches(repo)
+    removed.sort()
+    assert.deepEqual(removed, ['rivet-hands-stale-1', 'rivet-hands-stale-2'])
+
+    const remaining = git(repo, ['branch', '--list', 'rivet-hands-*']).trim()
+    assert.equal(remaining, '')
+  })
+
+  it('keeps branches that still belong to an active worktree', () => {
+    const wt = createWorktree(repo, 'active-1', 'rivet-hands-active-1')
+    try {
+      // Create a stale branch alongside the active one
+      git(repo, ['checkout', '-b', 'rivet-hands-stale-3'])
+      git(repo, ['checkout', 'main'])
+
+      const removed = cleanupStaleHandsBranches(repo)
+      assert.deepEqual(removed, ['rivet-hands-stale-3'])
+
+      const remaining = git(repo, ['branch', '--list', 'rivet-hands-*']).trim()
+      assert.ok(remaining.includes('rivet-hands-active-1'), 'active branch preserved')
+    } finally {
+      git(repo, ['worktree', 'remove', '--force', wt.path])
+      git(repo, ['branch', '-D', wt.branch])
     }
   })
 })

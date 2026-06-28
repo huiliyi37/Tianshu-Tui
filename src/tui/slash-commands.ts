@@ -14,7 +14,7 @@ import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
 import { openInEditor } from './external-editor.js'
 import { formatMissionStrip } from './mission.js'
-import { PANEL_LABELS, type Panel } from './cockpit/types.js'
+import { PANEL_LABELS, PANELS, type Panel } from './cockpit/types.js'
 import type { SummaryState } from './summary-state.js'
 import type { ContextClaimStore } from '../context/claim-store.js'
 import type { ContextClaimStatus } from '../context/claims.js'
@@ -43,6 +43,13 @@ import { extractMilestone, buildDepartureMilestone } from '../constellation/mile
 import { shortHash } from '../constellation/schema.js'
 import { buildAgentMark, VOID_SYMBOL } from '../agent/void-identity.js'
 
+import type { TuiApp } from './engine/app.js'
+import type { SlashCommand } from './slash-command-registry.js'
+import type { BootstrapContext } from '../bootstrap.js'
+import { switchAgentRuntime, switchAgentSession } from '../bootstrap.js'
+import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
+import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
+import type { ChangeSet } from '../agent/review-discipline.js'
 const HELP_TEXT = `Available commands:
 /help — Show this help
 /exit — Exit Rivet
@@ -88,6 +95,19 @@ const HELP_TEXT = `Available commands:
 /dream — Distill session decisions into project memory
 /index — Rebuild codebase index (modules + CLI entries)
 /diagram [list|<type>] — Generate a mermaid diagram skeleton (architecture|dataflow|sequence|flowchart|comparison|state)
+/model [id] — Switch model (no arg = open model picker)
+/domain [id|list] — Switch star domain (no arg = open domain picker)
+/status — Show agent status (model, domain, cache, tokens)
+/tools — Show available tools and their descriptions
+/compact — Compact context (summarize old messages)
+/workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
+/todo [list|add <content>|done <id>|skip <id>|move <id> up|down] — Manage task list
+/plan-template [list|<name>|save <name>] — Reusable plan templates
+/team-resume [groupId] — Resume team execution from wave checkpoint
+/goal <objective> — Set autonomous goal for multi-turn execution
+/cancel-goal — Cancel autonomous goal
+/rollback [<N>] — Rollback file changes (alias of /undo)
+/write-plan — Write current plan to file
 Ctrl+C — Interrupt current turn (press twice to exit)`
 
 /**
@@ -273,12 +293,47 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   return null
 }
 
-export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<boolean> {
-  const { parts, pushStatic, setIsStreaming } = ctx
-  const cmd = parts[0]!.toLowerCase()
+/**
+ * Resolve `/enter <worker-id-or-label> [message]` into a prompt that resumes
+ * the worker via delegate_task, or return a usage/error message.
+ */
+export function resolveEnterWorkerInput(
+  app: TuiApp,
+  input: string,
+): { prompt: string } | { error: string } | null {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith('/enter')) return null
+  const parts = trimmed.split(/\s+/)
+  if (parts.length < 2) {
+    return { error: 'Usage: /enter <worker-id-or-label> [continuation message]' }
+  }
+  const target = parts[1]!
+  const message = parts.slice(2).join(' ').trim()
+  const resolved = app.resolveWorkerId(target)
+  if (!resolved) {
+    return { error: `Worker not found: "${target}". Use /tasks to see available workers.` }
+  }
+  const objective = message || 'Continue from where you left off.'
+  const prior = resolved.objective ? ` Previous objective: ${resolved.objective}.` : ''
+  const prompt = `Resume worker ${resolved.workerId} (profile: ${resolved.profile}).${prior} Continue with: ${objective} Call delegate_task with resume="${resolved.workerId}" and objective="${objective}".`
+  return { prompt }
+}
 
-  switch (cmd) {
-    case '/tools': {
+
+interface TuiSlashCommandDef {
+  readonly name: string
+  readonly description?: string
+  readonly immediate?: true
+  readonly handler: (ctx: SlashHandlerContext) => boolean | Promise<boolean>
+}
+
+const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
+  {
+    name: '/tools',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const sub = parts[1]?.toLowerCase()
       if (sub === 'enable') {
         const toolName = parts[2]
@@ -322,13 +377,26 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-    case '/help':
+    },
+  },
+  {
+    name: '/help',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       pushStatic(createLogEntry({ type: 'system', content: HELP_TEXT }))
       setIsStreaming(false)
       return true
 
-    case '/status': {
+    },
+  },
+  {
+    name: '/status',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const lines: string[] = ['Bandit Promotion State', '═══════════════════════']
       if (ctx.banditState && ctx.banditState.length > 0) {
         for (const b of ctx.banditState) {
@@ -344,16 +412,40 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/exit':
-    case '/quit':
+    },
+  },
+  {
+    name: '/exit',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       ctx.persist.compactOai(ctx.session.getMessages())
       pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
       process.emit('SIGINT')
       return true
 
-    case '/compact': {
+    },
+  },
+  {
+    name: '/quit',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      ctx.persist.compactOai(ctx.session.getMessages())
+      pushStatic(createLogEntry({ type: 'system', content: 'Session saved. Goodbye!' }))
+      process.emit('SIGINT')
+      return true
+
+    },
+  },
+  {
+    name: '/compact',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const sub = parts[1]?.toLowerCase()
       const msgs = ctx.session.getMessages()
       const beforeTokens = estimateOaiTokens(msgs)
@@ -398,27 +490,39 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       ctx.setCacheHitRate(ctx.session.getCacheHitRate())
       setIsStreaming(false)
       return true
-    }
-
-    case '/team': {
+    },
+  },
+  {
+    name: '/team',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       if (!parts.slice(1).join(' ').trim()) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /team <task|docs/superpowers/plans/file.md>\n       /team max <task>' }))
         setIsStreaming(false)
         return true
       }
       return false
-    }
-
-    case '/council': {
+    },
+  },
+  {
+    name: '/council',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       if (!parts.slice(1).join(' ').trim()) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /council <要会诊的计划/问题> [--seats id1,id2,...] [--rounds 1-2]' }))
         setIsStreaming(false)
         return true
       }
       return false
-    }
-
-    case '/review': {
+    },
+  },
+  {
+    name: '/review',
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // /review [max] [focus] — 独立审查入口（不经过 deliver_task）。
       // 当 ctx.runReview 可用时直接调 routeReviewWorkflow；否则 fallback 到旧路径。
       const isMax = parts[1]?.toLowerCase() === 'max'
@@ -471,9 +575,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/model': {
+    },
+  },
+  {
+    name: '/model',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const targetModel = parts[1]
       if (!targetModel || targetModel === 'list') {
         const lines: string[] = []
@@ -496,22 +605,47 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/chat':
-    case '/task': {
+    },
+  },
+  {
+    name: '/chat',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。任务脚手架在有明确意图时自动开启。' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/mode': {
+    },
+  },
+  {
+    name: '/task',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。任务脚手架在有明确意图时自动开启。' }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/mode',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       pushStatic(createLogEntry({ type: 'system', content: '模式已由消息内容自动检测，无需手动切换。' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/goal': {
+    },
+  },
+  {
+    name: '/goal',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const goalText = parts.slice(1).join(' ').trim()
       if (!goalText) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /goal <task description>\nSets a persistent goal. The agent will auto-continue until the goal is achieved or the iteration budget is exhausted.\nCancel with /cancel-goal.' }))
@@ -574,9 +708,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       // Submit the goal prompt directly to agent pipeline (bypassing raw slash input).
       ctx.submitToAgent?.(buildGoalModePrompt(goalText))
       return true
-    }
-
-    case '/cancel-goal': {
+    },
+  },
+  {
+    name: '/cancel-goal',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       ctx.agent.setGoalTracker(null)
       if (ctx.goalTrackerRef) ctx.goalTrackerRef.current = null
       // Clean up persisted goal state if session info is available
@@ -590,9 +729,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: '🚫 Goal cancelled.' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/goal-resume': {
+    },
+  },
+  {
+    name: '/goal-resume',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const tracker = ctx.goalTrackerRef?.current
       if (!tracker) {
         pushStatic(createLogEntry({ type: 'system', content: 'No paused or blocked goal to resume. Use /goal <task> to start one.' }))
@@ -610,9 +754,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `▶️ Goal resumed: ${tracker.getGoal()}\nIteration: ${tracker.getIteration()}/${tracker.getMaxIterations()} | ⏱ ${wallElapsed}s elapsed.` }))
       ctx.submitToAgent?.(`[GOAL RESUME] 继续执行目标: ${tracker.getGoal()}`)
       return true
-    }
-
-    case '/goal-criteria': {
+    },
+  },
+  {
+    name: '/goal-criteria',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const tracker = ctx.goalTrackerRef?.current
       if (!tracker) {
         pushStatic(createLogEntry({ type: 'system', content: 'No active goal. Use /goal <task> first.' }))
@@ -649,9 +798,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/domain': {
+    },
+  },
+  {
+    name: '/domain',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const sub = parts[1]?.toLowerCase()
       if (!sub || sub === 'status') {
         // Show current domain
@@ -695,33 +849,78 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/verbose': {
+    },
+  },
+  {
+    name: '/verbose',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const nextVerbose = !ctx.verboseRef.current
       ctx.setVerbose(nextVerbose)
       pushStatic(createLogEntry({ type: 'system', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/auto': {
+    },
+  },
+  {
+    name: '/evidence',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const state = ctx.agent.getEvidenceState()
+      if (state.verifications.length === 0) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No evidence recorded yet this session.' }))
+      } else {
+        const recent = state.verifications.slice(-10)
+        const lines = ['Evidence Summary (last 10 verifications):', '']
+        for (const v of recent) {
+          const glyph = v.status === 'passed' ? '✓' : v.status === 'failed' ? '✗' : '◐'
+          const time = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : ''
+          lines.push(`  ${glyph} ${v.command}  (${v.status})  ${time}`)
+        }
+        const passRate = Math.round((recent.filter(v => v.status === 'passed').length / recent.length) * 100)
+        lines.push('', `Pass rate: ${passRate}% (${recent.filter(v => v.status === 'passed').length}/${recent.length})`)
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/auto',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const next = !ctx.autoSafeRef.current
       ctx.setAutoSafe(next)
       ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
       pushStatic(createLogEntry({ type: 'system', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/plan-mode': {
+    },
+  },
+  {
+    name: '/plan-mode',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       ctx.agent.enterPlanMode()
       pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan.\n\nWhen ready, call `plan_submit` with your plan. Then:\n  /plan-list — list submitted plans\n  /plan-approve <slug> — approve and start execution\n  /plan-reject <slug> — reject with feedback' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/plan-list': {
+    },
+  },
+  {
+    name: '/plan-list',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const cwd = ctx.agent.cwd
       const plans = await listPlans(cwd)
       if (plans.length === 0) {
@@ -735,9 +934,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/plan-approve': {
+    },
+  },
+  {
+    name: '/plan-approve',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
       if (!slug) {
         // No slug — list plans and hint
@@ -773,9 +977,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/plan-reject': {
+    },
+  },
+  {
+    name: '/plan-reject',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
       if (!slug) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug>\n\nUse /plan-list to see available plans.', isError: true }))
@@ -794,9 +1003,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nThe plan was marked REJECTED but kept on disk. Provide feedback and the agent can revise it in place.` }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/theme': {
+    },
+  },
+  {
+    name: '/theme',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const raw = parts[1]?.toLowerCase()
       // validThemes derives from THEMES so theme.ts remains the single source of truth.
       const validThemes = Object.keys(THEMES) as ThemeName[]
@@ -812,9 +1026,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/debug': {
+    },
+  },
+  {
+    name: '/debug',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const subcmd = parts[1]
       const info = ctx.agent.getDebugInfo()
       if (subcmd === 'prompt') {
@@ -856,18 +1075,36 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/rollback':
+    },
+  },
+  {
+    name: '/rollback',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       return false
 
-    case '/clear':
+    },
+  },
+  {
+    name: '/clear',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // Clear visual state — reset streaming text and thinking buffers
       setIsStreaming(false)
       pushStatic(createLogEntry({ type: 'system', content: 'Screen cleared.' }))
       return true
 
-    case '/fork': {
+    },
+  },
+  {
+    name: '/fork',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // /fork [name]       — fork current session, auto-switch to the copy
       // /fork at <N>       — fork from message line N (truncate after)
       // /fork at <N> <name>— fork from line N with a branch name
@@ -938,9 +1175,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/branch': {
+    },
+  },
+  {
+    name: '/branch',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // /branch            — show branch tree for current session
       // /branch list       — same
       // /branch back       — switch back to parent session
@@ -1031,9 +1273,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/sessions': {
+    },
+  },
+  {
+    name: '/sessions',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const list = SessionPersist.formatSessionList(ctx.agent.cwd, ctx.currentSessionId)
       // Enhance with fork annotations: mark sessions that have a parentSessionId
       const sessionDir = getSessionDir(ctx.agent.cwd)
@@ -1061,9 +1308,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/resume': {
+    },
+  },
+  {
+    name: '/resume',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const arg = parts[1]
       if (!arg) {
         pushStatic(createLogEntry({ type: 'system', content: '用法: /resume <id前缀 或 序号>。用 /sessions 查看会话列表。' }))
@@ -1128,9 +1380,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `已恢复会话 ${targetId.slice(0, 8)} (${preflight.messages.length} 条消息, apiSafe=${preflight.safe})` }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/context': {
+    },
+  },
+  {
+    name: '/context',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const args = parts.slice(1).join(' ').trim()
       if (args.startsWith('pin ')) {
         const text = args.slice(4).trim()
@@ -1297,17 +1554,27 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/verify': {
+    },
+  },
+  {
+    name: '/verify',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const verify = formatVerificationStatus(ctx.agent)
       const recovery = renderRecoveryStack(process.cwd())
       pushStatic(createLogEntry({ type: 'system', content: `${verify}\n\n${recovery}` }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/memory': {
+    },
+  },
+  {
+    name: '/memory',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const subcmd = parts[1]
       const text = parts.slice(2).join(' ').trim()
       if (!subcmd) {
@@ -1335,23 +1602,202 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/mcp': {
+    },
+  },
+  {
+    name: '/mcp',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       pushStatic(createLogEntry({ type: 'system', content: 'MCP status: use /debug mcp for detailed connection info, or check startup logs.' }))
       setIsStreaming(false)
       return true
-    }
+    },
+  },
+  {
+    name: '/todo',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const { getTodos, setTodos } = await import('../tools/todo.js')
+      const { TodoStore } = await import('../tools/todo-store.js')
+      const subcmd = parts[1]
+      const arg = parts.slice(2).join(' ').trim()
+      const todos = getTodos()
 
-    case '/mission': {
+      if (!subcmd || subcmd === 'list') {
+        // List current todos
+        const text = todos.length === 0
+          ? 'No todos. The agent will create tasks via the todo tool.'
+          : TodoStore.formatList(todos)
+        pushStatic(createLogEntry({ type: 'system', content: text }))
+      } else if (subcmd === 'add') {
+        if (!arg) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo add <content>', isError: true }))
+        } else {
+          const id = `user-${Date.now().toString(36)}`
+          setTodos([...todos, { id, content: arg, status: 'pending' as const }])
+          pushStatic(createLogEntry({ type: 'system', content: `Added: ○ [${id}] ${arg}` }))
+        }
+      } else if (subcmd === 'done') {
+        const item = todos.find(t => t.id === arg || t.id.startsWith(arg))
+        if (!item) {
+          pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${arg}". Use /todo list to see ids.`, isError: true }))
+        } else {
+          setTodos(todos.map(t => t.id === item.id ? { ...t, status: 'completed' as const } : t))
+          pushStatic(createLogEntry({ type: 'system', content: `✓ Done: ${item.content}` }))
+        }
+      } else if (subcmd === 'skip') {
+        const item = todos.find(t => t.id === arg || t.id.startsWith(arg))
+        if (!item) {
+          pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${arg}". Use /todo list to see ids.`, isError: true }))
+        } else {
+          // Remove the item entirely (skip = don't do it)
+          setTodos(todos.filter(t => t.id !== item.id))
+          pushStatic(createLogEntry({ type: 'system', content: `⊘ Skipped: ${item.content}` }))
+        }
+      } else if (subcmd === 'move') {
+        const id = parts[2]
+        const dir = parts[3] // 'up' or 'down'
+        if (!id || (dir !== 'up' && dir !== 'down')) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo move <id> <up|down>', isError: true }))
+        } else {
+          const idx = todos.findIndex(t => t.id === id || t.id.startsWith(id))
+          if (idx === -1) {
+            pushStatic(createLogEntry({ type: 'system', content: `No todo matching "${id}".`, isError: true }))
+          } else {
+            const swapWith = dir === 'up' ? idx - 1 : idx + 1
+            if (swapWith < 0 || swapWith >= todos.length) {
+              pushStatic(createLogEntry({ type: 'system', content: 'Already at edge.' }))
+            } else {
+              const next = [...todos]
+              ;[next[idx], next[swapWith]] = [next[swapWith]!, next[idx]!]
+              setTodos(next)
+              pushStatic(createLogEntry({ type: 'system', content: `Moved ${dir}: ${todos[idx]!.content}` }))
+            }
+          }
+        }
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /todo [list|add <content>|done <id>|skip <id>|move <id> <up|down>]' }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/mission',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const snapshot = ctx.agent.getCognitiveSnapshot?.()
       const strip = formatMissionStrip(snapshot)
       pushStatic(createLogEntry({ type: 'system', content: strip ? `Mission\n\n${strip}` : 'Mission\n\nNo actionable task contract is active.' }))
       setIsStreaming(false)
       return true
-    }
+    },
+  },
+  {
+    name: '/plan-template',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const sub = parts[1]
+      const { loadPlanTemplates, getPlanTemplate, savePlanTemplate, formatTemplateList } = await import('../agent/plan-templates.js')
 
-    case '/constellation': {
+      if (!sub || sub === 'list') {
+        const templates = loadPlanTemplates(cwd)
+        pushStatic(createLogEntry({ type: 'system', content: formatTemplateList(templates) }))
+      } else if (sub === 'save') {
+        const name = parts[2]
+        const description = parts.slice(3).join(' ').trim()
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-template save <name> [description]', isError: true }))
+        } else {
+          // Save current plan (if any) as template
+          const { getStoredPlan } = await import('../agent/plan-store.js')
+          const currentPlan = getStoredPlan()
+          if (!currentPlan) {
+            pushStatic(createLogEntry({ type: 'system', content: 'No active plan to save. Run /plan first.', isError: true }))
+          } else {
+            savePlanTemplate(cwd, name, `\`\`\`json\n${currentPlan}\n\`\`\`\n`, description)
+            pushStatic(createLogEntry({ type: 'system', content: `✓ Saved template "${name}" to .rivet/plan-templates/${name}.md` }))
+          }
+        }
+      } else {
+        // Treat as template name to load
+        const tpl = getPlanTemplate(cwd, sub)
+        if (!tpl) {
+          pushStatic(createLogEntry({ type: 'system', content: `Template "${sub}" not found. Use /plan-template list to see available templates.`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Loaded template: ${tpl.name}\n${tpl.description ? tpl.description + '\n' : ''}${tpl.estimatedWaves ? `Estimated waves: ${tpl.estimatedWaves}\n` : ''}\n${tpl.content}\n\n→ Use /plan to refine, or /team to execute.`,
+          }))
+        }
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/workflow',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const sub = parts[1]
+      const { listWorkflows, loadWorkflow, listTraces, loadTrace, formatTrace, parseWorkflow } = await import('../agent/workflow-runner.js')
+
+      if (!sub || sub === 'list') {
+        const names = listWorkflows(cwd)
+        const text = names.length === 0
+          ? 'No workflows. Create one in .rivet/workflows/*.yaml'
+          : `Available workflows:\n\n${names.map(n => `  ${n}`).join('\n')}\n\nUse: /workflow <name> to execute.`
+        pushStatic(createLogEntry({ type: 'system', content: text }))
+      } else if (sub === 'replay') {
+        const traceId = parts[2]
+        if (!traceId) {
+          const traces = listTraces(cwd, 10)
+          const text = traces.length === 0
+            ? 'No traces available.'
+            : `Recent traces:\n\n${traces.map(t => `  ${t.traceId} — ${t.workflowName} (${t.finalStatus})`).join('\n')}\n\nUse: /workflow replay <id> to view.`
+          pushStatic(createLogEntry({ type: 'system', content: text }))
+        } else {
+          const trace = loadTrace(cwd, traceId)
+          if (!trace) {
+            pushStatic(createLogEntry({ type: 'system', content: `Trace "${traceId}" not found.`, isError: true }))
+          } else {
+            pushStatic(createLogEntry({ type: 'system', content: formatTrace(trace) }))
+          }
+        }
+      } else {
+        // Execute workflow by name
+        const wf = loadWorkflow(cwd, sub)
+        if (!wf) {
+          pushStatic(createLogEntry({ type: 'system', content: `Workflow "${sub}" not found. Use /workflow list to see available workflows.`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `▶ Workflow "${wf.name}" loaded (${wf.steps.length} steps).\n${wf.description ?? ''}\n\n→ Type your objective to execute, or /cancel to abort.`,
+          }))
+        }
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/constellation',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const cwd = ctx.agent.cwd ?? process.cwd()
       const sub = (parts[1] ?? 'view').toLowerCase()
       const now = Date.now()
@@ -1425,9 +1871,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: formatConstellationView(c, { now }) }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/leave': {
+    },
+  },
+  {
+    name: '/leave',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // User-triggered departure ritual: seal a mark into the starmap now.
       // First token may be a single-glyph symbol; the rest is the summary.
       const cwd = ctx.agent.cwd ?? process.cwd()
@@ -1462,9 +1913,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/undo': {
+    },
+  },
+  {
+    name: '/undo',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const fh = ctx.agent.getFileHistory()
       if (!fh) {
         pushStatic(createLogEntry({ type: 'system', content: 'Undo not available (no file history).' }))
@@ -1514,9 +1970,42 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
+    },
+  },
+  {
+    name: '/team-resume',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const cwd = ctx.agent.cwd ?? process.cwd()
+      const { listCheckpoints, formatCheckpointList, loadCheckpoint } = await import('../agent/wave-checkpoint.js')
+      const groupId = parts[1]
 
-    case '/cockpit': {
+      if (!groupId) {
+        const checkpoints = listCheckpoints(cwd)
+        pushStatic(createLogEntry({ type: 'system', content: formatCheckpointList(checkpoints) }))
+      } else {
+        const cp = loadCheckpoint(cwd, groupId)
+        if (!cp) {
+          pushStatic(createLogEntry({ type: 'system', content: `No checkpoint found for "${groupId}".`, isError: true }))
+        } else {
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Checkpoint: ${cp.groupId}\nResume from wave ${cp.lastCompletedWave + 2}/${cp.totalWaves} (${cp.remainingOrders.length} tasks remaining).\nObjective: ${cp.objective}`,
+          }))
+        }
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/cockpit',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const subcmd = parts[1] as Panel | 'off' | undefined
       if (subcmd === 'off') {
         ctx.surfacePop?.()
@@ -1537,16 +2026,26 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/scroll': {
+    },
+  },
+  {
+    name: '/scroll',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       ctx.surfacePush?.('pager')
       pushStatic(createLogEntry({ type: 'system', content: 'Scrollback pager opened. Press q or Esc to close.' }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/effort': {
+    },
+  },
+  {
+    name: '/effort',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | undefined
       const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max'> = ['off', 'low', 'medium', 'high', 'max']
       if (!level || !(valid as string[]).includes(level)) {
@@ -1558,9 +2057,13 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }
       setIsStreaming(false)
       return true
-    }
-
-    case '/interview': {
+    },
+  },
+  {
+    name: '/interview',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const topic = parts.slice(1).join(' ').trim()
       if (!topic) {
         pushStatic(createLogEntry({ type: 'system', content: 'Usage: /interview <topic>\nExample: /interview add a notification system' }))
@@ -1568,10 +2071,13 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
       return false
-    }
-
-    case '/plan':
-    case '/write-plan': {
+    },
+  },
+  {
+    name: '/plan',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
         pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
@@ -1579,9 +2085,28 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
         return true
       }
       return false
-    }
-
-    case '/skill': {
+    },
+  },
+  {
+    name: '/write-plan',
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const feature = parts.slice(1).join(' ').trim()
+      if (!feature) {
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
+        setIsStreaming(false)
+        return true
+      }
+      return false
+    },
+  },
+  {
+    name: '/skill',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const sub = parts[1]?.toLowerCase()
 
       // Single source of truth: the shared skillRegistry (loaded at bootstrap
@@ -1682,11 +2207,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       ctx.session.addUserMessage(payload)
       setIsStreaming(false)
       return true
-    }
-
-    // ── 天枢独有命令 ──
-
-    case '/sensorium': {
+    },
+  },
+  {
+    name: '/sensorium',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const snapshot = ctx.agent.getCognitiveSnapshot?.()
       if (!snapshot) {
         pushStatic(createLogEntry({ type: 'system', content: 'Sensorium not available yet. Send a message first to build cognitive state.' }))
@@ -1710,9 +2238,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: sensoriumLines.join('\n') }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/index': {
+    },
+  },
+  {
+    name: '/index',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // Rebuild codebase index from MeridianDB
       const indexer = ctx.agent.getIndexer?.()
       if (!indexer) {
@@ -1741,9 +2274,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       pushStatic(createLogEntry({ type: 'system', content: `📚 Codebase Index Rebuilt\n\n${result}\n\nIndex will be injected into agent context on next turn.` }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/dream': {
+    },
+  },
+  {
+    name: '/dream',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       // Show dream status — memory distillation runs automatically at session end
       const dir = knowledgeDir()
       const memPath = join(dir, 'project-memory.md')
@@ -1769,9 +2307,14 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }))
       setIsStreaming(false)
       return true
-    }
-
-    case '/diagram': {
+    },
+  },
+  {
+    name: '/diagram',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
       const arg = (parts[1] ?? '').toLowerCase()
       if (!arg || arg === 'list') {
         pushStatic(createLogEntry({ type: 'system', content:
@@ -1803,8 +2346,333 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       }))
       setIsStreaming(false)
       return true
+    },
+  },
+]
+
+export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<boolean> {
+  const cmd = ctx.parts[0]!.toLowerCase()
+  const command = TUI_SLASH_COMMANDS.find(c => c.name === cmd)
+  if (!command) return false
+  return await command.handler(ctx)
+}
+
+export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): void {
+  const autoSafeRef: MutableRefLike<boolean> = { current: true }
+  const verboseRef: MutableRefLike<boolean> = { current: false }
+  const rollbackTokenRef: MutableRefLike<string | null> = { current: null }
+  let cacheHitRate = 0
+
+  const allProviders: Record<string, { models: Array<{ id: string; alias: string }> }> = {}
+  for (const [name, prov] of Object.entries(ctx.config.provider.providers)) {
+    allProviders[name] = { models: prov.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })) }
+  }
+
+  function buildHandlerContext(input: string): SlashHandlerContext {
+    const trimmed = input.trim()
+    const parts = trimmed.split(/\s+/)
+    const metrics = app.getMetrics()
+    const maxTokens = metrics?.maxTokens && metrics.maxTokens > 0
+      ? metrics.maxTokens
+      : (ctx.provider.models[0]?.contextWindow ?? 128000)
+    const cost = metrics?.cost ?? 0
+
+    return {
+      parts,
+      agent: ctx.agent,
+      session: ctx.session,
+      persist: ctx.persist,
+      model: app.getModelInfo().modelName,
+      maxTokens,
+      availableModels: ctx.provider.models.map(m => ({ id: m.id, alias: m.alias ?? m.id })),
+      onModelSwitch: (modelId: string) => {
+        try { ctx.agent.abort() } catch {}
+        const res = switchAgentRuntime(ctx, modelId)
+        if (res.ok && res.modelName) {
+          app.setModelInfo(res.modelName, res.contextWindow)
+        }
+        return { ok: res.ok, error: res.error }
+      },
+      onSessionSwitch: (targetId: string) => {
+        try { ctx.agent.abort() } catch {}
+        const res = switchAgentSession(ctx, targetId)
+        if (res.ok) {
+          app.setStreamingState(false)
+        }
+        return res
+      },
+      allProviders,
+      currentProvider: ctx.provider.name,
+      currentSessionId: ctx.sessionId,
+      cost,
+      cacheHitRate: metrics?.cacheHitRate ?? cacheHitRate,
+      autoSafeRef,
+      verboseRef,
+      setVerbose: (v: boolean) => { verboseRef.current = v },
+      setAutoSafe: (v: boolean) => { autoSafeRef.current = v },
+      rollbackTokenRef,
+      setCockpitPanel: () => {},
+      pushStatic: (entry) => { app.commitStatic(entry.content) },
+      setIsStreaming: (v: boolean) => { app.setStreamingState(v) },
+      setCacheHitRate: (v: number) => { cacheHitRate = v },
+      setSummaryState: () => {},
+      mcpManagerRef: { current: ctx.refs.mcpManager },
+      claimStoreRef: { current: ctx.claimStore },
+      banditState: ctx.refs.banditState ?? undefined,
+      onDomainChange: (domainName: string | undefined) => {
+        app.setSessionStarDomain(domainName)
+      },
+      runReview: ctx.refs.coordinator
+        ? (() => {
+            const reviewDeps = createCoordinatorReviewDeps(ctx.refs.coordinator!, {
+              parentTurnId: 'slash-review',
+              reviewDepth: 0,
+            })
+            return (change: ChangeSet, mode: ReviewMode, focus?: string) =>
+              routeReviewWorkflow(change, reviewDeps, { mode, focusHint: focus })
+          })()
+        : undefined,
+      submitToAgent: (prompt: string) => { app.submitText(prompt) },
+      goalTrackerRef: ctx.refs.goalTrackerRef,
     }
   }
 
-  return false
+  function getHandler(name: string) {
+    return TUI_SLASH_COMMANDS.find(c => c.name === name)?.handler
+  }
+
+  function register(name: string, command: Omit<SlashCommand, "name">) {
+    app.registerSlashCommand({ name, ...command })
+  }
+
+  // Register all switch-case commands using the shared handler context adapter.
+  for (const cmd of TUI_SLASH_COMMANDS) {
+    app.registerSlashCommand({
+      name: cmd.name,
+      description: cmd.description,
+      immediate: cmd.immediate,
+      handler: async ({ app, input, trimmed }) => cmd.handler(buildHandlerContext(trimmed)),
+    })
+  }
+
+  // TUI-specific overrides that need the app handle or resolve ecosystem workflows.
+  register("/clear", {
+    description: "Clear screen",
+    immediate: true,
+    handler: () => {
+      process.stdout.write('\x1B[2J\x1B[H')
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  register("/exit", {
+    description: "Exit Rivet",
+    immediate: true,
+    handler: () => {
+      app.commitStatic('Session saved. Goodbye!')
+      ctx.shutdown()
+      return true
+    },
+  })
+
+  register("/quit", {
+    description: "Exit Rivet",
+    immediate: true,
+    handler: () => {
+      app.commitStatic('Session saved. Goodbye!')
+      ctx.shutdown()
+      return true
+    },
+  })
+
+  register("/starmap", {
+    description: "Open starmap overlay",
+    immediate: true,
+    overlay: "starmap",
+    handler: () => true,
+  })
+
+  register("/chronicle", {
+    description: "Open chronicle overlay",
+    immediate: true,
+    overlay: "chronicle",
+    handler: () => true,
+  })
+
+  register("/scroll", {
+    description: "Open scrollback pager",
+    immediate: true,
+    overlay: "pager",
+    handler: () => true,
+  })
+
+  register("/pager", {
+    description: "Open scrollback pager",
+    immediate: true,
+    overlay: "pager",
+    handler: () => true,
+  })
+
+  register("/rewind", {
+    description: "Open rewind overlay",
+    immediate: true,
+    overlay: "rewind",
+    handler: () => true,
+  })
+
+  register("/tasks", {
+    description: "Open tasks overlay",
+    immediate: true,
+    overlay: "tasks",
+    handler: () => true,
+  })
+
+  register("/enter", {
+    description: "Resume a worker session (e.g. /enter wo_team:T1 continue fixing bug)",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const result = resolveEnterWorkerInput(app, trimmed)
+      if (!result) return false
+      if ('error' in result) {
+        app.commitStatic(`⚠️  ${result.error}`)
+        return true
+      }
+      app.submitText(result.prompt)
+      return true
+    },
+  })
+
+  register("/palette", {
+    description: "Open command palette",
+    immediate: true,
+    overlay: "command-palette",
+    handler: () => true,
+  })
+
+  register("/domain", {
+    description: "Show or switch star domain",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      if (parts.length === 1) {
+        app.activateOverlay("domain-picker")
+        return true
+      }
+      const handler = getHandler("/domain")
+      return handler ? handler(buildHandlerContext(trimmed)) : false
+    },
+  })
+
+  register("/model", {
+    description: "Show or switch model",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      if (parts.length === 1) {
+        app.activateOverlay("model-picker")
+        return true
+      }
+      const handler = getHandler("/model")
+      return handler ? handler(buildHandlerContext(trimmed)) : false
+    },
+  })
+
+  register("/theme", {
+    description: "Show or switch color theme",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      if (parts.length === 1) {
+        app.activateOverlay("theme-picker")
+        return true
+      }
+      const handler = getHandler("/theme")
+      return handler ? handler(buildHandlerContext(trimmed)) : false
+    },
+  })
+
+  register("/cockpit", {
+    description: "Toggle cockpit panel",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      const arg = parts[1]?.toLowerCase() as Panel | "off" | undefined
+      if (arg === "off") {
+        app.deactivateOverlay()
+        app.commitStatic('Cockpit panel collapsed.')
+        app.setStreamingState(false)
+        return true
+      }
+      if (arg && (PANELS as string[]).includes(arg)) {
+        app.setCockpitPanel(arg as Panel)
+        app.activateOverlay("cockpit")
+        app.commitStatic(`Cockpit: ${PANEL_LABELS[arg as Panel]} panel. /cockpit off to collapse.`)
+        app.setStreamingState(false)
+        return true
+      }
+      const wasOpen = app.activeOverlayId() === "cockpit"
+      if (wasOpen) {
+        app.deactivateOverlay()
+      } else {
+        app.setCockpitPanel('summary')
+        app.activateOverlay("cockpit")
+      }
+      app.commitStatic(wasOpen ? 'Cockpit panel collapsed.' : `Cockpit: ${PANEL_LABELS['summary']} panel. /cockpit off to collapse.`)
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  register("/vim", {
+    description: "Toggle vim keybindings",
+    immediate: true,
+    handler: () => {
+      const next = app.toggleVim()
+      app.commitStatic(next
+        ? 'Vim keybindings: on (Esc → normal mode, i/a → insert)'
+        : 'Vim keybindings: off')
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  register("/auto", {
+    description: "Toggle auto-approve",
+    immediate: true,
+    handler: () => {
+      const next = !autoSafeRef.current
+      autoSafeRef.current = next
+      const mode = next ? "auto-safe" : "manual"
+      ctx.agent.setApprovalMode(mode)
+      app.setApprovalMode(mode)
+      app.commitStatic(next
+        ? 'Auto-approve: on (auto-safe — high-risk still requires approval)'
+        : 'Auto-approve: off (manual — all mutating tools require approval)')
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  // Ecosystem workflow commands: resolve to agent prompt and submit directly.
+  // When the resolver has no mapping (e.g. empty /team or /plan), fall back to
+  // the shared handler so usage hints are shown instead of being rejected.
+  function registerWorkflow(name: string) {
+    register(name, {
+      handler: ({ app, input, trimmed }) => {
+        const resolved = resolveAppPromptInput(trimmed, ctx.cwd)
+        if (resolved !== null) {
+          app.submitText(resolved)
+          return true
+        }
+        const fallback = getHandler(name)
+        return fallback ? fallback(buildHandlerContext(trimmed)) : false
+      },
+    })
+  }
+  registerWorkflow("/team")
+  registerWorkflow("/council")
+  registerWorkflow("/plan")
+  registerWorkflow("/write-plan")
+  registerWorkflow("/plan-close")
 }

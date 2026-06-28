@@ -20,67 +20,67 @@ function diag(file: string, line: number, message: string, severity: Diagnostic[
 
 function runner(diagnostics: Diagnostic[], ranOk = true): TypecheckRunner {
   const res: LspCheckResult = { diagnostics, formatted: '', ranOk }
-  return () => res
+  return async () => res
 }
 
-test('flags a changed file that has a type error', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 264, 'TS1117: duplicate property')]))
+test('flags a changed file that has a type error', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 264, 'TS1117: duplicate property')]))
   assert.ok(r)
   assert.deepEqual(r.brokenFiles, ['src/x.ts'])
   assert.match(r.summary, /Typecheck broken/)
   assert.match(r.summary, /src\/x\.ts/)
 })
 
-test('point 1: matches when tsc reports an absolute path', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('/repo/src/x.ts', 10, 'TS2300: dup')]))
+test('point 1: matches when tsc reports an absolute path', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('/repo/src/x.ts', 10, 'TS2300: dup')]))
   assert.ok(r)
   assert.deepEqual(r.brokenFiles, ['src/x.ts'])
 })
 
-test('point 1: does not substring-misfire (src/xx.ts changed, error in src/x.ts)', () => {
+test('point 1: does not substring-misfire (src/xx.ts changed, error in src/x.ts)', async () => {
   // Error in src/x.ts is drift relative to changed src/xx.ts. With baseline
   // suppressing it, scoped match must still not misfire onto src/xx.ts.
   const baseline = new Set(['src/x.ts|10|TS2300: dup'])
-  const r = runChangedFilesTypecheck(CWD, ['src/xx.ts'], runner([diag('src/x.ts', 10, 'TS2300: dup')]), baseline)
+  const r = await runChangedFilesTypecheck(CWD, ['src/xx.ts'], runner([diag('src/x.ts', 10, 'TS2300: dup')]), baseline)
   assert.equal(r, null)
 })
 
-test('point 2: ranOk=false (crash/timeout) → null even with diagnostics', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 1, 'TS9999: x')], false))
+test('point 2: ranOk=false (crash/timeout) → null even with diagnostics', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 1, 'TS9999: x')], false))
   assert.equal(r, null)
 })
 
-test('errors only in untouched files with baseline suppression → null', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/other.ts', 5, 'TS1: noise')]), new Set(['src/other.ts|5|TS1: noise']))
+test('errors only in untouched files with baseline suppression → null', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/other.ts', 5, 'TS1: noise')]), new Set(['src/other.ts|5|TS1: noise']))
   assert.equal(r, null)
 })
 
-test('no .ts/.tsx among changed files → null and runner not called', () => {
+test('no .ts/.tsx among changed files → null and runner not called', async () => {
   let called = false
-  const spy: TypecheckRunner = () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
-  const r = runChangedFilesTypecheck(CWD, ['README.md', 'data.json'], spy)
+  const spy: TypecheckRunner = async () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
+  const r = await runChangedFilesTypecheck(CWD, ['README.md', 'data.json'], spy)
   assert.equal(r, null)
   assert.equal(called, false)
 })
 
-test('absolute changed-file paths are filtered out before running', () => {
+test('absolute changed-file paths are filtered out before running', async () => {
   let called = false
-  const spy: TypecheckRunner = () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
-  const r = runChangedFilesTypecheck(CWD, ['/abs/src/x.ts'], spy)
+  const spy: TypecheckRunner = async () => { called = true; return { diagnostics: [], formatted: '', ranOk: true } }
+  const r = await runChangedFilesTypecheck(CWD, ['/abs/src/x.ts'], spy)
   assert.equal(r, null)
   assert.equal(called, false)
 })
 
-test('warnings are ignored — only errors escalate', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 3, 'TS6133: unused', 'warning')]))
+test('warnings are ignored — only errors escalate', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([diag('src/x.ts', 3, 'TS6133: unused', 'warning')]))
   assert.equal(r, null)
 })
 
-test('caps errors per file and files in summary', () => {
+test('caps errors per file and files in summary', async () => {
   const ds: Diagnostic[] = []
   for (let i = 0; i < 12; i++) ds.push(diag(`src/f${i}.ts`, i, `TS${i}: e`))
   const changed = ds.map(d => d.file)
-  const r = runChangedFilesTypecheck(CWD, changed, runner(ds))
+  const r = await runChangedFilesTypecheck(CWD, changed, runner(ds))
   assert.ok(r)
   assert.equal(r.brokenFiles.length, 12)
   assert.match(r.summary, /\+4 more files/)
@@ -103,40 +103,40 @@ test('typecheckGateEnabled: default on, off via 0/false/off/no', () => {
   }
 })
 
-test('memo: identical changed-file set with stable mtime runs tsc once', () => {
+test('memo: identical changed-file set with stable mtime runs tsc once', async () => {
   __clearTypecheckMemo()
   let calls = 0
-  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  const spy: TypecheckRunner = async () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
   // Use a real, existing source file so statSync produces a stable signature.
   const files = ['src/agent/typecheck-gate.ts']
-  runChangedFilesTypecheckMemo(process.cwd(), files, spy)
-  runChangedFilesTypecheckMemo(process.cwd(), files, spy)
+  await runChangedFilesTypecheckMemo(process.cwd(), files, spy)
+  await runChangedFilesTypecheckMemo(process.cwd(), files, spy)
   assert.equal(calls, 1, 'second identical call should hit the memo')
 })
 
-test('memo: a different changed-file set bypasses the cache', () => {
+test('memo: a different changed-file set bypasses the cache', async () => {
   __clearTypecheckMemo()
   let calls = 0
-  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
-  runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/typecheck-gate.ts'], spy)
-  runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/loop.ts'], spy)
+  const spy: TypecheckRunner = async () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  await runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/typecheck-gate.ts'], spy)
+  await runChangedFilesTypecheckMemo(process.cwd(), ['src/agent/loop.ts'], spy)
   assert.equal(calls, 2)
 })
 
-test('memo: unstattable (mock) paths fail open — no cache, runner runs each time', () => {
+test('memo: unstattable (mock) paths fail open — no cache, runner runs each time', async () => {
   __clearTypecheckMemo()
   let calls = 0
-  const spy: TypecheckRunner = () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
+  const spy: TypecheckRunner = async () => { calls++; return { diagnostics: [], formatted: '', ranOk: true } }
   const files = ['src/does-not-exist-xyz.ts']
-  runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
-  runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
+  await runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
+  await runChangedFilesTypecheckMemo('/fake/cwd', files, spy)
   assert.equal(calls, 2)
 })
 
 // ── Cross-file drift detection (the 24-error class) ─────────────────────────
 
-test('drift: error in non-changed file + empty baseline → non-null with repoWide', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]))
+test('drift: error in non-changed file + empty baseline → non-null with repoWide', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]))
   assert.ok(r, 'must escalate when a new repo-wide error exists')
   assert.deepEqual(r.brokenFiles, [], 'no scoped errors — brokenFiles is empty')
   assert.ok(r.repoWide, 'repoWide segment must be populated')
@@ -145,25 +145,25 @@ test('drift: error in non-changed file + empty baseline → non-null with repoWi
   assert.match(r.summary, /src\/default\.ts/)
 })
 
-test('drift: same error in baseline → null (accepted debt)', () => {
+test('drift: same error in baseline → null (accepted debt)', async () => {
   const sig = 'src/default.ts|10|TS2322: type mismatch'
-  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]), new Set([sig]))
+  const r = await runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS2322: type mismatch')]), new Set([sig]))
   assert.equal(r, null, 'baseline-suppressed error must not escalate')
 })
 
-test('drift: corrupted/missing baseline → treated as empty set → strict', () => {
+test('drift: corrupted/missing baseline → treated as empty set → strict', async () => {
   // Pass no baseline (undefined) — defaults to loadTypecheckBaseline which returns empty Set
-  const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS9999: boom')]))
+  const r = await runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS9999: boom')]))
   assert.ok(r, 'missing baseline = strict = any error escalates')
   assert.ok(r.repoWide)
   assert.equal(r.repoWide!.count, 1)
 })
 
-test('drift: RIVET_TYPECHECK_REPO_WIDE=0 → only scoped, drift errors ignored', () => {
+test('drift: RIVET_TYPECHECK_REPO_WIDE=0 → only scoped, drift errors ignored', async () => {
   const prev = process.env.RIVET_TYPECHECK_REPO_WIDE
   try {
     process.env.RIVET_TYPECHECK_REPO_WIDE = '0'
-    const r = runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS1: drift')]))
+    const r = await runChangedFilesTypecheck(CWD, ['src/schema.ts'], runner([diag('src/default.ts', 10, 'TS1: drift')]))
     assert.equal(r, null, 'repo-wide disabled → drift error not escalated')
   } finally {
     if (prev == null) delete process.env.RIVET_TYPECHECK_REPO_WIDE
@@ -171,8 +171,8 @@ test('drift: RIVET_TYPECHECK_REPO_WIDE=0 → only scoped, drift errors ignored',
   }
 })
 
-test('drift: scoped + drift both present → summary has both segments', () => {
-  const r = runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([
+test('drift: scoped + drift both present → summary has both segments', async () => {
+  const r = await runChangedFilesTypecheck(CWD, ['src/x.ts'], runner([
     diag('src/x.ts', 1, 'TS1: scoped'),
     diag('src/other.ts', 2, 'TS2: drift'),
   ]))

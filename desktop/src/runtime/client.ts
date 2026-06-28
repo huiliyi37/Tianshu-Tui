@@ -5,7 +5,11 @@ import type {
   ArtifactSummary,
   DomainEntry,
   FileContent,
+  GitGraphResponse,
   HealthInfo,
+  HookEntry,
+  HooksConfig,
+  InsightsResponse,
   ModelEntry,
   PlanDoc,
   PlanModeState,
@@ -14,6 +18,7 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  WorkingTreeResponse,
 } from './types'
 
 export interface RuntimeInfo {
@@ -106,6 +111,12 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function apiPut<T>(path: string, body?: unknown): Promise<T> {
+  const res = await rivetFetch(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined })
+  if (!res.ok) throw new Error(`PUT ${path} -> ${res.status}`)
+  return res.json() as Promise<T>
+}
+
 // ── Health (N1) ─────────────────────────────────────────────────────
 
 export function getHealth(): Promise<HealthInfo> {
@@ -179,9 +190,17 @@ export async function steerSession(id: string, text: string): Promise<'queued' |
   return 'queued'
 }
 
-/** N2 — feedback on an artifact, re-injected as next-turn context. */
-export function sendArtifactFeedback(id: string, artifactId: string, comment: string): Promise<SessionRecord> {
-  return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment })
+/** N2 — feedback on an artifact, re-injected as next-turn context.
+ *  `lines` carries optional diff line-level review comments (file + old/new
+ *  line + text). When `comment` is empty but `lines` is non-empty, only
+ *  line-level remarks are injected. */
+export function sendArtifactFeedback(
+  id: string,
+  artifactId: string,
+  comment: string,
+  lines?: ReadonlyArray<import('./types.js').LineComment>,
+): Promise<SessionRecord> {
+  return apiPost<SessionRecord>(`/sessions/${id}/feedback`, { artifactId, comment, lines })
 }
 
 export function abortSession(id: string): Promise<{ aborted: boolean }> {
@@ -204,6 +223,11 @@ export function fetchEvents(id: string, since: number): Promise<{ events: Sessio
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }
 
+/** Insights — aggregated token usage, cost, and per-worker/model/provider breakdowns. */
+export function getInsights(id: string): Promise<InsightsResponse> {
+  return apiGet<InsightsResponse>(`/sessions/${id}/insights`)
+}
+
 /** D2 — @file mention picker: ranked project files under the session cwd. */
 export async function listFiles(id: string, query: string, limit = 50): Promise<string[]> {
   const qs = `q=${encodeURIComponent(query)}&limit=${limit}`
@@ -221,6 +245,15 @@ export async function getFileContent(
   if (range?.start) qs.set('start', String(range.start))
   if (range?.end) qs.set('end', String(range.end))
   return apiGet<FileContent>(`/sessions/${id}/file-content?${qs}`)
+}
+
+/** Gap 1 — directory listing for file browser. Returns direct children. */
+export async function listDir(
+  id: string,
+  path: string,
+): Promise<{ path: string; entries: import('./types.js').DirEntry[] }> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+  return apiGet(`/sessions/${id}/list-dir${qs}`)
 }
 
 export function answerApproval(
@@ -385,6 +418,30 @@ export function getArtifact(id: string, artifactId: string): Promise<{ artifact:
   )
 }
 
+// ── Council (I1) ────────────────────────────────────────────────────
+
+export function conveneCouncil(
+  id: string,
+  input: {
+    artifactId: string
+    objective?: string
+    seats?: { authority: string; charter?: string }[]
+    rounds?: number
+  },
+): Promise<{ planMarkdown: string; artifactId: string }> {
+  return apiPost<{ planMarkdown: string; artifactId: string }>(`/sessions/${id}/council`, input)
+}
+
+// ── Hooks (I4) ──────────────────────────────────────────────────────
+
+export function getHooks(id: string): Promise<HooksConfig> {
+  return apiGet<HooksConfig>(`/sessions/${id}/hooks`)
+}
+
+export function setHooks(id: string, hooks: HookEntry[]): Promise<HooksConfig> {
+  return apiPut<HooksConfig>(`/sessions/${id}/hooks`, { hooks })
+}
+
 // ── Schedule (N3) ───────────────────────────────────────────────────
 
 export async function listSchedule(): Promise<ScheduledTask[]> {
@@ -515,4 +572,21 @@ export async function restartMcpServer(serverId: string): Promise<{ ok: boolean 
 
 export async function listMcpServerTools(serverId: string): Promise<McpServerToolsResponse> {
   return apiGet<McpServerToolsResponse>(`/mcp/servers/${encodeURIComponent(serverId)}/tools`)
+}
+
+// ── Git graph ───────────────────────────────────────────────────────
+
+export function getGitGraph(maxCount?: number): Promise<GitGraphResponse> {
+  const qs = maxCount !== undefined ? `?maxCount=${maxCount}` : ''
+  return apiGet<GitGraphResponse>(`/git/graph${qs}`)
+}
+
+/** Working-tree changes relative to HEAD (file list only — per-file diff is on-demand). */
+export function getWorkingTree(): Promise<WorkingTreeResponse> {
+  return apiGet<WorkingTreeResponse>('/git/working-tree')
+}
+
+/** Unified diff of a single file relative to HEAD. Empty string = no textual diff (binary/untracked). */
+export function getFileDiff(path: string): Promise<{ diff: string }> {
+  return apiGet<{ diff: string }>(`/git/diff?path=${encodeURIComponent(path)}`)
 }

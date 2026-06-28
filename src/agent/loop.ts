@@ -182,6 +182,12 @@ export class AgentLoop {
   /** U6: most recent convergence-detector result — consumed by the replan loop's
    *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
   latestConvergenceResult: ConvergenceResult | null = null
+  /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
+   *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
+   *  (isGoalActive) read LOCAL state instead of reaching back into the
+   *  orchestrator — breaking the former orchestrator→loop→orchestrator cycle.
+   *  The orchestrator reads it via the deps.getGoalTracker getter. */
+  private goalTracker: import('./goal-tracker.js').GoalTracker | null = null
   /** U6: autonomous plan execution trace. Created per task (initializeRun), steps
    *  seeded from the first todo write (capturePlanSteps), advanced per tool-turn,
    *  and checked for deviation at each turn boundary. Null outside task context. */
@@ -215,6 +221,7 @@ export class AgentLoop {
   prevEngineStats = { volatileSwaps: 0, frozenClamps: 0, frozenFallbackRebuilds: 0, toolsUpdates: 0 }
   prevMsgCount = 0
   prevHitRate: number | null = null
+  prevTokenEfficiency: number | undefined = undefined
   /** Estimated context tokens at the end of the previous turn — baseline for
    *  compact attribution (compactPreRatio / compactReclaimed in the cache-log). */
   prevEstTokens = 0
@@ -577,14 +584,6 @@ export class AgentLoop {
     return this.planTraceCoordinator.buildStepResultFromTurn(turn)
   }
 
-  /** U6: turn-boundary deviation check. Reads the latest convergence result +
-   *  no-tool counter + most recent step result, detects deviation, applies a
-   *  course correction, and refreshes the replan/trace prompt surfaces. No-op
-   *  until the trace has steps (i.e. the agent has produced a todo plan). */
-  runReplanCheck(): void {
-    this.planTraceCoordinator.runReplanCheck()
-  }
-
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
       recordToolHistory(this, name, input, isError, result);
       // F-fix (session 803d897d): field habituation moves discipline text out of
@@ -656,15 +655,22 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
-  /** Attach a GoalTracker to the current run. The tracker is consumed by
-   *  TurnOrchestrator.execute() which reads this.turnOrchestrator.goalTracker. */
+  /** Attach a GoalTracker to the current run. Owned by AgentLoop; the
+   *  orchestrator reads it via deps.getGoalTracker (no longer a field on
+   *  TurnOrchestrator), severing the loop→orchestrator back-edge that
+   *  getDoomLoopLevel/isGoalActive used to traverse. */
   setGoalTracker(tracker: import('./goal-tracker.js').GoalTracker | null): void {
-    this.turnOrchestrator.setGoalTracker(tracker)
+    this.goalTracker = tracker
+  }
+
+  /** Expose the goal tracker for deps wiring (orchestrator reads via getter). */
+  getGoalTracker(): import('./goal-tracker.js').GoalTracker | null {
+    return this.goalTracker
   }
 
   /** Check if goal tracker is active (for doom-loop threshold selection). */
   isGoalActive(): boolean {
-    return this.turnOrchestrator.goalTracker?.isActive() ?? false
+    return this.goalTracker?.isActive() ?? false
   }
 
   /**
@@ -848,7 +854,7 @@ export class AgentLoop {
   getDoomLoopLevel(): 'none' | 'warn' | 'blocked' {
     // Goal-active mode uses relaxed thresholds to avoid false doom-loop triggers
     // during long autonomous tasks where repeated tool types are legitimate.
-    const thresholds = getDoomLoopThresholds(this.turnOrchestrator.goalTracker?.isActive() ?? false)
+    const thresholds = getDoomLoopThresholds(this.goalTracker?.isActive() ?? false)
     return combineDoomLoopLevels(
       getDoomLoopLevel(this.traceStore.toolFingerprints, thresholds.exact),
       getClassDoomLoopLevel(this.traceStore.bashClassFingerprints ?? [], thresholds.class),
@@ -1108,6 +1114,10 @@ export class AgentLoop {
     this.latestFsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   }
 
+  isRunning(): boolean {
+    return this._running
+  }
+
   async run(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {
     // Re-entry guard: prevent concurrent agent.run() calls.
     // React strict mode or rapid re-submits could trigger handleSubmit
@@ -1181,6 +1191,7 @@ export class AgentLoop {
       noToolTurnCount: this.consecutiveNoToolTurns,
       textFingerprints: this.recentTextFingerprints,
       providerName: this.config.providerName,
+      outputTokens: this.session.getTotalUsage().output_tokens,
     })
     this.latestConvergenceResult = convergenceCheck
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
@@ -1248,17 +1259,6 @@ export class AgentLoop {
     }
 
     return { action: 'proceed' }
-  }
-
-  async runCompaction(
-    turn: number,
-    snap: ResourceSensorSnapshot | null,
-  ): Promise<{
-    compacted: boolean
-    shouldAbort: boolean
-    userMessageConsumed: boolean
-  }> {
-    return this.compactBoundaryCoordinator.runCompaction(turn, snap)
   }
 
   private async _runInner(userInput: string, callbacks: AgentCallbacks, images?: string[]): Promise<void> {

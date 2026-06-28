@@ -4,12 +4,73 @@ import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, r
 import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
+import { storePlan } from '../agent/plan-store.js'
 import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
 import type { TodoItem } from './todo-store.js'
+import { readFile } from 'node:fs/promises'
+import type { TaskGraph, TaskGraphNode } from '../agent/task-graph.js'
 
 const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
+
+// ── Plan file detection & checklist parsing (plan_task → team_orchestrate fast path) ──
+
+const PLAN_PATH_RE = /(?:\.rivet\/knowledge\/|docs\/superpowers\/plans\/)[^\s]+\.md/
+
+/** Extract a plan file path from objective text or files array.
+ *  Returns null if no recognized plan file path is found. */
+export function extractPlanPath(objective: string, files?: string[]): string | null {
+  const match = objective.match(PLAN_PATH_RE)
+  if (match) return match[0]
+  if (files) {
+    for (const f of files) {
+      if (PLAN_PATH_RE.test(f)) return f
+    }
+  }
+  return null
+}
+
+/** Parse unchecked checklist items from Markdown.
+ *  Each `- [ ]` line becomes one item with text + extracted file paths.
+ *  Checked items (`- [x]`) are skipped. */
+export function parseChecklistItems(markdown: string): Array<{ text: string; files: string[] }> {
+  const items: Array<{ text: string; files: string[] }> = []
+  for (const line of markdown.split('\n')) {
+    const m = line.match(/^- \[ \] (.+)$/)
+    if (!m) continue
+    const text = m[1]!.trim()
+    const fileRefs = text.match(/`([^`]+\.\w+)`/g) ?? []
+    const files = fileRefs.map(f => f.replace(/`/g, ''))
+    items.push({ text, files })
+  }
+  return items
+}
+
+/** Build a TaskGraph from parsed checklist items — each item becomes a patcher task. */
+function buildTasksFromChecklist(
+  items: Array<{ text: string; files: string[] }>,
+  objective: string,
+): TaskGraph {
+  const nodes: TaskGraphNode[] = []
+  let seq = 1
+  for (const item of items) {
+    const id = `P${seq++}`
+    nodes.push({
+      id,
+      title: item.text.slice(0, 80),
+      objective: `${item.text}\n\n只执行本 task，不扩展范围，不重写计划。`,
+      profile: 'patcher' as const,
+      kind: 'patch_proposal' as const,
+      files: item.files,
+      dependsOn: [],
+      riskTier: 'medium' as const,
+    })
+  }
+  return { mission: objective, nodes, createdAt: Date.now() }
+}
+
+// ── Methodology guidance ──
 
 /**
  * Build a methodology guidance block for injection into plan_task output.
@@ -89,8 +150,27 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         ? (params.input.files as string[]).filter(f => typeof f === 'string')
         : undefined
 
-      // Step 1: decompose into TaskGraph
-      const graph = decomposeObjective({ objective, files })
+      // Step 1: plan file detection fast-path — when objective/files reference a
+      // Markdown plan, parse its checklist directly into patcher tasks instead of
+      // running the generic decomposeObjective pipeline (scout→architect→…).
+      let graph: TaskGraph
+      const planPath = extractPlanPath(objective, files)
+      if (planPath) {
+        try {
+          const markdown = await readFile(planPath, 'utf-8')
+          const items = parseChecklistItems(markdown)
+          if (items.length > 0) {
+            graph = buildTasksFromChecklist(items, objective)
+          } else {
+            graph = decomposeObjective({ objective, files })
+          }
+        } catch {
+          // File missing or unreadable → fallback
+          graph = decomposeObjective({ objective, files })
+        }
+      } else {
+        graph = decomposeObjective({ objective, files })
+      }
 
       // Populate todo store so the PlanExecutionTrace baseline is immediately
       // seeded (U6: trace captures steps from the first todo write). Skip the
@@ -118,6 +198,10 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           isError: true,
         }
       }
+
+      // Bridge: store the serialized plan so team_orchestrate can auto-consume
+      // it without the model copy-pasting JSON between tool calls.
+      storePlan(serializeUnifiedPlan(plan))
 
       if (params.input.execute !== true) {
         // Return JSON + human-readable summary with methodology guidance

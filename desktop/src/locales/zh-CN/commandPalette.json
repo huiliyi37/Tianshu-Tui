@@ -1,0 +1,15 @@
+{
+  "placeholder": "输入命令或线程…",
+  "noMatch": "无匹配",
+  "shortcuts": "快捷键",
+  "newThread": "新建线程",
+  "switchTheme": "切换主题",
+  "goTo": "前往 {{label}}",
+  "project": "项目：{{name}}",
+  "thread": "线程：{{name}}",
+  "hintNavigate": "导航",
+  "hintAction": "操作",
+  "hintAppearance": "外观",
+  "hintProject": "项目",
+  "hintJump": "跳转"
+}

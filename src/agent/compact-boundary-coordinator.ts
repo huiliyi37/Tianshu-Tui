@@ -3,6 +3,7 @@ import { compactStaleRoundsOai } from '../compact/stale-round.js'
 import { microCompactOai } from '../compact/micro.js'
 import { staleRoundThresholds } from '../compact/constants.js'
 import type { CompactCircuitBreakerState } from '../context/types.js'
+import type { DangerSignal } from './immune-types.js'
 import { debugLog } from '../utils/debug.js'
 
 /** T9 quality-compaction trigger ratios. Mirrors compactSchema.qualityCompact
@@ -53,7 +54,7 @@ export interface CompactBoundaryDeps {
   getProviderName?: () => string | undefined
   /** T9 trigger ratios from config; falls back to DEFAULT_QUALITY_COMPACT_THRESHOLDS. */
   getQualityThresholds?: () => QualityCompactThresholds
-  injectImmuneSignal: (signal: { kind: string; severity: number; turn: number; source: string }) => void
+  injectImmuneSignal: (signal: DangerSignal) => void
 }
 
 export interface RunCompactionResult {
@@ -164,7 +165,7 @@ export class CompactBoundaryCoordinator {
     if (!compactResult.compacted) {
       const contextWindow = this.deps.getContextWindow()
       const msgs = this.deps.getMessages()
-      const tokenBudget = estimateOaiTokens(msgs as any)
+      const tokenBudget = estimateOaiTokens(msgs)
       const tokenRatio = tokenBudget / contextWindow
 
       if ((tokenRatio >= 0.5 || this.deps.getPendingStaleCompact()) && contextWindow < 1_000_000) {

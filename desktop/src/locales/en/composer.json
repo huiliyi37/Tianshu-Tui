@@ -1,0 +1,18 @@
+{
+  "placeholderPlan": "Describe your goal…",
+  "placeholderBusy": "Running · Enter to steer",
+  "placeholderIdle": "Ask anything…",
+  "steer": "Steer",
+  "stop": "Stop",
+  "generate": "Generate Plan",
+  "selectImage": "Select image",
+  "voiceStart": "Voice input",
+  "voiceStop": "Stop recording",
+  "addMode": "Add mode / image / command",
+  "imageErrorFormat": "Unsupported format (PNG/JPEG/WebP/GIF/BMP only)",
+  "imageErrorSize": "{{name}} exceeds 5MB limit",
+  "imageErrorProcess": "Image processing failed, please retry",
+  "switchModel": "Switch model",
+  "modelDisabled": "Cannot switch model while running",
+  "removeImage": "Remove image"
+}

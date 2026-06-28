@@ -12,6 +12,7 @@ import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { decideReadPolicy } from './read-policy.js'
 import { foldCode } from '../compact/code-fold.js'
+import { canUsePrewarmForRead, consumePrewarm } from '../agent/prewarm-file.js'
 
 // Cache GitignoreFilter instances by cwd to avoid re-reading .gitignore on every call
 const gitignoreCache = new Map<string, { filter: Promise<GitignoreFilter>; ts: number }>()
@@ -72,9 +73,17 @@ function isReadRefEnabled(): boolean {
  *  as direct content to avoid wasted round-trips for tiny fragments. */
 const READ_REF_THRESHOLD = 2048
 
-/** Telemetry: cumulative bytes saved via read-ref (avoided cacheCreate). */
+/** Per-session read-ref telemetry accumulator. When injected via ToolCallParams,
+ *  read-ref stats scope to the session instead of accumulating process-wide. */
+export interface ReadRefStats {
+  savedBytes: number
+  count: number
+}
+
+/** Telemetry: cumulative bytes saved via read-ref (avoided cacheCreate).
+ *  Module-level fallback used when no per-session accumulator is injected. */
 let readRefSavedBytes = 0
-/** Telemetry: number of read-ref shortcuts executed. */
+/** Telemetry: number of read-ref shortcuts executed. Module-level fallback. */
 let readRefCount = 0
 
 /** Session-level file edit tracking: records which files this session has
@@ -99,8 +108,14 @@ export function wasFileEditedBySession(canonicalPath: string): boolean {
 export function __resetSessionFileEditsForTests(): void {
   sessionFileEdits.clear()
 }
-function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined): string {
-  return `${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limit: number | undefined, sessionId?: string): string {
+  return `${sessionId ?? ''}::${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
+}
+
+/** Key for fileReadHistory — scoped by sessionId so concurrent sessions in the
+ *  same cwd (fork/worker) don't see each other's "already read" entries. */
+function fileHistoryKey(sessionId: string | undefined, canonicalPath: string): string {
+  return `${sessionId ?? ''}::${canonicalPath}`
 }
 
 function trimReadHistory(): void {
@@ -128,10 +143,11 @@ export function isUnchangedRepeatRead(
   dedupKey: string,
   offset: number,
   limit: number | undefined,
+  sessionId?: string,
 ): boolean {
   const priorSame = readHistory.get(dedupKey)
   if (priorSame && priorSame.mtimeMs === currentMtimeMs) return true
-  const fullPrior = fileReadHistory.get(canonical)
+  const fullPrior = fileReadHistory.get(fileHistoryKey(sessionId, canonical))
   if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) return true
   return false
 }
@@ -303,6 +319,13 @@ export interface ReadFilePayloadOptions {
   limit?: number
   /** Per-call model read cap. Defaults to {@link DEFAULT_MODEL_READ_CAP}. */
   modelCap?: ModelReadCap
+  /**
+   * Full file content already read by a higher layer (e.g. a prewarm cache
+   * hit), skipping the `fs.readFile` inside this function. The content must be
+   * the verbatim file bytes (same as `await readFile(filePath, 'utf-8')` would
+   * return) — path validation, gitignore, binary, and cap truncation still run.
+   */
+  prefetchedContent?: string
 }
 
 export interface ReadFilePayload {
@@ -341,7 +364,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
   if (fileSize > MAX_TOOL_INPUT_BYTES && !hasExplicitRange) {
     if (policy.action === 'partial') {
       // Large source file: read and return PARTIAL view instead of hard error
-      const content = await readFile(filePath, 'utf-8')
+      const content = options.prefetchedContent ?? await readFile(filePath, 'utf-8')
       const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
       const partialContent = applyFoldThenPartial(content, filePath, cap)
       return {
@@ -358,7 +381,7 @@ export async function readFilePayload(cwd: string, options: ReadFilePayloadOptio
     )
   }
 
-  let content = await readFile(filePath, 'utf-8')
+  let content = options.prefetchedContent ?? await readFile(filePath, 'utf-8')
   const offset = options.offset ?? 1
   const limit = options.limit
   const cap = options.modelCap ?? DEFAULT_MODEL_READ_CAP
@@ -479,7 +502,7 @@ export const READ_FILE_TOOL: Tool = {
       canonical = validatePath(params.cwd, filePath)
       if (existsSync(canonical)) {
         currentMtimeMs = (await stat(canonical)).mtimeMs
-        dedupKey = readHistoryKey(params.cwd, canonical, offset, limit)
+        dedupKey = readHistoryKey(params.cwd, canonical, offset, limit, params.sessionId)
         const prior = readHistory.get(dedupKey)
         if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
           if (params.artifactStore) {
@@ -491,7 +514,7 @@ export const READ_FILE_TOOL: Tool = {
           }
           debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
-        const fullEntry = fileReadHistory.get(canonical)
+        const fullEntry = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical))
         if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
@@ -508,13 +531,13 @@ export const READ_FILE_TOOL: Tool = {
     // ── 重复读取检测 ──
     // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
     const unchangedRepeat = (canonical && currentMtimeMs !== null && dedupKey)
-      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit)
+      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit, params.sessionId)
       : false
 
     let repeatWarning: string | null = null
     if (unchangedRepeat) {
       const priorSame = readHistory.get(dedupKey!)
-      const fullPrior = fileReadHistory.get(canonical!)
+      const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
       if (priorSame && priorSame.mtimeMs === currentMtimeMs) {
         repeatWarning = `\n── read-dedup ──\n⚠ 此文件本轮已读取过，内容未变更 (${priorSame.modelBytes} bytes, ${priorSame.truncated ? '已截断' : '完整'})。请勿重复读取——回看上文结果即可。\n── read-dedup ──`
       } else if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) {
@@ -529,7 +552,7 @@ export const READ_FILE_TOOL: Tool = {
     // model already has in its context.
     if (unchangedRepeat && isReadRefEnabled()) {
       const priorSame = readHistory.get(dedupKey!)
-      const fullPrior = fileReadHistory.get(canonical!)
+      const fullPrior = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical!))
       const entryBytes = priorSame?.mtimeMs === currentMtimeMs ? priorSame.modelBytes : fullPrior?.modelBytes ?? 0
       const totalLines = fullPrior?.mtimeMs === currentMtimeMs ? fullPrior.totalLines : 0
 
@@ -543,20 +566,41 @@ export const READ_FILE_TOOL: Tool = {
           `完整内容在你上文的 tool_result 中——回看即可。`,
           `需要具体区段：read_section(file_path="${relPath}", section="L{N}-L{M}")`,
         ].join('\n')
-        readRefSavedBytes += entryBytes
-        readRefCount++
-        debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${readRefSavedBytes} count=${readRefCount}`)
+        // Accumulate into the per-session stats if injected, else the module-level fallback.
+        if (params.readRefStats) {
+          params.readRefStats.savedBytes += entryBytes
+          params.readRefStats.count++
+        } else {
+          readRefSavedBytes += entryBytes
+          readRefCount++
+        }
+        const totalSaved = params.readRefStats?.savedBytes ?? readRefSavedBytes
+        const totalCount = params.readRefStats?.count ?? readRefCount
+        debugLog(`[read-ref] file=${canonical} saved=${entryBytes} total-saved=${totalSaved} count=${totalCount}`)
         return { content: ref }
       }
       // Small fragment — fall through to normal read to avoid wasted round-trips
     }
 
     try {
+      // Speculative prewarm hit: if a full-file read (no offset/limit) has a
+      // matching prewarm entry (mtime-verified), skip the fs read and apply the
+      // current contextWindow's cap to the cached full content. Miss → fall
+      // through to the normal fs read below.
+      let prefetchedContent: string | undefined
+      if (params.prewarmCache && canonical && canUsePrewarmForRead(params.input)) {
+        const cached = consumePrewarm(params.prewarmCache, canonical)
+        if (cached) {
+          prefetchedContent = cached.content
+          debugLog(`[prewarm-hit] file=${canonical} cached=${cached.content.length} bytes`)
+        }
+      }
       payload = await readFilePayload(params.cwd, {
         filePath,
         offset,
         limit,
         modelCap: computedCap,
+        prefetchedContent,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -586,7 +630,7 @@ export const READ_FILE_TOOL: Tool = {
     const recordFileDedup = (artifactId?: string): void => {
       if (!canonical || currentMtimeMs === null) return
       if (offset !== 1 || limit !== undefined) return // only full reads
-      fileReadHistory.set(canonical, {
+      fileReadHistory.set(fileHistoryKey(params.sessionId, canonical), {
         mtimeMs: currentMtimeMs,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,
@@ -691,7 +735,7 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
 
       // Record file-level dedup for each file
       const currentMtimeMs = (await stat(payload.canonicalPath)).mtimeMs
-      fileReadHistory.set(payload.canonicalPath, {
+      fileReadHistory.set(fileHistoryKey(params.sessionId, payload.canonicalPath), {
         mtimeMs: currentMtimeMs,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,

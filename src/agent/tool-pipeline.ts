@@ -51,7 +51,6 @@ import type { P3Integration } from './p3-integration.js'
 import { buildCommitNudge } from './commit-nudge.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
-import { detectExplorationStall } from './exploration-stall.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -523,6 +522,9 @@ export async function executeToolUse(
     onOutput: (chunk) => {
       callbacks.onToolResult(tu.id, tu.name, chunk)
    },
+    // P6 follow-up: let tools (e.g. ast-edit) register internal file writes
+    // so evidence/filesModified and cerebellar gate are aware.
+    onFileWrite: (filePath) => deps.evidence.trackFileModified(filePath),
     // T4: structured per-worker delegation updates → subagent panel. Optional;
     // forwarded to the session layer alongside the text progress stream.
     onWorkerActivity: callbacks.onDelegationActivity
@@ -535,9 +537,11 @@ export async function executeToolUse(
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),
     artifactStore: deps.artifactStore,
+    prewarmCache: deps.prewarm,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,
     sessionTurnCount: deps.sessionTurnCount,
+    sessionId: deps.config.sessionId,
     reviewDepth: deps.config.reviewDepth,
     delegationDepth: deps.config.delegationDepth,
     abortSignal: deps.abortSignal,
@@ -658,17 +662,6 @@ export async function executeToolUse(
       // Different tool/input under 'blocked' — let it run. It will be recorded
       // and slide the offending fingerprints out of the detection window.
    }
-
-    // Exploration stall gate — after N consecutive read-only tools without any
-    // write/test/action, block further exploration and force the agent to act.
-    // Prevents GLM/thinking-mode "explore forever, never code" loops that waste
-    // minutes of reasoning only to be killed by SSE timeout.
-    const stall = detectExplorationStall(trajectorySummary, tu.name)
-    if (stall.blocked) {
-      const msg = stall.message!
-      callbacks.onToolResult(tu.id, tu.name, msg, true)
-      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: starSig ? msg + starSig : msg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
-    }
 
     // Plan-mode gate — block write tools during planning phase
     const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
@@ -921,13 +914,7 @@ export async function executeToolUse(
     let finalContent = postHookResult.result ?? harnessResult.content
     // Normalize: strip trailing whitespace to produce stable byte sequences
     // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
-    // can cause ~0.5% cache miss from otherwise identical tool results.
     finalContent = finalContent.trimEnd()
-
-    // Exploration stall advisory: append non-blocking hint to output
-    if (stall.advisory) {
-      finalContent = finalContent + '\n' + stall.advisory
-    }
 
     // LSP: notify the language server that a file changed on disk.
     // Must happen BEFORE diagnostics so the server's view is current.
@@ -1273,7 +1260,7 @@ export async function executeToolUse(
          })
        } catch { /* non-critical: signal injection is best-effort */ }
      }
-   } else if ((tu.name === 'write_file' || tu.name === 'edit_file') && !harnessResult.isError) {
+   } else if ((tu.name === 'write_file' || tu.name === 'edit_file' || tu.name === 'hash_edit') && !harnessResult.isError) {
       deps.evidence.trackFileModified(tu.input.file_path as string)
       deps.config.promptEngine.markGitDirty()
       deps.config.contextClaimStore?.markClaimsStaleForFile(

@@ -10,6 +10,8 @@
 
 import { ANSI, color, fg, bg } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { latexToBlock } from '../pi/latex-block.js'
+import { renderMathInText, latexToUnicode } from '../pi/latex-to-unicode.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -22,8 +24,7 @@ export interface Segment {
   color?: string
   dimmed?: boolean
 }
-
-export type BlockType = 'paragraph' | 'code' | 'header' | 'list' | 'blockquote' | 'hr' | 'table'
+export type BlockType = 'paragraph' | 'code' | 'header' | 'list' | 'blockquote' | 'hr' | 'table' | 'math'
 
 export interface Block {
   type: BlockType
@@ -217,6 +218,33 @@ export function parseBlocks(text: string): Block[] {
       i++; continue
     }
 
+    // Display math: $$...$$ (same-line or multi-line) or \[...\]
+    if (line.startsWith('$$') || line.startsWith('\\[')) {
+      const opener = line.startsWith('$$') ? '$$' : '\\['
+      const closer = line.startsWith('$$') ? '$$' : '\\]'
+      // Same-line close: $$x^2$$ or \[x^2\]
+      if (line.endsWith(closer) && line.length > opener.length) {
+        const body = line.slice(opener.length, line.length - closer.length)
+        blocks.push({ type: 'math', content: body })
+        i++; continue
+      }
+      // Multi-line: collect until the closing delimiter
+      const bodyLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i]!.includes(closer)) {
+        bodyLines.push(lines[i]!); i++
+      }
+      // Include a partial last line (e.g. trailing text after $$ on close line)
+      if (i < lines.length) {
+        const closeLine = lines[i]!
+        const closeIdx = closeLine.indexOf(closer)
+        if (closeIdx > 0) bodyLines.push(closeLine.slice(0, closeIdx))
+        i++
+      }
+      blocks.push({ type: 'math', content: bodyLines.join('\n') })
+      continue
+    }
+
     const headerMatch = line.match(/^(#{1,6})\s+(.*)/)
     if (headerMatch) {
       blocks.push({ type: 'header', level: headerMatch[1]!.length, content: headerMatch[2]! })
@@ -323,6 +351,8 @@ export function hasMarkdown(text: string): boolean {
   return text.includes('**') || text.includes('`') || text.includes('```')
     || /^#{1,6}\s/m.test(text) || /^[-*]\s/m.test(text) || /^>\s/m.test(text)
     || /^(-{3,}|\*{3,}|_{3,})\s*$/m.test(text)
+    // Inline/display math delimiters trigger the full parser too.
+    || /\$[^\s$]/.test(text) || text.includes('$$') || text.includes('\\[') || text.includes('\\(')
 }
 
 const NUMBERED_LINE_RE = /^\s*\d+│/
@@ -400,6 +430,19 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
     case 'code':
       result.push(...formatCodeBlock(block.language, block.content, columns, theme))
       break
+    case 'math': {
+      // Display math: render to stacked Unicode lines via latexToBlock.
+      const mathLines = latexToBlock(block.content)
+      if (mathLines.length === 0) {
+        // Fallback: no stacking structure, render inline.
+        result.push(color(latexToUnicode(block.content), theme.assistantColor))
+      } else {
+        for (const ml of mathLines) {
+          result.push(color(ml, theme.assistantColor))
+        }
+      }
+      break
+    }
     case 'list': {
       const items = block.items ?? block.content.split('\n')
       for (const item of items) {
@@ -424,7 +467,8 @@ function formatBlock(block: Block, columns: number, theme: RivetTheme): string[]
     }
     case 'paragraph':
     default:
-      result.push(color(formatInlineToAnsi(parseInline(block.content), theme), theme.assistantColor))
+      // Convert inline math ($...$, \(...\)) to Unicode before inline formatting.
+      result.push(color(formatInlineToAnsi(parseInline(renderMathInText(block.content)), theme), theme.assistantColor))
       break
   }
 

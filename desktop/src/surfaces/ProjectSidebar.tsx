@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Network, Settings, Scale, Plug, type LucideIcon,
+} from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
-import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
+import { addKnownProject, deriveProjects, loadKnownProjects, projectId } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
@@ -14,32 +18,39 @@ const STATUS_GLYPH: Record<string, string> = {
   idle: '○',
 }
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'settings']
+const CORE_SURFACES: Surface[] = ['workspace', 'git', 'automations', 'settings']
+const TOOL_SURFACES: Surface[] = ['skills', 'insights', 'delegation', 'council', 'hooks']
 
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
-  automations: '自动化',
+  automations: '任务自动化',
   attention: '需处理',
-  skills: '技能',
-  settings: '设置',
+  skills: '智能体技能',
+  git: 'Git 版本控制',
+  insights: '度量分析 (Insights)',
+  delegation: '任务委派树',
+  council: '自治议事会',
+  hooks: '系统钩子 (Hooks)',
+  settings: '系统设置',
+}
+
+const NAV_ICONS: Record<Surface, LucideIcon> = {
+  workspace: LayoutDashboard,
+  automations: Clock,
+  attention: Bell,
+  skills: Puzzle,
+  git: GitBranch,
+  insights: BarChart3,
+  delegation: Network,
+  council: Scale,
+  hooks: Plug,
+  settings: Settings,
 }
 
 function NavIcon({ surface }: { surface: Surface }) {
-  const paths: Record<Surface, string> = {
-    workspace: 'M4 5h16M4 5v14M4 19h16M14 5v14',
-    automations: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z',
-    attention: 'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.5 21a2 2 0 0 0 3 0',
-    skills: 'M12 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM3 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0ZM15 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z',
-    settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.3 1a7 7 0 0 0-1.7-1l-.4-2.4H9.5l-.4 2.4a7 7 0 0 0-1.7 1l-2.3-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.4h4.9l.4-2.4a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.6c.06-.33.1-.66.1-1Z',
-  }
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={paths[surface]} />
-    </svg>
-  )
+  const Ic = NAV_ICONS[surface]
+  return <Ic size={16} strokeWidth={1.7} aria-hidden />
 }
-
 // Project → Thread sidebar (Cursor 3.0 style).
 // Top: New Session button + main navigation. Below: project tree of sessions.
 export function ProjectSidebar() {
@@ -48,11 +59,12 @@ export function ProjectSidebar() {
   const sessions = useSessions()
   const closeSession = useCloseSession()
   const unarchive = useUnarchiveSession()
-  const [known, setKnown] = useState<string[]>(() => loadKnownProjects())
+  const [known, setKnown] = useState(() => loadKnownProjects())
   const [filter, setFilter] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
+  const [toolsExpanded, setToolsExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const loadArchived = async () => {
@@ -86,11 +98,12 @@ export function ProjectSidebar() {
     return list.sort((a, b) => b.updatedAt - a.updatedAt)
   }, [sessions.data, filter])
 
-  // Group sessions by project cwd. Active project is always expanded.
+  // Group sessions by project id (slug of primary root). A multi-root project
+  // stays a single group even if sessions land in different roots.
   const projectGroups = useMemo(() => {
     const groups = new Map<string, SessionRecord[]>()
     for (const s of visibleSessions) {
-      const key = s.cwd
+      const key = projectId(s.cwd)
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(s)
     }
@@ -116,19 +129,19 @@ export function ProjectSidebar() {
     }
     if (!cwd) return
     setKnown(addKnownProject(cwd))
-    dispatch({ type: 'setProject', cwd })
+    dispatch({ type: 'setProject', projectId: projectId(cwd) })
   }
 
-  const toggleProject = (cwd: string) => {
+  const toggleProject = (id: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev)
-      if (next.has(cwd)) next.delete(cwd)
-      else next.add(cwd)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  const activeProjectName = projects.find((p) => p.cwd === ui.activeProject)?.name
+  const activeProjectName = projects.find((p) => p.id === ui.activeProject)?.name
 
   return (
     <div className="project-sidebar">
@@ -143,7 +156,7 @@ export function ProjectSidebar() {
       </button>
 
       <nav className="sidebar-nav" aria-label="主导航">
-        {SURFACE_ORDER.map((s) => (
+        {CORE_SURFACES.map((s) => (
           <button
             key={s}
             className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
@@ -151,11 +164,32 @@ export function ProjectSidebar() {
           >
             <span className="sni-icon"><NavIcon surface={s} /></span>
             <span className="sni-label">{SURFACE_LABEL[s]}</span>
-            {s === 'attention' && (
-              <AttentionBadge />
-            )}
           </button>
         ))}
+
+        <div
+          className="sidebar-section-head tools-toggle-head"
+          onClick={() => setToolsExpanded(!toolsExpanded)}
+          style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 4px 0', padding: '6px 8px' }}
+        >
+          <span className="sidebar-section-title">星域工具</span>
+          <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
+        </div>
+
+        {toolsExpanded && (
+          <div className="sidebar-sub-nav">
+            {TOOL_SURFACES.map((s) => (
+              <button
+                key={s}
+                className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
+                onClick={() => dispatch({ type: 'setSurface', surface: s })}
+              >
+                <span className="sni-icon"><NavIcon surface={s} /></span>
+                <span className="sni-label">{SURFACE_LABEL[s]}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </nav>
 
       <div className="sidebar-divider" />
@@ -206,16 +240,16 @@ export function ProjectSidebar() {
 
       <div className="project-tree" role="tree">
         {projects.map((p) => {
-          const group = projectGroups.get(p.cwd) ?? []
-          const expanded = expandedProjects.has(p.cwd) || filter.length > 0
-          const isActiveProject = p.cwd === ui.activeProject
+          const group = projectGroups.get(p.id) ?? []
+          const expanded = expandedProjects.has(p.id) || filter.length > 0
+          const isActiveProject = p.id === ui.activeProject
           return (
-            <div key={p.cwd} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
+            <div key={p.id} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
               <button
                 className={`project-tree-header ${isActiveProject ? 'active' : ''}`}
                 onClick={() => {
-                  dispatch({ type: 'setProject', cwd: p.cwd })
-                  toggleProject(p.cwd)
+                  dispatch({ type: 'setProject', projectId: p.id })
+                  toggleProject(p.id)
                 }}
               >
                 <span className={`pt-chev ${expanded ? 'open' : ''}`} aria-hidden>▸</span>
@@ -226,6 +260,11 @@ export function ProjectSidebar() {
                   </svg>
                 </span>
                 <span className="pt-name">{p.name}</span>
+                {p.roots.length > 1 && (
+                  <span className="pt-repo-badge" title={p.roots.join('\n')}>
+                    {p.roots.length} repos
+                  </span>
+                )}
                 <span className="pt-count">{group.length}</span>
               </button>
               {expanded && (
@@ -341,15 +380,3 @@ export function ProjectSidebar() {
   )
 }
 
-function AttentionBadge() {
-  const sessions = useSessions()
-  const count = useMemo(() => {
-    return (sessions.data ?? []).filter((s) => {
-      if (s.status !== 'running') return false
-      // Simple heuristic: attention-worthy sessions have pending approvals or errors.
-      return (s.pendingApprovals ?? 0) > 0
-    }).length
-  }, [sessions.data])
-  if (count === 0) return null
-  return <span className="sidebar-nav-badge">{count > 9 ? '9+' : count}</span>
-}

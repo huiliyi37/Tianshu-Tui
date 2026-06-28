@@ -1,0 +1,8 @@
+{
+  "supervised": "监督",
+  "supervisedHint": "每个风险操作都需你确认",
+  "default": "默认",
+  "defaultHint": "项目内低风险自动，高风险需确认",
+  "autonomous": "自治",
+  "autonomousHint": "项目内全自动执行；项目外仍被沙箱拦截，可随时回滚"
+}

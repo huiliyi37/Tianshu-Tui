@@ -52,7 +52,7 @@ const longContent = Array.from({ length: 100 }, (_, i) => `LN${i}`).join('\n')
 // 序列：方向键/翻页是完整 ANSI 序列，立即派发（非 lone-ESC，不走 40ms 计时）。
 const SEQ: Record<string, string> = {
   down: '\x1B[B', up: '\x1B[A', pagedown: '\x1B[6~', pageup: '\x1B[5~',
-  home: '\x1B[H', end: '\x1B[F', enter: '\r',
+  home: '\x1B[H', end: '\x1B[F', enter: '\r', escape: '\x1B',
 }
 
 test('pager: ↓/j/PgDn 下翻，k 上翻，越界 clamp', () => {
@@ -76,6 +76,55 @@ test('pager: ↓/j/PgDn 下翻，k 上翻，越界 clamp', () => {
   // 首页再上翻 = no-op；随后 down 应到第 1 页(LN20)，证明 up 没把 page 推到负。
   press('up'); assert.equal(visible().trim(), '', '首页再上翻 no-op（不 rerender）')
   press('down'); assert.ok(visible().includes('LN20'), 'clamp 生效：首页 up 后 down 到第 1 页(LN20)')
+})
+
+test('pager: / 进入搜索，n/N 跳转匹配，Esc 清除', () => {
+  const { app, out, stdin } = makeApp()
+  app.registerOverlays({
+    pagerContent: () => ({
+      content: 'alpha\nbeta\ngamma\ndelta',
+      page: 0,
+      messages: [
+        { startLine: 0, endLine: 1, role: 'assistant', summary: 'alpha', lines: ['alpha'], isTruncated: false, rawContent: 'alpha' },
+        { startLine: 1, endLine: 2, role: 'assistant', summary: 'beta', lines: ['beta'], isTruncated: false, rawContent: 'beta' },
+        { startLine: 2, endLine: 3, role: 'assistant', summary: 'gamma', lines: ['gamma'], isTruncated: false, rawContent: 'gamma' },
+        { startLine: 3, endLine: 4, role: 'assistant', summary: 'delta', lines: ['delta'], isTruncated: false, rawContent: 'delta' },
+      ],
+    }),
+  })
+  app.activateOverlay('pager')
+  const press = (k: string) => { out.clear(); stdin.dataHandler!(SEQ[k] ?? k) }
+  const visible = () => stripAnsi(out.chunks.join(''))
+
+  press('/'); assert.ok(visible().includes('Search'))
+  press('a'); assert.ok(visible().includes('"a"'))
+  // beta 与 delta 都含 'a'；首次匹配 beta（索引 1）
+  press('n'); assert.ok(visible().includes('beta'), 'n 跳转到下一处匹配')
+  press('n'); assert.ok(visible().includes('delta'), 'n 循环到 delta')
+  press('N'); assert.ok(visible().includes('beta'), 'N 回退到 beta')
+  press('escape'); assert.ok(!visible().includes('Search'), 'Esc 清除搜索回到 page 模式')
+})
+
+test('pager: m 进入消息视图，j/k 切换消息', () => {
+  const { app, out, stdin } = makeApp()
+  app.registerOverlays({
+    pagerContent: () => ({
+      content: 'first\nsecond',
+      page: 0,
+      messages: [
+        { startLine: 0, endLine: 1, role: 'assistant', summary: 'first', lines: ['first'], isTruncated: false, rawContent: 'first' },
+        { startLine: 1, endLine: 2, role: 'assistant', summary: 'second', lines: ['second'], isTruncated: false, rawContent: 'second' },
+      ],
+    }),
+  })
+  app.activateOverlay('pager')
+  const press = (k: string) => { out.clear(); stdin.dataHandler!(SEQ[k] ?? k) }
+  const visible = () => stripAnsi(out.chunks.join(''))
+
+  press('m'); assert.ok(visible().includes('Message 1/2'))
+  press('down'); assert.ok(visible().includes('Message 2/2'))
+  press('up'); assert.ok(visible().includes('Message 1/2'))
+  press('escape'); assert.ok(!visible().includes('Message'), 'Esc 退出消息视图')
 })
 
 test('command-palette: ↑/↓ 循环选中，Enter 执行回调并关闭', () => {
@@ -229,6 +278,7 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
         failed: 0,
         running: 1,
         workers: [{
+          workerId: 'wo_team:T1',
           shortLabel: 'T1',
           profile: 'code_scout',
           status: 'running',
@@ -236,6 +286,8 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
           elapsedMs: 1500,
         }],
       }],
+      filter: 'running' as const,
+      completedCount: 0,
     }),
   })
   assert.equal(app.activateOverlay('tasks'), true, 'tasks overlay 应成功激活')

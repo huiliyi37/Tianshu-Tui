@@ -142,6 +142,11 @@ export function createDelegateTaskTool(
             authority: parsed.data.authority,
             status: r.status,
             progressLine: r.summary.slice(0, 80),
+            model: r.model,
+            provider: r.provider,
+            usage: r.usage,
+            artifactId: r.diffArtifactId,
+            changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
           })
         }
       }

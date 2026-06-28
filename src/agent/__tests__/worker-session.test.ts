@@ -183,4 +183,55 @@ describe('runWorkerSession', () => {
     assert.equal(run.result.status, 'blocked')
     assert.ok(run.result.risks.includes('Worker did not return schema-valid JSON'))
   })
+
+  it('forceJsonRepair sends response_format on the repair request and recovers', async () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_json',
+      parentTurnId: 'turn_1',
+      kind: 'plan',
+      profile: 'planner',
+      objective: 'Plan json repair.',
+      scope: {},
+      budget: { maxRetries: 1 },
+    })
+
+    // Capture whether the repair request carried response_format.
+    let sawResponseFormat = false
+    let repairCallCount = 0
+    const client = {
+      stream: mock.fn(async (req: { response_format?: unknown }, cb: StreamCallbacks) => {
+        // First call: invalid output (no response_format — normal turn via AgentLoop).
+        // Second call: json-mode repair (response_format set).
+        if (req.response_format) {
+          sawResponseFormat = true
+          repairCallCount++
+          cb.onTextDelta(validPacket('wo_json'))
+          cb.onContentBlock(textBlock(validPacket('wo_json')))
+          cb.onStopReason('end_turn', { input_tokens: 10, output_tokens: 5 })
+          return
+        }
+        // The AgentLoop also issues calls without response_format; only emit
+        // invalid text the first time so repair triggers.
+        cb.onTextDelta('definitely not json at all')
+        cb.onContentBlock(textBlock('definitely not json at all'))
+        cb.onStopReason('end_turn', { input_tokens: 10, output_tokens: 5 })
+      }),
+    } as unknown as StreamClient
+
+    const run = await runWorkerSession({
+      order,
+      client,
+      promptEngine: makePromptEngine(),
+      toolRegistry: new ToolRegistry(),
+      cwd: '/repo',
+      maxTurns: 2,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      forceJsonRepair: true,
+    })
+
+    assert.equal(run.result.status, 'passed', 'json-mode repair should recover to passed')
+    assert.ok(sawResponseFormat, 'repair request must carry response_format: json_object')
+    assert.equal(repairCallCount, 1, 'exactly one json-mode repair call')
+  })
 })

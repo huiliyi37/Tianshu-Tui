@@ -5,14 +5,10 @@
  * information from agent trajectories for 39-59% token reduction.
  */
 
+import type { OaiMessage } from '../api/oai-types.js'
 import { parseOptionalInt, rangeContains } from './shared-range.js'
 
-export interface OaiMessage {
-  role: 'user' | 'assistant' | 'system' | 'tool'
-  content: string
-  tool_call_id?: string
-  tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>
-}
+export type { OaiMessage }
 
 export interface DietOptions {
   protectRecentMessages?: number

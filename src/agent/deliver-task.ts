@@ -693,7 +693,7 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         // latter is the "24-error class" that scoped-only filtering missed.
         if (typecheckGateEnabled()) {
           try {
-            const tc = runChangedFilesTypecheckMemo(params.cwd, change.files, ctx.typecheckRunner)
+            const tc = await runChangedFilesTypecheckMemo(params.cwd, change.files, ctx.typecheckRunner)
             if (tc) {
               change.forceLevel = 'L3'
               const note = `Typecheck — ${tc.summary}`

@@ -3,14 +3,19 @@ import {
   abortSession,
   approvePlan,
   closeSession,
+  conveneCouncil,
   createSchedule,
   createSession,
   deleteSchedule,
   getHealth,
   getGithubPr,
+  getHooks,
   getPlan,
+  getFileDiff,
+  getWorkingTree,
   listArtifacts,
   listConfigProviders,
+  listDomains,
   listGithubPrs,
   listPlans,
   listSchedule,
@@ -19,10 +24,12 @@ import {
   rejectPlan,
   sendArtifactFeedback,
   sendPrompt,
+  setDomain,
+  setHooks,
   setPlanMode,
   unarchiveSession,
 } from '../runtime/client'
-import type { PlanModeState } from '../runtime/types'
+import type { HookEntry, PlanModeState } from '../runtime/types'
 
 // Server state lives in TanStack Query: sessions/health poll on an interval,
 // artifacts refetch on demand (driven by artifact events). UI state is separate
@@ -34,10 +41,14 @@ export const qk = {
   artifacts: (id: string | null) => ['artifacts', id] as const,
   plans: (id: string | null) => ['plans', id] as const,
   plan: (id: string | null, slug: string | null) => ['plan', id, slug] as const,
+  domains: (id: string | null) => ['domains', id] as const,
+  hooks: (id: string | null) => ['hooks', id] as const,
   schedule: ['schedule'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
   configProviders: ['config', 'providers'] as const,
+  workingTree: ['git', 'working-tree'] as const,
+  fileDiff: (path: string) => ['git', 'diff', path] as const,
 }
 
 export function useHealth() {
@@ -62,6 +73,57 @@ export function useArtifacts(sessionId: string | null, rev: number) {
     queryKey: [...qk.artifacts(sessionId), rev],
     queryFn: () => (sessionId ? listArtifacts(sessionId) : Promise.resolve([])),
     enabled: !!sessionId,
+  })
+}
+
+/** List the star-domain picker entries for a session (Auto / Off / built-in & custom). */
+export function useDomains(sessionId: string | null) {
+  return useQuery({
+    queryKey: qk.domains(sessionId),
+    queryFn: () => (sessionId ? listDomains(sessionId) : Promise.resolve([])),
+    enabled: !!sessionId,
+  })
+}
+
+export function useSetDomain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, key }: { id: string; key: string }) => setDomain(id, key),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.domains(id) })
+      qc.invalidateQueries({ queryKey: qk.sessions })
+    },
+  })
+}
+
+export function useConveneCouncil() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, artifactId, rounds }: { id: string; artifactId: string; rounds?: number }) =>
+      conveneCouncil(id, { artifactId, rounds }),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.artifacts(id) })
+    },
+  })
+}
+
+/** I4 — read the user-defined .rivet/hooks.json config for a session. */
+export function useHooks(sessionId: string | null) {
+  return useQuery({
+    queryKey: qk.hooks(sessionId),
+    queryFn: () => (sessionId ? getHooks(sessionId) : Promise.resolve({ hooks: [] })),
+    enabled: !!sessionId,
+  })
+}
+
+/** I4 — write the user-defined .rivet/hooks.json config for a session. */
+export function useSetHooks() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, hooks }: { id: string; hooks: HookEntry[] }) => setHooks(id, hooks),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.hooks(id) })
+    },
   })
 }
 
@@ -155,8 +217,17 @@ export function useUnarchiveSession() {
 
 export function useArtifactFeedback() {
   return useMutation({
-    mutationFn: ({ id, artifactId, comment }: { id: string; artifactId: string; comment: string }) =>
-      sendArtifactFeedback(id, artifactId, comment),
+    mutationFn: ({
+      id,
+      artifactId,
+      comment,
+      lines,
+    }: {
+      id: string
+      artifactId: string
+      comment: string
+      lines?: ReadonlyArray<import('../runtime/types.js').LineComment>
+    }) => sendArtifactFeedback(id, artifactId, comment, lines),
   })
 }
 
@@ -216,5 +287,30 @@ export function useConfigProviders() {
     queryKey: qk.configProviders,
     queryFn: listConfigProviders,
     staleTime: 10_000,
+  })
+}
+
+// ── Git: Working Tree (changes tab) ─────────────────────────────────
+
+/** Poll the working-tree change list. Diff changes less often than session
+ *  state, so 5s (vs sessions' 2s) is a reasonable cadence. Disabled when no
+ *  active session, since the cwd is session-scoped. */
+export function useWorkingTree(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.workingTree,
+    queryFn: getWorkingTree,
+    refetchInterval: enabled ? 5000 : false,
+    enabled,
+    staleTime: 2000,
+  })
+}
+
+/** Fetch a single file's unified diff on demand (when the user selects it). */
+export function useFileDiff(path: string | null) {
+  return useQuery({
+    queryKey: qk.fileDiff(path ?? ''),
+    queryFn: () => getFileDiff(path!),
+    enabled: path !== null,
+    staleTime: 3000,
   })
 }

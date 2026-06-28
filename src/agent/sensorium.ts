@@ -30,6 +30,8 @@ export interface PheromoneRef {
   depositedAt: number
   halfLife: number
   context?: string
+  /** Task contract ID for structured dead-end matching. Undefined for legacy entries. */
+  taskId?: string
 }
 
 // ─── Sensorium ──────────────────────────────────────────────────────
@@ -40,7 +42,7 @@ export interface PheromoneRef {
  * Computed purely from existing monitor outputs — zero LLM overhead.
  */
 export interface Sensorium {
-  /** Prediction accuracy momentum: consecutiveCorrect / windowSize */
+  /** Prediction accuracy momentum: 滑动窗口成功率（窗口内正确数/总数），抗探索性报错噪声 */
   momentum: number
   /** 多维压力：上下文填充 (0.50) + 验证债 (0.30) + CVM 开销 (0.15) + 增速 (0.05) */
   pressure: number
@@ -106,7 +108,14 @@ function clamp(v: number): number {
 
 function computeMomentum(acc: SensoriumInput['predictionAcc']): number {
   if (acc.windowSize <= 0) return 0
-  return clamp(acc.consecutiveCorrect / acc.windowSize)
+  // 滑动窗口成功率（非连续正确率）：探索性工具报错（grep 无匹配/文件不存在/测试 RED）
+  // 是常态，旧口径用 consecutiveCorrect 会让一次报错清零全部累积 → momentum 从 0.9 坠崖
+  // 到 0 → commitThreshold 被推高 → 误触发意图闸强弹。改用窗口内成功率，单次报错只让
+  // momentum 平滑下降（窗口 10、1 错 9 对 → 0.9），连续多错仍能正确反映停滞。
+  // consecutiveCorrect 字段保留供 shouldTippingPointReset（转折点判定）继续使用。
+  if (acc.predictions.length === 0) return 0
+  const wins = acc.predictions.filter(p => p).length
+  return clamp(wins / acc.predictions.length)
 }
 
 /**
@@ -146,8 +155,19 @@ function computeConfidence(evidence: SensoriumInput['evidenceState']): number {
 
 function computeComplexity(toolHistory: string[]): number {
   if (toolHistory.length === 0) return 0
-  const unique = new Set(toolHistory).size
-  return clamp(unique / toolHistory.length)
+  const counts = new Map<string, number>()
+  for (const name of toolHistory) {
+    counts.set(name, (counts.get(name) ?? 0) + 1)
+  }
+  if (counts.size <= 1) return 0
+  const n = toolHistory.length
+  let entropy = 0
+  for (const count of counts.values()) {
+    const p = count / n
+    entropy -= p * Math.log2(p)
+  }
+  const maxEntropy = Math.log2(counts.size)
+  return clamp(entropy / maxEntropy)
 }
 
 function computeFreshness(
@@ -344,10 +364,31 @@ export function computeStrategy(s: Sensorium): StrategyProfile {
     reasoningEffort = 'medium'
   }
 
+  // explorationBreadth: a continuous function of stability and complexity.
+  // Low stability widens the search for alternatives (the agent is flailing,
+  // so cast a wider net); higher complexity also broadens exploration. Both
+  // contributions are additive and continuous — there are no discrete jumps
+  // at stability=0.3 or complexity=0.5 (the old `stability<0.3 ? 0.9 : 0.3`
+  // had a 0.60 cliff). base 0.3→0.6 as complexity 0→1; stability penalty adds
+  // up to ~0.45 as stability falls from 0.3 to 0.
+  const breadthBase = 0.3 + s.complexity * 0.3
+  const stabilityPenalty = s.stability < 0.3 ? (0.3 - s.stability) * 1.5 : 0
+  const explorationBreadth = clamp(breadthBase + stabilityPenalty)
+
+  // commitThreshold: a continuous function of pressure and momentum. High
+  // pressure (context nearly full) raises the bar for committing; low momentum
+  // (failing to make progress) also raises it (don't commit a stuck state).
+  // The old `pressure>0.7 ? 0.9 : 0.6` had a 0.30 cliff at the boundary; this
+  // is smooth throughout. Baseline 0.5; pressure adds up to +0.15, low momentum
+  // adds up to +0.25 — they compose additively.
+  const pressureBoost = s.pressure > 0.7 ? (s.pressure - 0.7) * 0.5 : 0
+  const momentumDrag = s.momentum < 0.3 ? (0.3 - s.momentum) * (0.25 / 0.3) : 0
+  const commitThreshold = clamp(0.5 + pressureBoost + momentumDrag)
+
   return {
     reasoningEffort,
-    explorationBreadth: s.stability < 0.3 ? 0.9 : 0.3,
-    commitThreshold: s.pressure > 0.7 ? 0.9 : 0.6,
+    explorationBreadth,
+    commitThreshold,
     shouldEscalate: s.confidence < 0.3 && s.momentum < 0.2,
     thetaCycleInterval: s.complexity > 0.5 ? 3 : 7,
   }

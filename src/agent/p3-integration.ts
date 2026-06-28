@@ -183,7 +183,7 @@ export class P3Integration {
   // ─── PlanCache Serialization (Track B1) ───────────────────────────────
 
   serializePlanCache(): string {
-    const entries = [...(this.planCache as any).entries] as [string, PlanTemplate][]
+    const entries = [...this.planCache.getEntries()] as [string, PlanTemplate][]
     return JSON.stringify(entries.map(([_, t]) => t))
   }
 

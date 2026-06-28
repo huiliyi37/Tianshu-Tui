@@ -44,8 +44,43 @@ describe('intent preview core', () => {
 
   it('shows intent for high commit threshold, dead-end, or thrashing', () => {
     assert.equal(shouldShowIntent({ strategy: strategy({ commitThreshold: 0.9 }), vigor: null, sensorium: null, pheromones: [] }), true)
-    assert.equal(shouldShowIntent({ strategy: null, vigor: null, sensorium: null, pheromones: [deadEnd('src/a.ts')] }), true)
+    // dead-end 必须与 recentTargets 关联才触发（修复：旧实现任意 dead-end 即触发）
+    assert.equal(shouldShowIntent({ strategy: null, vigor: null, sensorium: null, pheromones: [deadEnd('src/a.ts')], recentTargets: ['src/a.ts'] }), true)
     assert.equal(shouldShowIntent({ strategy: null, vigor: null, sensorium: null, pheromones: [], thrashingSuggestion: 'task_decomposition' }), true)
+  })
+
+  it('does NOT trigger on dead-end unrelated to current targets (关联匹配修复)', () => {
+    // 历史无关任务 veto 残留的 dead-end（如旧会话沉积）不应触发当前任务意图闸
+    assert.equal(shouldShowIntent({
+      strategy: strategy(), vigor: createVigorState(), sensorium: sensorium(),
+      pheromones: [deadEnd('/old/unrelated/path.ts')],
+      recentTargets: ['src/current-task.ts'],
+      thrashingSuggestion: null,
+    }), false)
+    // 无 recentTargets 时也不触发（无目标可关联）
+    assert.equal(shouldShowIntent({
+      strategy: strategy(), vigor: createVigorState(), sensorium: sensorium(),
+      pheromones: [deadEnd('src/a.ts')],
+      recentTargets: [],
+      thrashingSuggestion: null,
+    }), false)
+  })
+
+  it('handles legacy dead-end summary format (处理 前缀 + ... 截断)', () => {
+    // 旧数据存的是 summarizeTarget 生成的 `处理 xxx...` 摘要；新匹配层应剥离前缀后比对
+    assert.equal(shouldShowIntent({
+      strategy: null, vigor: null, sensorium: null,
+      pheromones: [deadEnd('处理 src/legacy/mod...')],
+      recentTargets: ['src/legacy/module.ts'],
+      thrashingSuggestion: null,
+    }), true)
+    // fallback 摘要「继续执行当前计划」永不关联
+    assert.equal(shouldShowIntent({
+      strategy: null, vigor: null, sensorium: null,
+      pheromones: [deadEnd('继续执行当前计划')],
+      recentTargets: ['src/anything.ts'],
+      thrashingSuggestion: null,
+    }), false)
   })
 
   it('does NOT show intent for low vigor — auto-adapted by vigor-hook', () => {
@@ -57,7 +92,8 @@ describe('intent preview core', () => {
       strategy: strategy({ commitThreshold: 0.9, explorationBreadth: 0.9 }),
       vigor: createVigorState({ phasic: -0.8 }),
       sensorium: sensorium({ confidence: 0.7 }),
-      pheromones: [deadEnd('src/fragile.ts')],
+      // dead-end path 与 recentTargets 关联才进 warning（关联匹配修复）
+      pheromones: [deadEnd('src/api/client.ts')],
       thrashingSuggestion: 'task_decomposition',
       recentTargets: ['src/api/client.ts'],
     })

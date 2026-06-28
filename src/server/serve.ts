@@ -47,6 +47,15 @@ import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
 import { ProviderHealthTracker } from '../agent/provider-health.js'
 import type { Config, ProviderConfig, ModelConfig } from '../config/schema.js'
+import { runCouncil, runCouncilDebate, type CouncilInput } from '../agent/council/council-orchestrator.js'
+import type { CouncilSeat } from '../agent/council/council-routing.js'
+import { renderCouncilPlan, summarizeCouncilPlan } from '../agent/council/council-render.js'
+import { DEFAULT_COUNCIL_SEATS } from '../agent/council/council-routing.js'
+import { councilPlanToUnifiedPlan } from '../agent/council/council-to-plan.js'
+import { serializeUnifiedPlan, deserializeUnifiedPlan, type UnifiedPlan } from '../agent/unified-plan.js'
+import { recordCouncilSession } from '../agent/council/council-telemetry.js'
+import { persistCouncilRoutingShadow } from '../agent/council/council-routing.js'
+import type { PlanItem } from '../agent/council/council-plan.js'
 
 export interface ServeContext {
   config: Config
@@ -115,6 +124,8 @@ export interface SharedRuntime {
   sameCwdRunningCount: ((cwd: string, excludeSessionId?: string) => number) | null
   /** Server-level MCP manager — one connection pool for all sessions. */
   mcpManager: McpManager | null
+  /** I4: late-bound RuntimeSessionManager so hooks can emit `hook_result` events. */
+  sessions: RuntimeSessionManager | null
 }
 
 /** sidecar 内部：按 cwd 取/建 DomainKnowledgeStore，多 session 共享同一实例。 */
@@ -346,6 +357,8 @@ function assembleAgentLoop(
     // Wave J: 跨 session 复用 ProviderHealthTracker，让 switchModel 不丢
     // provider 健康累积；coordinator 冷层路由有正确依据。
     sharedProviderHealth: shared?.providerHealth,
+    // I4: user hook results → desktop event stream via the session manager.
+    emitHookResult: (results, meta) => shared?.sessions?.emitHookResult(sessionId, results, meta),
   })
 
   // approvalMode 在 createAgentRuntime 内部未接收；构造后立即覆盖
@@ -465,7 +478,134 @@ function buildManagedAgent(
     shutdown: () => {
       try { stores.refs.coordinator?.shutdown() } catch { /* best-effort */ }
     },
+    // I1: 桌面端议事会入口，直接评审 artifact 中的 council-plan-json。
+    conveneCouncil: (input) => conveneCouncilOnCoordinator(agent, stores.refs.coordinator, stores.refs, input),
   }
+}
+
+class CouncilError extends Error {
+  constructor(message: string, public statusCode: number) {
+    super(message)
+    this.name = 'CouncilError'
+  }
+}
+
+/**
+ * I1: 在指定 session 上召集议事会。输入 artifactId 必须指向一个包含
+ * ```council-plan-json 代码块的可执行计划；后端从 raw 中提取 UnifiedPlan
+ * 作为 draftItems。并发安全：agent 正在跑 turn 时直接拒绝。
+ */
+async function conveneCouncilOnCoordinator(
+  agent: AgentLoop,
+  coordinator: import('../agent/coordinator.js').DelegationCoordinator | null,
+  refs: RuntimeRefs,
+  input: {
+    artifactId: string
+    objective?: string
+    seats?: { authority: string; charter?: string }[]
+    rounds?: number
+  },
+): Promise<{ planMarkdown: string; artifactId: string }> {
+  if (agent.isRunning()) {
+    throw new CouncilError('Session is already running a turn', 409)
+  }
+  if (!coordinator) {
+    throw new Error('DelegationCoordinator not initialized')
+  }
+  const raw = await agent.artifactStore?.readRaw(input.artifactId)
+  if (!raw) {
+    throw new CouncilError('Artifact not found', 404)
+  }
+  const planJson = extractCouncilPlanJson(raw)
+  if (!planJson) {
+    throw new CouncilError('Artifact does not contain a valid council-plan-json block', 400)
+  }
+  const draftItems: PlanItem[] = planJson.tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    detail: t.objective,
+    files: t.files,
+  }))
+  const seats: CouncilSeat[] = input.seats && input.seats.length > 0
+    ? input.seats.map((s) => ({ authority: s.authority, ...(s.charter ? { charter: s.charter } : {}) }))
+    : [...DEFAULT_COUNCIL_SEATS]
+  const abortController = new AbortController()
+  const councilInput: CouncilInput = {
+    draft: { objective: input.objective ?? planJson.objective, items: draftItems },
+    seats,
+    abortSignal: abortController.signal,
+    ...(typeof input.rounds === 'number' ? { maxRounds: input.rounds } : {}),
+  }
+  const now = Date.now()
+  const deps = {
+    delegateBatch: async (
+      requests: import('../agent/council/council-orchestrator.js').CouncilFanoutRequest[],
+      policy: 'all_required',
+      signal?: AbortSignal,
+      onProgress?: (completed: number, total: number) => void,
+    ) => {
+      const delegationReqs: import('../agent/coordinator.js').DelegationRequest[] = requests.map((r) => ({
+        parentTurnId: r.parentTurnId,
+        objective: r.objective,
+        kind: r.kind,
+        profile: r.profile,
+        scope: r.scope,
+      }))
+      const run = await coordinator.delegateBatch(
+        delegationReqs,
+        policy,
+        signal,
+        onProgress,
+      )
+      return { results: run.results, workerModels: run.workerModels }
+    },
+    now: () => now,
+    sessionId: refs.sessionId ?? 'unknown',
+    recordRoutingShadow: (event: import('../agent/council/council-routing.js').CouncilRoutingShadowEvent) => persistCouncilRoutingShadow(refs.meridianIndexer?.getDb(), event),
+  }
+  const runner = councilInput.maxRounds && councilInput.maxRounds >= 2 ? runCouncilDebate : runCouncil
+  const plan = await runner(councilInput, deps)
+  const planMarkdown = renderCouncilPlan(plan)
+  const outputRaw = plan.aggregate.mergedItems.length > 0
+    ? [planMarkdown, '', '```council-plan-json', serializeUnifiedPlan(councilPlanToUnifiedPlan(plan)), '```'].join('\n')
+    : planMarkdown
+  const savedArtifactId = await agent.artifactStore?.save({
+    tool: 'council_convene',
+    target: `council:${plan.meta.objectiveHash}`,
+    rawContent: outputRaw,
+    summary: summarizeCouncilPlan(plan),
+    sections: [],
+  })
+  try {
+    recordCouncilSession(refs.meridianIndexer?.getDb(), {
+      schemaVersion: 1,
+      sessionId: refs.sessionId ?? 'unknown',
+      objective: plan.objective,
+      objectiveHash: plan.meta.objectiveHash,
+      seats: plan.seats,
+      roundsRun: plan.meta.round,
+      decisionCount: plan.aggregate.decisions.length,
+      acceptedCount: plan.aggregate.decisions.filter((d) => d.verdict === 'accepted').length,
+      rejectedCount: plan.aggregate.decisions.filter((d) => d.verdict === 'rejected').length,
+      deferredCount: plan.aggregate.decisions.filter((d) => d.verdict === 'deferred').length,
+      conflictCount: plan.aggregate.conflicts.length,
+      mergedItemCount: plan.aggregate.mergedItems.length,
+      convenedAt: plan.meta.convenedAt,
+      timestamp: Date.now(),
+    })
+  } catch {
+    // 遥测失败不影响交付
+  }
+  if (!savedArtifactId) {
+    throw new Error('Failed to save council plan artifact')
+  }
+  return { planMarkdown, artifactId: savedArtifactId }
+}
+
+function extractCouncilPlanJson(raw: string): UnifiedPlan | null {
+  const match = raw.match(/```council-plan-json\n([\s\S]*?)\n```/)
+  if (!match) return null
+  return deserializeUnifiedPlan(match[1]!)
 }
 
 export interface RunServeOptions {
@@ -545,6 +685,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     domainStores: new Map(),
     sameCwdRunningCount: null,
     mcpManager: null,
+    sessions: null,
   }
 
   // Initialize MCP manager asynchronously — connects to configured servers,
@@ -582,6 +723,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // 都会读到这条真实值；verificationSnapshotManager 的多 session 冲突检测真正生效。
   sharedRuntime.sameCwdRunningCount = (cwd, excludeSessionId) =>
     sessions.sameCwdRunningCount(cwd, excludeSessionId)
+  // I4: sessions 就绪后回写，让 user hooks 能把结果推送到桌面事件流。
+  sharedRuntime.sessions = sessions
 
   // Legacy single-prompt path (M0): one-shot POST /prompt SSE.
   const activeAgents = new Set<AgentLoop>()
@@ -622,7 +765,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Multi-session routes (M0.5 → M3): /sessions/*. R3 rollback routes consult
   // the live registry to build an OwnershipGuard, so thread it in via getter.
-  Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry))
+  Object.assign(routes, buildSessionRoutes(sessions, apiToken, () => sessionRegistry, ctx.config))
 
   // Config routes: provider + API key management for the desktop settings UI.
   Object.assign(routes, buildConfigRoutes(apiToken))

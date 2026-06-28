@@ -582,7 +582,7 @@ test('team_orchestrate review survives a null/missing meridian indexer', async (
 })
 
 test('team_orchestrate injects typecheck breakage into review content, ahead of blast radius', async () => {
-  const brokenRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => ({
+  const brokenRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = async () => ({
     diagnostics: [{ file: 'src/agent/x.ts', line: 7, col: 1, severity: 'error', message: 'TS2300: duplicate identifier' }],
     formatted: '',
     ranOk: true,
@@ -605,7 +605,7 @@ test('team_orchestrate injects typecheck breakage into review content, ahead of 
 })
 
 test('team_orchestrate emits no typecheck noise when the runner is clean', async () => {
-  const cleanRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => ({ diagnostics: [], formatted: '', ranOk: true })
+  const cleanRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = async () => ({ diagnostics: [], formatted: '', ranOk: true })
   const tool = impactTool({ getTypecheckRunner: () => cleanRunner })
   const result = await tool.execute({
     input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },
@@ -617,7 +617,7 @@ test('team_orchestrate emits no typecheck noise when the runner is clean', async
 })
 
 test('team_orchestrate review survives a throwing typecheck runner', async () => {
-  const throwingRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = () => { throw new Error('tsc boom') }
+  const throwingRunner: import('../../agent/typecheck-gate.js').TypecheckRunner = async () => { throw new Error('tsc boom') }
   const tool = impactTool({ getTypecheckRunner: () => throwingRunner })
   const result = await tool.execute({
     input: { mode: 'standard', objective: 'force: small single-module tweak', planMarkdown: impactPlan, fromWave: 0 },

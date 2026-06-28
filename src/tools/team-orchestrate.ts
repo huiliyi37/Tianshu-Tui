@@ -10,6 +10,7 @@ import { extractChangedFiles } from '../agent/diff-collector.js'
 import { runTeamSkeleton, type TeamRunSummary } from '../agent/team-orchestrator.js'
 import type { TeamTask } from '../agent/team-plan.js'
 import { deserializeUnifiedPlan, unifiedPlanToTeamTasks, validateUnifiedPlan } from '../agent/unified-plan.js'
+import { consumePlan, storePlan } from '../agent/plan-store.js'
 import { buildHistoricalTeamSchedulerState, type TeamSchedulerBanditState } from '../agent/team-scheduler-bandit.js'
 import type { TeamSchedulerShadowEvent } from '../agent/team-scheduler-shadow.js'
 import { persistGatedInfluenceAudit, type GatedInfluenceAuditEvent } from '../agent/gated-influence-audit.js'
@@ -234,7 +235,9 @@ export function createTeamOrchestrateTool(
     async execute(params: ToolCallParams): Promise<ToolResult> {
       const parsed = inputSchema.safeParse(params.input)
       if (!parsed.success) return { content: `Invalid input: ${parsed.error.message}`, isError: true }
-      const { mode, objective, planPath, planMarkdown, planJson, maxParallel, fromWave } = parsed.data
+      const { mode, objective, planPath, planMarkdown, planJson: explicitPlanJson, maxParallel, fromWave } = parsed.data
+      // Bridge: auto-consume the plan stored by plan_task when planJson is omitted.
+      const planJson = explicitPlanJson ?? consumePlan()
 
       // Task-size gate: block small tasks from triggering heavy orchestration
       const scale = classifyOrchestrationScale(objective)
@@ -256,6 +259,10 @@ export function createTeamOrchestrateTool(
           return { content: `team_orchestrate blocked: plan validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`, isError: true }
         }
         tasks = unifiedPlanToTeamTasks(plan)
+        // Re-store for multi-wave: consumePlan cleared it, but subsequent
+        // waves need it too.  Only re-store when the model didn't pass an
+        // explicit planJson (explicit always takes priority).
+        if (!explicitPlanJson) storePlan(planJson)
       }
 
       let markdown = planMarkdown
@@ -360,6 +367,11 @@ export function createTeamOrchestrateTool(
             parentToolId: params.toolUseId,
             status: r.status,
             progressLine: r.summary.slice(0, 80),
+            model: r.model,
+            provider: r.provider,
+            usage: r.usage,
+            artifactId: r.diffArtifactId,
+            changedFiles: r.changedFiles.length > 0 ? r.changedFiles : undefined,
           })
         }
       }
@@ -462,7 +474,7 @@ export function createTeamOrchestrateTool(
           if (typecheckGateEnabled() && typecheckRunner) {
             try {
               const observed = (telemetryEvent?.changedFiles.observedChangedFiles ?? []).filter(f => !isAbsolute(f))
-              const tc = runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
+              const tc = await runChangedFilesTypecheckMemo(params.cwd, observed, typecheckRunner)
               if (tc) {
                 change.forceLevel = 'L3'
                 typecheckFocus = `Typecheck — ${tc.summary}`

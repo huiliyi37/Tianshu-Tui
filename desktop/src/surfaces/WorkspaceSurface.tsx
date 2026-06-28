@@ -7,8 +7,11 @@ import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
-import { TerminalPanel } from '../components/TerminalPanel'
+import { TerminalTabs } from '../components/TerminalTabs'
 import { ThreadTabs } from '../components/ThreadTabs'
+import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
+import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
+import { UpdateBanner } from '../components/UpdateBanner'
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -103,61 +106,125 @@ export function WorkspaceSurface() {
     closeSession.mutate(activeId)
     dispatch({ type: 'closeTab', id: activeId })
   }, [activeId, closeSession, dispatch])
+  const sidebarRef = usePanelRef()
+  const reviewRef = usePanelRef()
 
-  const sidebarW = ui.sidebarVisible ? '264px' : '0px'
-  const reviewW = ui.reviewVisible ? '360px' : '0px'
+  // Sync panel collapse/expand with the ui state (Cmd+\, Cmd+Shift+B).
+  useEffect(() => {
+    const p = sidebarRef.current
+    if (!p) return
+    if (ui.sidebarVisible) p.expand()
+    else p.collapse()
+  }, [ui.sidebarVisible])
+  useEffect(() => {
+    const p = reviewRef.current
+    if (!p) return
+    if (ui.reviewVisible) p.expand()
+    else p.collapse()
+  }, [ui.reviewVisible])
+
+  const layout = loadPanelLayout()
+
+  const handleResetLayout = () => {
+    const next = resetPanelLayout()
+    sidebarRef.current?.resize(next.sidebar)
+    reviewRef.current?.resize(next.review)
+  }
 
   return (
-    <div
-      ref={wsRef}
-      className={`workspace${!ui.sidebarVisible ? ' sidebar-collapsed' : ''}${!ui.reviewVisible ? ' review-collapsed' : ''}`}
-      style={{ gridTemplateColumns: `${sidebarW} minmax(0, 1fr) ${reviewW}` }}
-    >
-      {ui.sidebarVisible && <ProjectSidebar />}
-
-      <div className="conversation">
-        <div className="conversation-body">
-          <ThreadTabs />
-          {active ? (
-            <ThreadView
-              session={active}
-              view={view}
-              onSend={handleSend}
-              onSteer={handleSteer}
-              onAbort={() => abortSession.mutate(active.id)}
-              onSetApprovalMode={handleSetApprovalMode}
-              onSetPlanMode={handleSetPlanMode}
-              onClose={handleClose}
-            />
-          ) : (
-            <div className="empty thread-empty">
-              <p>选择左侧线程，或在当前项目新建一个线程开始对话。</p>
-              <button className="btn" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                + 新线程
-              </button>
+    <div ref={wsRef} className="workspace-resizable">
+      <UpdateBanner />
+      <button
+        className="layout-reset-btn"
+        title="重置布局"
+        aria-label="重置布局"
+        onClick={handleResetLayout}
+      >
+        ⟲
+      </button>
+      <Group orientation="horizontal" style={{ height: '100%' }}>
+        <Panel
+          panelRef={sidebarRef}
+          collapsible
+          defaultSize={`${layout.sidebar}%`}
+          minSize="12%"
+          maxSize="35%"
+          onResize={({ asPercentage }) => saveSidebarWidth(Math.round(asPercentage))}
+        >
+          <ProjectSidebar />
+        </Panel>
+        <Separator className="panel-resize-handle" />
+        <Panel minSize="30%">
+          <div className="conversation">
+            <div className="conversation-body">
+              <ThreadTabs />
+              {active ? (
+                <ThreadView
+                  session={active}
+                  view={view}
+                  onSend={handleSend}
+                  onSteer={handleSteer}
+                  onAbort={() => abortSession.mutate(active.id)}
+                  onSetApprovalMode={handleSetApprovalMode}
+                  onSetPlanMode={handleSetPlanMode}
+                  onClose={handleClose}
+                />
+              ) : (
+                <div className="empty thread-empty onboard">
+                  <div className="onboard-glyph" aria-hidden>✦</div>
+                  <h2 className="onboard-title">开始你的第一个线程</h2>
+                  <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
+                  <div className="onboard-actions">
+                    <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                      + 新建线程
+                    </button>
+                  </div>
+                  <div className="onboard-hints">
+                    <div className="onboard-hint">
+                      <kbd>⌘K</kbd>
+                      <span>打开命令面板</span>
+                    </div>
+                    <div className="onboard-hint">
+                      <kbd>⌘N</kbd>
+                      <span>新建线程</span>
+                    </div>
+                    <div className="onboard-hint">
+                      <kbd>/</kbd>
+                      <span>在输入框使用斜杠命令</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-        {ui.terminalVisible && <TerminalPanel cwd={ui.activeProject ?? ''} />}
-      </div>
-
-      {ui.reviewVisible && (
-      <ReviewPanel
-        sessionId={activeId}
-        artifacts={artifacts.data ?? []}
-        pendingApproval={view.pendingApproval}
-        pendingIntent={view.pendingIntent}
-        approvalMode={active?.approvalMode}
-        planMode={view.planMode}
-        planRev={view.planRev}
-        latestPlanSlug={view.latestPlanSlug}
-        onApproval={handleApproval}
-        onIntent={handleIntent}
-        onFeedbackSent={() => sessions.refetch()}
-        todos={view.todos}
-        sources={view.sources}
-      />
-      )}
+            {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
+          </div>
+        </Panel>
+        <Separator className="panel-resize-handle" />
+        <Panel
+          panelRef={reviewRef}
+          collapsible
+          defaultSize={`${layout.review}%`}
+          minSize="15%"
+          maxSize="45%"
+          onResize={({ asPercentage }) => saveReviewWidth(Math.round(asPercentage))}
+        >
+          <ReviewPanel
+            sessionId={activeId}
+            artifacts={artifacts.data ?? []}
+            pendingApproval={view.pendingApproval}
+            pendingIntent={view.pendingIntent}
+            approvalMode={active?.approvalMode}
+            planMode={view.planMode}
+            planRev={view.planRev}
+            latestPlanSlug={view.latestPlanSlug}
+            onApproval={handleApproval}
+            onIntent={handleIntent}
+            onFeedbackSent={() => sessions.refetch()}
+            todos={view.todos}
+            sources={view.sources}
+          />
+        </Panel>
+      </Group>
 
       {!ui.reviewVisible && (
         <button

@@ -17,6 +17,7 @@
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
+import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
 import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
 import { ArtifactStore } from '../artifact/store.js'
@@ -39,6 +40,8 @@ import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
+import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
+import type { WorkingTreeFile } from '../tools/git.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -72,6 +75,8 @@ export type SessionEventType =
   | 'model_switched'
   | 'domain_changed'
   | 'skills_changed'
+  // I4 — user-defined .rivet/hooks.json script results.
+  | 'hook_result'
   | 'done'
 
 export interface SessionEvent {
@@ -116,6 +121,10 @@ export interface SessionRecord {
    * live ActiveStarDomain. Absent → 'auto'.
    */
   domain?: string
+  /** Visual glyph for the current star-domain selection (for UI badges). */
+  domainGlyph?: string
+  /** Semantic accent color key for the current star-domain selection. */
+  domainAccent?: string
   /** Estimated token count for the current conversation. Absent → session is idle/rehydrated. */
   contextTokens?: number
   /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
@@ -220,6 +229,17 @@ export interface ManagedAgent {
    * shutdown 是终结性操作。Optional 以兼容 lightweight test doubles。
    */
   shutdown?(): void
+  /**
+   * I1: 直接召集议事会评审一个 artifact 中的 council-plan-json 草案。
+   * 由桌面 CouncilSurface 调用；实际实现持有 coordinator 与 artifactStore。
+   * Optional 以兼容 lightweight test doubles。
+   */
+  conveneCouncil?(input: {
+    artifactId: string
+    objective?: string
+    seats?: { authority: string; charter?: string }[]
+    rounds?: number
+  }): Promise<{ planMarkdown: string; artifactId: string }>
 }
 
 /**
@@ -885,19 +905,42 @@ export class RuntimeSessionManager {
    * N2 — artifact feedback re-injection. Turns a human comment on an artifact
    * into a structured next-turn prompt so the agent revises in-context. Only
    * valid on an idle session (a finished turn); returns false while running.
+   *
+   * `lines` carries diff line-level review comments (file + old/new line +
+   * comment), surfaced as a `[LINE-LEVEL REVIEW]` block so the agent can locate
+   * each remark at an exact file:line anchor. Artifacts-level `comment` and
+   * `lines` are both optional but at least one must be non-empty.
    */
-  feedback(id: string, artifactId: string, comment: string): boolean {
+  feedback(
+    id: string,
+    artifactId: string,
+    comment: string,
+    lines?: ReadonlyArray<{ file: string; oldLine?: number; newLine?: number; comment: string }>,
+  ): boolean {
     const s = this.sessions.get(id)
     if (!s || s.running) return false
     const meta = [...s.events].reverse().find(
       (e) => e.type === 'artifact' && e.data.id === artifactId,
     )
     const target = meta ? String(meta.data.target ?? '') : ''
-    const prompt =
-      `[ARTIFACT FEEDBACK]\n` +
-      `Artifact: ${artifactId}${target ? ` (${target})` : ''}\n` +
-      `Comment: ${comment}\n\n` +
-      `Please revise your work to address this feedback.`
+    const parts: string[] = [`[ARTIFACT FEEDBACK]`]
+    parts.push(`Artifact: ${artifactId}${target ? ` (${target})` : ''}`)
+    if (comment.trim()) {
+      parts.push(`Comment: ${comment}`)
+    }
+    // 行级评论：每条带 <file>:<line> 锚点，让 agent 精确定位
+    const lineRemarks = lines?.filter((l) => l.comment.trim()) ?? []
+    if (lineRemarks.length > 0) {
+      const rendered = lineRemarks
+        .map((l) => {
+          const lineRef = l.newLine ?? l.oldLine
+          const loc = lineRef != null ? `${l.file}:${lineRef}` : l.file
+          return `${loc} — ${l.comment.trim()}`
+        })
+        .join('\n')
+      parts.push(`[LINE-LEVEL REVIEW]\n${rendered}`)
+    }
+    const prompt = `${parts.join('\n')}\n\nPlease revise your work to address this feedback.`
     return this.run(id, prompt)
   }
 
@@ -975,6 +1018,9 @@ export class RuntimeSessionManager {
       try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
       try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
     }
+    const persona = resolveDomainPersona(record.domain)
+    record.domainGlyph = persona.glyph
+    record.domainAccent = persona.accent
     return record
   }
 
@@ -982,6 +1028,47 @@ export class RuntimeSessionManager {
     const s = this.sessions.get(id)
     if (!s) return undefined
     return this.enrichRecord(s)
+  }
+
+  /**
+   * I1: expose the live ManagedAgent for a session so surfaces like
+   * CouncilSurface can call agent-specific methods (conveneCouncil). Returns
+   * undefined when the session is missing or has no built agent yet.
+   */
+  getAgentForSession(id: string): ManagedAgent | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    return s.agent ?? undefined
+  }
+
+  /**
+   * I4: append a `hook_result` event for user-defined .rivet/hooks.json scripts.
+   * Retains only the latest 50 hook_result events so diagnostic noise does not
+   * evict user messages from the main ring buffer.
+   */
+  emitHookResult(
+    id: string,
+    results: HookResult[],
+    meta: { event: HookEvent; turn?: number; toolName?: string; error?: string },
+  ): void {
+    const s = this.sessions.get(id)
+    if (!s) return
+    this.append(s, 'hook_result', {
+      event: meta.event,
+      turn: meta.turn,
+      toolName: meta.toolName,
+      error: meta.error,
+      results,
+    })
+    this.trimHookResults(s)
+  }
+
+  private trimHookResults(session: InternalSession): void {
+    const hookEvents = session.events.filter((e) => e.type === 'hook_result')
+    if (hookEvents.length <= 50) return
+    const toDrop = hookEvents.length - 50
+    const dropped = new Set(hookEvents.slice(0, toDrop))
+    session.events = session.events.filter((e) => !dropped.has(e))
   }
 
   getEvents(id: string, since = 0): { events: SessionEvent[]; lastSeq: number } | undefined {
@@ -1076,6 +1163,21 @@ export class RuntimeSessionManager {
   /** List git worktrees for a given cwd (defaults to the manager's default cwd). */
   getWorktrees(cwd?: string): WorktreeEntry[] {
     return listWorktrees(cwd ?? this.defaultCwd)
+  }
+
+  /** ASCII branch/merge graph for a given cwd (defaults to the manager's default cwd). */
+  async getGitGraph(cwd?: string, maxCount?: number): Promise<string> {
+    return getGitGraph(cwd ?? this.defaultCwd, maxCount)
+  }
+
+  /** Working-tree changes relative to HEAD for the desktop "changes" tab. */
+  async getWorkingTreeFiles(cwd?: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+    return getWorkingTreeFiles(cwd ?? this.defaultCwd)
+  }
+
+  /** Unified diff of a single file relative to HEAD (on-demand). */
+  async getFileDiff(path: string, cwd?: string): Promise<string> {
+    return getFileDiff(cwd ?? this.defaultCwd, path)
   }
 
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
@@ -1357,6 +1459,11 @@ export class RuntimeSessionManager {
           phase: a.status === 'running' ? 'running' : a.status,
           progressLine: a.progressLine ? redactText(a.progressLine) : undefined,
           elapsedMs: this.now() - started,
+          model: a.model,
+          provider: a.provider,
+          usage: a.usage,
+          artifactId: a.artifactId,
+          changedFiles: a.changedFiles,
         })
       },
     }
@@ -1579,6 +1686,14 @@ function resolveDomainState(
     key: d.id,
     label: d.name,
   }
+}
+
+function resolveDomainPersona(key: string | undefined): { glyph: string; accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim' } {
+  if (key === 'auto' || key === undefined) return { glyph: '⚙', accent: 'primary' }
+  if (key === 'off') return { glyph: '⊘', accent: 'dim' }
+  const d = starDomainRegistry.get(key)
+  if (!d) return { glyph: '⚙', accent: 'primary' }
+  return { glyph: d.uiPersona.glyph, accent: d.uiPersona.accent }
 }
 
 function redactValue(value: unknown): unknown {

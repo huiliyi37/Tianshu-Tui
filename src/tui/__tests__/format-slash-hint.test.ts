@@ -76,11 +76,13 @@ describe('formatSlashHint', () => {
     assert.ok(lines[lines.length - 1]!.includes('tab complete'))
   })
 
-  it('caps visible entries and shows overflow count', () => {
+  it('caps visible entries and shows scroll indicators', () => {
     const lines = formatSlashHint({ input: '/', commands: COMMANDS }, theme).map(stripAnsi)
-    // 5 visible + footer
+    // 5 visible + footer (selectedIdx=0 → scrollOffset=0, no "↑ above")
     assert.equal(lines.length, SLASH_HINT_MAX_VISIBLE + 1)
-    assert.ok(lines[lines.length - 1]!.includes(`… ${COMMANDS.length - SLASH_HINT_MAX_VISIBLE} more`))
+    // Footer should show overflow count and navigation hints
+    assert.ok(lines[lines.length - 1]!.includes(`${COMMANDS.length - SLASH_HINT_MAX_VISIBLE} more`), 'shows overflow count')
+    assert.ok(lines[lines.length - 1]!.includes('↓'), 'has down scroll indicator')
   })
 
   it('input /revi surfaces /review at top with ❯ marker', () => {
@@ -112,5 +114,35 @@ describe('slashCompletionTarget', () => {
     assert.equal(slashCompletionTarget('/comp', COMMANDS, 0), filtered[0]!.name)
     // out-of-range idx clamps to last
     assert.equal(slashCompletionTarget('/comp', COMMANDS, 99), filtered[filtered.length - 1]!.name)
+  })
+})
+
+describe('formatSlashHint scroll window', () => {
+  it('selectedIdx in middle shows scroll indicators above and below', () => {
+    // 9 commands, maxVisible=5. Selecting index 6 (past midpoint) should show "↑ above"
+    const lines = formatSlashHint({ input: '/', commands: COMMANDS, selectedIdx: 6 }, theme).map(stripAnsi)
+    // Should have "↑ N above" indicator
+    assert.ok(lines.some(l => l.includes('↑') && l.includes('above')), 'shows scroll-up indicator')
+  })
+
+  it('selectedIdx near bottom pins to end', () => {
+    const lines = formatSlashHint({ input: '/', commands: COMMANDS, selectedIdx: 8 }, theme).map(stripAnsi)
+    // Last visible command should be the last in COMMANDS (/review max)
+    const visibleCmds = lines.filter(l => l.includes('/'))
+    assert.ok(visibleCmds.some(l => l.includes('/review max')), 'last command visible when at bottom')
+  })
+
+  it('scrolling down moves window forward', () => {
+    // At idx 0, first visible is /help. At idx 5, /help should scroll off.
+    const lines0 = formatSlashHint({ input: '/', commands: COMMANDS, selectedIdx: 0 }, theme).map(stripAnsi)
+    const lines5 = formatSlashHint({ input: '/', commands: COMMANDS, selectedIdx: 5 }, theme).map(stripAnsi)
+    // /help visible at idx 0 but NOT at idx 5
+    assert.ok(lines0.some(l => l.includes('/help')), '/help visible at top')
+    assert.ok(!lines5.some(l => l.includes('/help') && !l.includes('above')), '/help scrolled off at idx 5')
+  })
+
+  it('footer shows ↵ run hint', () => {
+    const lines = formatSlashHint({ input: '/he', commands: COMMANDS }, theme).map(stripAnsi)
+    assert.ok(lines[lines.length - 1]!.includes('↵'), 'footer has Enter hint')
   })
 })

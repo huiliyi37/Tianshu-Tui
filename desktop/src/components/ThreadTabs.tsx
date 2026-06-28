@@ -2,11 +2,19 @@ import { useMemo, useState } from 'react'
 import { useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import type { SessionRecord } from '../runtime/types'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
 
 /**
  * Tab bar for open threads. Renders a compact row of session tabs
  * above the active conversation. Click switches; Cmd+W closes.
- * Supports drag-to-reorder (HTML5 Drag API, no deps).
+ * Supports drag-to-reorder (HTML5 Drag API, no deps) and a right-click
+ * context menu for common tab actions.
  */
 export function ThreadTabs() {
   const ui = useUiState()
@@ -26,11 +34,9 @@ export function ThreadTabs() {
 
   const handleDrop = () => {
     if (dragIndex !== null && overIndex !== null && dragIndex !== overIndex) {
-      // Resolve to session IDs to avoid tabSessions/openTabs index divergence
       const fromId = tabSessions[dragIndex]?.id
       const toId = tabSessions[overIndex]?.id
       if (!fromId || !toId) return
-      // Map to openTabs indices
       const fromTab = ui.openTabs.indexOf(fromId)
       const toTab = ui.openTabs.indexOf(toId)
       if (fromTab < 0 || toTab < 0) return
@@ -40,46 +46,87 @@ export function ThreadTabs() {
     setOverIndex(null)
   }
 
+  const closeOthers = (keepId: string) => {
+    for (const id of ui.openTabs) {
+      if (id !== keepId) dispatch({ type: 'closeTab', id })
+    }
+  }
+
+  const closeToRight = (anchorId: string) => {
+    const idx = ui.openTabs.indexOf(anchorId)
+    if (idx < 0) return
+    const toClose = ui.openTabs.slice(idx + 1)
+    for (const id of toClose) dispatch({ type: 'closeTab', id })
+  }
+
+  const copyTitle = (title: string) => {
+    void navigator.clipboard.writeText(title)
+  }
+
   return (
     <div className="thread-tabs" role="tablist" aria-label="对话标签">
       {tabSessions.map((s, i) => {
         const active = s.id === ui.activeSessionId
         const dragging = dragIndex === i
         const dragOver = overIndex === i && dragIndex !== null && dragIndex !== i
+        const title = s.title ?? s.id.slice(0, 8)
+        const tabClass = `thread-tab${active ? ' active' : ''}${dragging ? ' dragging' : ''}${dragOver ? ' drag-over' : ''}`
         return (
-          <button
-            key={s.id}
-            className={`thread-tab${active ? ' active' : ''}${dragging ? ' dragging' : ''}${dragOver ? ' drag-over' : ''}`}
-            role="tab"
-            aria-selected={active}
-            draggable
-            onDragStart={() => setDragIndex(i)}
-            onDragOver={(e) => { e.preventDefault(); setOverIndex(i) }}
-            onDragEnd={() => { setDragIndex(null); setOverIndex(null) }}
-            onDrop={(e) => { e.preventDefault(); handleDrop() }}
-            onClick={() => dispatch({ type: 'setActive', id: s.id })}
-            onAuxClick={(e) => {
-              // Middle-click to close tab
-              if (e.button === 1) {
-                e.preventDefault()
-                dispatch({ type: 'closeTab', id: s.id })
+          <ContextMenu key={s.id}>
+            <ContextMenuTrigger
+              render={
+                <button
+                  className={tabClass}
+                  role="tab"
+                  aria-selected={active}
+                  draggable
+                  onDragStart={() => setDragIndex(i)}
+                  onDragOver={(e) => { e.preventDefault(); setOverIndex(i) }}
+                  onDragEnd={() => { setDragIndex(null); setOverIndex(null) }}
+                  onDrop={(e) => { e.preventDefault(); handleDrop() }}
+                  onClick={() => dispatch({ type: 'setActive', id: s.id })}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault()
+                      dispatch({ type: 'closeTab', id: s.id })
+                    }
+                  }}
+                >
+                  {s.domainGlyph && (
+                    <span className={`thread-tab-glyph domain-accent-${s.domainAccent}`} aria-hidden>
+                      {s.domainGlyph}
+                    </span>
+                  )}
+                  <span className="thread-tab-title">{title}</span>
+                  <span
+                    className="thread-tab-close"
+                    aria-label={`关闭 ${title}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      dispatch({ type: 'closeTab', id: s.id })
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
               }
-            }}
-          >
-            <span className="thread-tab-title">
-              {s.title ?? s.id.slice(0, 8)}
-            </span>
-            <span
-              className="thread-tab-close"
-              aria-label={`关闭 ${s.title ?? s.id.slice(0, 8)}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                dispatch({ type: 'closeTab', id: s.id })
-              }}
-            >
-              ×
-            </span>
-          </button>
+            />
+            <ContextMenuContent align="start" side="bottom" sideOffset={4}>
+              <ContextMenuItem onClick={() => copyTitle(title)}>
+                复制标题
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => dispatch({ type: 'closeTab', id: s.id })}>
+                关闭
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => closeOthers(s.id)}>
+                关闭其他标签
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => closeToRight(s.id)}>
+                关闭右侧标签
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         )
       })}
     </div>

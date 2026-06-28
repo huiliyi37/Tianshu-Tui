@@ -103,6 +103,10 @@ export interface OaiChatRequest {
   temperature?: number
   /** DeepSeek extension. */
   reasoning_effort?: 'low' | 'medium' | 'high' | 'max'
+  /** Force the model to emit valid JSON (OpenAI-compatible json_object mode).
+   *  Worker sessions set this on the final (no-tools) turn to eliminate free-text
+   *  parse failures. Requires the prompt to mention "json". */
+  response_format?: { type: 'json_object' }
 }
 
 /** Usage stats from OpenAI-compatible API responses. */

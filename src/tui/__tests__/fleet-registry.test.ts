@@ -83,6 +83,29 @@ test('FleetRegistry: clearGroup 仅清理目标组', () => {
   assert.equal(fleet.getParentToolIds()[0], 'toolB')
 })
 
+test('FleetRegistry: clearGroup 归档终态记录，仍可通过 getWorkerById 查询', () => {
+  const fleet = new FleetRegistry()
+  fleet.apply(running('wo_x', 'toolA', 'patcher'), 0)
+  fleet.apply({ workOrderId: 'wo_x', parentToolId: 'toolA', status: 'passed', progressLine: 'done' }, 100)
+  fleet.clearGroup('toolA')
+  assert.equal(fleet.size, 0)
+  assert.equal(fleet.completedSize(), 1)
+  const w = fleet.getWorkerById('wo_x', 200)
+  assert.ok(w)
+  assert.equal(w!.status, 'passed')
+  assert.equal(w!.profile, 'patcher')
+})
+
+test('FleetRegistry: getCompletedWorkers / getAllWorkers 支持 filter', () => {
+  const fleet = new FleetRegistry()
+  fleet.apply(running('wo_active', 'toolA'), 0)
+  fleet.apply({ workOrderId: 'wo_done', parentToolId: 'toolA', status: 'passed' }, 0)
+  assert.equal(fleet.getCompletedWorkers().length, 1)
+  assert.equal(fleet.getAllWorkers(0, 'all').length, 2)
+  assert.equal(fleet.getAllWorkers(0, 'active').length, 1)
+  assert.equal(fleet.getAllWorkers(0, 'completed').length, 1)
+})
+
 test('FleetRegistry: hasActive 反映是否有未终态 worker', () => {
   const fleet = new FleetRegistry()
   assert.equal(fleet.hasActive(), false)

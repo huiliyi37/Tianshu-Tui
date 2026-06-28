@@ -9,8 +9,8 @@
 
 :root {
   /* Typography */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -50,95 +50,44 @@
   --md-gap: var(--space-3);
   --md-code-radius: var(--radius-sm);
   --md-quote-bar: 3px;
+
+  /* Glass slider defaults (overridden by glass-custom.ts at runtime).
+     Values match the DEFAULT_GLASS_CONFIG constant in glass-custom.ts. */
+  --sidebar-glass-opacity: 80%;
+  --sidebar-glass-blur: 24px;
+  --main-glass-opacity: 90%;
+  --main-glass-blur: 16px;
 }
 
-/* ── Dark (default) ─────────────────────────────────────────────── */
-:root,
-:root[data-theme="dark"] {
-  color-scheme: dark;
+/* ── Theme colors are now JSON-driven ──────────────────────────────
+   See styles/themes/*.json + lib/theme-loader.ts.
+   Surface tokens are applied via setProperty at runtime. */
 
-  --bg: #0d0d10;
-  --panel: #151519;
-  --panel-2: #1c1c22;
-  --panel-3: #232329;
-  --border: #2a2a32;
-  --border-strong: #3a3a44;
-
-  --text: #e7e7ec;
-  --text-strong: #f6f6f9;
-  --muted: #989aa6;
-  --faint: #6c6e7a;
-  --text-dim: #7c7e89;
-  --text-secondary: #a6a8b2;
-  --hover: rgba(255, 255, 255, 0.06);
-  --bg-elevated: #1c1c22;
-  --surface-2: rgba(127, 127, 127, 0.12);
-  --link: var(--accent);
-  --link-hover: var(--accent-hover);
-  --green: var(--success);
-
-  /* Antigravity 2.0 / Codex cool azure — restrained, not periwinkle-purple. */
-  --accent: #5aa9ff;
-  --accent-hover: #7dbcff;
-  --accent-fg: #0a0f16;
-  --accent-soft: rgba(90, 169, 255, 0.14);
-
-  --success: #43c463;
-  --success-soft: rgba(67, 196, 99, 0.14);
-  --warning: #e0a93a;
-  --warning-soft: rgba(224, 169, 58, 0.14);
-  --error: #f76b6b;
-  --error-soft: rgba(247, 107, 107, 0.13);
-  --info: #5aa9ff;
-  --info-soft: rgba(90, 169, 255, 0.13);
-
-  --overlay: rgba(0, 0, 0, 0.55);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+/* Font-weight boost levels. All three semantic weights shift together so
+   body, buttons, and headings keep their relative hierarchy. */
+html[data-font-weight="medium"] {
+  --weight-normal: 450;
+  --weight-medium: 550;
+  --weight-semibold: 650;
+}
+html[data-font-weight="bold"] {
+  --weight-normal: 500;
+  --weight-medium: 600;
+  --weight-semibold: 700;
 }
 
-/* ── Light ──────────────────────────────────────────────────────── */
-:root[data-theme="light"] {
-  color-scheme: light;
-
-  --bg: #ffffff;
-  --panel: #f7f7f8;
-  --panel-2: #f0f0f2;
-  --panel-3: #e8e8ec;
-  --border: #e3e3e8;
-  --border-strong: #d2d2da;
-
-  --text: #1b1b21;
-  --text-strong: #0c0c10;
-  --muted: #6a6a76;
-  --faint: #9a9aa6;
-  --text-dim: #8a8a96;
-  --text-secondary: #5c5c68;
-  --hover: rgba(0, 0, 0, 0.05);
-  --bg-elevated: #f0f0f2;
-  --surface-2: rgba(127, 127, 127, 0.12);
-  --link: var(--accent);
-  --link-hover: var(--accent-hover);
-  --green: var(--success);
-
-  /* Antigravity 2.0 / Codex cool azure — restrained, not indigo-purple. */
-  --accent: #1f6feb;
-  --accent-hover: #1a5fd0;
-  --accent-fg: #ffffff;
-  --accent-soft: rgba(31, 111, 235, 0.10);
-
-  --success: #1a7f37;
-  --success-soft: rgba(26, 127, 55, 0.12);
-  --warning: #9a6700;
-  --warning-soft: rgba(154, 103, 0, 0.12);
-  --error: #cf222e;
-  --error-soft: rgba(207, 34, 46, 0.10);
-  --info: #0969da;
-  --info-soft: rgba(9, 105, 218, 0.10);
-
-  --overlay: rgba(20, 20, 28, 0.40);
-  --shadow-sm: 0 1px 2px rgba(20, 20, 40, 0.08);
-  --shadow-md: 0 6px 20px rgba(20, 20, 40, 0.12);
-  --shadow-lg: 0 16px 48px rgba(20, 20, 40, 0.16);
+/* Font family configurations */
+html[data-font-family="sans"] {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+html[data-font-family="kaiti"] {
+  --font-sans: "Kaiti SC", "STKaiti", "Noto Serif CJK SC", "STSong", "Georgia", serif;
+}
+html[data-font-family="geometric"] {
+  --font-sans: "Outfit", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+html[data-font-family="mono"] {
+  --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+

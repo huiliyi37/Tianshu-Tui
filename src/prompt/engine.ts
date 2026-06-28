@@ -1,5 +1,5 @@
 import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from '../api/oai-types.js'
-import { semanticPruneLayer1 } from '../compact/semantic-prune.js'
+import { pruneOutdatedQueryResults } from '../compact/semantic-prune.js'
 import { collapseToolResult } from '../compact/context-collapse.js'
 import { detectStaleness } from '../compact/staleness-detect.js'
 import { CACHE_ANCHOR_MESSAGES } from '../compact/constants.js'
@@ -444,12 +444,16 @@ export class PromptEngine {
     // mutating message content breaks DeepSeek exact-prefix cache. trySessionSplit (86%)
     // handles context overflow instead.
     if (!contextWindow || contextWindow < 1_000_000) {
-      const { messages: semanticPruned } = semanticPruneLayer1(result, CACHE_ANCHOR_MESSAGES)
-      if (semanticPruned !== result) {
-        for (let i = 0; i < result.length; i++) result[i] = semanticPruned[i]!
+      const { messages: prunedMessages, prunedCount, savedChars } = pruneOutdatedQueryResults(result, CACHE_ANCHOR_MESSAGES)
+      if (prunedCount > 0) {
+        debugLog(`[semantic-prune] pruned ${prunedCount} results, saved ${savedChars} chars`)
+        result.length = 0
+        result.push(...prunedMessages)
       }
 
-      const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES)
+      const { messages: stalenessPruned } = detectStaleness(result, CACHE_ANCHOR_MESSAGES, {
+        suffixTokenLimit: 8_000, // only mutate cheap-to-recache tail
+      })
       if (stalenessPruned !== result) {
         for (let i = 0; i < result.length; i++) result[i] = stalenessPruned[i]!
       }
@@ -700,18 +704,9 @@ export class PromptEngine {
     this.taskProgress = state
   }
 
-  /** @deprecated Dead field — behaviorMirror never rendered into prompt. */
-  setBehaviorMirror(_mirror: string | null): void { /* noop */ }
-
-  /** @deprecated Dead field — strategyShift never rendered into prompt. */
-  setStrategyShift(_hint: string | null): void { /* noop */ }
-
   setRepairHint(hint: string | null): void {
     this.repairHint = hint
   }
-
-  /** @deprecated Dead field — impactHint never rendered into prompt. */
-  setImpactHint(_hint: string | null): void { /* noop */ }
 
 
 

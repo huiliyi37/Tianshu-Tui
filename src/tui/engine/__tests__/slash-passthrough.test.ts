@@ -78,3 +78,39 @@ test('passthrough 后 scrollback 包含用户气泡', async () => {
   assert.ok(/[❯▌]/.test(scrollback), 'scrollback 应包含用户气泡标记（❯/▌）')
   assert.ok(scrollback.includes('/team plan.md'), 'scrollback 应包含用户原始输入')
 })
+
+test('busy 期间 passthrough 的 slash 命令以高优先级入 steer 队列', async () => {
+  const { app, stdin } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+  app.setSlashHandler(async () => false) // 透传命令
+
+  // 启动 run A
+  app.setInput('task A')
+  stdin.dataHandler!('\r')
+  await tick()
+  assert.equal(app.busy, true)
+
+  // run A 执行期间输入透传 slash
+  app.setInput('/team do something')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(runs.length, 1, 'busy 期间不应直接触发新的 onSubmit')
+  assert.equal(app.steerBuffer.hasPending(), true)
+  // 优先级为 next，排在 later guidance 之前
+  const entries = app.steerBuffer.getPendingEntries()
+  assert.equal(entries[0]!.text, '/team do something')
+  assert.equal(entries[0]!.priority, 'next')
+
+  // run B 启动时，高优先级 slash 应先被归并
+  app.callbacks.onTurnComplete({ input_tokens: 100, output_tokens: 10 }, 1, true)
+  await tick()
+  app.setInput('task B')
+  stdin.dataHandler!('\r')
+  await tick()
+
+  assert.equal(runs.length, 2)
+  assert.equal(runs[1], '/team do something\n\ntask B')
+  assert.equal(app.steerBuffer.hasPending(), false)
+})

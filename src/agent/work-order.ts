@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { CapabilityTask } from '../model/capability.js'
+import type { Usage } from '../api/types.js'
 import type { VerificationMetadata } from '../tools/types.js'
 import { profileRegistry } from './profile-registry.js'
 import { starDomainRegistry } from './star-domain-registry.js'
@@ -155,10 +156,27 @@ export const workerResultSchema = z.object({
   patchSummary: z.string().optional(),
   verification: verificationMetadataSchema.optional(),
   changedFiles: z.array(z.string()),
+  /** Persisted diff artifact id (set by runHandsSession after落盘). Absent if the
+   *  worker produced no diff or persistence failed. Carried through to
+   *  DelegationActivity.artifactId so the UI can fetch this worker's diff. */
+  diffArtifactId: z.string().optional(),
   examinedFiles: z.array(z.string()).optional(),
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
+  /** Runtime metadata: actual model used by the worker. */
+  model: z.string().optional(),
+  /** Runtime metadata: provider used by the worker. */
+  provider: z.string().optional(),
+  /** Runtime metadata: cumulative token usage for this worker run. */
+  usage: z.object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+    reasoning_tokens: z.number().optional(),
+    total_tokens: z.number().optional(),
+  }).optional(),
 })
 
 const workerResultIngestSchema = z.object({
@@ -182,12 +200,14 @@ const workerResultIngestSchema = z.object({
   ]).default([]),
   examinedFiles: z.array(z.string()).optional(),
   risks: z.union([
-    z.array(z.string()),
-    z.undefined().transform(() => [] as string[]),
+    // Accept structured risk objects (model infers shape from findings),
+    // plain strings, or missing/empty. Coerced to strings in normalizeWorkerResult.
+    z.array(z.union([z.record(z.string(), z.unknown()), z.string().min(1)])),
+    z.undefined().transform(() => [] as (Record<string, unknown> | string)[]),
   ]).default([]),
   nextActions: z.union([
-    z.array(z.string()),
-    z.undefined().transform(() => [] as string[]),
+    z.array(z.union([z.record(z.string(), z.unknown()), z.string().min(1)])),
+    z.undefined().transform(() => [] as (Record<string, unknown> | string)[]),
   ]).default([]),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
 })
@@ -376,14 +396,65 @@ function extractBalancedJsonCandidates(text: string): string[] {
 }
 
 export function extractJsonCandidates(text: string): string[] {
-  const candidates = [...extractFencedJsonCandidates(text), ...extractBalancedJsonCandidates(text)]
-  if (candidates.length > 0) return candidates
+  // Strategy 1: fenced JSON (```json ... ``` or ``` ... ```) — Codex-style multi-tag.
+  const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)]
+    .map(m => m[1]?.trim())
+    .filter((c): c is string => Boolean(c?.includes('{') && c.includes('}')))
 
-  const firstBrace = text.indexOf('{')
-  const lastBrace = text.lastIndexOf('}')
-  if (firstBrace !== -1 && lastBrace > firstBrace) {
-    return [text.slice(firstBrace, lastBrace + 1)]
+  // Strategy 2: balanced { ... } pairs anywhere in the response.
+  const balanced = extractBalancedJsonCandidates(text)
+
+  // Strategy 3: YAML/TOML fences — some models wrap JSON in ```yaml or ```toml.
+  const altFenced = [...text.matchAll(/```(?:yaml|toml)?\s*([\s\S]*?)```/g)]
+    .map(m => m[1]?.trim())
+    .filter((c): c is string => Boolean(c?.startsWith('{') && c.endsWith('}')))
+
+  const all = [...fenced, ...altFenced, ...balanced]
+
+  // Strategy 4: tail extraction — models most often place JSON at the END of
+  // the response after prose. Try the last N characters as a candidate.
+  const TAIL_SIZE = 8000
+  const tail = text.length > TAIL_SIZE ? text.slice(-TAIL_SIZE) : text
+  const tailFirst = tail.indexOf('{')
+  const tailLast = tail.lastIndexOf('}')
+  if (tailFirst !== -1 && tailLast > tailFirst) {
+    const tailCandidate = tail.slice(tailFirst, tailLast + 1)
+    // Avoid duplicate of an already-captured balanced candidate
+    if (!all.includes(tailCandidate)) {
+      all.push(tailCandidate)
+    }
   }
+
+  if (all.length > 0) return all
+
+  // Strategy 5: raw text — treat the entire trimmed message as a candidate.
+  const trimmed = text.trim()
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return [trimmed]
+  }
+
+  // Strategy 6: truncated JSON repair — find the first { and append } to balance.
+  const firstBrace = text.indexOf('{')
+  if (firstBrace !== -1) {
+    const truncated = text.slice(firstBrace)
+    // Count open vs close braces and append enough } to balance.
+    let depth = 0
+    let inStr = false
+    let esc = false
+    for (const ch of truncated) {
+      if (esc) { esc = false; continue }
+      if (ch === '\\') { esc = true; continue }
+      if (ch === '"') { inStr = !inStr; continue }
+      if (inStr) continue
+      if (ch === '{') depth++
+      else if (ch === '}') depth--
+    }
+    if (depth > 0) {
+      all.push(truncated + '}'.repeat(depth))
+    }
+  }
+
+  if (all.length > 0) return all
 
   throw new Error('Worker result did not contain a JSON object')
 }
@@ -406,6 +477,8 @@ function normalizeWorkerResult(raw: z.infer<typeof workerResultIngestSchema>): W
     artifacts: raw.artifacts.map((artifact, index) => typeof artifact === 'string'
       ? { kind: 'note' as const, title: `Artifact ${index + 1}`, content: artifact }
       : artifact),
+    risks: raw.risks.map(r => typeof r === 'string' ? r : JSON.stringify(r)),
+    nextActions: raw.nextActions.map(a => typeof a === 'string' ? a : JSON.stringify(a)),
   })
 }
 
@@ -431,6 +504,8 @@ function parseWorkerResultObject(parsed: unknown, expectedWorkOrderId: string): 
 }
 
 export function parseWorkerResult(text: string, expectedWorkOrderId: string): WorkerResult {
+  // extractJsonCandidates throws when truly no JSON is found — let it propagate
+  // so the caller's repair loop can trigger a retry with the repair prompt.
   const candidates = extractJsonCandidates(text)
   const errors: string[] = []
 
@@ -451,7 +526,14 @@ export function parseWorkerResult(text: string, expectedWorkOrderId: string): Wo
     }
   }
 
-  throw new Error(errors.at(-1) ?? 'Worker result did not contain a valid JSON object')
+  // All JSON candidates failed to parse or validate. Return a blocked result
+  // with diagnostic details so the coordinator can see what went wrong, instead
+  // of throwing and triggering yet another retry with the same broken prompt.
+  // The caller's repair loop already handles retries; this is the terminal case.
+  return buildBlockedWorkerResult(
+    { id: expectedWorkOrderId } as WorkOrder,
+    `JSON candidates found (${candidates.length}) but none parseable. Errors: ${errors.join(' | ')}`.slice(0, 500),
+  )
 }
 
 export function buildBlockedWorkerResult(order: WorkOrder, reason: string): WorkerResult {

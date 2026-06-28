@@ -8,7 +8,9 @@ import type { Sensorium, SensoriumInput } from '../sensorium.js'
 describe('computeSensorium', () => {
   it('computes momentum from prediction accumulator', () => {
     const input: SensoriumInput = {
-      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 7 },
+      // 滑动窗口口径：窗口内 7 正 3 错 → momentum 0.7（非 consecutiveCorrect/10）。
+      // 一次探索性报错不清零，连续多错才压低 momentum。
+      predictionAcc: { windowSize: 10, predictions: [true, true, true, true, true, true, true, false, false, false], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.3 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file', 'bash', 'write_file', 'bash'],
@@ -34,7 +36,7 @@ describe('computeSensorium', () => {
     assert.equal(s.momentum, 0)
   })
 
-  it('computes complexity from tool diversity in sliding window', () => {
+  it('computes complexity via Shannon entropy from tool diversity', () => {
     const input: SensoriumInput = {
       predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
       pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
@@ -57,7 +59,34 @@ describe('computeSensorium', () => {
       doomLevel: 'none',
     }
     const s = computeSensorium(input)
-    assert.equal(s.complexity, 0.2) // 1 unique / 5 total
+    assert.equal(s.complexity, 0) // all same → entropy zero
+  })
+
+  it('distinguishes distribution skew (Shannon entropy)', () => {
+    // With the old unique/total formula, both would be 2/5 = 0.4.
+    // Shannon entropy gives different values for different distributions.
+    const skewed: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['A', 'A', 'A', 'A', 'B'], // 4×A, 1×B
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const balanced: SensoriumInput = {
+      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 0 },
+      pressureResult: { tier: 0, shouldCompact: false, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.1 },
+      evidenceState: { filesModified: 0, verifiedCount: 0 },
+      toolCallHistory: ['A', 'A', 'A', 'B', 'B'], // 3×A, 2×B
+      pheromones: [],
+      doomLevel: 'none',
+    }
+    const s1 = computeSensorium(skewed)
+    const s2 = computeSensorium(balanced)
+    assert.ok(s1.complexity < s2.complexity,
+      `skewed ${s1.complexity.toFixed(3)} should be < balanced ${s2.complexity.toFixed(3)}`)
+    assert.ok(s1.complexity > 0 && s2.complexity < 1,
+      `skewed=${s1.complexity.toFixed(3)}, balanced=${s2.complexity.toFixed(3)}`)
   })
 
   it('computes continuous stability from blended signals', () => {
@@ -264,7 +293,7 @@ describe('computeSensorium', () => {
 
   it('all dimensions are frozen/immutable result', () => {
     const input: SensoriumInput = {
-      predictionAcc: { windowSize: 10, predictions: [], consecutiveCorrect: 5 },
+      predictionAcc: { windowSize: 10, predictions: [true, true, true, true, true], consecutiveCorrect: 5 },
       pressureResult: { tier: 1, shouldCompact: true, thrashing: false, fastGrowth: false, growthRate: 0, cvmOverheadRatio: 0, shouldThrottleCvm: false, ratio: 0.65 },
       evidenceState: { filesModified: 3, verifiedCount: 2 },
       toolCallHistory: ['bash', 'read_file'],
@@ -272,7 +301,9 @@ describe('computeSensorium', () => {
       doomLevel: 'none',
     }
     const s1 = computeSensorium(input)
-    const s2 = computeSensorium({ ...input, predictionAcc: { ...input.predictionAcc, consecutiveCorrect: 9 } })
+    // 滑动窗口口径：改 predictions 数组（非 consecutiveCorrect）才改变 momentum。
+    // s1 全对 → momentum 1；s2 混入错误 → momentum < 1，二者不同。
+    const s2 = computeSensorium({ ...input, predictionAcc: { ...input.predictionAcc, predictions: [true, true, true, true, true, false, false, false] } })
     assert.notEqual(s1.momentum, s2.momentum) // fresh computation each call
   })
 })
@@ -311,19 +342,46 @@ describe('computeStrategy', () => {
   })
 
   it('increases exploration breadth when stability is low', () => {
-    const stable = makeSensorium({ stability: 0.8 })
-    assert.equal(computeStrategy(stable).explorationBreadth, 0.3)
+    // explorationBreadth is now a continuous function of stability + complexity
+    // (was a binary `stability<0.3 ? 0.9 : 0.3` with a 0.60 cliff). Verify the
+    // direction (low stability → wider breadth) and that there is no cliff at
+    // the old 0.3 boundary.
+    const stable = makeSensorium({ stability: 0.8, complexity: 0.3 })
+    const unstable = makeSensorium({ stability: 0.2, complexity: 0.3 })
+    assert.ok(
+      computeStrategy(unstable).explorationBreadth > computeStrategy(stable).explorationBreadth,
+      `unstable breadth should exceed stable`,
+    )
 
-    const unstable = makeSensorium({ stability: 0.2 })
-    assert.equal(computeStrategy(unstable).explorationBreadth, 0.9)
+    // Continuity: just-below and just-above the old 0.3 cliff must be close,
+    // not separated by the old 0.60 jump.
+    const justBelow = computeStrategy(makeSensorium({ stability: 0.29, complexity: 0.3 })).explorationBreadth
+    const justAbove = computeStrategy(makeSensorium({ stability: 0.31, complexity: 0.3 })).explorationBreadth
+    assert.ok(
+      Math.abs(justBelow - justAbove) < 0.1,
+      `explorationBreadth must be continuous across stability=0.3 (got ${justBelow} vs ${justAbove})`,
+    )
   })
 
   it('raises commit threshold when pressure is high', () => {
-    const lowPressure = makeSensorium({ pressure: 0.3 })
-    assert.equal(computeStrategy(lowPressure).commitThreshold, 0.6)
+    // commitThreshold is now a continuous function of pressure + momentum
+    // (was a binary `pressure>0.7 ? 0.9 : 0.6` with a 0.30 cliff). Verify the
+    // direction (high pressure → higher threshold) and continuity at 0.7.
+    const lowPressure = makeSensorium({ pressure: 0.3, momentum: 0.5 })
+    const highPressure = makeSensorium({ pressure: 0.8, momentum: 0.5 })
+    assert.ok(
+      computeStrategy(highPressure).commitThreshold > computeStrategy(lowPressure).commitThreshold,
+      `high pressure should raise commit threshold`,
+    )
 
-    const highPressure = makeSensorium({ pressure: 0.8 })
-    assert.equal(computeStrategy(highPressure).commitThreshold, 0.9)
+    // Continuity: just-below and just-above the old 0.7 cliff must be close,
+    // not separated by the old 0.30 jump.
+    const justBelow = computeStrategy(makeSensorium({ pressure: 0.69, momentum: 0.5 })).commitThreshold
+    const justAbove = computeStrategy(makeSensorium({ pressure: 0.71, momentum: 0.5 })).commitThreshold
+    assert.ok(
+      Math.abs(justBelow - justAbove) < 0.1,
+      `commitThreshold must be continuous across pressure=0.7 (got ${justBelow} vs ${justAbove})`,
+    )
   })
 
   it('signals escalation when confidence low and momentum low', () => {

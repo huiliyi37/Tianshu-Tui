@@ -42,14 +42,19 @@ node 二进制与 DMG/安装器封装暂缓**——`bundle.targets` 当前限定
 
 ## 后续迭代（本轮不做，按 Antigravity 2.0 其余能力 + 天枢个性化排序）
 
-### I1 — 星域 agent 名册 + 议事会评审（天枢的反转支柱）
+### I1 — 星域 agent 名册 + 议事会评审（天枢的反转支柱） ✅ 已交付
 把 Antigravity 的**匿名 dynamic subagents** 升级为[北斗八星人格](../src/agent/star-domain.ts)：各带
 decisionStyle / toolWhitelist / 方法论 suffix / glyph+accent。新会话/子代理自动匹配星域，Agent Manager
 卡片显示星符；重大决策唤起「星图议事会」——多星**对抗性评审**（对标 2.0 review flow，但是有名有姓
 互不服的评审团，而非黑箱 artifact）。复用 [`DelegationCoordinator`](../src/agent/coordinator.ts) +
 [`ProfileRegistry`](../src/agent/profile-registry.ts)。
-- 验收：新会话能选/自动派星域；卡片显示星符与 accent；议事会对一份 plan artifact 产出 N 星分歧意见
-  并汇总成可执行裁决。
+- 交付物：
+  - 后端：`SessionRecord.domainGlyph/accent` + `DomainEntry.uiPersona`；`AgentLoop.isRunning()`；
+    `ManagedAgent.conveneCouncil` + `POST /sessions/:id/council`；council 从 artifact raw 中解析
+    `council-plan-json` 并产出 plan markdown artifact。
+  - 前端：`ProjectSidebar`/`ThreadTabs`/`ThreadView` 星符徽章；`CouncilSurface` 表面；路由/ Rail /
+    侧边栏 / 快捷键 / i18n 注册。
+- 验证：`council-route.test.ts` 7 条绿；桌面 `tsc --noEmit` + `npm test` 绿。
 
 ### I2 — Scheduled Tasks（`/schedule`）✅ 已在 N3 交付
 把已有 [`CronScheduler`](../src/server/cron-scheduler.ts) + [`TaskRegistry`](../src/server/task-registry.ts)
@@ -62,9 +67,16 @@ cron / 一次性定时任务。
 共用 [`src/agent/goal-tracker.ts`](../src/agent/goal-tracker.ts)）、`/grill-me`（≈ 现有 `/interview`）。
 - 验收：一个会话委派 2 个子代理，UI 实时画出树与状态；`/goal` 从前端可发起。
 
-### I4 — JSON hooks 面板
+### I4 — JSON hooks 面板 ✅ 已交付
 `.rivet/hooks.json` 的编辑 / 巡检 / 启停（[`src/hooks/user-hooks-runner.ts`](../src/hooks/user-hooks-runner.ts)）。
-- 验收：面板增删一条 hook，下一轮 tool 调用按配置触发并在事件流可见。
+- 交付物：
+  - 后端：`GET /sessions/:id/hooks` + `PUT /sessions/:id/hooks`；`user-hooks-bridge.ts` 为 `preTurn/postTurn/postTool/postSession`
+    发出 `hook_result` 事件；新增 `onError` 桥接，runtime hook 抛错时触发 `onError` hooks；
+    `RuntimeSessionManager.emitHookResult` 追加事件并保留最新 50 条。
+  - 前端：`HooksSurface` 编辑 hook 条目并展示最近 `hook_result`；`event-reducer.ts` 收集 `hook_result`；
+    路由 / Rail / 侧边栏 / 快捷键 / i18n 注册。
+- 验证：`hooks-route.test.ts` 7 条、`hook-result-events.test.ts` 3 条、`user-hooks-bridge.test.ts` 3 条、
+  桌面 `event-reducer` + `client` 单测绿；`tsc --noEmit` 绿。
 
 ### I5 — Browser 验证面（`/browser`）✅ 已在 N4 交付
 Playwright headless 工具 + 截图/录屏 Artifact + **强制 approval 白名单**（新攻击面，必须在 M2/M3

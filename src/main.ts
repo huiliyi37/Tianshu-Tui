@@ -20,16 +20,17 @@ import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
-import { SlashRouter } from './tui/engine/slash-router.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
+import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
+import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
-import { resolveAppPromptInput } from './tui/slash-commands.js'
+import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
@@ -331,8 +332,10 @@ async function main() {
 
   // ── Interactive TUI (requires TTY) ──────────────────────────
 
-  if (!stdout.isTTY || !stdin.isTTY) {
-    process.stderr.write('[T9] stdout and stdin must be TTY (use -p for headless mode).\n')
+  const forceRecoveryCli = process.env.RIVET_FORCE_RECOVERY_CLI === '1'
+
+  if (!forceRecoveryCli && (!stdout.isTTY || !stdin.isTTY)) {
+    process.stderr.write('[T9] stdout and stdin must be TTY (use -p for headless mode or RIVET_FORCE_RECOVERY_CLI=1).\n')
     process.exit(1)
   }
 
@@ -375,6 +378,14 @@ async function main() {
   // Store heartbeat for shutdown cleanup
   heartbeatInterval = ctx.heartbeatInterval
 
+  // ── Recovery CLI fallback ────────────────────────────────────
+  if (forceRecoveryCli) {
+    const { runRecoveryCli } = await import('./recovery-cli.js')
+    await runRecoveryCli(ctx)
+    shutdown(0)
+    return
+  }
+
   // ── Build TuiApp ─────────────────────────────────────────────
   const currentModel = ctx.provider.models[0]
   const modelName = currentModel?.alias ?? currentModel?.id ?? 'unknown'
@@ -415,12 +426,27 @@ async function main() {
     return filterCommands(base, tuiApp.getOverlayQuery())
   }
   tuiApp.registerOverlays({
-    // Pager — scrollback 内容
-    pagerContent: () => ({
-      content: tuiApp.getScrollbackContent() || '(no messages yet)',
-      page: 0,
-      title: 'Scrollback',
-    }),
+    // Pager — scrollback 内容 或 当前选中 worker 的 detail（用于 /tasks Enter）
+    pagerContent: () => {
+      const workerId = tuiApp.getWorkerDetailId()
+      if (workerId) {
+        const liveView = tuiApp.getWorkerDetailView(workerId)
+        const { content, title, messages } = buildWorkerDetailContent(workerId, process.cwd(), liveView)
+        return {
+          content,
+          page: 0,
+          title,
+          messages,
+        }
+      }
+      const content = tuiApp.getScrollbackContent() || '(no messages yet)'
+      return {
+        content,
+        page: 0,
+        title: 'Scrollback',
+        messages: parseScrollbackTranscript(content),
+      }
+    },
     // Starmap
     starmapEntries: () => {
       const domains = starDomainRegistry.list()
@@ -508,8 +534,8 @@ async function main() {
         query,
       }
     },
-    // Tasks — /tasks 显示运行中子代理（per-worker，来自舰队读模型）
-    tasksData: () => tuiApp.getRunningWorkers(),
+    // Tasks — /tasks 显示子代理（per-worker，来自舰队读模型；filter 由 overlay nav 决定）
+    tasksData: () => tuiApp.getTasksData(),
     // Domain Picker — 裸 /domain 打开的 CC 风星域选择器（entries 由共享 builder 构造）
     domainPickerData: () => ({
       entries: buildDomainPickerEntries(ctx!.agent.getSessionDomain()),
@@ -634,8 +660,7 @@ async function main() {
   })
 
   // ── SlashRouter ──────────────────────────────────────────────
-  const slashRouter = new SlashRouter(app, ctx)
-  app.setSlashHandler(async (input) => slashRouter.route(input))
+  registerTuiSlashCommands(app, ctx)
 
   // slash 命令提示列表（仅 / 开头的 command 类，过滤 __surface: 面板项）
   app.setSlashCommands(
@@ -661,6 +686,10 @@ async function main() {
       // appended since (provider-agnostic — works for DeepSeek/MiMo/GLM). Falls
       // back to the calibrated estimate before the first response / post-compact.
       estimatedTokens: session.getRealOccupancy(),
+      // Visible conversation only (excluding system prompt / tool schemas / prefix
+      // overhead) for the GlanceBar context display, so users see the chat-sized
+      // context rather than the API-facing prompt bulk.
+      conversationTokens: session.getConversationTokens(),
       maxTokens,
       cacheHitRate: session.getRecentTurnHitRate(3) ?? session.getCacheHitRate(),
       cost,

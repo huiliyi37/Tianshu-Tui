@@ -15,6 +15,20 @@ import { parseOptionalInt, rangeContains } from './shared-range.js'
 const LAG_STEPS = 3 // only evaluate tool results at least 3 assistant turns old
 const MIN_CONTENT_CHARS = 500 // skip short results
 
+export interface StalenessOptions {
+  /**
+   * Prompt-cache-aware pruning. When set, staleness mutations are skipped
+   * for messages whose suffix exceeds this many estimated tokens — such
+   * messages sit in the warm cache prefix and mutating them forces the
+   * provider to re-write the entire suffix at cacheWrite premium.
+   *
+   * Undefined = no cache guard (legacy behavior). The production caller
+   * (PromptEngine) passes 8000; tests may omit it to exercise the unguarded
+   * path.
+   */
+  suffixTokenLimit?: number
+}
+
 export interface StalenessResult {
   messages: OaiMessage[]
   supersededCount: number
@@ -52,9 +66,37 @@ function isReferenced(toolContent: string, assistantTexts: string[]): boolean {
   return false
 }
 
+/**
+ * Rough token estimate for cache-suffix calculation.
+ * Uses the standard ~4 chars/token heuristic — precise enough for the
+ * cheap-to-recache decision without importing the full micro estimator.
+ */
+function roughTokens(msg: OaiMessage): number {
+  const text = typeof msg.content === 'string' ? msg.content : ''
+  const calls = (msg as OaiAssistantMessage).tool_calls
+  const callsJson = calls ? JSON.stringify(calls) : ''
+  return Math.ceil((text.length + callsJson.length) / 4)
+}
+
+/**
+ * For each message index, compute the total estimated tokens of all messages
+ * strictly after it. A result whose suffix exceeds the limit sits in the warm
+ * cache prefix — mutating it re-writes the whole suffix at cacheWrite premium.
+ */
+function computeSuffixTokens(messages: OaiMessage[]): number[] {
+  const suffix = new Array<number>(messages.length)
+  let accumulated = 0
+  for (let i = messages.length - 1; i >= 0; i--) {
+    suffix[i] = accumulated
+    accumulated += roughTokens(messages[i]!)
+  }
+  return suffix
+}
+
 export function detectStaleness(
   messages: OaiMessage[],
   anchorCount: number = CACHE_ANCHOR_MESSAGES,
+  options?: StalenessOptions,
 ): StalenessResult {
   // Build a map of file paths → later read entries with range info (for superseded detection)
   // Keyed by file_path; stores all later reads of that file with their index and range.
@@ -89,6 +131,11 @@ export function detectStaleness(
     if (messages[i]!.role === 'assistant') assistantIndices.push(i)
   }
 
+  // Cache suffix tokens: when cache guard is enabled, skip mutations on
+  // messages deep in the warm prefix (their suffix is too expensive to rewrite).
+  const suffixLimit = options?.suffixTokenLimit
+  const suffixTokens = suffixLimit !== undefined ? computeSuffixTokens(messages) : undefined
+
   // Collect assistant text after each tool result (for reference checking)
   let supersededCount = 0
   let unreferencedCount = 0
@@ -99,6 +146,9 @@ export function detectStaleness(
     if (msg.role !== 'tool') return msg
     if (msg.content.length < MIN_CONTENT_CHARS) return msg
     if (msg.content.startsWith('[')) return msg // already processed
+
+    // Cache guard: skip if this message is deep in the warm prefix
+    if (suffixTokens !== undefined && suffixTokens[idx]! > suffixLimit) return msg
 
     // Check lag: is this tool result old enough?
     const assistantTurnsAfter = assistantIndices.filter(ai => ai > idx).length

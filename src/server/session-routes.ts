@@ -28,15 +28,19 @@ import type { Artifact } from '../artifact/types.js'
 import type { SessionRegistry } from '../agent/session-registry.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
 import type { PlanDocument } from '../plan/plan-store.js'
+import type { Config } from '../config/schema.js'
+import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
-import { listProjectFiles, rankFiles } from './file-list.js'
+import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
 import { validatePath } from '../tools/path-validate.js'
-import { readFileSync, statSync } from 'node:fs'
-import { extname, relative } from 'node:path'
+import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
+import { extname, relative, join } from 'node:path'
+import type { HookEntry, HookEvent, HooksConfig } from '../hooks/user-hooks-runner.js'
+import { loadHooksConfig, VALID_EVENTS } from '../hooks/user-hooks-runner.js'
 
-export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result'
+export type ArtifactKind = 'plan' | 'task-list' | 'walkthrough' | 'diff' | 'screenshot' | 'test-result' | 'markdown' | 'html'
 
 /** Vision upload guards — provider-safe formats and a per-image byte ceiling. */
 const MAX_IMAGES = 4
@@ -66,6 +70,8 @@ export function classifyArtifact(a: Artifact): ArtifactKind {
   if (tool.includes('plan') || target.includes('plan')) return 'plan'
   if (tool.includes('todo') || tool.includes('task')) return 'task-list'
   if (/\.(png|jpe?g|gif|webp)$/.test(target) || tool.includes('screenshot')) return 'screenshot'
+  if (/\.(md|markdown|mdx)$/.test(target) || tool === 'render_markdown') return 'markdown'
+  if (/\.(html?)$/.test(target) || tool === 'render_html') return 'html'
   if (
     tool === 'edit_file' ||
     tool === 'write_file' ||
@@ -121,6 +127,7 @@ export function buildSessionRoutes(
   manager: RuntimeSessionManager,
   apiToken?: string,
   getRegistry?: () => SessionRegistry | undefined,
+  config?: Config,
 ): Record<string, RouteHandler> {
   // R3 — build an OwnershipGuard scoped to one session so rollback never
   // restores files a *different* live session exclusively owns. Returns
@@ -383,6 +390,157 @@ export function buildSessionRoutes(
       return { status: 200, body: result }
     }, apiToken),
 
+    // Insights — aggregated token usage, cost, and per-worker/model/provider
+    // breakdowns derived from delegation events. Bearer-gated.
+    'GET /sessions/:id/insights': withAuth((_body, params) => {
+      const id = params!.id!
+      const rec = manager.getSession(id)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const events = manager.getEvents(id, 0)
+      if (!events) return { status: 404, body: { error: 'Session not found' } }
+
+      const providers = config?.provider.providers ?? {}
+      const workers = new Map<string, {
+        workerId: string
+        parentId?: string
+        profile?: string
+        status?: string
+        model?: string
+        provider?: string
+        objective?: string
+        elapsedMs?: number
+        inputTokens: number
+        outputTokens: number
+        cacheReadTokens: number
+        cacheWriteTokens: number
+        reasoningTokens: number
+        totalTokens: number
+        cost: number
+      }>()
+      const modelTotals = new Map<string, { model: string; provider?: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
+      const providerTotals = new Map<string, { provider: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
+
+      for (const ev of events.events) {
+        if (ev.type !== 'delegation') continue
+        const data = ev.data as {
+          workerId?: string
+          parentId?: string
+          profile?: string
+          status?: string
+          objective?: string
+          elapsedMs?: number
+          model?: string
+          provider?: string
+          usage?: {
+            input_tokens?: number
+            output_tokens?: number
+            cache_read_input_tokens?: number
+            cache_creation_input_tokens?: number
+            reasoning_tokens?: number
+            total_tokens?: number
+          }
+        }
+        const workerId = data.workerId
+        if (!workerId) continue
+
+        const usage = data.usage
+        const model = data.model
+        const provider = data.provider
+        const pricing = findModelPricing(providers, provider, model)
+        const costBreakdown = computeUsageCost(
+          usage
+            ? {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_input_tokens: usage.cache_read_input_tokens,
+                cache_creation_input_tokens: usage.cache_creation_input_tokens,
+                reasoning_tokens: usage.reasoning_tokens,
+              }
+            : undefined,
+          pricing,
+        )
+
+        const inputTokens = usage?.input_tokens ?? 0
+        const outputTokens = usage?.output_tokens ?? 0
+        const cacheReadTokens = usage?.cache_read_input_tokens ?? 0
+        const cacheWriteTokens = usage?.cache_creation_input_tokens ?? 0
+        const reasoningTokens = usage?.reasoning_tokens ?? 0
+        const totalTokens = usage?.total_tokens ?? inputTokens + outputTokens
+
+        const existing = workers.get(workerId)
+        const worker = {
+          workerId,
+          parentId: data.parentId ?? existing?.parentId,
+          profile: data.profile ?? existing?.profile,
+          status: data.status ?? existing?.status,
+          model: model ?? existing?.model,
+          provider: provider ?? existing?.provider,
+          objective: data.objective ?? existing?.objective,
+          elapsedMs: data.elapsedMs ?? existing?.elapsedMs,
+          inputTokens: (existing?.inputTokens ?? 0) + inputTokens,
+          outputTokens: (existing?.outputTokens ?? 0) + outputTokens,
+          cacheReadTokens: (existing?.cacheReadTokens ?? 0) + cacheReadTokens,
+          cacheWriteTokens: (existing?.cacheWriteTokens ?? 0) + cacheWriteTokens,
+          reasoningTokens: (existing?.reasoningTokens ?? 0) + reasoningTokens,
+          totalTokens: (existing?.totalTokens ?? 0) + totalTokens,
+          cost: (existing?.cost ?? 0) + costBreakdown.total,
+        }
+        workers.set(workerId, worker)
+
+        if (model) {
+          const mt = modelTotals.get(model) ?? { model, provider, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0, count: 0 }
+          mt.inputTokens += inputTokens
+          mt.outputTokens += outputTokens
+          mt.totalTokens += totalTokens
+          mt.cost += costBreakdown.total
+          mt.count += 1
+          if (provider && !mt.provider) mt.provider = provider
+          modelTotals.set(model, mt)
+        }
+        if (provider) {
+          const pt = providerTotals.get(provider) ?? { provider, inputTokens: 0, outputTokens: 0, totalTokens: 0, cost: 0, count: 0 }
+          pt.inputTokens += inputTokens
+          pt.outputTokens += outputTokens
+          pt.totalTokens += totalTokens
+          pt.cost += costBreakdown.total
+          pt.count += 1
+          providerTotals.set(provider, pt)
+        }
+      }
+
+      const workerList = [...workers.values()]
+      const totalInput = workerList.reduce((sum, w) => sum + w.inputTokens, 0)
+      const totalOutput = workerList.reduce((sum, w) => sum + w.outputTokens, 0)
+      const totalCacheRead = workerList.reduce((sum, w) => sum + w.cacheReadTokens, 0)
+      const totalCacheWrite = workerList.reduce((sum, w) => sum + w.cacheWriteTokens, 0)
+      const totalReasoning = workerList.reduce((sum, w) => sum + w.reasoningTokens, 0)
+      const totalTokens = workerList.reduce((sum, w) => sum + w.totalTokens, 0)
+      const totalCost = workerList.reduce((sum, w) => sum + w.cost, 0)
+      const cacheHitRate = totalCacheRead + totalCacheWrite > 0
+        ? Math.round((totalCacheRead / (totalCacheRead + totalCacheWrite)) * 100)
+        : null
+
+      return {
+        status: 200,
+        body: {
+          totals: {
+            workers: workers.size,
+            inputTokens: totalInput,
+            outputTokens: totalOutput,
+            cacheReadTokens: totalCacheRead,
+            cacheWriteTokens: totalCacheWrite,
+            reasoningTokens: totalReasoning,
+            totalTokens,
+            cost: totalCost,
+          },
+          cacheHitRate,
+          workers: workerList,
+          modelBreakdown: [...modelTotals.values()],
+          providerBreakdown: [...providerTotals.values()],
+        },
+      }
+    }, apiToken),
+
     // @file mention picker (D2) — enumerate project files under the session's
     // cwd, ranked by an optional ?q substring/fuzzy query. Scoped to cwd, never
     // follows symlinks, honors gitignore + silent-layer filters. Bearer-gated.
@@ -448,6 +606,23 @@ export function buildSessionRoutes(
       }
     }, apiToken),
 
+    // Gap 1 — directory listing for the read-only file browser. Returns direct
+    // children of a sub-directory within cwd (one level, not recursive).
+    // ?path=src/components (empty/omitted = cwd root). Bearer-gated.
+    'GET /sessions/:id/list-dir': withAuth(async (_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const relPath = typeof params?.path === 'string' ? params.path : ''
+      let absDir: string
+      try {
+        absDir = relPath ? validatePath(rec.cwd, relPath, 'read') : rec.cwd
+      } catch {
+        return { status: 403, body: { error: 'Path outside session cwd' } }
+      }
+      const entries = await listDirEntries(absDir)
+      return { status: 200, body: { path: relPath, entries } }
+    }, apiToken),
+
     'GET /sessions/:id/stream': withAuth((_body, params, _headers, res) => {
       if (!res) return { status: 500, body: { error: 'SSE response stream is unavailable' } }
       const id = params!.id!
@@ -480,11 +655,22 @@ export function buildSessionRoutes(
     }, apiToken),
 
     'POST /sessions/:id/feedback': withAuth((body, params) => {
-      const data = (body ?? {}) as { artifactId?: string; comment?: string }
-      if (!data.artifactId || !data.comment || !data.comment.trim()) {
-        return { status: 400, body: { error: 'Missing "artifactId" or "comment"' } }
+      const data = (body ?? {}) as {
+        artifactId?: string
+        comment?: string
+        lines?: Array<{ file: string; oldLine?: number; newLine?: number; comment: string }>
       }
-      const ok = manager.feedback(params!.id!, data.artifactId, data.comment.trim())
+      const hasComment = data.comment && data.comment.trim()
+      const hasLines = data.lines && data.lines.some((l) => l.comment && l.comment.trim())
+      if (!data.artifactId || (!hasComment && !hasLines)) {
+        return { status: 400, body: { error: 'Missing "artifactId", or both "comment" and "lines" are empty' } }
+      }
+      const ok = manager.feedback(
+        params!.id!,
+        data.artifactId,
+        (data.comment ?? '').trim(),
+        data.lines,
+      )
       if (!ok) return { status: 409, body: { error: 'Session is missing or already running' } }
       return { status: 200, body: manager.getSession(params!.id!) }
     }, apiToken),
@@ -504,6 +690,90 @@ export function buildSessionRoutes(
       if (!found) return { status: 404, body: { error: 'Artifact not found' } }
       const raw = await manager.readArtifact(id, artifactId)
       return { status: 200, body: { artifact: artifactSummary(found), raw: raw ?? '' } }
+    }, apiToken),
+
+    // I1 — convene a star-domain council on a plan artifact.
+    // Body: { artifactId: string, objective?: string, seats?: [...], rounds?: 1|2 }
+    'POST /sessions/:id/council': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { artifactId?: unknown; objective?: unknown; seats?: unknown; rounds?: unknown }
+      if (typeof data.artifactId !== 'string' || !data.artifactId.trim()) {
+        return { status: 400, body: { error: 'Missing or invalid "artifactId"' } }
+      }
+      if (data.objective !== undefined && typeof data.objective !== 'string') {
+        return { status: 400, body: { error: 'Invalid "objective"' } }
+      }
+      if (data.seats !== undefined && (!Array.isArray(data.seats) || data.seats.some((s: unknown) => !s || typeof (s as { authority?: unknown }).authority !== 'string'))) {
+        return { status: 400, body: { error: 'Invalid "seats"' } }
+      }
+      if (data.rounds !== undefined && (typeof data.rounds !== 'number' || data.rounds < 1 || data.rounds > 2)) {
+        return { status: 400, body: { error: 'Invalid "rounds" (must be 1 or 2)' } }
+      }
+      const session = manager.getSession(params!.id!)
+      if (!session) return { status: 404, body: { error: 'Session not found' } }
+      // I1: ensure the session has a live agent. The agent is lazily built on
+      // first run; council must operate on a ready agent (idle is OK as long as
+      // the agent exists and is not currently running a turn).
+      const agent = manager.getAgentForSession?.(params!.id!)
+      if (!agent || typeof agent.conveneCouncil !== 'function') {
+        return { status: 503, body: { error: 'Agent not ready' } }
+      }
+      try {
+        const result = await agent.conveneCouncil({
+          artifactId: data.artifactId.trim(),
+          ...(data.objective ? { objective: data.objective } : {}),
+          ...(data.seats ? { seats: data.seats as { authority: string; charter?: string }[] } : {}),
+          ...(typeof data.rounds === 'number' ? { rounds: data.rounds } : {}),
+        })
+        return { status: 200, body: result }
+      } catch (err: unknown) {
+        if (err instanceof Error && 'statusCode' in err && typeof (err as { statusCode: unknown }).statusCode === 'number') {
+          return { status: (err as { statusCode: number }).statusCode, body: { error: err.message } }
+        }
+        return { status: 500, body: { error: (err as Error)?.message ?? 'Council failed' } }
+      }
+    }, apiToken),
+
+    // I4 — read user-defined .rivet/hooks.json for this session.
+    'GET /sessions/:id/hooks': withAuth((_body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const config = loadHooksConfig(rec.cwd)
+      return { status: 200, body: config }
+    }, apiToken),
+
+    // I4 — write user-defined .rivet/hooks.json for this session.
+    'PUT /sessions/:id/hooks': withAuth((body, params) => {
+      const rec = manager.getSession(params!.id!)
+      if (!rec) return { status: 404, body: { error: 'Session not found' } }
+      const data = (body ?? {}) as { hooks?: unknown }
+      if (!Array.isArray(data.hooks)) {
+        return { status: 400, body: { error: 'Missing or invalid "hooks" array' } }
+      }
+      const hooks: HookEntry[] = []
+      for (const entry of data.hooks) {
+        if (!entry || typeof entry !== 'object') {
+          return { status: 400, body: { error: 'Each hook must be an object' } }
+        }
+        const e = entry as Record<string, unknown>
+        if (!VALID_EVENTS.has(e.event as HookEvent)) {
+          return { status: 400, body: { error: `Invalid hook event "${e.event}"` } }
+        }
+        if (typeof e.script !== 'string' || !e.script.trim()) {
+          return { status: 400, body: { error: 'Each hook must have a non-empty "script"' } }
+        }
+        const timeoutMs = typeof e.timeoutMs === 'number' ? e.timeoutMs : undefined
+        hooks.push({ event: e.event as HookEvent, script: e.script.trim(), ...(timeoutMs !== undefined ? { timeoutMs } : {}) })
+      }
+      const dir = join(rec.cwd, '.rivet')
+      const path = join(dir, 'hooks.json')
+      try {
+        validatePath(rec.cwd, path, 'write')
+      } catch {
+        return { status: 400, body: { error: 'Invalid hooks path' } }
+      }
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(path, JSON.stringify({ hooks }, null, 2), 'utf-8')
+      return { status: 200, body: { hooks } }
     }, apiToken),
 
     // Vision — serve a persisted user-attached image by id. The desktop fetches
@@ -582,6 +852,28 @@ export function buildSessionRoutes(
       status: 200,
       body: { worktrees: manager.getWorktrees() },
     }), apiToken),
+
+    // Git branch graph — ASCII graph for the repo root.
+    'GET /git/graph': withAuth(async (_body, params) => {
+      const maxCount = params?.maxCount ? Number(params.maxCount) : undefined
+      const graph = await manager.getGitGraph(undefined, maxCount)
+      return { status: 200, body: { graph: graph.split('\n') } }
+    }, apiToken),
+
+    // Working-tree changes relative to HEAD (file list only; per-file diff fetched on demand).
+    // Used by the desktop "changes" tab — lightweight file list, no diff body.
+    'GET /git/working-tree': withAuth(async () => {
+      const result = await manager.getWorkingTreeFiles()
+      return { status: 200, body: result }
+    }, apiToken),
+
+    // Unified diff of a single file relative to HEAD (on-demand, for the changes tab).
+    'GET /git/diff': withAuth(async (_body, params) => {
+      const path = params?.path
+      if (!path || typeof path !== 'string') return { status: 400, body: { error: 'Missing path param' } }
+      const diff = await manager.getFileDiff(path)
+      return { status: 200, body: { diff } }
+    }, apiToken),
 
     // GitHub PR integration — list open PRs for the repo. Requires `gh` CLI.
     'GET /github/prs': withAuth(async () => {

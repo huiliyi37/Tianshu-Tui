@@ -8,16 +8,30 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, PlanModeState, TodoStateItem } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
+import { Markdown } from '../components/Markdown'
 import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
+import { FileExplorer } from '../components/FileExplorer'
+import { ChangesTab } from './ChangesTab'
 import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files'
 
 interface TabDef {
   id: ReviewTab
@@ -64,7 +78,10 @@ export function ReviewPanel(props: {
     }
   }, [latestPlanSlug])
   const [open, setOpen] = useState<{ artifact: ArtifactSummary; raw: string } | null>(null)
+  const [viewMode, setViewMode] = useState<'rendered' | 'raw'>('rendered')
   const [comment, setComment] = useState('')
+  // 行级评论：在 diff 弹窗里逐行累积，随 artifact 级 comment 一起回灌
+  const [lineComments, setLineComments] = useState<LineComment[]>([])
   const [sending, setSending] = useState(false)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
   const [fileLoading, setFileLoading] = useState(false)
@@ -73,7 +90,9 @@ export function ReviewPanel(props: {
     if (!sessionId) return
     try {
       setOpen(await getArtifact(sessionId, a.id))
+      setViewMode(a.kind === 'markdown' || a.kind === 'html' ? 'rendered' : 'raw')
       setComment('')
+      setLineComments([])
     } catch {
       // ignore
     }
@@ -94,17 +113,27 @@ export function ReviewPanel(props: {
   }, [sessionId])
 
   const sendFeedback = useCallback(async () => {
-    if (!sessionId || !open || !comment.trim()) return
+    if (!sessionId || !open) return
+    // artifact 级 comment 与行级评论至少一个非空才可提交
+    const hasArtifactComment = comment.trim().length > 0
+    const hasLineComments = lineComments.some((l) => l.comment.trim())
+    if (!hasArtifactComment && !hasLineComments) return
     setSending(true)
     try {
-      await sendArtifactFeedback(sessionId, open.artifact.id, comment.trim())
+      await sendArtifactFeedback(
+        sessionId,
+        open.artifact.id,
+        comment.trim(),
+        hasLineComments ? lineComments : undefined,
+      )
       setOpen(null)
       setComment('')
+      setLineComments([])
       onFeedbackSent?.()
     } finally {
       setSending(false)
     }
-  }, [sessionId, open, comment, onFeedbackSent])
+  }, [sessionId, open, comment, lineComments, onFeedbackSent])
 
   const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
@@ -113,44 +142,47 @@ export function ReviewPanel(props: {
     { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
     { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
     { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
+    { id: 'wt', label: 'Diff', glyph: '⟐' },
+    { id: 'files', label: 'Files', glyph: '📁' },
     { id: 'github', label: 'PR', glyph: '🔀' },
   ]
 
   return (
     <div className="review">
-      <div className="open-tabs-head">Open Tabs</div>
-      <div className="open-tabs">
-        {tabs.map((t) => {
-          const badge = t.badge?.()
-          return (
-            <button
-              key={t.id}
-              className={`open-tab ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="open-tab-glyph" aria-hidden>{t.glyph}</span>
-              <span className="open-tab-label">{t.label}</span>
-              {badge != null && badge > 0 && (
-                <span className="open-tab-badge">{badge}</span>
-              )}
-              {badge === -1 && (
-                <span className="open-tab-dot" aria-label="进行中" />
-              )}
-            </button>
-          )
-        })}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
+        <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {tabs.map((t) => {
+            const badge = t.badge?.()
+            return (
+              <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                <span aria-hidden>{t.glyph}</span>
+                <span>{t.label}</span>
+                {badge != null && badge > 0 && (
+                  <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
+                    {badge}
+                  </span>
+                )}
+                {badge === -1 && (
+                  <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                )}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
 
-      {tab === 'github' ? (
-        <div className="review-body">
+        <TabsContent value="github" className="review-body">
           <GithubPanel />
-        </div>
-      ) : tab === 'plan' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="wt" className="review-body">
+          <ChangesTab sessionId={sessionId} />
+        </TabsContent>
+        <TabsContent value="files" className="review-body">
+          <FileExplorer sessionId={sessionId} />
+        </TabsContent>
+        <TabsContent value="plan" className="review-body">
           <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />
-        </div>
-      ) : tab === 'task' ? (
-        <div className="review-body">
+        </TabsContent>
+        <TabsContent value="task" className="review-body">
           <section className="review-section">
             <h4>任务清单</h4>
             {todos.length === 0 && <div className="empty sm">还没有任务</div>}
@@ -162,38 +194,14 @@ export function ReviewPanel(props: {
             ))}
           </section>
 
-          <section className="review-section">
-            <h4>涉及文件 · {sources.length}</h4>
-            {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
-            {sources.map((path) => (
-              <div
-                key={path}
-                className="source-item"
-                title={`查看 ${path}`}
-                onClick={() => viewFile(path)}
-              >
-                <span className="source-icon" aria-hidden>📄</span>
-                <FilePath path={path} className="source-path" />
-              </div>
-            ))}
-            {fileLoading && <div className="empty sm">加载文件…</div>}
-            {fileContent && (
-              <div className="review-file-viewer">
-                <div className="review-file-header">
-                  <FilePath path={fileContent.path} />
-                  <button className="btn ghost sm" onClick={() => openFile(fileContent.path).catch(() => {})}>
-                    在编辑器中打开
-                  </button>
-                  <button className="btn ghost sm" onClick={() => setFileContent(null)}>关闭</button>
-                </div>
-                <FileViewer
-                  content={fileContent.content}
-                  language={fileContent.language}
-                  startLine={fileContent.startLine}
-                />
-              </div>
-            )}
-          </section>
+          <SourceListSection
+            sources={sources}
+            fileContent={fileContent}
+            fileLoading={fileLoading}
+            onView={viewFile}
+            onOpen={() => fileContent && openFile(fileContent.path).catch(() => {})}
+            onClose={() => setFileContent(null)}
+          />
 
           <section className="review-section">
             <h4>工件 · {artifacts.length}</h4>
@@ -206,88 +214,127 @@ export function ReviewPanel(props: {
               </div>
             ))}
           </section>
-        </div>
-      ) : (
-      <div className="review-body">
-        {(pendingApproval || pendingIntent) && (
+        </TabsContent>
+        <TabsContent value="review" className="review-body">
+          {(pendingApproval || pendingIntent) && (
+            <section className="review-section">
+              <h4>待处理</h4>
+              {pendingApproval && (
+                <ApprovalReview request={pendingApproval} onDecision={onApproval} />
+              )}
+              {pendingIntent && (
+                <IntentReview request={pendingIntent} onDecision={onIntent} />
+              )}
+            </section>
+          )}
+
+          {autonomous && !pendingApproval && !pendingIntent && (
+            <section className="review-section">
+              <div className="autonomy-note">
+                <span className="ab-glyph" aria-hidden>✦</span>
+                自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
+              </div>
+            </section>
+          )}
+
           <section className="review-section">
-            <h4>待处理</h4>
-            {pendingApproval && (
-              <ApprovalReview request={pendingApproval} onDecision={onApproval} />
-            )}
-            {pendingIntent && (
-              <IntentReview request={pendingIntent} onDecision={onIntent} />
+            <h4>Git 变更 · 代码审查</h4>
+            {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
+              <div className="empty sm">
+                <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
+              </div>
+            ) : (
+              artifacts.filter(a => a.kind === 'diff').map((a) => (
+                <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
+                  <div className="kind">{a.kind} · {a.target}</div>
+                  <div className="summary">{a.summary || a.target}</div>
+                  <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
+                </div>
+              ))
             )}
           </section>
-        )}
 
-        {autonomous && !pendingApproval && !pendingIntent && (
           <section className="review-section">
-            <div className="autonomy-note">
-              <span className="ab-glyph" aria-hidden>✦</span>
-              自治模式：项目内操作已自动放行，无需逐条审批。下方检查点可随时回滚。
-            </div>
-          </section>
-        )}
-
-        <section className="review-section">
-          <h4>Git 变更 · 代码审查</h4>
-          {artifacts.filter(a => a.kind === 'diff').length === 0 ? (
-            <div className="empty sm">
-              <p>还没有 diff 工件。在对话中输入 <code>/review</code> 让 agent 对未提交变更执行代码审查。</p>
-            </div>
-          ) : (
-            artifacts.filter(a => a.kind === 'diff').map((a) => (
-              <div key={a.id} className="artifact-card diff" onClick={() => view(a)}>
-                <div className="kind">{a.kind} · {a.target}</div>
+            <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
+            {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
+            {artifacts.filter(a => a.kind !== 'diff').map((a) => (
+              <div key={a.id} className="artifact-card" onClick={() => view(a)}>
+                <div className="kind">{a.kind}</div>
                 <div className="summary">{a.summary || a.target}</div>
                 <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
               </div>
-            ))
-          )}
-        </section>
-
-        <section className="review-section">
-          <h4>其他工件 · {artifacts.filter(a => a.kind !== 'diff').length}</h4>
-          {artifacts.filter(a => a.kind !== 'diff').length === 0 && <div className="empty sm">还没有其他工件</div>}
-          {artifacts.filter(a => a.kind !== 'diff').map((a) => (
-            <div key={a.id} className="artifact-card" onClick={() => view(a)}>
-              <div className="kind">{a.kind}</div>
-              <div className="summary">{a.summary || a.target}</div>
-              <div className="meta">{a.lineCount} 行 · {a.charCount} 字符</div>
-            </div>
-          ))}
-        </section>
-
-        {sessionId && (
-          <section className="review-section">
-            <h4>检查点 · 回滚</h4>
-            <RollbackSection sessionId={sessionId} />
+            ))}
           </section>
-        )}
-      </div>
-      )}
+
+          {sessionId && (
+            <section className="review-section">
+              <h4>检查点 · 回滚</h4>
+              <RollbackSection sessionId={sessionId} />
+            </section>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>
           <div className="modal wide" onClick={(e) => e.stopPropagation()}>
-            <h3>{open.artifact.kind} · {open.artifact.target}</h3>
+            <div className="modal-header">
+              <h3>{open.artifact.kind} · {open.artifact.target}</h3>
+              {(open.artifact.kind === 'markdown' || open.artifact.kind === 'html') && (
+                <div className="segmented">
+                  <button className={viewMode === 'rendered' ? 'active' : ''} onClick={() => setViewMode('rendered')}>渲染</button>
+                  <button className={viewMode === 'raw' ? 'active' : ''} onClick={() => setViewMode('raw')}>源码</button>
+                </div>
+              )}
+            </div>
             {open.artifact.kind === 'screenshot' ? (
               <img className="screenshot" src={`data:image/png;base64,${open.raw}`} alt={open.artifact.summary} />
             ) : open.artifact.kind === 'diff' ? (
-              <DiffView raw={open.raw} />
+              <DiffView
+                raw={open.raw}
+                comments={lineComments}
+                onLineComment={(anchor, text) =>
+                  setLineComments((prev) => [
+                    ...prev,
+                    {
+                      file: anchor.file,
+                      oldLine: anchor.oldLine,
+                      newLine: anchor.newLine,
+                      comment: text,
+                    },
+                  ])
+                }
+              />
+            ) : open.artifact.kind === 'markdown' && viewMode === 'rendered' ? (
+              <div className="artifact-rendered"><Markdown source={open.raw} /></div>
+            ) : open.artifact.kind === 'html' && viewMode === 'rendered' ? (
+              <iframe
+                className="artifact-html-frame"
+                srcDoc={open.raw}
+                sandbox=""
+                title={open.artifact.target}
+              />
             ) : (
               <pre>{open.raw}</pre>
             )}
-            <label className="meta">在工件上反馈（回灌为下一轮上下文）</label>
+            <label className="meta">
+              在工件上反馈（回灌为下一轮上下文）
+              {lineComments.some((l) => l.comment.trim()) && (
+                <span className="meta-badge">已标注 {lineComments.filter((l) => l.comment.trim()).length} 行评论</span>
+              )}
+            </label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder="例如：这个改动漏了错误处理，请补上 try/catch 并加测试"
+              placeholder="例如：这个改动漏了错误处理，请补上 try/catch 并加测试（行级评论可在 diff 上直接标）"
             />
             <div className="modal-actions">
               <button className="btn ghost" onClick={() => setOpen(null)}>关闭</button>
-              <button className="btn" disabled={!comment.trim() || sending} onClick={sendFeedback}>
+              <button
+                className="btn"
+                disabled={(!comment.trim() && !lineComments.some((l) => l.comment.trim())) || sending}
+                onClick={sendFeedback}
+              >
                 {sending ? '发送中…' : '发送反馈'}
               </button>
             </div>
@@ -375,6 +422,7 @@ function RollbackSection(props: { sessionId: string }) {
   const [preview, setPreview] = useState<{ text: string; confirmationToken: string } | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'previewed' | 'running' | 'none'>('idle')
   const [result, setResult] = useState<RollbackResult | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const loadPreview = useCallback(async () => {
     setState('loading')
@@ -421,8 +469,26 @@ function RollbackSection(props: { sessionId: string }) {
           <pre className="rp-preview">{preview.text}</pre>
           <div className="rp-actions">
             <button className="btn ghost sm" onClick={() => setState('idle')}>取消</button>
-            <button className="btn sm danger" onClick={execute}>确认回滚</button>
+            <button className="btn sm danger" onClick={() => setShowConfirm(true)}>确认回滚</button>
           </div>
+
+          <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+            <AlertDialogContent className="max-w-lg sm:max-w-lg">
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认回滚？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  此操作会将当前会话恢复到上一个检查点。部分副作用（如已执行的 bash 命令）可能无法撤销。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <pre className="max-h-48 overflow-auto rounded-md bg-panel-2 p-2 text-xs">{preview.text}</pre>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setShowConfirm(false)}>取消</AlertDialogCancel>
+                <AlertDialogAction className="bg-destructive/10 text-destructive hover:bg-destructive/20" onClick={execute}>
+                  确认回滚
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
       {result && (
@@ -470,5 +536,63 @@ function IntentReview(props: {
         <button className="btn sm" onClick={() => onDecision('continue')}>继续</button>
       </div>
     </div>
+  )
+}
+
+// T2 companion — collapsible source file list so long file rosters don't push
+// the rest of the Task tab off-screen.
+function SourceListSection(props: {
+  sources: string[]
+  fileContent: FileContent | null
+  fileLoading: boolean
+  onView: (path: string) => void
+  onOpen: () => void
+  onClose: () => void
+}) {
+  const { sources, fileContent, fileLoading, onView, onOpen, onClose } = props
+  const [expanded, setExpanded] = useState(false)
+  const PREVIEW_LIMIT = 8
+  const needsCollapse = sources.length > PREVIEW_LIMIT
+  const visible = expanded || !needsCollapse ? sources : sources.slice(0, PREVIEW_LIMIT)
+  const remaining = sources.length - PREVIEW_LIMIT
+
+  return (
+    <section className="review-section">
+      <h4>涉及文件 · {sources.length}</h4>
+      {sources.length === 0 && <div className="empty sm">还没有文件变更</div>}
+      {visible.map((path) => (
+        <div
+          key={path}
+          className="source-item"
+          title={`查看 ${path}`}
+          onClick={() => onView(path)}
+        >
+          <span className="source-icon" aria-hidden>📄</span>
+          <FilePath path={path} className="source-path" />
+        </div>
+      ))}
+      {needsCollapse && (
+        <button className="source-more" onClick={() => setExpanded((v) => !v)}>
+          {expanded ? '收起' : `展开剩余 ${remaining} 个文件`}
+        </button>
+      )}
+      {fileLoading && <div className="empty sm">加载文件…</div>}
+      {fileContent && (
+        <div className="review-file-viewer">
+          <div className="review-file-header">
+            <FilePath path={fileContent.path} />
+            <button className="btn ghost sm" onClick={onOpen}>
+              在编辑器中打开
+            </button>
+            <button className="btn ghost sm" onClick={onClose}>关闭</button>
+          </div>
+          <FileViewer
+            content={fileContent.content}
+            language={fileContent.language}
+            startLine={fileContent.startLine}
+          />
+        </div>
+      )}
+    </section>
   )
 }

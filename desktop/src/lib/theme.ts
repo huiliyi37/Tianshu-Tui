@@ -1,19 +1,22 @@
 // Theme preference (P0). system|light|dark, persisted to localStorage and applied
-// as [data-theme] on <html>. `system` follows prefers-color-scheme live.
+// as [data-theme] on <html> + CSS variables via setProperty (JSON-driven).
+// `system` follows prefers-color-scheme live.
 
-export type ThemePref = 'system' | 'light' | 'dark'
-export type ResolvedTheme = 'light' | 'dark'
+import { applyThemeJson } from './theme-loader'
+
+export type ThemePref = 'system' | 'light' | 'dark' | 'nebula'
+export type ResolvedTheme = 'light' | 'dark' | 'nebula'
 
 const KEY = 'tianshu.theme'
 
 export function loadThemePref(): ThemePref {
   try {
     const v = localStorage.getItem(KEY)
-    if (v === 'light' || v === 'dark' || v === 'system') return v
+    if (v === 'light' || v === 'dark' || v === 'system' || v === 'nebula') return v
   } catch {
     // disabled storage — fall through
   }
-  return 'system'
+  return 'dark'
 }
 
 export function saveThemePref(pref: ThemePref): void {
@@ -37,9 +40,13 @@ export function resolveTheme(pref: ThemePref): ResolvedTheme {
   return pref
 }
 
-export function applyTheme(pref: ThemePref): void {
+/**
+ * Apply theme + surface tokens via setProperty (JSON-driven).
+ * `glass` controls whether glass-mode surface tokens are written.
+ */
+export function applyTheme(pref: ThemePref, glass: boolean): void {
   const resolved = resolveTheme(pref)
-  document.documentElement.dataset.theme = resolved
+  applyThemeJson(resolved, glass)
 }
 
 /**
@@ -48,11 +55,11 @@ export function applyTheme(pref: ThemePref): void {
  */
 export function initTheme(): () => void {
   const pref = loadThemePref()
-  applyTheme(pref)
+  applyTheme(pref, loadGlassModeFromStorage())
 
   let media: MediaQueryList | null = null
   const onChange = () => {
-    if (loadThemePref() === 'system') applyTheme('system')
+    if (loadThemePref() === 'system') applyTheme('system', loadGlassModeFromStorage())
   }
   try {
     media = window.matchMedia('(prefers-color-scheme: dark)')
@@ -66,5 +73,14 @@ export function initTheme(): () => void {
 /** Set + persist + apply in one call (used by Settings). */
 export function setThemePref(pref: ThemePref): void {
   saveThemePref(pref)
-  applyTheme(pref)
+  applyTheme(pref, loadGlassModeFromStorage())
+}
+
+/** Read glass-mode preference directly from localStorage (avoids circular import). */
+function loadGlassModeFromStorage(): boolean {
+  try {
+    return localStorage.getItem('tianshu.glassMode') === '1'
+  } catch {
+    return false
+  }
 }

@@ -23,7 +23,7 @@ export interface ConvergenceInput {
   /** Context window size (200_000 or 1_000_000) */
   contextWindow: number
   /** Recent tool history (last N entries) */
-  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target'>>
+  recentToolHistory: ReadonlyArray<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash'>>
   /** Evidence state with edit/verification tracking */
   evidenceState: Pick<EvidenceState, 'filesModified' | 'filesRead' | 'deliveryStatus'>
   /** Optional tool call fingerprints for oscillation detection (A→B→A→B patterns). */
@@ -40,6 +40,10 @@ export interface ConvergenceInput {
   /** Provider name for provider-specific thresholds (e.g. 'glm' gets tighter cutoffs).
    *  When absent, uses default DeepSeek-tuned values. */
   providerName?: string
+  /** Total LLM output tokens consumed so far in this session.
+   *  Used by tokenEfficiency signal to measure real output cost vs tool calls.
+   *  When absent, falls back to the old tool-classification heuristic. */
+  outputTokens?: number
 }
 
 export interface ConvergenceResult {
@@ -184,6 +188,11 @@ function computeEditRatio(
 /**
  * targetNovelty: fraction of tool targets that are new (not seen before in the window).
  * High novelty in explore phase is good. Declining novelty over time signals convergence.
+ *
+ * Formula: (unique − 1) / (total − 1), so that N identical targets yield 0.0
+ * (zero novelty) — not 1/N as a naive distinct/total would. A single target is
+ * fully novel (1.0); an empty window is treated as fully novel (1.0) to match
+ * the explore-phase early-game expectation that no history = open frontier.
  */
 function computeTargetNovelty(
   windowSize: number,
@@ -192,16 +201,9 @@ function computeTargetNovelty(
   const window = history.slice(-windowSize)
   if (window.length === 0) return 1.0
   const seen = new Set<string>()
-  let novelCount = 0
-  for (const entry of window) {
-    const target = entry.target
-    if (!seen.has(target)) {
-      novelCount++
-      seen.add(target)
-    }
-  }
-  // novelCount / windowSize: 1.0 = all unique, 0.0 = all repeats
-  return novelCount / window.length
+  for (const entry of window) seen.add(entry.argsHash ?? entry.target)
+  if (seen.size === 1) return window.length === 1 ? 1.0 : 0.0
+  return (seen.size - 1) / (window.length - 1)
 }
 
 /**
@@ -236,25 +238,33 @@ function computeErrorPenalty(
 }
 
 /**
- * tokenEfficiency: heuristic proxy for output/input ratio.
- * We approximate by looking at tool call patterns:
- * - Read tools (read_file, grep, glob) consume input but produce output
- * - Write tools (edit_file, write_file) produce tangible output
- * - A high read/write ratio with no edits suggests inefficiency.
+ * tokenEfficiency: real output-token efficiency via exponential decay.
+ * When outputTokens is available, uses exp(-tokensPerTool / 500) — direct
+ * measurement of LLM output cost vs tool call count. Falls back to the old
+ * tool-classification heuristic when outputTokens is absent.
  *
- * Returns 1.0 when balanced, approaches 0.0 when pure reading without progress.
+ * Returns 1.0 when efficient, approaches 0.0 when token-heavy without progress.
  */
 function computeTokenEfficiency(
   windowSize: number,
   history: ConvergenceInput['recentToolHistory'],
   _evidence: ConvergenceInput['evidenceState'],
+  outputTokens?: number,
 ): number {
+  const toolCount = history.length
+  // New path: real output tokens → exponential decay
+  if (outputTokens !== undefined && toolCount > 0) {
+    const tokensPerTool = outputTokens / toolCount
+    if (tokensPerTool <= 0) return 1.0
+    return Math.exp(-tokensPerTool / 500)
+  }
+  // Fallback: old tool-classification heuristic
   const window = history.slice(-windowSize)
   if (window.length === 0) return 0.5
 
   const readTools = new Set(['read_file', 'grep', 'glob', 'repo_map', 'repo_graph', 'inspect_project', 'lsp_goto_definition', 'lsp_find_references'])
   const writeTools = new Set(['edit_file', 'write_file'])
-  const testTools = new Set(['run_tests', 'bash']) // bash may run tests
+  const testTools = new Set(['run_tests', 'bash'])
 
   let reads = 0
   let writes = 0
@@ -269,15 +279,11 @@ function computeTokenEfficiency(
   const total = reads + writes + tests
   if (total === 0) return 0.5
 
-  // Balanced: writes + tests should balance reads
-  // Pure reads with no output = zero efficiency
   const productive = writes + tests
-  if (productive === 0) return 0.0 // all reads, no output
-  if (reads === 0) return 0.9 // all productive, no pure reads
+  if (productive === 0) return 0.0
+  if (reads === 0) return 0.9
 
-  // Efficiency: productive / total, with bonus for balanced ratio
   const rawEfficiency = productive / total
-  // Boost when read:productive ratio is balanced (around 1:1 to 2:1)
   const ratio = reads / productive
   const balanceBonus = ratio >= 0.5 && ratio <= 2.0 ? 0.2 : 0.0
 
@@ -285,34 +291,32 @@ function computeTokenEfficiency(
 }
 
 /**
- * oscillationPenalty: detects A→B→A→B alternating patterns in tool fingerprints.
- * Uses a sliding window of the last 8 fingerprints.
- * Returns 0.0 (heavy penalty) when perfect oscillation is detected,
- * 1.0 when no oscillation is present.
+ * oscillationPenalty: detects A→B→A→B alternating patterns in tool fingerprints
+ * via positional reversal counting — hash[i] === hash[i-2] && hash[i] !== hash[i-1].
  *
- * Oscillation defined as: at least 4 alternations among exactly 2 unique
- * fingerprints in the last 6-8 calls. This catches post-completion verification
- * loops where the model alternates between two read-only verification commands.
+ * Returns continuous 0–1 (0 = heavy oscillation, 1 = no oscillation). Unlike the
+ * old strict-2-unique-value gate, this catches gradual oscillation across 3+ values
+ * (e.g. A→B→A→C→A→B) that the old detector silently ignored.
  */
 function computeOscillationPenalty(fingerprints: ReadonlyArray<string>): number {
-  const window = fingerprints.slice(-8)
-  if (window.length < 6) return 1.0 // not enough data
-
-  // Count unique fingerprints and check for alternation pattern
-  const unique = new Set(window)
-  if (unique.size !== 2) return 1.0 // oscillation requires exactly 2 alternating values
-
-  const [a, b] = [...unique] as [string, string]
-  let alternations = 0
-  for (let i = 1; i < window.length; i++) {
-    if (window[i] !== window[i! - 1]) alternations++
+  if (fingerprints.length < 4) return 1.0 // need at least 4 to detect reversals
+  let reversals = 0
+  for (let i = 2; i < fingerprints.length; i++) {
+    if (fingerprints[i] === fingerprints[i - 2] && fingerprints[i] !== fingerprints[i - 1]) {
+      reversals++
+    }
   }
+  const possibleReversals = fingerprints.length - 2
+  const oscillationRate = reversals / possibleReversals
+  return Math.max(0, Math.min(1, 1 - oscillationRate))
+}
 
-  // Perfect oscillation: alternates every step (e.g., A,B,A,B,A,B,A,B = 7 alternations)
-  // Severe oscillation: alternates most steps (>= 5 out of 7 possible)
-  if (alternations >= 5) return 0.0  // heavy penalty
-  if (alternations >= 3) return 0.3  // moderate penalty
-  return 1.0
+/**
+ * Whether computeOscillationPenalty has enough data to produce a meaningful
+ * (non-sentinel) value. Updated to match new threshold: ≥ 4 fingerprints.
+ */
+function oscillationHasData(fingerprints: ReadonlyArray<string>): boolean {
+  return fingerprints.length >= 4
 }
 
 /**
@@ -363,6 +367,21 @@ function computeTextRepetitionPenalty(fingerprints: ReadonlyArray<string>): numb
   return 1.0
 }
 
+/**
+ * Whether computeTextRepetitionPenalty has enough data to produce a meaningful
+ * (non-sentinel) value. The signal returns 1.0 both when data is insufficient
+ * (too few fingerprints / too few long ones / no pairs) AND when text is
+ * genuinely diverse. Only the former should trigger weight re-allocation.
+ * Mirrors the guard conditions in computeTextRepetitionPenalty.
+ */
+function textRepetitionHasData(fingerprints: ReadonlyArray<string>): boolean {
+  const window = fingerprints.slice(-5)
+  if (window.length < 3) return false
+  const longWordSets = window.filter(fp => fp.length >= 50)
+    .map(fp => new Set(fp.split(/\s+/).filter(w => w.length >= 3)))
+  return longWordSets.length >= 3
+}
+
 // ─── Score Computation ──────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -373,15 +392,49 @@ function computeConvergenceScore(
   turn: number,
   recentToolHistory: ConvergenceInput['recentToolHistory'],
   providerName?: string,
+  signalsMissingData: ReadonlySet<keyof ConvergenceSignals> = new Set(),
 ): number {
+  // Weight re-allocation for no-data signals: when a penalty signal lacks
+  // sufficient data, its default 1.0 ("no penalty") would otherwise enter the
+  // weighted sum at full weight and inflate the score — making the agent look
+  // healthier than the evidence supports. Instead, redistribute that weight
+  // equally across the signals that DO carry data. This closes the execute-phase
+  // ~0.18 inflation (textRep 0.12 + oscillation 0.06 at default 1.0) during the
+  // early-window period before these signals have enough fingerprints.
+  //
+  // Scoped to textRepetitionPenalty + oscillationPenalty only — these are
+  // window-period no-data sentinels. errorPenalty's empty-window 1.0 is
+  // semantically correct (no errors = full marks) and is NOT re-allocated.
+  const w: PhaseWeights = { ...weights }
+  if (signalsMissingData.size > 0) {
+    // Re-allocate only to signals that are independent of editRatio: editRatio
+    // is already a composite (gated by novelty below), so adding weight to it
+    // would double-count novelty and mis-reward low-edit-ratio windows. The
+    // four targets below are pure standalone signals.
+    const others = ['targetNovelty', 'toolEntropy', 'errorPenalty', 'tokenEfficiency'] as const
+    for (const missing of signalsMissingData) {
+      const excess = w[missing]
+      if (!excess) continue
+      w[missing] = 0
+      const perSignal = excess / others.length
+      for (const key of others) w[key] += perSignal
+    }
+  }
+
+  // editRatio is gated by targetNovelty: editing the same file repeatedly
+  // (novelty collapses to 0) is原地打转, not progress — regardless of how many
+  // successful edits happened. The 0.1 floor preserves a small baseline so a
+  // legitimately iterative edit on one file (e.g. building up a large module)
+  // is not zeroed out entirely.
+  const effectiveEditRatio = signals.editRatio * Math.max(signals.targetNovelty, 0.1)
   const raw =
-    weights.editRatio * signals.editRatio +
-    weights.targetNovelty * signals.targetNovelty +
-    weights.toolEntropy * signals.toolEntropy +
-    weights.errorPenalty * signals.errorPenalty +
-    weights.tokenEfficiency * signals.tokenEfficiency +
-    weights.oscillationPenalty * signals.oscillationPenalty +
-    weights.textRepetitionPenalty * signals.textRepetitionPenalty
+    w.editRatio * effectiveEditRatio +
+    w.targetNovelty * signals.targetNovelty +
+    w.toolEntropy * signals.toolEntropy +
+    w.errorPenalty * signals.errorPenalty +
+    w.tokenEfficiency * signals.tokenEfficiency +
+    w.oscillationPenalty * signals.oscillationPenalty +
+    w.textRepetitionPenalty * signals.textRepetitionPenalty
 
   // Phase expectation penalty: phases that require edits (execute, verify,
   // deliver) are fundamentally off-track if no edits are happening.
@@ -569,12 +622,20 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     targetNovelty: computeTargetNovelty(windowSize, input.recentToolHistory),
     toolEntropy: computeToolEntropy(windowSize, input.recentToolHistory),
     errorPenalty: computeErrorPenalty(windowSize, input.recentToolHistory),
-    tokenEfficiency: computeTokenEfficiency(windowSize, input.recentToolHistory, input.evidenceState),
+    tokenEfficiency: computeTokenEfficiency(windowSize, input.recentToolHistory, input.evidenceState, input.outputTokens),
     oscillationPenalty: computeOscillationPenalty(input.toolFingerprints ?? []),
     textRepetitionPenalty: computeTextRepetitionPenalty(input.textFingerprints ?? []),
   }
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName)
+  // Track which penalty signals lack sufficient data so their default-1.0
+  // weight can be re-allocated instead of inflating the score. Only the two
+  // window-period signals (oscillation, textRepetition) — errorPenalty's
+  // empty-window 1.0 is a legitimate "no errors = full marks".
+  const signalsMissingData = new Set<keyof ConvergenceSignals>()
+  if (!oscillationHasData(input.toolFingerprints ?? [])) signalsMissingData.add('oscillationPenalty')
+  if (!textRepetitionHasData(input.textFingerprints ?? [])) signalsMissingData.add('textRepetitionPenalty')
+
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0

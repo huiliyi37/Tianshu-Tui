@@ -1,0 +1,23 @@
+{
+  "title": "设置",
+  "appearance": "外观",
+  "autonomy": "新线程默认自治档位",
+  "autonomyHint": "自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。",
+  "toolDensity": "工具组密度",
+  "toolDensityHint": "控制 read/search 工具组的折叠行为：紧凑（永久折叠）、均衡（默认折叠可展开）、详细（默认展开）。",
+  "notifications": "通知",
+  "wallpaper": "壁纸与毛玻璃",
+  "wallpaperHint": "设置壁纸后，界面自动切换为半透明毛玻璃效果（类似 macOS vibrancy）。壁纸仅存储在本地，不会上传。",
+  "wallpaperEmpty": "无壁纸",
+  "selectImage": "选择图片",
+  "clearWallpaper": "清除壁纸",
+  "wallpaperFitCover": "填充",
+  "wallpaperFitContain": "适应",
+  "wallpaperFitCenter": "居中",
+  "densityCompact": "紧凑",
+  "densityBalanced": "均衡",
+  "densityDetailed": "详细",
+  "notifNever": "从不",
+  "notifBackground": "仅后台",
+  "notifAlways": "始终"
+}

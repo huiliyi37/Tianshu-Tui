@@ -1,9 +1,20 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { chmodSync, writeFileSync, rmSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir } from 'node:os'
 import { RUN_TESTS_TOOL, parseOutput } from '../run-tests.js'
+import { makeTestDir, cleanupTestDir } from './_test-tmp.js'
+
+// output-store.ts 的 rawDir() 使用 os.tmpdir()，沙箱下无写权限。
+// rawDir() 懒加载且受 TMPDIR 环境变量控制——在 import 后覆盖即可。
+const FAKE_TMP = mkdtempSync(join(process.cwd(), '.test-tmp', 'fake-tmp-'))
+process.env.TMPDIR = FAKE_TMP
+process.env.TMP = FAKE_TMP
+process.env.TEMP = FAKE_TMP
+
+after(() => {
+  rmSync(FAKE_TMP, { recursive: true, force: true })
+})
 
 function makeParams(input: Record<string, unknown>, cwd: string) {
   return {
@@ -14,7 +25,7 @@ function makeParams(input: Record<string, unknown>, cwd: string) {
 }
 
 function setupProject(testScript: string, testFile: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'run-tests-'))
+  const dir = makeTestDir('run-tests-')
   mkdirSync(join(dir, 'src'), { recursive: true })
   writeFileSync(join(dir, 'package.json'), JSON.stringify({
     name: 'test-project',
@@ -25,7 +36,7 @@ function setupProject(testScript: string, testFile: string): string {
 }
 
 function setupPythonProject(options: { withTests?: boolean; withFakePytest?: boolean } = {}): string {
-  const dir = mkdtempSync(join(tmpdir(), 'run-tests-python-'))
+  const dir = makeTestDir('run-tests-python-')
   writeFileSync(join(dir, 'pyproject.toml'), '[tool.pytest.ini_options]\n')
   if (options.withTests) {
     mkdirSync(join(dir, 'tests'), { recursive: true })
@@ -42,7 +53,7 @@ function setupPythonProject(options: { withTests?: boolean; withFakePytest?: boo
 }
 
 function setupHangingProject(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'run-tests-hanging-'))
+  const dir = makeTestDir('run-tests-hanging-')
   writeFileSync(join(dir, 'package.json'), JSON.stringify({
     name: 'hanging-project',
     scripts: { test: 'node -e "setInterval(() => {}, 1000)"' },
@@ -145,7 +156,7 @@ it('works', () => assert.equal(2 + 2, 4))`)
   })
 
   it('does not default to npm test when package.json is absent', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'run-tests-empty-'))
+    const dir = makeTestDir('run-tests-empty-')
     try {
       const result = await RUN_TESTS_TOOL.execute(makeParams({}, dir))
 
@@ -206,7 +217,7 @@ it('works', () => assert.equal(2 + 2, 4))`)
   })
 
   it('unknown npm runner with filter does not synthesize npm test arguments', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'run-tests-unknown-filter-'))
+    const dir = makeTestDir('run-tests-unknown-filter-')
     try {
       writeFileSync(join(dir, 'package.json'), JSON.stringify({
         name: 'unknown-runner',

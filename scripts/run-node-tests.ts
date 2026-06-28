@@ -1,10 +1,14 @@
 import { spawn } from 'node:child_process'
-import { glob } from 'node:fs/promises'
+import { glob, mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 
 const args = process.argv.slice(2)
 const includeTui = !args.includes('--exclude-tui')
 const integrationOnly = args.includes('--integration')
 const unitOnly = args.includes('--unit') || args.includes('--fast') || args.includes('--exclude-tui')
+
+const PROJECT_TMP = join(process.cwd(), '.test-tmp')
+await mkdir(PROJECT_TMP, { recursive: true })
 
 const files: string[] = []
 for await (const file of glob('src/**/*.test.ts')) {
@@ -24,6 +28,12 @@ if (files.length === 0) {
 const child = spawn(process.execPath, ['--import', 'tsx', '--test-force-exit', '--test', ...files], {
   stdio: 'inherit',
   shell: false,
+  env: {
+    ...process.env,
+    TMPDIR: PROJECT_TMP,
+    TMP: PROJECT_TMP,
+    TEMP: PROJECT_TMP,
+  },
 })
 
 child.on('exit', (code, signal) => {

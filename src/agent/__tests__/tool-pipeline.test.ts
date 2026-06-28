@@ -43,7 +43,7 @@ describe('executeToolUse', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -384,13 +384,10 @@ describe('executeToolUse', () => {
       config: {
         ...base.config,
         promptEngine: {
-          setStrategyShift: () => {},
-          setImpactHint: () => {},
           markGitDirty: () => { gitDirtyCalls++ },
         },
       } as any,
     })
-
     await executeToolUse(
       { id: 'tu-deliver-commit', name: 'deliver_task', input: { commit: true, message: 'feat: x' } },
       deps, noopCallbacks as any, 1, false,
@@ -409,8 +406,6 @@ describe('executeToolUse', () => {
       config: {
         ...base.config,
         promptEngine: {
-          setStrategyShift: () => {},
-          setImpactHint: () => {},
           markGitDirty: () => { gitDirtyCalls++ },
         },
       } as any,
@@ -585,11 +580,15 @@ describe('executeToolUse', () => {
   it('traces grep input keys when pattern disappears during repair', async () => {
     const oldDebug = process.env.RIVET_DEBUG
     const oldToolInputDebug = process.env.RIVET_DEBUG_TOOL_INPUT
+    const oldSessionDir = process.env.RIVET_SESSION_DIR
     const oldWarn = console.warn
     const traceDir = mkdtempSync(join(tmpdir(), 'tool-input-trace-'))
     const warnings: string[] = []
     delete process.env.RIVET_DEBUG
     delete process.env.RIVET_DEBUG_TOOL_INPUT
+    // getSessionDir reads RIVET_SESSION_DIR; without this the trace file
+    // writes to ~/.rivet/sessions/<slug> instead of the temp dir.
+    process.env.RIVET_SESSION_DIR = join(traceDir, '.rivet', 'sessions')
     console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')) }
     try {
       const deps = makeDeps({
@@ -629,6 +628,8 @@ describe('executeToolUse', () => {
       else process.env.RIVET_DEBUG = oldDebug
       if (oldToolInputDebug === undefined) delete process.env.RIVET_DEBUG_TOOL_INPUT
       else process.env.RIVET_DEBUG_TOOL_INPUT = oldToolInputDebug
+      if (oldSessionDir === undefined) delete process.env.RIVET_SESSION_DIR
+      else process.env.RIVET_SESSION_DIR = oldSessionDir
     }
 
     assert.deepEqual(warnings, [], 'natural grep trace must not write directly to terminal stderr')
@@ -1125,7 +1126,7 @@ describe('artifactIntercept in tool pipeline', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {
@@ -1571,7 +1572,7 @@ describe('phase-aware prediction recording', () => {
         fileHistory: undefined,
         contextClaimStore: undefined,
         sessionId: 'test-session',
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {}, markGitDirty: () => {} },
+        promptEngine: { markGitDirty: () => {} },
       } as any,
       cwd: '/tmp/test',
       harness: {

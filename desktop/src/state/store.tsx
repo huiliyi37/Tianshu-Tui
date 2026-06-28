@@ -23,8 +23,8 @@ import {
 } from '../lib/persist'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
-// automations (was schedule), attention (was inbox), settings.
-export type Surface = 'workspace' | 'automations' | 'attention' | 'settings' | 'skills'
+// automations (was schedule), attention (was inbox), settings, git.
+export type Surface = 'workspace' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
 
 export interface UiState {
   activeSessionId: string | null
@@ -37,7 +37,8 @@ export interface UiState {
   sidebarVisible: boolean
   reviewVisible: boolean
   terminalVisible: boolean
-  /** Ordered list of open thread IDs (tabs). First = most recently used. */
+  /** Zen mode: hides sidebar + review panel for distraction-free focus (Cmd+.). */
+  zenMode: boolean
   openTabs: string[]
   /** Split editor mode — reserved for Phase 3, persisted now so it survives reload. */
   splitMode: SplitMode
@@ -48,7 +49,7 @@ export interface UiState {
 
 type UiAction =
   | { type: 'setActive'; id: string | null }
-  | { type: 'setProject'; cwd: string | null }
+  | { type: 'setProject'; projectId: string | null }
   | { type: 'setSurface'; surface: Surface }
   | { type: 'openNew'; open: boolean }
   | { type: 'setError'; error: string | null }
@@ -59,6 +60,7 @@ type UiAction =
   | { type: 'setTerminal'; visible: boolean }
   | { type: 'closeTab'; id: string }
   | { type: 'reorderTabs'; from: number; to: number }
+  | { type: 'toggleZen' }
   | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
 
@@ -72,7 +74,7 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setProject':
       // Switching project drops the active thread; it belongs to another project.
-      return { ...state, activeProject: action.cwd, activeSessionId: null }
+      return { ...state, activeProject: action.projectId, activeSessionId: null }
     case 'setSurface':
       return { ...state, surface: action.surface }
     case 'openNew':
@@ -90,6 +92,16 @@ function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, sidebarVisible: action.visible }
     case 'setReview':
       return { ...state, reviewVisible: action.visible }
+    case 'toggleZen': {
+      const next = !state.zenMode
+      return {
+        ...state,
+        zenMode: next,
+        // Entering zen: hide sidebar + review. Exiting: restore both.
+        sidebarVisible: next ? false : true,
+        reviewVisible: next ? false : true,
+      }
+    }
     case 'setTerminal':
       return { ...state, terminalVisible: action.visible }
     case 'closeTab': {
@@ -131,6 +143,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     sidebarVisible: loadSidebarVisible(),
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
+    zenMode: false,
     openTabs: loadOpenTabs(),
     splitMode: loadSplitMode(),
     reviewManuallyToggled: false,

@@ -26,6 +26,8 @@ export const CORE_TOOLS = [
   'glob',
   'diff',
   'semantic_search',
+  'web_search',
+  'web_fetch',
   'inspect_project',
   'repo_map',
   'related_tests',
@@ -59,8 +61,6 @@ export const CORE_TOOLS = [
  * web/browser/doc/council/team/import/lsp/undo 等低频或重场景工具。
  */
 export const EXTENDED_TOOLS = [
-  'web_search',
-  'web_fetch',
   'browser',
   'repo_graph',
   'council_convene',

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
-import type { PlanStatus } from '../runtime/types'
+import type { PlanStatus, PlanSummary } from '../runtime/types'
+import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
 
 const STATUS_LABEL: Record<PlanStatus, string> = {
   submitted: '待审',
@@ -10,10 +11,30 @@ const STATUS_LABEL: Record<PlanStatus, string> = {
   rejected: '已拒绝',
 }
 
+type FilterMode = 'active' | 'archived' | 'all'
+
+const FILTERS: { key: FilterMode; label: string }[] = [
+  { key: 'active', label: '活动' },
+  { key: 'archived', label: '归档' },
+  { key: 'all', label: '全部' },
+]
+
+function matchesFilter(p: PlanSummary, mode: FilterMode) {
+  if (mode === 'all') return true
+  if (mode === 'active') return p.status === 'submitted' || p.status === 'approved'
+  return p.status === 'executed' || p.status === 'rejected'
+}
+
 /**
  * Plan column (Cursor 3.0 "Build" surface). Lists this session's plans, renders
- * the selected plan's markdown, and exposes Build (approve → execute) / Reject
- * (with feedback) / Copy. Auto-selects the newest submitted plan.
+ * the selected plan's markdown, and exposes Build / Reject / Copy.
+ *
+ * UX refresh:
+ * - Plan selector is a thin horizontal chip strip so the document stays visible.
+ * - Status filter defaults to "active" to reduce visual noise.
+ * - A search box filters chips by title.
+ * - "Expand list" toggles a compact vertical list for scanning many plans.
+ * - Document area fills the remaining panel height and scrolls independently.
  */
 export function PlanPanel(props: {
   sessionId: string | null
@@ -23,6 +44,9 @@ export function PlanPanel(props: {
   const { sessionId, planRev, latestPlanSlug } = props
   const plans = usePlans(sessionId, planRev)
   const [selected, setSelected] = useState<string | null>(null)
+  const [filter, setFilter] = useState<FilterMode>('active')
+  const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState(false)
   const [rejecting, setRejecting] = useState(false)
   const [comment, setComment] = useState('')
   const [copied, setCopied] = useState(false)
@@ -30,22 +54,38 @@ export function PlanPanel(props: {
   const approve = useApprovePlan()
   const reject = useRejectPlan()
 
-  const list = plans.data ?? []
+  const all = plans.data ?? []
+  const sorted = useMemo(
+    () => [...all].sort((a, b) => b.createdAt - a.createdAt),
+    [all],
+  )
+  const filtered = useMemo(
+    () =>
+      sorted
+        .filter((p) => matchesFilter(p, filter))
+        .filter((p) => (query ? p.title.toLowerCase().includes(query.toLowerCase()) : true)),
+    [sorted, filter, query],
+  )
 
   // Auto-select: prefer the freshly submitted plan, else the newest, when no
   // valid selection is held.
-  const selectedExists = selected != null && list.some((p) => p.slug === selected)
+  const selectedExists = selected != null && filtered.some((p) => p.slug === selected)
   useEffect(() => {
     if (selectedExists) return
-    const next = (latestPlanSlug && list.some((p) => p.slug === latestPlanSlug))
-      ? latestPlanSlug
-      : list[0]?.slug ?? null
+    const candidates = filter === 'active' ? sorted.filter((p) => matchesFilter(p, 'active')) : sorted
+    const next =
+      latestPlanSlug && candidates.some((p) => p.slug === latestPlanSlug)
+        ? latestPlanSlug
+        : candidates[0]?.slug ?? sorted[0]?.slug ?? null
     setSelected(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestPlanSlug, list.length, selectedExists])
+  }, [latestPlanSlug, sorted.length, filter, selectedExists])
 
   const doc = usePlan(sessionId, selected, planRev)
-  const current = useMemo(() => list.find((p) => p.slug === selected) ?? null, [list, selected])
+  const current = useMemo(
+    () => all.find((p) => p.slug === selected) ?? null,
+    [all, selected],
+  )
 
   const onBuild = () => {
     if (!sessionId || !selected) return
@@ -75,23 +115,75 @@ export function PlanPanel(props: {
 
   return (
     <div className="plan-panel">
-      <div className="plan-list">
-        {list.length === 0 && (
-          <div className="empty sm">
-            还没有方案。切到 Plan 模式后描述目标，agent 会只读探索并产出方案。
-          </div>
-        )}
-        {list.map((p) => (
-          <button
-            key={p.slug}
-            className={`plan-item ${p.slug === selected ? 'active' : ''}`}
-            onClick={() => { setSelected(p.slug); setRejecting(false) }}
-          >
-            <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
-            <span className="plan-title">{p.title}</span>
-          </button>
-        ))}
+      <div className="plan-toolbar">
+        <span className="plan-toolbar-title">方案</span>
+
+        <div className="plan-filter">
+          {FILTERS.map((f) => (
+            <button
+              key={f.key}
+              className={filter === f.key ? 'active' : ''}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="plan-search">
+          <Search size={12} />
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="过滤方案"
+          />
+        </div>
+
+        <button
+          className="plan-expand-btn"
+          onClick={() => setExpanded((v) => !v)}
+          title={expanded ? '收起列表' : '展开列表'}
+        >
+          <LayoutList size={12} />
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
       </div>
+
+      {expanded ? (
+        <div className="plan-list-compact">
+          {filtered.length === 0 && (
+            <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
+          )}
+          {filtered.map((p) => (
+            <button
+              key={p.slug}
+              className={`plan-item-row ${p.slug === selected ? 'active' : ''}`}
+              onClick={() => { setSelected(p.slug); setRejecting(false) }}
+            >
+              <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              <span className="plan-title">{p.title}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="plan-chips">
+          {filtered.length === 0 && (
+            <div className="empty sm">{query ? '没有匹配的方案' : '该过滤条件下没有方案'}</div>
+          )}
+          {filtered.map((p) => (
+            <button
+              key={p.slug}
+              className={`plan-chip ${p.slug === selected ? 'active' : ''}`}
+              onClick={() => { setSelected(p.slug); setRejecting(false) }}
+              title={p.title}
+            >
+              <span className={`plan-badge st-${p.status}`}>{STATUS_LABEL[p.status]}</span>
+              <span className="plan-chip-title">{p.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {current && (
         <div className="plan-detail">

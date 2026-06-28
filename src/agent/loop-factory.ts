@@ -5,6 +5,7 @@ import { ToolExecutionController } from './tool-execution.js'
 import type { RuntimeHookSnapshot } from './runtime-hooks.js'
 import { createRuntimeHookContext, RuntimeHookPipeline } from './runtime-hooks.js'
 import { createDefaultRuntimeHooks } from './create-runtime-hooks.js'
+import { createUserHooksBridge, runOnErrorHooks } from './hooks/user-hooks-bridge.js'
 import { normalizeAntiAnchoringConfig } from './anti-anchoring-config.js'
 import { mapQueriedPheromones } from './pheromone-map.js'
 import { buildPrewarmValue, batchPrewarm } from './prewarm-file.js'
@@ -20,7 +21,9 @@ import { isSystemReminder } from '../prompt/system-reminder.js'
 import { getReadRefStats } from '../tools/read-file.js'
 import { PlanTraceCoordinator } from './plan-trace-coordinator.js'
 import { CompactBoundaryCoordinator, DEFAULT_QUALITY_COMPACT_THRESHOLDS } from './compact-boundary-coordinator.js'
-import { TurnOrchestrator } from './turn-orchestrator.js'
+import { TurnOrchestrator, type TurnStateBag } from './turn-orchestrator.js'
+import { GoalContinuationController } from './goal-continuation.js'
+import { PostTurnDecisionController } from './post-turn-decision.js'
 import { ReasoningEffortController } from './reasoning-effort-controller.js'
 import { IntentRetrievalRouteController } from './intent-retrieval-route-controller.js'
 import { AntiAnchoringController } from './anti-anchoring-controller.js'
@@ -68,6 +71,9 @@ return new TurnStreamController({
           // thinking (reasoning) or final prose (text) before any intervention.
           output: usage.output_tokens,
         }
+        // tokenEfficiency from convergence detector: cross-validate with cache hit rate
+        const te = self.latestConvergenceResult?.signals.tokenEfficiency
+        if (te !== undefined) entry.tokenEfficiency = te
         if (usage.reasoning_tokens !== undefined) {
           entry.reasoning = usage.reasoning_tokens
           entry.text = Math.max(0, usage.output_tokens - usage.reasoning_tokens)
@@ -134,8 +140,13 @@ return new TurnStreamController({
           if (self.prevHitRate !== null && self.prevHitRate - hitRateNum > 15) {
             const diag = diagnoseCacheMiss(self.session.getCacheHistory(), turn, null, wasRewritten)
             if (diag) entry.diagnose = `${diag.reason}: ${diag.message}`
+            // Cross-validate: tokenEfficiency also collapsing → cache-break compensation loop
+            if (te !== undefined && self.prevTokenEfficiency !== undefined && self.prevTokenEfficiency > 0.5 && te < 0.2) {
+              entry.diagnose = (entry.diagnose ? `${entry.diagnose}; ` : '') + 'possible cache-break compensation loop: tokenEfficiency collapsed alongside cache hit rate'
+            }
           }
           self.prevHitRate = hitRateNum
+          if (te !== undefined) self.prevTokenEfficiency = te
         } catch { /* breadcrumbs are best-effort — never break cache logging */ }
 
         const line = JSON.stringify(entry)
@@ -227,7 +238,7 @@ export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHoo
 return {
       cwd: self.cwd,
       turn: self.session.getTurnCount(),
-      recentToolHistory: self.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target })),
+      recentToolHistory: self.recentToolHistory.map(h => ({ tool: h.tool, status: h.status, target: h.target, argsHash: h.argsHash })),
       sensorium: self.sensorium,
       strategy: self.strategy,
       vigor: self.vigorState,
@@ -244,7 +255,13 @@ return {
 }
 
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
-  return new RuntimeHookPipeline(createDefaultRuntimeHooks({
+  const userBridgeDeps = {
+    cwd: self.cwd,
+    sessionId: self.config.sessionId,
+    getTurn: () => self.session.getTurnCount(),
+    emitHookResult: self.config.emitHookResult,
+  }
+  const hooks = createDefaultRuntimeHooks({
     stigmergyDeposit: deposit => self.stigmergyStore.deposit(deposit),
     stigmergyQuery: () => self.stigmergyStore.query(),
     getEvidenceState: () => self.evidence.getState(),
@@ -295,6 +312,8 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         vigor: self.vigorState.tonic,
         stability: self.sensorium.stability,
         season: self.currentSeason ?? 'unknown',
+        convergencePrecision: self.latestConvergenceResult?.score,
+        outputEfficiency: self.latestConvergenceResult?.signals.tokenEfficiency,
       }
     },
     getObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 120) ?? null,
@@ -356,16 +375,20 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       getUserMessage: () => self.initialUserMessage,
       getStreamedText: () => self.streamedText,
     },
-    userHooksBridge: {
-      cwd: self.cwd,
-      sessionId: self.config.sessionId,
-      getTurn: () => self.session.getTurnCount(),
-    },
+    userHooksBridge: userBridgeDeps,
     advisoryBus: self.advisoryBus,
     sycophancyTrap: self.sycophancyTrap,
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getContextWindow: () => self.config.contextWindow ?? 128_000,
-  }))
+  })
+
+  // I4: when any runtime hook throws, run user `onError` hooks and emit the
+  // result to the desktop event stream.
+  return new RuntimeHookPipeline(hooks, {
+    onError: (err) => {
+      runOnErrorHooks(userBridgeDeps, err.message)
+    },
+  })
 }
 
 export function createPlanTraceCoordinator(self: AgentLoop): PlanTraceCoordinator {
@@ -403,7 +426,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
       self.session.replaceMessages(msgs)
       self.config.promptEngine.resetAppendixBaseline()
     },
-    dietMessages: msgs => self.p3.dietMessages(msgs as any) as any,
+    dietMessages: msgs => self.p3.dietMessages(msgs),
     trySessionSplit: () => self.compaction.trySessionSplit(),
     maybeCompact: opts => self.compaction.maybeCompact(opts),
     tryPartialCompact: target => self.compaction.tryPartialCompact(target),
@@ -413,7 +436,7 @@ export function createCompactBoundaryCoordinator(self: AgentLoop): CompactBounda
     isCostInsensitiveProvider: () => isCostInsensitiveProvider(self.config.providerName),
     getProviderName: () => self.config.providerName,
     getQualityThresholds: () => self.config.compact.qualityCompact ?? DEFAULT_QUALITY_COMPACT_THRESHOLDS,
-    injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal as any) },
+    injectImmuneSignal: signal => { self.immuneHook.injectSignal(signal) },
   })
 }
 
@@ -475,11 +498,11 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getCacheHistory: () => self.session.getCacheHistory(),
 
     // === Sub-processes (thin wrappers) ===
-    runCompaction: (turn, snap) => self.runCompaction(turn, snap),
+    runCompaction: (turn, snap) => self.compactBoundaryCoordinator.runCompaction(turn, snap),
     runPerception: (turn, estTokens, actionable, callbacks) => self.turnStepProducer.runPerception(turn, estTokens, actionable, callbacks),
     runConvergenceCheck: (turn, phaseClass, assistantResponded, userMessageConsumed, callbacks) =>
       self.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
-    runReplanCheck: () => { self.runReplanCheck() },
+    runReplanCheck: () => { self.planTraceCoordinator.runReplanCheck() },
     buildTurnRequest: (turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks) =>
       self.turnStepProducer.buildTurnRequest(turn, strategy, sensorium, pressureResult, assistantResponded, userMessageConsumed, callbacks),
     prewarmRecentReads: () => self.prewarmController.prewarmRecentReads(),
@@ -494,7 +517,7 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     onCacheAdvisorTurnEnd: (params) => { self.cacheAdvisor.onTurnEnd(params) },
 
     // === Telemetry ===
-    writeTelemetry: (entry) => { (self.telemetryWriter as any).write(entry) },
+    writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
     resetEvidence: () => { self.evidence.reset() },
 
     // === Abort signal ===
@@ -512,81 +535,117 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     // === FsWatcher ===
     getFsWatcherState: () => self.fsWatcher?.getState() ?? { eventRate: 0, eventCount: 0, active: false },
 
-    // === Per-run state ===
-    getStreamedText: () => self.streamedText,
-    setStreamedText: (v) => { self.streamedText = v },
-    getLastPrewarmAt: () => self.lastPrewarmAt,
-    setLastPrewarmAt: (v) => { self.lastPrewarmAt = v },
-    getGitChangeRate: () => self.gitChangeRate,
-    setGitChangeRate: (v) => { self.gitChangeRate = v },
-    setTurnBudget: (v) => { self.turnBudget = v },
-    getLatestFsWatcherState: () => self.latestFsWatcherState,
-    setLatestFsWatcherState: (v) => { self.latestFsWatcherState = v },
-    getConsecutiveNoToolTurns: () => self.consecutiveNoToolTurns,
-    setConsecutiveNoToolTurns: (v) => { self.consecutiveNoToolTurns = v },
-    getAutoContinueCount: () => self.autoContinueCount,
-    setAutoContinueCount: (v) => { self.autoContinueCount = v },
+    // === Per-run state (getter/setter view into AgentLoop fields) ===
+    state: {
+      get streamedText() { return self.streamedText },
+      set streamedText(v) { self.streamedText = v },
+      get lastPrewarmAt() { return self.lastPrewarmAt },
+      set lastPrewarmAt(v) { self.lastPrewarmAt = v },
+      get gitChangeRate() { return self.gitChangeRate },
+      set gitChangeRate(v) { self.gitChangeRate = v },
+      get turnBudget() { return self.turnBudget },
+      set turnBudget(v) { self.turnBudget = v },
+      get latestFsWatcherState() { return self.latestFsWatcherState },
+      set latestFsWatcherState(v) { self.latestFsWatcherState = v },
+      get consecutiveNoToolTurns() { return self.consecutiveNoToolTurns },
+      set consecutiveNoToolTurns(v) { self.consecutiveNoToolTurns = v },
+      get autoContinueCount() { return self.autoContinueCount },
+      set autoContinueCount(v) { self.autoContinueCount = v },
+      get thinkingOnlyRetries() { return self.thinkingOnlyRetries },
+      set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
+      get lastThinkingContent() { return self.lastThinkingContent },
+      set lastThinkingContent(v) { self.lastThinkingContent = v },
+      get lastTurnTextFingerprint() { return self.lastTurnTextFingerprint },
+      set lastTurnTextFingerprint(v) { self.lastTurnTextFingerprint = v },
+      get lastTurnThinkingFingerprint() { return self.lastTurnThinkingFingerprint },
+      set lastTurnThinkingFingerprint(v) { self.lastTurnThinkingFingerprint = v },
+      get recentTextFingerprints() { return self.recentTextFingerprints },
+      set recentTextFingerprints(v) { self.recentTextFingerprints = v },
+      get turnsSinceLastObjection() { return self.turnsSinceLastObjection },
+      set turnsSinceLastObjection(v) { self.turnsSinceLastObjection = v },
+      get traceStore() { return self.traceStore },
+      set traceStore(v) { self.traceStore = v },
+      get importGraph() { return self.importGraph },
+      set importGraph(v) { self.importGraph = v },
+      get lastConflictCheckCount() { return self.lastConflictCheckCount },
+      set lastConflictCheckCount(v) { self.lastConflictCheckCount = v },
+      get latestRisk() { return self.latestRisk },
+      set latestRisk(v) { self.latestRisk = v },
+      get thetaRequestsThisTurn() { return self.thetaRequestsThisTurn },
+      set thetaRequestsThisTurn(v) { self.thetaRequestsThisTurn = v },
+      get taskContract() { return self.taskContract },
+      set taskContract(v) { self.taskContract = v },
+    } as TurnStateBag,
     getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
-    getActiveContract: () => self.taskContract,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
-    getThinkingOnlyRetries: () => self.thinkingOnlyRetries,
-    setThinkingOnlyRetries: (v) => { self.thinkingOnlyRetries = v },
-    getLastThinkingContent: () => self.lastThinkingContent,
-    setLastThinkingContent: (v) => { self.lastThinkingContent = v },
-    getLastTurnTextFingerprint: () => self.lastTurnTextFingerprint,
-    setLastTurnTextFingerprint: (v) => { self.lastTurnTextFingerprint = v },
-    getLastTurnThinkingFingerprint: () => self.lastTurnThinkingFingerprint,
-    setLastTurnThinkingFingerprint: (v) => { self.lastTurnThinkingFingerprint = v },
-    getRecentTextFingerprints: () => self.recentTextFingerprints,
-    setTurnsSinceLastObjection: (v) => { self.turnsSinceLastObjection = v },
-    getTraceStore: () => self.traceStore,
-    setTraceStore: (v) => { self.traceStore = v },
-    getImportGraph: () => self.importGraph,
-    setImportGraph: (v) => { self.importGraph = v },
-    getLastConflictCheckCount: () => self.lastConflictCheckCount,
-    setLastConflictCheckCount: (v) => { self.lastConflictCheckCount = v },
-    getLatestRisk: () => self.latestRisk,
-    setLatestRisk: (v) => { self.latestRisk = v },
-    setThetaRequestsThisTurn: (v) => { self.thetaRequestsThisTurn = v },
 
-    // === Goal completion judge ===
-    getGoalJudgeDeps: () => {
-      // Disabled explicitly → undefined → orchestrator keeps legacy accept-on-marker.
-      if (self.config.goalJudge?.enabled === false) return undefined
-      const coordinator = self.config.coordinatorRef?.()
-      // Enabled but no coordinator to spawn the judge → empty deps → runGoalJudge
-      // returns inconclusive (fail-open accept+warning), never blocking the loop.
-      if (!coordinator) return {}
-      const browserMode = self.config.goalJudge?.browser === true
-      return {
-        spawnJudge: (objective, scope, signal) => coordinator.delegate({
-          parentTurnId: 'goal:judge',
-          objective,
-          kind: 'verify',
-          profile: 'goal_judge',
-          scope,
-        }, signal),
-        browserMode,
-      }
-    },
-    getGoalJudgeEvidence: () => {
-      const state = self.evidence.getState()
-      const modifiedFiles = [...state.filesModified]
-      const readFiles = [...state.filesRead]
-      const verifications = state.verifications.map(v =>
-        `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`)
-      const text = [
-        modifiedFiles.length > 0 ? `Modified files: ${modifiedFiles.join(', ')}` : '',
-        readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
-        verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
-      ].filter(Boolean).join('\n')
+    // === Sub-controllers ===
+    goalContinuation: new GoalContinuationController({
+      getGoalTracker: () => self.getGoalTracker(),
+      getGoalJudgeDeps: () => {
+        if (self.config.goalJudge?.enabled === false) return undefined
+        const coordinator = self.config.coordinatorRef?.()
+        if (!coordinator) return {}
+        const browserMode = self.config.goalJudge?.browser === true
+        return {
+          spawnJudge: (objective, scope, signal) => coordinator.delegate({
+            parentTurnId: 'goal:judge',
+            objective,
+            kind: 'verify',
+            profile: 'goal_judge',
+            scope,
+          }, signal),
+          browserMode,
+        }
+      },
+      getGoalJudgeEvidence: () => {
+        const state = self.evidence.getState()
+        const modifiedFiles = [...state.filesModified]
+        const readFiles = [...state.filesRead]
+        const verifications = state.verifications.map(v =>
+          `ran: ${v.command} → ${v.status} (${v.passed} passed, ${v.failed} failed, ${v.skipped} skipped)`)
+        const text = [
+          modifiedFiles.length > 0 ? `Modified files: ${modifiedFiles.join(', ')}` : '',
+          readFiles.length > 0 ? `Read files (sample): ${readFiles.slice(0, 20).join(', ')}` : '',
+          verifications.length > 0 ? `Verifications:\n${verifications.join('\n')}` : '',
+        ].filter(Boolean).join('\n')
 
-      // Meridian blast radius — let the judge verify downstream consumers too.
-      // Absolute paths silently return empty on repo-relative LIKE, so filter first.
-      const db = self.config.meridianIndexer?.getDb()
-      const fullText = appendMeridianBlastRadius(text, modifiedFiles, db)
-      return { text: fullText, modifiedFiles }
-    },
+        const db = self.config.meridianIndexer?.getDb()
+        const fullText = appendMeridianBlastRadius(text, modifiedFiles, db)
+        return { text: fullText, modifiedFiles }
+      },
+      getStreamedText: () => self.streamedText,
+      getEstimatedTokens: () => self.session.getEstimatedTokens(),
+      getSessionId: () => self.config.sessionId,
+      getCwd: () => self.cwd,
+      appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
+      completeTurn: (params) => self.turnCompletion.complete(params),
+      writeTelemetry: (entry) => { self.telemetryWriter.write(entry) },
+      flushMeridianTurn: () => { self.config.meridianIndexer?.flushTurn() },
+    }),
+    postTurnDecision: new PostTurnDecisionController({
+      state: {
+        get streamedText() { return self.streamedText },
+        set streamedText(v) { self.streamedText = v },
+        get thinkingOnlyRetries() { return self.thinkingOnlyRetries },
+        set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
+        get lastThinkingContent() { return self.lastThinkingContent },
+        set lastThinkingContent(v) { self.lastThinkingContent = v },
+        get autoContinueCount() { return self.autoContinueCount },
+        set autoContinueCount(v) { self.autoContinueCount = v },
+        get taskContract() { return self.taskContract },
+        set taskContract(v) { self.taskContract = v },
+      },
+      getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
+      getDoomLoopLevel: () => self.getDoomLoopLevel(),
+      appendSystemReminder: (content) => { self.session.appendSystemReminder(content) },
+      completeTurn: (params) => self.turnCompletion.complete(params),
+      getTotalUsage: () => self.session.getTotalUsage(),
+      getTurnCount: () => self.session.getTurnCount(),
+      // GLM independent reasoning: thinking-only turns are legitimate output,
+      // not failed utterances. Skip retry to avoid wasting time on fresh reasoning.
+      skipThinkingRetry: self.config.providerName === 'glm',
+    }),
   })
 }
 

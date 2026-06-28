@@ -31,6 +31,10 @@ export interface SessionRecord {
   model?: string
   /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
   domain?: string
+  /** Visual glyph for the current star-domain selection (for badges). */
+  domainGlyph?: string
+  /** Semantic accent color key for the current star-domain selection. */
+  domainAccent?: string
   /** Estimated token count for the current conversation (from live agent). */
   contextTokens?: number
   /** Model context window size in tokens. */
@@ -62,6 +66,12 @@ export interface DomainEntry {
   essence: string
   /** Whether this is the session's current selection. */
   current: boolean
+  /** Full UI persona (separator + accent + glyph). */
+  uiPersona?: {
+    separator: 'thin' | 'thick' | 'dots'
+    accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim'
+    glyph: string
+  }
 }
 
 /** PlusMenu — a skill with its per-session enablement status. */
@@ -80,6 +90,12 @@ export interface FileContent {
   totalLines: number
   startLine: number
   endLine: number
+}
+
+/** Gap 1 — directory entry for the read-only file browser. */
+export interface DirEntry {
+  name: string
+  isDirectory: boolean
 }
 
 /** Plan list entry (no markdown body). createdAt/approvedAt are epoch ms. */
@@ -129,6 +145,8 @@ export type SessionEventType =
   | 'model_switched'
   | 'domain_changed'
   | 'skills_changed'
+  // I4 — user-defined .rivet/hooks.json script results.
+  | 'hook_result'
   | 'done'
 
 export interface SessionEvent {
@@ -186,6 +204,97 @@ export interface DelegationNode {
   progressLine?: string
   /** T4 — elapsed wall-clock since the worker started, ms. */
   elapsedMs?: number
+  /** Actual model dispatched for this worker (insights / cost visualization). */
+  model?: string
+  /** Provider name for this worker (insights / cost visualization). */
+  provider?: string
+  /** Token usage for this worker (insights / cost visualization). */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+    reasoning_tokens?: number
+    total_tokens?: number
+  }
+  /** Persisted diff artifact id (worker fallback session). Lets the UI fetch this
+   *  worker's diff for independent review. Absent when no diff or persistence failed. */
+  artifactId?: string
+  /** Files this worker changed (for diff review entry hints). */
+  changedFiles?: string[]
+}
+
+export interface InsightsWorker {
+  workerId: string
+  parentId?: string
+  profile?: string
+  status?: string
+  model?: string
+  provider?: string
+  objective?: string
+  elapsedMs?: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  reasoningTokens: number
+  totalTokens: number
+  cost: number
+}
+
+export interface InsightsModelBreakdown {
+  model: string
+  provider?: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cost: number
+  count: number
+}
+
+export interface InsightsProviderBreakdown {
+  provider: string
+  inputTokens: number
+  outputTokens: number
+  totalTokens: number
+  cost: number
+  count: number
+}
+
+export interface InsightsResponse {
+  totals: {
+    workers: number
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    reasoningTokens: number
+    totalTokens: number
+    cost: number
+  }
+  cacheHitRate: number | null
+  workers: InsightsWorker[]
+  modelBreakdown: InsightsModelBreakdown[]
+  providerBreakdown: InsightsProviderBreakdown[]
+}
+
+/** Git branch graph response from `GET /git/graph`. */
+export interface GitGraphResponse {
+  graph: string[]
+}
+
+/** A single file's working-tree change relative to HEAD (mirrors backend WorkingTreeFile). */
+export interface WorkingTreeFile {
+  path: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  additions: number
+  deletions: number
+}
+
+/** Working-tree change list for the desktop "changes" tab. */
+export interface WorkingTreeResponse {
+  files: WorkingTreeFile[]
+  isRepo: boolean
 }
 
 /** T2 — structured active task list item (mirrors backend `todo` write). */
@@ -204,6 +313,18 @@ export interface ArtifactSummary {
   charCount: number
   lineCount: number
   createdAt: number
+}
+
+/**
+ * 行级评论：锚定 diff 的一行（文件 + old/new 行号 + 文本）。
+ * 锚点用 (file, oldLine, newLine) 组合，newLine 优先作为定位行；file 来自
+ * parseDiff 解析的当前文件上下文，保证多文件 diff 唯一定位。
+ */
+export interface LineComment {
+  file: string
+  oldLine?: number
+  newLine?: number
+  comment: string
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────
@@ -244,4 +365,26 @@ export interface McpServerToolsResponse {
     description: string
     inputSchema: Record<string, unknown>
   }>
+}
+
+/** I4 — user-defined hook event kinds. Mirrors backend HookEvent. */
+export type HookEvent = 'preTurn' | 'postTurn' | 'postTool' | 'postSession' | 'onError'
+
+/** I4 — a single entry in .rivet/hooks.json. */
+export interface HookEntry {
+  event: HookEvent
+  script: string
+  timeoutMs?: number
+}
+
+/** I4 — result of running one user hook script. */
+export interface HookResult {
+  script: string
+  ok: boolean
+  output: string
+}
+
+/** I4 — full .rivet/hooks.json payload. */
+export interface HooksConfig {
+  hooks: HookEntry[]
 }

@@ -93,6 +93,8 @@ export interface EventViewState {
   prevTotalTokens: number
   /** Deduplicated file paths touched by file-editing tools (for Task Sidebar sources). */
   sources: string[]
+  /** I4 — latest user hook results surfaced as raw hook_result events. */
+  hookResults: SessionEvent[]
 }
 
 export const initialEventState: EventViewState = {
@@ -113,6 +115,7 @@ export const initialEventState: EventViewState = {
   lastTotalTokens: 0,
   prevTotalTokens: 0,
   sources: [],
+  hookResults: [],
 }
 
 export type EventAction =
@@ -386,6 +389,11 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         profile: ev.data.profile != null ? String(ev.data.profile) : prev?.profile,
         progressLine: ev.data.progressLine != null ? String(ev.data.progressLine) : prev?.progressLine,
         elapsedMs: ev.data.elapsedMs != null ? Number(ev.data.elapsedMs) : prev?.elapsedMs,
+        model: ev.data.model != null ? String(ev.data.model) : prev?.model,
+        provider: ev.data.provider != null ? String(ev.data.provider) : prev?.provider,
+        usage: ev.data.usage != null && typeof ev.data.usage === 'object' ? (ev.data.usage as DelegationNode['usage']) : prev?.usage,
+        artifactId: ev.data.artifactId != null ? String(ev.data.artifactId) : prev?.artifactId,
+        changedFiles: Array.isArray(ev.data.changedFiles) ? (ev.data.changedFiles as string[]) : prev?.changedFiles,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }
@@ -433,12 +441,16 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.todos = todos
       return next
     }
+    case 'hook_result': {
+      next.hookResults = [...next.hookResults, ev].slice(-50)
+      return next
+    }
     default:
       return next
   }
 }
 
-function humanizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
+export function humanizeToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
   if (!input) return '{}'
   const path = String(input.path ?? input.file_path ?? input.target ?? '')
   switch (toolName) {
@@ -464,6 +476,27 @@ function humanizeToolInput(toolName: string, input: Record<string, unknown> | un
     case 'read_file':
     case 'read':
       return path || safeJson(input)
+    case 'delegate_batch': {
+      const tasks = Array.isArray(input.tasks) ? input.tasks : []
+      if (tasks.length === 0) return '等待任务列表…'
+      const cap = Math.min(tasks.length, 8)
+      const lines: string[] = []
+      for (let i = 0; i < cap; i++) {
+        const task = tasks[i] as Record<string, unknown> | undefined
+        const id = typeof task?.id === 'string' && task.id.trim() ? task.id.trim() : `#${i + 1}`
+        const desc = typeof task?.description === 'string' ? task.description.trim() : ''
+        lines.push(desc ? `${id}: ${desc}` : id)
+      }
+      if (cap < tasks.length) lines.push(`… +${tasks.length - cap} more`)
+      return lines.join('\n')
+    }
+    case 'delegate_task': {
+      const objective = typeof input.objective === 'string' ? input.objective.trim() : ''
+      const agent = typeof input.agent === 'string' ? input.agent : ''
+      if (objective) return objective
+      if (agent) return `派发 ${agent}`
+      return '派发中…'
+    }
     default:
       return safeJson(input)
   }

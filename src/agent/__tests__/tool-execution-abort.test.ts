@@ -44,7 +44,7 @@ describe('ToolExecutionController abort-signal threading', () => {
         contextClaimStore: undefined,
         sessionId: 'test-session',
         contextWindow: 200_000,
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+        promptEngine: {},
       },
       cwd: '/tmp/test',
       harness: {
@@ -146,7 +146,7 @@ describe('aborted tool result is never empty', () => {
         lspEnabled: false,
         sessionId: 'test-session',
         contextWindow: 200_000,
-        promptEngine: { setStrategyShift: () => {}, setImpactHint: () => {} },
+        promptEngine: {},
       },
       cwd: '/tmp/test',
       harness: {

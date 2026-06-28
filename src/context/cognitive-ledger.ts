@@ -21,6 +21,10 @@ export interface CognitiveLedgerInput {
   seasonIntensity?: number
   /** CVM trap: latest tool risk level for uncertainty framing */
   riskLevel?: RiskLevel
+  /** Convergence precision (0-1), composite score from convergence detector signals */
+  convergencePrecision?: number
+  /** Output token efficiency (0-1), from convergence detector signals.tokenEfficiency */
+  outputEfficiency?: number
 }
 
 export interface CognitiveLedger {
@@ -34,6 +38,8 @@ export interface CognitiveLedger {
   season?: CognitiveSeason | null
   seasonIntensity?: number
   riskLevel?: RiskLevel
+  convergencePrecision?: number
+  outputEfficiency?: number
 }
 
 export interface CognitivePhaseSnapshot {
@@ -57,6 +63,8 @@ export function createCognitiveLedger(input: CognitiveLedgerInput): CognitiveLed
     season: input.season ?? null,
     seasonIntensity: input.seasonIntensity,
     riskLevel: input.riskLevel,
+    convergencePrecision: input.convergencePrecision,
+    outputEfficiency: input.outputEfficiency,
   }
 }
 
@@ -146,6 +154,9 @@ export function buildCognitiveMirror(ledger: CognitiveLedger): string {
       : ledger.season
     parts.push(`season="${seasonVal}"`)
   }
+
+  if (ledger.convergencePrecision !== undefined) parts.push(`convergence_precision="${formatDim(ledger.convergencePrecision)}"`)
+  if (ledger.outputEfficiency !== undefined) parts.push(`output_efficiency="${formatDim(ledger.outputEfficiency)}"`)
 
   return `<cognitive-mirror ${parts.join(' ')} />`
 }

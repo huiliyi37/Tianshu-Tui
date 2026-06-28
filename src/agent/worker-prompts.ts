@@ -160,8 +160,8 @@ function buildReadOnlyResultShape(): string {
   ],
   "changedFiles": [],
   "examinedFiles": ["REQUIRED: list all files you read/inspected but did NOT modify"],
-  "risks": [],
-  "nextActions": [],
+  "risks": ["string — brief risk description, one per item"],
+  "nextActions": ["string — suggested next action, one per item"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
@@ -190,8 +190,8 @@ function buildWriteResultShape(): string {
     "skipped": 0,
     "durationMs": 0
   },
-  "risks": [],
-  "nextActions": [],
+  "risks": ["string — brief risk description, one per item"],
+  "nextActions": ["string — suggested next action, one per item"],
   "evidenceStatus": "verified | failed | blocked | unverified"
 }`
 }
@@ -283,23 +283,61 @@ export function buildWorkerPrompt(order: WorkOrder, authoritySuffix?: string): s
 }
 
 export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, parseError: string): string {
-  // Use tail of previous text — JSON output is more likely at the end.
-  // If the text is short, use the whole thing; otherwise prefer the last 4000 chars.
-  const tail = previousText.length <= 4000
+  // Tail of previous text as reference for the model to repair. A complete
+  // WorkerResult JSON for write-capable workers (multiple findings + artifacts
+  // + changedFiles) commonly reaches 5–8K chars; 4000 truncated mid-object and
+  // left the model without enough context to rebuild. 8000 covers a full
+  // typical packet while staying well under the 8192-token output budget.
+  const tail = previousText.length <= 8000
     ? previousText
-    : previousText.slice(-4000)
+    : previousText.slice(-8000)
 
   const hasWriteTools = order.allowedTools.some(t => WRITE_CAPABLE_TOOLS.has(t))
   const resultShape = hasWriteTools ? buildWriteResultShape() : buildReadOnlyResultShape()
 
+  // Classify the error to give a specific repair instruction.
+  const isMissingJson = parseError.includes('did not contain a JSON object')
+  const isInvalidJson = parseError.includes('Unexpected token') || parseError.includes('Expected')
+  const isMissingField = parseError.includes('Required') || parseError.includes('invalid_type')
+  const isSchemaError = parseError.includes('Unrecognized key') || parseError.includes('invalid_union')
+
+  let instruction = ''
+  if (isMissingJson) {
+    instruction = [
+      'The previous answer contained NO valid JSON object. Output ONLY a raw JSON object (no markdown, no prose, no thinking).',
+      'Start with a single { character and end with a single } character.',
+      'If your answer includes thinking or analysis, put it INSIDE the "summary" field of the JSON.',
+    ].join('\n')
+  } else if (isInvalidJson) {
+    instruction = [
+      'The JSON in your previous answer was syntactically invalid (bad commas, unclosed strings, etc).',
+      'Common fixes: use double-quotes for all keys AND values; remove trailing commas after the last array/object item; escape any double-quotes inside strings with \\\".',
+    ].join('\n')
+  } else if (isMissingField) {
+    instruction = [
+      'The JSON was valid but missing required fields. Check that your object has:',
+      '- "workOrderId" (copy from the order ID)',
+      '- "status" (one of: passed, failed, blocked, escalated)',
+      '- "findings" (array, not single object)',
+      '- "artifacts" (array, not single object)',
+      '- "changedFiles" (array of strings, even if empty)',
+      '- "risks" (array of strings)',
+      '- "nextActions" (array of strings)',
+      '- "evidenceStatus" (one of: verified, failed, blocked, unverified)',
+    ].join('\n')
+  } else if (isSchemaError) {
+    instruction = 'The JSON had extra or wrong-typed fields. Use EXACTLY the field names shown in the shape below — no additional top-level keys.'
+  } else {
+    instruction = `The JSON could not be parsed. Error: ${parseError}. Follow the exact shape below.`
+  }
+
   return [
-    'Repair the previous answer so it is exactly one valid WorkerResult JSON object.',
-    `WorkOrder ID that must be used: ${order.id}`,
-    `Parse error: ${parseError}`,
-    'Do not add markdown fences or explanation.',
-    'Use this shape:',
+    `YOUR PREVIOUS ANSWER COULD NOT BE USED. ${instruction}`,
+    'Output EXACTLY one JSON object and NOTHING else — no ``` fences, no markdown, no prose outside the object.',
+    `WorkOrder ID (copy this exactly): ${order.id}`,
+    'Required shape:',
     resultShape,
-    'Previous answer (last 4000 chars):',
+    'Your previous answer (for reference):',
     tail,
   ].join('\n')
 }

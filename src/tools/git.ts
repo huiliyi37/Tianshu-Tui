@@ -5,7 +5,7 @@ import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 import { killProcessTree } from './process-kill.js'
 
-const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'stash', 'stash_pop'] as const
+const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'log_graph', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
 
 const MAX_OUTPUT = 50_000
@@ -158,6 +158,97 @@ async function createSafetyRef(cwd: string, abortSignal?: AbortSignal): Promise<
   } catch { /* best-effort, never block stash */ }
 }
 
+/** Run `git log --graph --all --oneline --decorate` for the desktop Git graph view. */
+export async function getGitGraph(cwd: string, maxCount = 200): Promise<string> {
+  const count = Math.max(1, Math.min(maxCount, 500))
+  return runGit(
+    ['log', `--max-count=${count}`, '--graph', '--all', '--oneline', '--decorate', '--branches', '--remotes'],
+    cwd,
+  )
+}
+
+/** A single file's working-tree change relative to HEAD. */
+export interface WorkingTreeFile {
+  path: string
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+  additions: number
+  deletions: number
+}
+
+/** Parse `git diff HEAD --numstat` (+ untracked via status) into a file list.
+ *  numstat gives "added\tdelted\tpath" per file; renames show as "R100\told\tnew". */
+function parseWorkingTreeFiles(numstat: string, statusPorcelain: string): WorkingTreeFile[] {
+  const files = new Map<string, WorkingTreeFile>()
+  // numstat covers tracked changes (modified/added-to-index/deleted/rename)
+  for (const line of numstat.split('\n')) {
+    if (!line.trim()) continue
+    const parts = line.split('\t')
+    if (parts.length < 3) continue
+    const [addStr, delStr, ...pathParts] = parts
+    const path = pathParts.join('\t') // paths with tabs are pathological but safe
+    // Binary files show as "-\t-\t..." — count as 0 to avoid NaN
+    const additions = addStr === '-' ? 0 : parseInt(addStr!, 10) || 0
+    const deletions = delStr === '-' ? 0 : parseInt(delStr!, 10) || 0
+    files.set(path, { path, status: 'modified', additions, deletions })
+  }
+  // porcelain covers untracked (??) + precise status codes
+  for (const line of statusPorcelain.split('\n')) {
+    if (line.length < 3) continue
+    const xy = line.slice(0, 2)
+    let rawPath = line.slice(3)
+    // rename: "R  old -> new" — porcelain prints the new path with a ->
+    if (rawPath.includes(' -> ')) rawPath = rawPath.split(' -> ').pop()!
+    // strip surrounding quotes (core.quotepath)
+    if (rawPath.startsWith('"') && rawPath.endsWith('"')) rawPath = rawPath.slice(1, -1)
+    const existing = files.get(rawPath)
+    if (xy[1] === '?' || xy === '??') {
+      // untracked — not in numstat; add with 0/0, status untracked
+      if (!existing) files.set(rawPath, { path: rawPath, status: 'untracked', additions: 0, deletions: 0 })
+    } else if (existing) {
+      // refine status from porcelain xy code
+      const code = xy[0] !== ' ' ? xy[0] : xy[1]
+      existing.status =
+        code === 'A' ? 'added'
+        : code === 'D' ? 'deleted'
+        : code === 'R' ? 'renamed'
+        : 'modified'
+    }
+  }
+  return [...files.values()].sort((a, b) => a.path.localeCompare(b.path))
+}
+
+/**
+ * List working-tree changes relative to HEAD for the desktop "changes" tab.
+ * Uses `git diff HEAD --numstat` (tracked) + `git status --porcelain` (untracked + status codes).
+ * Lightweight: file list only, no diff body — the body is fetched per-file on demand via getFileDiff.
+ * Returns `notARepo: true` (empty files) if cwd isn't a git repo, so the UI can degrade gracefully.
+ */
+export async function getWorkingTreeFiles(cwd: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+  const { ok: numstatOk, output: numstat } = await runGitSafe(['diff', 'HEAD', '--numstat'], cwd)
+  // git diff HEAD fails if HEAD doesn't exist (empty repo) — treat as "no tracked diff yet"
+  const { ok: statusOk, output: statusOut } = await runGitSafe(['status', '--porcelain', '-uall'], cwd)
+  if (!statusOk && !numstatOk) {
+    // Both failed — likely not a git repo
+    return { files: [], isRepo: false }
+  }
+  return { files: parseWorkingTreeFiles(numstatOk ? numstat : '', statusOk ? statusOut : ''), isRepo: true }
+}
+
+/**
+ * Fetch the unified diff of a single file relative to HEAD, for on-demand
+ * rendering in the desktop "changes" tab. Empty string = no textual diff
+ * (binary file, or untracked with no HEAD to diff against).
+ */
+export async function getFileDiff(cwd: string, path: string): Promise<string> {
+  // Guard against path traversal / pathspec injection — pathspec must be relative
+  const rel = normalizeProjectRelativePath(cwd, path)
+  if (!rel) throw new Error(`Invalid file path: ${path}`)
+  const { ok, output } = await runGitSafe(['diff', 'HEAD', '--', rel], cwd)
+  if (!ok) return '' // untracked / binary / not in HEAD — no unified diff
+  return output
+}
+
+
 export const GIT_TOOL: Tool = {
   definition: {
     name: 'git',
@@ -166,6 +257,7 @@ export const GIT_TOOL: Tool = {
 - diff_summary: Show diff stats for staged and unstaged changes
 - commit: Commit only this session's modified files when available; otherwise commit already staged changes only
 - log: Show recent commit history (default 20, configurable with maxCount)
+- log_graph: Show ASCII branch/merge graph across all local and remote refs
 - stash: Stash current working directory changes
 
 For complex git operations (branch, merge, rebase, push, pull), use the bash tool instead.`,
@@ -273,6 +365,27 @@ For complex git operations (branch, merge, rebase, push, pull), use the bash too
           const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 20, 100))
           const log = (await runGit(['log', `--max-count=${maxCount}`, '--oneline', '--decorate'], cwd, params.abortSignal)).trim()
           return { content: log || 'No commits yet.' }
+        }
+
+        case 'log_graph': {
+          const maxCount = Math.max(1, Math.min((params.input.maxCount as number) ?? 200, 500))
+          const graph = (
+            await runGit(
+              [
+                'log',
+                `--max-count=${maxCount}`,
+                '--graph',
+                '--all',
+                '--oneline',
+                '--decorate',
+                '--branches',
+                '--remotes',
+              ],
+              cwd,
+              params.abortSignal,
+            )
+          ).trimEnd()
+          return { content: graph || 'No commits yet.' }
         }
 
         case 'stash': {

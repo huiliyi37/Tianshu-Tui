@@ -26,7 +26,7 @@ export interface RuntimeToolEvent {
 export interface RuntimeHookSnapshot {
   cwd: string
   turn: number
-  recentToolHistory: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target'>>
+  recentToolHistory: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'argsHash'>>
   sensorium: Sensorium | null
   sensoriumInput?: SensoriumInput
   providerDegradationRatio?: number

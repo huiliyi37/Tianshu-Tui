@@ -5,7 +5,7 @@ export interface CompanionHeartbeatHookDeps {
   cwd: string
   getSessionId: () => string | undefined
   getDomainId: () => string | null
-  getCognitiveSnapshot: () => { vigor: number; stability: number; season: string } | null
+  getCognitiveSnapshot: () => { vigor: number; stability: number; season: string; convergencePrecision?: number; outputEfficiency?: number } | null
   getObjective: () => string | null
 }
 

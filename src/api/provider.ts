@@ -28,6 +28,10 @@ export interface ProviderCapabilities {
    * - 'none': No prefix caching; skip cache fingerprinting
    */
   prefixCacheStrategy: 'deepseek-native' | 'anthropic-cache-control' | 'none'
+  /** Whether the provider supports `response_format: {type:'json_object'}` to force
+   *  JSON output. Used by worker sessions to eliminate free-text parse failures
+   *  (DeepSeek/GLM/OpenAI-compatible support this; some providers reject it). */
+  supportsResponseFormat: boolean
 }
 
 /**
@@ -52,6 +56,7 @@ export const DEEPSEEK_CAPABILITIES: ProviderCapabilities = {
   hasToolJsonInContentBug: true,
   effortFormat: 'reasoning_effort',
   prefixCacheStrategy: 'deepseek-native',
+  supportsResponseFormat: true,
   mapUsage: mapDeepSeekUsage,
 }
 
@@ -63,6 +68,7 @@ export const DEFAULT_CAPABILITIES: ProviderCapabilities = {
   hasToolJsonInContentBug: false,
   effortFormat: 'none',
   prefixCacheStrategy: 'none',
+  supportsResponseFormat: false,
 }
 
 /**
@@ -80,6 +86,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   },
   glm: {
     supportsThinking: true,
@@ -91,6 +98,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     // GLM-5.2 has implicit exact-prefix caching (no cache_control breakpoints),
     // reported via usage.prompt_tokens_details.cached_tokens — same model as DeepSeek.
     prefixCacheStrategy: 'deepseek-native',
+    supportsResponseFormat: true,
     mapUsage: mapDeepSeekUsage,
   },
   minimax: {
@@ -101,6 +109,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   },
   mimo: {
     supportsThinking: true,
@@ -110,6 +119,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   },
   'mimo-api': {
     supportsThinking: true,
@@ -119,6 +129,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'deepseek-native',
+    supportsResponseFormat: false,
   },
   'opencode-go': {
     supportsThinking: true,
@@ -128,6 +139,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   },
   openai: {
     supportsThinking: true,
@@ -137,6 +149,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
   },
   codex: {
     supportsThinking: true,
@@ -146,6 +159,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
   },
   claude: {
     supportsThinking: true,
@@ -155,6 +169,7 @@ export const WELL_KNOWN_DEFAULTS: Record<string, ProviderCapabilities> = {
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   },
 }
 
