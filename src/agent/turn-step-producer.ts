@@ -226,7 +226,11 @@ export class TurnStepProducer {
       const routeKinds = this.self._lastRetrievalRoute?.taskKinds
       this.self._taskDepthLayer = classifyTaskDepth(this.self.taskContract, undefined, routeKinds)
       this.self.config.promptEngine.setTaskDepthLayer(this.self._taskDepthLayer)
-      this.self._planMethodology = classifyPlanMethodology(this.self.taskContract, this.self._taskDepthLayer)
+      // Plan mode always uses the Superpowers-based base template; execution-mode tasks
+      // still route between lightweight and full based on depth + safety signals.
+      this.self._planMethodology = this.self.planModeState === 'planning'
+        ? 'full'
+        : classifyPlanMethodology(this.self.taskContract, this.self._taskDepthLayer)
       this.self.config.promptEngine.setPlanMethodology(this.self._planMethodology)
       // U6: open a fresh execution trace for a new task (or a changed contract).
       if (this.self._taskDepthLayer) {

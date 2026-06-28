@@ -5,13 +5,13 @@ import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
 import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
 import { storePlan } from '../agent/plan-store.js'
-import { classifyTaskDepth, classifyPlanMethodology, type TaskContract } from '../context/task-contract.js'
+import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
 import type { TodoItem } from './todo-store.js'
 import { readFile } from 'node:fs/promises'
 import type { TaskGraph, TaskGraphNode } from '../agent/task-graph.js'
 
-const FULL_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-template.md'
+const BASE_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-28-plan-methodology-base.md'
 const LIGHTWEIGHT_TEMPLATE_PATH = 'docs/superpowers/plans/2026-06-14-plan-methodology-lightweight.md'
 
 // ── Plan file detection & checklist parsing (plan_task → team_orchestrate fast path) ──
@@ -89,20 +89,21 @@ function buildMethodologyGuidance(objective: string, files: string[]): string {
     isActionable: true,
   }
   const depth = classifyTaskDepth(contract)
-  const methodology = classifyPlanMethodology(contract, depth)
-
-  const templatePath = methodology === 'full' ? FULL_TEMPLATE_PATH : LIGHTWEIGHT_TEMPLATE_PATH
-  const templateType = methodology === 'full' ? '完整版（9阶段）' : '轻量版（5阶段）'
+  // 默认使用 Superpowers-based 基础模板；只有明确极小（unit 深度 + 不超过一个文件）才降级为轻量版。
+  const useLightweight = depth === 'unit' && files.length <= 1
+  const templatePath = useLightweight ? LIGHTWEIGHT_TEMPLATE_PATH : BASE_TEMPLATE_PATH
+  const templateType = useLightweight ? '轻量版（5阶段）' : '基础模板（Superpowers writing-plans）'
+  const note = useLightweight
+    ? '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。'
+    : '默认使用基础模板，强制四条纪律：① 至少一张 Mermaid 图；② TDD RED→GREEN；③ 探针先行；④ 瑶光反证（真实输入复现、取 exit code、方案 GREEN≠落地 GREEN）。安全/权限/沙箱/多 enforcement gate 任务追加安全附录。'
 
   return [
     '## 计划方法论路由',
     '',
-    `任务深度: ${depth} | 推荐模板: ${methodology} | ${templateType}`,
+    `任务深度: ${depth} | 推荐模板: ${templateType}`,
     `模板路径: ${templatePath}`,
     '',
-    methodology === 'full'
-      ? '必须包含: 安全不变量、触发路径清单、双门对齐数据流图。系统边界标定和跨模块协调说明不可省略。'
-      : '本任务 scope 内聚，单模块边界内变更，聚焦核心改动与验证即可。',
+    note,
     '',
     '如用户已显式指定模板，以用户指定为准。',
   ].join('\n')
