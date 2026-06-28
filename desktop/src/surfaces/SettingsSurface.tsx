@@ -8,6 +8,7 @@ import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../l
 import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
 import { loadGlassConfig, saveGlassConfig, type GlassConfig } from '../lib/glass-custom'
 import { loadUiDensity, saveUiDensity, applyUiDensity, type UiDensity } from '../lib/ui-density'
+import { useEnabledTabs, ALL_TABS, type ReviewTab } from '../lib/review-tabs'
 import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -78,6 +79,7 @@ export function SettingsSurface() {
   const [fontFamily, setFontFamily] = useState<FontFamilyPref>(() => loadFontFamilyPref())
   const [glassConfig, setGlassConfig] = useState<GlassConfig>(() => loadGlassConfig())
   const [uiDensity, setUiDensity] = useState<UiDensity>(() => loadUiDensity())
+  const [enabledTabs, setEnabledTabs] = useEnabledTabs()
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -220,6 +222,34 @@ export function SettingsSurface() {
                 </SelectContent>
               </Select>
               <div className="meta">{t('notifHint')}</div>
+            </section>
+            <section className="settings-group">
+              <h4>右侧面板标签自定义</h4>
+              <div className="flex flex-col gap-2 mt-2">
+                {ALL_TABS.map((tab) => {
+                  const isChecked = enabledTabs.includes(tab.id)
+                  return (
+                    <label key={tab.id} className="flex items-center gap-2 text-xs text-text cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={isChecked && enabledTabs.length === 1} // Prevent disabling all tabs
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEnabledTabs([...enabledTabs, tab.id])
+                          } else {
+                            setEnabledTabs(enabledTabs.filter((id) => id !== tab.id))
+                          }
+                        }}
+                        className="rounded border-border text-accent focus:ring-accent h-3.5 w-3.5"
+                      />
+                      <span className="font-mono text-muted shrink-0">{tab.glyph}</span>
+                      <span>{tab.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <div className="meta mt-1.5">勾选以显示或隐藏右侧审查面板（ReviewPanel）中对应的标签页，至少保持显示一个标签。</div>
             </section>
           </>
         )}

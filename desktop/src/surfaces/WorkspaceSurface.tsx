@@ -273,13 +273,16 @@ export function WorkspaceSurface() {
             onFeedbackSent={() => sessions.refetch()}
             todos={view.todos}
             sources={view.sources}
+            onCollapse={() => {
+              dispatch({ type: 'setReview', visible: false })
+            }}
           />
         </Panel>
       </Group>
 
       {!ui.reviewVisible && (
         <button
-          className="review-expand-hint"
+          className="review-expand-capsule"
           title="展开审查面板 (Cmd+Shift+B)"
           onClick={() => {
             dispatch({ type: 'setReview', visible: true })
@@ -287,10 +290,11 @@ export function WorkspaceSurface() {
           }}
           aria-label="展开审查面板"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5" />
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M15 18l-6-6 6-6" />
           </svg>
+          <span className="capsule-text">审查面板</span>
         </button>
       )}
     </div>

@@ -9,6 +9,7 @@ import {
   type RollbackResult,
 } from '../runtime/client'
 import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
+import { useEnabledTabs } from '../lib/review-tabs'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
@@ -60,9 +61,11 @@ export function ReviewPanel(props: {
   todos?: TodoStateItem[]
   /** Source files touched by file-editing tools. */
   sources?: string[]
+  onCollapse?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [] } = props
+  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [], onCollapse } = props
   const autonomous = isAutonomous(approvalMode)
+  const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
 
   // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
@@ -193,38 +196,64 @@ export function ReviewPanel(props: {
   const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
 
-  const tabs: TabDef[] = [
-    { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
-    { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
-    { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
-    { id: 'canvas', label: 'Canvas', glyph: '🎨' },
-    { id: 'wt', label: 'Diff', glyph: '⟐' },
-    { id: 'files', label: 'Files', glyph: '📁' },
-    { id: 'github', label: 'PR', glyph: '🔀' },
-  ]
+  const tabs = useMemo<TabDef[]>(() => {
+    const all: TabDef[] = [
+      { id: 'review', label: 'Changes', glyph: '✓', badge: () => pendingCount || null },
+      { id: 'plan', label: 'Plan', glyph: '📋', badge: () => (planMode === 'planning' ? -1 : null) },
+      { id: 'task', label: 'Tasks', glyph: '☑', badge: () => incompleteTasks || null },
+      { id: 'canvas', label: 'Canvas', glyph: '🎨' },
+      { id: 'wt', label: 'Diff', glyph: '⟐' },
+      { id: 'files', label: 'Files', glyph: '📁' },
+      { id: 'github', label: 'PR', glyph: '🔀' },
+    ]
+    const filtered = all.filter((t) => enabledTabs.includes(t.id))
+    return filtered.length > 0 ? filtered : [all[0]!]
+  }, [pendingCount, planMode, incompleteTasks, enabledTabs])
+
+  // Fallback active tab if current tab gets disabled
+  useEffect(() => {
+    const isCurrentTabEnabled = tabs.some((t) => t.id === tab)
+    if (!isCurrentTabEnabled && tabs[0]) {
+      setTab(tabs[0].id)
+    }
+  }, [tabs, tab])
 
   return (
-    <div className="review">
+    <div className="review flex flex-col h-full relative">
       <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
-        <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {tabs.map((t) => {
-            const badge = t.badge?.()
-            return (
-              <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
-                <span aria-hidden>{t.glyph}</span>
-                <span>{t.label}</span>
-                {badge != null && badge > 0 && (
-                  <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
-                    {badge}
-                  </span>
-                )}
-                {badge === -1 && (
-                  <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
-                )}
-              </TabsTrigger>
-            )
-          })}
-        </TabsList>
+        <div className="flex items-center justify-between pr-2">
+          <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1">
+            {tabs.map((t) => {
+              const badge = t.badge?.()
+              return (
+                <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                  <span aria-hidden>{t.glyph}</span>
+                  <span>{t.label}</span>
+                  {badge != null && badge > 0 && (
+                    <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
+                      {badge}
+                    </span>
+                  )}
+                  {badge === -1 && (
+                    <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                  )}
+                </TabsTrigger>
+              )
+            })}
+          </TabsList>
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              className="review-collapse-capsule-btn flex items-center gap-1 text-[10px] text-muted hover:text-text bg-panel-3 hover:bg-panel-2 border border-border rounded-full px-2 py-0.5 transition-all shrink-0 ml-2"
+              title="收起审查面板 (Cmd+Shift+B)"
+            >
+              <span className="text-[9px]">收起</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M9 18l6-6-6-6" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         <TabsContent value="github" className="review-body">
           <GithubPanel />

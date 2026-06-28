@@ -3507,3 +3507,52 @@ html[data-theme="nebula"] .plan-panel {
   color: var(--error);
   background: var(--error-soft);
 }
+
+/* Capsule Toggle Buttons */
+.review-expand-capsule {
+  position: fixed;
+  right: -10px;
+  top: 45%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  box-shadow: var(--shadow-md);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.review-expand-capsule:hover {
+  right: 0;
+  color: var(--text-strong);
+  border-color: var(--accent);
+  background: var(--panel-3);
+  box-shadow: var(--shadow-lg);
+}
+.review-expand-capsule svg {
+  color: var(--accent);
+  transition: transform var(--dur) var(--ease);
+}
+.review-expand-capsule:hover svg {
+  transform: translateX(-2px);
+}
+.review-collapse-capsule-btn {
+  box-shadow: var(--shadow-sm);
+}
+.review-collapse-capsule-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+.review-collapse-capsule-btn svg {
+  transition: transform var(--dur) var(--ease);
+}
+.review-collapse-capsule-btn:hover svg {
+  transform: translateX(2px);
+}
