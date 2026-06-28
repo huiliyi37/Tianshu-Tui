@@ -34,6 +34,7 @@ import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
+import { renderApprovalPreview } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
 import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
@@ -56,6 +57,7 @@ import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
+import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import { renderRewind, type RewindData } from '../format/rewind.js'
@@ -88,51 +90,6 @@ export function truncateToWidth(text: string, maxWidth: number): string {
   return out
 }
 
-/**
- * Format a human-readable preview of what a tool will do, for the approval prompt.
- * Tool-aware: shows file path+diffstat for write/edit, command for bash, objective for delegate.
- * Falls back to truncated JSON for unknown tools.
- */
-function formatApprovalPreview(toolName: string, input: Record<string, unknown>, maxWidth: number): string[] {
-  const truncate = (s: string, max: number) => s.length > max ? s.slice(0, max - 1) + '…' : s
-  const lines: string[] = []
-  // bash / shell — show the command
-  if (toolName === 'bash' || toolName === 'shell' || toolName === 'sandbox_exec') {
-    const cmd = typeof input.command === 'string' ? input.command : JSON.stringify(input)
-    lines.push(`→ ${truncate(cmd, maxWidth - 3)}`)
-    return lines
-  }
-  // write_file / edit_file — show path + line count
-  if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'hash_edit' || toolName === 'apply_patch') {
-    const path = typeof input.path === 'string' ? input.path : typeof input.file_path === 'string' ? input.file_path : '?'
-    const content = typeof input.content === 'string' ? input.content : typeof input.new_string === 'string' ? input.new_string : ''
-    const lineCount = content ? content.split('\n').length : 0
-    lines.push(`→ ${path} (${lineCount} lines)`)
-    return lines
-  }
-  // delegate_task — show objective
-  if (toolName === 'delegate_task') {
-    const obj = typeof input.objective === 'string' ? input.objective : ''
-    if (obj) lines.push(`→ ${truncate(obj, maxWidth - 3)}`)
-    return lines
-  }
-  // delegate_batch — show task count
-  if (toolName === 'delegate_batch') {
-    const tasks = Array.isArray(input.tasks) ? input.tasks : []
-    lines.push(`→ ${tasks.length} tasks`)
-    return lines
-  }
-  // web operations
-  if (toolName === 'web_fetch' || toolName === 'web_search') {
-    const url = typeof input.url === 'string' ? input.url : typeof input.query === 'string' ? input.query : ''
-    if (url) lines.push(`→ ${truncate(url, maxWidth - 3)}`)
-    return lines
-  }
-  // fallback: truncated JSON (max 2 lines)
-  const raw = JSON.stringify(input)
-  lines.push(`→ ${truncate(raw, maxWidth - 3)}`)
-  return lines
-}
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -366,14 +323,15 @@ export class TuiApp {
         // 跨 run steer 收口：上一 run 结束（text-only 收尾从不 drain）或
         // busy 闩残留时排队的 guidance 会滞留到这里。若放任不管，它会在
         // 下一次工具回合作为 [User guidance] 注入 —— 旧指令混进新任务上下文。
-        // 归并进本次 prompt（排队内容本就是用户意图，按时间序拼在新消息前）。
+        // 归并进本次 prompt（排队内容本就是用户意图，按优先级/时间序拼在新消息前）。
         // 注意：steer 路径已为每条 queued 消息单独 commit 了用户气泡，
         // 此处不再重复 commit，仅输出合并提示并归并文本。
         let submitText = text
         let steerMerged = false
         if (trimmed && this.steerBuffer.hasPending()) {
-          const pending = [...this.steerBuffer.getPending()]
+          const pendingEntries = [...this.steerBuffer.getPendingEntries()]
           this.steerBuffer.clear()
+          const pending = pendingEntries.map(entry => entry.text)
           submitText = [...pending, trimmed].join('\n\n')
           steerMerged = true
           this.commitAbove(() => {
@@ -827,6 +785,8 @@ export class TuiApp {
 
   /** 激活 overlay */
   activateOverlay(id: string): boolean {
+    // overlay 内 ESC 应即时响应，关闭输入处理器的 lone-ESC 超时。
+    this.input.setEscapeImmediate(true)
     // 在激活任何全屏覆盖层之前，必须先干净地清除主屏幕底部的 live region（输入框和 GlanceBar），
     // 避免退出覆盖层后主屏幕残留旧的 live region 导致重影和重复行。
     this.live.clear()
@@ -873,6 +833,7 @@ export class TuiApp {
 
   /** 停用 overlay */
   deactivateOverlay(): void {
+    this.input.setEscapeImmediate(false)
     this.overlay.deactivate()
     // Alt screen exit restores cursor to where it was before overlay activate.
     // activateOverlay called live.clear() which: (1) moved cursor to live region
@@ -959,8 +920,103 @@ export class TuiApp {
     }
 
     if (id === 'pager') {
+      const nav = this.overlayController.nav()
       const total = this.pagerTotalPages()
-      const cur = this.overlayController.nav().pagerPage
+      const mode = nav.pagerMode
+      const messages = this.overlayController.getData()?.pagerContent?.().messages ?? []
+
+      // Search mode: character input
+      if (mode === 'search') {
+        if (key.name === 'escape') {
+          nav.pagerMode = 'page'
+          nav.pagerSearchQuery = ''
+          nav.pagerSearchCurrent = 0
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'backspace') {
+          this.editOverlayQuery(null)
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'return') {
+          // Confirm search and jump to first match
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'down' || c === 'j' || key.name === 'pagedown') {
+          const next = findNextMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+          nav.pagerSearchCurrent = next + 1
+          this.overlay.rerender()
+          return true
+        }
+        if (key.name === 'up' || c === 'k' || key.name === 'pageup') {
+          const next = findPrevMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+          nav.pagerSearchCurrent = next + 1
+          this.overlay.rerender()
+          return true
+        }
+        if (this.isPrintableKey(key)) {
+          this.editOverlayQuery(key.char)
+          this.updatePagerSearch(messages)
+          this.overlay.rerender()
+          return true
+        }
+        return false
+      }
+
+      // Message mode: navigate by message
+      if (mode === 'message') {
+        if (key.name === 'escape') {
+          nav.pagerMode = 'page'
+          this.overlay.rerender()
+          return true
+        }
+        const count = messages.length
+        let idx = nav.pagerSelectedMessage
+        if (key.name === 'down' || c === 'j') idx = Math.min(idx + 1, count - 1)
+        else if (key.name === 'up' || c === 'k') idx = Math.max(idx - 1, 0)
+        else if (key.name === 'home') idx = 0
+        else if (key.name === 'end') idx = count - 1
+        else return false
+        nav.pagerSelectedMessage = idx
+        this.overlay.rerender()
+        return true
+      }
+
+      // Page mode
+      if (c === '/') {
+        nav.pagerMode = 'search'
+        nav.pagerSearchQuery = ''
+        nav.pagerSearchCurrent = 0
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'm' && messages.length > 0) {
+        nav.pagerMode = 'message'
+        // Select the message nearest to the current page start
+        const pageSize = Math.max(1, this.rows - 4)
+        nav.pagerSelectedMessage = Math.min(nav.pagerPage * pageSize, messages.length - 1)
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'n' && nav.pagerSearchQuery) {
+        nav.pagerMode = 'search'
+        const next = findNextMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+        nav.pagerSearchCurrent = next + 1
+        this.overlay.rerender()
+        return true
+      }
+      if (c === 'N' && nav.pagerSearchQuery) {
+        nav.pagerMode = 'search'
+        const next = findPrevMatch(messages, nav.pagerSearchCurrent - 1, nav.pagerSearchQuery)
+        nav.pagerSearchCurrent = next + 1
+        this.overlay.rerender()
+        return true
+      }
+      const cur = nav.pagerPage
       let next = cur
       if (key.name === 'down' || key.name === 'pagedown' || c === 'j') next = cur + 1
       else if (key.name === 'up' || key.name === 'pageup' || c === 'k') next = cur - 1
@@ -969,7 +1025,7 @@ export class TuiApp {
       else return false
       next = Math.max(0, Math.min(total - 1, next))
       if (next !== cur) {
-        this.overlayController.nav().pagerPage = next
+        nav.pagerPage = next
         this.overlay.rerender()
       }
       return true
@@ -1160,6 +1216,15 @@ export class TuiApp {
   private editOverlayQuery(ch: string | null): void {
     this.overlayController.editQuery(ch)
     this.overlay.rerender()
+  }
+
+  /** 同步 pager 搜索 query 与匹配状态。 */
+  private updatePagerSearch(messages: readonly import('../scrollback-transcript.js').TranscriptMessage[]): void {
+    const nav = this.overlayController.nav()
+    const query = this.overlayController.getQuery()
+    nav.pagerSearchQuery = query
+    const matches = searchTranscript(messages, query)
+    nav.pagerSearchCurrent = matches.length > 0 ? matches[0]! + 1 : 0
   }
 
   /** pager 总页数（与 renderPager 同口径：pageSize = rows - 4）。 */
@@ -2105,7 +2170,7 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const preview = formatApprovalPreview(p.name, p.input, this.columns - 4)
+        const preview = renderApprovalPreview(p.name, p.input, this.columns - 4, this.theme)
         lines.push({ text: '' })
         lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
@@ -2381,6 +2446,14 @@ export class TuiApp {
       // 透传给 agent 前 commit 用户消息到 scrollback，确保 slash 命令
       // 也能在终端历史中看到（之前只有 agent 回复无用户气泡）。
       this.commitUserPrompt(input)
+
+      if (this.agentBusy) {
+        // 当前 run 仍在执行：把透传 slash 命令按高优先级排进 steer 队列，
+        // 避免与正在进行的 turn 冲突，同时保证它比普通的 later guidance 先 drain。
+        this.steerBuffer.push(input, 'next')
+        return
+      }
+
       this.blockWriter.discard()
       this.streamRenderer.reset()
       this.streamRenderController.assistantHeaderDone = false
@@ -2453,11 +2526,24 @@ export class TuiApp {
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
     this.overlayController.setChoicePanelExec(choicePanelExec)
-    // Pager — page 由 overlayNav 注入（覆盖 provider 的静态 page）
+    // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
     this.overlay.register('pager', {
       render: (_w, _h) => {
         const data = overlayData?.pagerContent?.() ?? { content: '(no content)', page: 0 }
-        return renderPager({ ...data, page: this.overlayController.nav().pagerPage }, this.columns, this.rows, this.theme)
+        const nav = this.overlayController.nav()
+        const messages = data.messages ?? []
+        const searchMatches = nav.pagerMode === 'search' && nav.pagerSearchQuery
+          ? searchTranscript(messages, nav.pagerSearchQuery).length
+          : 0
+        return renderPager({
+          ...data,
+          page: nav.pagerPage,
+          mode: nav.pagerMode,
+          searchQuery: nav.pagerSearchQuery,
+          searchMatches,
+          searchCurrent: nav.pagerSearchCurrent,
+          selectedMessageIndex: nav.pagerSelectedMessage,
+        }, this.columns, this.rows, this.theme)
       },
     })
 

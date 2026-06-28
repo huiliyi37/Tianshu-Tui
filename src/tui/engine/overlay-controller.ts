@@ -5,6 +5,10 @@ import type { HistorySearchData } from '../format/history-search.js'
 
 export interface OverlayNavState {
   pagerPage: number
+  pagerMode: 'page' | 'search' | 'message'
+  pagerSearchQuery: string
+  pagerSearchCurrent: number
+  pagerSelectedMessage: number
   paletteIndex: number
   rewindIndex: number
   historySearchIndex: number
@@ -37,7 +41,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (content: string) => void
@@ -52,11 +56,19 @@ export class OverlayController {
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
   setPagerPage(v: number): void { this.overlayNav.pagerPage = v }
+  get pagerMode(): 'page' | 'search' | 'message' { return this.overlayNav.pagerMode }
+  setPagerMode(v: 'page' | 'search' | 'message'): void { this.overlayNav.pagerMode = v }
+  get pagerSearchQuery(): string { return this.overlayNav.pagerSearchQuery }
+  setPagerSearchQuery(v: string): void { this.overlayNav.pagerSearchQuery = v }
+  get pagerSearchCurrent(): number { return this.overlayNav.pagerSearchCurrent }
+  setPagerSearchCurrent(v: number): void { this.overlayNav.pagerSearchCurrent = v }
+  get pagerSelectedMessage(): number { return this.overlayNav.pagerSelectedMessage }
+  setPagerSelectedMessage(v: number): void { this.overlayNav.pagerSelectedMessage = v }
   get paletteIndex(): number { return this.overlayNav.paletteIndex }
   setPaletteIndex(v: number): void { this.overlayNav.paletteIndex = v }
   get rewindIndex(): number { return this.overlayNav.rewindIndex }

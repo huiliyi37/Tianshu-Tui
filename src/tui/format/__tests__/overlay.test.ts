@@ -55,6 +55,47 @@ describe('overlay CJK/emoji width alignment (padLine / title / footer)', () => {
     const lines = renderPager({ content: '甲\n\nz', page: 0 }, width, 8, theme)
     assertAllWidth(lines, width)
   })
+
+  it('renderPager: search mode shows query and match count', () => {
+    const width = 60
+    const lines = renderPager(
+      { content: 'alpha\nbeta\ngamma', page: 0, mode: 'search', searchQuery: 'ta', searchMatches: 2, searchCurrent: 1 },
+      width,
+      10,
+      theme,
+    )
+    const text = stripAnsi(lines.join('\n'))
+    assert.ok(text.includes('Search "ta" (1/2)'))
+    assert.ok(text.includes('alpha'))
+    assert.ok(text.includes('beta'))
+  })
+
+  it('renderPager: message mode shows selected message', () => {
+    const width = 60
+    const lines = renderPager(
+      {
+        content: 'alpha\nbeta\ngamma',
+        page: 0,
+        mode: 'message',
+        selectedMessageIndex: 0,
+        messages: [{
+          startLine: 0,
+          endLine: 1,
+          role: 'assistant',
+          summary: 'alpha',
+          lines: ['alpha'],
+          isTruncated: false,
+          rawContent: 'alpha',
+        }],
+      },
+      width,
+      10,
+      theme,
+    )
+    const text = stripAnsi(lines.join('\n'))
+    assert.ok(text.includes('Message 1/1'))
+    assert.ok(text.includes('alpha'))
+  })
 })
 
 function stripAnsi(s: string): string {

@@ -27,6 +27,7 @@ import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { getTodos } from './tools/todo.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
+import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
 import { resolveAppPromptInput } from './tui/slash-commands.js'
@@ -415,12 +416,16 @@ async function main() {
     return filterCommands(base, tuiApp.getOverlayQuery())
   }
   tuiApp.registerOverlays({
-    // Pager — scrollback 内容
-    pagerContent: () => ({
-      content: tuiApp.getScrollbackContent() || '(no messages yet)',
-      page: 0,
-      title: 'Scrollback',
-    }),
+    // Pager — scrollback 内容 + 消息级解析（用于搜索/消息视图）
+    pagerContent: () => {
+      const content = tuiApp.getScrollbackContent() || '(no messages yet)'
+      return {
+        content,
+        page: 0,
+        title: 'Scrollback',
+        messages: parseScrollbackTranscript(content),
+      }
+    },
     // Starmap
     starmapEntries: () => {
       const domains = starDomainRegistry.list()

@@ -15,8 +15,8 @@ import stringWidth from 'string-width'
 import { ANSI, color } from '../engine/ansi.js'
 import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
+import type { TranscriptMessage } from '../scrollback-transcript.js'
 
-// ── Shared Layout Helpers ─────────────────────────────────────
 
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
   const tabDomain = activeTab === 'domain' ? color(' 🎛  Domain ', theme.primary, { bold: true }) : color('    Domain ', theme.dim)
@@ -51,7 +51,22 @@ function formatTitleBar(title: string, width: number, theme: RivetTheme): string
 }
 
 function formatFooter(hint: string, width: number, theme: RivetTheme): string {
-  const padded = ` ${hint} `
+  const maxHintWidth = Math.max(0, width - 4) // 2 borders + 1 space each side
+  let visibleHint = hint
+  if (stringWidth(visibleHint) > maxHintWidth) {
+    // Preserve the right-hand side (close hints are usually at the tail).
+    let suffix = ''
+    let suffixWidth = 0
+    const chars = Array.from(hint)
+    for (let i = chars.length - 1; i >= 0; i--) {
+      const cw = stringWidth(chars[i]!)
+      if (suffixWidth + cw + 1 > maxHintWidth) break // +1 for leading ellipsis
+      suffix = chars[i]! + suffix
+      suffixWidth += cw
+    }
+    visibleHint = '…' + suffix
+  }
+  const padded = ` ${visibleHint} `
   const remaining = width - 2 - stringWidth(padded)
   return color('│' + padded + ' '.repeat(Math.max(0, remaining)) + '│', theme.dim)
 }
@@ -72,36 +87,143 @@ export interface PagerData {
   page: number
   /** 标题 */
   title?: string
+  /** 当前模式 */
+  mode?: 'page' | 'search' | 'message'
+  /** 搜索 query */
+  searchQuery?: string
+  /** 搜索总匹配数 */
+  searchMatches?: number
+  /** 当前匹配序号（1-based） */
+  searchCurrent?: number
+  /** 消息列表（用于搜索/消息视图） */
+  messages?: TranscriptMessage[]
+  /** 当前选中的消息索引（message 模式） */
+  selectedMessageIndex?: number
+}
+
+const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
+function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, '')
+}
+
+function lineMatchesQuery(line: string, query: string): boolean {
+  return stripAnsi(line).toLowerCase().includes(query.toLowerCase())
+}
+
+function highlightMatch(line: string, query: string, width: number, theme: RivetTheme): string {
+  if (!query) return line
+  const plain = stripAnsi(line)
+  const q = query.toLowerCase()
+  const idx = plain.toLowerCase().indexOf(q)
+  if (idx === -1) return line
+  const before = plain.slice(0, idx)
+  const match = plain.slice(idx, idx + q.length)
+  const after = plain.slice(idx + q.length)
+  const highlighted = `${before}${color(match, theme.primary, { bold: true })}${after}`
+  // Re-pad to width; highlighted line may have different display width due to ANSI,
+  // but padLine uses stringWidth which strips ANSI, so it's safe.
+  const padding = Math.max(0, width - 2 - stringWidth(highlighted))
+  return color('│', theme.dim) + highlighted + ' '.repeat(padding) + color('│', theme.dim)
+}
+
+function pageForMessage(messages: readonly TranscriptMessage[], messageIndex: number, pageSize: number): number {
+  if (messageIndex < 0 || messageIndex >= messages.length || pageSize <= 0) return 0
+  let rows = 0
+  for (let i = 0; i < messageIndex; i++) {
+    rows += messages[i]!.lines.length
+  }
+  return Math.floor(rows / pageSize)
 }
 
 /**
  * 渲染 Pager overlay（分页文本查看器）。
+ *
+ * 支持三种模式：
+ * - page：传统分页
+ * - search：高亮匹配行，标题显示匹配计数
+ * - message：聚焦单条消息
  */
 export function renderPager(data: PagerData, width: number, height: number, theme: RivetTheme): string[] {
   const lines: string[] = []
   const contentLines = data.content.split('\n')
   const pageSize = height - 4 // 1 border top + 1 title + 1 footer + 1 border bottom = 4
   const totalPages = Math.max(1, Math.ceil(contentLines.length / pageSize))
-  const safePage = Math.min(data.page, totalPages - 1)
+  const mode = data.mode ?? 'page'
+  const messages = data.messages ?? []
+
+  let effectivePage = Math.min(data.page, totalPages - 1)
+  let title: string
+  let footer = '↑↓/j/k scroll  PgUp/PgDn  /search  m message  q/Esc close'
+
+  if (mode === 'search') {
+    const current = data.searchCurrent ?? 0
+    const total = data.searchMatches ?? 0
+    const query = data.searchQuery ?? ''
+    title = data.title
+      ? `${data.title} — Search "${query}" (${current}/${total})`
+      : `Search "${query}" (${current}/${total})`
+    footer = 'n/N next/prev  Esc clear search  q close'
+    if (messages.length > 0 && current > 0) {
+      const msgIdx = current - 1 < messages.length ? current - 1 : 0
+      effectivePage = pageForMessage(messages, msgIdx, pageSize)
+      effectivePage = Math.min(effectivePage, totalPages - 1)
+    }
+  } else if (mode === 'message' && messages.length > 0) {
+    const idx = Math.min(Math.max(0, data.selectedMessageIndex ?? 0), messages.length - 1)
+    title = data.title
+      ? `${data.title} — Message ${idx + 1}/${messages.length}`
+      : `Message ${idx + 1}/${messages.length}`
+    footer = '↑↓/j/k prev/next message  Esc back  q close'
+    effectivePage = pageForMessage(messages, idx, pageSize)
+    effectivePage = Math.min(effectivePage, totalPages - 1)
+  } else {
+    title = data.title ? `${data.title} (${effectivePage + 1}/${totalPages})` : `Page ${effectivePage + 1}/${totalPages}`
+  }
 
   // Top border + title
   lines.push(formatBorder(width, theme))
-  const title = data.title ? `${data.title} (${safePage + 1}/${totalPages})` : `Page ${safePage + 1}/${totalPages}`
   lines.push(formatTitleBar(title, width, theme))
 
   // Content
-  const start = safePage * pageSize
+  const start = effectivePage * pageSize
   const pageLines = contentLines.slice(start, start + pageSize)
-  for (const line of pageLines) {
-    lines.push(padLine(line, width, theme))
-  }
-  // Pad remaining
-  for (let i = pageLines.length; i < pageSize; i++) {
-    lines.push(padLine('', width, theme))
+
+  if (mode === 'message' && messages.length > 0) {
+    const idx = Math.min(Math.max(0, data.selectedMessageIndex ?? 0), messages.length - 1)
+    const msg = messages[idx]!
+    const header = msg.isTruncated
+      ? color(`〔message ${idx + 1}/${messages.length} — truncated in scrollback〕`, theme.warning)
+      : color(`〔message ${idx + 1}/${messages.length}〕`, theme.dim)
+    lines.push(padLine(header, width, theme))
+    for (const line of msg.lines.slice(0, pageSize - 1)) {
+      lines.push(padLine(line, width, theme))
+    }
+    for (let i = msg.lines.length + 1; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
+  } else if (mode === 'search') {
+    for (let i = 0; i < pageLines.length; i++) {
+      const line = pageLines[i]!
+      if (data.searchQuery && lineMatchesQuery(line, data.searchQuery)) {
+        lines.push(highlightMatch(line, data.searchQuery, width, theme))
+      } else {
+        lines.push(padLine(line, width, theme))
+      }
+    }
+    for (let i = pageLines.length; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
+  } else {
+    for (const line of pageLines) {
+      lines.push(padLine(line, width, theme))
+    }
+    for (let i = pageLines.length; i < pageSize; i++) {
+      lines.push(padLine('', width, theme))
+    }
   }
 
   // Footer + bottom border
-  lines.push(formatFooter('↑↓/j/k scroll  PgUp/PgDn  q/Esc close', width, theme))
+  lines.push(formatFooter(footer, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
