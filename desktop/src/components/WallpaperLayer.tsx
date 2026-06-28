@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useWallpaper } from './WallpaperContext'
-import { useGlassMode } from '../lib/glass'
+import { useGlassMode, applyGlassMode } from '../lib/glass'
 
 // WallpaperLayer — renders a full-viewport background behind the app.
 // Glass mode activates when either a custom wallpaper is set OR the user has
@@ -28,11 +28,10 @@ export function WallpaperLayer() {
 
   const active = Boolean(wallpaper) || glassMode
 
-  // Toggle glass mode on document root
+  // Toggle glass mode on document root (delegates to applyGlassMode so
+  // surface tokens stay in sync with the visual glass state).
   useEffect(() => {
-    const root = document.documentElement
-    if (active) root.setAttribute('data-surface', 'glass')
-    else root.removeAttribute('data-surface')
+    applyGlassMode(active)
   }, [active])
 
   const objectFit =

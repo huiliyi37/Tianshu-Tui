@@ -10,19 +10,25 @@ class MemStorage {
 }
 
 let dispatchedEvent: string | null = null
+const styleProps = new Map<string, string>()
 const g = globalThis as unknown as {
   localStorage: MemStorage
-  window: { dispatchEvent(e: Event): boolean }
-  document: { documentElement: { setAttribute(k: string, v: string): void; getAttribute(k: string): string | null } }
+  window: { dispatchEvent(e: Event): boolean; matchMedia(q: string): { matches: boolean; addEventListener(): void; removeEventListener(): void } }
+  document: { documentElement: { setAttribute(k: string, v: string): void; getAttribute(k: string): string | null; removeAttribute(k: string): void; dataset: Record<string, string>; style: { setProperty(k: string, v: string): void } } }
 }
 g.localStorage = new MemStorage()
-g.window = { dispatchEvent: (e: Event) => { dispatchedEvent = e.type; return true } }
+g.window = {
+  dispatchEvent: (e: Event) => { dispatchedEvent = e.type; return true },
+  matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
+}
 g.document = {
   documentElement: {
     _attrs: {} as Record<string, string>,
+    dataset: {} as Record<string, string>,
     setAttribute(k: string, v: string) { this._attrs[k] = v },
     getAttribute(k: string) { return this._attrs[k] ?? null },
     removeAttribute(k: string) { delete this._attrs[k] },
+    style: { setProperty(k: string, v: string) { styleProps.set(k, v) } },
   },
 }
 
@@ -41,11 +47,14 @@ test('save + loadGlassMode round-trips true/false', () => {
   assert.equal(loadGlassMode(), false)
 })
 
-test('applyGlassMode sets data-surface attribute', () => {
+test('applyGlassMode sets data-surface attribute and applies surface tokens', () => {
+  styleProps.clear()
   applyGlassMode(true)
   assert.equal(g.document.documentElement.getAttribute('data-surface'), 'glass')
+  assert.ok(styleProps.has('--sidebar-surface-bg'), 'should set glass surface tokens')
   applyGlassMode(false)
   assert.equal(g.document.documentElement.getAttribute('data-surface'), null)
+  assert.ok(styleProps.has('--sidebar-surface-bg'), 'should set solid surface tokens')
 })
 
 test('initGlassMode loads persisted value and applies', () => {

@@ -9,17 +9,25 @@ class MemStorage {
   removeItem(k: string): void { this.store.delete(k) }
   clear(): void { this.store.clear() }
 }
+const styleStore = new Map<string, string>()
 const g = globalThis as unknown as {
   localStorage: MemStorage
   window: { matchMedia: (q: string) => { matches: boolean; addEventListener(): void; removeEventListener(): void } }
-  document: { documentElement: { dataset: Record<string, string> } }
+  document: { documentElement: { dataset: Record<string, string>; style: { setProperty(k: string, v: string): void; removeProperty?(k: string): void } } }
 }
 g.localStorage = new MemStorage()
 let systemDark = false
 g.window = {
   matchMedia: () => ({ matches: systemDark, addEventListener() {}, removeEventListener() {} }),
 }
-g.document = { documentElement: { dataset: {} } }
+g.document = {
+  documentElement: {
+    dataset: {},
+    style: {
+      setProperty(k: string, v: string) { styleStore.set(k, v) },
+    },
+  },
+}
 
 const { loadThemePref, saveThemePref, resolveTheme, setThemePref } = await import('../theme.ts')
 
@@ -38,9 +46,11 @@ test('resolveTheme follows system via matchMedia', () => {
   assert.equal(resolveTheme('dark'), 'dark')
 })
 
-test('setThemePref writes data-theme on <html>', () => {
+test('setThemePref writes data-theme on <html> and CSS variables via setProperty', () => {
   setThemePref('light')
   assert.equal(g.document.documentElement.dataset.theme, 'light')
+  assert.equal(styleStore.get('--bg'), '#ffffff', 'should set light --bg')
   setThemePref('dark')
   assert.equal(g.document.documentElement.dataset.theme, 'dark')
+  assert.equal(styleStore.get('--bg'), '#1c1c1e', 'should set dark --bg')
 })

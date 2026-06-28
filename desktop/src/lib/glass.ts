@@ -2,6 +2,9 @@
 // no custom wallpaper is set. Stored in localStorage and broadcast via a custom
 // event so consumers can react without a full context provider.
 
+import { resolveTheme, loadThemePref } from './theme'
+import { applyThemeJson } from './theme-loader'
+
 const KEY = 'tianshu.glassMode'
 const CHANGE_EVENT = 'tianshu:glasschange'
 
@@ -24,10 +27,21 @@ export function saveGlassMode(value: GlassMode): void {
   }
 }
 
+/**
+ * Update visual glass state. Sets/removes data-surface attribute (for
+ * shadcn-tokens.css + styles.css selectors) AND re-applies theme surface
+ * tokens (glass vs solid) via setProperty.
+ *
+ * Called by: the settings toggle, initGlassMode, AND WallpaperLayer
+ * (when a custom wallpaper is set, glass surfaces should activate regardless
+ * of the persisted glassMode preference).
+ */
 export function applyGlassMode(value: GlassMode): void {
   const root = document.documentElement
   if (value) root.setAttribute('data-surface', 'glass')
   else root.removeAttribute('data-surface')
+  // Sync surface tokens with visual glass state
+  applyThemeJson(resolveTheme(loadThemePref()), value)
 }
 
 export function initGlassMode(): void {
@@ -51,6 +65,7 @@ export function useGlassMode(): [GlassMode, (value: GlassMode) => void] {
     (value) => {
       saveGlassMode(value)
       setEnabled(value)
+      applyGlassMode(value)
     },
   ]
 }
