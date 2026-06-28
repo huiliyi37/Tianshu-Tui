@@ -60,6 +60,56 @@ test('streamSession parses SSE frames split across chunk boundaries', async () =
   }
 })
 
+test('streamSession joins multi-line data: into one payload (D3)', async () => {
+  clearRuntimeCache()
+  // A single JSON object split across two `data:` lines. Only joining the lines
+  // with '\n' yields valid JSON; the old "keep last data line" logic would see
+  // `"type":"status",...` alone and fail to parse → drop the event.
+  const f =
+    'event: status\n' +
+    'data: {"seq":5,"ts":0,\n' +
+    'data: "type":"status","data":{}}\n\n'
+  const events: SessionEvent[] = []
+  globalThis.fetch = (() => Promise.resolve(sseResponse([f]))) as typeof fetch
+  try {
+    await streamSession('s1', 0, (e) => events.push(e), new AbortController().signal)
+    assert.equal(events.length, 1, 'multi-line data must fold into a single event')
+    assert.equal(events[0]!.seq, 5)
+    assert.equal(events[0]!.type, 'status')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('streamSession flushes a final frame with no trailing blank line (D3)', async () => {
+  clearRuntimeCache()
+  // Server closes right after the data line, without the terminating '\n\n'.
+  const f = 'event: status\ndata: {"seq":9,"ts":0,"type":"status","data":{}}'
+  const events: SessionEvent[] = []
+  globalThis.fetch = (() => Promise.resolve(sseResponse([f]))) as typeof fetch
+  try {
+    await streamSession('s1', 0, (e) => events.push(e), new AbortController().signal)
+    assert.equal(events.length, 1, 'an unterminated trailing frame must still be emitted')
+    assert.equal(events[0]!.seq, 9)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('streamSession tolerates CRLF line endings within a frame (D3)', async () => {
+  clearRuntimeCache()
+  const f = 'event: status\r\ndata: {"seq":12,"ts":0,"type":"status","data":{}}\r\n\r\n'
+  const events: SessionEvent[] = []
+  globalThis.fetch = (() => Promise.resolve(sseResponse([f]))) as typeof fetch
+  try {
+    await streamSession('s1', 0, (e) => events.push(e), new AbortController().signal)
+    assert.equal(events.length, 1, 'CRLF frame must parse')
+    assert.equal(events[0]!.seq, 12)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 test('streamSession throws on a non-ok status (so the caller can reconnect)', async () => {
   clearRuntimeCache()
   globalThis.fetch = (() => Promise.resolve(sseResponse([], 503))) as typeof fetch

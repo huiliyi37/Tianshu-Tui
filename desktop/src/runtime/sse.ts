@@ -45,19 +45,38 @@ export async function streamSession(
         if (event) onEvent(event)
       }
     }
+    // Flush the decoder (release any held trailing multi-byte sequence) and the
+    // residual buffer: a server that closes without a final blank-line separator
+    // would otherwise silently drop its last event.
+    buf += decoder.decode()
+    if (buf.trim()) {
+      const event = parseFrame(buf)
+      if (event) onEvent(event)
+    }
   } finally {
     reader.releaseLock()
   }
 }
 
 function parseFrame(frame: string): SessionEvent | null {
-  let dataLine: string | null = null
-  for (const line of frame.split('\n')) {
-    if (line.startsWith('data:')) dataLine = line.slice(5).trim()
+  // SSE allows an event to carry multiple `data:` lines; the payload is their
+  // values joined with '\n' (per spec). The server currently emits a single
+  // data line, but joining keeps us correct if a frame ever arrives split
+  // across lines (large value, future server change, or a CRLF proxy).
+  const dataLines: string[] = []
+  for (const rawLine of frame.split('\n')) {
+    // Tolerate CRLF: strip a trailing '\r' the line-split left behind.
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    if (line.startsWith('data:')) {
+      // Drop the field name and a single optional leading space (per spec).
+      dataLines.push(line.slice(5).replace(/^ /, ''))
+    }
   }
-  if (!dataLine) return null
+  if (dataLines.length === 0) return null
+  const payload = dataLines.join('\n').trim()
+  if (!payload) return null
   try {
-    const parsed = JSON.parse(dataLine)
+    const parsed = JSON.parse(payload)
     // The server sends the full SessionEvent ({ seq, ts, type, data }) as data.
     if (parsed && typeof parsed.seq === 'number' && typeof parsed.type === 'string') {
       return parsed as SessionEvent
