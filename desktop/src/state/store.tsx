@@ -45,13 +45,14 @@ export interface UiState {
   /** True when the user explicitly toggled review panel open (Cmd+Shift+B).
    *  Resets when the workspace width recovers above the responsive threshold. */
   reviewManuallyToggled: boolean
+  newSessionPrompt: string | null
 }
 
 type UiAction =
   | { type: 'setActive'; id: string | null }
   | { type: 'setProject'; projectId: string | null }
   | { type: 'setSurface'; surface: Surface }
-  | { type: 'openNew'; open: boolean }
+  | { type: 'openNew'; open: boolean; prompt?: string }
   | { type: 'setError'; error: string | null }
   | { type: 'markSeen'; sigs: string[] }
   | { type: 'setToolDensity'; density: ToolDensity }
@@ -78,7 +79,7 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'setSurface':
       return { ...state, surface: action.surface }
     case 'openNew':
-      return { ...state, newSessionOpen: action.open }
+      return { ...state, newSessionOpen: action.open, newSessionPrompt: action.prompt ?? null }
     case 'setError':
       return { ...state, error: action.error }
     case 'markSeen': {
@@ -138,6 +139,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     activeProject: loadActiveProject(),
     surface: 'workspace' as Surface,
     newSessionOpen: false,
+    newSessionPrompt: null,
     error: null,
     attentionSeen: loadAttentionSeen(),
     toolDensity: loadToolDensity(),

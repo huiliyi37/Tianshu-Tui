@@ -193,30 +193,55 @@ export function WorkspaceSurface() {
                     onClose={handleClose}
                   />
                 ) : (
-                  <div className="empty thread-empty onboard">
-                    <div className="onboard-glyph" aria-hidden>✦</div>
-                    <h2 className="onboard-title">开始你的第一个线程</h2>
-                    <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
-                    <div className="onboard-actions">
-                      <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                        + 新建线程
-                      </button>
-                    </div>
-                    <div className="onboard-hints">
-                      <div className="onboard-hint">
-                        <kbd>⌘K</kbd>
-                        <span>打开命令面板</span>
-                      </div>
-                      <div className="onboard-hint">
-                        <kbd>⌘N</kbd>
-                        <span>新建线程</span>
-                      </div>
-                      <div className="onboard-hint">
-                        <kbd>/</kbd>
-                        <span>在输入框使用斜杠命令</span>
-                      </div>
-                    </div>
-                  </div>
+                   <div className="empty thread-empty onboard">
+                     <div className="onboard-glyph" aria-hidden>✦</div>
+                     <h2 className="onboard-title">开始你的第一个线程</h2>
+                     <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
+                     
+                     <div className="onboard-templates">
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '分析并解释当前项目的整体架构' })}>
+                         <span className="tc-emoji">🔍</span>
+                         <div className="tc-text">
+                           <span className="tc-title">代码库诊断</span>
+                           <span className="tc-desc">分析项目结构与潜在风险</span>
+                         </div>
+                       </button>
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '为当前项目实现一个新功能' })}>
+                         <span className="tc-emoji">⚡</span>
+                         <div className="tc-text">
+                           <span className="tc-title">实现新功能</span>
+                           <span className="tc-desc">编写新的模块或 API 接口</span>
+                         </div>
+                       </button>
+                       <button className="template-card" onClick={() => dispatch({ type: 'openNew', open: true, prompt: '查找并修复项目中已知的故障' })}>
+                         <span className="tc-emoji">🐛</span>
+                         <div className="tc-text">
+                           <span className="tc-title">修复故障</span>
+                           <span className="tc-desc">定位并消除潜在的代码 Bug</span>
+                         </div>
+                       </button>
+                     </div>
+
+                     <div className="onboard-actions">
+                       <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                         + 自定义新建线程
+                       </button>
+                     </div>
+                     <div className="onboard-hints">
+                       <div className="onboard-hint">
+                         <kbd>⌘K</kbd>
+                         <span>打开命令面板</span>
+                       </div>
+                       <div className="onboard-hint">
+                         <kbd>⌘N</kbd>
+                         <span>新建线程</span>
+                       </div>
+                       <div className="onboard-hint">
+                         <kbd>/</kbd>
+                         <span>在输入框使用斜杠命令</span>
+                       </div>
+                     </div>
+                   </div>
                 )}
               </Suspense>
             </div>

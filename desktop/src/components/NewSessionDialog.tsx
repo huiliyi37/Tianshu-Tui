@@ -27,16 +27,17 @@ import {
  */
 export function NewSessionDialog(props: {
   defaultCwd?: string | null
+  initialPrompt?: string | null
   onCreate: (input: { cwd?: string; roots?: string[]; title?: string; prompt?: string; approvalMode?: ApprovalMode; isolatedWorktree?: boolean }) => void
   onClose: () => void
 }) {
-  const { defaultCwd, onCreate, onClose } = props
+  const { defaultCwd, initialPrompt, onCreate, onClose } = props
   const [title, setTitle] = useState('')
   // roots[0] is the primary cwd; additional entries are bound repos.
   const [roots, setRoots] = useState<string[]>(() => (defaultCwd ? [defaultCwd] : []))
   const [manualInput, setManualInput] = useState('')
   const [showManual, setShowManual] = useState(false)
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState(initialPrompt || '')
   const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [worktree, setWorktree] = useState(false)
 
