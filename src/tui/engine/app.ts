@@ -34,6 +34,7 @@ import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
 import { formatCollapsedGroup, formatCollapsedGroupLive, CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
+import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBashCommand, type CollapsedBashGroup } from '../format/collapsed-bash.js'
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { renderApprovalPreview } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
@@ -1675,11 +1676,17 @@ export class TuiApp {
       }
     }
 
-    // 工具折叠组：collapsible → push entry；non-collapsible → 先 flush 再单独走 tool card
+    // 工具折叠组：read/search 与可折叠 bash 各走各的 buffer，互相打断。
+    // non-collapsible（含变更型 bash）到达时 flush 两个组。
     if (isCollapsibleTool(name)) {
+      if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
       this.toolGroupController.pushUse(id, name, input)
+    } else if (name === 'bash' && isCollapsibleBashCommand(input.command as string)) {
+      if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+      this.toolGroupController.pushBashUse(id, input.command as string, Date.now())
     } else {
       if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+      if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     }
 
     // Commit thinking if any
@@ -1689,13 +1696,22 @@ export class TuiApp {
       this.renderLive()
     }
   }
-  /** 将折叠组 buffer 刷新到 scrollback */
+  /** 将 read/search 折叠组 buffer 刷新到 scrollback */
   private flushToolGroup(): void {
     const group = this.toolGroupController.flushGroup()
     if (!group || group.entries.length === 0) return
-    // 记录最近 flush 的组供 ctrl+o 展开
-    this.toolGroupController.flushGroup()
     const formatted = formatCollapsedGroup({ group, theme: this.theme })
+    this.commitAbove(() => {
+      this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+      this.state.committedCount++
+    })
+  }
+
+  /** 将 bash 折叠组 buffer 刷新到 scrollback */
+  private flushBashGroup(): void {
+    const group = this.toolGroupController.flushBashGroup()
+    if (!group || group.entries.length === 0) return
+    const formatted = formatCollapsedBashGroup({ group, theme: this.theme })
     this.commitAbove(() => {
       this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
       this.state.committedCount++
@@ -1776,6 +1792,17 @@ export class TuiApp {
       return
     }
 
+    // 可折叠 bash：成功则绑定到组延迟渲染；错误则把前面成功命令摘要后单独渲染错误卡片
+    if (name === 'bash' && this.toolGroupController.hasBashEntry(id)) {
+      if (isError) {
+        this.toolGroupController.detachBashEntry(id)
+        this.flushBashGroup()
+      } else {
+        this.toolGroupController.attachBashResult(id, finalContent, isError)
+        return
+      }
+    }
+
     // team_orchestrate：把编码串 rivet:team-panel:v1:{...} 解码为 TeamPanel 面板，
     // 而非把裸编码串当工具卡片输出（对齐 Ink decodeTeamPanelModel + TeamPanel）。
     if (name === 'team_orchestrate') {
@@ -1828,12 +1855,24 @@ export class TuiApp {
 
   /** ctrl+o：展开最近被截断的工具结果或折叠组 */
   private expandLastTruncatedTool(): void {
-    // 优先展开折叠组
+    // 优先展开 read/search 折叠组
     const collapsed = this.toolGroupController.getLastCollapsedGroup()
     if (collapsed) {
       const g = collapsed
       this.toolGroupController.clearLastCollapsedGroup()
       const formatted = formatCollapsedGroup({ group: g, expanded: true, theme: this.theme })
+      this.commitAbove(() => {
+        this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
+        this.state.committedCount++
+      })
+      return
+    }
+    // 其次展开 bash 折叠组
+    const collapsedBash = this.toolGroupController.getLastCollapsedBashGroup()
+    if (collapsedBash) {
+      const g = collapsedBash
+      this.toolGroupController.clearLastCollapsedBashGroup()
+      const formatted = formatCollapsedBashGroup({ group: g, expanded: true, theme: this.theme })
       this.commitAbove(() => {
         this.commit.write({ text: formatted.join('\n'), trailingNewline: true })
         this.state.committedCount++
@@ -1878,6 +1917,7 @@ export class TuiApp {
 
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
 
     // Flush any pending blocks from the writer, then commit the remaining tail
     await this.blockWriter.flush()
@@ -1960,6 +2000,9 @@ export class TuiApp {
     this.setPhase('idle')
     this.state.isStreaming = false
     this.state.isThinking = false
+    // 与 abort 同口径 flush 折叠组，避免错误后孤儿结果滞留组内无法提交。
+    if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     // 与 abort 同口径回收 run 本地状态：provider 在工具/委派回合中报错走 onError，
     // 此时 pendingTools/toolAccumulator 可能持有半成品数据。只清 fleet 而漏清这两者，
     // 下一轮会读到上轮孤儿条目（live 区显示已死工具卡片、累加器跨 run 污染）。
@@ -2009,6 +2052,7 @@ export class TuiApp {
     if (this.approvalIntentController.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
+    if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
     // 保留 steer 队列：对齐 Ink。用户在卡死期间排队的指引不应因中断而丢失——
     // 下次 submit 会把排队内容归并进新 prompt（见 onSubmit 的 steer 收口）。
     this.streamRenderer.reset()
@@ -2223,11 +2267,24 @@ export class TuiApp {
       }
     }
 
+    // 2c-bis. 可折叠 bash 聚合行
+    if (this.toolGroupController.isActiveBashGroup()) {
+      const activeBashGroup = this.toolGroupController.getActiveBashGroup()
+      if (activeBashGroup && activeBashGroup.entries.length > 0) {
+        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, this.columns)
+        for (const line of groupLines) {
+          lines.push({ text: line })
+        }
+      }
+    }
+
     // 2d. 进行中非 collapsible 工具：● 标题行 + 末 3 行输出（⎿ 缩进）
     if (this.toolGroupController.getPendingSize() > 0) {
       for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
         // 跳过已归入折叠组的 collapsible 工具（它们在 2c 聚合行中显示）
         if (isCollapsibleTool(meta.name)) continue
+        // 跳过已归入 bash 折叠组的 bash 工具
+        if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
         const toolLines = formatToolCardLive({
           toolName: meta.name,
           toolInput: meta.input,

@@ -331,8 +331,10 @@ async function main() {
 
   // ── Interactive TUI (requires TTY) ──────────────────────────
 
-  if (!stdout.isTTY || !stdin.isTTY) {
-    process.stderr.write('[T9] stdout and stdin must be TTY (use -p for headless mode).\n')
+  const forceRecoveryCli = process.env.RIVET_FORCE_RECOVERY_CLI === '1'
+
+  if (!forceRecoveryCli && (!stdout.isTTY || !stdin.isTTY)) {
+    process.stderr.write('[T9] stdout and stdin must be TTY (use -p for headless mode or RIVET_FORCE_RECOVERY_CLI=1).\n')
     process.exit(1)
   }
 
@@ -374,6 +376,14 @@ async function main() {
 
   // Store heartbeat for shutdown cleanup
   heartbeatInterval = ctx.heartbeatInterval
+
+  // ── Recovery CLI fallback ────────────────────────────────────
+  if (forceRecoveryCli) {
+    const { runRecoveryCli } = await import('./recovery-cli.js')
+    await runRecoveryCli(ctx)
+    shutdown(0)
+    return
+  }
 
   // ── Build TuiApp ─────────────────────────────────────────────
   const currentModel = ctx.provider.models[0]

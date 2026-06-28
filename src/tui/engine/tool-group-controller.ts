@@ -1,4 +1,5 @@
 import { CollapsedReadSearchBuffer, isCollapsibleTool, type CollapsedReadSearchGroup } from '../format/collapsed-read-search.js'
+import { CollapsedBashBuffer, type CollapsedBashGroup } from '../format/collapsed-bash.js'
 import { capToolAccumulator, TOOL_ACCUMULATOR_MAX_BYTES } from './tool-accumulator.js'
 
 export interface PendingToolMeta {
@@ -27,6 +28,8 @@ export class ToolGroupController {
   private lastTruncatedTool: TruncatedToolInfo | null = null
   private lastCollapsedGroup: CollapsedReadSearchGroup | null = null
   private toolGroupBuffer = new CollapsedReadSearchBuffer()
+  private bashGroupBuffer = new CollapsedBashBuffer()
+  private lastCollapsedBashGroup: CollapsedBashGroup | null = null
 
   // ── pendingTools ──
   setPending(id: string, meta: PendingToolMeta): void {
@@ -98,6 +101,37 @@ export class ToolGroupController {
     this.toolGroupBuffer.attachResult(id, content, isError)
   }
 
+  // ── bashGroupBuffer ──
+  pushBashUse(id: string, command: string, startMs: number): void {
+    this.bashGroupBuffer.pushUse(id, command, startMs)
+  }
+
+  isActiveBashGroup(): boolean {
+    return this.bashGroupBuffer.isActive()
+  }
+
+  getActiveBashGroup() {
+    return this.bashGroupBuffer.getActive()
+  }
+
+  flushBashGroup(): CollapsedBashGroup | null {
+    const group = this.bashGroupBuffer.flush()
+    if (group) this.lastCollapsedBashGroup = group
+    return group
+  }
+
+  attachBashResult(id: string, content: string, isError: boolean): void {
+    this.bashGroupBuffer.attachResult(id, content, isError)
+  }
+
+  hasBashEntry(id: string): boolean {
+    return this.bashGroupBuffer.hasEntry(id)
+  }
+
+  detachBashEntry(id: string): import('../format/collapsed-bash.js').CollapsedBashEntry | null {
+    return this.bashGroupBuffer.detachEntry(id)
+  }
+
   // ── lastCollapsedGroup ──
   getLastCollapsedGroup(): CollapsedReadSearchGroup | null {
     return this.lastCollapsedGroup
@@ -105,6 +139,15 @@ export class ToolGroupController {
 
   clearLastCollapsedGroup(): void {
     this.lastCollapsedGroup = null
+  }
+
+  // ── lastCollapsedBashGroup ──
+  getLastCollapsedBashGroup(): CollapsedBashGroup | null {
+    return this.lastCollapsedBashGroup
+  }
+
+  clearLastCollapsedBashGroup(): void {
+    this.lastCollapsedBashGroup = null
   }
 
   // ── lastTruncatedTool ──
