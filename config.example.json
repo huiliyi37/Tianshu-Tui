@@ -50,6 +50,7 @@
     "enabled": true,
     "autoThreshold": 800000,
     "autoFloor": 500000,
+    "provider": "deepseek",
     "model": "deepseek-v4-flash"
   },
   "cache": {

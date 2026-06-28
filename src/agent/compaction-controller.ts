@@ -292,6 +292,14 @@ export interface CompactionControllerDeps {
   providerProfile?: ProviderProfile
   primaryClient?: StreamClient
   /**
+   * Optional dedicated client for compaction summarization (compact.provider+
+   * model). When set, llmCompact / tryPartialCompact distill on this cheap
+   * model — isolated server-side cache, no primary-model token spend — and use
+   * a more generous summary budget (Flash is cheap; prefer fidelity over
+   * over-compression). Falls back to primaryClient when undefined.
+   */
+  compactClient?: StreamClient
+  /**
    * When false, discretionary compaction (ratio tiers, 1M partial/full LLM
    * compact) is skipped entirely. Emergency paths — session split and the
    * 95% context ceiling — stay active regardless, because exceeding the
@@ -352,6 +360,18 @@ export class CompactionController {
   private _prefixOverheadSet = false
 
   constructor(private deps: CompactionControllerDeps) {}
+
+  /** Client used for compaction summarization: the dedicated cheap compact
+   *  client when configured, else the session primary. */
+  private summaryClient(): StreamClient | undefined {
+    return this.deps.compactClient ?? this.deps.primaryClient
+  }
+
+  /** Summary char budget. Generous (≈2×) when a dedicated compact client is
+   *  configured — distillation is near-free, so retain more detail. */
+  private summaryBudget(): { full: number; partial: number } {
+    return summaryOutputBudgetChars(this.deps.contextWindow, { generous: Boolean(this.deps.compactClient) })
+  }
 
   /**
    * Compute the fixed token overhead from system prompt and tool definitions.
@@ -428,7 +448,7 @@ export class CompactionController {
       const cachePreserving = this.isCachePreservingProvider()
 
       // T8: Partial Compact at 60% — earlier, lighter, preserves recent context.
-      if (ratio >= 0.60 && ratio < 0.75 && this.deps.primaryClient) {
+      if (ratio >= 0.60 && ratio < 0.75 && this.summaryClient()) {
         if (cachePreserving && this.deps.cacheAdvisor?.shouldDelayCompact(1, { estimatedTokens, contextWindow })) {
           debugLog(`[partial-compact] 1M at ${(ratio * 100).toFixed(0)}% — cache healthy, delaying`)
           return { failures: input.failures, compacted: false }
@@ -443,7 +463,7 @@ export class CompactionController {
       }
 
       // Full LLM compact at 75% — fallback when partial was insufficient
-      if (ratio >= 0.75 && this.deps.primaryClient) {
+      if (ratio >= 0.75 && this.summaryClient()) {
         // P2: tier-2 delay check. At 75%+ pressure shouldDelayCompact rarely
         // holds (protection = hitRate × (1 − pressure) ≤ 0.25 < 0.45), so this
         // mainly defers the 75-80% band when the cache is exceptionally hot.
@@ -596,7 +616,7 @@ export class CompactionController {
     this.persistExtractedMemories(this.deps.getTrajectoryEntries())
 
     // Try LLM compact first (short timeout — emergency path, can't wait long)
-    if (this.deps.primaryClient) {
+    if (this.summaryClient()) {
       const summary = await this.llmCompact(30_000, this.deps.getAbortSignal?.())
       if (this.isAbortRequested()) {
         debugLog('[llm-compact] turn aborted after compact returned — skipping ceiling checkpoint replacement')
@@ -661,7 +681,7 @@ export class CompactionController {
     this.persistExtractedMemories(trajectory)
 
     // Try LLM compact first for higher-fidelity summary
-    if (this.deps.primaryClient) {
+    if (this.summaryClient()) {
       const summary = await this.llmCompact(undefined, this.deps.getAbortSignal?.())
       if (this.isAbortRequested()) {
         debugLog('[llm-compact] turn aborted after compact returned — skipping session-split checkpoint replacement')
@@ -984,7 +1004,8 @@ export class CompactionController {
    * Returns true if successful, false if LLM summary failed.
    */
   async tryPartialCompact(recentToPreserve = 60): Promise<boolean> {
-    if (!this.deps.primaryClient) return false
+    const summaryClient = this.summaryClient()
+    if (!summaryClient) return false
     if (this._llmCompactInFlight) return false
 
     const messages = this.deps.session.getMessages()
@@ -1008,7 +1029,7 @@ export class CompactionController {
     debugLog(`[partial-compact] anchor=${anchor.length} old=${oldZone.length} recent=${recentZone.length}`)
 
     const userIntentChain = extractUserIntentChain(oldZone)
-    const partialBudget = summaryOutputBudgetChars(this.deps.contextWindow).partial
+    const partialBudget = this.summaryBudget().partial
     const summaryPrompt: OaiMessage = {
       role: 'user',
       content: [
@@ -1050,7 +1071,7 @@ export class CompactionController {
         : timeoutSignal
 
       try {
-        await this.deps.primaryClient.stream(request, {
+        await summaryClient.stream(request, {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},
@@ -1122,7 +1143,8 @@ export class CompactionController {
    *          or session has insufficient messages.
    */
   async llmCompact(timeoutMs = 60_000, userSignal?: AbortSignal): Promise<string | null> {
-    if (!this.deps.primaryClient) return null
+    const summaryClient = this.summaryClient()
+    if (!summaryClient) return null
     if (this._llmCompactInFlight) return null
     this._llmCompactInFlight = true
 
@@ -1155,7 +1177,7 @@ export class CompactionController {
             '- 探索性搜索的中间过程',
             '- 重复的状态汇报',
             '',
-            `只输出总结内容，不要调用工具。格式用 markdown，控制在 ${summaryOutputBudgetChars(this.deps.contextWindow).full} 字以内。`,
+            `只输出总结内容，不要调用工具。格式用 markdown，控制在 ${this.summaryBudget().full} 字以内。`,
           ].join('\n'),
         },
       ]
@@ -1174,7 +1196,7 @@ export class CompactionController {
         ? AbortSignal.any([userSignal, timeoutSignal])
         : timeoutSignal
       try {
-        await this.deps.primaryClient.stream(request, {
+        await summaryClient.stream(request, {
           onTextDelta: (text) => { chunks.push(text) },
           onThinkingDelta: () => {},
           onContentBlock: () => {},

@@ -42,6 +42,11 @@ export interface AgentConfig {
   providerName?: string
   /** Primary model's StreamClient — reused for LLM compaction via Forked Agent pattern. */
   primaryClient?: StreamClient
+  /** Optional dedicated StreamClient for compaction summarization, built from
+   *  compact.provider+model. When set, CompactionController distills on this
+   *  (cheap) client instead of primaryClient — isolated cache, no main-model
+   *  token spend. Undefined → compaction falls back to primaryClient. */
+  compactClient?: StreamClient
   approvalMode?: ApprovalMode
   sessionId?: string
   /** Review-router re-entrancy depth. Worker contexts spawned by review routing use depth > 0. */

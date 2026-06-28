@@ -427,6 +427,7 @@ export class AgentLoop {
       contextWindow: this.config.contextWindow,
       providerProfile: this.config.providerProfile,
       primaryClient: this.config.primaryClient,
+      compactClient: this.config.compactClient,
       compactEnabled: this.config.compact.enabled,
       pressureMonitor: this.pressureMonitor,
       getTrajectoryEntries: () => this.trajectory.getEntries(),

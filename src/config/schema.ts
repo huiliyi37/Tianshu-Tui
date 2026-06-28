@@ -252,7 +252,19 @@ export const compactSchema = z.object({
   /** @deprecated Superseded by ratio-based policy (compactPolicyRatios).
    *  Retained for config compatibility; not read by the runtime. */
   autoFloor: z.number().int().positive().default(500_000),
+  /** Model that performs the compaction summarization (LLM compact / partial
+   *  compact). ONLY takes effect together with `provider`: when both are set
+   *  and resolve to a real provider+model with credentials, compaction runs on
+   *  that dedicated client (its own server-side cache), so a cheap model (e.g.
+   *  a Flash) does the distillation WITHOUT spending the main model's tokens or
+   *  evicting its hot prefix cache. Without `provider`, this is inert and
+   *  compaction uses the session's primary model (backward compatible). */
   model: z.string().default('deepseek-v4-flash'),
+  /** Provider hosting the compaction model (must exist in provider.providers).
+   *  Set together with `model` to route compaction onto an isolated cheap model.
+   *  Unknown provider / missing model / no credentials → silent fallback to the
+   *  session primary (same rule as agent.review / council seat routing). */
+  provider: z.string().optional(),
   /** T9 turn-0 quality-compaction trigger ratios (provider cost-aware).
    *  Only the turn-0, phase-gated quality lever — mid-turn delay guards are
    *  unaffected. Per-token cache-preserving providers (DeepSeek) skip T9

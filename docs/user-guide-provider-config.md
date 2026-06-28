@@ -744,6 +744,25 @@ rivet config providers  # 应该只显示内置 Provider
 - **`authority` 必须是星域 id**(内置 10 个:`tianshu` / `pojun` / `tianfu` / `tianliang` / `tianquan` / `tianji` / `tianxuan` / `fu` / `wenqu` / `yaoguang`,或已加载的自定义域)。非星域 authority 会让该席位**无工具(fail-closed)且无认知注入**,席位形同失明——务必从建议列表里选。
 - **每席 `authority` 不可重复**。议事会按 authority 绑定结果,重复会导致丢席 + 重复计票,`council_convene` 会直接报错拒绝(fail-loud)。要「同一视角对比两个模型」目前不支持,请用不同星域。
 
+### 上下文压缩走廉价模型（`compact.provider` + `compact.model`）
+
+上下文压缩（把变长的历史蒸馏成摘要）本身是一次**一次性、无工具**的纯总结任务，没必要用主力贵模型来做——而且压缩请求和主对话的前缀不同，在主 provider 上跑还会**挤掉主对话的热前缀缓存**（GLM/DeepSeek 缓存争抢卡顿的诱因之一）。把它路由到一个便宜模型（如 Flash），用独立 provider/client = 独立服务端缓存，既省钱又不碰主缓存：
+
+```json
+{
+  "compact": {
+    "enabled": true,
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash"
+  }
+}
+```
+
+- **必须同时设 `provider` + `model`** 才生效。只写 `model`（旧默认行为）不会路由——压缩仍用会话主模型，保持向后兼容。
+- **静默回退**：`provider` 不存在 / 模型不在该 provider 的 models 列表 / 无凭据 → 自动退回主模型，不报错（和 `agent.review`、议事会席位同一套规则）。
+- **不会压得太狠**：一旦走专用廉价压缩模型，摘要输出预算自动放宽（≈2×），优先保留决策/文件/错误等细节而非过度压缩——Flash 很便宜，多花几 KB 摘要比丢上下文划算。
+- 这条只管**压缩**，和上面的子代理/审查路由是两套独立机制；可以「主控 GLM + 压缩 Flash + 子代理 Flash」三者各自配置、互不影响。
+
 ### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
 
 仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查、team 侦察和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存；同时把 `council_expert` 单独留在 DeepSeek Pro，演示「议事会保强、其余走 Flash」的 profile 覆盖配方。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
