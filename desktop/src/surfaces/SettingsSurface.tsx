@@ -11,6 +11,8 @@ import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
+import { GlassCustomPanel } from '../components/GlassCustomPanel'
+import { FontSettingsPanel } from '../components/FontSettingsPanel'
 import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
@@ -58,13 +60,6 @@ const FONT_WEIGHT_LABEL: Record<FontWeightPref, string> = {
   normal: '常规',
   medium: '中等',
   bold: '加粗',
-}
-
-const FONT_FAMILY_LABEL: Record<FontFamilyPref, string> = {
-  sans: '系统无衬线 (Sans-Serif)',
-  kaiti: '优雅楷体 (Chinese Kaiti)',
-  geometric: '几何主义 (Outfit / Inter)',
-  mono: '极客等宽 (JetBrains Mono)',
 }
 
 export function SettingsSurface() {
@@ -161,20 +156,7 @@ export function SettingsSurface() {
               </Select>
               <div className="meta">调整全局字重，实时生效。</div>
             </section>
-            <section className="settings-group">
-              <h4>字体风格</h4>
-              <Select value={fontFamily} onValueChange={(v) => pickFontFamily(v as FontFamilyPref)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择字体风格" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(['sans', 'kaiti', 'geometric', 'mono'] as FontFamilyPref[]).map((f) => (
-                    <SelectItem key={f} value={f}>{FONT_FAMILY_LABEL[f]}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="meta">调整全局字体风格与排版，支持衬线、等宽等定制风格。</div>
-            </section>
+            <FontSettingsPanel value={fontFamily} onChange={pickFontFamily} />
             <LanguageSection />
             <WallpaperSection glassConfig={glassConfig} updateGlass={updateGlass} />
           </>
@@ -475,72 +457,7 @@ function WallpaperSection({
         </label>
       </div>
 
-      {glassMode && (
-        <div className="glass-custom-section" style={{ marginTop: '16px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
-          <h5 style={{ fontSize: '12px', fontWeight: 600, marginBottom: '12px', color: 'var(--text)' }}>自定义毛玻璃浓度与模糊度</h5>
-          <div className="glass-custom-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' }}>
-            <div className="glass-custom-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div className="glass-custom-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)' }}>
-                <span>侧边栏浓度 (不透明度)</span>
-                <span className="glass-value-badge" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--accent)' }}>{glassConfig.sidebarOpacity}%</span>
-              </div>
-              <input
-                type="range"
-                className="glass-slider"
-                min="10"
-                max="100"
-                value={glassConfig.sidebarOpacity}
-                onChange={(e) => updateGlass({ sidebarOpacity: parseInt(e.target.value) })}
-              />
-            </div>
-            
-            <div className="glass-custom-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div className="glass-custom-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)' }}>
-                <span>侧边栏模糊半径</span>
-                <span className="glass-value-badge" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--accent)' }}>{glassConfig.sidebarBlur}px</span>
-              </div>
-              <input
-                type="range"
-                className="glass-slider"
-                min="0"
-                max="64"
-                value={glassConfig.sidebarBlur}
-                onChange={(e) => updateGlass({ sidebarBlur: parseInt(e.target.value) })}
-              />
-            </div>
-
-            <div className="glass-custom-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div className="glass-custom-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)' }}>
-                <span>主内容区浓度 (不透明度)</span>
-                <span className="glass-value-badge" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--accent)' }}>{glassConfig.mainOpacity}%</span>
-              </div>
-              <input
-                type="range"
-                className="glass-slider"
-                min="10"
-                max="100"
-                value={glassConfig.mainOpacity}
-                onChange={(e) => updateGlass({ mainOpacity: parseInt(e.target.value) })}
-              />
-            </div>
-
-            <div className="glass-custom-item" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div className="glass-custom-label" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)' }}>
-                <span>主内容区模糊半径</span>
-                <span className="glass-value-badge" style={{ fontFamily: 'var(--font-mono)', fontWeight: 500, color: 'var(--accent)' }}>{glassConfig.mainBlur}px</span>
-              </div>
-              <input
-                type="range"
-                className="glass-slider"
-                min="0"
-                max="64"
-                value={glassConfig.mainBlur}
-                onChange={(e) => updateGlass({ mainBlur: parseInt(e.target.value) })}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      {glassMode && <GlassCustomPanel config={glassConfig} onChange={updateGlass} />}
 
       <div className="meta" style={{ marginTop: '12px' }}>
         设置壁纸或开启毛玻璃后，界面切换为半透明 backdrop-blur 效果（类似 macOS vibrancy）。
