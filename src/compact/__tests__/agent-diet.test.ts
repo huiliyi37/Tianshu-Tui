@@ -4,7 +4,7 @@ import { applyAgentDiet } from '../agent-diet.js'
 import type { OaiMessage } from '../agent-diet.js'
 
 function makeToolCall(id: string, name: string, args: Record<string, string>) {
-  return { id, function: { name, arguments: JSON.stringify(args) } }
+  return { id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } }
 }
 
 describe('agent-diet', () => {
@@ -26,8 +26,8 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 1)
-    assert.ok(result.messages[3]!.content.startsWith('[diet:redundant]'))
-    assert.ok(!result.messages[6]!.content.startsWith('[diet:'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:redundant]'))
+    assert.ok(!(result.messages[6]!.content as string).startsWith('[diet:'))
   })
 
   it('removes expired reads (file edited after read)', () => {
@@ -44,7 +44,7 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.expired, 1)
-    assert.ok(result.messages[3]!.content.startsWith('[diet:expired]'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:expired]'))
   })
 
   it('removes useless failed-then-retried tool calls', () => {
@@ -61,7 +61,7 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.useless, 1)
-    assert.ok(result.messages[3]!.content.startsWith('[diet:useless]'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:useless]'))
   })
 
   it('protects recent messages', () => {
@@ -98,7 +98,7 @@ describe('agent-diet', () => {
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 0, 'non-overlapping ranges should NOT be redundant')
     // First read result preserved
-    assert.ok(!result.messages[3]!.content.startsWith('[diet:'), `expected preserved content, got: ${result.messages[3]!.content.slice(0, 50)}`)
+    assert.ok(!(result.messages[3]!.content as string).startsWith('[diet:'), `expected preserved content, got: ${(result.messages[3]!.content as string).slice(0, 50)}`)
   })
 
   it('removes ranged read when later full read contains it', () => {
@@ -118,8 +118,8 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 1, 'full read should contain ranged read')
-    assert.ok(result.messages[3]!.content.startsWith('[diet:redundant]'))
-    assert.ok(!result.messages[6]!.content.startsWith('[diet:'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:redundant]'))
+    assert.ok(!(result.messages[6]!.content as string).startsWith('[diet:'))
   })
 
   it('removes smaller range when larger range read later contains it', () => {
@@ -139,7 +139,7 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 1, 'larger range should contain smaller range')
-    assert.ok(result.messages[3]!.content.startsWith('[diet:redundant]'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:redundant]'))
   })
 
   it('does NOT remove full read when later ranged read does NOT contain it', () => {
@@ -160,7 +160,7 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 0, 'ranged read should NOT contain full read')
-    assert.ok(!result.messages[3]!.content.startsWith('[diet:'), `expected preserved content, got: ${result.messages[3]!.content.slice(0, 50)}`)
+    assert.ok(!(result.messages[3]!.content as string).startsWith('[diet:'), `expected preserved content, got: ${(result.messages[3]!.content as string).slice(0, 50)}`)
   })
 
   it('removes full read when later full read of same file exists (existing behavior)', () => {
@@ -179,8 +179,8 @@ describe('agent-diet', () => {
     ]
     const result = applyAgentDiet(messages)
     assert.equal(result.categories.redundant, 1)
-    assert.ok(result.messages[3]!.content.startsWith('[diet:redundant]'))
-    assert.ok(!result.messages[6]!.content.startsWith('[diet:'))
+    assert.ok((result.messages[3]!.content as string).startsWith('[diet:redundant]'))
+    assert.ok(!(result.messages[6]!.content as string).startsWith('[diet:'))
   })
 
   it('does NOT remove ranged read when later read has offset-only (start differs)', () => {

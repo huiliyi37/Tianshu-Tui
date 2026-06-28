@@ -36,7 +36,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
-import { skillRegistry, listSkillFiles } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles, importSkillsIntoRivet } from '../skills/skill-loader.js'
 import { listSkillDrafts, approveSkillDraft, rejectSkillDraft } from '../agent/skill-distill.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
@@ -54,6 +54,10 @@ import type { TuiApp } from './engine/app.js'
 import type { SlashCommand } from './slash-command-registry.js'
 import type { BootstrapContext } from '../bootstrap.js'
 import { switchAgentRuntime, switchAgentSession } from '../bootstrap.js'
+import { loadTodos, setTodoSession } from '../tools/todo.js'
+import { restoreGoalTracker } from '../agent/goal-persist.js'
+import { setPlanSession } from '../agent/plan-store.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
 import type { ChangeSet } from '../agent/review-discipline.js'
@@ -67,6 +71,7 @@ const HELP_TEXT = `Available commands:
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
+/permission [status|mode|allow|deny|bash|remove|reset|test] — Manage permission mode and rules
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -89,7 +94,7 @@ const HELP_TEXT = `Available commands:
 /mcp — Show MCP server status
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
-/skill [list|<name>|review|approve <name>|reject <name>] — List/load skills; review auto-distilled drafts
+/skill [list|install <name>|import <name>|<name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
@@ -1022,6 +1027,207 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
+    name: '/permission',
+    immediate: true,
+    handler(ctx) {
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const sub = parts[1]?.toLowerCase()
+
+      const VALID_MODES = ['auto-accept', 'auto-safe', 'manual', 'dangerously-skip-permissions'] as const
+      type RuntimeMode = typeof VALID_MODES[number]
+      function isRuntimeMode(m: string): m is RuntimeMode {
+        return (VALID_MODES as readonly string[]).includes(m)
+      }
+
+      function parseKvPairs(tokens: string[]): Record<string, string> {
+        const out: Record<string, string> = {}
+        for (const t of tokens) {
+          const idx = t.indexOf('=')
+          if (idx > 0) {
+            let value = t.slice(idx + 1)
+            if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+              value = value.slice(1, -1)
+            }
+            out[t.slice(0, idx)] = value
+          }
+        }
+        return out
+      }
+
+      function ruleSource(rules: unknown[], overlay: unknown[], index: number): string {
+        if (index < rules.length) return '[config]'
+        return '[session]'
+      }
+
+      function formatRules() {
+        const cfg = agent.config.permissions
+        const overlay = agent.config.permissionsOverlay
+        const allow = [...(cfg?.allow ?? []), ...(overlay?.allow ?? [])]
+        const deny = [...(cfg?.deny ?? []), ...(overlay?.deny ?? [])]
+        const bashAllow = [...(cfg?.bash?.allowlist ?? []), ...(overlay?.bashAllow ?? [])]
+        const bashDeny = [...(cfg?.bash?.denylist ?? []), ...(overlay?.bashDeny ?? [])]
+
+        const lines: string[] = []
+        lines.push(`当前模式: ${agent.config.approvalMode ?? 'manual'}`)
+
+        if (allow.length > 0) {
+          lines.push('\nAllow 规则：')
+          allow.forEach((r, i) => {
+            const params = r.params ? Object.entries(r.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+            lines.push(`  ${i}. ${ruleSource(cfg?.allow ?? [], overlay?.allow ?? [], i)} ${r.tool}${params ? ' ' + params : ''}`)
+          })
+        }
+        if (deny.length > 0) {
+          lines.push('\nDeny 规则：')
+          deny.forEach((r, i) => {
+            const params = r.params ? Object.entries(r.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+            lines.push(`  ${i}. ${ruleSource(cfg?.deny ?? [], overlay?.deny ?? [], i)} ${r.tool}${params ? ' ' + params : ''}`)
+          })
+        }
+        if (bashAllow.length > 0) {
+          lines.push(`\nBash 前缀白名单：${bashAllow.join(', ')}`)
+        }
+        if (bashDeny.length > 0) {
+          lines.push(`\nBash 前缀黑名单：${bashDeny.join(', ')}`)
+        }
+        if (allow.length === 0 && deny.length === 0 && bashAllow.length === 0 && bashDeny.length === 0) {
+          lines.push('\n当前没有任何 allow/deny 规则。')
+        }
+        lines.push('\n说明：deny 规则优先于 allow 和 approval mode；session 规则仅本次会话有效。')
+        return lines.join('\n')
+      }
+
+      if (!sub || sub === 'status') {
+        pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'mode') {
+        const mode = parts[2]
+        if (!mode || !isRuntimeMode(mode)) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /permission mode <${VALID_MODES.join('|')}>`, isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        agent.setApprovalMode(mode)
+        // Keep /auto toggle ref in sync for users who still use /auto.
+        ctx.setAutoSafe(mode === 'auto-safe')
+        pushStatic(createLogEntry({ type: 'system', content: `Approval mode → ${mode}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'allow' || sub === 'deny') {
+        const tool = parts[2]
+        if (!tool) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /permission ${sub} <tool> [param=value]...`, isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const rule = { tool, params: parseKvPairs(parts.slice(3)) }
+        if (Object.keys(rule.params).length === 0) delete (rule as { params?: Record<string, string> }).params
+        if (sub === 'allow') agent.addAllowRule(rule)
+        else agent.addDenyRule(rule)
+        const paramsStr = rule.params ? Object.entries(rule.params).map(([k, v]) => `${k}="${v}"`).join(' ') : ''
+        pushStatic(createLogEntry({ type: 'system', content: `已添加 ${sub} 规则: ${tool}${paramsStr ? ' ' + paramsStr : ''}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'bash') {
+        const action = parts[2]?.toLowerCase()
+        if (action !== 'allow' && action !== 'deny') {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission bash allow|deny <prefix>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const prefix = parts.slice(3).join(' ')
+        if (!prefix) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission bash allow|deny <prefix>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        if (action === 'allow') agent.addBashAllowPrefix(prefix)
+        else agent.addBashDenyPrefix(prefix)
+        pushStatic(createLogEntry({ type: 'system', content: `已添加 bash ${action === 'allow' ? '白名单' : '黑名单'}前缀: ${prefix}` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'remove') {
+        const kindRaw = parts[2]?.toLowerCase()
+        const target = parts[3]
+        if (!kindRaw || !target || !['allow', 'deny', 'bashallow', 'bashdeny'].includes(kindRaw)) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission remove allow|deny|bashAllow|bashDeny <index|pattern>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const kind = kindRaw as 'allow' | 'deny' | 'bashAllow' | 'bashDeny'
+        const idx = parseInt(target, 10)
+        const key = Number.isNaN(idx) ? target : idx
+        const ok = agent.removePermissionRule(kind, key)
+        pushStatic(createLogEntry({ type: 'system', content: ok ? `已移除 ${kind} 规则: ${target}` : `未找到 ${kind} 规则: ${target}`, isError: !ok }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'reset') {
+        agent.resetPermissionOverlay()
+        pushStatic(createLogEntry({ type: 'system', content: '已清空本次会话所有运行时权限覆盖。' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'test') {
+        const tool = parts[2]
+        const json = parts.slice(3).join(' ')
+        if (!tool || !json) {
+          pushStatic(createLogEntry({ type: 'system', content: '用法: /permission test <tool> <json input>', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        let input: Record<string, unknown>
+        try {
+          input = JSON.parse(json) as Record<string, unknown>
+        } catch {
+          pushStatic(createLogEntry({ type: 'system', content: 'JSON 解析失败', isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        const allDeny = [...(agent.config.permissions?.deny ?? []), ...(agent.config.permissionsOverlay?.deny ?? [])]
+        const allAllow = [...(agent.config.permissions?.allow ?? []), ...(agent.config.permissionsOverlay?.allow ?? [])]
+        const bashDeny = [...(agent.config.permissions?.bash?.denylist ?? []), ...(agent.config.permissionsOverlay?.bashDeny ?? [])]
+        const bashAllow = [...(agent.config.permissions?.bash?.allowlist ?? []), ...(agent.config.permissionsOverlay?.bashAllow ?? [])]
+
+        const denied = tool === 'bash' && typeof input.command === 'string'
+          ? isBashCommandDenied(input.command, bashDeny)
+          : isToolDenied(tool, input, allDeny)
+        if (denied) {
+          pushStatic(createLogEntry({ type: 'system', content: `结果: deny（命中 deny 规则）` }))
+          setIsStreaming(false)
+          return true
+        }
+        const allowlisted = tool === 'bash' && typeof input.command === 'string'
+          ? isBashCommandAllowlisted(input.command, bashAllow)
+          : isToolAllowed(tool, input, allAllow)
+        if (allowlisted) {
+          pushStatic(createLogEntry({ type: 'system', content: '结果: allow（命中 allow 规则）' }))
+          setIsStreaming(false)
+          return true
+        }
+        const needsApproval = agent.config.toolRegistry.needsApproval(tool, { input, toolUseId: 'test', cwd: ctx.agent.cwd })
+        pushStatic(createLogEntry({ type: 'system', content: `结果: ask（需要 approval：${needsApproval ? '是' : '否'}）` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      pushStatic(createLogEntry({ type: 'system', content: '未知子命令。用法: /permission [status|mode|allow|deny|bash|remove|reset|test]', isError: true }))
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
     name: '/plan-mode',
     immediate: true,
     handler(ctx) {
@@ -1838,7 +2044,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         } else {
           // Save current plan (if any) as template
           const { getStoredPlan } = await import('../agent/plan-store.js')
-          const currentPlan = getStoredPlan()
+          const currentPlan = getStoredPlan(ctx.currentSessionId)
           if (!currentPlan) {
             pushStatic(createLogEntry({ type: 'system', content: 'No active plan to save. Run /plan first.', isError: true }))
           } else {
@@ -2279,9 +2485,30 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      // /skill install <name> [...] — copy from .claude/skills/ into .rivet/skills/
+      if (sub === 'install' || sub === 'import') {
+        const names = parts.slice(2).filter(Boolean)
+        if (names.length === 0) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /skill ${sub} <name> [name2 ...]\n从 .claude/skills/<name> 复制到 .rivet/skills/<name>。` }))
+          setIsStreaming(false)
+          return true
+        }
+        const { copied, skipped, errors } = importSkillsIntoRivet(ctx.agent.cwd, names)
+        if (copied.length > 0) {
+          skillRegistry.loadFromDirectory(join(ctx.agent.cwd, '.rivet', 'skills'), 'rivet')
+        }
+        const lines: string[] = []
+        if (copied.length > 0) lines.push(`✅ 已安装: ${copied.join(', ')}`)
+        if (skipped.length > 0) lines.push(`⏭ 已存在/跳过: ${skipped.join(', ')}`)
+        if (errors.length > 0) lines.push(`❌ 失败:\n${errors.map(e => `  • ${e}`).join('\n')}`)
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') || '无变更。' }))
+        setIsStreaming(false)
+        return true
+      }
+
       if (!sub || sub === 'list' || sub === 'ls') {
         if (allSkills.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nCopy a skill in with:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
+          pushStatic(createLogEntry({ type: 'system', content: 'No skills found in .rivet/skills/.\nInstall one with:\n  /skill install <name>\nor copy manually:\n  cp -r ~/.claude/skills/<name> .rivet/skills/<name>\nor list it under skills.importFromClaude in config.' }))
         } else {
           const lines = [...allSkills]
             .sort((a, b) => a.name.localeCompare(b.name))
@@ -2516,6 +2743,28 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         const res = switchAgentSession(ctx, targetId)
         if (res.ok) {
           app.setStreamingState(false)
+          // 切换后恢复目标、todo 列表与 side panel 状态，保持会话连续性。
+          try {
+            const restoredGoal = restoreGoalTracker(getSessionDir(ctx.cwd), targetId, {
+              maxJudgeRuns: ctx.config.agent.goal?.judge?.maxRuns,
+            })
+            if (restoredGoal) {
+              ctx.agent.setGoalTracker(restoredGoal)
+              ctx.refs.goalTrackerRef.current = restoredGoal
+            } else {
+              ctx.refs.goalTrackerRef.current = null
+            }
+          } catch { /* goal restore best-effort */ }
+          try {
+            loadTodos(targetId, ctx.cwd)
+            setTodoSession(targetId, ctx.cwd)
+            setPlanSession(targetId)
+          } catch { /* todo/plan restore best-effort */ }
+          try {
+            const meta = ctx.persist.loadMetadata()
+            if (meta?.sidePanelOpen) app.setSidePanelOpen(true)
+            else app.setSidePanelOpen(false)
+          } catch { /* panel restore best-effort */ }
         }
         return res
       },

@@ -3,17 +3,31 @@ export interface PermissionAllowRule {
   params?: Record<string, string>
 }
 
-export interface BashAllowlistConfig {
-  /** Command prefixes that bypass bash-write approval.
-   *  "git status" matches "git status", "git status --porcelain", etc. */
-  allowlist: string[]
-}
-
 export interface PermissionConfig {
   allow: PermissionAllowRule[]
-  /** Optional bash command allowlist — commands starting with any of these prefixes
-   *  bypass bash-write approval in all modes (including auto-safe/manual). */
-  bash?: BashAllowlistConfig
+  /** Deny rules override allow rules and approval mode. */
+  deny: PermissionAllowRule[]
+  /** Optional bash command allowlist/denylist. */
+  bash?: BashPermissionsConfig
+}
+
+export interface BashPermissionsConfig {
+  /** Command prefixes that bypass bash-write approval. */
+  allowlist: string[]
+  /** Command prefixes that are always blocked. */
+  denylist: string[]
+}
+
+/** Runtime permission overrides that apply only to the current session. */
+export interface PermissionOverlay {
+  allow: PermissionAllowRule[]
+  deny: PermissionAllowRule[]
+  bashAllow: string[]
+  bashDeny: string[]
+}
+
+export function createPermissionOverlay(): PermissionOverlay {
+  return { allow: [], deny: [], bashAllow: [], bashDeny: [] }
 }
 
 /** Characters that are NOT matched by the `*` wildcard in permission patterns.
@@ -43,6 +57,16 @@ export function isToolAllowed(toolName: string, input: Record<string, unknown>, 
   return rules.some(rule => patternMatches(rule.tool, toolName) && paramsMatch(rule.params, input))
 }
 
+/** Check whether a tool call matches any deny rule. */
+export function isToolDenied(toolName: string, input: Record<string, unknown>, rules: readonly PermissionAllowRule[] | undefined): boolean {
+  return isToolAllowed(toolName, input, rules)
+}
+
+/** Check whether a bash command matches any denylist prefix. */
+export function isBashCommandDenied(command: string, denylist: readonly string[] | undefined): boolean {
+  return isBashCommandAllowlisted(command, denylist)
+}
+
 /** Extract the first token (command binary) from a bash command for allowlist learning.
  *  "git add ." → "git", "npx tsx --test" → "npx" */
 export function extractBashPrefix(command: string): string {
@@ -58,7 +82,7 @@ export function learnBashPrefix(command: string, permissions: PermissionConfig |
   if (!permissions || typeof command !== 'string') return
   const prefix = extractBashPrefix(command)
   if (!prefix) return
-  if (!permissions.bash) permissions.bash = { allowlist: [] }
+  if (!permissions.bash) permissions.bash = { allowlist: [], denylist: [] }
   if (!permissions.bash.allowlist.includes(prefix)) {
     permissions.bash.allowlist.push(prefix)
   }

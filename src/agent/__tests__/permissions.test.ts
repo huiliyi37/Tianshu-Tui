@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isToolAllowed, isBashCommandAllowlisted } from '../permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, createPermissionOverlay } from '../permissions.js'
 
 describe('permission allow rules', () => {
   it('matches exact tool names and exact parameter values', () => {
@@ -70,5 +70,34 @@ describe('isBashCommandAllowlisted', () => {
     assert.equal(isBashCommandAllowlisted('npm test', []), false)
     assert.equal(isBashCommandAllowlisted('npm test', undefined), false)
     assert.equal(isBashCommandAllowlisted('', ['npm']), false)
+  })
+})
+
+describe('permission deny rules', () => {
+  it('blocks tool calls matching deny rules', () => {
+    assert.equal(isToolDenied('bash', { command: 'rm -rf /' }, [
+      { tool: 'bash', params: { command: 'rm -rf*' } },
+    ]), true)
+  })
+
+  it('does not block calls that do not match deny rules', () => {
+    assert.equal(isToolDenied('bash', { command: 'git status' }, [
+      { tool: 'bash', params: { command: 'rm -rf*' } },
+    ]), false)
+  })
+})
+
+describe('isBashCommandDenied', () => {
+  it('matches denylist prefixes and rejects shell operators', () => {
+    assert.equal(isBashCommandDenied('rm -rf /tmp', ['rm']), true)
+    assert.equal(isBashCommandDenied('rm -rf / && echo ok', ['rm']), false)
+    assert.equal(isBashCommandDenied('git status', ['rm']), false)
+  })
+})
+
+describe('createPermissionOverlay', () => {
+  it('returns empty overlay', () => {
+    const overlay = createPermissionOverlay()
+    assert.deepEqual(overlay, { allow: [], deny: [], bashAllow: [], bashDeny: [] })
   })
 })

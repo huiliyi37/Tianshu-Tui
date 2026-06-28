@@ -510,6 +510,27 @@ describe('executeToolUse', () => {
     onCheckpoint: () => {},
   }
 
+  it('denies tool calls matching a deny rule before execution', async () => {
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        permissions: {
+          allow: [],
+          deny: [{ tool: 'bash', params: { command: 'rm -rf*' } }],
+          bash: { allowlist: [], denylist: [] },
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-deny', name: 'bash', input: { command: 'rm -rf /tmp' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal((result.toolResult as any).is_error, true)
+    assert.ok((result.toolResult as any).content.includes('denied'))
+  })
+
   it('R2: blocks write_file when another session holds an exclusive claim (fail-closed)', async () => {
     let executed = false
     const fakeRegistry = {

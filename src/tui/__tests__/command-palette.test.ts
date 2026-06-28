@@ -57,6 +57,18 @@ describe('getPaletteCommands', () => {
     assert.ok(reject, '/plan-reject must be in palette to surface rejection feedback')
   })
 
+  it('exposes /permission for permission mode/rule discovery', () => {
+    const cmd = getPaletteCommands().find(c => c.name === '/permission')
+    assert.ok(cmd, '/permission must be in palette so users discover permission controls')
+    assert.match(cmd.description, /permission|mode|rule/i)
+  })
+
+  it('exposes /skill install to discover skill installation', () => {
+    const cmd = getPaletteCommands().find(c => c.name === '/skill install')
+    assert.ok(cmd, '/skill install must be in palette so users can install skills')
+    assert.match(cmd.description, /install|import|claude/i)
+  })
+
   // 反证：UI 提示面板必须能通过子串过滤命中新增条目。filterCommands 用
   // substring + fuzzy 子序列匹配 — 输入 "plan" 必须返回所有 plan-* 命令。
   // 仅在 palette 列表里写名字但 filter 链路不通（如缺 description）会让

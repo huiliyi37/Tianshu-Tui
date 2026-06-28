@@ -28,7 +28,7 @@ import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
-import { isToolAllowed, isBashCommandAllowlisted, learnBashPrefix } from './permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
@@ -212,7 +212,7 @@ export interface ToolPipelineDeps {
   /** Capture an agent's departure mark (leave_mark tool) for 主控 to record at close. */
   onLeaveMark?: (mark: import('../tools/types.js').LeaveMarkInput) => void
   /** U6/C1: capture goal decomposition from plan_steps into the loop's PlanExecutionTrace. */
-  onPlanSteps?: (descriptions: string[]) => void
+  onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
@@ -697,9 +697,37 @@ export async function executeToolUse(
       && (risk.level === 'none' || risk.level === 'low')
       && approvalMode === 'auto-safe'
 
-    const allowlisted = isToolAllowed(tu.name, tu.input, deps.config.permissions?.allow)
+    const allowRules = [
+      ...(deps.config.permissions?.allow ?? []),
+      ...(deps.config.permissionsOverlay?.allow ?? []),
+    ]
+    const denyRules = [
+      ...(deps.config.permissions?.deny ?? []),
+      ...(deps.config.permissionsOverlay?.deny ?? []),
+    ]
+    const bashAllowPrefixes = [
+      ...(deps.config.permissions?.bash?.allowlist ?? []),
+      ...(deps.config.permissionsOverlay?.bashAllow ?? []),
+    ]
+    const bashDenyPrefixes = [
+      ...(deps.config.permissions?.bash?.denylist ?? []),
+      ...(deps.config.permissionsOverlay?.bashDeny ?? []),
+    ]
+
+    // Deny rules always win, even in dangerously-skip-permissions.
+    const denied = isToolDenied(tu.name, tu.input, denyRules)
+    const bashDenied = tu.name === 'bash' && typeof tu.input.command === 'string'
+      ? isBashCommandDenied(tu.input.command, bashDenyPrefixes)
+      : false
+    if (denied || bashDenied) {
+      const reason = `Tool execution denied: ${tu.name} matches an active deny rule`
+      callbacks.onToolResult(tu.id, tu.name, reason, true)
+      return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: reason, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
+    }
+
+    const allowlisted = isToolAllowed(tu.name, tu.input, allowRules)
     const bashAllowlisted = tu.name === 'bash' && typeof tu.input.command === 'string'
-      ? isBashCommandAllowlisted(tu.input.command, deps.config.permissions?.bash?.allowlist)
+      ? isBashCommandAllowlisted(tu.input.command, bashAllowPrefixes)
       : false
     // Autonomy-first: when a real kernel sandbox boundary is in effect, an
     // in-workspace bash write is safe-by-construction (writes can't escape the

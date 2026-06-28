@@ -139,7 +139,8 @@ export const DEFAULT_CONFIG: Config = {
     },
     permissions: {
       allow: [],
-      bash: { allowlist: [] },
+      deny: [],
+      bash: { allowlist: [], denylist: [] },
     },
     review: {
       profiles: {},

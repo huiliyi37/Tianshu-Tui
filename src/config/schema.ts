@@ -74,10 +74,14 @@ export const permissionAllowRuleSchema = z.object({
 export const bashAllowlistSchema = z.object({
   /** Command prefixes that bypass bash-write approval. Matched by prefix: "git status" allows "git status --porcelain". */
   allowlist: z.array(z.string().min(1)).default([]),
+  /** Command prefixes that are always blocked, regardless of mode or allowlist. */
+  denylist: z.array(z.string().min(1)).default([]),
 }).default({})
 
 export const permissionsSchema = z.object({
   allow: z.array(permissionAllowRuleSchema).default([]),
+  /** Deny rules take precedence over allow rules and approval mode. */
+  deny: z.array(permissionAllowRuleSchema).default([]),
   bash: bashAllowlistSchema,
 })
 

@@ -5,7 +5,8 @@
  * information from agent trajectories for 39-59% token reduction.
  */
 
-import type { OaiMessage } from '../api/oai-types.js'
+import type { OaiMessage, OaiToolMessage } from '../api/oai-types.js'
+import { isToolMessage } from '../api/oai-types.js'
 import { parseOptionalInt, rangeContains } from './shared-range.js'
 
 export type { OaiMessage }
@@ -143,7 +144,7 @@ export function applyAgentDiet(messages: OaiMessage[], options: DietOptions = {}
 }
 
 function extractPath(msg: OaiMessage, allMessages: OaiMessage[]): ExtractedPath | undefined {
-  if (!msg.tool_call_id) return undefined
+  if (!isToolMessage(msg)) return undefined
   for (let i = allMessages.indexOf(msg) - 1; i >= 0; i--) {
     const prev = allMessages[i]!
     if (prev.role !== 'assistant' || !prev.tool_calls) continue
@@ -165,7 +166,7 @@ function extractPath(msg: OaiMessage, allMessages: OaiMessage[]): ExtractedPath 
   return undefined
 }
 
-function isFailedResult(msg: OaiMessage): boolean {
+function isFailedResult(msg: OaiToolMessage): boolean {
   return msg.content.startsWith('Error:') || msg.content.startsWith('error:') ||
     msg.content.includes('ENOENT') || msg.content.includes('Permission denied')
 }

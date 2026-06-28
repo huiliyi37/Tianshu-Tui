@@ -367,6 +367,7 @@ function runCheckId(fn: (entry: ProviderEntry) => ConformanceCheck): string {
       hasToolJsonInContentBug: false,
       effortFormat: 'none',
       prefixCacheStrategy: 'none',
+      supportsResponseFormat: false,
     },
     cacheProfile: { cacheType: 'none', persistent: false, minCacheTokens: 0 },
     hasUsageMapping: false,

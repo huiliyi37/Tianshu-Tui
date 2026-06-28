@@ -205,6 +205,7 @@ test('addProviderEntry adds a new provider', () => {
     hasToolJsonInContentBug: false,
     effortFormat: 'none',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: false,
   })
 
   assert.equal(entry.key, 'test_provider')
@@ -229,6 +230,7 @@ test('addProviderEntry with notes', () => {
     hasToolJsonInContentBug: false,
     effortFormat: 'reasoning_effort',
     prefixCacheStrategy: 'none',
+    supportsResponseFormat: true,
   }, ['This is a note', 'Another note'])
 
   assert.equal(entry.notes.length, 2)

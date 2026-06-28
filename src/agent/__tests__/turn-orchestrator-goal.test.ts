@@ -7,6 +7,7 @@ import { GoalTracker } from '../goal-tracker.js'
 import type { GoalJudgeDeps } from '../goal-judge.js'
 import type { CoordinatorRun } from '../coordinator.js'
 import type { WorkerResult } from '../work-order.js'
+import type { TelemetryRecord } from '../telemetry-writer.js'
 
 /**
  * Focused unit tests for the goal-completion judge decision logic that the
@@ -38,7 +39,7 @@ function verdictRun(overall: string, summary = '', criteria: unknown[] = []): Co
 function makeController(opts: {
   judgeDeps?: GoalJudgeDeps | undefined
   streamedText?: string
-  telemetrySink?: Array<Record<string, unknown>>
+  telemetrySink?: TelemetryRecord[]
 }): GoalContinuationController {
   return new GoalContinuationController({
     getGoalTracker: () => null,
@@ -50,7 +51,7 @@ function makeController(opts: {
     getCwd: () => '/tmp',
     appendSystemReminder: () => {},
     completeTurn: async () => {},
-    writeTelemetry: (entry: Record<string, unknown>) => { opts.telemetrySink?.push(entry) },
+    writeTelemetry: (entry: TelemetryRecord) => { opts.telemetrySink?.push(entry) },
     flushMeridianTurn: () => {},
   })
 }
@@ -143,7 +144,7 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
   })
 
   it('emits goal_judge_verdict telemetry on accept (verified)', async () => {
-    const telemetry: Record<string, unknown>[] = []
+    const telemetry: TelemetryRecord[] = []
     const ctrl = makeController({
       judgeDeps: { spawnJudge: async () => verdictRun('verified', 'all good', [
         { criterion: 'c1', met: true },
@@ -155,7 +156,7 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
     const decision = await judge(ctrl, tracker, undefined)
     assert.equal(decision.action, 'accept')
     assert.equal(telemetry.length, 1)
-    const entry = telemetry[0]!
+    const entry = telemetry[0]! as Record<string, unknown>
     assert.equal(entry.kind, 'goal_judge_verdict')
     assert.equal(entry.overall, 'verified')
     assert.equal(entry.acceptedUnverified, false)
@@ -165,7 +166,7 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
   })
 
   it('emits goal_judge_verdict telemetry with acceptedUnverified=true on inconclusive', async () => {
-    const telemetry: Record<string, unknown>[] = []
+    const telemetry: TelemetryRecord[] = []
     const ctrl = makeController({
       judgeDeps: {}, // no spawnJudge → inconclusive
       telemetrySink: telemetry,
@@ -173,12 +174,13 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
     const tracker = makeTracker()
     await judge(ctrl, tracker, undefined)
     assert.equal(telemetry.length, 1)
-    assert.equal(telemetry[0]!.kind, 'goal_judge_verdict')
-    assert.equal(telemetry[0]!.acceptedUnverified, true)
+    const entry = telemetry[0]! as Record<string, unknown>
+    assert.equal(entry.kind, 'goal_judge_verdict')
+    assert.equal(entry.acceptedUnverified, true)
   })
 
   it('does NOT emit telemetry on continue (rejected under cap)', async () => {
-    const telemetry: Record<string, unknown>[] = []
+    const telemetry: TelemetryRecord[] = []
     const ctrl = makeController({
       judgeDeps: { spawnJudge: async () => verdictRun('rejected', 'c1 missing', [
         { criterion: 'c1', met: false },
@@ -192,7 +194,7 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
   })
 
   it('emits telemetry with acceptedUnverified=true when judge cap reached on rejected', async () => {
-    const telemetry: Record<string, unknown>[] = []
+    const telemetry: TelemetryRecord[] = []
     const ctrl = makeController({
       judgeDeps: { spawnJudge: async () => verdictRun('rejected', 'still broken', [
         { criterion: 'c1', met: false },
@@ -203,7 +205,8 @@ describe('TurnOrchestrator.judgeGoalCompletion', () => {
     const decision = await judge(ctrl, tracker, undefined)
     assert.equal(decision.action, 'accept')
     assert.equal(telemetry.length, 1)
-    assert.equal(telemetry[0]!.acceptedUnverified, true)
-    assert.equal(telemetry[0]!.overall, 'rejected')
+    const entry = telemetry[0]! as Record<string, unknown>
+    assert.equal(entry.acceptedUnverified, true)
+    assert.equal(entry.overall, 'rejected')
   })
 })

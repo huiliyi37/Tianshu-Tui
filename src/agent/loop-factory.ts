@@ -209,7 +209,7 @@ return new ToolExecutionController({
       addToolResults: results => { self.session.addToolResults(results) },
       recordToolHistory: (name, input, isError, content) => self.recordToolHistory(name, input, isError, content),
       onLeaveMark: mark => self.captureLeaveMark(mark),
-      onPlanSteps: descriptions => self.capturePlanSteps(descriptions),
+      onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),
       requestThetaCheck: reason => { self.requestThetaCheck(reason) },

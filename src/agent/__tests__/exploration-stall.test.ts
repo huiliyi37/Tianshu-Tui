@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { detectExplorationStall, EXPLORATION_TOOLS } from '../exploration-stall.js'
 
 function traj(tools: string[]) {
-  return tools.map(tool => ({ tool, target: '', status: 'success' }))
+  return tools.map(tool => ({ tool, target: '', status: 'success' as const }))
 }
 
 describe('detectExplorationStall', () => {

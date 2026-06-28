@@ -11,7 +11,7 @@ import type { RuntimeHookPipeline } from './runtime-hooks.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
 import type { ModelCapabilityCard } from '../model/capability.js'
 import type { PlanModeState } from './plan-mode.js'
-import type { PermissionConfig } from './permissions.js'
+import type { PermissionConfig, PermissionOverlay } from './permissions.js'
 import type { ApprovalResult } from './approval-edit.js'
 import type { ResourceSensorOptions } from './resource-sensor.js'
 import type { ProviderHealthTracker } from './provider-health.js'
@@ -96,6 +96,8 @@ export interface AgentConfig {
    *  where LSP initializes asynchronously after AgentLoop construction. */
   getLspManager?: () => import('../lsp/manager.js').LspManager | null
   permissions?: PermissionConfig
+  /** Runtime permission overrides that apply only to the current session. */
+  permissionsOverlay?: PermissionOverlay
   contextClaimStore?: ContextClaimStore
   /** Optional provider health tracker for Physarum-style routing.
    *  Degradation ratio affects sensorium stability dimension. */

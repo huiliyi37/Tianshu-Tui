@@ -191,4 +191,6 @@ export interface SessionMetadata {
    * silently auto-resumed — only crash-interrupted sessions are (R1).
    */
   cleanExit?: boolean
+  /** TUI side panel open state persisted across session resume. */
+  sidePanelOpen?: boolean
 }
