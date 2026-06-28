@@ -1124,6 +1124,9 @@ body {
 .kv > div { display: flex; justify-content: space-between; font-size: var(--text-base); }
 .kv dt { color: var(--muted); margin: 0; }
 .kv dd { margin: 0; color: var(--text); }
+.help-steps { margin: 0 0 var(--space-3); padding-left: 1.4em; display: flex; flex-direction: column; gap: var(--space-2); list-style: decimal; color: var(--text); font-size: var(--text-base); }
+.help-steps li { line-height: 1.6; }
+.settings-content code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
 
 /* ── Hooks surface ─────────────────────────────────────────────── */
 .hooks-surface { padding: var(--space-4); height: 100%; display: flex; flex-direction: column; min-height: 0; }
@@ -2308,7 +2311,8 @@ body {
   font-size: var(--text-xs);
   color: var(--muted);
 }
-.onboard-hint kbd {
+.onboard-hint kbd,
+.settings-content kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;

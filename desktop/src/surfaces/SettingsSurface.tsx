@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Palette, SlidersHorizontal, Plug, Cpu, type LucideIcon } from 'lucide-react'
+import { Palette, SlidersHorizontal, Plug, Cpu, LifeBuoy, type LucideIcon } from 'lucide-react'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -30,13 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system'
+type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system' | 'help'
 
 const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [
   { id: 'appearance', icon: Palette },
   { id: 'behavior', icon: SlidersHorizontal },
   { id: 'integrations', icon: Plug },
   { id: 'system', icon: Cpu },
+  { id: 'help', icon: LifeBuoy },
 ]
 
 
@@ -291,8 +292,87 @@ export function SettingsSurface() {
             <UpdaterSection />
           </>
         )}
+        {activeCat === 'help' && <HelpSection onNavigate={setActiveCat} />}
       </div>
     </div>
+  )
+}
+
+/**
+ * In-app user guide. Surfaces the few configuration concepts most likely to
+ * trip up a first-time user (provider + key, sub-agent routing / cache
+ * contention, autonomy, where config & session data live, shortcuts) and
+ * provides jump buttons into the relevant settings category.
+ */
+function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void }) {
+  return (
+    <>
+      <section className="settings-group">
+        <h4>快速开始</h4>
+        <ol className="help-steps">
+          <li>在「集成」里添加一个模型 Provider，并填入 API Key（首个 Provider 会自动设为主控模型）。</li>
+          <li>到「行为」选择新线程的默认自治档位。</li>
+          <li>用 <kbd>⌘N</kbd> 新建线程，描述你的任务，天枢会自主完成编码。</li>
+        </ol>
+        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 Provider →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>模型 Provider 与 API Key</h4>
+        <div className="meta">
+          在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。
+          其中一个被标记为「主控」，即对话主循环使用的模型。Key 只存在本地
+          <code> ~/.rivet/config.json</code>，不会上传。
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>子代理 / 审查模型路由（重要）</h4>
+        <div className="meta">
+          天枢在「提交后审查」和「能力任务委派」时会派出子代理。如果子代理和主控用
+          <strong> 同一个无服务端前缀缓存的 Provider</strong>（GLM / Kimi / Codex 等），并发请求会
+          <strong> 抢占并驱逐主会话的服务端缓存</strong>，导致主对话突然变慢甚至看起来卡死。
+        </div>
+        <div className="meta" style={{ marginTop: 8 }}>
+          解决办法：把子代理路由到一个便宜的「副模型」（如 DeepSeek Flash）。
+          支持<strong>跨 Provider</strong>路由——主控用 GLM，子代理走 DeepSeek Flash，两条缓存互不干扰。
+          若指定的 Provider / 模型不存在或缺 Key，会静默回退到主控模型（不报错）。
+        </div>
+        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置路由 →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>自治档位</h4>
+        <div className="meta">
+          在「行为 → 新线程默认自治档位」设置。高档位在项目目录内全自动执行；
+          项目目录外的写入仍受沙箱限制，且任何改动都可回滚。
+        </div>
+        <button className="btn" onClick={() => onNavigate('behavior')}>前往「行为」设置 →</button>
+      </section>
+
+      <section className="settings-group">
+        <h4>配置文件与数据位置</h4>
+        <dl className="kv">
+          <div><dt>主配置</dt><dd><code>~/.rivet/config.json</code>（JSON，camelCase 键）</dd></div>
+          <div><dt>项目级覆盖</dt><dd>项目根目录 <code>.rivet-config.json</code></dd></div>
+          <div><dt>会话日志</dt><dd><code>~/.rivet/sessions/&lt;项目&gt;/</code></dd></div>
+          <div><dt>配置示例</dt><dd>仓库根目录 <code>config.example.json</code></dd></div>
+        </dl>
+        <div className="meta" style={{ marginTop: 8 }}>
+          手改配置后无需重启桌面端，下一次新建会话即生效。注意加载器只接受
+          JSON 格式（不是 TOML），键名为 camelCase。
+        </div>
+      </section>
+
+      <section className="settings-group">
+        <h4>常用快捷键</h4>
+        <dl className="kv">
+          <div><dt><kbd>⌘K</kbd></dt><dd>打开命令面板</dd></div>
+          <div><dt><kbd>⌘N</kbd></dt><dd>新建线程</dd></div>
+          <div><dt><kbd>/</kbd></dt><dd>在输入框使用斜杠命令</dd></div>
+        </dl>
+      </section>
+    </>
   )
 }
 

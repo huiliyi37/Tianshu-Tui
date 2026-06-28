@@ -4,7 +4,8 @@
     "appearance": "外观",
     "behavior": "行为",
     "integrations": "集成",
-    "system": "系统"
+    "system": "系统",
+    "help": "帮助"
   },
   "appearance": "外观",
   "autonomy": "新线程默认自治档位",
