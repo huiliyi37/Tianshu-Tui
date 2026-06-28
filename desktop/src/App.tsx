@@ -1,8 +1,8 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useHealth, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
-import { projectId } from './lib/projects'
+import { loadKnownProjects, projectId } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
@@ -55,6 +55,12 @@ export function App() {
   const commands = useSurfaceCommands()
 
   const sidecarDown = health.isError
+  const defaultCwd = useMemo(() => {
+    if (!ui.activeProject) return null
+    const known = loadKnownProjects()
+    const p = known.find((x) => x.id === ui.activeProject)
+    return p?.roots[0] ?? null
+  }, [ui.activeProject])
   return (
     <WallpaperProvider>
       <div className="shell">
@@ -111,7 +117,7 @@ export function App() {
 
       {ui.newSessionOpen && (
         <NewSessionDialog
-          defaultCwd={ui.activeProject}
+          defaultCwd={defaultCwd}
           onCreate={async (input) => {
             try {
               const rec = await createSession.mutateAsync(input)

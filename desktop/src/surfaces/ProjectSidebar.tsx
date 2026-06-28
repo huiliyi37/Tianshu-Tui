@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
-import { addKnownProject, deriveProjects, loadKnownProjects, projectId, type StoredProject } from '../lib/projects'
+import { addKnownProject, deriveProjects, loadKnownProjects, projectId } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
