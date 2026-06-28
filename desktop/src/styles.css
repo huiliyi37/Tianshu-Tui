@@ -3338,6 +3338,58 @@ html[data-theme="nebula"] .plan-panel {
 .canvas-content-box {
   box-shadow: var(--shadow-lg);
 }
+/* Fullscreen preview overlay — reuses the sandboxed iframe, app-internal (no
+   un-sandboxed external window.open). */
+.canvas-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  animation: canvas-fs-in 0.15s var(--ease);
+}
+@keyframes canvas-fs-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.canvas-fs-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.canvas-fs-title {
+  color: var(--text-strong);
+  font-weight: 600;
+  min-width: 0;
+}
+.canvas-fs-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.canvas-fs-body {
+  flex: 1;
+  min-height: 0;
+  background: #fff;
+}
+.canvas-fs-content {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.canvas-fs-content.markdown {
+  background: var(--panel);
+  color: var(--text);
+  padding: 24px;
+  overflow: auto;
+}
 
 /* SVG Flow Lines & Flowing Light Animation */
 .glowing-particle {

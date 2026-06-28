@@ -90,10 +90,23 @@ export function ReviewPanel(props: {
   const [canvasWidth, setCanvasWidth] = useState<'100%' | '768px' | '375px'>('100%')
   // 自增触发「刷新」：进 content effect 依赖 → 重新从盘上拉取，同时作为 iframe key 强制重挂。
   const [canvasKey, setCanvasKey] = useState<number>(0)
+  // 全屏预览：复用同一沙箱 iframe 做 app 内全屏覆盖层，取代未沙箱化的 blob
+  // window.open（后者在本 Tauri 配置下既是脚本逃逸入口、又打不开真正的外部浏览器）。
+  const [canvasFullscreen, setCanvasFullscreen] = useState<boolean>(false)
 
   const canvasArtifacts = useMemo(() => {
     return artifacts.filter((a) => a.kind === 'html' || a.kind === 'markdown' || a.target.endsWith('.html') || a.target.endsWith('.md') || a.target.endsWith('.css'))
   }, [artifacts])
+
+  // Esc 退出全屏预览。
+  useEffect(() => {
+    if (!canvasFullscreen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCanvasFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canvasFullscreen])
 
   // 切会话或工件被移除时，当前选中项可能已不在列表里：回落到首个，避免拿旧会话的
   // artifactId 去取（404）以及 <select> 显示一个不在选项中的越界值。
@@ -241,6 +254,7 @@ export function ReviewPanel(props: {
                 </div>
 
                 {selectedCanvasArtifact && (
+                  <>
                   <div className="canvas-preview-wrapper flex-1 flex flex-col border border-border rounded overflow-hidden bg-panel">
                     <div className="canvas-toolbar flex items-center justify-between bg-panel-2 border-b border-border px-3 py-1.5 text-xs">
                       <div className="flex items-center gap-2">
@@ -257,23 +271,13 @@ export function ReviewPanel(props: {
                         <span className="text-border">|</span>
                         <button
                           className="canvas-btn flex items-center gap-1 hover:text-text-strong"
-                          onClick={() => {
-                            if (!canvasContent) return
-                            // markdown 用 text/plain 打开（避免把 .md 内联的 HTML 当文档执行）；
-                            // html 才用 text/html。revoke 释放 object URL，noopener 断开 opener。
-                            const mime =
-                              selectedCanvasArtifact?.kind === 'markdown' ? 'text/plain;charset=utf-8' : 'text/html'
-                            const blob = new Blob([canvasContent], { type: mime })
-                            const url = URL.createObjectURL(blob)
-                            window.open(url, '_blank', 'noopener,noreferrer')
-                            setTimeout(() => URL.revokeObjectURL(url), 60_000)
-                          }}
-                          title="在浏览器中打开"
+                          onClick={() => setCanvasFullscreen(true)}
+                          title="全屏预览（应用内沙箱）"
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3" />
+                            <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
                           </svg>
-                          浏览器打开
+                          全屏
                         </button>
                       </div>
 
@@ -321,6 +325,40 @@ export function ReviewPanel(props: {
                       )}
                     </div>
                   </div>
+
+                  {canvasFullscreen && (
+                    <div className="canvas-fullscreen-overlay" role="dialog" aria-modal="true">
+                      <div className="canvas-fs-toolbar">
+                        <span className="canvas-fs-title truncate" title={selectedCanvasArtifact.target}>
+                          {selectedCanvasArtifact.target} ({selectedCanvasArtifact.kind})
+                        </span>
+                        <div className="canvas-fs-actions">
+                          <button className="canvas-btn" onClick={() => setCanvasKey((k) => k + 1)} title="重新加载">
+                            刷新
+                          </button>
+                          <button className="canvas-btn" onClick={() => setCanvasFullscreen(false)} title="退出全屏 (Esc)">
+                            退出全屏
+                          </button>
+                        </div>
+                      </div>
+                      <div className="canvas-fs-body">
+                        {selectedCanvasArtifact.kind === 'markdown' ? (
+                          <div className="canvas-fs-content markdown">
+                            <Markdown source={canvasContent} />
+                          </div>
+                        ) : (
+                          <iframe
+                            key={`fs-${canvasKey}`}
+                            className="canvas-fs-content"
+                            srcDoc={canvasContent}
+                            sandbox="allow-scripts"
+                            title={selectedCanvasArtifact.target}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  </>
                 )}
               </>
             )}
