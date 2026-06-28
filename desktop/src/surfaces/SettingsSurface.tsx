@@ -29,40 +29,40 @@ import {
 } from '@/components/ui/select'
 type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system'
 
-const SETTINGS_CATS: { id: SettingsCat; label: string; icon: LucideIcon }[] = [
-  { id: 'appearance', label: '外观', icon: Palette },
-  { id: 'behavior', label: '行为', icon: SlidersHorizontal },
-  { id: 'integrations', label: '集成', icon: Plug },
-  { id: 'system', label: '系统', icon: Cpu },
+const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [
+  { id: 'appearance', icon: Palette },
+  { id: 'behavior', icon: SlidersHorizontal },
+  { id: 'integrations', icon: Plug },
+  { id: 'system', icon: Cpu },
 ]
 
-const THEME_LABEL: Record<ThemePref, string> = {
-  system: '跟随系统',
-  light: '亮色',
-  dark: '暗色 (石板)',
-  nebula: '星空 (霓虹)',
-}
 
-
-const DENSITY_LABEL: Record<ToolDensity, string> = {
-  compact: '紧凑',
-  balanced: '均衡',
-  detailed: '详细',
-}
-
-const NOTIF_LABEL: Record<NotifPref, string> = {
-  never: '从不',
-  background: '仅后台',
-  always: '始终',
-}
-
-const FONT_WEIGHT_LABEL: Record<FontWeightPref, string> = {
-  normal: '常规',
-  medium: '中等',
-  bold: '加粗',
-}
 
 export function SettingsSurface() {
+  const { t } = useTranslation('settings')
+
+  const THEME_LABEL: Record<ThemePref, string> = {
+    system: t('theme.system'),
+    light: t('theme.light'),
+    dark: t('theme.dark'),
+    nebula: t('theme.nebula'),
+  }
+  const DENSITY_LABEL: Record<ToolDensity, string> = {
+    compact: t('densityCompact'),
+    balanced: t('densityBalanced'),
+    detailed: t('densityDetailed'),
+  }
+  const NOTIF_LABEL: Record<NotifPref, string> = {
+    never: t('notifNever'),
+    background: t('notifBackground'),
+    always: t('notifAlways'),
+  }
+  const FONT_WEIGHT_LABEL: Record<FontWeightPref, string> = {
+    normal: t('fontWeight.normal'),
+    medium: t('fontWeight.medium'),
+    bold: t('fontWeight.bold'),
+  }
+
   const [activeCat, setActiveCat] = useState<SettingsCat>('appearance')
   const health = useHealth()
   const dispatch = useUiDispatch()
@@ -120,7 +120,7 @@ export function SettingsSurface() {
             onClick={() => setActiveCat(c.id)}
           >
             <c.icon size={16} strokeWidth={1.7} />
-            <span>{c.label}</span>
+            <span>{t(`cat.${c.id}`)}</span>
           </button>
         ))}
       </nav>
@@ -130,10 +130,10 @@ export function SettingsSurface() {
         {activeCat === 'appearance' && (
           <>
             <section className="settings-group">
-              <h4>主题</h4>
+              <h4>{t('themeLabel')}</h4>
               <Select value={theme} onValueChange={(v) => pick(v as ThemePref)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择主题" />
+                  <SelectValue placeholder={t('themePlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {(['system', 'light', 'dark', 'nebula'] as ThemePref[]).map((t) => (
@@ -143,10 +143,10 @@ export function SettingsSurface() {
               </Select>
             </section>
             <section className="settings-group">
-              <h4>字体粗细</h4>
+              <h4>{t('fontWeightLabel')}</h4>
               <Select value={fontWeight} onValueChange={(v) => pickFontWeight(v as FontWeightPref)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择字体粗细" />
+                  <SelectValue placeholder={t('fontWeightPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {(['normal', 'medium', 'bold'] as FontWeightPref[]).map((w) => (
@@ -154,7 +154,7 @@ export function SettingsSurface() {
                   ))}
                 </SelectContent>
               </Select>
-              <div className="meta">调整全局字重，实时生效。</div>
+              <div className="meta">{t('fontWeightHint')}</div>
             </section>
             <FontSettingsPanel value={fontFamily} onChange={pickFontFamily} />
             <LanguageSection />
@@ -164,15 +164,15 @@ export function SettingsSurface() {
         {activeCat === 'behavior' && (
           <>
             <section className="settings-group">
-              <h4>新线程默认自治档位</h4>
+              <h4>{t('autonomy')}</h4>
               <AutonomyControl value={autonomy} onChange={pickAutonomy} />
-              <div className="meta">自治档项目内全自动执行；项目外写入仍受沙箱限制，可随时回滚。</div>
+              <div className="meta">{t('autonomyHint')}</div>
             </section>
             <section className="settings-group">
-              <h4>工具组密度</h4>
+              <h4>{t('toolDensity')}</h4>
               <Select value={ui.toolDensity} onValueChange={(v) => pickDensity(v as ToolDensity)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择密度" />
+                  <SelectValue placeholder={t('densityPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {(['compact', 'balanced', 'detailed'] as ToolDensity[]).map((d) => (
@@ -180,13 +180,13 @@ export function SettingsSurface() {
                   ))}
                 </SelectContent>
               </Select>
-              <div className="meta">控制 read/search 工具组的折叠行为。</div>
+              <div className="meta">{t('toolDensityHint')}</div>
             </section>
             <section className="settings-group">
-              <h4>通知</h4>
+              <h4>{t('notifications')}</h4>
               <Select value={notifPref} onValueChange={(v) => pickNotif(v as NotifPref)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="选择通知策略" />
+                  <SelectValue placeholder={t('notifPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {(['never', 'background', 'always'] as NotifPref[]).map((n) => (
@@ -194,14 +194,14 @@ export function SettingsSurface() {
                   ))}
                 </SelectContent>
               </Select>
-              <div className="meta">控制何时收到系统通知。</div>
+              <div className="meta">{t('notifHint')}</div>
             </section>
           </>
         )}
         {activeCat === 'integrations' && (
           <>
             <section className="settings-group">
-              <h4>模型 Provider</h4>
+              <h4>{t('provider')}</h4>
               <ProviderSettings />
             </section>
             <section className="settings-group">
@@ -212,16 +212,16 @@ export function SettingsSurface() {
         {activeCat === 'system' && (
           <>
             <section className="settings-group">
-              <h4>运行时 (sidecar)</h4>
+              <h4>{t('runtime')}</h4>
               {health.isError ? (
-                <div className="meta warn">sidecar 离线，重连中…</div>
+                <div className="meta warn">{t('sidecarOffline')}</div>
               ) : (
                 <dl className="kv">
-                  <div><dt>版本</dt><dd>{health.data?.version ?? '—'}</dd></div>
-                  <div><dt>会话数</dt><dd>{health.data?.sessionCount ?? 0}</dd></div>
-                  <div><dt>运行中</dt><dd>{health.data?.runningCount ?? 0}</dd></div>
+                  <div><dt>{t('runtimeVersion')}</dt><dd>{health.data?.version ?? '—'}</dd></div>
+                  <div><dt>{t('runtimeSessions')}</dt><dd>{health.data?.sessionCount ?? 0}</dd></div>
+                  <div><dt>{t('runtimeRunning')}</dt><dd>{health.data?.runningCount ?? 0}</dd></div>
                   <div>
-                    <dt>运行时长</dt>
+                    <dt>{t('runtimeUptime')}</dt>
                     <dd>{health.data ? `${Math.round(health.data.uptimeMs / 1000)}s` : '—'}</dd>
                   </div>
                 </dl>
@@ -236,6 +236,7 @@ export function SettingsSurface() {
 }
 
 function UpdaterSection() {
+  const { t } = useTranslation('settings')
   const [checking, setChecking] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -251,12 +252,12 @@ function UpdaterSection() {
       const result = await check()
       if (result) {
         setUpdate(result)
-        setMessage(`发现新版本 ${result.version}。`)
+        setMessage(t('updateAvailable', { version: result.version }))
       } else {
-        setMessage('当前已是最新版本。')
+        setMessage(t('updateLatest'))
       }
     } catch (err) {
-      setMessage(`检查更新失败：${(err as Error).message}（若刚配置签名，请确认 pubkey 与 endpoint 已填实）`)
+      setMessage(t('updateCheckFailed', { error: (err as Error).message }))
     } finally {
       setChecking(false)
     }
@@ -286,13 +287,13 @@ function UpdaterSection() {
             // 盲等让用户以为卡住（与 UpdateBanner 一致）。
             setProgress(100)
             setInstalling(false)
-            setMessage('安装完成，正在重启…')
+            setMessage(t('updateInstallingComplete'))
             break
         }
       })
       await relaunch()
     } catch (err) {
-      setMessage(`安装失败：${(err as Error).message}`)
+      setMessage(t('updateInstallFailed', { error: (err as Error).message }))
     } finally {
       setInstalling(false)
     }
@@ -300,16 +301,16 @@ function UpdaterSection() {
 
   return (
     <section className="settings-group">
-      <h4>更新</h4>
+      <h4>{t('update')}</h4>
       <button className="btn" onClick={handleCheck} disabled={checking || installing}>
-        {checking ? '检查中…' : '检查更新'}
+        {checking ? t('updateChecking') : t('updateCheck')}
       </button>
       {update && (
         <div className="updater-actions">
-          <div className="meta">新版本 {update.version} 可用。</div>
+          <div className="meta">{t('updateAvailableShort', { version: update.version })}</div>
           {update.body && <div className="meta">{update.body}</div>}
           <button className="btn" onClick={handleInstall} disabled={installing}>
-            {installing ? (progress != null ? `下载中 ${progress}%` : '安装中…') : '下载并安装'}
+            {installing ? (progress != null ? t('updateDownloading', { progress }) : t('updateInstalling')) : t('updateDownload')}
           </button>
         </div>
       )}
@@ -378,15 +379,16 @@ function WallpaperSection({
   glassConfig: GlassConfig
   updateGlass: (updates: Partial<GlassConfig>) => void
 }) {
+  const { t } = useTranslation('settings')
   const { wallpaper, fit, pick, clear, changeFit } = useWallpaper()
   const [glassMode, setGlassMode] = useGlassMode()
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const FIT_LABEL: Record<WallpaperFit, string> = {
-    cover: '填充',
-    contain: '适应',
-    center: '居中',
+    cover: t('wallpaperFitCover'),
+    contain: t('wallpaperFitContain'),
+    center: t('wallpaperFitCenter'),
   }
 
   const handlePick = useCallback(
@@ -403,13 +405,13 @@ function WallpaperSection({
 
   return (
     <section className="settings-group">
-      <h4>壁纸与毛玻璃</h4>
+      <h4>{t('wallpaper')}</h4>
       <div className="wallpaper-row">
         <div
           className="wallpaper-preview"
           style={wallpaper ? { backgroundImage: `url("${wallpaper.url}")` } : undefined}
         >
-          {!wallpaper && <span className="wallpaper-empty">无壁纸</span>}
+          {!wallpaper && <span className="wallpaper-empty">{t('wallpaperEmpty')}</span>}
         </div>
         <div className="wallpaper-controls">
           <input
@@ -424,11 +426,11 @@ function WallpaperSection({
             }}
           />
           <button className="btn" disabled={busy} onClick={() => fileRef.current?.click()}>
-            {busy ? '处理中…' : '选择图片'}
+            {busy ? t('wallpaperProcessing') : t('selectImage')}
           </button>
           {wallpaper && (
             <button className="btn btn-danger" onClick={clear}>
-              清除壁纸
+              {t('clearWallpaper')}
             </button>
           )}
           {wallpaper && (
@@ -453,15 +455,14 @@ function WallpaperSection({
             checked={glassMode}
             onChange={(e) => setGlassMode(e.target.checked)}
           />
-          <span>启用毛玻璃效果（无壁纸时使用默认渐变背景）</span>
+          <span>{t('glassMode')}</span>
         </label>
       </div>
 
       {glassMode && <GlassCustomPanel config={glassConfig} onChange={updateGlass} />}
 
       <div className="meta" style={{ marginTop: '12px' }}>
-        设置壁纸或开启毛玻璃后，界面切换为半透明 backdrop-blur 效果（类似 macOS vibrancy）。
-        壁纸经压缩后存在本地 IndexedDB，不会上传。
+        {t('wallpaperHint')}
       </div>
     </section>
   )
