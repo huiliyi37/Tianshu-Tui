@@ -522,13 +522,23 @@ export async function listConfigProviders(): Promise<{
   return apiGet('/config/providers')
 }
 
-export function setupConfigProvider(input: {
+export interface SetupConfigProviderInput {
   providerName: string
   apiKey?: string
   apiKeyEnv?: string
   baseUrl?: string
   makeDefault?: boolean
-}): Promise<{ ok: boolean; providerName: string }> {
+  model?: {
+    id: string
+    alias?: string
+    contextWindow: number
+    maxTokens: number
+  }
+}
+
+export function setupConfigProvider(
+  input: SetupConfigProviderInput,
+): Promise<{ ok: boolean; providerName: string }> {
   return apiPost('/config/providers', input)
 }
 

@@ -25,6 +25,86 @@ function KeyBadge({ status }: { status: ProviderListItem['keyStatus'] }) {
   return <span className="badge warn">未配置</span>
 }
 
+interface ModelFormState {
+  id: string
+  alias: string
+  contextWindow: string
+  maxTokens: string
+}
+
+function emptyModel(): ModelFormState {
+  return { id: '', alias: '', contextWindow: '128000', maxTokens: '64000' }
+}
+
+function validateModel(state: ModelFormState): { ok: true; model: { id: string; alias?: string; contextWindow: number; maxTokens: number } } | { ok: false; error: string } {
+  const id = state.id.trim()
+  if (!id) return { ok: false, error: '模型 ID 不能为空' }
+  const contextWindow = Number(state.contextWindow)
+  if (!Number.isInteger(contextWindow) || contextWindow <= 0) return { ok: false, error: '上下文长度必须是正整数' }
+  const maxTokens = Number(state.maxTokens)
+  if (!Number.isInteger(maxTokens) || maxTokens <= 0) return { ok: false, error: '最大 Tokens 必须是正整数' }
+  const alias = state.alias.trim() || undefined
+  return { ok: true, model: { id, alias, contextWindow, maxTokens } }
+}
+
+function ModelForm({
+  state,
+  onChange,
+  onSubmit,
+  onCancel,
+  submitLabel,
+  busy,
+  error,
+}: {
+  state: ModelFormState
+  onChange: (patch: Partial<ModelFormState>) => void
+  onSubmit: () => void
+  onCancel: () => void
+  submitLabel: string
+  busy: boolean
+  error: string | null
+}) {
+  return (
+    <div className="provider-model-form">
+      <div className="provider-form-grid">
+        <input
+          type="text"
+          placeholder="模型 ID，例如 gpt-4o"
+          value={state.id}
+          onChange={(e) => onChange({ id: e.target.value })}
+          disabled={busy}
+        />
+        <input
+          type="text"
+          placeholder="别名（可选）"
+          value={state.alias}
+          onChange={(e) => onChange({ alias: e.target.value })}
+          disabled={busy}
+        />
+        <input
+          type="number"
+          placeholder="上下文长度"
+          value={state.contextWindow}
+          onChange={(e) => onChange({ contextWindow: e.target.value })}
+          disabled={busy}
+        />
+        <input
+          type="number"
+          placeholder="最大 Tokens"
+          value={state.maxTokens}
+          onChange={(e) => onChange({ maxTokens: e.target.value })}
+          disabled={busy}
+        />
+      </div>
+      <div className="provider-form-actions">
+        <button className="btn-sm" disabled={busy} onClick={onSubmit}>{submitLabel}</button>
+        <button className="btn-sm ghost" disabled={busy} onClick={onCancel}>取消</button>
+      </div>
+      {error && <span className="provider-key-error">{error}</span>}
+    </div>
+  )
+}
+
 function ProviderRow({
   p,
   onRefresh,
@@ -33,8 +113,11 @@ function ProviderRow({
   onRefresh: () => void
 }) {
   const [editing, setEditing] = useState(false)
+  const [addingModel, setAddingModel] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
+  const [modelState, setModelState] = useState<ModelFormState>(emptyModel())
+  const [modelError, setModelError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const validateKey = (v: string): string | null => {
@@ -86,6 +169,24 @@ function ProviderRow({
     } finally { setBusy(false) }
   }
 
+  const addModel = async () => {
+    const result = validateModel(modelState)
+    if (!result.ok) {
+      setModelError(result.error)
+      return
+    }
+    setBusy(true)
+    try {
+      await setupConfigProvider({ providerName: p.name, model: result.model })
+      setModelState(emptyModel())
+      setModelError(null)
+      setAddingModel(false)
+      onRefresh()
+    } catch (e) {
+      toast.error(`添加模型失败: ${(e as Error).message}`)
+    } finally { setBusy(false) }
+  }
+
   return (
     <div className="provider-row">
       <div className="provider-header">
@@ -108,6 +209,9 @@ function ProviderRow({
         <button className="btn-sm" disabled={busy} onClick={() => setEditing(!editing)}>
           {editing ? '取消' : '设置 Key'}
         </button>
+        <button className="btn-sm" disabled={busy} onClick={() => setAddingModel(!addingModel)}>
+          {addingModel ? '取消' : '添加模型'}
+        </button>
         {!p.isDefault && (
           <button className="btn-sm danger" disabled={busy} onClick={remove}>移除</button>
         )}
@@ -125,6 +229,17 @@ function ProviderRow({
           <button className="btn-sm" disabled={busy} onClick={saveKey}>保存</button>
           {keyError && <span className="provider-key-error">{keyError}</span>}
         </div>
+      )}
+      {addingModel && (
+        <ModelForm
+          state={modelState}
+          onChange={(patch) => setModelState((prev) => ({ ...prev, ...patch }))}
+          onSubmit={addModel}
+          onCancel={() => { setAddingModel(false); setModelError(null); setModelState(emptyModel()) }}
+          submitLabel="保存模型"
+          busy={busy}
+          error={modelError}
+        />
       )}
     </div>
   )
@@ -196,6 +311,153 @@ function PresetCard({
   )
 }
 
+interface CustomProviderFormState {
+  name: string
+  baseUrl: string
+  apiKey: string
+  model: ModelFormState
+  makeDefault: boolean
+}
+
+function emptyCustomProvider(): CustomProviderFormState {
+  return {
+    name: '',
+    baseUrl: '',
+    apiKey: '',
+    model: emptyModel(),
+    makeDefault: false,
+  }
+}
+
+function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const [state, setState] = useState<CustomProviderFormState>(emptyCustomProvider())
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const add = async () => {
+    const name = state.name.trim()
+    if (!name) {
+      setError('Provider 名称不能为空')
+      return
+    }
+    const baseUrl = state.baseUrl.trim()
+    if (!baseUrl) {
+      setError('Base URL 不能为空')
+      return
+    }
+    try {
+      new URL(baseUrl)
+    } catch {
+      setError('Base URL 格式不正确')
+      return
+    }
+    const modelResult = validateModel(state.model)
+    if (!modelResult.ok) {
+      setError(modelResult.error)
+      return
+    }
+    setBusy(true)
+    try {
+      await setupConfigProvider({
+        providerName: name,
+        baseUrl,
+        apiKey: state.apiKey.trim() || undefined,
+        model: modelResult.model,
+        makeDefault: state.makeDefault,
+      })
+      setState(emptyCustomProvider())
+      setError(null)
+      setExpanded(false)
+      onRefresh()
+    } catch (e) {
+      toast.error(`添加 Provider 失败: ${(e as Error).message}`)
+    } finally { setBusy(false) }
+  }
+
+  if (!expanded) {
+    return (
+      <button className="preset-card" onClick={() => setExpanded(true)}>
+        <span className="preset-label">+ 自定义 Provider</span>
+        <span className="preset-model">手动输入名称、URL、模型</span>
+      </button>
+    )
+  }
+
+  return (
+    <div className="preset-card preset-card-input custom-provider-card">
+      <span className="preset-label">自定义 Provider</span>
+      <div className="provider-form-stack">
+        <input
+          type="text"
+          placeholder="Provider 名称，例如 my-openai"
+          value={state.name}
+          onChange={(e) => setState((prev) => ({ ...prev, name: e.target.value }))}
+          disabled={busy}
+        />
+        <input
+          type="text"
+          placeholder="Base URL，例如 https://api.example.com/v1"
+          value={state.baseUrl}
+          onChange={(e) => setState((prev) => ({ ...prev, baseUrl: e.target.value }))}
+          disabled={busy}
+        />
+        <input
+          type="password"
+          placeholder="API Key（可选）"
+          value={state.apiKey}
+          onChange={(e) => setState((prev) => ({ ...prev, apiKey: e.target.value }))}
+          disabled={busy}
+        />
+        <div className="provider-form-grid">
+          <input
+            type="text"
+            placeholder="模型 ID"
+            value={state.model.id}
+            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, id: e.target.value } }))}
+            disabled={busy}
+          />
+          <input
+            type="text"
+            placeholder="别名（可选）"
+            value={state.model.alias}
+            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, alias: e.target.value } }))}
+            disabled={busy}
+          />
+          <input
+            type="number"
+            placeholder="上下文长度"
+            value={state.model.contextWindow}
+            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, contextWindow: e.target.value } }))}
+            disabled={busy}
+          />
+          <input
+            type="number"
+            placeholder="最大 Tokens"
+            value={state.model.maxTokens}
+            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, maxTokens: e.target.value } }))}
+            disabled={busy}
+          />
+        </div>
+        <label className="provider-check">
+          <input
+            type="checkbox"
+            checked={state.makeDefault}
+            onChange={(e) => setState((prev) => ({ ...prev, makeDefault: e.target.checked }))}
+            disabled={busy}
+          />
+          <span>设为默认 Provider</span>
+        </label>
+        <div className="provider-form-actions">
+          <button className="btn-sm" disabled={busy} onClick={add}>添加</button>
+          <button className="btn-sm ghost" disabled={busy} onClick={() => { setExpanded(false); setError(null); setState(emptyCustomProvider()) }}>取消</button>
+        </div>
+        {error && <span className="provider-key-error">{error}</span>}
+      </div>
+    </div>
+  )
+}
+
 export function ProviderSettings() {
   const { data, isLoading, isError } = useConfigProviders()
   const qc = useQueryClient()
@@ -212,13 +474,14 @@ export function ProviderSettings() {
         <ProviderRow key={p.name} p={p} onRefresh={refresh} />
       ))}
 
-      {unconfigured.length > 0 && (
+      {(unconfigured.length > 0 || true) && (
         <div className="preset-section">
-          <div className="preset-header">可添加的预设</div>
+          <div className="preset-header">添加 Provider</div>
           <div className="preset-grid">
             {unconfigured.map(u => (
               <PresetCard key={u.key} preset={u} onRefresh={refresh} />
             ))}
+            <CustomProviderCard onRefresh={refresh} />
           </div>
         </div>
       )}
