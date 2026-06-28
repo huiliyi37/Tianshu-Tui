@@ -29,6 +29,7 @@ import { InputController } from './input-controller.js'
 import { color, fg, bg } from './ansi.js'
 import { BlockStreamWriter } from '../block-stream-writer.js'
 import { SteerBuffer } from '../steer-buffer.js'
+import { SlashCommandRegistry, type SlashCommandContext } from '../slash-command-registry.js'
 import { getTheme, type RivetTheme } from '../theme.js'
 import { formatUserMessage } from '../format/user-message.js'
 import { formatToolCard, formatToolCardLive, isToolCardTruncated } from '../format/tool-card.js'
@@ -245,8 +246,10 @@ export class TuiApp {
   private onSubmitCallback?: (text: string) => void
   private onAbortCallback?: () => void
   private onExitCallback?: () => void
-  /** External slash command handler. If set, handleSlashCommand delegates here. */
+  /** External slash command handler. If set, it is tried before the registry. */
   private slashHandler?: (input: string) => boolean | Promise<boolean>
+  /** Metadata-driven slash command registry (unified command framework). */
+  private slashRegistry = new SlashCommandRegistry()
   /** 消息队列（W4a：streaming 时 Enter 入队，turn 边界 drain 注入） */
   readonly steerBuffer = new SteerBuffer()
   /** agent 是否正在执行（submit → final turn complete 之间） */
@@ -690,6 +693,8 @@ export class TuiApp {
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
 
+    this.registerBuiltinSlashCommands()
+
     // 审批按键统一在 onAnyKey 顶部短路处理（见上），不再注册 mode-bound 处理器，
     // 避免与 onAnyKey 双触发。
   }
@@ -745,6 +750,11 @@ export class TuiApp {
   /** agent 是否正在执行（streaming 状态的唯一权威，供外层入口判定是否可发起新 run） */
   get busy(): boolean {
     return this.agentBusy
+  }
+
+  /** 当前激活的 overlay id（无则 null）。 */
+  activeOverlayId(): string | null {
+    return this.overlay.activeId()
   }
 
   /**
@@ -1469,6 +1479,70 @@ export class TuiApp {
   /** 设置外部 slash command 处理器（如 SlashRouter） */
   setSlashHandler(handler: (input: string) => boolean | Promise<boolean>): void {
     this.slashHandler = handler
+  }
+
+  /** 注册一条 metadata-driven slash 命令。 */
+  registerSlashCommand(command: import('../slash-command-registry.js').SlashCommand): void {
+    this.slashRegistry.register(command)
+  }
+
+  /** 注册内置 slash 命令（/clear、/starmap、/chronicle、/exit）。 */
+  private registerBuiltinSlashCommands(): void {
+    this.slashRegistry.registerMany([
+      {
+        name: '/clear',
+        description: 'Clear screen',
+        immediate: true,
+        handler: () => {
+          process.stdout.write('\x1B[2J\x1B[H')
+          this.live.reset()
+          this.renderLive()
+          return true
+        },
+      },
+      {
+        name: '/starmap',
+        description: 'Open starmap overlay',
+        immediate: true,
+        overlay: 'starmap',
+        handler: () => true,
+      },
+      {
+        name: '/chronicle',
+        description: 'Open chronicle overlay',
+        immediate: true,
+        overlay: 'chronicle',
+        handler: () => true,
+      },
+      {
+        name: '/exit',
+        description: 'Exit Rivet',
+        immediate: true,
+        handler: () => {
+          this.dispose()
+          if (this.onExitCallback) {
+            this.onExitCallback()
+          } else {
+            process.exit(0)
+          }
+          return true
+        },
+      },
+      {
+        name: '/quit',
+        description: 'Exit Rivet',
+        immediate: true,
+        handler: () => {
+          this.dispose()
+          if (this.onExitCallback) {
+            this.onExitCallback()
+          } else {
+            process.exit(0)
+          }
+          return true
+        },
+      },
+    ])
   }
 
   /**
@@ -2454,7 +2528,9 @@ export class TuiApp {
         handled = true
       }
     } else {
-      handled = this.handleSlashCommand(input)
+      const ctx: SlashCommandContext = { app: this, input, trimmed: input.trim() }
+      const result = await this.slashRegistry.execute(ctx)
+      handled = result.handled
     }
     if (!handled) {
       // 透传给 agent 前 commit 用户消息到 scrollback，确保 slash 命令
@@ -2475,38 +2551,6 @@ export class TuiApp {
       this.state.turnStartMs = Date.now()
       this.streamRenderController.lastActivityMs = Date.now()
       this.onSubmitCallback?.(input)
-    }
-  }
-
-  /** 处理内置斜杠命令（无外部 handler 时的兜底），返回 true 表示已处理 */
-  private handleSlashCommand(input: string): boolean {
-    // Fallback: basic built-in commands
-    const trimmed = input.trim()
-    switch (trimmed) {
-      case '/clear':
-        process.stdout.write('\x1B[2J\x1B[H')
-        this.live.reset()
-        this.renderLive()
-        return true
-      case '/starmap':
-        this.activateOverlay('starmap')
-        return true
-      case '/chronicle':
-        this.activateOverlay('chronicle')
-        return true
-      case '/exit':
-      case '/quit':
-        this.dispose()
-        // Delegate to graceful shutdown (session persist, agent abort, MCP teardown)
-        // instead of process.exit(0) which skips all cleanup.
-        if (this.onExitCallback) {
-          this.onExitCallback()
-        } else {
-          process.exit(0)
-        }
-        return true
-      default:
-        return false
     }
   }
 
