@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree } from '../agent/worktree.js'
+import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree, cleanupStaleHandsBranches } from '../agent/worktree.js'
 
 function git(dir: string, args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -159,6 +159,51 @@ describe('createWorktree branch uniqueness (S1b)', () => {
       )
     } finally {
       rmSync(badRepo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('cleanupStaleHandsBranches', () => {
+  let repo: string
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'rivet-stale-branch-'))
+    initGitRepo(repo, 'main')
+  })
+
+  after(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('removes rivet-hands branches that are not attached to a worktree', () => {
+    git(repo, ['checkout', '-b', 'rivet-hands-stale-1'])
+    git(repo, ['checkout', 'main'])
+    git(repo, ['checkout', '-b', 'rivet-hands-stale-2'])
+    git(repo, ['checkout', 'main'])
+
+    const removed = cleanupStaleHandsBranches(repo)
+    removed.sort()
+    assert.deepEqual(removed, ['rivet-hands-stale-1', 'rivet-hands-stale-2'])
+
+    const remaining = git(repo, ['branch', '--list', 'rivet-hands-*']).trim()
+    assert.equal(remaining, '')
+  })
+
+  it('keeps branches that still belong to an active worktree', () => {
+    const wt = createWorktree(repo, 'active-1', 'rivet-hands-active-1')
+    try {
+      // Create a stale branch alongside the active one
+      git(repo, ['checkout', '-b', 'rivet-hands-stale-3'])
+      git(repo, ['checkout', 'main'])
+
+      const removed = cleanupStaleHandsBranches(repo)
+      assert.deepEqual(removed, ['rivet-hands-stale-3'])
+
+      const remaining = git(repo, ['branch', '--list', 'rivet-hands-*']).trim()
+      assert.ok(remaining.includes('rivet-hands-active-1'), 'active branch preserved')
+    } finally {
+      git(repo, ['worktree', 'remove', '--force', wt.path])
+      git(repo, ['branch', '-D', wt.branch])
     }
   })
 })

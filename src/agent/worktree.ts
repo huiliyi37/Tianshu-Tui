@@ -163,6 +163,36 @@ export function removeWorktree(cwd: string, wtPath: string, branch?: string): vo
   try { rmSync(join(wtPath, OWNER_FILE), { force: true }) } catch {}
 }
 
+/**
+ * Remove stale `rivet-hands-*` branches that are not associated with any
+ * registered worktree. These are typically left behind when a previous run
+ * crashed between worktree creation and branch deletion. Returns the list of
+ * removed branch names (best-effort).
+ */
+export function cleanupStaleHandsBranches(cwd: string): string[] {
+  const removed: string[] = []
+  const wtResult = git(cwd, ['worktree', 'list', '--porcelain'])
+  if (!wtResult.ok) return removed
+
+  const activeBranches = new Set(
+    parseWorktreeList(wtResult.stdout)
+      .map(e => e.branch)
+      .filter((b): b is string => !!b && b.startsWith('rivet-hands-')),
+  )
+
+  const branchResult = git(cwd, ['branch', '--list', 'rivet-hands-*'])
+  if (!branchResult.ok) return removed
+
+  for (const raw of branchResult.stdout.split('\n')) {
+    const branch = raw.replace(/^\*\s*/, '').trim()
+    if (!branch.startsWith('rivet-hands-')) continue
+    if (activeBranches.has(branch)) continue
+    const del = git(cwd, ['branch', '-D', branch])
+    if (del.ok) removed.push(branch)
+  }
+  return removed
+}
+
 export function getCurrentGitRef(cwd: string): string | undefined {
   const branch = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
   const branchName = branch.stdout.trim()

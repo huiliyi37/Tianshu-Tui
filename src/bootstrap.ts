@@ -52,6 +52,7 @@ import { createVerificationAttribution } from './agent/verification-attribution.
 import { createDeliveryGateV2 } from './agent/delivery-gate-v2.js'
 import { createWorktreeBaseline } from './agent/worktree-baseline.js'
 import { createVerificationSnapshotManager, reapOrphanSnapshots, reapOrphanHandsWorktrees } from './agent/verification-snapshot-manager.js'
+import { cleanupStaleHandsBranches } from './agent/worktree.js'
 import { createProviderClient, resolveApiKey } from './api/factory.js'
 import { buildReviewOverrideState } from './agent/review-model-override.js'
 import type { ResolvedReviewOverride } from './agent/review-model-override.js'
@@ -484,6 +485,7 @@ export function createInteractiveToolRegistry(
   // so behavior is unchanged unless the baseline is dirty or RIVET_VSW=1 forces it.
   try { reapOrphanSnapshots({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
   try { reapOrphanHandsWorktrees({ baseCwd: cwd, currentSessionId: refs.sessionId ?? undefined }) } catch { /* best-effort */ }
+  try { cleanupStaleHandsBranches(cwd) } catch { /* best-effort */ }
   const b1SnapshotManager = createVerificationSnapshotManager({
     baseCwd: cwd,
     sessionId: refs.sessionId ?? getOrCreateSessionId(),
