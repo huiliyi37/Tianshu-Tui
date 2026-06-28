@@ -250,7 +250,11 @@ export function topoSort(steps: WorkflowStep[]): WorkflowStep[] {
 
 // ── Execution ──────────────────────────────────────────────────
 
-/** Execute a workflow definition, returning a trace. */
+/** Execute a workflow definition, returning a trace.
+ *
+ *  Steps run in topological order. When a step fails and has `on_failure`,
+ *  execution loops back to the target step and replays from there. A
+ *  per-workflow retry cap (default 3) prevents infinite loops. */
 export async function runWorkflow(
   def: WorkflowDef,
   inputs: Record<string, unknown>,
@@ -258,6 +262,7 @@ export async function runWorkflow(
   executor: ToolExecutor,
   onProgress?: (stepId: string, status: StepStatus) => void,
 ): Promise<WorkflowTrace> {
+  const MAX_RETRIES = 3
   const traceId = `wf-${def.name}-${Date.now().toString(36)}`
   const trace: WorkflowTrace = {
     workflowName: def.name,
@@ -268,10 +273,12 @@ export async function runWorkflow(
     finalStatus: 'pending',
   }
   const ctx: WorkflowContext = { inputs, stepResults: {}, cwd, onProgress }
-
   const ordered = topoSort(def.steps)
 
-  for (const step of ordered) {
+  let i = 0
+  let retries = 0
+  while (i < ordered.length) {
+    const step = ordered[i]!
     const stepTrace: StepTrace = {
       stepId: step.id,
       tool: step.tool,
@@ -279,7 +286,7 @@ export async function runWorkflow(
       startedAt: Date.now(),
     }
 
-    // Check condition
+    // Check condition — skip without executing
     if (step.condition) {
       const resolvedCondition = resolveVars(step.condition, ctx)
       if (resolvedCondition === 'false' || resolvedCondition === false) {
@@ -287,6 +294,7 @@ export async function runWorkflow(
         stepTrace.endedAt = Date.now()
         trace.steps.push(stepTrace)
         onProgress?.(step.id, 'skipped')
+        i++
         continue
       }
     }
@@ -295,7 +303,6 @@ export async function runWorkflow(
     const resolvedInput = resolveVars(step.input ?? {}, ctx) as Record<string, unknown>
 
     try {
-      const resolvedInput = resolveVars(step.input, ctx) as Record<string, unknown>
       stepTrace.input = resolvedInput
       const result = await executor(step.tool, resolvedInput, ctx)
       stepTrace.output = result.output?.slice(0, 2000) // cap trace size
@@ -307,15 +314,17 @@ export async function runWorkflow(
       trace.steps.push(stepTrace)
       onProgress?.(step.id, stepTrace.status)
 
-      // on_failure: retry from specified step
-      if (result.error && step.on_failure) {
-        const failStep = def.steps.find(s => s.id === step.on_failure)
-        if (failStep) {
-          // Re-run from the failure target (simple loop-back, not infinite)
-          // Note: in production this would have a retry cap.
+      // on_failure: loop back to the target step with a retry cap.
+      if (result.error && step.on_failure && retries < MAX_RETRIES) {
+        const targetIdx = ordered.findIndex(s => s.id === step.on_failure)
+        if (targetIdx >= 0) {
+          retries++
+          i = targetIdx
+          continue
         }
       }
-      // If this step failed, stop the workflow (don't run dependents)
+
+      // Failed without (or after exhausting) on_failure — stop the workflow
       if (result.error) {
         trace.finalStatus = 'failed'
         trace.endedAt = Date.now()
@@ -334,9 +343,14 @@ export async function runWorkflow(
       trace.totalDurationMs = trace.endedAt - trace.startedAt
       return trace
     }
+    i++
   }
 
-  trace.finalStatus = trace.steps.every(s => s.status === 'done' || s.status === 'skipped') ? 'done' : 'failed'
+  // Determine final status from the LAST trace of each step (a retried step
+  // may have earlier 'failed' traces that were superseded by a later 'done').
+  const lastByStep = new Map<string, StepTrace>()
+  for (const s of trace.steps) lastByStep.set(s.stepId, s)
+  trace.finalStatus = [...lastByStep.values()].every(s => s.status === 'done' || s.status === 'skipped') ? 'done' : 'failed'
   trace.endedAt = Date.now()
   trace.totalDurationMs = trace.endedAt - trace.startedAt
   return trace

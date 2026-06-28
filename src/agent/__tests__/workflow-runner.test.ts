@@ -171,6 +171,72 @@ test('runWorkflow: onProgress callback fires for each step', async () => {
   assert.equal(progress[1]!.status, 'done')
 })
 
+test('runWorkflow: handles step without input field (no undefined leak)', async () => {
+  const calls: { tool: string; input: Record<string, unknown> }[] = []
+  const def = parseWorkflow(`
+name: no-input
+steps:
+  - id: bare
+    tool: tool_x
+`)
+  const executor = async (tool: string, input: Record<string, unknown>) => {
+    calls.push({ tool, input })
+    return { output: 'ok' }
+  }
+  const trace = await runWorkflow(def, {}, '/tmp', executor)
+  assert.equal(trace.finalStatus, 'done')
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0]!.input, {}, 'input should be empty object, not undefined')
+})
+
+test('runWorkflow: on_failure loops back and retries target step', async () => {
+  let verifyCalls = 0
+  const def = parseWorkflow(`
+name: retry-loop
+steps:
+  - id: build
+    tool: build_tool
+    input: {}
+  - id: verify
+    tool: verify_tool
+    depends_on: [build]
+    on_failure: build
+    input: {}
+`)
+  const executor = async (tool: string) => {
+    if (tool === 'build_tool') return { output: 'built' }
+    // verify_tool fails first time, succeeds second time
+    verifyCalls++
+    if (verifyCalls === 1) return { output: '', error: 'tests failed' }
+    return { output: 'all green' }
+  }
+  const trace = await runWorkflow(def, {}, '/tmp', executor)
+  // build ran twice (initial + retry), verify ran twice (fail then pass)
+  const builds = trace.steps.filter(s => s.stepId === 'build')
+  const verifies = trace.steps.filter(s => s.stepId === 'verify')
+  assert.equal(builds.length, 2, 'build should run twice (initial + loop-back)')
+  assert.equal(verifies.length, 2, 'verify should run twice (fail then success)')
+  assert.equal(verifyCalls, 2)
+  assert.equal(trace.finalStatus, 'done')
+})
+
+test('runWorkflow: on_failure stops after MAX_RETRIES exhausted', async () => {
+  const def = parseWorkflow(`
+name: retry-exhaust
+steps:
+  - id: flaky
+    tool: always_fail
+    on_failure: flaky
+    input: {}
+`)
+  const executor = async () => ({ output: '', error: 'never works' })
+  const trace = await runWorkflow(def, {}, '/tmp', executor)
+  assert.equal(trace.finalStatus, 'failed')
+  // flaky runs MAX_RETRIES + 1 times: initial + 3 loop-backs
+  const runs = trace.steps.filter(s => s.stepId === 'flaky')
+  assert.equal(runs.length, 4, 'should run 4 times (initial + 3 retries)')
+})
+
 // ── formatTrace ────────────────────────────────────────────────
 
 test('formatTrace: renders workflow name and step status', () => {
