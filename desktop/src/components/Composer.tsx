@@ -610,7 +610,7 @@ export function Composer(props: {
             onClose={() => {}}
           />
         </div>
-        <ModelPicker sessionId={sessionId} disabled={busy} />
+        <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -638,23 +638,34 @@ export function Composer(props: {
 }
 
 /** Inline model selector in the composer bar (Codex-style). */
-function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: boolean }) {
+function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    setLoading(true)
-    listModels(sessionId)
-      .then((ms) => { if (alive) setModels(ms) })
-      .catch((err) => { if (alive) toast.error(`加载模型失败: ${(err as Error).message}`) })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [open, sessionId])
+  const refresh = useCallback(async (withSpinner: boolean) => {
+    if (!sessionId) return
+    if (withSpinner) setLoading(true)
+    try {
+      const ms = await listModels(sessionId)
+      setModels(ms)
+    } catch (err) {
+      if (withSpinner) toast.error(`加载模型失败: ${(err as Error).message}`)
+    } finally {
+      if (withSpinner) setLoading(false)
+    }
+  }, [sessionId])
+
+  // Keep the (closed) trigger label live: refetch on mount, on session change,
+  // and whenever a model_switched / domain / skills SSE bumps menuRev. Without
+  // this the label lags a switch behind — e.g. switch to Pro still shows Flash —
+  // because the list was only ever fetched when the menu was open.
+  useEffect(() => { void refresh(false) }, [refresh, menuRev])
+
+  // Fresh list (with spinner) each time the menu opens.
+  useEffect(() => { if (open) void refresh(true) }, [open, refresh])
 
   useEffect(() => {
     if (!open) return
@@ -673,6 +684,9 @@ function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: bo
     setSwitchingId(m.id)
     try {
       await switchModel(sessionId, m.id)
+      // Optimistically re-flag current so the trigger label updates immediately;
+      // the model_switched SSE (menuRev bump) reconciles against the server next.
+      setModels((prev) => prev.map((x) => ({ ...x, current: x.id === m.id })))
       setOpen(false)
     } catch (err) {
       toast.error(`切换模型失败: ${(err as Error).message}`)
