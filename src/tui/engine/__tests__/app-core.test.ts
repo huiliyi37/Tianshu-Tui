@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatElapsedShort, truncateToWidth } from '../app.js'
+import { formatElapsedShort, truncateToWidth, looksLikeFilePath } from '../app.js'
 
 /**
  * Safety net for the engine/app.ts decomposition (mid-tui). The 2002-line
@@ -44,4 +44,16 @@ test('truncateToWidth respects wide (CJK) glyph columns, never splitting one', (
   assert.equal(truncateToWidth('你好世界', 4), '你好')
   // odd budget never emits a half-width fragment of a 2-col glyph
   assert.equal(truncateToWidth('你好世界', 5), '你好')
+})
+
+test('looksLikeFilePath distinguishes absolute paths from slash commands', () => {
+  assert.equal(looksLikeFilePath('/src/main.ts'), true)
+  assert.equal(looksLikeFilePath('/tmp/foo bar'), true)
+  assert.equal(looksLikeFilePath('~/project/readme.md'), true)
+  assert.equal(looksLikeFilePath('/'), false)
+  assert.equal(looksLikeFilePath('/help'), false)
+  assert.equal(looksLikeFilePath('/team'), false)
+  assert.equal(looksLikeFilePath('/team max plan'), false)
+  assert.equal(looksLikeFilePath('plain text'), false)
+  assert.equal(looksLikeFilePath('./relative/path'), false)
 })

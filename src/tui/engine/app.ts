@@ -90,6 +90,19 @@ export function truncateToWidth(text: string, maxWidth: number): string {
   return out
 }
 
+/** 判断输入是否更像文件路径而非 slash 命令。
+ *  例如 `/src/main.ts` 或 `/tmp/foo bar` 应走普通文本流程，
+ *  避免被当作未知 slash 命令报失败。 */
+export function looksLikeFilePath(input: string): boolean {
+  if (input.startsWith('~/')) return true
+  if (!input.startsWith('/')) return false
+  const rest = input.slice(1)
+  const slashIdx = rest.indexOf('/')
+  if (slashIdx === -1) return false
+  const spaceIdx = rest.indexOf(' ')
+  return spaceIdx === -1 || slashIdx < spaceIdx
+}
+
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -588,7 +601,8 @@ export class TuiApp {
       }
       // ── Slash command handling ──────────────────────────────
       const inputVal = this.inputLine.value
-      if (inputVal.startsWith('/')) {
+      const inputIsPath = looksLikeFilePath(inputVal)
+      if (inputVal.startsWith('/') && !inputIsPath) {
         // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
         if (!inputVal.includes(' ')) {
           const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
@@ -1385,8 +1399,8 @@ export class TuiApp {
     const value = this.inputLine.value
     const cursor = this.inputLine.cursor
 
-    // slash 命令补全
-    if (value.startsWith('/') && !value.includes(' ')) {
+    // slash 命令补全（排除 `/file/path` 这类绝对路径）
+    if (value.startsWith('/') && !value.includes(' ') && !looksLikeFilePath(value)) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -2243,7 +2257,7 @@ export class TuiApp {
       lines.push({ text: '(Ctrl+C again to exit)' })
     } else {
       const inputVal = this.inputLine.value
-      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n')
+      const isSlash = inputVal.startsWith('/') && !inputVal.includes('\n') && !looksLikeFilePath(inputVal)
       const isStreaming = this.state.phase !== 'idle'
 
       // Domain-accent border color: slash=primary, streaming=dim, else domain accent
