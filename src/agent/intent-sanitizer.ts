@@ -183,6 +183,7 @@ function extractOrdinalReferences(text: string): Array<{ raw: string; index: num
   let m: RegExpExecArray | null
   while ((m = regex.exec(text)) !== null) {
     const numStr = m[1]
+    if (numStr === undefined) continue
     let index: number
     if (/^\d+$/.test(numStr)) {
       index = parseInt(numStr, 10)
