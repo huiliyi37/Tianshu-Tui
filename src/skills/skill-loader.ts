@@ -46,11 +46,34 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/
 
 function parseFrontmatter(raw: string): Record<string, string | string[]> {
   const fm: Record<string, string | string[]> = {}
-  for (const line of raw.split('\n')) {
+  const lines = raw.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
     const m = line.match(/^(\w+):\s*(.*)$/)
     if (!m) continue
     const key = m[1]!
-    const val = m[2]!.trim()
+    let val = m[2]!.trim()
+
+    // YAML multiline literal block scalar (`description: |`). The indented
+    // lines that follow are the value; we strip the common indentation prefix
+    // and join them with '\n' (| preserves newlines). Without this, Claude
+    // skills imported with YAML multiline descriptions parse as `"|"` — a
+    // single pipe character — and are invisible in /skill list.
+    if (val === '|' || val === '>') {
+      const chunks: string[] = []
+      let minIndent = Infinity
+      while (i + 1 < lines.length) {
+        const next = lines[i + 1]!
+        const indentMatch = next.match(/^(\s+)/)
+        if (!indentMatch) break // non-indented → end of block scalar
+        const indent = indentMatch[1]!.length
+        if (indent < minIndent) minIndent = indent
+        chunks.push(next)
+        i++
+      }
+      val = chunks.map(l => l.slice(minIndent)).join(val === '>' ? ' ' : '\n')
+    }
+
     if (val.startsWith('[')) {
       try {
         const parsed = JSON.parse(val.replace(/'/g, '"')) as string[]

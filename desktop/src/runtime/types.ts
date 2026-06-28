@@ -178,6 +178,8 @@ export interface HealthInfo {
   uptimeMs: number
   sessionCount: number
   runningCount: number
+  /** false when the default provider has no usable API key (first launch / setup mode). */
+  configured: boolean
 }
 
 export interface ScheduledTask {
