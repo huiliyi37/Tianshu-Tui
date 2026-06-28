@@ -13,6 +13,7 @@ import type { FleetWorkerView } from './fleet-registry.js'
 import { color } from './engine/ansi.js'
 import { formatTokenProgressBar } from './format/glance-bar.js'
 import { formatTaskList } from './format/task-list.js'
+import { formatWorkerRow } from './format/worker-fleet.js'
 import { displayWidth, truncateToDisplayWidth } from './width.js'
 
 export interface SidePanelInput {
@@ -117,14 +118,10 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
     lines.push(sectionDivider())
     lines.push(line(color(input.workers.length === 1 ? '◆ worker' : `◆ workers (${input.workers.length})`, theme.secondary, { bold: true })))
     const shown = input.workers.slice(0, MAX_WORKERS)
+    // 复用主区 formatWorkerRow：宽窄屏切换时字段（glyph/label/activity/elapsed）一致，
+    // 不再各自维护一套渲染，消除「主区显示 activity、侧栏显示 shortLabel+profile」的突变。
     for (const wrk of shown) {
-      const statusIcon = wrk.terminal ? '✓' : wrk.status === 'failed' ? '✗' : '●'
-      const statusColor = wrk.terminal ? theme.success : wrk.status === 'failed' ? theme.error : theme.primary
-      const label = truncateStr(wrk.shortLabel, 8)
-      const profile = truncateStr(wrk.profile, 8)
-      const elapsed = formatElapsedShort(wrk.elapsedMs)
-      const row = `${color(statusIcon, statusColor)} ${label} ${dim(profile)} ${muted(elapsed)}`
-      lines.push(line(row))
+      lines.push(line(formatWorkerRow(wrk, theme, contentW)))
     }
     if (input.workers.length > MAX_WORKERS) {
       lines.push(line(muted(`... +${input.workers.length - MAX_WORKERS} more`)))

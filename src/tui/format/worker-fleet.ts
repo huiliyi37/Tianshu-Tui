@@ -16,6 +16,7 @@ import type { RivetTheme } from '../theme.js'
 import type { FleetWorkerView } from '../fleet-registry.js'
 import { formatElapsed } from '../worker-panel-model.js'
 import { profileLabel, authorityStarName } from './profile-labels.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
 export interface WorkerFleetSummary {
   done: number
@@ -30,6 +31,16 @@ function statusGlyph(status: FleetWorkerView['status']): string {
     case 'failed': return '✗'
     case 'blocked': return '⊗'
     case 'escalated': return '↑'
+  }
+}
+
+/** 状态 → 主题色键：与主区/侧栏共用，保证宽窄屏切换时颜色不突变。 */
+function statusColorKey(status: FleetWorkerView['status']): keyof RivetTheme {
+  switch (status) {
+    case 'running': return 'primary'
+    case 'passed': return 'success'
+    case 'failed': return 'error'
+    default: return 'warning'
   }
 }
 
@@ -138,4 +149,47 @@ export function formatWorkerFleet(
     out.push(color(plain[plain.length - 1]!, theme.muted))
   }
   return out
+}
+
+/**
+ * 渲染单个 worker 行（带色 ANSI）—— 主区与侧栏共用，保证宽窄屏切换时字段不突变。
+ *
+ * 字段顺序与 formatWorkerFleet 单行一致：`glyph label [activity] elapsed`
+ *  - glyph：statusGlyph（◐/✓/✗/⊗/↑）
+ *  - label：星名 · 中文职能名（同主区）
+ *  - activity：仅当 width 充足时显示（窄列省略，避免挤压 label）
+ *  - elapsed：formatElapsed
+ *  - 颜色：statusColorKey（running=primary / passed=success / failed=error / 其余=warning）
+ *
+ * @param worker 单个 worker 视图
+ * @param theme 主题
+ * @param width 该行可用宽度（display-width 口径，含 ambiguousAsWide）。≤0 时不渲染。
+ */
+export function formatWorkerRow(worker: FleetWorkerView, theme: RivetTheme, width: number): string {
+  if (width <= 0) return ''
+  const WIDE = { ambiguousAsWide: true }
+  const glyph = statusGlyph(worker.status)
+  const star = authorityStarName(worker.authority)
+  const labelBase = star ? `${star} · ${profileLabel(worker.profile)}` : profileLabel(worker.profile)
+  const elapsed = formatElapsed(worker.elapsedMs)
+  const colorKey = statusColorKey(worker.status)
+  // theme[colorKey] 在类型上是 string | 函数（部分主题键是 formatter），但语义色键
+  // （primary/success/error/warning/muted/dim）恒为 ANSI 字符串。断言为 string 即可。
+  const accent = theme[colorKey] as string
+
+  // 头部：`  glyph label`（前导 2 空格与主区缩进一致）
+  const head = `   ${glyph} ${labelBase}`
+  const tail = elapsed ? `  ${elapsed}` : ''
+  // activity 仅在剩余空间 ≥ 6 列（含分隔）时显示，否则省略。
+  const headW = displayWidth(head, WIDE)
+  const tailW = displayWidth(tail, WIDE)
+  const activityBudget = width - headW - tailW - 2
+  let activity = ''
+  if (worker.activity && activityBudget >= 6) {
+    const ellipsisW = displayWidth('…', WIDE)
+    activity = ' ' + (displayWidth(worker.activity, WIDE) > activityBudget
+      ? `${truncateToDisplayWidth(worker.activity, activityBudget - ellipsisW, WIDE)}…`
+      : worker.activity)
+  }
+  return color(`${head}${activity}${tail}`, accent)
 }

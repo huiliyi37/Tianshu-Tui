@@ -113,6 +113,26 @@ export function looksLikeFilePath(input: string): boolean {
 const SIDE_PANEL_MIN_COLUMNS = 120
 const SIDE_PANEL_WIDTH = 32
 
+/**
+ * 输入框线框字符集（按 separator 主题）。纯字面量，提升到模块级避免 renderLive
+ * 每帧重建对象字面量。 getInputChrome 据此缓存着色后的 leftBar/rightBar/botBorder。
+ */
+interface BoxCharSet { tl: string; tr: string; bl: string; br: string; h: string; v: string; m: string }
+const INPUT_BOX_CHARS = {
+  thin:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' },
+  thick: { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃', m: '┳' },
+  dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
+} as const
+
+/** 按 separator 取线框字符集，未知 separator 回退到 thin。返回值确定非空。 */
+function boxCharsFor(separator: string): BoxCharSet {
+  switch (separator) {
+    case 'thick': return INPUT_BOX_CHARS.thick
+    case 'dots': return INPUT_BOX_CHARS.dots
+    default: return INPUT_BOX_CHARS.thin
+  }
+}
+
 // ── State types ────────────────────────────────────────────────
 
 export type ActivityPhase = 'idle' | 'thinking' | 'streaming' | 'waiting' | 'analyzing'
@@ -2321,6 +2341,35 @@ export class TuiApp {
    *  ticker / 批渲染帧文本未变时直接复用，消除每帧 O(n) split。主题切换经 forceRedraw 失效。 */
   private thinkingLinesMemo: { key: string; lines: string[] } | null = null
 
+  /**
+   * 输入框静态 chrome 缓存：leftBar / rightBar / botBorder 只依赖
+   * (separator, innerWidth, borderColor)，与输入文本、光标、GlanceBar 指标无关。
+   * renderLive 每帧重建这些边框是纯重复工作（含 `chars.h.repeat(innerWidth+2)`
+   * 这类 O(cols) 字符串构造）；按三元 key 缓存后，稳态帧（idle / 光标移动）直接命中。
+   * 着色用 color() 包装，结果确定性，不引入渲染状态耦合。
+   */
+  private inputChromeMemo: {
+    key: string
+    leftBar: string
+    rightBar: string
+    botBorder: string
+  } | null = null
+
+  private getInputChrome(
+    separator: string,
+    innerWidth: number,
+    borderColor: string,
+  ): { leftBar: string; rightBar: string; botBorder: string } {
+    const key = `${separator}|${innerWidth}|${borderColor}`
+    if (this.inputChromeMemo?.key === key) return this.inputChromeMemo
+    const chars = boxCharsFor(separator)
+    const leftBar = color(chars.v + ' ', borderColor)
+    const rightBar = color(' ' + chars.v, borderColor)
+    const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
+    this.inputChromeMemo = { key, leftBar, rightBar, botBorder }
+    return { leftBar, rightBar, botBorder }
+  }
+
   private getThinkingLines(expanded: boolean): string[] {
     const text = this.state.thinkingText
     const key = `${expanded ? '1' : '0'}\u0000${text}`
@@ -2641,17 +2690,10 @@ export class TuiApp {
       const starDomain = activeDomainId ? (STAR_DOMAINS as any)[activeDomainId] : null
       const uiSep = starDomain?.uiPersona?.separator ?? 'thin'
 
-      // 2. 根据 separator 确定线框字符
-      const chars = ({
-        thin:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' },
-        thick: { tl: '┏', tr: '┓', bl: '┗', br: '┛', h: '━', v: '┃', m: '┳' },
-        dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
-      } as any)[uiSep] ?? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' }
-
       const innerWidth = Math.max(20, cols - 6)
-      const leftBar = color(chars.v + ' ', borderColor)
-      const rightBar = color(' ' + chars.v, borderColor)
-      const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
+      // 静态 chrome（线框字符 + 底边框）只依赖 (separator, innerWidth, borderColor)，
+      // 缓存复用，避免每帧 repeat(innerWidth) 重建。
+      const { leftBar, rightBar, botBorder } = this.getInputChrome(uiSep, innerWidth, borderColor)
 
       // 3. 构建高保真左右指标 Segment
       const leftStr = formatGlanceLeft({
@@ -2677,6 +2719,7 @@ export class TuiApp {
       const plainRight = stripAnsiLen(rightStr)
 
       // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
+      const chars = boxCharsFor(uiSep)
       let topBorder = ''
       if (innerWidth < plainLeft + plainRight + 10) {
         topBorder = color(`${chars.tl}${chars.h.repeat(innerWidth + 2)}${chars.tr}`, borderColor)
