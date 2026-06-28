@@ -4,7 +4,6 @@ import { useUiDispatch, useUiState, type Surface } from '../state/store'
 export const SURFACE_ORDER: Surface[] = [
   'workspace',
   'automations',
-  'attention',
   'skills',
   'git',
   'insights',

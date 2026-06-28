@@ -47,7 +47,7 @@ export function Rail(props: {
   const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
+  const order: Surface[] = ['workspace', 'automations', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)

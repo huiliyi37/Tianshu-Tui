@@ -18,19 +18,20 @@ const STATUS_GLYPH: Record<string, string> = {
   idle: '○',
 }
 
-const SURFACE_ORDER: Surface[] = ['workspace', 'automations', 'attention', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
+const CORE_SURFACES: Surface[] = ['workspace', 'git', 'automations', 'settings']
+const TOOL_SURFACES: Surface[] = ['skills', 'insights', 'delegation', 'council', 'hooks']
 
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: '工作台',
-  automations: '自动化',
+  automations: '任务自动化',
   attention: '需处理',
-  skills: '技能',
-  git: 'Git',
-  insights: 'Insights',
-  delegation: '委派树',
-  council: '议事会',
-  hooks: 'Hooks',
-  settings: '设置',
+  skills: '智能体技能',
+  git: 'Git 版本控制',
+  insights: '度量分析 (Insights)',
+  delegation: '任务委派树',
+  council: '自治议事会',
+  hooks: '系统钩子 (Hooks)',
+  settings: '系统设置',
 }
 
 const NAV_ICONS: Record<Surface, LucideIcon> = {
@@ -63,6 +64,7 @@ export function ProjectSidebar() {
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
+  const [toolsExpanded, setToolsExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const loadArchived = async () => {
@@ -154,7 +156,7 @@ export function ProjectSidebar() {
       </button>
 
       <nav className="sidebar-nav" aria-label="主导航">
-        {SURFACE_ORDER.map((s) => (
+        {CORE_SURFACES.map((s) => (
           <button
             key={s}
             className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
@@ -162,11 +164,32 @@ export function ProjectSidebar() {
           >
             <span className="sni-icon"><NavIcon surface={s} /></span>
             <span className="sni-label">{SURFACE_LABEL[s]}</span>
-            {s === 'attention' && (
-              <AttentionBadge />
-            )}
           </button>
         ))}
+
+        <div
+          className="sidebar-section-head tools-toggle-head"
+          onClick={() => setToolsExpanded(!toolsExpanded)}
+          style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 4px 0', padding: '6px 8px' }}
+        >
+          <span className="sidebar-section-title">星域工具</span>
+          <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
+        </div>
+
+        {toolsExpanded && (
+          <div className="sidebar-sub-nav">
+            {TOOL_SURFACES.map((s) => (
+              <button
+                key={s}
+                className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
+                onClick={() => dispatch({ type: 'setSurface', surface: s })}
+              >
+                <span className="sni-icon"><NavIcon surface={s} /></span>
+                <span className="sni-label">{SURFACE_LABEL[s]}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </nav>
 
       <div className="sidebar-divider" />
@@ -255,11 +278,6 @@ export function ProjectSidebar() {
                       <div className="thread-row-main">
                         <div className="title">
                           <span className={`status-dot status-${s.status}`} />
-                          {s.domainGlyph && (
-                            <span className={`domain-glyph domain-accent-${s.domainAccent}`} aria-hidden>
-                              {s.domainGlyph}
-                            </span>
-                          )}
                           {s.title ?? s.id.slice(0, 8)}
                           {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
                           {s.worktreeBranch && (
@@ -362,15 +380,3 @@ export function ProjectSidebar() {
   )
 }
 
-function AttentionBadge() {
-  const sessions = useSessions()
-  const count = useMemo(() => {
-    return (sessions.data ?? []).filter((s) => {
-      if (s.status !== 'running') return false
-      // Simple heuristic: attention-worthy sessions have pending approvals or errors.
-      return (s.pendingApprovals ?? 0) > 0
-    }).length
-  }, [sessions.data])
-  if (count === 0) return null
-  return <span className="sidebar-nav-badge">{count > 9 ? '9+' : count}</span>
-}
