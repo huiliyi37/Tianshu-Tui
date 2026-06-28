@@ -75,7 +75,7 @@ fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
                 if s.len() <= 3 {
                     // Fall through to exe-relative fallback
                 } else {
-                    return p;
+                    return strip_verbatim_prefix(p);
                 }
             } else {
                 return p;
@@ -86,8 +86,40 @@ fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
     // Fallback: exe directory (works for raw/uninstalled exes).
     std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .and_then(|exe| exe.parent().map(|p| strip_verbatim_prefix(p.to_path_buf())))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// On Windows, `current_exe()` and some APIs return "verbatim" (extended-length)
+/// paths prefixed with `\\?\` (e.g. `\\?\D:\foo\bar`). That prefix is valid for
+/// the Win32 API but Node.js's `realpathSync` doesn't understand it and fails
+/// with `EISDIR: lstat '<drive>:'`, killing the sidecar. Strip the prefix so
+/// the spawned `node` process receives an ordinary path. No-op off Windows.
+#[cfg(target_os = "windows")]
+fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
+    use std::path::Component;
+
+    let mut comps = p.components();
+    match comps.next() {
+        Some(Component::Prefix(pref)) => {
+            // `\\?\D:\...` parses as Prefix::VerbatimDisk — reconstruct without the verbatim wrapper.
+            if let Some(disk) = pref.as_os_str().to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+                let mut rebuilt = PathBuf::from(disk);
+                for c in comps {
+                    rebuilt.push(c.as_os_str());
+                }
+                rebuilt
+            } else {
+                p
+            }
+        }
+        _ => p,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn strip_verbatim_prefix(p: PathBuf) -> PathBuf {
+    p
 }
 
 /// Resolve the bundled Node.js binary shipped as a Tauri resource.
