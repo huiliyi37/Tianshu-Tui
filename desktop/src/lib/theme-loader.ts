@@ -6,6 +6,7 @@ import nebula from '../styles/themes/nebula.json'
 import sakura from '../styles/themes/sakura.json'
 import cyberpunk from '../styles/themes/cyberpunk.json'
 import cupertino from '../styles/themes/cupertino.json'
+import lightClassic from '../styles/themes/light-classic.json'
 
 const THEMES: Record<ResolvedTheme, ThemeJson> = {
   dark: dark as ThemeJson,
@@ -14,6 +15,7 @@ const THEMES: Record<ResolvedTheme, ThemeJson> = {
   sakura: sakura as ThemeJson,
   cyberpunk: cyberpunk as ThemeJson,
   cupertino: cupertino as ThemeJson,
+  'light-classic': lightClassic as ThemeJson,
 }
 
 export function loadThemeJson(resolved: ResolvedTheme): ThemeJson {

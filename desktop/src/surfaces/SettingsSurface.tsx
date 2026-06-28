@@ -8,7 +8,7 @@ import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../l
 import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
 import { loadGlassConfig, saveGlassConfig, type GlassConfig } from '../lib/glass-custom'
 import { loadUiDensity, saveUiDensity, applyUiDensity, type UiDensity } from '../lib/ui-density'
-import { useEnabledTabs, ALL_TABS, type ReviewTab } from '../lib/review-tabs'
+import { useEnabledTabs, ALL_TABS } from '../lib/review-tabs'
 import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -45,12 +45,13 @@ export function SettingsSurface() {
 
   const THEME_LABEL: Record<ThemePref, string> = {
     system: t('theme.system'),
-    light: t('theme.light'),
+    light: '默认亮色 (Default Light)',
     dark: t('theme.dark'),
     nebula: t('theme.nebula'),
     sakura: '樱花粉 (Sakura Pink)',
     cyberpunk: '赛博朋克 (Cyberpunk Neon)',
     cupertino: '苹果极简 (Cupertino Clean)',
+    'light-classic': '经典亮色 (Classic Light)',
   }
   const DENSITY_LABEL: Record<ToolDensity, string> = {
     compact: t('densityCompact'),
@@ -149,7 +150,7 @@ export function SettingsSurface() {
                   <SelectValue placeholder={t('themePlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino'] as ThemePref[]).map((t) => (
+                  {(['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic'] as ThemePref[]).map((t) => (
                     <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
                   ))}
                 </SelectContent>
