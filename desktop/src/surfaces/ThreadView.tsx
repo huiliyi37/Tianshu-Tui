@@ -76,6 +76,17 @@ export function ThreadView(props: {
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+  // 发消息失败时回填输入内容：useSendPrompt 的 onError 派发 'send-prompt-failed' 事件，
+  // 此处监听并把失败的 prompt 塞回输入框，让用户能编辑后重发（而非因 submit 已清空而丢失）。
+  // 仅当当前输入框为空时回填，避免覆盖用户失败后已手动输入的新内容。
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ prompt: string }>).detail
+      if (detail?.prompt && !input) setInput(detail.prompt)
+    }
+    window.addEventListener('send-prompt-failed', handler as EventListener)
+    return () => window.removeEventListener('send-prompt-failed', handler as EventListener)
+  }, [input])
   const busy = session.status === 'running'
   const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])

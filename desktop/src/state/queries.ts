@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   abortSession,
   approvePlan,
@@ -190,6 +191,17 @@ export function useSendPrompt() {
   return useMutation({
     mutationFn: ({ id, prompt, images }: { id: string; prompt: string; images?: string[] }) => sendPrompt(id, prompt, images),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+    // 失败时弹 toast：旧实现 fire-and-forget，发消息失败用户完全无感知，以为发出去了。
+    // 这是核心操作的静默丢失——toast 至少让用户知道失败了，配合 ThreadView 的回填可重发。
+    onError: (err: unknown, vars) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(`发送失败：${msg}`, {
+        description: '消息未发出，输入内容已保留，可重试',
+        duration: 6000,
+      })
+      // 通知 ThreadView 回填输入内容（通过自定义事件，避免改 onSend 签名影响 40+ 调用点）
+      window.dispatchEvent(new CustomEvent('send-prompt-failed', { detail: { prompt: vars.prompt } }))
+    },
   })
 }
 

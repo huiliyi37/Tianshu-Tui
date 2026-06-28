@@ -1,6 +1,48 @@
 import { useState } from 'react'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState } from '../runtime/types'
 
+/**
+ * 把单行参数字符串解析为 argv 数组，支持引号包裹含空格的参数。
+ *
+ * 修复点：旧实现 `split(/\s+/)` 会把 Windows 含空格路径
+ * （如 `C:\Users\Alice\My Documents\server`）拆成多个 argv，
+ * 导致 MCP server 收到错误的根目录。本解析器支持：
+ *  - 双引号 "..." / 单引号 '...' 包裹的含空格参数作为一个整体
+ *  - 引号内可含空格、反斜杠路径
+ *  - 引号外按空白切分
+ *  - 未闭合引号容忍处理（取到行尾）
+ *
+ * 示例：
+ *   `-y @x/server "C:\My Documents\dir" flag`
+ *   → ['-y', '@x/server', 'C:\My Documents\dir', 'flag']
+ */
+export function parseArgs(input: string): string[] {
+  const args: string[] = []
+  let current = ''
+  let inQuote: '"' | "'" | null = null
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]!
+    if (inQuote) {
+      if (ch === inQuote) {
+        inQuote = null // 闭合引号
+      } else {
+        current += ch
+      }
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch as '"' | "'"
+    } else if (/\s/.test(ch)) {
+      if (current) {
+        args.push(current)
+        current = ''
+      }
+    } else {
+      current += ch
+    }
+  }
+  if (current) args.push(current) // 末尾参数（含未闭合引号的容忍回退）
+  return args
+}
+
 // ── MCP 预设 ──────────────────────────────────────────────────
 // 常用 MCP 服务器的一键添加配置。Context7 提供库文档查询能力，
 // 是编码 agent 最常用的外部知识源之一。
@@ -93,7 +135,7 @@ export function McpSettings({
       const config: McpServerConfig = { serverId: serverId.trim() }
       if (transport === 'stdio') {
         config.command = command.trim()
-        if (args.trim()) config.args = args.trim().split(/\s+/)
+        if (args.trim()) config.args = parseArgs(args.trim())
       } else {
         config.url = url.trim()
       }
