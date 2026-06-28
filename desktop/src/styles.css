@@ -2708,3 +2708,37 @@ html[data-theme="nebula"] .plan-panel {
   transform: scale(1.2);
   background: var(--accent-hover);
 }
+
+/* Glass custom panel layout */
+.glass-custom-section {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.glass-custom-section h5 {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text);
+}
+.glass-custom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+}
+.glass-custom-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.glass-custom-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+.glass-value-badge {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--accent);
+}
