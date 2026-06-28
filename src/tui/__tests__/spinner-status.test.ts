@@ -7,7 +7,7 @@ import {
   formatTurnWorkSummary,
   formatElapsedHuman,
 } from '../format/spinner-status.js'
-import { brailleSpinnerFrame } from '../braille-spinner.js'
+import { circleSpinnerFrame } from '../braille-spinner.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -25,7 +25,7 @@ describe('formatSpinnerStatus', () => {
     assert.ok(line)
     const plain = stripAnsi(line!)
     const useAscii = chalk.level < 3
-    const expectedFrame = useAscii ? '/' : brailleSpinnerFrame(3)
+    const expectedFrame = useAscii ? '/' : circleSpinnerFrame(3)
     assert.ok(plain.startsWith(expectedFrame), 'leads with single spinner frame matching tick')
     assert.ok(plain.includes('thinking'), 'word is the static label')
     assert.ok(plain.includes('…'), 'word carries ellipsis')
@@ -33,15 +33,15 @@ describe('formatSpinnerStatus', () => {
     assert.ok(!plain.includes('esc'), 'no interrupt hint appended')
   })
 
-  it('spinner label reflects phase', () => {
+  it('spinner label reflects phase (all non-idle unified to thinking)', () => {
     const thinking = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'thinking', elapsedMs: 0 }, theme)!)
     const streaming = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'streaming', elapsedMs: 0 }, theme)!)
     const analyzing = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'analyzing', elapsedMs: 0 }, theme)!)
     const waiting = stripAnsi(formatSpinnerStatus({ tick: 5, phase: 'waiting', elapsedMs: 0 }, theme)!)
     assert.ok(thinking.includes('thinking'))
-    assert.ok(streaming.includes('streaming'))
-    assert.ok(analyzing.includes('analyzing'))
-    assert.ok(waiting.includes('waiting'))
+    assert.ok(streaming.includes('thinking'))
+    assert.ok(analyzing.includes('thinking'))
+    assert.ok(waiting.includes('thinking'))
   })
 
   it('word is static (does not rotate with elapsed)', () => {
