@@ -1620,6 +1620,26 @@ body {
    so block elements (lists/tables/headings) lay out correctly. Code keeps pre. */
 .md { white-space: normal; color: inherit; font-size: var(--text-base); line-height: var(--leading); }
 .md-streaming { white-space: pre-wrap; word-break: break-word; }
+.md-stream-more {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  opacity: 0.7;
+  margin-bottom: var(--space-1);
+  user-select: none;
+}
+.timeline-more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: var(--space-1) 0;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.timeline-more:hover { color: var(--accent); }
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 .md p { margin: 0 0 var(--md-gap); }

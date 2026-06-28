@@ -1043,10 +1043,27 @@ function AssistantText({ text, isStreaming }: { text: string; isStreaming: boole
   return <Markdown source={text} />
 }
 
+// Above this size the streaming tail is windowed (see below).
+const STREAM_TAIL_MAX = 8000
+
 // Plain-text fallback for the very-long streaming guard (md-streaming keeps the
 // pre-wrap styling until the final Markdown parse on turn completion).
+//
+// Only the trailing window is rendered while a long reply streams: a single
+// growing text node costs O(n) to diff/paint per throttle tick, so over a
+// 50k-char reply the naive full render is O(n^2). The user is pinned to the
+// bottom mid-stream (auto-scroll), so the tail is exactly what they read; the
+// full text + Markdown render the instant streaming completes (AssistantText
+// switches off this path). Bounds per-tick work to O(tail).
 function StreamingText({ source }: { source: string }) {
-  return <div className="md md-streaming">{source}</div>
+  const tail = source.length > STREAM_TAIL_MAX ? source.slice(-STREAM_TAIL_MAX) : source
+  const truncated = tail.length < source.length
+  return (
+    <div className="md md-streaming">
+      {truncated && <div className="md-stream-more">↑ 输出较长，完成后显示全文</div>}
+      {tail}
+    </div>
+  )
 }
 
 /** MsgBlock — message wrapper with a copy button that appears on hover. */
