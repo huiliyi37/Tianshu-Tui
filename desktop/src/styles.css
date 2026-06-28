@@ -1650,7 +1650,7 @@ body {
 .tool-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
 .tool-dot.ok { background: var(--success); }
 .tool-dot.err { background: var(--error); }
-.tool-dot.run { background: var(--accent); }
+.tool-dot.run { background: var(--accent); animation: pulse-running 1.5s var(--ease) infinite; }
 .tool-row .tool-body { border-top: none; margin-top: var(--space-1); border-radius: var(--radius-sm); }
 
 .thinking { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
