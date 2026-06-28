@@ -78,6 +78,7 @@ describe('getCurrentGitRef', () => {
 
 describe('createWorktree failure cleanup (S1a)', () => {
   const _savedTmpdir = process.env.TMPDIR
+  const _originalTmp = tmpdir()
   let _testTmp: string
 
   // Redirect TMPDIR to workspace — agent Seatbelt sandbox blocks writes to /var/folders T/.
@@ -92,8 +93,9 @@ describe('createWorktree failure cleanup (S1a)', () => {
   })
 
   it('cleans up mkdtemp directory when git worktree add fails', () => {
-    // Non-git directory → git worktree add will fail
-    const nonGit = mkdtempSync(join(tmpdir(), 'rivet-test-nongit-'))
+    // Non-git directory → git worktree add will fail.
+    // Put it outside the project so git cannot find a parent .git directory.
+    const nonGit = mkdtempSync(join(_originalTmp, 'rivet-test-nongit-'))
     const sessionId = 'cleanup-t1' // slice(0,8) = 'cleanup-'
     const wtPrefix = 'rivet-wt-cleanup-'
 
@@ -113,6 +115,50 @@ describe('createWorktree failure cleanup (S1a)', () => {
       assert.equal(after.length, 0, 'mkdtemp dir must be cleaned up after git worktree add failure')
     } finally {
       try { rmSync(nonGit, { recursive: true, force: true }) } catch {}
+    }
+  })
+})
+
+describe('createWorktree branch uniqueness (S1b)', () => {
+  let repo: string
+  let wt: { path: string; branch: string } | null = null
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'rivet-branch-uniq-'))
+    initGitRepo(repo, 'main')
+  })
+
+  after(() => {
+    if (wt) {
+      try { git(repo, ['worktree', 'remove', '--force', wt.path]) } catch {}
+      try { git(repo, ['branch', '-D', wt.branch]) } catch {}
+    }
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('picks a unique branch when the base branch name already exists', () => {
+    const sessionId = 'collide-1'
+    const baseBranch = `rivet-hands-${sessionId}`
+    git(repo, ['checkout', '-b', baseBranch])
+    git(repo, ['checkout', 'main'])
+
+    wt = createWorktree(repo, sessionId, baseBranch)
+    assert.notEqual(wt.branch, baseBranch, 'must not reuse existing branch')
+    assert.ok(wt.branch.startsWith(baseBranch), 'unique branch keeps base prefix')
+
+    const list = git(repo, ['worktree', 'list', '--porcelain'])
+    assert.ok(list.includes(wt.path), 'worktree is registered')
+  })
+
+  it('includes git stderr in the thrown error', () => {
+    const badRepo = mkdtempSync(join(tmpdir(), 'rivet-bad-repo-'))
+    try {
+      assert.throws(
+        () => createWorktree(badRepo, 'stderr-test'),
+        /不是 git 仓库|not a git repository|failed to create git worktree/,
+      )
+    } finally {
+      rmSync(badRepo, { recursive: true, force: true })
     }
   })
 })
