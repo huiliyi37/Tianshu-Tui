@@ -150,5 +150,6 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/leave', description: '离开仪式 — Leave your mark in the starmap' },
     { name: '/enter', description: 'Resume a worker session (e.g. /enter wo_team:T1 continue)' },
     { name: '/exit', description: 'Save session and exit' },
+    { name: '/update', description: 'Check and install the latest Rivet release' },
   ]
 }

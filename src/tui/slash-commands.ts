@@ -9,6 +9,13 @@ import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js
 import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { resolveCustomCommand } from '../commands/loader.js'
 import { getTheme, setTheme, getActiveThemeName, THEMES, type ThemeName } from './theme.js'
+import {
+  checkForUpdate,
+  detectInstallRoot,
+  formatUpdateBanner,
+  restartProcess,
+  runUpdate,
+} from './updater.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
 import { getPaletteCommands } from './command-palette.js'
@@ -54,6 +61,7 @@ const HELP_TEXT = `Available commands:
 /help — Show this help
 /exit — Exit Rivet
 /quit — Exit
+/update — Check and install the latest Rivet release
 /compact [status|llm] — Micro-compact context (/compact status for stats)
 /model [name|list] — Show or switch model
 /domain [list|<name>|auto|off] — Show or switch star domain personality
@@ -2482,6 +2490,56 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     handler: () => {
       app.commitStatic('Session saved. Goodbye!')
       ctx.shutdown()
+      return true
+    },
+  })
+
+  register("/update", {
+    description: "Check and install the latest Rivet release",
+    immediate: true,
+    handler: async () => {
+      if (app.busy) {
+        app.commitStatic('⚠️  Cannot update while the agent is running.')
+        return true
+      }
+
+      const root = detectInstallRoot()
+      if (!root) {
+        app.commitStatic('⚠️  Cannot detect Rivet install root.')
+        return true
+      }
+
+      app.commitStatic('Checking for updates...')
+      const check = await checkForUpdate(root, { bypassCache: true })
+      if (!check) {
+        app.commitStatic('⚠️  Could not check for updates right now.')
+        return true
+      }
+
+      if (!check.hasUpdate) {
+        app.commitStatic(`Rivet is up to date (${check.current}).`)
+        return true
+      }
+
+      app.commitStatic(formatUpdateBanner(check.current, check.latest))
+      app.commitStatic(`Install source: ${check.installType}`)
+
+      const result = await runUpdate(root, 'latest', (line) => app.commitStatic(line))
+      if (result.skipped) {
+        app.commitStatic(`ℹ️  ${result.message}`)
+        return true
+      }
+      if (!result.ok) {
+        app.commitStatic(`❌ ${result.message}`)
+        return true
+      }
+
+      app.commitStatic('✅ Update complete. Restarting...')
+      setTimeout(() => {
+        ctx.shutdown()
+        app.dispose()
+        restartProcess()
+      }, 250)
       return true
     },
   })

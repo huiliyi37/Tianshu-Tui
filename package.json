@@ -1,5 +1,5 @@
 {
-  "name": "rivet",
+  "name": "tianshu-tui",
   "version": "2.9.0",
   "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
   "license": "MIT",
@@ -12,13 +12,13 @@
     "ai",
     "cli"
   ],
-  "homepage": "https://github.com/user/rivet#readme",
+  "homepage": "https://github.com/huiliyi37/Tianshu-Tui#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/user/rivet.git"
+    "url": "git+https://github.com/huiliyi37/Tianshu-Tui.git"
   },
   "bugs": {
-    "url": "https://github.com/user/rivet/issues"
+    "url": "https://github.com/huiliyi37/Tianshu-Tui/issues"
   },
   "engines": {
     "node": "22.23.1"
