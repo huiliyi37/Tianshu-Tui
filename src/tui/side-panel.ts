@@ -46,6 +46,16 @@ const MAX_WORKERS = 5
 /** 任务区最大行数（含标题与摘要）。 */
 const MAX_TASK_ROWS = 6
 
+/** 展开右侧面板所需的最小终端宽度。 */
+export const SIDE_PANEL_MIN_COLUMNS = 100
+
+/** 根据终端宽度选择侧栏宽度（100-119 用 24 列，≥120 用 32 列，<100 不展开）。 */
+export function resolveSidePanelWidth(columns: number): number {
+  if (columns >= 120) return 32
+  if (columns >= SIDE_PANEL_MIN_COLUMNS) return 24
+  return 0
+}
+
 /**
  * 渲染右侧面板为固定宽度的行数组。
  * 顶部用 ╭─╮ 线框，底部 ╰─╯ 收束。

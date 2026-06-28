@@ -4,7 +4,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { displayWidth } from '../width.js'
-import { renderSidePanel } from '../side-panel.js'
+import { renderSidePanel, resolveSidePanelWidth, SIDE_PANEL_MIN_COLUMNS } from '../side-panel.js'
 import { getTheme } from '../theme.js'
 
 const theme = getTheme()
@@ -230,5 +230,26 @@ describe('renderSidePanel', () => {
     const all = lines.map(stripAnsi).join(' ')
     assert.ok(all.includes('ctrl+] toggle'), `toggle hint: ${all}`)
     assert.ok(all.includes('ctrl+x r'), `open hint: ${all}`)
+  })
+})
+
+describe('resolveSidePanelWidth', () => {
+  it('uses 32 columns on wide terminals', () => {
+    assert.equal(resolveSidePanelWidth(130), 32)
+    assert.equal(resolveSidePanelWidth(120), 32)
+  })
+
+  it('falls back to 24 columns on medium terminals', () => {
+    assert.equal(resolveSidePanelWidth(119), 24)
+    assert.equal(resolveSidePanelWidth(100), 24)
+  })
+
+  it('returns 0 when terminal is too narrow', () => {
+    assert.equal(resolveSidePanelWidth(99), 0)
+    assert.equal(resolveSidePanelWidth(80), 0)
+  })
+
+  it('exposes a minimum threshold of 100 columns', () => {
+    assert.equal(SIDE_PANEL_MIN_COLUMNS, 100)
   })
 })

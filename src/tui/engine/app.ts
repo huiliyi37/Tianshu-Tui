@@ -47,7 +47,7 @@ import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import { buildWorkerDetailContent } from '../worker-detail.js'
-import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
+import { renderSidePanel, resolveSidePanelWidth, SIDE_PANEL_MIN_COLUMNS, type SidePanelInput } from '../side-panel.js'
 import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
 import {
@@ -109,10 +109,6 @@ export function looksLikeFilePath(input: string): boolean {
   const spaceIdx = rest.indexOf(' ')
   return spaceIdx === -1 || slashIdx < spaceIdx
 }
-
-/** 右侧面板触发阈值与宽度。 */
-const SIDE_PANEL_MIN_COLUMNS = 120
-const SIDE_PANEL_WIDTH = 32
 
 /**
  * 输入框线框字符集（按 separator 主题）。纯字面量，提升到模块级避免 renderLive
@@ -1875,7 +1871,7 @@ export class TuiApp {
 
   /** 设置右侧面板展开状态；若终端太窄或 overlay 激活则静默不展开。 */
   setSidePanelOpen(open: boolean): void {
-    if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
+    if (open && resolveSidePanelWidth(this.columns) === 0) return
     if (this.overlay.isActive()) return
     this.state.sidePanelOpen = open
     try { this.onSidePanelChange?.(open) } catch { /* persistence failure is non-fatal */ }
@@ -1884,7 +1880,7 @@ export class TuiApp {
 
   /** 查询右侧面板是否展开（对齐可见状态——窄终端下面板不可见即为关闭）。 */
   isSidePanelOpen(): boolean {
-    return this.state.sidePanelOpen && this.columns >= SIDE_PANEL_MIN_COLUMNS
+    return this.state.sidePanelOpen && resolveSidePanelWidth(this.columns) > 0
   }
 
   /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
@@ -2491,8 +2487,8 @@ export class TuiApp {
       return
     }
 
-    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS && this.state.sidePanelOpen
-    const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
+    const sidePanelWidth = this.state.sidePanelOpen ? resolveSidePanelWidth(this.columns) : 0
+    const showSidePanel = sidePanelWidth > 0
     const contentCols = this.columns - sidePanelWidth
     // 局部 cols：侧栏展开时用压缩后的主区宽度，否则用原始终端宽度。
     // 不改写 this.columns，避免异步回调读到临时值。
