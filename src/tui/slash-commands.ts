@@ -88,6 +88,19 @@ const HELP_TEXT = `Available commands:
 /dream — Distill session decisions into project memory
 /index — Rebuild codebase index (modules + CLI entries)
 /diagram [list|<type>] — Generate a mermaid diagram skeleton (architecture|dataflow|sequence|flowchart|comparison|state)
+/model [id] — Switch model (no arg = open model picker)
+/domain [id|list] — Switch star domain (no arg = open domain picker)
+/status — Show agent status (model, domain, cache, tokens)
+/tools — Show available tools and their descriptions
+/compact — Compact context (summarize old messages)
+/workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
+/todo [list|add <content>|done <id>|skip <id>|move <id> up|down] — Manage task list
+/plan-template [list|<name>|save <name>] — Reusable plan templates
+/team-resume [groupId] — Resume team execution from wave checkpoint
+/goal <objective> — Set autonomous goal for multi-turn execution
+/cancel-goal — Cancel autonomous goal
+/rollback [<N>] — Rollback file changes (alias of /undo)
+/write-plan — Write current plan to file
 Ctrl+C — Interrupt current turn (press twice to exit)`
 
 /**
@@ -701,6 +714,26 @@ export async function handleSlashCommand(ctx: SlashHandlerContext): Promise<bool
       const nextVerbose = !ctx.verboseRef.current
       ctx.setVerbose(nextVerbose)
       pushStatic(createLogEntry({ type: 'system', content: nextVerbose ? 'Verbose mode: on (show 200 lines)' : 'Verbose mode: off (show 20 lines)' }))
+      setIsStreaming(false)
+      return true
+    }
+
+    case '/evidence': {
+      const state = ctx.agent.getEvidenceState()
+      if (state.verifications.length === 0) {
+        pushStatic(createLogEntry({ type: 'system', content: 'No evidence recorded yet this session.' }))
+      } else {
+        const recent = state.verifications.slice(-10)
+        const lines = ['Evidence Summary (last 10 verifications):', '']
+        for (const v of recent) {
+          const glyph = v.status === 'passed' ? '✓' : v.status === 'failed' ? '✗' : '◐'
+          const time = v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : ''
+          lines.push(`  ${glyph} ${v.command}  (${v.status})  ${time}`)
+        }
+        const passRate = Math.round((recent.filter(v => v.status === 'passed').length / recent.length) * 100)
+        lines.push('', `Pass rate: ${passRate}% (${recent.filter(v => v.status === 'passed').length}/${recent.length})`)
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') }))
+      }
       setIsStreaming(false)
       return true
     }
