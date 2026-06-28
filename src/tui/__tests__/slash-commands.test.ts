@@ -155,7 +155,7 @@ describe('resolveAppPromptInput', () => {
 
     assert.ok(resolved.includes('团队模式核心骨架'))
     assert.ok(resolved.includes('team_orchestrate'))
-    assert.ok(resolved.includes('delegate_batch'))
+    assert.ok(resolved.includes('plan_task'))
     assert.ok(resolved.includes('patcher workers as 天梁 executors'))
     assert.ok(resolved.includes('deliver_task'))
   })
