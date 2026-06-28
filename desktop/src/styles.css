@@ -108,6 +108,11 @@
 
 html, body, #root { height: 100%; margin: 0; }
 
+html[data-surface="glass"],
+html[data-surface="glass"] body {
+  background: transparent !important;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -2316,6 +2321,28 @@ body {
   cursor: pointer; font-size: 16px; line-height: 1; opacity: 0.7;
 }
 .banner-close:hover { opacity: 1; background: var(--error); color: var(--error-soft); }
+
+/* D2 — live SSE stream status banner (sticky at top of the message list) */
+.stream-banner {
+  position: sticky; top: 0; z-index: 4;
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 6px 12px; margin: 0 0 6px 0;
+  font-size: 12.5px; border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.stream-banner.offline { background: var(--error-soft); color: var(--error); border-color: var(--error); }
+.stream-banner.reconnecting { background: var(--warning-soft); color: var(--warning); }
+.stream-banner-text { flex: 1; }
+.stream-banner-glyph { flex-shrink: 0; }
+.stream-banner-glyph.spin { animation: stream-spin 1s linear infinite; display: inline-block; }
+@keyframes stream-spin { to { transform: rotate(360deg); } }
+.stream-banner-retry {
+  flex-shrink: 0; display: inline-flex; align-items: center;
+  padding: 3px 10px; background: var(--error); color: var(--bg);
+  border: none; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 12px; font-weight: var(--weight-medium);
+}
+.stream-banner-retry:hover { opacity: 0.85; }
 
 /* Rewind overlay */
 .rewind-panel { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 480px; max-width: 600px; max-height: 70vh; display: flex; flex-direction: column; gap: 8px; }

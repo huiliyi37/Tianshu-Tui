@@ -7,6 +7,7 @@ import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
 import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
 import { loadGlassConfig, saveGlassConfig, type GlassConfig } from '../lib/glass-custom'
+import { loadUiDensity, saveUiDensity, applyUiDensity, type UiDensity } from '../lib/ui-density'
 import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -73,6 +74,7 @@ export function SettingsSurface() {
   const [fontWeight, setFontWeight] = useState<FontWeightPref>(() => loadFontWeightPref())
   const [fontFamily, setFontFamily] = useState<FontFamilyPref>(() => loadFontFamilyPref())
   const [glassConfig, setGlassConfig] = useState<GlassConfig>(() => loadGlassConfig())
+  const [uiDensity, setUiDensity] = useState<UiDensity>(() => loadUiDensity())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -87,6 +89,12 @@ export function SettingsSurface() {
   const pickFontFamily = (f: FontFamilyPref) => {
     setFontFamily(f)
     setFontFamilyPref(f)
+  }
+
+  const pickUiDensity = (density: UiDensity) => {
+    setUiDensity(density)
+    saveUiDensity(density)
+    applyUiDensity(density)
   }
 
   const updateGlass = (updates: Partial<GlassConfig>) => {
@@ -157,6 +165,20 @@ export function SettingsSurface() {
               <div className="meta">{t('fontWeightHint')}</div>
             </section>
             <FontSettingsPanel value={fontFamily} onChange={pickFontFamily} />
+            <section className="settings-group">
+              <h4>界面信息密度</h4>
+              <Select value={uiDensity} onValueChange={(v) => pickUiDensity(v as UiDensity)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择界面信息密度" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="compact">紧凑 (Compact)</SelectItem>
+                  <SelectItem value="cozy">标准 (Cozy)</SelectItem>
+                  <SelectItem value="spacious">宽松 (Spacious)</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="meta">调整全局间距、内边距和字体大小，以获得最舒适的阅读与操作体验。</div>
+            </section>
             <LanguageSection />
             <WallpaperSection glassConfig={glassConfig} updateGlass={updateGlass} />
           </>

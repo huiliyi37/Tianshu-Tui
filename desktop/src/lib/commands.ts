@@ -6,6 +6,7 @@ export interface Command {
   label: string
   hint?: string
   run: () => void
+  subMode?: 'switch-model' | 'open-file'
 }
 
 /** Substring (preferred, earlier = higher) → subsequence fallback → -1 miss. */

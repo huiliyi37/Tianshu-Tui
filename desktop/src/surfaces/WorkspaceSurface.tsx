@@ -191,6 +191,8 @@ export function WorkspaceSurface() {
                     onSetApprovalMode={handleSetApprovalMode}
                     onSetPlanMode={handleSetPlanMode}
                     onClose={handleClose}
+                    streamStatus={view.streamStatus}
+                    onRetryStream={view.retryStream}
                   />
                 ) : (
                    <div className="empty thread-empty onboard">

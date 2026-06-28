@@ -2,6 +2,7 @@ import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useStat
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
+import type { StreamStatus } from '../state/use-session-events'
 import { basename } from '../lib/projects'
 import { ToolCard, toolNameOf } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
@@ -64,8 +65,11 @@ export function ThreadView(props: {
   onSetApprovalMode: (mode: ApprovalMode) => void
   onSetPlanMode?: (state: PlanModeState) => void
   onClose: () => void
+  /** D2 — live SSE connection state; drives the "updates stopped" banner. */
+  streamStatus?: StreamStatus
+  onRetryStream?: () => void
 }) {
-  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose } = props
+  const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
@@ -451,6 +455,25 @@ export function ThreadView(props: {
       </header>
 
       <div className="messages" ref={msgRef} onScroll={onScroll}>
+        {streamStatus === 'offline' && (
+          <div className="stream-banner offline" role="alert">
+            <span className="stream-banner-glyph" aria-hidden>⚠</span>
+            <span className="stream-banner-text">实时连接已断开，可能错过最新进度</span>
+            <button
+              className="stream-banner-retry"
+              onClick={() => onRetryStream?.()}
+              aria-label="重新连接实时更新"
+            >
+              重新连接
+            </button>
+          </div>
+        )}
+        {streamStatus === 'reconnecting' && (
+          <div className="stream-banner reconnecting" role="status">
+            <span className="stream-banner-glyph spin" aria-hidden>⟳</span>
+            <span className="stream-banner-text">连接中断，正在重连…</span>
+          </div>
+        )}
         {view.blocks.length === 0 && (
           <div className="empty welcome">
             <p className="welcome-title">开始对话</p>

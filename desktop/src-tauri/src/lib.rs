@@ -19,10 +19,12 @@ use tauri::{
 /// Live coordinates of the rivet sidecar, handed to the frontend so it can talk
 /// to 127.0.0.1:<port> with the per-launch Bearer token.
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeInfo {
     pub port: u16,
     pub token: String,
     /// Which Node binary is hosting the sidecar: "bundled", "env", "system".
+    /// Serialized as `nodeSource` for the TS frontend (see runtime/client.ts).
     pub node_source: String,
 }
 
@@ -334,6 +336,21 @@ pub fn run() {
                 info,
                 child: Mutex::new(child),
             });
+
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window_vibrancy::apply_vibrancy(
+                    &window,
+                    window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                    None,
+                    None,
+                );
+            }
+
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window_vibrancy::apply_mica(&window, None);
+            }
 
             // ── 系统托盘（L1 #7）──
             let show = MenuItemBuilder::with_id("show", "显示天枢").build(app)?;

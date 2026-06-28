@@ -24,6 +24,9 @@ import type {
 export interface RuntimeInfo {
   port: number
   token: string
+  /** Which Node hosts the sidecar: 'bundled' (shipped binary) | 'env' | 'system'.
+   *  Reported by the Rust shell (runtime_info); absent in the browser-dev fallback. */
+  nodeSource?: string
 }
 
 let cached: RuntimeInfo | null = null

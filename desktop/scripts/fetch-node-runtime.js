@@ -11,16 +11,20 @@
  *   FORCE_FETCH    set to 1 to re-download even if the binary already exists
  */
 
-import { createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { get } from 'node:https'
+import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_NODE_VERSION = '22.23.1'
 const NODE_VERSION = process.env.NODE_VERSION || DEFAULT_NODE_VERSION
 const FORCE_FETCH = process.env.FORCE_FETCH === '1'
+// No-data watchdog: abort a stalled connection so a hung mirror can't freeze
+// the whole build indefinitely.
+const DOWNLOAD_TIMEOUT_MS = Number(process.env.NODE_FETCH_TIMEOUT_MS || 120000)
 
 const platformMap = {
   darwin: 'darwin',
@@ -46,7 +50,7 @@ function detectTriple() {
 function download(url, dest) {
   return new Promise((resolve, reject) => {
     const file = createWriteStream(dest)
-    get(url, (res) => {
+    const req = get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close()
         rmSync(dest, { force: true })
@@ -59,11 +63,64 @@ function download(url, dest) {
       }
       res.pipe(file)
       file.on('finish', () => file.close(resolve))
-    }).on('error', (err) => {
+    })
+    req.on('error', (err) => {
       file.close()
       rmSync(dest, { force: true })
       reject(err)
     })
+    // Reset the watchdog on every byte; only fire if the socket goes silent.
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Download timed out after ${DOWNLOAD_TIMEOUT_MS}ms: ${url}`))
+    })
+  })
+}
+
+/** Fetch a small text resource (follows redirects). Used for SHASUMS256.txt. */
+function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    const req = get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchText(res.headers.location).then(resolve, reject)
+      }
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Fetch failed: ${res.statusCode} ${url}`))
+      }
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { body += c })
+      res.on('end', () => resolve(body))
+    })
+    req.on('error', reject)
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Fetch timed out after ${DOWNLOAD_TIMEOUT_MS}ms: ${url}`))
+    })
+  })
+}
+
+/**
+ * Pull the expected sha256 for `filename` out of a Node.js SHASUMS256.txt body.
+ * Each line is "<hex>  <filename>". Returns the lowercase hex digest, or null
+ * if the file is not listed. Pure (no I/O) so it is unit-testable.
+ */
+export function parseShasum(shasumsText, filename) {
+  for (const line of shasumsText.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const m = trimmed.match(/^([0-9a-fA-F]{64})\s+\*?(.+)$/)
+    if (m && m[2] === filename) return m[1].toLowerCase()
+  }
+  return null
+}
+
+/** Stream-hash a file with sha256 → lowercase hex. */
+function sha256File(path) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    const stream = createReadStream(path)
+    stream.on('error', reject)
+    stream.on('data', (chunk) => hash.update(chunk))
+    stream.on('end', () => resolve(hash.digest('hex')))
   })
 }
 
@@ -89,6 +146,26 @@ async function main() {
 
   console.log(`[fetch-node-runtime] downloading ${url}`)
   await download(url, archivePath)
+
+  // Supply-chain guard: verify the archive against the official SHASUMS256.txt
+  // before trusting it. A tampered/corrupt binary would otherwise be bundled
+  // straight into the shipped app. Fail-closed — abort the build on any mismatch.
+  const archiveName = `${baseName}.${ext}`
+  console.log(`[fetch-node-runtime] verifying ${archiveName} checksum`)
+  const shasums = await fetchText(`https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt`)
+  const expected = parseShasum(shasums, archiveName)
+  if (!expected) {
+    rmSync(tmpDir, { recursive: true, force: true })
+    throw new Error(`No checksum listed for ${archiveName} in SHASUMS256.txt`)
+  }
+  const actual = await sha256File(archivePath)
+  if (actual !== expected) {
+    rmSync(tmpDir, { recursive: true, force: true })
+    throw new Error(
+      `Checksum mismatch for ${archiveName}:\n  expected ${expected}\n  actual   ${actual}`,
+    )
+  }
+  console.log(`[fetch-node-runtime] checksum ok (${expected.slice(0, 12)}…)`)
 
   console.log(`[fetch-node-runtime] extracting ${archivePath}`)
   if (isWindows) {
@@ -124,7 +201,13 @@ async function main() {
   console.log(`[fetch-node-runtime] ready ${binaryPath}`)
 }
 
-main().catch((err) => {
-  console.error('[fetch-node-runtime] failed:', err.message)
-  process.exit(1)
-})
+// Only run the fetch when invoked directly as a script. Importing this module
+// (e.g. for the exported `parseShasum` in a test) must have no side effects.
+const invokedDirectly =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('[fetch-node-runtime] failed:', err.message)
+    process.exit(1)
+  })
+}

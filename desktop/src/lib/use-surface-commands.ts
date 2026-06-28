@@ -34,6 +34,20 @@ export function useSurfaceCommands(): Command[] {
         run: () => dispatch({ type: 'openNew', open: true }),
       },
       {
+        id: 'switch-model',
+        label: '切换模型 (Switch Model)',
+        hint: '操作',
+        subMode: 'switch-model',
+        run: () => {},
+      },
+      {
+        id: 'open-file',
+        label: '打开文件 (Open File)',
+        hint: '操作',
+        subMode: 'open-file',
+        run: () => {},
+      },
+      {
         id: 'theme',
         label: '切换主题',
         hint: '外观',

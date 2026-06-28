@@ -15,9 +15,17 @@ export async function streamSession(
   since: number,
   onEvent: (event: SessionEvent) => void,
   signal: AbortSignal,
+  onOpen?: () => void,
 ): Promise<void> {
   const res = await rivetFetch(`/sessions/${id}/stream?since=${since}`, { signal })
   if (!res.ok || !res.body) throw new Error(`stream ${id} -> ${res.status}`)
+
+  // Connection established: the server accepted the request and handed back a
+  // live body. Signal "live" here rather than on the first data frame, because
+  // a caught-up idle session only emits `: ping` heartbeat comments (no data
+  // event) until the next run — waiting for an event would leave a healthy
+  // stream stuck showing "connecting".
+  onOpen?.()
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
