@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useHealth, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
@@ -61,6 +61,15 @@ export function App() {
     const p = known.find((x) => x.id === ui.activeProject)
     return p?.roots[0] ?? null
   }, [ui.activeProject])
+
+  // U3: transient error banner auto-dismisses after 5s and can be closed manually.
+  useEffect(() => {
+    if (!ui.error) return
+    const t = setTimeout(() => dispatch({ type: 'setError', error: null }), 5000)
+    return () => clearTimeout(t)
+  }, [ui.error, dispatch])
+  const dismissError = () => dispatch({ type: 'setError', error: null })
+
   return (
     <WallpaperProvider>
       <div className="shell">
@@ -69,7 +78,14 @@ export function App() {
         {sidecarDown && (
           <div className="banner error">sidecar 离线，重连中…</div>
         )}
-        {ui.error && <div className="banner error">{ui.error}</div>}
+        {ui.error && (
+          <div className="banner error">
+            {ui.error}
+            <button className="banner-close" onClick={dismissError} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
 
         {ui.surface !== 'workspace' && (
           <header className="surface-topbar">

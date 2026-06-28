@@ -1527,10 +1527,22 @@ body {
   padding: 1px 5px; border-radius: var(--md-code-radius); border: 1px solid var(--border);
 }
 .md pre {
-  margin: 0 0 var(--md-gap); padding: var(--space-3); background: var(--panel-2);
+  margin: 0; padding: var(--space-3); background: var(--panel-2);
   border: 1px solid var(--border); border-radius: var(--radius-md); overflow-x: auto; white-space: pre;
+  max-height: 60vh; overflow-y: auto;
 }
 .md pre code { font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.5; background: none; border: none; padding: 0; }
+.md-pre-wrap { position: relative; margin: 0 0 var(--md-gap); }
+.md-pre-copy {
+  position: absolute; top: 6px; right: 6px; z-index: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: var(--text-sm);
+  opacity: 0; transition: opacity var(--dur-fast) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.md-pre-wrap:hover .md-pre-copy { opacity: 1; }
+.md-pre-copy:hover { color: var(--text); background: var(--panel-3); }
 .md img { max-width: 100%; }
 .md input[type="checkbox"] { margin-right: var(--space-1); }
 
@@ -1997,8 +2009,15 @@ body {
 .onboard-hints { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-2); }
 .onboard-hint { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--muted); }
 .onboard-hint kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--panel-2); font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); }
-.banner { padding: 8px 14px; font-size: 13px; }
+.banner { padding: 8px 14px; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: var(--space-2); }
 .banner.error { background: var(--error-soft); color: var(--error); }
+.banner-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; margin-left: 2px;
+  background: transparent; color: inherit; border: none; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 16px; line-height: 1; opacity: 0.7;
+}
+.banner-close:hover { opacity: 1; background: var(--error); color: var(--error-soft); }
 
 /* Rewind overlay */
 .rewind-panel { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 16px; min-width: 480px; max-width: 600px; max-height: 70vh; display: flex; flex-direction: column; gap: 8px; }

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -71,8 +71,39 @@ function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   )
 }
 
+/** U4: code block wrapper with a hover copy button. */
+function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
+  const { children, ...rest } = props
+  const preRef = useRef<HTMLPreElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copy = () => {
+    const text = preRef.current?.textContent ?? ''
+    if (!text) return
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="md-pre-wrap">
+      <button
+        className="md-pre-copy"
+        onClick={copy}
+        aria-label={copied ? '已复制' : '复制'}
+        title={copied ? '已复制' : '复制'}
+      >
+        {copied ? '✓' : '⎘'}
+      </button>
+      <pre {...rest} ref={preRef}>{children}</pre>
+    </div>
+  )
+}
+
 const COMPONENTS = {
   a: ExternalLink,
+  pre: CodeBlock,
 } as const
 
 // During streaming a fenced code block is often half-open (odd number of ```
