@@ -324,28 +324,56 @@ body {
   color: var(--text); font-size: var(--text-sm); outline: none;
 }
 .skills-search:focus { border-color: var(--accent); }
-.skills-list { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-4) var(--space-4); }
+.skills-group-label {
+  font-size: 11px; font-weight: 600; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: var(--space-3) var(--space-4) var(--space-1);
+}
+.skills-list { display: flex; flex-direction: column; gap: var(--space-2); padding: 0 var(--space-4) var(--space-3); }
 .skill-card {
   display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3);
   padding: var(--space-3); border-radius: 8px; border: 1px solid var(--border);
-  background: var(--panel); transition: border-color var(--dur) var(--ease);
+  background: var(--panel); transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+  border-left: 3px solid transparent;
 }
-.skill-card.enabled { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.skill-card.enabled {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
 .skill-info { flex: 1; min-width: 0; }
+.skill-title-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .skill-name { font-weight: 600; font-size: var(--text-sm); color: var(--text); }
-.skill-desc { font-size: var(--text-xs); color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
-.skill-source { font-size: 10px; color: var(--text-faint); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.skill-src-chip {
+  font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 4px;
+  letter-spacing: 0.02em; flex-shrink: 0;
+}
+.skill-src-chip.src-builtin { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.skill-src-chip.src-claude { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.skill-src-chip.src-rivet { background: color-mix(in srgb, var(--text-dim) 16%, transparent); color: var(--text-dim); }
+.skill-desc { font-size: var(--text-xs); color: var(--text-dim); margin-top: 4px; line-height: 1.45; }
 .skill-toggle {
   flex-shrink: 0; width: 36px; height: 20px; border-radius: 10px; border: none;
   background: var(--border); position: relative; cursor: pointer; padding: 0;
   transition: background var(--dur) var(--ease);
 }
+.skill-toggle:hover { background: color-mix(in srgb, var(--text-dim) 40%, var(--border)); }
 .skill-toggle.on { background: var(--accent); }
+.skill-toggle.on:hover { background: color-mix(in srgb, var(--text) 15%, var(--accent)); }
 .skill-toggle-knob {
   position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
   border-radius: 50%; background: white; transition: transform var(--dur) var(--ease);
 }
 .skill-toggle.on .skill-toggle-knob { transform: translateX(16px); }
+.skills-empty-hero {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--space-8) var(--space-4); text-align: center; gap: var(--space-2);
+}
+.skills-empty-glyph { font-size: 32px; color: var(--text-faint); line-height: 1; }
+.skills-empty-glyph.spin { animation: spin 1.4s linear infinite; }
+.skills-empty-hero p { color: var(--text-dim); font-size: var(--text-sm); margin: 0; }
+.skills-empty-hint { color: var(--text-faint); font-size: var(--text-xs) !important; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* File viewer */
 .file-viewer {

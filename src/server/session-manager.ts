@@ -37,7 +37,7 @@ import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domai
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
-import { skillRegistry } from '../skills/skill-loader.js'
+import { skillRegistry, loadProjectSkills } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
@@ -554,6 +554,12 @@ export class RuntimeSessionManager {
     }
     this.sessions.set(id, session)
     this.persistRecord(session)
+    // 立即加载技能到共享 registry：技能列表查询（/skills）发生在用户发首条消息之前，
+    // 而 agent 是懒创建的（ensureAgent 在 run() 时才建）——若把 loadProjectSkills 只留
+    // 在 agent 创建路径（buildSessionStores），新会话的技能面板会显示空（0/0）直到首次
+    // 对话。这里在创建会话时即加载，幂等（registry 用 Map.set 覆盖）。
+    // importFromClaude 的文件复制由后续 agent 创建时的 buildSessionStores 补全（幂等）。
+    try { loadProjectSkills(cwd) } catch { /* non-fatal: 技能加载失败不阻断会话 */ }
     // R1 — announce the session to the shared registry so its file claims are
     // attributed and reaped on crash. Best-effort: registry may be disabled.
     try { this.getRegistry?.()?.register(id, cwd, 'standalone') } catch { /* non-fatal */ }
