@@ -56,6 +56,19 @@ const READ_HEAD_LINES = 3
 const READ_TAIL_LINES = 5
 const DIFF_MAX_LINES = 20
 
+/** 按工具家族给不同默认展开高度，避免所有工具都挤在 4 行内。 */
+export function getDefaultMaxLines(toolName: string): number {
+  const family = getToolFamily(toolName).family
+  switch (family) {
+    case 'run': return 8
+    case 'find': return 6
+    case 'write': return DIFF_MAX_LINES
+    case 'read': return READ_HEAD_LINES + READ_TAIL_LINES
+    case 'other': return DEFAULT_MAX_LINES
+    default: return DEFAULT_MAX_LINES
+  }
+}
+
 const BODY_FIRST_PREFIX = '⎿  '
 const BODY_CONT_PREFIX = '   '
 
@@ -150,7 +163,7 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
   // ── 普通输出分支 ─────────────────────────────────────────────
   const contentLines = trimmed.split('\n')
   const totalLines = contentLines.length
-  const maxLines = input.maxLines ?? DEFAULT_MAX_LINES
+  const maxLines = input.maxLines ?? getDefaultMaxLines(toolName)
   // 正文是「数据」(命令输出/文件列表/git status)，用可读的 muted 前景。
   // 绝不能用 theme.dim —— dim 是装饰专用色(分隔线/快捷键)，在墨夜底上 ~2:1
   // 对比度几乎不可见，会把真实数据染到看不清。
@@ -203,7 +216,7 @@ export function isToolCardTruncated(input: Pick<FormatToolCardInput, 'toolName' 
   if (family.family === 'write' && isDiffContent(trimmed)) {
     return totalLines > DIFF_MAX_LINES
   }
-  return totalLines > (input.maxLines ?? DEFAULT_MAX_LINES)
+  return totalLines > (input.maxLines ?? getDefaultMaxLines(input.toolName))
 }
 
 // ── Live 进行中工具行 ──────────────────────────────────────────

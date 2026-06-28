@@ -130,6 +130,29 @@ describe('formatToolCard (Claude Code ●/⎿ style)', () => {
     assert.ok(plain.some(l => l.includes('5. Local')))
     assert.ok(!plain.some(l => l.includes('[Ctrl+O]')), 'must not be truncated')
   })
+
+  it('uses family-specific default maxLines', () => {
+    const long = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n')
+    // run family (bash) defaults to 8 lines
+    const bashLines = formatToolCard({ toolName: 'bash', content: long }, theme)
+    const bashPlain = bashLines.map(stripAnsi)
+    assert.ok(bashPlain.some(l => l.includes('… +4 lines [Ctrl+O]')), 'bash shows 8 lines')
+    // find family (grep) defaults to 6 lines
+    const grepLines = formatToolCard({ toolName: 'grep', content: long }, theme)
+    const grepPlain = grepLines.map(stripAnsi)
+    assert.ok(grepPlain.some(l => l.includes('… +6 lines [Ctrl+O]')), 'grep shows 6 lines')
+    // other family defaults to 4 lines
+    const todoLines = formatToolCard({ toolName: 'todo', content: long }, theme)
+    const todoPlain = todoLines.map(stripAnsi)
+    assert.ok(todoPlain.some(l => l.includes('… +8 lines [Ctrl+O]')), 'todo shows 4 lines')
+  })
+
+  it('explicit maxLines overrides family default', () => {
+    const long = Array.from({ length: 12 }, (_, i) => `line ${i}`).join('\n')
+    const lines = formatToolCard({ toolName: 'bash', content: long, maxLines: 3 }, theme)
+    const plain = lines.map(stripAnsi)
+    assert.ok(plain.some(l => l.includes('… +9 lines [Ctrl+O]')), 'explicit maxLines wins')
+  })
 })
 
 describe('toolCardTitle / isToolCardTruncated', () => {
@@ -146,6 +169,9 @@ describe('toolCardTitle / isToolCardTruncated', () => {
     assert.equal(isToolCardTruncated({ toolName: 'bash', content: long }), true)
     assert.equal(isToolCardTruncated({ toolName: 'bash', content: 'one\ntwo' }), false)
     assert.equal(isToolCardTruncated({ toolName: 'ask_user_question', content: long }), false)
+    // run family default is 8 lines, so 9 lines truncates but 7 does not
+    assert.equal(isToolCardTruncated({ toolName: 'bash', content: Array.from({ length: 9 }, (_, i) => `l${i}`).join('\n') }), true)
+    assert.equal(isToolCardTruncated({ toolName: 'bash', content: Array.from({ length: 7 }, (_, i) => `l${i}`).join('\n') }), false)
   })
 })
 
