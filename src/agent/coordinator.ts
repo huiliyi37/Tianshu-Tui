@@ -252,8 +252,16 @@ export interface DelegationCoordinatorConfig {
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
-  const words = objective.trim().split(/\s+/).filter(Boolean).length
-  return words >= 6 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
+  const trimmed = objective.trim()
+  const words = trimmed.split(/\s+/).filter(Boolean).length
+  // CJK text carries no whitespace, so whitespace word-count drastically
+  // undercounts Chinese/Japanese objectives — a fully-detailed Chinese task (and
+  // even the patcher's Chinese instruction prefix) reads as ~1 "word" and would
+  // be wrongly skipped, silently dispatching zero workers. Count CJK characters
+  // as tokens so substantive non-Latin objectives clear the gate. Additive: pure
+  // OR branch, so existing Latin behavior is unchanged.
+  const cjkChars = (trimmed.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/g) ?? []).length
+  return words >= 6 || cjkChars >= 8 || (scope.files?.length ?? 0) >= 2 || (scope.symbols?.length ?? 0) >= 2
 }
 
 /**
@@ -1134,8 +1142,18 @@ export class DelegationCoordinator {
     persistModelTierShadow(this.config.modelTierShadowStore, tierShadow)
     persistModelTierGatedDecision(this.config.modelTierShadowStore, tierGatedDecision)
     persistGatedInfluenceAudit(this.config.gatedInfluenceAuditStore ?? this.config.modelTierShadowStore, gatedInfluenceAudit)
-    // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets
-    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, order.allowedTools)
+    // Use the work order's allowedTools (from ProfileRegistry) instead of hardcoded sets.
+    // A profile may allowlist a tool that isn't registered in THIS session — gated
+    // tools (web_search), MCP tools, or a host-trimmed registry. filterToolRegistry
+    // is fail-closed and throws on any unknown name, which would kill the whole
+    // worker over one missing tool. Degrade gracefully instead: keep the tools that
+    // exist, drop the absent ones (with a warning), so the worker still runs.
+    const presentTools = order.allowedTools.filter(name => this.config.baseToolRegistry.has(name))
+    const missingTools = order.allowedTools.filter(name => !this.config.baseToolRegistry.has(name))
+    if (missingTools.length > 0) {
+      debugLog(`[worker-tools] order ${order.id} (${order.profile}): dropping ${missingTools.length} unregistered tool(s) [${missingTools.join(', ')}] — not in base registry this session`)
+    }
+    const workerRegistry = filterToolRegistry(this.config.baseToolRegistry, presentTools)
     const workerConfig = this.config.runtimeFactory(order, selected, workerRegistry)
     // R3.1: the runtime factory returns a generic default maxTurns; clamp it to
     // the work order's per-profile budget so caps like reviewer=6 actually bite.

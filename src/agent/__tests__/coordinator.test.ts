@@ -126,6 +126,85 @@ describe('DelegationCoordinator', () => {
     assert.equal(shouldDelegateObjective('inspect files', { files: ['a.ts', 'b.ts'] }), true)
   })
 
+  it('counts CJK characters so Chinese objectives are not silently skipped', () => {
+    // Whitespace word-count reads a spaceless Chinese objective as ~1 word and
+    // would wrongly skip dispatch. A substantive Chinese objective must pass.
+    assert.equal(shouldDelegateObjective('修复并发工具调用导致的参数污染问题', {}), true)
+    // The patcher's Chinese instruction prefix alone is substantive enough.
+    assert.equal(
+      shouldDelegateObjective('你是天梁执行者。只执行本 task，不扩展范围，不重写计划。\n\nModify foo', {}),
+      true,
+    )
+    // A trivial Chinese fragment (< 8 CJK chars, no files/symbols) is still gated.
+    assert.equal(shouldDelegateObjective('改一下', {}), false)
+  })
+
+  it('degrades gracefully when a profile allowlists a tool absent from the base registry', async () => {
+    // Reproduces the "Cannot allowlist unknown tool" terminal failure: a profile
+    // references a tool that isn't registered this session (gated/MCP/host-trimmed).
+    // The worker must still run with the remaining tools instead of crashing.
+    const readOnly = new Set<string>(READ_ONLY_WORKER_TOOLS)
+    const profileTools = [...profileRegistry.get('code_scout')!.allowedTools]
+    // The omitted tool must NOT be a READ_ONLY tool, otherwise the read-only loop
+    // below re-registers it and it would not actually be missing.
+    const omittedCandidate = profileTools.filter(t => !readOnly.has(t)).pop()
+    assert.ok(omittedCandidate, 'code_scout must allowlist at least one non-read-only tool to omit')
+    const omitted: string = omittedCandidate
+
+    const partialRegistry = new ToolRegistry()
+    for (const name of READ_ONLY_WORKER_TOOLS) partialRegistry.register(fakeTool(name))
+    for (const pname of profileRegistry.getProfileNames()) {
+      for (const tool of profileRegistry.get(pname)!.allowedTools) {
+        if (tool === omitted) continue
+        if (!partialRegistry.has(tool)) partialRegistry.register(fakeTool(tool))
+      }
+    }
+
+    let workerRan = false
+    let capturedTools: string[] = []
+    const coordinator = new DelegationCoordinator({
+      baseToolRegistry: partialRegistry,
+      modelCards: cards,
+      maxWorkers: 2,
+      runtimeFactory: (order, card, workerRegistry) => {
+        capturedTools = workerRegistry.getAll().map(t => t.definition.name)
+        return {
+          order,
+          client: {} as StreamClient,
+          promptEngine: new PromptEngine({ model: card.model, maxTokens: 1024, staticCtx: { tools: workerRegistry.getDefinitions() }, volatileCtx: { cwd: '/repo' } }),
+          toolRegistry: workerRegistry,
+          cwd: '/repo',
+          maxTurns: 2,
+          contextWindow: card.contextWindow,
+          compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        }
+      },
+      runWorker: async config => {
+        workerRan = true
+        return {
+          result: resultFor(config.order.id),
+          transcript: { text: '', thinking: '', toolUses: [], toolResults: [], errors: [], repairAttempts: 0 },
+          session: { getTurnCount: () => 1 } as never,
+          usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+        }
+      },
+    })
+
+    await assert.doesNotReject(
+      coordinator.delegate({
+        parentTurnId: 'turn-missing-tool',
+        objective: 'Inspect the coordinator tool filtering path and report graceful degradation behavior',
+        kind: 'code_search',
+        profile: 'code_scout',
+        scope: { files: ['src/agent/coordinator.ts', 'src/tools/registry.ts'] },
+      }),
+    )
+
+    assert.equal(workerRan, true, 'worker must still run despite the missing tool')
+    assert.ok(!capturedTools.includes(omitted), `omitted tool ${omitted} must be dropped, not crash`)
+    assert.ok(capturedTools.length > 0, 'remaining allowlisted tools must survive')
+  })
+
   it('propagates reviewDepth from delegation request into worker runtime config', async () => {
     let orderDepth: number | undefined
     let configDepth: number | undefined
