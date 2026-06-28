@@ -693,6 +693,8 @@ body {
   font-family: var(--font-mono); font-size: var(--text-sm); white-space: pre-wrap; word-break: break-word;
 }
 .rp-actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
+.rp-actions .btn.primary { box-shadow: 0 2px 6px color-mix(in oklab, var(--accent) 25%, transparent); }
+.rp-default-mark { margin-left: 6px; font-size: 10px; color: var(--accent-fg); opacity: 0.85; }
 .review-pending .edit-input { width: 100%; min-height: 140px; margin-bottom: var(--space-2); }
 .review-pending .kind.warn { color: var(--warning); }
 
