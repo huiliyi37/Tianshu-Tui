@@ -2118,6 +2118,19 @@ body {
 .provider-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
 .provider-check input { margin: 0; }
 .custom-provider-card { width: 100%; }
+.provider-models-list {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 8px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-2);
+}
+.provider-model-row {
+  display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0;
+}
+.provider-model-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: var(--text-strong); }
+.provider-model-row input {
+  width: 100px; padding: 3px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); font-family: var(--font-mono); font-size: 11px;
+}
+.provider-model-params { color: var(--muted); font-family: var(--font-mono); }
 
 .empty { color: var(--muted); padding: 24px; text-align: center; }
 .empty.sm { padding: var(--space-4); font-size: var(--text-sm); display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }

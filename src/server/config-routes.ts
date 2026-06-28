@@ -57,7 +57,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
-          models: p.models.map(m => ({ id: m.id, alias: m.alias })),
+          models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens })),
           isPreset: (providerPresetKeys as string[]).includes(name),
         })
       }

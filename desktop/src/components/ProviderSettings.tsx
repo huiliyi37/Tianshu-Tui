@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
+import { Pencil } from 'lucide-react'
 import { useConfigProviders, qk } from '../state/queries'
 import {
   setupConfigProvider,
@@ -36,15 +37,28 @@ function emptyModel(): ModelFormState {
   return { id: '', alias: '', contextWindow: '128000', maxTokens: '64000' }
 }
 
-function validateModel(state: ModelFormState): { ok: true; model: { id: string; alias?: string; contextWindow: number; maxTokens: number } } | { ok: false; error: string } {
+function modelFromState(state: ModelFormState): { id: string; alias?: string; contextWindow: number; maxTokens: number } | null {
   const id = state.id.trim()
-  if (!id) return { ok: false, error: '模型 ID 不能为空' }
+  if (!id) return null
   const contextWindow = Number(state.contextWindow)
-  if (!Number.isInteger(contextWindow) || contextWindow <= 0) return { ok: false, error: '上下文长度必须是正整数' }
+  if (!Number.isInteger(contextWindow) || contextWindow <= 0) return null
   const maxTokens = Number(state.maxTokens)
-  if (!Number.isInteger(maxTokens) || maxTokens <= 0) return { ok: false, error: '最大 Tokens 必须是正整数' }
+  if (!Number.isInteger(maxTokens) || maxTokens <= 0) return null
   const alias = state.alias.trim() || undefined
-  return { ok: true, model: { id, alias, contextWindow, maxTokens } }
+  return { id, alias, contextWindow, maxTokens }
+}
+
+function validateModel(state: ModelFormState): { ok: true; model: { id: string; alias?: string; contextWindow: number; maxTokens: number } } | { ok: false; error: string } {
+  const model = modelFromState(state)
+  if (!model) {
+    if (!state.id.trim()) return { ok: false, error: '模型 ID 不能为空' }
+    const cw = Number(state.contextWindow)
+    if (!Number.isInteger(cw) || cw <= 0) return { ok: false, error: '上下文长度必须是正整数' }
+    const mt = Number(state.maxTokens)
+    if (!Number.isInteger(mt) || mt <= 0) return { ok: false, error: '最大 Tokens 必须是正整数' }
+    return { ok: false, error: '模型信息无效' }
+  }
+  return { ok: true, model }
 }
 
 function ModelForm({
@@ -105,6 +119,101 @@ function ModelForm({
   )
 }
 
+function ModelManageList({
+  providerName,
+  models,
+  onRefresh,
+}: {
+  providerName: string
+  models: ProviderListItem['models']
+  onRefresh: () => void
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [ctx, setCtx] = useState('')
+  const [max, setMax] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const startEdit = (m: ProviderListItem['models'][number]) => {
+    setEditingId(m.id)
+    setCtx(String(m.contextWindow))
+    setMax(String(m.maxTokens))
+    setError(null)
+  }
+
+  const save = async (model: ProviderListItem['models'][number]) => {
+    const contextWindow = Number(ctx)
+    const maxTokens = Number(max)
+    if (!Number.isInteger(contextWindow) || contextWindow <= 0) {
+      setError('上下文长度必须是正整数')
+      return
+    }
+    if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
+      setError('最大 Tokens 必须是正整数')
+      return
+    }
+    setBusy(true)
+    try {
+      await setupConfigProvider({
+        providerName,
+        model: {
+          id: model.id,
+          alias: model.alias,
+          contextWindow,
+          maxTokens,
+        },
+      })
+      setEditingId(null)
+      setError(null)
+      onRefresh()
+    } catch (e) {
+      toast.error(`更新模型失败: ${(e as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="provider-models-list">
+      {models.map((m) => (
+        <div key={m.id} className="provider-model-row">
+          <span className="provider-model-name">{m.alias ?? m.id}</span>
+          {editingId === m.id ? (
+            <>
+              <input
+                type="number"
+                value={ctx}
+                onChange={(e) => setCtx(e.target.value)}
+                disabled={busy}
+                placeholder="上下文长度"
+              />
+              <input
+                type="number"
+                value={max}
+                onChange={(e) => setMax(e.target.value)}
+                disabled={busy}
+                placeholder="最大 Tokens"
+              />
+              <button className="btn-sm" disabled={busy} onClick={() => save(m)}>保存</button>
+              <button className="btn-sm ghost" disabled={busy} onClick={() => setEditingId(null)}>取消</button>
+            </>
+          ) : (
+            <>
+              <span className="provider-model-params">
+                ctx {m.contextWindow.toLocaleString()} / max {m.maxTokens.toLocaleString()}
+              </span>
+              <button className="btn-sm ghost" onClick={() => startEdit(m)} title="编辑">
+                <Pencil size={12} />
+              </button>
+            </>
+          )}
+        </div>
+      ))}
+      {error && <span className="provider-key-error">{error}</span>}
+    </div>
+  )
+}
+
 function ProviderRow({
   p,
   onRefresh,
@@ -114,6 +223,7 @@ function ProviderRow({
 }) {
   const [editing, setEditing] = useState(false)
   const [addingModel, setAddingModel] = useState(false)
+  const [managingModels, setManagingModels] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [keyError, setKeyError] = useState<string | null>(null)
   const [modelState, setModelState] = useState<ModelFormState>(emptyModel())
@@ -209,7 +319,10 @@ function ProviderRow({
         <button className="btn-sm" disabled={busy} onClick={() => setEditing(!editing)}>
           {editing ? '取消' : '设置 Key'}
         </button>
-        <button className="btn-sm" disabled={busy} onClick={() => setAddingModel(!addingModel)}>
+        <button className="btn-sm" disabled={busy} onClick={() => { setManagingModels(!managingModels); setAddingModel(false) }}>
+          {managingModels ? '收起模型' : '管理模型'}
+        </button>
+        <button className="btn-sm" disabled={busy} onClick={() => { setAddingModel(!addingModel); setManagingModels(false) }}>
           {addingModel ? '取消' : '添加模型'}
         </button>
         {!p.isDefault && (
@@ -240,6 +353,9 @@ function ProviderRow({
           busy={busy}
           error={modelError}
         />
+      )}
+      {managingModels && (
+        <ModelManageList providerName={p.name} models={p.models} onRefresh={onRefresh} />
       )}
     </div>
   )
@@ -474,17 +590,15 @@ export function ProviderSettings() {
         <ProviderRow key={p.name} p={p} onRefresh={refresh} />
       ))}
 
-      {(unconfigured.length > 0 || true) && (
-        <div className="preset-section">
-          <div className="preset-header">添加 Provider</div>
-          <div className="preset-grid">
-            {unconfigured.map(u => (
-              <PresetCard key={u.key} preset={u} onRefresh={refresh} />
-            ))}
-            <CustomProviderCard onRefresh={refresh} />
-          </div>
+      <div className="preset-section">
+        <div className="preset-header">添加 Provider</div>
+        <div className="preset-grid">
+          {unconfigured.map(u => (
+            <PresetCard key={u.key} preset={u} onRefresh={refresh} />
+          ))}
+          <CustomProviderCard onRefresh={refresh} />
         </div>
-      )}
+      </div>
     </div>
   )
 }

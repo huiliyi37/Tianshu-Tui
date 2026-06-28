@@ -505,7 +505,7 @@ export interface ProviderListItem {
   baseUrl: string
   isDefault: boolean
   keyStatus: { source: 'inline' | 'env' | 'none'; ref: string }
-  models: { id: string; alias?: string }[]
+  models: { id: string; alias?: string; contextWindow: number; maxTokens: number }[]
   isPreset: boolean
 }
 
