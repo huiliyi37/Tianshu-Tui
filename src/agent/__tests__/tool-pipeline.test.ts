@@ -25,6 +25,12 @@ const mockEvidence = {
     impactedTests: new Set<string>(),
   }),
   getVerificationSummary: () => ({ total: 0, verified: 0, pending: 0, files: [] }),
+  getGateState: () => ({
+    filesModified: 0,
+    verifications: 0,
+    editsSinceLastTest: 0,
+    hasFailedTests: false,
+  }),
   buildBadge: () => null,
   reset: () => {},
 } satisfies EvidenceTrackerPublic
