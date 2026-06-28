@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useUiDispatch } from '../state/store'
 import { useSessions } from '../state/queries'
-import { deriveProjects, loadKnownProjects } from './projects'
+import { deriveProjects, loadKnownProjects, projectId } from './projects'
 import { loadThemePref, setThemePref, type ThemePref } from './theme'
 import { SURFACE_ORDER } from './use-global-shortcuts'
 import type { Command } from './commands'
@@ -19,7 +19,7 @@ export function useSurfaceCommands(): Command[] {
   const sessions = useSessions()
 
   const jumpTo = (cwd: string, id: string) => {
-    dispatch({ type: 'setProject', cwd })
+    dispatch({ type: 'setProject', projectId: projectId(cwd) })
     dispatch({ type: 'setActive', id })
     dispatch({ type: 'setSurface', surface: 'workspace' })
   }
@@ -52,10 +52,10 @@ export function useSurfaceCommands(): Command[] {
 
     for (const p of deriveProjects(list, loadKnownProjects())) {
       cmds.push({
-        id: `proj-${p.cwd}`,
+        id: `proj-${p.id}`,
         label: `项目：${p.name}`,
         hint: '项目',
-        run: () => dispatch({ type: 'setProject', cwd: p.cwd }),
+        run: () => dispatch({ type: 'setProject', projectId: projectId(p.roots[0] ?? '') }),
       })
     }
 

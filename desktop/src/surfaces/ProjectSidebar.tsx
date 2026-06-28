@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
-import { addKnownProject, deriveProjects, loadKnownProjects } from '../lib/projects'
+import { addKnownProject, deriveProjects, loadKnownProjects, projectId, type StoredProject } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
@@ -58,7 +58,7 @@ export function ProjectSidebar() {
   const sessions = useSessions()
   const closeSession = useCloseSession()
   const unarchive = useUnarchiveSession()
-  const [known, setKnown] = useState<string[]>(() => loadKnownProjects())
+  const [known, setKnown] = useState(() => loadKnownProjects())
   const [filter, setFilter] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
@@ -96,11 +96,12 @@ export function ProjectSidebar() {
     return list.sort((a, b) => b.updatedAt - a.updatedAt)
   }, [sessions.data, filter])
 
-  // Group sessions by project cwd. Active project is always expanded.
+  // Group sessions by project id (slug of primary root). A multi-root project
+  // stays a single group even if sessions land in different roots.
   const projectGroups = useMemo(() => {
     const groups = new Map<string, SessionRecord[]>()
     for (const s of visibleSessions) {
-      const key = s.cwd
+      const key = projectId(s.cwd)
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push(s)
     }
@@ -126,19 +127,19 @@ export function ProjectSidebar() {
     }
     if (!cwd) return
     setKnown(addKnownProject(cwd))
-    dispatch({ type: 'setProject', cwd })
+    dispatch({ type: 'setProject', projectId: projectId(cwd) })
   }
 
-  const toggleProject = (cwd: string) => {
+  const toggleProject = (id: string) => {
     setExpandedProjects((prev) => {
       const next = new Set(prev)
-      if (next.has(cwd)) next.delete(cwd)
-      else next.add(cwd)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  const activeProjectName = projects.find((p) => p.cwd === ui.activeProject)?.name
+  const activeProjectName = projects.find((p) => p.id === ui.activeProject)?.name
 
   return (
     <div className="project-sidebar">
@@ -216,16 +217,16 @@ export function ProjectSidebar() {
 
       <div className="project-tree" role="tree">
         {projects.map((p) => {
-          const group = projectGroups.get(p.cwd) ?? []
-          const expanded = expandedProjects.has(p.cwd) || filter.length > 0
-          const isActiveProject = p.cwd === ui.activeProject
+          const group = projectGroups.get(p.id) ?? []
+          const expanded = expandedProjects.has(p.id) || filter.length > 0
+          const isActiveProject = p.id === ui.activeProject
           return (
-            <div key={p.cwd} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
+            <div key={p.id} className="project-tree-node" role="treeitem" aria-expanded={expanded}>
               <button
                 className={`project-tree-header ${isActiveProject ? 'active' : ''}`}
                 onClick={() => {
-                  dispatch({ type: 'setProject', cwd: p.cwd })
-                  toggleProject(p.cwd)
+                  dispatch({ type: 'setProject', projectId: p.id })
+                  toggleProject(p.id)
                 }}
               >
                 <span className={`pt-chev ${expanded ? 'open' : ''}`} aria-hidden>▸</span>
@@ -236,6 +237,11 @@ export function ProjectSidebar() {
                   </svg>
                 </span>
                 <span className="pt-name">{p.name}</span>
+                {p.roots.length > 1 && (
+                  <span className="pt-repo-badge" title={p.roots.join('\n')}>
+                    {p.roots.length} repos
+                  </span>
+                )}
                 <span className="pt-count">{group.length}</span>
               </button>
               {expanded && (

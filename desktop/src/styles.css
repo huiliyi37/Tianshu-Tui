@@ -67,6 +67,13 @@
 
 /* Wallpaper layer — fixed full-viewport background behind everything. */
 .wallpaper-layer { position: fixed; inset: 0; z-index: -1; pointer-events: none; }
+.wallpaper-gradient {
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 30%, color-mix(in oklab, var(--accent) 18%, transparent) 0%, transparent 60%),
+    radial-gradient(ellipse 70% 50% at 80% 70%, color-mix(in oklab, var(--info, var(--accent)) 12%, transparent) 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 50% 50%, color-mix(in oklab, var(--primary, var(--accent)) 8%, transparent) 0%, transparent 50%),
+    var(--bg);
+}
 
 /* Surface utility classes — each maps to a token layer with backdrop-filter.
    In solid mode (default), blur=0 and bg=opaque → zero overhead.
@@ -917,6 +924,10 @@ body {
 .project-tree-header .pt-count {
   font-size: var(--text-xs); color: var(--muted); font-family: var(--font-mono);
 }
+.project-tree-header .pt-repo-badge {
+  font-size: 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: 0 5px; border-radius: 8px; white-space: nowrap;
+}
 .project-tree-children {
   display: flex; flex-direction: column;
   padding-left: var(--space-2);
@@ -1183,7 +1194,7 @@ body {
 .conversation { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--main-surface-bg); backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation)); -webkit-backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation)); }
 
 /* ── Thread (single-session) ───────────────────────────────────── */
-.thread { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.thread { display: flex; flex-direction: column; height: 100%; min-height: 0; position: relative; }
 /* ── Thread header (Codex-style two-tier) ─────────────────────── */
 .thread-header {
   display: flex; flex-direction: column;
@@ -1600,8 +1611,25 @@ body {
 }
 .checkpoint-chip .cp-glyph { color: var(--accent); }
 
-.composer { position: relative; border-top: none; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--compose-surface-bg); backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation)); box-shadow: 0 -1px 0 var(--border); }
-.composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); }
+.composer-float {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 20;
+  padding: 0 16px 16px;
+  display: flex; justify-content: center;
+  pointer-events: none;
+}
+.composer-float-inner {
+  pointer-events: auto;
+  width: 100%; max-width: 760px;
+  background: var(--compose-surface-bg);
+  backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation));
+  -webkit-backdrop-filter: blur(var(--compose-surface-blur)) saturate(var(--compose-surface-saturation));
+  border: 1px solid var(--compose-surface-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--compose-surface-shadow);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.composer { position: relative; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: transparent; backdrop-filter: none; border: none; border-radius: 0; box-shadow: none; }
+.composer.drag-over { background: var(--accent-soft); border: 2px dashed var(--accent); border-radius: var(--radius-lg); }
 .composer-row { display: flex; gap: var(--space-2); align-items: flex-end; }
 .composer-row textarea { flex: 1; }
 .composer textarea {

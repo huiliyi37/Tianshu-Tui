@@ -49,7 +49,7 @@ export interface UiState {
 
 type UiAction =
   | { type: 'setActive'; id: string | null }
-  | { type: 'setProject'; cwd: string | null }
+  | { type: 'setProject'; projectId: string | null }
   | { type: 'setSurface'; surface: Surface }
   | { type: 'openNew'; open: boolean }
   | { type: 'setError'; error: string | null }
@@ -74,7 +74,7 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setProject':
       // Switching project drops the active thread; it belongs to another project.
-      return { ...state, activeProject: action.cwd, activeSessionId: null }
+      return { ...state, activeProject: action.projectId, activeSessionId: null }
     case 'setSurface':
       return { ...state, surface: action.surface }
     case 'openNew':

@@ -80,23 +80,53 @@ export function formatSlashHint(input: FormatSlashHintInput, theme: RivetTheme):
   const query = input.input.slice(1)
   const filtered = filterSlashCommands(input.commands, query)
   if (filtered.length === 0) return []
-
   const maxVisible = input.maxVisible ?? SLASH_HINT_MAX_VISIBLE
   const selectedIdx = Math.min(input.selectedIdx ?? 0, filtered.length - 1)
-  const visible = filtered.slice(0, maxVisible)
-  const overflow = filtered.length - visible.length
+
+  // Scroll window: follow the selected index so ↑↓ navigation always keeps
+  // the cursor visible. Inspired by Claude Code's command palette scrolling.
+  let scrollOffset = 0
+  if (filtered.length > maxVisible) {
+    if (selectedIdx < maxVisible) {
+      // Near top — show from beginning
+      scrollOffset = 0
+    } else if (selectedIdx >= filtered.length - maxVisible) {
+      // Near bottom — pin to end
+      scrollOffset = filtered.length - maxVisible
+    } else {
+      // Middle — center the selection
+      scrollOffset = selectedIdx - Math.floor(maxVisible / 2)
+    }
+  }
+
+  const visible = filtered.slice(scrollOffset, scrollOffset + maxVisible)
+  const overflowAbove = scrollOffset
+  const overflowBelow = filtered.length - scrollOffset - visible.length
 
   const lines: string[] = []
+
+  // Scroll indicator: show "↑ N above" when scrolled past top
+  if (overflowAbove > 0) {
+    lines.push(color(`  ↑ ${overflowAbove} more above`, theme.dim))
+  }
+
   for (let i = 0; i < visible.length; i++) {
     const cmd = visible[i]!
-    const selected = i === selectedIdx
+    const globalIdx = scrollOffset + i
+    const selected = globalIdx === selectedIdx
     const marker = selected ? color('❯ ', theme.primary) : '  '
     const name = color(cmd.name, selected ? theme.primary : theme.secondary, { bold: selected })
     const desc = color(` — ${cmd.description}`, theme.muted)
     lines.push(`${marker}${name}${desc}`)
   }
-  const footer = overflow > 0 ? `… ${overflow} more · ↑↓ select · tab complete` : '↑↓ select · tab complete'
-  lines.push(color(footer, theme.dim))
+
+  // Scroll indicator: show "↓ N below" when more items remain
+  const footerParts: string[] = []
+  if (overflowBelow > 0) {
+    footerParts.push(`↓ ${overflowBelow} more`)
+  }
+  footerParts.push('↑↓ navigate', 'tab complete', '↵ run')
+  lines.push(color(`  ${footerParts.join(' · ')}`, theme.dim))
   return lines
 }
 

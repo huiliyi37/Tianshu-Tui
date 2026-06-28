@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useHealth, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState, type Surface } from './state/store'
+import { projectId } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
@@ -114,7 +115,7 @@ export function App() {
           onCreate={async (input) => {
             try {
               const rec = await createSession.mutateAsync(input)
-              if (rec.cwd) dispatch({ type: 'setProject', cwd: rec.cwd })
+              if (rec.cwd) dispatch({ type: 'setProject', projectId: projectId(rec.cwd) })
               dispatch({ type: 'setActive', id: rec.id })
               dispatch({ type: 'setSurface', surface: 'workspace' })
               dispatch({ type: 'openNew', open: false })
