@@ -177,3 +177,51 @@ export function checkTddGate(input: TddGateInput): ImmuneContextHint | null {
     suggestion: 'No test file touched yet. Write tests before implementation.',
   }
 }
+
+/**
+ * Build a TDD gate hint for the immune → cognitive projection channel.
+ *
+ * Queries {@link TddGateState} (from EvidenceTracker.getGateState()) and
+ * produces an immune hint when edits are accumulating without verification.
+ * Pure: no I/O, no state, no side effects.
+ *
+ * Called from turn-step-producer at turn boundaries; the hint flows through
+ * formatImmuneContext → buildCognitiveProjectionParts → promptEngine, appearing
+ * as an <immune-signal> block in the next provider request.
+ *
+ * Complements {@link checkTddGate}: checkTddGate checks "has the agent read
+ * any test file?"; this checks "is the agent editing without running tests?"
+ * Both produce `tdd_violation` hints via the same immune channel.
+ *
+ * @returns hint when edits > 0 and verifications === 0, or tests are failing;
+ *          null when the gate is disabled or everything is fine.
+ */
+export function buildTddGateHint(
+  state: TddGateState,
+  config: TddGateConfig,
+): ImmuneContextHint | null {
+  if (!config.enabled) return null
+  if (state.filesModified === 0) return null
+
+  // Zero verifications: edits accumulating without any test run.
+  if (state.verifications === 0 && state.editsSinceLastTest > 0) {
+    return {
+      level: 'warning',
+      signalKinds: ['tdd_violation'],
+      matchedMistakes: [],
+      suggestion: `${state.editsSinceLastTest} edit(s) without a test run. TDD discipline: run tests (run_tests) before more edits — the test should fail first (RED), then pass after implementation (GREEN).`,
+    }
+  }
+
+  // Tests were run but failed: nudge to fix before piling on more edits.
+  if (state.hasFailedTests) {
+    return {
+      level: 'warning',
+      signalKinds: ['tdd_violation'],
+      matchedMistakes: [],
+      suggestion: `${state.verifications} verification(s) recorded with failures. Fix the failing tests before continuing to edit.`,
+    }
+  }
+
+  return null
+}
