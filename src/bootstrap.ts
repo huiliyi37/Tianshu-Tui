@@ -685,11 +685,13 @@ export function createAgentRuntime(deps: {
           ? Math.min(8192, overrideSpec?.maxTokens ?? overrideContextWindow)
           : Math.min(4096, overrideSpec?.maxTokens ?? overrideContextWindow)
         debugLog(`[worker-model] review-override active: profile=${_order.profile} model=${overrideResolved.modelId} isWrite=${isWrite}`)
+        const overrideCapabilities = resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities)
         return {
           order: _order,
+          providerName: overrideResolved.providerName,
           client: createProviderClient(
             overrideResolved.providerConfig,
-            resolveCapabilities(overrideResolved.providerName, overrideResolved.providerConfig.capabilities),
+            overrideCapabilities,
             {
               apiKey: overrideApiKey,
               model: overrideResolved.modelId,
@@ -711,6 +713,7 @@ export function createAgentRuntime(deps: {
           compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
           activeClaims: claimStore.listActiveClaims(),
           domainKnowledgeStore,
+          forceJsonRepair: overrideCapabilities.supportsResponseFormat,
         }
       }
     }
