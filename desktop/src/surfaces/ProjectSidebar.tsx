@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   History, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, type LucideIcon,
+  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, LayoutGrid, type LucideIcon,
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
@@ -11,11 +11,12 @@ import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 
 
-const CORE_SURFACES: Surface[] = ['workspace', 'automations']
+const CORE_SURFACES: Surface[] = ['workspace', 'mission', 'automations']
 const TOOL_SURFACES: Surface[] = ['git', 'skills', 'insights', 'delegation', 'council', 'hooks']
 
 const SURFACE_LABEL: Record<Surface, string> = {
   workspace: 'Conversation History',
+  mission: 'Mission Control',
   automations: 'Scheduled Tasks',
   attention: 'Attention',
   skills: 'Skills',
@@ -29,6 +30,7 @@ const SURFACE_LABEL: Record<Surface, string> = {
 
 const NAV_ICONS: Record<Surface, LucideIcon> = {
   workspace: History,
+  mission: LayoutGrid,
   automations: Clock,
   attention: Bell,
   skills: Puzzle,

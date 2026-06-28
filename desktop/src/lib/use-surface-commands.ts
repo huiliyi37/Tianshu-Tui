@@ -7,8 +7,11 @@ import { loadThemePref, setThemePref, type ThemePref } from './theme'
 import { SURFACE_ORDER } from './use-global-shortcuts'
 import type { Command } from './commands'
 
+const THEME_CYCLE: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino']
+
 function nextTheme(p: ThemePref): ThemePref {
-  return p === 'system' ? 'light' : p === 'light' ? 'dark' : p === 'dark' ? 'nebula' : 'system'
+  const i = THEME_CYCLE.indexOf(p)
+  return THEME_CYCLE[(i + 1) % THEME_CYCLE.length]!
 }
 
 /** Build the Command Palette item list: surfaces, projects, threads, actions. */

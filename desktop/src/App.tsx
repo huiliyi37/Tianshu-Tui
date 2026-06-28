@@ -1,10 +1,12 @@
-import { Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useHealth, useCreateSession } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
+
+const MissionControlSurface = lazy(() => import('./surfaces/MissionControlSurface'))
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { CommandPalette } from './components/CommandPalette'
 import { Toaster } from 'sonner'
@@ -75,9 +77,9 @@ export function App() {
         )}
 
         <div className="surface">
-          <ErrorBoundary label="工作台">
+          <ErrorBoundary label={ui.surface === 'mission' ? '任务中控台' : '工作台'}>
             <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-              <WorkspaceSurface />
+              {ui.surface === 'mission' ? <MissionControlSurface /> : <WorkspaceSurface />}
             </Suspense>
           </ErrorBoundary>
         </div>
