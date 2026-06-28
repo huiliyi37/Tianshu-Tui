@@ -692,21 +692,18 @@ export class TuiApp {
       const inputVal = this.inputLine.value
       const inputIsPath = looksLikeFilePath(inputVal)
       if (inputVal.startsWith('/') && !inputIsPath) {
-        // ↑↓ 选择仅对无参数命令生效（Tab 补全同理）
-        if (!inputVal.includes(' ')) {
-          const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
-          if (key.name === 'up' && filtered.length > 0) {
-            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
-            this.renderLive()
-            return
-          }
-          if (key.name === 'down' && filtered.length > 0) {
-            this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
-            this.renderLive()
-            return
-          }
-          // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
+        const filtered = filterSlashCommands(this.inputController.slashCommands, inputVal.slice(1))
+        if (key.name === 'up' && filtered.length > 0) {
+          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx - 1 + filtered.length) % filtered.length
+          this.renderLive()
+          return
         }
+        if (key.name === 'down' && filtered.length > 0) {
+          this.inputController.slashSelectedIdx = (this.inputController.slashSelectedIdx + 1) % filtered.length
+          this.renderLive()
+          return
+        }
+        // Tab 在 inputLine.handleKey 里走 'tab' 事件 → handleTabComplete，无需在此处理
         if (key.name === 'return') {
           // 先清空输入框，再异步处理（await handler 结果决定是否透传 agent）
           this.inputLine.setValue('')
@@ -1605,8 +1602,8 @@ export class TuiApp {
     const value = this.inputLine.value
     const cursor = this.inputLine.cursor
 
-    // slash 命令补全（排除 `/file/path` 这类绝对路径）
-    if (value.startsWith('/') && !value.includes(' ') && !looksLikeFilePath(value)) {
+    // slash 命令补全（排除 `/file/path` 这类绝对路径；支持 /skill <name> 等多 token）
+    if (value.startsWith('/') && !looksLikeFilePath(value)) {
       const target = slashCompletionTarget(value, this.inputController.slashCommands, this.inputController.slashSelectedIdx)
       if (target && target !== value) {
         this.inputLine.setValue(`${target} `)
@@ -2846,8 +2843,8 @@ export class TuiApp {
       }
       lines.push({ text: botBorder })
 
-      // 5b. slash 命令提示（输入以 / 开头且未含空格）
-      if (isSlash && !inputVal.includes(' ')) {
+      // 5b. slash 命令提示（输入以 / 开头；支持 /skill <name> 等多 token 过滤）
+      if (isSlash) {
         for (const hintLine of formatSlashHint({ input: inputVal, commands: this.inputController.slashCommands, selectedIdx: this.inputController.slashSelectedIdx }, this.theme)) {
           lines.push({ text: this.clampLine(hintLine) })
         }
