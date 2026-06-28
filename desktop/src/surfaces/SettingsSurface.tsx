@@ -318,6 +318,48 @@ function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void })
       </section>
 
       <section className="settings-group">
+        <h4>关键任务命令</h4>
+        <div className="meta">
+          在输入框打 <kbd>/</kbd> 会弹出命令补全，也可用 <kbd>⌘K</kbd> 命令面板。下面是几条最常用的重型任务命令——
+          带 <code>&lt;…&gt;</code> 的需要在命令后跟上你的任务描述。
+        </div>
+        <dl className="help-cmds">
+          <div>
+            <dt><code>/team &lt;任务&gt;</code></dt>
+            <dd>团队模式：拆解任务 → 多个 patcher 子代理分波并行；主控负责集成、验证、最终 <code>deliver_task</code>。子代理不会自动提交，产出当作 diff 证据由主控审慎合并。也可传计划文件路径（<code>/team docs/…plan.md</code>）按计划执行。</dd>
+          </div>
+          <div>
+            <dt><code>/team max &lt;任务&gt;</code></dt>
+            <dd>强编队：执行前先做多视角规划（依赖分析 / 风险审计 / 对抗盲点搜索）再并行落地。适合大改动 / 高风险重构。</dd>
+          </div>
+          <div>
+            <dt><code>/council &lt;目标&gt;</code></dt>
+            <dd>议事会：多星域专家单轮对抗会诊，<strong>只出计划不执行</strong>，产出可审计的议事记录 + 任务表。可选 <code>--seats tianquan,tianfu,…</code> 指定席位、<code>--rounds 2</code> 开启辩论轮（仅首轮有冲突时才进第二轮）。每席模型可在「集成 → 路由」里配成异构。</dd>
+          </div>
+          <div>
+            <dt><code>/review [关注点]</code></dt>
+            <dd>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。关注点可选，用来聚焦审查范围。</dd>
+          </div>
+          <div>
+            <dt><code>/review max [关注点]</code></dt>
+            <dd>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。改动较大或要交付前用它兜底。</dd>
+          </div>
+          <div>
+            <dt><code>/goal &lt;高层目标&gt;</code></dt>
+            <dd>自主目标：设定一个高层目标后<strong>跨多个 turn 持续自主执行</strong>直到达成。中途用 <code>/cancel-goal</code> 取消。</dd>
+          </div>
+          <div>
+            <dt><code>/plan &lt;功能&gt;</code></dt>
+            <dd>规划模式：先读代码、出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</dd>
+          </div>
+        </dl>
+        <div className="meta" style={{ marginTop: 8 }}>
+          重型并发命令（team / review max / council）会派出子代理——务必先配好「子代理 / 审查模型路由」，
+          否则子代理和主控抢同一个无缓存 Provider 会拖慢主对话（见下一节）。
+        </div>
+      </section>
+
+      <section className="settings-group">
         <h4>模型 Provider 与 API Key</h4>
         <div className="meta">
           在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。

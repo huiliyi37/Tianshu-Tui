@@ -1128,6 +1128,10 @@ body {
 .kv dd { margin: 0; color: var(--text); }
 .help-steps { margin: 0 0 var(--space-3); padding-left: 1.4em; display: flex; flex-direction: column; gap: var(--space-2); list-style: decimal; color: var(--text); font-size: var(--text-base); }
 .help-steps li { line-height: 1.6; }
+.help-cmds { margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.help-cmds > div { display: flex; flex-direction: column; gap: 3px; }
+.help-cmds dt { margin: 0; }
+.help-cmds dd { margin: 0; color: var(--muted); font-size: var(--text-base); line-height: 1.6; }
 .settings-content code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
 
 /* ── Hooks surface ─────────────────────────────────────────────── */
