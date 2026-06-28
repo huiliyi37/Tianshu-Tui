@@ -67,10 +67,33 @@ function dataHome(): string {
   return homedir()
 }
 
-function projectSlug(cwd: string): string {
-  const name = cwd.split('/').filter(Boolean).pop() || 'unknown'
+/**
+ * 把 cwd 映射成一个文件系统安全的会话目录名（slug）。
+ *
+ * 结构：`<basename>-<hash6>`，hash 用整条 cwd 保证不同项目不撞目录。
+ *
+ * 跨平台正确性（Windows 曾因此 ENOENT 阻断启动）：
+ *  - 分割同时识别 `/` 和 `\`：Windows 路径 `D:\tianshu\proj` 只按 `/` 切会得到
+ *    整条路径作为 basename，`D:` 的冒号在 NTFS 是非法目录字符 → mkdir ENOENT。
+ *  - basename 清洗 NTFS 非法字符（`\ / : * ? " < > |` 及控制符）：替换为 `_`，
+ *    保证 slug 在 Windows 也能作为目录名。
+ *
+ * 向后兼容：POSIX 路径不含 `\`，正则分割结果与旧 `split('/')` 完全一致；
+ * basename 也不含非法字符，清洗无变化 → macOS/Linux 既有会话目录名不变。
+ */
+function sanitizePathSegment(name: string): string {
+  // NTFS 非法字符 + 控制符 → '_'。保留点（.rivet 这类前导点目录合法）。
+  // 连续非法符合并为单个 _，避免 slug 出现 `___`。
+  const cleaned = name.replace(/[\\/:*?"<>|\x00-\x1f]+/g, '_').replace(/^_+|_+$/g, '')
+  return cleaned || 'unknown'
+}
+
+/** 导出供测试直接验证跨平台 slug 行为（Windows 路径清洗、POSIX 向后兼容）。 */
+export function projectSlug(cwd: string): string {
+  const name = cwd.split(/[\\/]/).filter(Boolean).pop() || 'unknown'
+  const safeName = sanitizePathSegment(name)
   const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 6)
-  return `${name}-${hash}`
+  return `${safeName}-${hash}`
 }
 
 export function getSessionDir(cwd: string): string {
