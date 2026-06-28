@@ -47,6 +47,12 @@ export interface WorkerSessionConfig {
   compact: CompactionConfig
   /** Provider key used for this worker run (e.g. 'deepseek', 'openai'). */
   providerName?: string
+  /** Whether to use response_format: json_object on the repair turn (when the
+   *  provider supports it) to force valid JSON output. The repair turn is a
+   *  tool-free single-shot request, so json_object does not conflict with
+   *  function calling (unlike normal turns where tools + json_object cause
+   *  duplicate/spurious output). */
+  forceJsonRepair?: boolean
   activeClaims?: import('../context/claims.js').ContextClaim[]
   /** Review-router re-entrancy depth propagated to worker tool calls. */
   reviewDepth?: number
@@ -186,6 +192,52 @@ async function runOnce(
   // return the partial text and let the parse/blocked path handle it.
   if (streamError && !aborted) throw streamError
   return text
+}
+
+/**
+ * Single-shot repair request with response_format: json_object and NO tools.
+ *
+ * Normal worker turns carry tool definitions, and combining response_format:
+ * json_object with tools is a known-broken combination (duplicate JSON, spurious
+ * tool_calls, empty content — see OpenAI community reports). The repair turn,
+ * however, only needs the model to re-emit its result as valid JSON from the
+ * repair prompt (which embeds the previous broken output). It carries no tools,
+ * so json_object is safe here and forces the model to emit parseable JSON,
+ * eliminating the most common parse-failure cause (free-text prose / truncation).
+ *
+ * Bypasses AgentLoop entirely (no tool-calling loop) — just one client.stream
+ * call. Returns the accumulated text or '' on stream error (caller falls back
+ * to the blocked-result path).
+ */
+async function repairWithJsonMode(
+  client: StreamClient,
+  model: string,
+  repairPrompt: string,
+  maxTokens: number,
+  signal?: AbortSignal,
+): Promise<string> {
+  let text = ''
+  let failed = false
+  await client.stream(
+    {
+      model,
+      messages: [{ role: 'user' as const, content: repairPrompt }],
+      max_tokens: maxTokens,
+      stream: true,
+      // Force JSON output. The repair prompt already mentions "json" (required
+      // by DeepSeek/GLM when response_format is set).
+      response_format: { type: 'json_object' as const },
+    },
+    {
+      onTextDelta: (delta) => { text += delta },
+      onThinkingDelta: () => {},
+      onContentBlock: () => {},
+      onStopReason: () => {},
+      onError: () => { failed = true },
+    },
+    signal,
+  ).catch(() => { failed = true })
+  return failed ? '' : text
 }
 
 /** Run a single agent turn, retrying transient network/API errors with backoff.
@@ -361,6 +413,25 @@ export async function runWorkerSession(config: WorkerSessionConfig): Promise<Wor
           }
         }
         transcript.repairAttempts++
+        // JSON-mode repair: provider supports response_format: json_object and
+        // the combination is safe here (no tools on this turn). Prefer it over
+        // the AgentLoop repair loop — it directly forces valid JSON output,
+        // short-circuiting the most common parse-failure cause.
+        if (config.forceJsonRepair && !abortLatched) {
+          const jsonText = await repairWithJsonMode(
+            config.client,
+            config.promptEngine.getModel(),
+            buildWorkerRepairPrompt(config.order, latestText, message),
+            Math.min(8192, config.order.budget.maxTokens ?? config.contextWindow),
+            config.abortSignal,
+          )
+          if (jsonText) {
+            latestText = jsonText
+            // Skip the AgentLoop repair — go straight to re-parse at loop top.
+            continue
+          }
+          // json-mode repair produced nothing (stream error) → fall through to AgentLoop repair
+        }
         latestText = await runOnceWithTransientRetry(agent, buildWorkerRepairPrompt(config.order, latestText, message), transcript, config.onActivity)
       }
     }

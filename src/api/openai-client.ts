@@ -112,6 +112,10 @@ export interface OpenAIClientConfig {
     /** DeepSeek sometimes emits tool JSON as plain text content. */
     hasToolJsonInContentBug?: boolean
   }
+  /** Force JSON output mode (response_format: json_object) for every request.
+   *  Worker sessions use per-request response_format instead, but this flag is
+   *  available for clients that always want JSON. */
+  jsonMode?: boolean
   /**
    * Provider usage calibration factor for `prompt_tokens` (0–1).
    * 1.0 (default) = trust the API's prompt_tokens as-is.
@@ -282,6 +286,16 @@ export class OpenAIClient implements StreamClient {
     if (request.tools && request.tools.length > 0) {
       body.tools = request.tools
       if (request.tool_choice) body.tool_choice = request.tool_choice
+    }
+
+    // JSON output mode: force the model to emit valid JSON. Per-request
+    // response_format (worker final turn) takes precedence; config.jsonMode is a
+    // fallback for always-JSON clients. DeepSeek/GLM require the prompt to
+    // mention "json" when this is set — worker prompts already satisfy this.
+    if (request.response_format) {
+      body.response_format = request.response_format
+    } else if (this.config.jsonMode) {
+      body.response_format = { type: 'json_object' }
     }
 
     if (request.temperature !== undefined) body.temperature = request.temperature

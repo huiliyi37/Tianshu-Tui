@@ -761,10 +761,11 @@ export function createAgentRuntime(deps: {
 
     debugLog(`[worker-model] runtimeFactory: kind=${_order.kind} profile=${_order.profile} model=${workerModel} provider=${workerProvider.name} contextWindow=${workerContextWindow}`)
 
+    const workerCapabilities = resolveCapabilities(workerProvider.name, workerProvider.capabilities)
     return {
       order: _order,
       providerName: workerProvider.name,
-      client: createProviderClient(workerProvider, resolveCapabilities(workerProvider.name, workerProvider.capabilities), {
+      client: createProviderClient(workerProvider, workerCapabilities, {
         apiKey: workerApiKey,
         model: workerModel,
         reasoningEffort: undefined,
@@ -785,6 +786,12 @@ export function createAgentRuntime(deps: {
       compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
       activeClaims: claimStore.listActiveClaims(),
       domainKnowledgeStore,
+      // Use response_format: json_object on repair turns when the provider
+      // supports it — forces valid JSON output, eliminating the most common
+      // worker-result parse-failure cause (free-text prose / truncation).
+      // Only applied to the tool-free repair turn, so it never conflicts with
+      // function calling on normal turns.
+      forceJsonRepair: workerCapabilities.supportsResponseFormat,
     }
   }
 
