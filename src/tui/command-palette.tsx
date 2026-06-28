@@ -148,6 +148,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/review max', description: 'Trigger L3 Review Squadron (5 inspectors) on current changes' },
     { name: '/constellation', description: '星图 — Project blueprint & milestone chronicle' },
     { name: '/leave', description: '离开仪式 — Leave your mark in the starmap' },
+    { name: '/enter', description: 'Resume a worker session (e.g. /enter wo_team:T1 continue)' },
     { name: '/exit', description: 'Save session and exit' },
   ]
 }

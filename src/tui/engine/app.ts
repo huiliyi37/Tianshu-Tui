@@ -47,6 +47,7 @@ import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import { buildWorkerDetailContent } from '../worker-detail.js'
 import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
+import { loadWorkerSession } from '../../agent/worker-session-persist.js'
 import type { TasksFilter } from '../format/overlay.js'
 import {
   delegationObjectiveFromInput,
@@ -944,6 +945,28 @@ export class TuiApp {
   /** 获取当前在 fleet（含归档区）中的 worker 实时视图。 */
   getWorkerDetailView(workerId: string): import('../fleet-registry.js').FleetWorkerView | undefined {
     return this.fleet.getWorkerById(workerId)
+  }
+
+  /**
+   * 解析用户输入的 worker 标识（完整 workOrderId 或短标签），返回可续作的 worker。
+   * 先查 fleet（活跃 + 已归档），再查持久化的 worker session 文件。
+   */
+  resolveWorkerId(query: string): { workerId: string; profile: string; objective?: string } | null {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return null
+    const all = [...this.fleet.getActiveWorkers(), ...this.fleet.getCompletedWorkers()]
+    const found = all.find(
+      (w) => w.workerId.toLowerCase() === normalized || w.shortLabel.toLowerCase() === normalized,
+    )
+    if (found) {
+      return { workerId: found.workerId, profile: found.profile, objective: found.activity }
+    }
+    // 未在 fleet 命中时，尝试读持久化 session（resume 场景）
+    const persisted = loadWorkerSession(query)
+    if (persisted) {
+      return { workerId: persisted.workOrderId, profile: persisted.profile, objective: persisted.objective }
+    }
+    return null
   }
 
   /** 兼容旧名：返回 running worker 列表。 */

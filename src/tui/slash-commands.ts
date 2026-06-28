@@ -293,6 +293,32 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   return null
 }
 
+/**
+ * Resolve `/enter <worker-id-or-label> [message]` into a prompt that resumes
+ * the worker via delegate_task, or return a usage/error message.
+ */
+export function resolveEnterWorkerInput(
+  app: TuiApp,
+  input: string,
+): { prompt: string } | { error: string } | null {
+  const trimmed = input.trim()
+  if (!trimmed.startsWith('/enter')) return null
+  const parts = trimmed.split(/\s+/)
+  if (parts.length < 2) {
+    return { error: 'Usage: /enter <worker-id-or-label> [continuation message]' }
+  }
+  const target = parts[1]!
+  const message = parts.slice(2).join(' ').trim()
+  const resolved = app.resolveWorkerId(target)
+  if (!resolved) {
+    return { error: `Worker not found: "${target}". Use /tasks to see available workers.` }
+  }
+  const objective = message || 'Continue from where you left off.'
+  const prior = resolved.objective ? ` Previous objective: ${resolved.objective}.` : ''
+  const prompt = `Resume worker ${resolved.workerId} (profile: ${resolved.profile}).${prior} Continue with: ${objective} Call delegate_task with resume="${resolved.workerId}" and objective="${objective}".`
+  return { prompt }
+}
+
 
 interface TuiSlashCommandDef {
   readonly name: string
@@ -2500,6 +2526,21 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     immediate: true,
     overlay: "tasks",
     handler: () => true,
+  })
+
+  register("/enter", {
+    description: "Resume a worker session (e.g. /enter wo_team:T1 continue fixing bug)",
+    immediate: true,
+    handler: ({ app, input, trimmed }) => {
+      const result = resolveEnterWorkerInput(app, trimmed)
+      if (!result) return false
+      if ('error' in result) {
+        app.commitStatic(`⚠️  ${result.error}`)
+        return true
+      }
+      app.submitText(result.prompt)
+      return true
+    },
   })
 
   register("/palette", {
