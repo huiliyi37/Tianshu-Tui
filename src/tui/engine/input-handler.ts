@@ -395,7 +395,7 @@ export class InputHandler {
         const seq = csiMatch[0]
         const name = this.resolveEscapeSequence(seq)
         const meta = seq.includes(';3') || seq.includes(';4')
-        const shift = seq.includes(';2')
+        const shift = seq.includes(';2') || name === 'shift_tab'
         return { key: { raw: seq, char: '', name: name ?? 'unknown', ctrl: false, meta, shift }, consumed: seq.length }
       }
 
