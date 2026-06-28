@@ -364,6 +364,7 @@ function buildBlockedVerification(command: TestCommand, startTime: number): Veri
     failed: 0,
     skipped: 0,
     durationMs: Date.now() - startTime,
+    timestamp: startTime,
     failureKind: 'tool_invocation_failure',
     ...(command.recommendedCommand ? { recommendedCommand: command.recommendedCommand } : {}),
   }
@@ -606,6 +607,7 @@ function runTestCommandIn(
           failed: parsed.failed,
           skipped: parsed.skipped,
           durationMs,
+          timestamp: startTime,
           ...(invocationFailed ? { failureKind: 'tool_invocation_failure' as const } : {}),
           ...(testCommand.recommendedCommand ? { recommendedCommand: testCommand.recommendedCommand } : {}),
         }

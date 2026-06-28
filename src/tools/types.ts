@@ -161,6 +161,8 @@ export interface VerificationMetadata {
   /** VSW two-phase: 'isolated' = Phase A on baseline.head + owned diff (blocking
    *  gate); 'integration' = Phase B on current HEAD + owned diff (advisory). */
   verificationPhase?: 'isolated' | 'integration'
+  /** Unix ms timestamp when this verification was recorded. */
+  timestamp?: number
 }
 
 export interface ToolResult {
