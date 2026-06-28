@@ -6,5 +6,8 @@ src-tauri/gen
 src-tauri/resources/node/*
 !src-tauri/resources/node/.gitkeep
 .tmp-node-runtime
+# 下载的 Node 运行时压缩包（fetch-node-runtime 产物，不入库）
+node-v*-win-*.zip
+node-v*.zip
 # 签名私钥绝不入库（含 TAURI_SIGNING_PRIVATE_KEY）
 .env
