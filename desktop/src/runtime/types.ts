@@ -273,6 +273,18 @@ export interface InsightsResponse {
     cost: number
   }
   cacheHitRate: number | null
+  /** Main control session turn-level usage (turn_complete events). null when session has no turns. */
+  mainSession: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    reasoningTokens: number
+    totalTokens: number
+    model?: string
+    provider?: string
+    cost: number
+  } | null
   workers: InsightsWorker[]
   modelBreakdown: InsightsModelBreakdown[]
   providerBreakdown: InsightsProviderBreakdown[]

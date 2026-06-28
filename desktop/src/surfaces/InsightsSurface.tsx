@@ -70,9 +70,25 @@ function recomputeCost(insights: InsightsResponse): InsightsResponse {
   }))
 
   const totalCost = workers.reduce((sum, w) => sum + w.cost, 0)
+  const mainSession = insights.mainSession
+    ? {
+        ...insights.mainSession,
+        cost: computeDeepSeekCost(
+          {
+            inputTokens: insights.mainSession.inputTokens,
+            outputTokens: insights.mainSession.outputTokens,
+            cacheReadTokens: insights.mainSession.cacheReadTokens,
+            cacheWriteTokens: insights.mainSession.cacheWriteTokens,
+          },
+          insights.mainSession.model,
+        ),
+      }
+    : null
+  const mainCost = mainSession?.cost ?? 0
   return {
     ...insights,
-    totals: { ...insights.totals, cost: totalCost },
+    totals: { ...insights.totals, cost: totalCost + mainCost },
+    mainSession,
     workers,
     modelBreakdown,
     providerBreakdown,
@@ -92,6 +108,7 @@ function aggregateInsights(list: InsightsResponse[]): InsightsResponse {
       cost: 0,
     },
     cacheHitRate: null,
+    mainSession: null,
     workers: [],
     modelBreakdown: [],
     providerBreakdown: [],
@@ -174,6 +191,12 @@ export function InsightsSurface() {
             <div className="insight-value">{formatCny(data.totals.cost)}</div>
             <div className="insight-label">总成本（DeepSeek V4-Flash/Pro）</div>
           </div>
+          {data.mainSession && (
+            <div className="insight-card">
+              <div className="insight-value">{formatCny(data.mainSession.cost)}</div>
+              <div className="insight-label">主控会话成本</div>
+            </div>
+          )}
           <div className="insight-card">
             <div className="insight-value">{formatTokens(data.totals.inputTokens)}</div>
             <div className="insight-label">输入 Tokens</div>

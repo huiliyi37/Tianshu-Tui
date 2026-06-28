@@ -420,7 +420,26 @@ export function buildSessionRoutes(
       const modelTotals = new Map<string, { model: string; provider?: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
       const providerTotals = new Map<string, { provider: string; inputTokens: number; outputTokens: number; totalTokens: number; cost: number; count: number }>()
 
+      // Main session turn-level usage (turn_complete events).
+      let mainInput = 0
+      let mainOutput = 0
+      let mainCacheRead = 0
+      let mainCacheWrite = 0
+      let mainReasoning = 0
+      const mainModel = rec.model
+
       for (const ev of events.events) {
+        if (ev.type === 'turn_complete') {
+          const data = ev.data as { usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number; reasoning_tokens?: number } }
+          if (data.usage) {
+            mainInput += data.usage.input_tokens ?? 0
+            mainOutput += data.usage.output_tokens ?? 0
+            mainCacheRead += data.usage.cache_read_input_tokens ?? 0
+            mainCacheWrite += data.usage.cache_creation_input_tokens ?? 0
+            mainReasoning += data.usage.reasoning_tokens ?? 0
+          }
+          continue
+        }
         if (ev.type !== 'delegation') continue
         const data = ev.data as {
           workerId?: string
@@ -509,13 +528,49 @@ export function buildSessionRoutes(
       }
 
       const workerList = [...workers.values()]
-      const totalInput = workerList.reduce((sum, w) => sum + w.inputTokens, 0)
-      const totalOutput = workerList.reduce((sum, w) => sum + w.outputTokens, 0)
-      const totalCacheRead = workerList.reduce((sum, w) => sum + w.cacheReadTokens, 0)
-      const totalCacheWrite = workerList.reduce((sum, w) => sum + w.cacheWriteTokens, 0)
-      const totalReasoning = workerList.reduce((sum, w) => sum + w.reasoningTokens, 0)
-      const totalTokens = workerList.reduce((sum, w) => sum + w.totalTokens, 0)
-      const totalCost = workerList.reduce((sum, w) => sum + w.cost, 0)
+      const workerInput = workerList.reduce((sum, w) => sum + w.inputTokens, 0)
+      const workerOutput = workerList.reduce((sum, w) => sum + w.outputTokens, 0)
+      const workerCacheRead = workerList.reduce((sum, w) => sum + w.cacheReadTokens, 0)
+      const workerCacheWrite = workerList.reduce((sum, w) => sum + w.cacheWriteTokens, 0)
+      const workerReasoning = workerList.reduce((sum, w) => sum + w.reasoningTokens, 0)
+      const workerTotalTokens = workerList.reduce((sum, w) => sum + w.totalTokens, 0)
+      const workerCost = workerList.reduce((sum, w) => sum + w.cost, 0)
+
+      // Main session cost — resolve provider from model id, compute USD cost.
+      const mainTotalTokens = mainInput + mainOutput
+      const mainProvider = mainModel
+        ? Object.entries(providers).find(([, p]) =>
+            p.models?.some(m => m.id === mainModel || m.alias === mainModel),
+          )?.[0]
+        : undefined
+      const mainPricing = findModelPricing(providers, mainProvider, mainModel)
+      const mainCostBreakdown = computeUsageCost(
+        mainTotalTokens > 0
+          ? {
+              input_tokens: mainInput,
+              output_tokens: mainOutput,
+              cache_read_input_tokens: mainCacheRead,
+              cache_creation_input_tokens: mainCacheWrite,
+              reasoning_tokens: mainReasoning,
+            }
+          : undefined,
+        mainPricing,
+      )
+
+      const mainSession = mainTotalTokens > 0 ? {
+        inputTokens: mainInput,
+        outputTokens: mainOutput,
+        cacheReadTokens: mainCacheRead,
+        cacheWriteTokens: mainCacheWrite,
+        reasoningTokens: mainReasoning,
+        totalTokens: mainTotalTokens,
+        model: mainModel,
+        provider: mainProvider,
+        cost: mainCostBreakdown.total,
+      } : null
+
+      const totalCacheRead = workerCacheRead + (mainSession?.cacheReadTokens ?? 0)
+      const totalCacheWrite = workerCacheWrite + (mainSession?.cacheWriteTokens ?? 0)
       const cacheHitRate = totalCacheRead + totalCacheWrite > 0
         ? Math.round((totalCacheRead / (totalCacheRead + totalCacheWrite)) * 100)
         : null
@@ -525,15 +580,16 @@ export function buildSessionRoutes(
         body: {
           totals: {
             workers: workers.size,
-            inputTokens: totalInput,
-            outputTokens: totalOutput,
+            inputTokens: workerInput + (mainSession?.inputTokens ?? 0),
+            outputTokens: workerOutput + (mainSession?.outputTokens ?? 0),
             cacheReadTokens: totalCacheRead,
             cacheWriteTokens: totalCacheWrite,
-            reasoningTokens: totalReasoning,
-            totalTokens,
-            cost: totalCost,
+            reasoningTokens: workerReasoning + (mainSession?.reasoningTokens ?? 0),
+            totalTokens: workerTotalTokens + (mainSession?.totalTokens ?? 0),
+            cost: workerCost + (mainSession?.cost ?? 0),
           },
           cacheHitRate,
+          mainSession,
           workers: workerList,
           modelBreakdown: [...modelTotals.values()],
           providerBreakdown: [...providerTotals.values()],
