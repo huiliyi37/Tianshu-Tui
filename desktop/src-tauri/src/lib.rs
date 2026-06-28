@@ -257,6 +257,26 @@ fn wait_until_ready(port: u16, token: &str, timeout: Duration) -> bool {
     false
 }
 
+/// Working directory for the sidecar process.
+///
+/// The sidecar uses `process.cwd()` as the fallback `defaultCwd` for any session
+/// created without an explicit project folder, and as the root for shared
+/// `.rivet/` data. Tauri launches us from an arbitrary dir — `desktop/src-tauri`
+/// in dev, `/` or the bundle dir in prod — so without anchoring, a cwd-less
+/// session dumps `.rivet/artifacts/` into the app's own tree (the source
+/// checkout got polluted exactly this way). Pin it to the user's home so the
+/// fallback locus is stable and aligns with the global `~/.rivet/` session store.
+///
+/// Override with `RIVET_DEFAULT_CWD` (CI / power users / tests).
+fn sidecar_cwd(app: &tauri::App) -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("RIVET_DEFAULT_CWD") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    app.path().home_dir().ok()
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let port = pick_free_port();
     let token = random_token();
@@ -266,14 +286,19 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     // Report spawn failures instead of swallowing them with `.ok()`: a missing
     // node / bad entry path otherwise leaves the UI with a valid-looking handle
     // pointing at nothing, surfacing only as opaque fetch failures later.
-    let child = match Command::new(&node)
-        .arg(&entry)
+    let mut cmd = Command::new(&node);
+    cmd.arg(&entry)
         .arg("serve")
         .arg("--port")
         .arg(port.to_string())
-        .env("RIVET_SERVER_TOKEN", &token)
-        .spawn()
-    {
+        .env("RIVET_SERVER_TOKEN", &token);
+    // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
+    // resolved to absolute paths above, so the child's different cwd can't break
+    // locating them). Leave it inherited only if home can't be resolved.
+    if let Some(dir) = sidecar_cwd(app) {
+        cmd.current_dir(dir);
+    }
+    let child = match cmd.spawn() {
         Ok(c) => Some(c),
         Err(e) => {
             eprintln!(

@@ -110,6 +110,35 @@ test('streamSession tolerates CRLF line endings within a frame (D3)', async () =
   }
 })
 
+test('streamSession aborts a stalled (idle) stream so the caller can reconnect', async () => {
+  clearRuntimeCache()
+  // Body sends one frame, then stays open forever (never closes / enqueues more)
+  // — a half-dead socket. reader.read() hangs after the first chunk; the idle
+  // watchdog must fire and reject so use-session-events reconnects.
+  const events: SessionEvent[] = []
+  globalThis.fetch = (() => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(frame(1, 'status')))
+        // intentionally never close()
+      },
+    })
+    return Promise.resolve(new Response(body, { status: 200 }))
+  }) as typeof fetch
+  try {
+    await assert.rejects(
+      () => streamSession('s1', 0, (e) => events.push(e), new AbortController().signal, undefined, 30),
+      /idle/,
+    )
+    // The first frame still reached the consumer before the stall.
+    assert.equal(events.length, 1)
+    assert.equal(events[0]!.seq, 1)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
 test('streamSession throws on a non-ok status (so the caller can reconnect)', async () => {
   clearRuntimeCache()
   globalThis.fetch = (() => Promise.resolve(sseResponse([], 503))) as typeof fetch
