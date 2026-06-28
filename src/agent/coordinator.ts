@@ -1367,6 +1367,11 @@ export class DelegationCoordinator {
                 }
                 const retryCwd = this.config.cwd ?? workerConfig.cwd
                 let retryHandsMessages: readonly OaiMessage[] | undefined
+                // Retry reuses the same order.id, so the fallback session is
+                // already registered by the primary branch above. Re-derive the
+                // worker-scoped store so retry diffs also persist (otherwise the
+                // delegation diff review would silently miss retry/escalation paths).
+                const retryWorkerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
                 const retryHandsRun = await wrapAbort(this.runHands({
                   order,
                   wtCoordinator: new WorktreeCoordinator(retryCwd),
@@ -1376,6 +1381,7 @@ export class DelegationCoordinator {
                   compact: workerConfig.compact,
                   activeClaims: this.config.activeClaims?.() ?? workerConfig.activeClaims ?? [],
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  artifactStore: retryWorkerStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({
                       ...workerConfig,
@@ -1485,6 +1491,10 @@ export class DelegationCoordinator {
                 escalationShadows.push(this.recordEscalation(order, strongCard, msg))
                 const cwd = this.config.cwd ?? upgradedConfig.cwd
                 let retryHandsMessages: readonly OaiMessage[] | undefined
+                // Escalation retries with the same order.id → fallback session already
+                // registered. Re-derive worker store so the escalated run's diff persists
+                // (parity with primary + retry branches).
+                const escalateWorkerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
                   maxTurns: upgradedConfig.maxTurns,
@@ -1492,6 +1502,7 @@ export class DelegationCoordinator {
                   compact: upgradedConfig.compact,
                   activeClaims: upgradedConfig.activeClaims ?? [],
                   domainKnowledgeStore: this.config.domainKnowledgeStore,
+                  artifactStore: escalateWorkerStore,
                   runAgent: async (prompt, callbacks, workerCwd) => {
                     const sessionRun = await this.runWorker({ ...upgradedConfig, order, cwd: workerCwd, activeClaims: upgradedConfig.activeClaims ?? [], domainKnowledgeStore: this.config.domainKnowledgeStore })
                     if (typeof sessionRun.session?.getMessages === 'function') {

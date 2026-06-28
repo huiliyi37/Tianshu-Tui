@@ -34,6 +34,8 @@ export function NewSessionDialog(props: {
   const [title, setTitle] = useState('')
   // roots[0] is the primary cwd; additional entries are bound repos.
   const [roots, setRoots] = useState<string[]>(() => (defaultCwd ? [defaultCwd] : []))
+  const [manualInput, setManualInput] = useState('')
+  const [showManual, setShowManual] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [level, setLevel] = useState<AutonomyLevel>(() => coerceLevel(loadDefaultAutonomy()))
   const [worktree, setWorktree] = useState(false)
@@ -46,6 +48,14 @@ export function NewSessionDialog(props: {
 
   const removeRoot = (root: string) => {
     setRoots((prev) => prev.filter((r) => r !== root))
+  }
+
+  const commitManual = () => {
+    const v = manualInput.trim()
+    if (!v) return
+    setRoots((prev) => (prev.includes(v) ? prev : [...prev, v]))
+    setManualInput('')
+    setShowManual(false)
   }
 
   const submit = () => {
@@ -107,6 +117,20 @@ export function NewSessionDialog(props: {
               <Button variant="outline" size="sm" onClick={browse}>
                 {roots.length === 0 ? '选择…' : '+ 添加 repo'}
               </Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowManual((v) => !v)}>
+                手输
+              </Button>
+              {showManual && (
+                <Input
+                  autoFocus
+                  value={manualInput}
+                  onChange={(e) => setManualInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitManual() } }}
+                  onBlur={commitManual}
+                  placeholder="输入绝对路径后回车"
+                  className="h-7 flex-1 font-mono text-xs"
+                />
+              )}
             </div>
             {roots.length > 1 && (
               <p className="text-[11px] text-muted-foreground">
