@@ -27,6 +27,7 @@ export function App() {
 
   const sidecarDown = health.isError
   const needsSetup = !sidecarDown && health.data?.configured === false
+  const [setupDismissed, setSetupDismissed] = useState(false)
   const defaultCwd = useMemo(() => {
     if (!ui.activeProject) return null
     const known = loadKnownProjects()
@@ -50,7 +51,7 @@ export function App() {
         {sidecarDown && (
           <div className="banner error">sidecar 未启动，正在重连…</div>
         )}
-        {needsSetup && (
+        {needsSetup && !setupDismissed && (
           <div className="banner warn">
             首次使用，请先配置 API Key
             <button
@@ -58,6 +59,9 @@ export function App() {
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
             >
               前往设置
+            </button>
+            <button className="banner-close" onClick={() => setSetupDismissed(true)} aria-label="关闭" title="关闭">
+              ×
             </button>
           </div>
         )}

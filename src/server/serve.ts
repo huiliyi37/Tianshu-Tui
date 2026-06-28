@@ -820,7 +820,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     routes,
     buildHealthRoute(sessions, startedAt, version, apiToken, () =>
       opts.ephemeral ? true : sessionRegistry !== undefined,
-    ctx.configured,
+    () => resolveServeContext().configured,
     ),
   )
 
