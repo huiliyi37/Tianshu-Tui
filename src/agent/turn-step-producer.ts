@@ -25,7 +25,7 @@ import { loadPresence, formatPresenceForAppendix } from './companion-presence.js
 import { classifySeason } from './cognitive-season.js'
 import { renderToolContext, type AffordanceState, adaptAffordanceFromHistory, computeAffordanceScores } from './affordance.js'
 import { selectPolicy } from './policy-selection.js'
-import { checkTddGate } from './tdd-gate.js'
+import { checkTddGate, buildTddGateHint } from './tdd-gate.js'
 import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhaseSnapshot } from '../context/cognitive-ledger.js'
 import { formatImmuneContext } from './immune-context.js'
 
@@ -564,6 +564,16 @@ export class TurnStepProducer {
           isActionable: this.self.taskContract.isActionable,
         })
         if (tddHint) this.self._lastImmuneHint = tddHint
+
+        // L1 suggest: edit streak without verification — produce a hint
+        // even when test files were read (checkTddGate only checks that).
+        // Only sets _lastImmuneHint when checkTddGate didn't already produce one,
+        // since "no test file touched" is the more critical message.
+        const tddConfig = this.self.config.tddGate ?? { enabled: true, mode: 'enforce' as const, threshold: 3 }
+        const gateHint = buildTddGateHint(this.self.evidence.getGateState(), tddConfig)
+        if (gateHint && !this.self._lastImmuneHint) {
+          this.self._lastImmuneHint = gateHint
+        }
       }
     }
 
