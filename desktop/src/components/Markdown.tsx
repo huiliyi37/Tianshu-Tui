@@ -1,9 +1,18 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import hljs from 'highlight.js/lib/common'
+
+// U8b — highlight.js is loaded on demand the first time we actually need to
+// highlight a code block. This keeps the initial bundle smaller and avoids
+// paying the common-language pack cost on screens that never render code.
+type Hljs = typeof import('highlight.js/lib/common').default
+let hljsPromise: Promise<Hljs> | null = null
+function getHljs(): Promise<Hljs> {
+  if (!hljsPromise) hljsPromise = import('highlight.js/lib/common').then((m) => m.default)
+  return hljsPromise
+}
 
 // Conversation Markdown renderer (D1). Renders assistant/user/steer prose as
 // GFM Markdown. Syntax highlighting runs ASYNCHRONOUSLY after mount (highlight.js
@@ -35,7 +44,8 @@ function cancelIdle(id: number): void {
   else clearTimeout(id)
 }
 
-function highlightWithin(root: HTMLElement): void {
+async function highlightWithin(root: HTMLElement): Promise<void> {
+  const hljs = await getHljs()
   const blocks = root.querySelectorAll<HTMLElement>('pre code:not([data-hl])')
   blocks.forEach((el) => {
     // Mark first so a skipped (oversized) block is never retried on re-render.
@@ -71,8 +81,39 @@ function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   )
 }
 
+/** U4: code block wrapper with a hover copy button. */
+function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
+  const { children, ...rest } = props
+  const preRef = useRef<HTMLPreElement>(null)
+  const [copied, setCopied] = useState(false)
+
+  const copy = () => {
+    const text = preRef.current?.textContent ?? ''
+    if (!text) return
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  return (
+    <div className="md-pre-wrap">
+      <button
+        className="md-pre-copy"
+        onClick={copy}
+        aria-label={copied ? '已复制' : '复制'}
+        title={copied ? '已复制' : '复制'}
+      >
+        {copied ? '✓' : '⎘'}
+      </button>
+      <pre {...rest} ref={preRef}>{children}</pre>
+    </div>
+  )
+}
+
 const COMPONENTS = {
   a: ExternalLink,
+  pre: CodeBlock,
 } as const
 
 // During streaming a fenced code block is often half-open (odd number of ```
@@ -114,7 +155,7 @@ function MarkdownImpl({ source, highlight = true }: { source: string; highlight?
     if (huge || !highlight) return
     const root = ref.current
     if (!root) return
-    const id = scheduleIdle(() => highlightWithin(root))
+    const id = scheduleIdle(() => { void highlightWithin(root) })
     return () => cancelIdle(id)
   }, [source, highlight, huge])
 

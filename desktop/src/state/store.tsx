@@ -84,7 +84,8 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'markSeen': {
       if (action.sigs.length === 0) return state
       const merged = new Set([...state.attentionSeen, ...action.sigs])
-      return { ...state, attentionSeen: [...merged] }
+      // Cap in-memory list to match the persisted cap and prevent unbounded growth.
+      return { ...state, attentionSeen: [...merged].slice(-500) }
     }
     case 'setToolDensity':
       return { ...state, toolDensity: action.density }

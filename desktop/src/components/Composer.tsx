@@ -563,12 +563,18 @@ export function Composer(props: {
 function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [models, setModels] = useState<ModelEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [switchingId, setSwitchingId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
     let alive = true
-    listModels(sessionId).then((ms) => { if (alive) setModels(ms) })
+    setLoading(true)
+    listModels(sessionId)
+      .then((ms) => { if (alive) setModels(ms) })
+      .catch((err) => { if (alive) toast.error(`加载模型失败: ${(err as Error).message}`) })
+      .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [open, sessionId])
 
@@ -585,9 +591,16 @@ function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: bo
   const label = current?.alias || current?.id || 'Model'
 
   const select = async (m: ModelEntry) => {
-    setOpen(false)
     if (disabled || m.current) return
-    await switchModel(sessionId, m.id)
+    setSwitchingId(m.id)
+    try {
+      await switchModel(sessionId, m.id)
+      setOpen(false)
+    } catch (err) {
+      toast.error(`切换模型失败: ${(err as Error).message}`)
+    } finally {
+      setSwitchingId(null)
+    }
   }
 
   return (
@@ -595,27 +608,35 @@ function ModelPicker({ sessionId, disabled }: { sessionId: string; disabled?: bo
       <button
         className="model-picker-trigger"
         onClick={() => setOpen((o) => !o)}
-        disabled={disabled}
+        disabled={disabled || !!switchingId}
         title={disabled ? '运行中不可切换模型' : '切换模型'}
         aria-label="切换模型"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
         <span aria-hidden>◇</span>
-        <span className="model-picker-label">{label}</span>
+        <span className="model-picker-label">{switchingId ? '切换中…' : label}</span>
       </button>
       {open && (
         <div className="model-picker-menu" role="listbox">
-          {models.map((m) => (
+          {loading && (
+            <div className="model-picker-item" role="status" aria-busy>
+              <span className="model-picker-name">加载中…</span>
+            </div>
+          )}
+          {!loading && models.map((m) => (
             <button
               key={m.id}
               role="option"
               aria-selected={m.current}
+              disabled={switchingId === m.id}
               className={`model-picker-item ${m.current ? 'active' : ''}`}
               onClick={() => void select(m)}
             >
               <span className="model-picker-name">{m.alias || m.id}</span>
-              {m.contextWindow ? (
+              {switchingId === m.id ? (
+                <span className="model-picker-desc">切换中…</span>
+              ) : m.contextWindow ? (
                 <span className="model-picker-desc">{Math.round(m.contextWindow / 1000)}K</span>
               ) : null}
             </button>

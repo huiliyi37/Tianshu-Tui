@@ -99,7 +99,7 @@ export function ChangesTab(props: { sessionId: string | null }) {
 
 /** Show the last 2 path segments so long paths fit the narrow list. */
 function shortPath(p: string): string {
-  const parts = p.split('/')
+  const parts = p.split(/[/\\]/)
   if (parts.length <= 2) return p
   return '…/' + parts.slice(-2).join('/')
 }

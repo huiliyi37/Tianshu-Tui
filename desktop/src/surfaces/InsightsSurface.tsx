@@ -1,18 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useUiState } from '../state/store'
+import { useSessions } from '../state/queries'
 import { getInsights } from '../runtime/client'
-import type { InsightsResponse } from '../runtime/types'
+import type { InsightsResponse, SessionRecord } from '../runtime/types'
+import { computeDeepSeekCost, formatCny } from '../lib/pricing'
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return String(n)
-}
-
-function formatCost(value: number): string {
-  if (value === 0) return '$0.00'
-  if (value < 0.0001) return '<$0.0001'
-  return `$${value.toFixed(4).replace(/\.?0+$/, '')}`
 }
 
 function formatMs(ms?: number): string {
@@ -22,19 +18,149 @@ function formatMs(ms?: number): string {
   return `${(ms / 60_000).toFixed(1)}m`
 }
 
+function startOfDay(ts: number): number {
+  const d = new Date(ts)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+function isToday(ts: number): boolean {
+  return startOfDay(ts) === startOfDay(Date.now())
+}
+
+function recomputeCost(insights: InsightsResponse): InsightsResponse {
+  const recalcWorker = (w: InsightsResponse['workers'][number]) => ({
+    ...w,
+    cost: computeDeepSeekCost(
+      {
+        inputTokens: w.inputTokens,
+        outputTokens: w.outputTokens,
+        cacheReadTokens: w.cacheReadTokens,
+        cacheWriteTokens: w.cacheWriteTokens,
+      },
+      w.model,
+    ),
+  })
+
+  const workers = insights.workers.map(recalcWorker)
+  const modelBreakdown = insights.modelBreakdown.map((m) => ({
+    ...m,
+    cost: computeDeepSeekCost(
+      {
+        inputTokens: m.inputTokens,
+        outputTokens: m.outputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      m.model,
+    ),
+  }))
+  // Provider breakdown lacks per-model detail; default to Flash for conservative display.
+  const providerBreakdown = insights.providerBreakdown.map((p) => ({
+    ...p,
+    cost: computeDeepSeekCost(
+      {
+        inputTokens: p.inputTokens,
+        outputTokens: p.outputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+      'flash',
+    ),
+  }))
+
+  const totalCost = workers.reduce((sum, w) => sum + w.cost, 0)
+  const mainSession = insights.mainSession
+    ? {
+        ...insights.mainSession,
+        cost: computeDeepSeekCost(
+          {
+            inputTokens: insights.mainSession.inputTokens,
+            outputTokens: insights.mainSession.outputTokens,
+            cacheReadTokens: insights.mainSession.cacheReadTokens,
+            cacheWriteTokens: insights.mainSession.cacheWriteTokens,
+          },
+          insights.mainSession.model,
+        ),
+      }
+    : null
+  const mainCost = mainSession?.cost ?? 0
+  return {
+    ...insights,
+    totals: { ...insights.totals, cost: totalCost + mainCost },
+    mainSession,
+    workers,
+    modelBreakdown,
+    providerBreakdown,
+  }
+}
+
+function aggregateInsights(list: InsightsResponse[]): InsightsResponse {
+  const empty: InsightsResponse = {
+    totals: {
+      workers: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 0,
+      cost: 0,
+    },
+    cacheHitRate: null,
+    mainSession: null,
+    workers: [],
+    modelBreakdown: [],
+    providerBreakdown: [],
+  }
+  if (list.length === 0) return empty
+
+  const totals = list.reduce(
+    (acc, cur) => ({
+      workers: acc.workers + cur.totals.workers,
+      inputTokens: acc.inputTokens + cur.totals.inputTokens,
+      outputTokens: acc.outputTokens + cur.totals.outputTokens,
+      cacheReadTokens: acc.cacheReadTokens + cur.totals.cacheReadTokens,
+      cacheWriteTokens: acc.cacheWriteTokens + cur.totals.cacheWriteTokens,
+      reasoningTokens: acc.reasoningTokens + cur.totals.reasoningTokens,
+      totalTokens: acc.totalTokens + cur.totals.totalTokens,
+      cost: acc.cost + cur.totals.cost,
+    }),
+    empty.totals,
+  )
+
+  const cacheHitRate =
+    totals.cacheReadTokens + totals.cacheWriteTokens > 0
+      ? Math.round((totals.cacheReadTokens / (totals.cacheReadTokens + totals.cacheWriteTokens)) * 100)
+      : null
+
+  return { ...empty, totals, cacheHitRate }
+}
+
 export function InsightsSurface() {
   const { activeSessionId } = useUiState()
-  const [insights, setInsights] = useState<InsightsResponse | null>(null)
+  const sessions = useSessions()
+
+  const [activeInsights, setActiveInsights] = useState<InsightsResponse | null>(null)
+  const [dailyInsights, setDailyInsights] = useState<InsightsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const todaySessions = useMemo(
+    () => (sessions.data ?? []).filter((s: SessionRecord) => isToday(s.updatedAt)),
+    [sessions.data],
+  )
+
   const load = async () => {
-    if (!activeSessionId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await getInsights(activeSessionId)
-      setInsights(res)
+      const [active, ...daily] = await Promise.all([
+        activeSessionId ? getInsights(activeSessionId) : null,
+        ...todaySessions.map((s: SessionRecord) => getInsights(s.id)),
+      ])
+      setActiveInsights(active ? recomputeCost(active) : null)
+      setDailyInsights(recomputeCost(aggregateInsights(daily.filter(Boolean) as InsightsResponse[])))
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -44,15 +170,57 @@ export function InsightsSurface() {
 
   useEffect(() => {
     load()
-  }, [activeSessionId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, sessions.dataUpdatedAt])
 
-  if (!activeSessionId) {
+  const renderSummary = (title: string, data: InsightsResponse | null) => {
+    if (!data) {
+      return (
+        <section className="insights-section">
+          <h4>{title}</h4>
+          <div className="meta">暂无数据</div>
+        </section>
+      )
+    }
+
     return (
-      <div className="surface-scroll">
-        <div className="insights-surface">
-          <div className="meta">请先选择一个会话</div>
+      <section className="insights-section">
+        <h4>{title}</h4>
+        <div className="insights-grid">
+          <div className="insight-card primary">
+            <div className="insight-value">{formatCny(data.totals.cost)}</div>
+            <div className="insight-label">总成本（DeepSeek V4-Flash/Pro）</div>
+          </div>
+          {data.mainSession && (
+            <div className="insight-card">
+              <div className="insight-value">{formatCny(data.mainSession.cost)}</div>
+              <div className="insight-label">主控会话成本</div>
+            </div>
+          )}
+          <div className="insight-card">
+            <div className="insight-value">{formatTokens(data.totals.inputTokens)}</div>
+            <div className="insight-label">输入 Tokens</div>
+          </div>
+          <div className="insight-card">
+            <div className="insight-value">{formatTokens(data.totals.outputTokens)}</div>
+            <div className="insight-label">输出 Tokens</div>
+          </div>
+          <div className="insight-card">
+            <div className="insight-value">{formatTokens(data.totals.totalTokens)}</div>
+            <div className="insight-label">总 Tokens</div>
+          </div>
+          <div className="insight-card">
+            <div className="insight-value">{data.totals.workers}</div>
+            <div className="insight-label">Worker 数</div>
+          </div>
+          {data.cacheHitRate !== null && (
+            <div className="insight-card">
+              <div className="insight-value">{data.cacheHitRate}%</div>
+              <div className="insight-label">缓存命中率</div>
+            </div>
+          )}
         </div>
-      </div>
+      </section>
     )
   }
 
@@ -68,34 +236,15 @@ export function InsightsSurface() {
 
         {error && <div className="meta warn">加载失败：{error}</div>}
 
-        {!insights && !loading && !error && <div className="meta">暂无数据</div>}
+        {renderSummary('全天汇总', dailyInsights)}
 
-        {insights && (
+        {activeSessionId && renderSummary('当前会话', activeInsights)}
+
+        {activeInsights && (
           <>
-            <section className="insights-grid">
-              <div className="insight-card">
-                <div className="insight-value">{formatCost(insights.totals.cost)}</div>
-                <div className="insight-label">总成本</div>
-              </div>
-              <div className="insight-card">
-                <div className="insight-value">{formatTokens(insights.totals.totalTokens)}</div>
-                <div className="insight-label">总 Tokens</div>
-              </div>
-              <div className="insight-card">
-                <div className="insight-value">{insights.totals.workers}</div>
-                <div className="insight-label">Worker 数</div>
-              </div>
-              {insights.cacheHitRate !== null && (
-                <div className="insight-card">
-                  <div className="insight-value">{insights.cacheHitRate}%</div>
-                  <div className="insight-label">缓存命中率</div>
-                </div>
-              )}
-            </section>
-
             <section className="insights-section">
               <h4>Worker 明细</h4>
-              {insights.workers.length === 0 ? (
+              {activeInsights.workers.length === 0 ? (
                 <div className="meta">暂无 worker 数据</div>
               ) : (
                 <table className="insights-table">
@@ -111,14 +260,14 @@ export function InsightsSurface() {
                     </tr>
                   </thead>
                   <tbody>
-                    {insights.workers.map((w) => (
+                    {activeInsights.workers.map((w) => (
                       <tr key={w.workerId}>
                         <td title={w.workerId}>{w.profile ?? w.workerId.slice(-8)}</td>
                         <td>{w.model ?? '—'}</td>
                         <td>{w.provider ?? '—'}</td>
                         <td>{w.status ?? '—'}</td>
                         <td>{formatTokens(w.totalTokens)}</td>
-                        <td>{formatCost(w.cost)}</td>
+                        <td>{formatCny(w.cost)}</td>
                         <td>{formatMs(w.elapsedMs)}</td>
                       </tr>
                     ))}
@@ -129,7 +278,7 @@ export function InsightsSurface() {
 
             <section className="insights-section">
               <h4>模型分布</h4>
-              {insights.modelBreakdown.length === 0 ? (
+              {activeInsights.modelBreakdown.length === 0 ? (
                 <div className="meta">暂无模型数据</div>
               ) : (
                 <table className="insights-table">
@@ -143,13 +292,13 @@ export function InsightsSurface() {
                     </tr>
                   </thead>
                   <tbody>
-                    {insights.modelBreakdown.map((m) => (
+                    {activeInsights.modelBreakdown.map((m) => (
                       <tr key={m.model}>
                         <td>{m.model}</td>
                         <td>{m.provider ?? '—'}</td>
                         <td>{m.count}</td>
                         <td>{formatTokens(m.totalTokens)}</td>
-                        <td>{formatCost(m.cost)}</td>
+                        <td>{formatCny(m.cost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -159,7 +308,7 @@ export function InsightsSurface() {
 
             <section className="insights-section">
               <h4>Provider 分布</h4>
-              {insights.providerBreakdown.length === 0 ? (
+              {activeInsights.providerBreakdown.length === 0 ? (
                 <div className="meta">暂无 provider 数据</div>
               ) : (
                 <table className="insights-table">
@@ -172,12 +321,12 @@ export function InsightsSurface() {
                     </tr>
                   </thead>
                   <tbody>
-                    {insights.providerBreakdown.map((p) => (
+                    {activeInsights.providerBreakdown.map((p) => (
                       <tr key={p.provider}>
                         <td>{p.provider}</td>
                         <td>{p.count}</td>
                         <td>{formatTokens(p.totalTokens)}</td>
-                        <td>{formatCost(p.cost)}</td>
+                        <td>{formatCny(p.cost)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -185,6 +334,10 @@ export function InsightsSurface() {
               )}
             </section>
           </>
+        )}
+
+        {!activeSessionId && !error && (
+          <div className="meta">请先选择一个会话以查看明细</div>
         )}
       </div>
     </div>

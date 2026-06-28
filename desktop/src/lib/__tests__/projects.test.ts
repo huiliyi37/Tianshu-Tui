@@ -13,6 +13,7 @@ class MemStorage {
 
 const {
   basename,
+  projectId,
   deriveProjects,
   addKnownProject,
   loadKnownProjects,
@@ -36,7 +37,7 @@ test('deriveProjects dedupes by project id, counts threads, sorts by activity', 
   assert.equal(projects.length, 3)
   // sorted by lastActivity desc: x(5) > y(3) > z(0)
   assert.deepEqual(projects.map((p) => p.name), ['x', 'y', 'z'])
-  const x = projects.find((p) => p.id === 'x')!
+  const x = projects.find((p) => p.id.startsWith('x-'))!
   assert.equal(x.threadCount, 2)
   assert.equal(x.lastActivity, 5)
   assert.deepEqual(x.roots, ['/a/x'])
@@ -61,11 +62,19 @@ test('known projects round trip + dedupe (new StoredProject shape)', () => {
   addKnownProject('/p2')
   const loaded = loadKnownProjects()
   assert.equal(loaded.length, 2)
-  assert.equal(loaded[0]!.id, 'p2') // most recent first
-  assert.equal(loaded[1]!.id, 'p1')
+  assert.ok(loaded[0]!.id.startsWith('p2-'), 'most recent project id starts with basename + hash')
+  assert.ok(loaded[1]!.id.startsWith('p1-'))
   assert.deepEqual(loaded[1]!.roots, ['/p1'])
-  removeKnownProject('p1')
+  removeKnownProject(loaded[1]!.id)
   assert.equal(loadKnownProjects().length, 1)
+})
+
+test('projectId avoids cross-disk basename collisions', () => {
+  const id1 = projectId('C:\\Projects\\app')
+  const id2 = projectId('D:\\Projects\\app')
+  assert.notEqual(id1, id2, 'same basename on different drives must not collide')
+  assert.ok(id1.startsWith('app-'))
+  assert.ok(id2.startsWith('app-'))
 })
 
 test('legacy bare string[] localStorage is migrated to StoredProject[]', () => {
@@ -75,7 +84,7 @@ test('legacy bare string[] localStorage is migrated to StoredProject[]', () => {
   const loaded = loadKnownProjects()
   assert.equal(loaded.length, 2)
   assert.ok(loaded.every((p) => Array.isArray(p.roots) && p.roots.length === 1), 'each migrated to single-root')
-  assert.equal(loaded[0]!.id, 'a')
+  assert.ok(loaded[0]!.id.startsWith('a-'), 'migrated id includes path hash')
   // migration should have written back the new format
   const raw = JSON.parse(localStorage.getItem('tianshu.knownProjects')!)
   assert.equal(typeof raw[0], 'object', 'localStorage rewritten to new shape')

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Scale, Plug, type LucideIcon,
+  History, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, type LucideIcon,
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
@@ -10,32 +10,25 @@ import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 
-const STATUS_GLYPH: Record<string, string> = {
-  running: '◴',
-  completed: '✓',
-  failed: '✕',
-  aborted: '⊘',
-  idle: '○',
-}
 
-const CORE_SURFACES: Surface[] = ['workspace', 'git', 'automations', 'settings']
-const TOOL_SURFACES: Surface[] = ['skills', 'insights', 'delegation', 'council', 'hooks']
+const CORE_SURFACES: Surface[] = ['workspace', 'automations']
+const TOOL_SURFACES: Surface[] = ['git', 'skills', 'insights', 'delegation', 'council', 'hooks']
 
 const SURFACE_LABEL: Record<Surface, string> = {
-  workspace: '工作台',
-  automations: '任务自动化',
-  attention: '需处理',
-  skills: '智能体技能',
-  git: 'Git 版本控制',
-  insights: '度量分析 (Insights)',
-  delegation: '任务委派树',
-  council: '自治议事会',
-  hooks: '系统钩子 (Hooks)',
-  settings: '系统设置',
+  workspace: 'Conversation History',
+  automations: 'Scheduled Tasks',
+  attention: 'Attention',
+  skills: 'Skills',
+  git: 'Git',
+  insights: 'Insights',
+  delegation: 'Delegation Tree',
+  council: 'Council',
+  hooks: 'Hooks',
+  settings: 'Settings',
 }
 
 const NAV_ICONS: Record<Surface, LucideIcon> = {
-  workspace: LayoutDashboard,
+  workspace: History,
   automations: Clock,
   attention: Bell,
   skills: Puzzle,
@@ -51,8 +44,21 @@ function NavIcon({ surface }: { surface: Surface }) {
   const Ic = NAV_ICONS[surface]
   return <Ic size={16} strokeWidth={1.7} aria-hidden />
 }
-// Project → Thread sidebar (Cursor 3.0 style).
-// Top: New Session button + main navigation. Below: project tree of sessions.
+
+
+function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'now'
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d`
+  const months = Math.floor(days / 30)
+  return `${months}mo`
+}
+
 export function ProjectSidebar() {
   const ui = useUiState()
   const dispatch = useUiDispatch()
@@ -145,98 +151,102 @@ export function ProjectSidebar() {
 
   return (
     <div className="project-sidebar">
-      <button
-        className="sidebar-new-btn"
-        onClick={() => dispatch({ type: 'openNew', open: true })}
-        title="新建线程 (⌘N)"
-      >
-        <span className="snb-glyph" aria-hidden>+</span>
-        <span className="snb-label">New Session</span>
-        <span className="snb-hint">⌘N</span>
-      </button>
-
-      <nav className="sidebar-nav" aria-label="主导航">
-        {CORE_SURFACES.map((s) => (
-          <button
-            key={s}
-            className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
-            onClick={() => dispatch({ type: 'setSurface', surface: s })}
-          >
-            <span className="sni-icon"><NavIcon surface={s} /></span>
-            <span className="sni-label">{SURFACE_LABEL[s]}</span>
-          </button>
-        ))}
-
-        <div
-          className="sidebar-section-head tools-toggle-head"
-          onClick={() => setToolsExpanded(!toolsExpanded)}
-          style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 4px 0', padding: '6px 8px' }}
+      <div className="sidebar-top-container">
+        <button
+          className="sidebar-new-btn outline"
+          onClick={() => dispatch({ type: 'openNew', open: true })}
+          title="新建对话 (⌘N)"
         >
-          <span className="sidebar-section-title">星域工具</span>
-          <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
+          <span className="snb-glyph" aria-hidden>+</span>
+          <span className="snb-label">New Conversation</span>
+        </button>
+
+        <nav className="sidebar-nav" aria-label="主导航">
+          {CORE_SURFACES.map((s) => (
+            <button
+              key={s}
+              className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
+              onClick={() => dispatch({ type: 'setSurface', surface: s })}
+            >
+              <span className="sni-icon"><NavIcon surface={s} /></span>
+              <span className="sni-label">{SURFACE_LABEL[s]}</span>
+            </button>
+          ))}
+
+          <div
+            className="sidebar-section-head tools-toggle-head"
+            onClick={() => setToolsExpanded(!toolsExpanded)}
+            style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 4px 0', padding: '6px 8px' }}
+          >
+            <span className="sidebar-section-title">星域工具</span>
+            <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
+          </div>
+
+          {toolsExpanded && (
+            <div className="sidebar-sub-nav">
+              {TOOL_SURFACES.map((s) => (
+                <button
+                  key={s}
+                  className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
+                  onClick={() => dispatch({ type: 'setSurface', surface: s })}
+                >
+                  <span className="sni-icon"><NavIcon surface={s} /></span>
+                  <span className="sni-label">{SURFACE_LABEL[s]}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </nav>
+
+        <div className="sidebar-divider" />
+
+        <div className="search-wrapper">
+          <span className="search-icon" aria-hidden>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </span>
+          <input
+            ref={searchRef}
+            className="thread-filter"
+            type="text"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="搜索会话…"
+            aria-label="搜索会话"
+          />
+          {filter && (
+            <button
+              className="search-clear"
+              onClick={() => setFilter('')}
+              aria-label="清除搜索"
+              title="清除搜索"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
 
-        {toolsExpanded && (
-          <div className="sidebar-sub-nav">
-            {TOOL_SURFACES.map((s) => (
-              <button
-                key={s}
-                className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
-                onClick={() => dispatch({ type: 'setSurface', surface: s })}
-              >
-                <span className="sni-icon"><NavIcon surface={s} /></span>
-                <span className="sni-label">{SURFACE_LABEL[s]}</span>
-              </button>
-            ))}
+        <div className="sidebar-section-head" style={{ marginTop: '12px' }}>
+          <span className="sidebar-section-title">Projects</span>
+          <div className="sidebar-section-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', opacity: 0.6 }}>
+            <SlidersHorizontal size={13} style={{ cursor: 'pointer' }} />
+            <FolderOpen size={13} style={{ cursor: 'pointer' }} onClick={openFolder} />
           </div>
+        </div>
+
+        {visibleSessions.length === 0 && !filter && (
+          <div className="sidebar-empty">No sessions yet</div>
         )}
-      </nav>
-
-      <div className="sidebar-divider" />
-
-      <div className="search-wrapper">
-        <span className="search-icon" aria-hidden>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-        </span>
-        <input
-          ref={searchRef}
-          className="thread-filter"
-          type="text"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="搜索会话…"
-          aria-label="搜索会话"
-        />
-        {filter && (
-          <button
-            className="search-clear"
-            onClick={() => setFilter('')}
-            aria-label="清除搜索"
-            title="清除搜索"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+        {filter && visibleSessions.length === 0 && (
+          <div className="sidebar-empty">No matches</div>
         )}
       </div>
-
-      <div className="sidebar-section-head">
-        <span className="sidebar-section-title">Home</span>
-        <span className="sidebar-section-count">{visibleSessions.length}</span>
-      </div>
-
-      {visibleSessions.length === 0 && !filter && (
-        <div className="sidebar-empty">No sessions yet</div>
-      )}
-      {filter && visibleSessions.length === 0 && (
-        <div className="sidebar-empty">No matches</div>
-      )}
 
       <div className="project-tree" role="tree">
         {projects.map((p) => {
@@ -262,7 +272,7 @@ export function ProjectSidebar() {
                 <span className="pt-name">{p.name}</span>
                 {p.roots.length > 1 && (
                   <span className="pt-repo-badge" title={p.roots.join('\n')}>
-                    {p.roots.length} repos
+                    {p.roots.length}
                   </span>
                 )}
                 <span className="pt-count">{group.length}</span>
@@ -273,12 +283,17 @@ export function ProjectSidebar() {
                     <div
                       key={s.id}
                       className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
-                      onClick={() => dispatch({ type: 'setActive', id: s.id })}
+                      onClick={() => {
+                        dispatch({ type: 'setActive', id: s.id })
+                        dispatch({ type: 'setSurface', surface: 'workspace' })
+                      }}
                     >
-                      <div className="thread-row-main">
-                        <div className="title">
+                      <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                           <span className={`status-dot status-${s.status}`} />
-                          {s.title ?? s.id.slice(0, 8)}
+                          <span className="thread-title-text" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {s.title ?? s.id.slice(0, 8)}
+                          </span>
                           {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
                           {s.worktreeBranch && (
                             <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>
@@ -286,11 +301,9 @@ export function ProjectSidebar() {
                             </span>
                           )}
                         </div>
-                        <div className="meta">
-                          {STATUS_GLYPH[s.status] ?? '·'} {s.status}
-                          {s.currentPhase ? ` · ${s.currentPhase}` : ''}
-                          {s.pendingApprovals > 0 ? ` · ⚠ ${s.pendingApprovals}` : ''}
-                        </div>
+                        <span className="thread-time" style={{ fontSize: '11px', color: 'var(--muted)', marginLeft: '8px', flexShrink: 0 }}>
+                          {formatRelativeTime(s.updatedAt)}
+                        </span>
                       </div>
                       <button
                         className="thread-row-close"
@@ -316,46 +329,20 @@ export function ProjectSidebar() {
         })}
       </div>
 
-      <div className="sidebar-divider" />
-
-      <div className="sidebar-tools">
-        <button className="sidebar-tool-row" onClick={openFolder} title="打开项目文件夹">
-          <span className="sidebar-tool-icon" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-              <path d="M12 11v5M9.5 13.5h5" />
-            </svg>
-          </span>
-          <span className="sidebar-tool-label">打开文件夹</span>
-        </button>
-        <button
-          className={`sidebar-tool-row ${showArchived ? 'open' : ''}`}
-          onClick={loadArchived}
-          title="归档会话"
-        >
-          <span className="sidebar-tool-icon" aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-              strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-            </svg>
-          </span>
-          <span className="sidebar-tool-label">归档会话</span>
-          <span className="sidebar-tool-chev" aria-hidden>▸</span>
-        </button>
-      </div>
-
-      {showArchived && (
-        <div className="archived-section">
-          {archivedSessions.length === 0 && <div className="sidebar-empty">没有归档会话</div>}
+      {showArchived && archivedSessions.length > 0 && (
+        <div className="archived-section" style={{ borderTop: '1px solid var(--border)', paddingTop: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+          <div className="sidebar-section-head" style={{ padding: '0 8px 4px' }}>
+            <span className="sidebar-section-title">Archived Sessions</span>
+          </div>
           {archivedSessions.map((s) => (
             <div key={s.id} className="thread-row archived">
-              <div className="thread-row-main">
-                <div className="title">
+              <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                   <span className="status-dot status-archived" />
-                  {s.title ?? s.id.slice(0, 8)}
+                  <span className="thread-title-text" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.title ?? s.id.slice(0, 8)}
+                  </span>
                 </div>
-                <div className="meta">归档 · {s.status}</div>
               </div>
               <button
                 className="btn-sm"
@@ -364,6 +351,7 @@ export function ProjectSidebar() {
                   unarchive.mutate(s.id)
                   setArchivedSessions((prev) => prev.filter((a) => a.id !== s.id))
                 }}
+                style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-3)', border: 'none', cursor: 'pointer' }}
               >恢复</button>
             </div>
           ))}
@@ -371,11 +359,42 @@ export function ProjectSidebar() {
       )}
 
       {activeProjectName && (
-        <div className="sidebar-active-project" title={ui.activeProject ?? undefined}>
-          <span className="sidebar-active-label">当前项目</span>
-          <span className="sidebar-active-name">{activeProjectName}</span>
+        <div className="sidebar-active-project" title={ui.activeProject ?? undefined} style={{ padding: '8px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <span className="sidebar-active-label" style={{ fontSize: '10px', color: 'var(--muted)', textTransform: 'uppercase' }}>当前项目</span>
+          <span className="sidebar-active-name" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeProjectName}</span>
         </div>
       )}
+
+      <div className="sidebar-bottom" style={{ display: 'flex', gap: '4px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
+        <button
+          className={`sidebar-nav-item bottom-settings-btn ${ui.surface === 'settings' ? 'active' : ''}`}
+          onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+          style={{ flex: 1 }}
+        >
+          <span className="sni-icon"><Settings size={16} strokeWidth={1.7} /></span>
+          <span className="sni-label">Settings</span>
+        </button>
+        <button
+          className={`sidebar-archive-btn ${showArchived ? 'active' : ''}`}
+          onClick={loadArchived}
+          title="归档会话"
+          style={{
+            width: '32px',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            color: 'var(--muted)',
+            cursor: 'pointer',
+            transition: 'background var(--dur) var(--ease), color var(--dur) var(--ease)'
+          }}
+        >
+          <FolderOpen size={16} />
+        </button>
+      </div>
     </div>
   )
 }

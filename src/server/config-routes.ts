@@ -20,6 +20,7 @@ import {
   setApiKeyEnv,
 } from '../config/manager.js'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
+import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -56,7 +57,7 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
           baseUrl: p.baseUrl,
           isDefault: name === defaultName,
           keyStatus: getApiKeyStatus(name),
-          models: p.models.map(m => ({ id: m.id, alias: m.alias })),
+          models: p.models.map(m => ({ id: m.id, alias: m.alias, contextWindow: m.contextWindow, maxTokens: m.maxTokens })),
           isPreset: (providerPresetKeys as string[]).includes(name),
         })
       }
@@ -73,16 +74,27 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
     }, apiToken),
 
     'POST /config/providers': withAuth((body) => {
-      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault } = body as {
+      const { providerName, apiKey, apiKeyEnv, baseUrl, makeDefault, model } = body as {
         providerName?: string
         apiKey?: string
         apiKeyEnv?: string
         baseUrl?: string
         makeDefault?: boolean
+        model?: ModelConfig
       }
       if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
+
+      let parsedModel: ModelConfig | undefined
+      if (model) {
+        const result = modelConfigSchema.safeParse(model)
+        if (!result.success) {
+          return { status: 400, body: { error: `Invalid model: ${result.error.message}` } }
+        }
+        parsedModel = result.data
+      }
+
       try {
-        setupProvider({ providerName, apiKey, apiKeyEnv, baseUrl, makeDefault })
+        setupProvider({ providerName, apiKey, apiKeyEnv, baseUrl, model: parsedModel, makeDefault })
         return { status: 200, body: { ok: true, providerName } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }

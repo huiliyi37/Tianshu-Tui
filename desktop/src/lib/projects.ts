@@ -32,10 +32,24 @@ export interface StoredProject {
   name: string
 }
 
-/** Derive a stable id from a root path (slug). */
+function shortHash(s: string): string {
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+  return h.toString(36).slice(0, 6)
+}
+
+/** Derive a stable id from a root path (slug + short hash). */
 export function projectId(root: string): string {
   const b = basename(root) || root
-  return b.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'
+  const normalized = root.replace(/[/\\]+$/, '')
+  const slug = `${b}-${shortHash(normalized)}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+  return slug || 'project'
 }
 
 /** Migrate legacy `string[]` → StoredProject[] and write back. */
@@ -59,9 +73,29 @@ export function loadKnownProjects(): StoredProject[] {
       return migrateLegacy(parsed)
     }
     if (Array.isArray(parsed)) {
-      return parsed.filter(
+      const list = parsed.filter(
         (x): x is StoredProject => x && typeof x === 'object' && typeof x.id === 'string' && Array.isArray(x.roots),
       )
+      // Re-derive ids so stored projects pick up new projectId() hashing logic
+      // (fixes cross-disk basename collisions) and merge any duplicates.
+      const map = new Map<string, StoredProject>()
+      let changed = false
+      for (const p of list) {
+        const nextId = projectId(p.roots[0] ?? '')
+        if (nextId !== p.id) changed = true
+        const existing = map.get(nextId)
+        if (existing) {
+          existing.roots = [...new Set([...existing.roots, ...p.roots])]
+          changed = true
+        } else {
+          map.set(nextId, { ...p, id: nextId })
+        }
+      }
+      const next = [...map.values()]
+      if (changed) {
+        try { localStorage.setItem(KEY, JSON.stringify(next)) } catch { /* non-fatal */ }
+      }
+      return next
     }
   } catch {
     // disabled storage / corrupt

@@ -71,14 +71,16 @@ export function CommandPalette(props: { commands: Cmd[]; onClose: () => void }) 
               ))}
             </CommandGroup>
           ))}
-          <CommandGroup heading="快捷键">
-            {SHORTCUTS.map((s) => (
-              <CommandItem key={s.keys} value={s.desc} disabled>
-                <span>{s.desc}</span>
-                <CommandShortcut>{s.keys}</CommandShortcut>
-              </CommandItem>
-            ))}
-          </CommandGroup>
+          {q.trim() === '' && (
+            <CommandGroup heading="快捷键">
+              {SHORTCUTS.map((s) => (
+                <CommandItem key={s.keys} value={s.desc} disabled>
+                  <span>{s.desc}</span>
+                  <CommandShortcut>{s.keys}</CommandShortcut>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          )}
         </CommandList>
       </Command>
     </CommandDialog>

@@ -50,14 +50,65 @@ struct PtyExit {
 
 /// 默认 shell：尊重用户 $SHELL / %COMSPEC%，否则退回平台常规值。
 fn default_shell() -> String {
+    let raw = {
+        #[cfg(windows)]
+        {
+            std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+        }
+        #[cfg(not(windows))]
+        {
+            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+        }
+    };
+    resolve_shell_path(&raw)
+}
+
+/// 把 shell 名解析为绝对路径。PATH 受限时 portable-pty 找不到 `powershell.exe`
+/// 这种非绝对路径，因此我们在常见位置和 PATH 里主动搜索。
+fn resolve_shell_path(shell: &str) -> String {
+    // 已经是绝对路径或显式相对路径：直接复用。
+    if shell.contains(std::path::MAIN_SEPARATOR) {
+        return shell.to_string();
+    }
+
     #[cfg(windows)]
     {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let candidates = [
+            format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", windir),
+            format!("{}\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe", windir),
+            format!("{}\\System32\\cmd.exe", windir),
+            format!("{}\\SysWOW64\\cmd.exe", windir),
+            format!("{}\\System32\\WindowsPowerShell\\v1.0\\pwsh.exe", windir),
+        ];
+        for c in &candidates {
+            if std::path::Path::new(c).exists() {
+                return c.clone();
+            }
+        }
     }
-    #[cfg(not(windows))]
-    {
-        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+
+    // 在 PATH 中搜索。
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    for dir in path_var.split(sep) {
+        let candidate = std::path::Path::new(dir).join(shell);
+        if candidate.exists() {
+            return candidate.to_string_lossy().to_string();
+        }
+        #[cfg(windows)]
+        {
+            for ext in ["exe", "cmd", "bat"] {
+                let with_ext = candidate.with_extension(ext);
+                if with_ext.exists() {
+                    return with_ext.to_string_lossy().to_string();
+                }
+            }
+        }
     }
+
+    // 找不到也返回原名，让 spawn 失败时给出原始错误信息。
+    shell.to_string()
 }
 
 /// 开一个新 PTY 并 spawn shell。`id` 由前端提供（见模块注释的竞态消除）。
@@ -81,7 +132,10 @@ pub fn pty_spawn(
         })
         .map_err(|e| format!("openpty failed: {e}"))?;
 
-    let mut cmd = CommandBuilder::new(shell.unwrap_or_else(default_shell));
+    let shell = shell
+        .map(|s| resolve_shell_path(&s))
+        .unwrap_or_else(default_shell);
+    let mut cmd = CommandBuilder::new(shell);
     if !cwd.is_empty() {
         cmd.cwd(cwd);
     }

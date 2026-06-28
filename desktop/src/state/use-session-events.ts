@@ -51,15 +51,29 @@ export function useSessionEvents(sessionId: string | null): EventViewState {
     }
 
     const loop = async () => {
+      // U5: exponential backoff with a cap and a finite retry budget so a
+      // sidecar outage does not turn into an unbounded reconnect storm.
+      let failures = 0
+      const MAX_RETRIES = 8
+      const BASE_DELAY = 1500
+      const MAX_DELAY = 30000
+
       while (!stopped) {
         try {
           await streamSession(sessionId, seqRef.current, onEvent, ac.signal)
           // Stream ended cleanly (server closed). Pause briefly then reconnect
           // to keep watching for a possible new run on the same session.
+          failures = 0
           if (stopped) return
-          await delay(1500)
+          await delay(BASE_DELAY)
         } catch {
           if (stopped) return
+          failures++
+          if (failures > MAX_RETRIES) {
+            // sidecar has been down too long; stop the reconnect loop.
+            return
+          }
+          const backoff = Math.min(BASE_DELAY * 2 ** (failures - 1), MAX_DELAY)
           // Network/stream error — try a polling backfill, then reconnect.
           try {
             const { events } = await fetchEvents(sessionId, seqRef.current)
@@ -67,7 +81,7 @@ export function useSessionEvents(sessionId: string | null): EventViewState {
           } catch {
             // sidecar likely down; surfaced elsewhere via health
           }
-          await delay(1500)
+          await delay(backoff)
         }
       }
     }

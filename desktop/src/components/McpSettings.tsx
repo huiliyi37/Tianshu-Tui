@@ -271,12 +271,12 @@ export function McpSettings({
                 />
               </div>
               <div className="form-row">
-                <label>参数 (空格分隔，含空格路径用引号包裹)</label>
+                <label>参数 (空格分隔)</label>
                 <input
                   type="text"
                   value={args}
                   onChange={(e) => setArgs((e.target as HTMLInputElement).value)}
-                  placeholder='如: -y @modelcontextprotocol/server-filesystem "C:\Users\docs"'
+                  placeholder="如: -y @modelcontextprotocol/server-filesystem /tmp"
                 />
               </div>
             </>
