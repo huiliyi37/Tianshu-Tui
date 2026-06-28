@@ -26,6 +26,7 @@ import {
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
+import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
@@ -257,9 +258,9 @@ export function ThreadView(props: {
     },
     {
       name: '/theme',
-      desc: '切换主题 (system→light→dark→nebula)',
+      desc: '切换主题 (system→light→dark→nebula→sakura→cyberpunk→cupertino→light-classic)',
       run: () => {
-        const order = ['system', 'light', 'dark', 'nebula'] as const
+        const order: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino', 'light-classic']
         const cur = loadThemePref()
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },

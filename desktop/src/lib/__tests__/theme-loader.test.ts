@@ -32,6 +32,7 @@ const { loadThemeJson, applyThemeJson } = await import('../theme-loader.ts')
 import dark from '../../styles/themes/dark.json'
 import light from '../../styles/themes/light.json'
 import nebula from '../../styles/themes/nebula.json'
+import lightClassic from '../../styles/themes/light-classic.json'
 
 // ── JSON format validation ──────────────────────────────────────────
 
@@ -52,10 +53,11 @@ function assertThemeJsonShape(json: unknown, label: string) {
 test('dark.json is valid ThemeJson', () => assertThemeJsonShape(dark, 'dark'))
 test('light.json is valid ThemeJson', () => assertThemeJsonShape(light, 'light'))
 test('nebula.json is valid ThemeJson', () => assertThemeJsonShape(nebula, 'nebula'))
+test('light-classic.json is valid ThemeJson', () => assertThemeJsonShape(lightClassic, 'light-classic'))
 
-test('light.json glass block has text contrast overrides', () => {
-  assert.equal(light.glass['--link'], '#5c35cc', 'light glass --link override')
-  assert.equal(light.glass['--muted'], '#3a3a44', 'light glass --muted override')
+test('light-classic.json glass block has text contrast overrides', () => {
+  assert.equal((lightClassic.glass as any)['--link'], '#5c35cc', 'light-classic glass --link override')
+  assert.equal((lightClassic.glass as any)['--muted'], '#3a3a44', 'light-classic glass --muted override')
 })
 
 test('dark.json glass block has color-mix expressions', () => {
@@ -134,11 +136,11 @@ test('applyThemeJson respects prefers-reduced-transparency', () => {
   }
 })
 
-test('applyThemeJson writes light theme glass text overrides', () => {
+test('applyThemeJson writes light-classic theme glass text overrides', () => {
   styleProps.clear()
-  applyThemeJson('light', true)
-  assert.equal(styleProps.get('--link'), '#5c35cc', 'light glass --link override')
-  assert.equal(styleProps.get('--muted'), '#3a3a44', 'light glass --muted override')
+  applyThemeJson('light-classic', true)
+  assert.equal(styleProps.get('--link'), '#5c35cc', 'light-classic glass --link override')
+  assert.equal(styleProps.get('--muted'), '#3a3a44', 'light-classic glass --muted override')
 })
 
 test('applyThemeJson writes nebula accent with glow', () => {
