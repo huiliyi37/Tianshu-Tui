@@ -1187,8 +1187,16 @@ body {
 /* ── Thread header (Codex-style two-tier) ─────────────────────── */
 .thread-header {
   display: flex; flex-direction: column;
-  border-bottom: 1px solid var(--border);
+  position: relative;
+  border-bottom: none;
   /* hover: expand the second tier */
+}
+.thread-header::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 25%, var(--accent) 75%, transparent 100%);
+  opacity: 0.25;
+  pointer-events: none;
 }
 .thread-header-main {
   display: flex; align-items: center; gap: var(--space-3);
