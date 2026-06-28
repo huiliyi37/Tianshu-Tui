@@ -29,6 +29,11 @@ import { parseRecallMarker } from '../compact/recall-marker.js'
  */
 export const RECALL_KEEP_RECENT = 10
 
+/** Markers identifying an earlier compaction summary already in the history.
+ *  Their presence switches llmCompact / tryPartialCompact into lossless
+ *  iterative-merge mode (preserve the prior summary, then fold in new messages). */
+const PRIOR_SUMMARY_MARKERS = ['<compact-summary', '<partial-compact-summary', '<session-handoff', '<checkpoint-resume'] as const
+
 /**
  * Fold aged compact-history recall blocks sitting in the recent zone back into
  * one-line pointers. The original content remains in the source artifact and
@@ -371,6 +376,37 @@ export class CompactionController {
    *  configured — distillation is near-free, so retain more detail. */
   private summaryBudget(): { full: number; partial: number } {
     return summaryOutputBudgetChars(this.deps.contextWindow, { generous: Boolean(this.deps.compactClient) })
+  }
+
+  /**
+   * True when the zone being compacted already contains an earlier compaction
+   * summary. Repeated compactions otherwise re-summarize a summary, drifting and
+   * dropping early decisions; when detected we instruct the model to merge the
+   * prior summary losslessly instead of rewriting from scratch (oh-my-pi's
+   * <previous-summary> iterative-merge contract).
+   */
+  private hasPriorSummary(messages: OaiMessage[]): boolean {
+    for (const m of messages) {
+      const text = typeof m.content === 'string'
+        ? m.content
+        : Array.isArray(m.content)
+          ? m.content.map(c => (typeof c === 'string' ? c : ((c as { text?: string }).text ?? ''))).join('')
+          : ''
+      if (PRIOR_SUMMARY_MARKERS.some(mk => text.includes(mk))) return true
+    }
+    return false
+  }
+
+  /** Merge-preservation clause appended to the compact prompt when a prior
+   *  summary is present, or [] otherwise. */
+  private mergeClause(present: boolean): string[] {
+    if (!present) return []
+    return [
+      '## 迭代合并（最高优先）',
+      '上文已包含上一次压缩产生的摘要（`<compact-summary>` / `<partial-compact-summary>` / `<session-handoff>` 等标记）。',
+      '你必须把那份既有摘要的**全部信息无损保留**，再把其后的新消息合并进去——绝不能因为“重新总结”而丢失早期摘要里的任何决策、文件、错误或待办。',
+      '',
+    ]
   }
 
   /**
@@ -1035,6 +1071,7 @@ export class CompactionController {
       content: [
         '请总结以下对话片段的关键信息（这是对话的较早部分，最近的消息会被完整保留）。',
         '',
+        ...this.mergeClause(this.hasPriorSummary(oldZone)),
         '## 用户意图链（按时间序）',
         ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),
         '',
@@ -1160,6 +1197,7 @@ export class CompactionController {
           content: [
             '请总结上述对话的关键信息，用于上下文压缩。',
             '',
+            ...this.mergeClause(this.hasPriorSummary(messages)),
             '## 必须完整保留的用户意图链',
             '以下是用户所有消息（按时间序），**必须逐条保留核心意图，不得合并或遗漏**：',
             ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),

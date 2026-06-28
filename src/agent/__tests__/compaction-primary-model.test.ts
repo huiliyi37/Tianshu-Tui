@@ -168,6 +168,40 @@ describe('CompactionController compactClient routing', () => {
   })
 })
 
+describe('CompactionController iterative summary merge', () => {
+  const capturePrompt = () => {
+    let prompt = ''
+    const client = { stream: async (_r: any, cb: any) => { prompt = JSON.stringify(_r); cb.onTextDelta('s') } } as any
+    return { client, get: () => prompt }
+  }
+
+  it('injects the merge clause when a prior summary exists in history', async () => {
+    const cap = capturePrompt()
+    const deps = createDeps({ primaryClient: cap.client })
+    const controller = new CompactionController(deps)
+    deps.session.addUserMessage('hello')
+    deps.session.addAssistantBlocks([{ type: 'text', text: '<partial-compact-summary turn="1">earlier work</partial-compact-summary>' }])
+    deps.session.addUserMessage('next task')
+    deps.session.addAssistantBlocks([{ type: 'text', text: 'working' }])
+
+    await controller.llmCompact()
+    assert.ok(cap.get().includes('迭代合并'), 'merge clause must be present when a prior summary exists')
+  })
+
+  it('omits the merge clause on a first (clean) compaction', async () => {
+    const cap = capturePrompt()
+    const deps = createDeps({ primaryClient: cap.client })
+    const controller = new CompactionController(deps)
+    deps.session.addUserMessage('hello')
+    deps.session.addAssistantBlocks([{ type: 'text', text: 'hi there' }])
+    deps.session.addUserMessage('do task')
+    deps.session.addAssistantBlocks([{ type: 'text', text: 'doing task' }])
+
+    await controller.llmCompact()
+    assert.ok(!cap.get().includes('迭代合并'), 'merge clause must be absent on first compaction')
+  })
+})
+
 describe('summaryOutputBudgetChars', () => {
   it('doubles budgets in generous mode across window tiers', () => {
     for (const w of [100_000, 500_000, 1_000_000]) {
