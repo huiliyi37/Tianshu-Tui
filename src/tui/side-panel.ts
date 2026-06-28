@@ -13,7 +13,7 @@ import type { FleetWorkerView } from './fleet-registry.js'
 import { color } from './engine/ansi.js'
 import { formatTokenProgressBar } from './format/glance-bar.js'
 import { formatTaskList } from './format/task-list.js'
-import stringWidth from 'string-width'
+import { displayWidth, truncateToDisplayWidth } from './width.js'
 
 export interface SidePanelInput {
   /** 面板总宽度（含边框），通常 24-32 列 */
@@ -56,9 +56,16 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
   const botBorder = color(`╰${h.repeat(totalW - 2)}╯`, theme.muted)
   const leftEdge = color('│', theme.muted)
 
+  const AMBIGUOUS_WIDE = { ambiguousAsWide: true }
+  const ELLIPSIS_WIDTH = displayWidth('…', AMBIGUOUS_WIDE)
+
   const pad = (text: string, target: number): string => {
-    const dw = stringWidth(text)
-    if (dw >= target) return text.slice(0, Math.max(0, target - 1)) + '…'
+    const dw = displayWidth(text, AMBIGUOUS_WIDE)
+    if (dw > target) {
+      if (target < ELLIPSIS_WIDTH) return ''
+      const truncated = truncateToDisplayWidth(text, Math.max(0, target - ELLIPSIS_WIDTH), AMBIGUOUS_WIDE)
+      return truncated + '…'
+    }
     return text + ' '.repeat(target - dw)
   }
 
@@ -154,7 +161,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   // ── Section: 快捷键提示 ──
   lines.push(sectionDivider())
-  lines.push(line(dim('ctrl+] toggle · ctrl+x r open')))
+  lines.push(line(dim('ctrl+] toggle · ctrl+x r')))
 
   lines.push(botBorder)
   return lines
@@ -182,23 +189,13 @@ function decodeXmlEntities(s: string): string {
 
 function truncateStr(s: string, max: number): string {
   if (max <= 0) return ''
-  const dw = stringWidth(s)
+  const AMBIGUOUS_WIDE = { ambiguousAsWide: true }
+  const ELLIPSIS_WIDTH = displayWidth('…', AMBIGUOUS_WIDE)
+  const dw = displayWidth(s, AMBIGUOUS_WIDE)
   if (dw <= max) return s
-  if (max <= 3) return '…'
-  // Code-point-aware truncation: iterate by code point (not UTF-16 code unit)
-  // so that CJK characters (1 code point, 2 display columns) and emoji
-  // (1-2 code points) are never split into orphan surrogate halves.
-  const chars = Array.from(s)
-  let w = 0
-  let cut = 0
-  const limit = max - 1 // reserve 1 column for '…'
-  for (let i = 0; i < chars.length; i++) {
-    const cw = stringWidth(chars[i]!)
-    if (w + cw > limit) break
-    w += cw
-    cut = i + 1
-  }
-  return chars.slice(0, cut).join('') + '…'
+  if (max < ELLIPSIS_WIDTH) return '…'
+  const truncated = truncateToDisplayWidth(s, max - ELLIPSIS_WIDTH, AMBIGUOUS_WIDE)
+  return truncated + '…'
 }
 
 function formatTokensCompact(n: number): string {

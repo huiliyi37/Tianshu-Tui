@@ -191,16 +191,22 @@ export interface DoomLoopThresholds {
   class: { window: number; blockConsec: number; blockFreq: number; warnConsec: number }
 }
 
-/** Normal mode: slightly relaxed from the original (warn at 3rd call, block at 5th). */
+/** Normal mode: relaxed from original to avoid blocking normal workflows.
+ *  Exact: 5 consecutive / 7-of-8 freq → block (was 4/7)
+ *  Class: 9 consecutive / 10-of-12 freq → block (was 7/9 in window 10)
+ *  Bash class fingerprints aggregate many different commands into one bin
+ *  (e.g. all grep/rg/find patterns share `grep·error`), so the class
+ *  thresholds must be higher to avoid making sequential debugging unusable. */
 export const NORMAL_DOOM_THRESHOLDS: DoomLoopThresholds = {
-  exact: { window: 8, blockConsec: 4, blockFreq: 7, warnConsec: 2, warnFreq: 5 },
-  class: { window: 10, blockConsec: 7, blockFreq: 9, warnConsec: 5 },
+  exact: { window: 8, blockConsec: 5, blockFreq: 7, warnConsec: 3, warnFreq: 5 },
+  class: { window: 12, blockConsec: 9, blockFreq: 10, warnConsec: 6 },
 }
 
-/** Goal mode: significantly relaxed for long autonomous tasks. */
+/** Goal mode: significantly relaxed for long autonomous tasks.
+ *  Already using larger windows, scaled proportionally from normal thresholds. */
 export const GOAL_DOOM_THRESHOLDS: DoomLoopThresholds = {
   exact: { window: 10, blockConsec: 6, blockFreq: 8, warnConsec: 3, warnFreq: 6 },
-  class: { window: 12, blockConsec: 10, blockFreq: 10, warnConsec: 7 },
+  class: { window: 14, blockConsec: 10, blockFreq: 12, warnConsec: 7 },
 }
 
 export function getDoomLoopThresholds(goalActive: boolean): DoomLoopThresholds {

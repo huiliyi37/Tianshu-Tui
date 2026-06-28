@@ -2379,8 +2379,10 @@ export class TuiApp {
 
     const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS && this.state.sidePanelOpen
     const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
-    const savedColumns = this.columns
-    const contentCols = savedColumns - sidePanelWidth
+    const contentCols = this.columns - sidePanelWidth
+    // 局部 cols：侧栏展开时用压缩后的主区宽度，否则用原始终端宽度。
+    // 不改写 this.columns，避免异步回调读到临时值。
+    const cols = showSidePanel ? contentCols : this.columns
 
     // Metrics 供 side panel 与 GlanceBar 共享，提前计算。
     const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
@@ -2401,11 +2403,6 @@ export class TuiApp {
       glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
       glanceContextRatio = this.metricsGlanceController.lastContextRatio
       glanceCost = this.estimateSessionCost()
-    }
-
-    // 让 live 内容按主区域宽度排版；后续再把 side panel 拼到右侧。
-    if (showSidePanel) {
-      (this as any).columns = contentCols
     }
 
     let lines: LiveRegionLine[] = []
@@ -2456,7 +2453,7 @@ export class TuiApp {
     if (!showSidePanel) {
       if (this.liveTeamModel) {
         const model = this.teamModelWithLiveStatus(this.liveTeamModel)
-        for (const line of formatTeamPanel(model, this.theme, this.columns)) {
+        for (const line of formatTeamPanel(model, this.theme, cols)) {
           lines.push({ text: line })
         }
       } else {
