@@ -26,6 +26,7 @@ export function App() {
 
 
   const sidecarDown = health.isError
+  const needsSetup = !sidecarDown && health.data?.configured === false
   const defaultCwd = useMemo(() => {
     if (!ui.activeProject) return null
     const known = loadKnownProjects()
@@ -47,7 +48,18 @@ export function App() {
         <WallpaperLayer />
       <div className="main">
         {sidecarDown && (
-          <div className="banner error">sidecar 离线，重连中…</div>
+          <div className="banner error">sidecar 未启动，正在重连…</div>
+        )}
+        {needsSetup && (
+          <div className="banner warn">
+            首次使用，请先配置 API Key
+            <button
+              className="banner-action"
+              onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+            >
+              前往设置
+            </button>
+          </div>
         )}
         {ui.error && (
           <div className="banner error">
