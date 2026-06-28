@@ -144,7 +144,7 @@ export function Composer(props: {
   const { text, mentions } = useMemo(() => {
     const regex = /@file:([^\s]+)\s?/g
     const paths: string[] = []
-    const cleanText = value.replace(regex, (m, path) => {
+    const cleanText = value.replace(regex, (_m, path) => {
       paths.push(path)
       return ''
     })
@@ -256,7 +256,7 @@ export function Composer(props: {
   }
 
   const selectFile = (token: MentionToken, path: string) => {
-    const { text: nextRawValue, caret } = applyMention(value, token, path)
+    const { text: nextRawValue } = applyMention(value, token, path)
     // Place caret at the end of the text segment (where the '@' query was)
     pendingCaret.current = token.start
     onChange(nextRawValue)
@@ -314,7 +314,10 @@ export function Composer(props: {
     recognition.lang = 'zh-CN'
     recognition.continuous = true
     recognition.interimResults = true
-    recognition.onstart = () => setRecording(true)
+    recognition.onstart = () => {
+      setSpeechError(null)
+      setRecording(true)
+    }
     recognition.onend = () => {
       setRecording(false)
       recognitionRef.current = null
@@ -347,7 +350,11 @@ export function Composer(props: {
         onChange(newValue)
       }
     }
-    recognition.onerror = () => setRecording(false)
+    recognition.onerror = (event: Event) => {
+      const code = (event as Event & { error?: string }).error
+      setSpeechError(code === 'not-allowed' ? '麦克风权限被拒绝' : '语音识别失败')
+      setRecording(false)
+    }
     recognitionRef.current = recognition
     recognition.start()
   }
@@ -544,6 +551,7 @@ export function Composer(props: {
         </div>
       )}
       {imageError && <div className="composer-error">{imageError}</div>}
+      {speechError && <div className="composer-error">{speechError}</div>}
       <div className="composer-row">
         <textarea
           ref={taRef}
