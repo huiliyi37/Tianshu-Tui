@@ -2445,6 +2445,8 @@ html[data-theme="dark"] body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: var(--radius-pill); border: 2px solid transparent; background-clip: padding-box; }
 html[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.16); border: 1px solid transparent; }
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, 0.12); }
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, 0.24); }
 
 /* 2. Composer Layout (Integrated Box with focus-within border) */
 html[data-theme="dark"] .composer-float-inner {

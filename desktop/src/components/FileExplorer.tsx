@@ -4,6 +4,12 @@ import { listDir, getFileContent } from '../runtime/client'
 import { FileViewer } from './FileViewer'
 import type { DirEntry, FileContent } from '../runtime/types'
 
+function joinPath(base: string, part: string): string {
+  if (!base) return part
+  const separator = base.includes('\\') ? '\\' : '/'
+  return base.endsWith(separator) ? `${base}${part}` : `${base}${separator}${part}`
+}
+
 /**
  * FileExplorer — read-only project file browser (Gap 1).
  *
@@ -157,7 +163,7 @@ function TreeNode({
             </div>
           ) : null}
           {entries?.map((entry) => {
-            const childPath = dirPath ? `${dirPath}/${entry.name}` : entry.name
+            const childPath = joinPath(dirPath, entry.name)
             if (entry.isDirectory) {
               return (
                 <DirRow
@@ -215,7 +221,7 @@ function DirRow(props: TreeNodeProps) {
             </div>
           ) : null}
           {tree[dirPath]?.map((entry) => {
-            const childPath = `${dirPath}/${entry.name}`
+            const childPath = joinPath(dirPath, entry.name)
             if (entry.isDirectory) {
               return (
                 <DirRow
