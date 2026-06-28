@@ -12,6 +12,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
         const maxWidth = Math.max(10, (input.columns ?? 80) - childPrefix.length)
         const previewLines = entry.content.split('\n').slice(0, expanded ? 30 : 3)
         for (const pl of previewLines) {
-          const trimmed = pl.length > maxWidth ? pl.slice(0, maxWidth - 1) + '…' : pl
+          const trimmed = displayWidth(pl) > maxWidth ? truncateToDisplayWidth(pl, maxWidth - 2) + '…' : pl
           lines.push(`${childPrefix}${color(trimmed, theme.muted)}`)
         }
         const limit = expanded ? 30 : 3
@@ -280,7 +281,7 @@ export function formatCollapsedGroup(input: FormatCollapsedGroupInput): string[]
     // 大折叠（>3 条）：紧凑路径列表 + ctrl+o 提示
     const files = completed.map(e => e.displayName).join(', ')
     const maxWidth = Math.max(10, (input.columns ?? 80) - 9)
-    const preview = files.length > maxWidth ? files.slice(0, maxWidth - 1) + '…' : files
+    const preview = displayWidth(files) > maxWidth ? truncateToDisplayWidth(files, maxWidth - 2) + '…' : files
     lines.push(`│  ╰─ ${color(preview, theme.muted)}`)
     lines.push(color(`│     … +${completed.length - 3} more files [Ctrl+O]`, theme.secondary))
   }

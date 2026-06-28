@@ -13,6 +13,9 @@ import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
 import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
+/** 宽度口径：与 LiveEngine 一致，ambiguous 符号按宽处理。 */
+const WIDE = { ambiguousAsWide: true }
+
 export interface ApprovalRenderer {
   /** 渲染审批预览行（每行已做列宽控制，调用方直接显示） */
   render(toolName: string, input: Record<string, unknown>, columns: number, theme: RivetTheme): string[]
@@ -215,8 +218,8 @@ const ANSI_RE = /\x1B\[[0-9;]*[a-zA-Z]/g
 /** 左对齐填充或截断到目标宽度（ANSI 安全）。 */
 function fitLine(text: string, width: number): string {
   const plain = text.replace(ANSI_RE, '')
-  const pad = width - displayWidth(plain)
-  if (pad < 0) return truncateToDisplayWidth(text, width)
+  const pad = width - displayWidth(plain, WIDE)
+  if (pad < 0) return truncateToDisplayWidth(text, width, WIDE)
   if (pad === 0) return text
   return text + ' '.repeat(pad)
 }

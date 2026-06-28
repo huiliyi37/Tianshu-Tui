@@ -6,6 +6,7 @@ import {
   type CollapsedReadSearchGroup,
 } from '../collapsed-read-search.js'
 import { getTheme } from '../../theme.js'
+import { displayWidth } from '../../width.js'
 
 const theme = getTheme()
 function stripAnsi(s: string): string {
@@ -53,6 +54,30 @@ describe('formatCollapsedGroup', () => {
     ])
     const lines = formatCollapsedGroup({ group, expanded: false, theme, columns: 80 }).map(stripAnsi)
     assert.ok(lines.some(l => l.includes('pending')), 'pending hint')
+  })
+
+  it('truncates CJK content by display width, not byte length', () => {
+    // 8 CJK chars = 16 display columns. With maxWidth ~10, content MUST be truncated.
+    // Bug: .length-based check (8 > 10 → false) passes the full line through,
+    // causing it to overflow the column budget.
+    const cjkContent = '这是一段中文测试内容'
+    const group = makeGroup([
+      { id: '1', toolName: 'read_file', input: { file_path: 'src/a.ts' }, displayName: 'src/a.ts', kind: 'read', completed: true, content: cjkContent },
+    ])
+    // Narrow columns so the CJK line won't fit (childPrefix = '│     ' = 6 cols, columns=20 → maxWidth ≈ 14)
+    const lines = formatCollapsedGroup({ group, expanded: true, theme, columns: 20 }).map(stripAnsi)
+    // Every line must fit within the terminal column budget.
+    for (const line of lines) {
+      // CJK width: each CJK char = 2 columns.
+      const w = displayWidth(line)
+      assert.ok(w <= 20, `line "${line.slice(0, 20)}..." width ${w} exceeds 20 columns`)
+    }
+    // The CJK content line should be truncated (not the full 8-char CJK string).
+    const contentLines = lines.filter(l => l.includes('中'))
+    assert.ok(contentLines.length > 0, 'CJK content present')
+    const contentLine = contentLines[0]!
+    // After truncation, the visible text should be shorter than the original
+    assert.ok(contentLine.length < cjkContent.length + 10, 'CJK content was truncated')
   })
 })
 

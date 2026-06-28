@@ -10,6 +10,7 @@
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -153,7 +154,7 @@ export function formatCollapsedBashGroup(input: FormatCollapsedBashGroupInput): 
         const maxWidth = Math.max(10, (input.columns ?? 80) - childPrefix.length)
         const previewLines = entry.content.replace(/\n+$/, '').split('\n').slice(0, 3)
         for (const pl of previewLines) {
-          const trimmed = pl.length > maxWidth ? pl.slice(0, maxWidth - 1) + '…' : pl
+          const trimmed = displayWidth(pl) > maxWidth ? truncateToDisplayWidth(pl, maxWidth - 2) + '…' : pl
           lines.push(`${childPrefix}${color(trimmed, theme.muted)}`)
         }
         const totalLines = entry.content.split('\n').length
@@ -165,7 +166,7 @@ export function formatCollapsedBashGroup(input: FormatCollapsedBashGroupInput): 
   } else {
     const commands = completed.map(e => e.command).join(', ')
     const maxWidth = Math.max(10, (input.columns ?? 80) - 9)
-    const preview = commands.length > maxWidth ? commands.slice(0, maxWidth - 1) + '…' : commands
+    const preview = displayWidth(commands) > maxWidth ? truncateToDisplayWidth(commands, maxWidth - 2) + '…' : commands
     lines.push(`│  ╰─ ${color(preview, theme.muted)}`)
     lines.push(color(`│     … +${completed.length - 3} more commands [Ctrl+O]`, theme.secondary))
   }

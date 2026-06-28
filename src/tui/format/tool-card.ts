@@ -254,7 +254,8 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
   const lines: string[] = [header]
   const tail = (input.outputTail ?? '').replace(/\n+$/, '')
   const tailCount = input.tailLines ?? 3
-  const maxWidth = Math.max(10, input.columns - 6)
+  // BODY_FIRST_PREFIX = '⎿  ' (3 display columns) — content has columns-3 available.
+  const maxWidth = Math.max(10, input.columns - 3)
 
   // 固定 tail 区域高度：内容不足时顶部补空行，避免卡片高度随输出变化而跳动。
   const tailLines: string[] = []
