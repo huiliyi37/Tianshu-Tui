@@ -81,34 +81,49 @@ function ModelForm({
   return (
     <div className="provider-model-form">
       <div className="provider-form-grid">
-        <input
-          type="text"
-          placeholder="模型 ID，例如 gpt-4o"
-          value={state.id}
-          onChange={(e) => onChange({ id: e.target.value })}
-          disabled={busy}
-        />
-        <input
-          type="text"
-          placeholder="别名（可选）"
-          value={state.alias}
-          onChange={(e) => onChange({ alias: e.target.value })}
-          disabled={busy}
-        />
-        <input
-          type="number"
-          placeholder="上下文长度"
-          value={state.contextWindow}
-          onChange={(e) => onChange({ contextWindow: e.target.value })}
-          disabled={busy}
-        />
-        <input
-          type="number"
-          placeholder="最大 Tokens"
-          value={state.maxTokens}
-          onChange={(e) => onChange({ maxTokens: e.target.value })}
-          disabled={busy}
-        />
+        <label className="provider-field">
+          <span className="provider-field-label">模型 ID</span>
+          <input
+            type="text"
+            placeholder="例如 gpt-4o"
+            value={state.id}
+            onChange={(e) => onChange({ id: e.target.value })}
+            disabled={busy}
+          />
+        </label>
+        <label className="provider-field">
+          <span className="provider-field-label">别名（可选）</span>
+          <input
+            type="text"
+            placeholder="显示用名称"
+            value={state.alias}
+            onChange={(e) => onChange({ alias: e.target.value })}
+            disabled={busy}
+          />
+        </label>
+        <label className="provider-field">
+          <span className="provider-field-label">上下文长度（tokens）</span>
+          <input
+            type="number"
+            placeholder="128000"
+            value={state.contextWindow}
+            onChange={(e) => onChange({ contextWindow: e.target.value })}
+            disabled={busy}
+          />
+        </label>
+        <label className="provider-field">
+          <span className="provider-field-label">最大输出 Tokens</span>
+          <input
+            type="number"
+            placeholder="64000"
+            value={state.maxTokens}
+            onChange={(e) => onChange({ maxTokens: e.target.value })}
+            disabled={busy}
+          />
+        </label>
+      </div>
+      <div className="provider-form-hint">
+        上下文长度决定模型能记住多少对话内容；最大输出 Tokens 限制模型单次返回长度。
       </div>
       <div className="provider-form-actions">
         <button className="btn-sm" disabled={busy} onClick={onSubmit}>{submitLabel}</button>
@@ -180,20 +195,26 @@ function ModelManageList({
           <span className="provider-model-name">{m.alias ?? m.id}</span>
           {editingId === m.id ? (
             <>
-              <input
-                type="number"
-                value={ctx}
-                onChange={(e) => setCtx(e.target.value)}
-                disabled={busy}
-                placeholder="上下文长度"
-              />
-              <input
-                type="number"
-                value={max}
-                onChange={(e) => setMax(e.target.value)}
-                disabled={busy}
-                placeholder="最大 Tokens"
-              />
+              <label className="provider-mini-field">
+                <span>上下文</span>
+                <input
+                  type="number"
+                  value={ctx}
+                  onChange={(e) => setCtx(e.target.value)}
+                  disabled={busy}
+                  placeholder="tokens"
+                />
+              </label>
+              <label className="provider-mini-field">
+                <span>最大输出</span>
+                <input
+                  type="number"
+                  value={max}
+                  onChange={(e) => setMax(e.target.value)}
+                  disabled={busy}
+                  placeholder="tokens"
+                />
+              </label>
               <button className="btn-sm" disabled={busy} onClick={() => save(m)}>保存</button>
               <button className="btn-sm ghost" disabled={busy} onClick={() => setEditingId(null)}>取消</button>
             </>
@@ -504,56 +525,77 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
     <div className="preset-card preset-card-input custom-provider-card">
       <span className="preset-label">自定义 Provider</span>
       <div className="provider-form-stack">
-        <input
-          type="text"
-          placeholder="Provider 名称，例如 my-openai"
-          value={state.name}
-          onChange={(e) => setState((prev) => ({ ...prev, name: e.target.value }))}
-          disabled={busy}
-        />
-        <input
-          type="text"
-          placeholder="Base URL，例如 https://api.example.com/v1"
-          value={state.baseUrl}
-          onChange={(e) => setState((prev) => ({ ...prev, baseUrl: e.target.value }))}
-          disabled={busy}
-        />
-        <input
-          type="password"
-          placeholder="API Key（可选）"
-          value={state.apiKey}
-          onChange={(e) => setState((prev) => ({ ...prev, apiKey: e.target.value }))}
-          disabled={busy}
-        />
+        <label className="provider-field">
+          <span className="provider-field-label">Provider 名称</span>
+          <input
+            type="text"
+            placeholder="例如 my-openai"
+            value={state.name}
+            onChange={(e) => setState((prev) => ({ ...prev, name: e.target.value }))}
+            disabled={busy}
+          />
+        </label>
+        <label className="provider-field">
+          <span className="provider-field-label">Base URL</span>
+          <input
+            type="text"
+            placeholder="例如 https://api.example.com/v1"
+            value={state.baseUrl}
+            onChange={(e) => setState((prev) => ({ ...prev, baseUrl: e.target.value }))}
+            disabled={busy}
+          />
+        </label>
+        <label className="provider-field">
+          <span className="provider-field-label">API Key（可选）</span>
+          <input
+            type="password"
+            placeholder="sk-..."
+            value={state.apiKey}
+            onChange={(e) => setState((prev) => ({ ...prev, apiKey: e.target.value }))}
+            disabled={busy}
+          />
+        </label>
         <div className="provider-form-grid">
-          <input
-            type="text"
-            placeholder="模型 ID"
-            value={state.model.id}
-            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, id: e.target.value } }))}
-            disabled={busy}
-          />
-          <input
-            type="text"
-            placeholder="别名（可选）"
-            value={state.model.alias}
-            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, alias: e.target.value } }))}
-            disabled={busy}
-          />
-          <input
-            type="number"
-            placeholder="上下文长度"
-            value={state.model.contextWindow}
-            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, contextWindow: e.target.value } }))}
-            disabled={busy}
-          />
-          <input
-            type="number"
-            placeholder="最大 Tokens"
-            value={state.model.maxTokens}
-            onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, maxTokens: e.target.value } }))}
-            disabled={busy}
-          />
+          <label className="provider-field">
+            <span className="provider-field-label">模型 ID</span>
+            <input
+              type="text"
+              placeholder="例如 gpt-4o"
+              value={state.model.id}
+              onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, id: e.target.value } }))}
+              disabled={busy}
+            />
+          </label>
+          <label className="provider-field">
+            <span className="provider-field-label">别名（可选）</span>
+            <input
+              type="text"
+              placeholder="显示用名称"
+              value={state.model.alias}
+              onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, alias: e.target.value } }))}
+              disabled={busy}
+            />
+          </label>
+          <label className="provider-field">
+            <span className="provider-field-label">上下文长度（tokens）</span>
+            <input
+              type="number"
+              placeholder="128000"
+              value={state.model.contextWindow}
+              onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, contextWindow: e.target.value } }))}
+              disabled={busy}
+            />
+          </label>
+          <label className="provider-field">
+            <span className="provider-field-label">最大输出 Tokens</span>
+            <input
+              type="number"
+              placeholder="64000"
+              value={state.model.maxTokens}
+              onChange={(e) => setState((prev) => ({ ...prev, model: { ...prev.model, maxTokens: e.target.value } }))}
+              disabled={busy}
+            />
+          </label>
         </div>
         <label className="provider-check">
           <input
