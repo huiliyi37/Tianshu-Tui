@@ -140,10 +140,10 @@
 - 代码块展示安装与启动：
 
 ```bash
-git clone https://github.com/user/rivet.git && cd rivet
+git clone https://github.com/huiliyi37/Tianshu-Tui.git && cd Tianshu
 npm install && npm run build
 export DEEPSEEK_API_KEY=sk-xxx
-node dist/main.js
+npm start
 ```
 
 - 一键复制按钮

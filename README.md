@@ -14,16 +14,47 @@ Terminal coding agent with prefix-cache optimization, multi-provider support, su
 
 ## Quick Start
 
-```bash
-git clone <repo> && cd rivet
-npm install && npm run build
+### 1. Prerequisites
 
-# Set API key
+- **Node.js 22+** — verify with `node --version`.
+- **Git** — optional but strongly recommended. Without it Rivet still runs, but
+delegation/checkpoint/rollback features degrade. See [Prerequisites](#prerequisites).
+
+### 2. Clone & Build
+
+```bash
+git clone https://github.com/huiliyi37/Tianshu-Tui.git
+cd Tianshu
+npm install
+npm run build
+```
+
+This produces `dist/main.js`, the TUI entry point.
+
+### 3. Configure an API Key
+
+Pick one of the following. The key is read at startup.
+
+```bash
+# A. Environment variable (simplest for first try)
 export DEEPSEEK_API_KEY=sk-xxx
 
-# Launch
-node dist/main.js
+# B. Persisted CLI config (saved to ~/.rivet/config.json)
+node dist/main.js config set-key deepseek sk-xxx
 ```
+
+> Other providers (Claude, GLM, Codex, MiniMax, MiMo) use the same pattern.
+> Run `node dist/main.js config set-key <provider> <key>` or see
+> [Provider Config](docs/user-guide-provider-config.md).
+
+### 4. Launch
+
+```bash
+npm start
+# or directly: node dist/main.js
+```
+
+You should see the TUI with a `〉` prompt. Type your request and press Enter.
 
 ## Core Features
 

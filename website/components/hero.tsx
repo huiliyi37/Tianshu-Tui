@@ -32,7 +32,7 @@ export function Hero() {
         <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
           <Button size="lg" asChild>
             <a
-              href="https://github.com/user/rivet/releases"
+              href="https://github.com/huiliyi37/Tianshu-Tui/releases"
               target="_blank"
               rel="noopener noreferrer"
             >

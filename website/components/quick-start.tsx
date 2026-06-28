@@ -7,7 +7,7 @@ import { useState } from "react";
 const installSteps = [
   {
     title: "克隆并构建",
-    code: "git clone https://github.com/user/rivet.git && cd rivet\nnpm install && npm run build",
+    code: "git clone https://github.com/huiliyi37/Tianshu-Tui.git && cd Tianshu\nnpm install && npm run build",
   },
   {
     title: "配置 API Key",
@@ -15,7 +15,7 @@ const installSteps = [
   },
   {
     title: "启动",
-    code: "node dist/main.js",
+    code: "npm start",
   },
 ];
 

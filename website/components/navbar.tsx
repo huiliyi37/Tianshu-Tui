@@ -41,7 +41,7 @@ export function Navbar() {
         <div className="hidden items-center gap-3 md:flex">
           <Button variant="ghost" size="sm" asChild>
             <a
-              href="https://github.com/user/rivet"
+              href="https://github.com/huiliyi37/Tianshu-Tui"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -51,7 +51,7 @@ export function Navbar() {
           </Button>
           <Button size="sm" asChild>
             <a
-              href="https://github.com/user/rivet/releases"
+              href="https://github.com/huiliyi37/Tianshu-Tui/releases"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -87,7 +87,7 @@ export function Navbar() {
             <li className="pt-2">
               <Button className="w-full" asChild>
                 <a
-                  href="https://github.com/user/rivet/releases"
+                  href="https://github.com/huiliyi37/Tianshu-Tui/releases"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

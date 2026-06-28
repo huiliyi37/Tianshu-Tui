@@ -21,7 +21,7 @@ export function Community() {
               <p className="mb-4 text-sm text-text-secondary">查看源码、提交反馈、参与贡献</p>
               <Button variant="secondary" size="sm" asChild>
                 <a
-                  href="https://github.com/user/rivet"
+                  href="https://github.com/huiliyi37/Tianshu-Tui"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -37,7 +37,7 @@ export function Community() {
               <h3 className="mb-2 font-semibold">文档</h3>
               <p className="mb-4 text-sm text-text-secondary">配置指南、模型提供方、Slash 命令</p>
               <Button variant="secondary" size="sm" asChild>
-                <a href="https://github.com/user/rivet/tree/main/docs">
+                <a href="https://github.com/huiliyi37/Tianshu-Tui/tree/main/docs">
                   阅读文档
                 </a>
               </Button>
@@ -51,7 +51,7 @@ export function Community() {
               <p className="mb-4 text-sm text-text-secondary">交流用法、分享技能与最佳实践</p>
               <Button variant="secondary" size="sm" asChild>
                 <a
-                  href="https://github.com/user/rivet/discussions"
+                  href="https://github.com/huiliyi37/Tianshu-Tui/discussions"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

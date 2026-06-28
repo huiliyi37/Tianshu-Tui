@@ -36,7 +36,7 @@ export function Desktop() {
             <div className="flex flex-wrap gap-4">
               <Button asChild>
                 <a
-                  href="https://github.com/user/rivet/releases"
+                  href="https://github.com/huiliyi37/Tianshu-Tui/releases"
                   target="_blank"
                   rel="noopener noreferrer"
                 >

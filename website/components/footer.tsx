@@ -26,7 +26,7 @@ export function Footer() {
             快速开始
           </a>
           <a
-            href="https://github.com/user/rivet/blob/main/CONTRIBUTING.md"
+            href="https://github.com/huiliyi37/Tianshu-Tui/blob/main/CONTRIBUTING.md"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-text-primary"
@@ -34,7 +34,7 @@ export function Footer() {
             贡献
           </a>
           <a
-            href="https://github.com/user/rivet/blob/main/LICENSE"
+            href="https://github.com/huiliyi37/Tianshu-Tui/blob/main/LICENSE"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-text-primary"
@@ -44,7 +44,7 @@ export function Footer() {
         </nav>
 
         <a
-          href="https://github.com/user/rivet"
+          href="https://github.com/huiliyi37/Tianshu-Tui"
           target="_blank"
           rel="noopener noreferrer"
           className="text-text-secondary hover:text-text-primary"

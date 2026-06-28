@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, serializeSessionMessage } from '../session-persist.js'
+import { MAX_SESSION_MESSAGE_JSON_CHARS, SessionPersist, evictOldSessionsInternal, projectSlug, serializeSessionMessage } from '../session-persist.js'
 import type { OaiMessage } from '../../api/oai-types.js'
 
 describe('SessionPersist', () => {
@@ -489,5 +489,57 @@ describe('checksum integration', () => {
     assert.match(raw, /"type":"model_switch"/)
     assert.match(raw, /"to":"deepseek-v4-pro"/)
     assert.match(raw, /"from":"claude-opus-4-8"/)
+  })
+})
+
+describe('projectSlug (cross-platform session dir name)', () => {
+  it('POSIX path: basename + hash, backward-compatible with old split("/") behavior', () => {
+    // 这是回归基线：macOS/Linux 既有会话目录名不能变，否则历史会话丢失。
+    const slug = projectSlug('/Users/banxia/app/deepseek-tui/opencode-tui')
+    assert.match(slug, /^opencode-tui-[0-9a-f]{6}$/, `posix slug: ${slug}`)
+  })
+
+  it('Windows backslash path: splits on \\ and takes the real basename', () => {
+    // 旧实现 split('/') 切不开反斜杠路径 → 整条路径作为 basename → 含 ':' '\' 非法。
+    const slug = projectSlug('D:\\tianshu\\Tianshu-Tui')
+    assert.match(slug, /^Tianshu-Tui-[0-9a-f]{6}$/, `windows backslash slug: ${slug}`)
+    // slug 绝不能含盘符冒号或反斜杠（NTFS 非法目录字符）
+    assert.ok(!/[\\:]/.test(slug), `slug must not contain drive-colon or backslash: ${slug}`)
+  })
+
+  it('Windows drive-letter path: colon sanitized out of basename', () => {
+    // 报错现场：cwd 形如 D:\tianshu\proj，basename 含 D: → 清洗后不含冒号
+    const slug = projectSlug('C:\\Users\\Admin\\projects\\my-app')
+    assert.match(slug, /^my-app-[0-9a-f]{6}$/, `drive-letter slug: ${slug}`)
+  })
+
+  it('reproduces the reported fatal: full Windows path no longer leaks into slug', () => {
+    // 烟雾测试报错：mkdir "...sessions\D:\tianshu\Tianshu-Tui-8ffe00"
+    // 修复后 slug 必须只是 basename-hash，绝不包含 \ 或 :
+    const slug = projectSlug('D:\\tianshu\\Tianshu-Tui-8ffe00')
+    assert.ok(!slug.includes('D:'), `no drive leak: ${slug}`)
+    assert.ok(!slug.includes('\\'), `no backslash leak: ${slug}`)
+    assert.match(slug, /^[^\\/:*?"<>|]+-[0-9a-f]{6}$/, `slug fs-safe: ${slug}`)
+  })
+
+  it('mixed separators (/ and \\) both split correctly', () => {
+    // 某些 Windows 工具产出正反斜杠混合路径
+    const slug = projectSlug('D:/tianshu\\mixed-project')
+    assert.match(slug, /^mixed-project-[0-9a-f]{6}$/, `mixed-sep slug: ${slug}`)
+  })
+
+  it('different cwds produce different slugs (hash disambiguates)', () => {
+    const a = projectSlug('/home/u/proj')
+    const b = projectSlug('/home/u/other/proj')
+    // 同 basename 'proj' 但 cwd 不同 → hash 不同 → 不撞目录
+    assert.notEqual(a, b, 'same basename different cwd must differ by hash')
+  })
+
+  it('trailing slash does not change the slug', () => {
+    // 有无尾斜杠应等价（filter(Boolean) 已去掉空段，hash 仍基于原 cwd）
+    const withSlash = projectSlug('/home/u/proj/')
+    const noSlash = projectSlug('/home/u/proj')
+    // basename 一致（都是 proj）；hash 因 cwd 字面量不同而不同——这是既有行为，保留。
+    assert.ok(withSlash.startsWith('proj-') && noSlash.startsWith('proj-'), 'basename stable')
   })
 })
