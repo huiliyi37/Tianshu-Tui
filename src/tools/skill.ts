@@ -21,11 +21,14 @@ export const SKILL_TOOL: Tool = {
 
 Skills are reusable workflow playbooks. The available-skills block lists each skill's name and a short description. When a skill's description matches what you are doing, call this tool with its exact name to load its complete instructions on demand, then carry them out.
 
+When you have finished carrying out a loaded skill, call skill(name="<name>", complete=true) to release it. This stops the skill instructions from being re-injected once the workflow is done.
+
 Example: skill(name="brainstorming")`,
     input_schema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Exact name of the skill to load (see the available-skills block).' },
+        name: { type: 'string', description: 'Exact name of the skill to load or complete (see the available-skills block).' },
+        complete: { type: 'boolean', description: 'When true, mark the skill as completed instead of loading it. The skill instructions will no longer be re-injected into the context.' },
       },
       required: ['name'],
     },
@@ -38,7 +41,7 @@ Example: skill(name="brainstorming")`,
     }
     const name = raw.trim()
 
-    const skill = skillRegistry.get(name)
+    const skill = skillRegistry.get(name) ?? skillRegistry.list().find(s => s.name.toLowerCase() === name.toLowerCase())
     if (!skill) {
       const available = skillRegistry.list().map(s => s.name).sort()
       const list = available.length > 0 ? available.join(', ') : '(none loaded)'
@@ -47,6 +50,13 @@ Example: skill(name="brainstorming")`,
         isError: true,
       }
     }
+
+    if (params.input.complete === true) {
+      params.onSkillCompleted?.(skill.name)
+      return { content: `Skill "${skill.name}" marked as completed.`, uiContent: `Completed skill: ${skill.name}` }
+    }
+
+    params.onSkillInvoked?.(skill.name)
 
     const body = `<skill name="${skill.name}">\n${skill.body}\n</skill>`
     // Flat (no skillDir) skills have no sub-files — return body as-is.

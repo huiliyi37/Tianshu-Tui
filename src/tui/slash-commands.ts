@@ -94,7 +94,7 @@ const HELP_TEXT = `Available commands:
 /mcp — Show MCP server status
 /cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
-/skill [list|install <name>|import <name>|<name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
+/skill [list|install <name>|import <name>|<name>|off <name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
 /plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
@@ -368,6 +368,8 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   if (workflow) return workflow.prompt
   const custom = resolveCustomCommand(cwd, input)
   if (custom) return custom
+  const skillPrompt = resolveSkillPrompt(input, cwd)
+  if (skillPrompt !== null) return skillPrompt
   // /review [max] [focus description] — map to deliver_task instruction for the agent
   const reviewMatch = input.match(/^\/review(?:\s+(max))?(?:\s+(.*))?$/i)
   if (reviewMatch) {
@@ -384,6 +386,33 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
   }
   // Unrecognized slash command — return null to signal "blocked"
   return null
+}
+
+/**
+ * Resolve `/skill <name> [user task...]` into the skill's full body prompt.
+ * Reserved subcommands (list/install/etc.) and unknown skills return null so
+ * they fall back to the slash handler's local behavior or error message.
+ */
+function resolveSkillPrompt(input: string, cwd: string): string | null {
+  const match = input.trim().match(/^\/skill\s+(\S+)(?:\s+(.*))?$/s)
+  if (!match) return null
+  const name = match[1]!
+  const userTask = match[2]?.trim() ?? ''
+  const reserved = new Set(['list', 'ls', 'install', 'import', 'review', 'drafts', 'approve', 'reject', 'off', 'complete'])
+  if (reserved.has(name.toLowerCase())) return null
+  const skill = skillRegistry.get(name) ?? skillRegistry.list().find(s => s.name.toLowerCase() === name.toLowerCase())
+  if (!skill) return null
+  let prompt = `[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`
+  if (skill.skillDir) {
+    const files = listSkillFiles(skill.skillDir)
+    if (files.length > 0) {
+      prompt += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
+    }
+  }
+  if (userTask) {
+    prompt += `\n\nUser task: ${userTask}`
+  }
+  return prompt
 }
 
 /**
@@ -2485,6 +2514,21 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      // /skill off <name> — manually release an invoked skill so its instructions
+      // are no longer re-injected into the dynamic appendix.
+      if (sub === 'off' || sub === 'complete') {
+        const name = parts[2]
+        if (!name) {
+          pushStatic(createLogEntry({ type: 'system', content: `用法: /skill ${sub} <name>\n停止持续注入该技能的完整指令。` }))
+          setIsStreaming(false)
+          return true
+        }
+        ctx.agent.markSkillCompleted?.(name)
+        pushStatic(createLogEntry({ type: 'system', content: `🛑 已停止技能: ${name}` }))
+        setIsStreaming(false)
+        return true
+      }
+
       // /skill install <name> [...] — copy from .claude/skills/ into .rivet/skills/
       if (sub === 'install' || sub === 'import') {
         const names = parts.slice(2).filter(Boolean)
@@ -2525,7 +2569,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      // /skill <name> — load the FULL body into the conversation (no truncation).
+      // /skill <name> — load the FULL body into the conversation and immediately
+      // invoke it as the current prompt. The slash handler just acknowledges the
+      // load; the actual body is expanded by resolveAppPromptInput so the agent
+      // sees the skill instructions as the user message and responds in this turn.
       const skill = skillRegistry.get(parts[1]!) ?? allSkills.find(s => s.name.toLowerCase() === sub)
       if (!skill) {
         pushStatic(createLogEntry({ type: 'system', content: `Skill "${parts[1]}" not found.\nUse /skill list to see available skills.` }))
@@ -2534,24 +2581,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       const sizeKb = (skill.body.length / 1024).toFixed(1)
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${sizeKb}KB from ${skill.source ?? 'rivet'})\nThe full skill instructions are now in the conversation.` }))
+      const taskHint = parts.slice(2).join(' ').trim()
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Loaded skill: ${skill.name} (${sizeKb}KB from ${skill.source ?? 'rivet'})\nThe full skill instructions are now in the conversation.${taskHint ? `\nUser task: ${taskHint}` : ''}` }))
 
-      // Append-only one-shot: the complete body becomes a normal message in
-      // history (visible all session). We deliberately do NOT use a persistent
-      // anchor — that would re-render the whole body every turn and bloat the
-      // prefix. No slice(): the full body is preserved. For directory skills we
-      // also append the sub-file tree (Tier-3 entry points), matching the
-      // `skill` tool's behaviour.
-      let payload = `[Skill loaded: ${skill.name}]\n<skill name="${skill.name}">\n${skill.body}\n</skill>`
-      if (skill.skillDir) {
-        const files = listSkillFiles(skill.skillDir)
-        if (files.length > 0) {
-          payload += `\n<skill-files dir="${skill.skillDir}" note="Read on demand with read_file/grep/glob; page large sub-files completely with offset/limit.">\n${files.map(f => '  ' + f.path).join('\n')}\n</skill-files>`
-        }
-      }
-      ctx.session.addUserMessage(payload)
-      setIsStreaming(false)
-      return true
+      // Remember that this skill was invoked so the prompt engine can re-inject
+      // its instructions into the dynamic appendix after context compaction.
+      ctx.agent.markSkillInvoked?.(skill.name)
+
+      // Fall through to the agent pipeline. resolveAppPromptInput will expand
+      // `/skill <name> [...]` into the skill body so the agent responds now.
+      return false
     },
   },
   {

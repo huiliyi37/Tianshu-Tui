@@ -89,4 +89,21 @@ describe('skill tool', () => {
     assert.ok(res.content.includes('extract.py'))
     assert.ok(!res.content.includes('SKILL.md'))
   })
+
+  it('fires onSkillInvoked when loading a skill', async () => {
+    const invoked: string[] = []
+    const params = { input: { name: 'small' }, toolUseId: 't', cwd: process.cwd(), onSkillInvoked: (n: string) => invoked.push(n) } as unknown as ToolCallParams
+    const res = await SKILL_TOOL.execute(params)
+    assert.equal(res.isError, undefined)
+    assert.deepEqual(invoked, ['small'])
+  })
+
+  it('supports complete=true to mark a skill finished', async () => {
+    const completed: string[] = []
+    const params = { input: { name: 'small', complete: true }, toolUseId: 't', cwd: process.cwd(), onSkillCompleted: (n: string) => completed.push(n) } as unknown as ToolCallParams
+    const res = await SKILL_TOOL.execute(params)
+    assert.equal(res.isError, undefined)
+    assert.ok(res.content.includes('marked as completed'))
+    assert.deepEqual(completed, ['small'])
+  })
 })

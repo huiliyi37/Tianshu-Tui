@@ -2,7 +2,7 @@
 
 > 维护者视角的技术参考(非用户使用指南——用法见 `docs/skills-guide.md`)。
 > 记录**当前真实实现**,供后续迭代对照,避免"盲盒"。
-> 最近一次对齐:2026-06-16(Phase 1 三级渐进装载 + MUST 1/2 保真硬保证)。
+> 最近一次对齐:2026-06-28(Phase 2 技能生命周期——调用即执行 + 完整轮次保护 + 主动释放)。
 
 ---
 
@@ -131,8 +131,8 @@ prompt/volatile.ts  buildDynamicAppendix:  if (ctx.skillAdvisoryBlock) parts.pus
 
 ### 5.1 两个入口
 
-- **模型自助**:`skill` 工具(`src/tools/skill.ts`)。`definition` **不嵌任何具体技能名**(字节稳定 → prefix-cache 安全;可加载集合只活在 volatile 发现块)。`execute(name)` 取 `skillRegistry.get(name).body`,包成 `<skill name>...</skill>`。
-- **用户手动**:`/skill <name>`(`src/tui/slash-commands.ts`),以 append-only `addUserMessage` 注入完整 body(不用持久锚点,避免每轮重渲染撑爆 prefix)。`/skill list` 读 registry 列表。
+- **模型自助**:`skill` 工具(`src/tools/skill.ts`)。`definition` **不嵌任何具体技能名**(字节稳定 → prefix-cache 安全;可加载集合只活在 volatile 发现块)。`execute(name)` 取 `skillRegistry.get(name).body`,包成 `<skill name>...</skill>`;加载成功后会回调 `onSkillInvoked`,通知 PromptEngine 该技能进入活跃状态。
+- **用户手动**:`/skill <name>`(`src/tui/slash-commands.ts`)。handler 返回 `false` 让输入透传给 agent pipeline,`resolveAppPromptInput` 把 `/skill <name> [任务...]` 展开成完整技能体作为当前 user prompt,模型**本轮立即响应**;同时调用 `agent.markSkillInvoked(name)` 进入活跃状态。`/skill list` 读 registry 列表。
 
 两者对**目录技能**都追加 `<skill-files dir="..." note="...">` 文件树清单(`listSkillFiles`,排除 SKILL.md,maxDepth=3 / maxEntries=50 有界),note 含"按需读、大文件 offset/limit 分页读完整"。
 
@@ -156,6 +156,19 @@ const FIDELITY_EXEMPT_TOOLS = new Set(['skill'])
 > 为何全文 inline 安全:模型是**显式**调 `skill(name)` 要这份指令,理应给全;且 SKILL.md 按约定应是短"路由"(重料在 `references/`,走 L3 分页),body 体量有界。
 
 守护测试:`src/agent/__tests__/tool-pipeline.test.ts`「delivers a large skill body COMPLETE and inline」——过 `executeToolUse` 全链路,20KB body 完整 inline、无 `[artifact:`、无 `[truncated`、无 `<stored>`、零落盘。(注意:`skill-tool.test.ts` 只测 `execute()` 孤立返回,测不到这条链路,故必须有 pipeline 级测试。)
+
+### 5.3 调用后持续生效与主动释放(Phase 2)
+
+**问题**:L2 仅把技能体 inline 到当前 prompt,若后续发生上下文压缩,技能指令会从历史中被裁掉,导致模型中途“忘记”技能协议。
+
+**解法**:PromptEngine 维护一个 `invokedSkillNames` 集合:
+
+1. **调用即注册**:`skill` 工具加载、`/skill <name>` 都会调用 `PromptEngine.markSkillInvoked(name)`。
+2. **每轮动态附录注入**:`renderInvokedSkillsBlock(names, cwd)` 生成 `<invoked-skills>` 块,包含完整技能体,写入 `VolatileContext.invokedSkillsBlock`。
+3. **受保护、不被预算挤掉**:`buildDynamicAppendixParts` 先把 `<invoked-skills>` 列为 **protected block**,普通附录块只在“`appendixMaxChars - protectedLen`”剩余预算里做 Top-K。技能体在上下文紧张时仍然完整保留,其它低显著性块先被丢。
+4. **主动释放**:模型在技能 workflow 走完后调用 `skill(name="<name>", complete=true)`,经 `onSkillCompleted` 回调 `PromptEngine.markSkillCompleted(name)`,该技能即从动态附录消失。用户也可手动 `/skill off <name>` 或 `/skill complete <name>` 释放。
+
+> 这是天枢对 Claude Code `invoked_skills` attachment 的对齐,但预算保护更严格:技能体作为 protected block 优先于普通附录块。
 
 ---
 
@@ -187,26 +200,29 @@ turn-step-producer  renderDiscoveryBlock(..., { exclude: getDisabledSkills() })
 
 | 文件 | 职责 |
 |------|------|
-| `src/skills/skill-loader.ts` | 数据模型、`SkillRegistry`、`loadFromDirectory`(双形态)、`importSkillsIntoRivet`(复制导入)、`listSkillFiles`、`renderDiscoveryBlock`、`BUILTIN_SKILLS`、`loadProjectSkills` |
-| `src/tools/skill.ts` | `skill` 工具(L2 模型入口,字节稳定 definition + 文件树) |
+| `src/skills/skill-loader.ts` | 数据模型、`SkillRegistry`、`loadFromDirectory`(双形态)、`importSkillsIntoRivet`(复制导入)、`listSkillFiles`、`renderDiscoveryBlock`、`renderInvokedSkillsBlock`、`BUILTIN_SKILLS`、`loadProjectSkills` |
+| `src/tools/skill.ts` | `skill` 工具(L2 模型入口,字节稳定 definition + 文件树 + `complete` 释放) |
 | `src/tools/path-validate.ts` | `validatePathSafe`(L3 读边界,无 denylist) |
 | `src/tools/read-file.ts` | L3 子文件读取(offset/limit 分页) |
-| `src/agent/tool-pipeline.ts` | `FIDELITY_EXEMPT_TOOLS` / `READ_TOOLS` / `artifactIntercept` / `truncateSuccessfulToolResult`(保真豁免在此) |
+| `src/agent/tool-pipeline.ts` | `FIDELITY_EXEMPT_TOOLS` / `READ_TOOLS` / 工具回调透传(`onSkillInvoked`/`onSkillCompleted`) |
+| `src/agent/tool-execution.ts` / `loop-factory.ts` | 工具回调向 AgentLoop/PromptEngine 转发 |
 | `src/agent/turn-step-producer.ts` | 每轮注入发现块(hint=userInput,exclude=禁用集) |
-| `src/agent/loop.ts` | `_disabledSkills` + setter/getter |
+| `src/agent/loop.ts` | `_disabledSkills` + `markSkillInvoked` / `markSkillCompleted` |
 | `src/server/session-manager.ts` | per-session `disabledSkills`,PlusMenu 接线 |
-| `src/prompt/engine.ts` / `volatile.ts` | 发现块存储 → dynamic appendix(cache-safe) |
+| `src/prompt/engine.ts` | 维护 `invokedSkillNames`,渲染 `<invoked-skills>` 块 |
+| `src/prompt/volatile.ts` | dynamic appendix,`invokedSkillsBlock` 为 protected block |
 | `src/config/schema.ts` / `default.ts` | `skills.importFromClaude`(复制白名单) |
-| `src/tui/slash-commands.ts` | `/skill list` / `/skill <name>`(L2 用户入口 + 文件树) |
+| `src/tui/slash-commands.ts` | `/skill list` / `/skill <name>`(L2 用户入口 + 文件树) / `/skill off <name>` |
 
 ### 测试覆盖
 | 测试 | 守护点 |
 |------|--------|
 | `src/skills/__tests__/skill-loader.test.ts` | 双形态加载 / skillDir / listSkillFiles / 复制导入幂等 / L3 读边界 |
 | `src/skills/__tests__/discovery.test.ts` | 发现层预算/relevant 排序/exclude/`<more>` 溢出 |
-| `src/tools/__tests__/skill-tool.test.ts` | 工具 execute:全文不截断 / 文件树 / 缓存安全 definition |
+| `src/tools/__tests__/skill-tool.test.ts` | 工具 execute:全文不截断 / 文件树 / 缓存安全 definition / `complete=true` 释放回调 |
 | `src/agent/__tests__/tool-pipeline.test.ts` | **保真豁免全链路**(大 body inline 不 artifact/不截断) |
 | `src/prompt/__tests__/skill-cache-safety.test.ts` | 发现块不进静态 prompt |
+| `src/prompt/__tests__/volatile.test.ts` | dynamic appendix budget / protected block 行为 |
 
 ---
 

@@ -906,6 +906,16 @@ export class AgentLoop {
     return this._disabledSkills
   }
 
+  /** Mark a skill as explicitly invoked so its instructions survive compaction. */
+  markSkillInvoked(name: string): void {
+    this.config.promptEngine.markSkillInvoked(name)
+  }
+
+  /** Release an invoked skill so its instructions are no longer re-injected. */
+  markSkillCompleted(name: string): void {
+    this.config.promptEngine.markSkillCompleted(name)
+  }
+
   getLatestPheromones() { return this.loadedPheromones }
 
   /** Expose MeridianIndexer for /index command */

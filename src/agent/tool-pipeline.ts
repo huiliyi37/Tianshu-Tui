@@ -215,6 +215,10 @@ export interface ToolPipelineDeps {
   onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Called when the model explicitly loads a skill via the skill tool. */
+  onSkillInvoked?: (name: string) => void
+  /** Called when the model explicitly marks a skill as complete via the skill tool. */
+  onSkillCompleted?: (name: string) => void
   recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
@@ -533,6 +537,8 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
     onPlanClosed: deps.onPlanClosed,
+    onSkillInvoked: deps.onSkillInvoked,
+    onSkillCompleted: deps.onSkillCompleted,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),

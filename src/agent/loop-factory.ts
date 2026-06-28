@@ -211,6 +211,8 @@ return new ToolExecutionController({
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
+      onSkillInvoked: name => self.config.promptEngine.markSkillInvoked(name),
+      onSkillCompleted: name => self.config.promptEngine.markSkillCompleted(name),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),
       requestThetaCheck: reason => { self.requestThetaCheck(reason) },
       getAutoReasoning: () => self.config.autoReasoning ?? false,

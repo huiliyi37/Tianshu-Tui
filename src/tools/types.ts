@@ -147,6 +147,10 @@ export interface ToolCallParams {
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */
   abortSignal?: AbortSignal
+  /** Called when the model explicitly loads a skill via the skill tool. */
+  onSkillInvoked?: (name: string) => void
+  /** Called when the model explicitly marks a skill as complete via the skill tool. */
+  onSkillCompleted?: (name: string) => void
 }
 
 export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'

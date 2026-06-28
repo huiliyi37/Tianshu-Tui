@@ -22,6 +22,7 @@ import { FieldHabituationTracker } from './field-habituation.js'
 import { isSystemReminder } from './system-reminder.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 import { debugLog } from '../utils/debug.js'
+import { skillRegistry } from '../skills/skill-loader.js'
 
 export type { PrefixFingerprint, DriftEvent, ContextLayerReport }
 
@@ -125,6 +126,7 @@ export class PromptEngine {
   /** Advisory text — only set when methodology changes, null otherwise to avoid noise. */
   private planMethodologyAdvisory: string | null = null
   private skillAdvisoryBlock?: string | null
+  private invokedSkillNames = new Set<string>()
   private crossSessionMemoryBlock?: string | null
   private mentionContextBlock?: string | null
   private harnessAdvisoryBlock?: string | null
@@ -310,7 +312,7 @@ export class PromptEngine {
               this.gitDirty = false
               this.userMessagesSinceGitRefresh = 0
             }
-            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
+            const dynamicCtx: VolatileContext = { ...this.config.volatileCtx, toolHistory, taskProgress: this.taskProgress, toolContext: this.toolContext, planCacheAdvisory: this.planCacheAdvisory, planTraceAppendix: this.planTraceAppendix, activePlanPointer: this.activePlanPointer, intentRetrievalRoute: this.intentRetrievalRoute, taskDepthAdvisory: this.taskDepthAdvisory, planMethodologyAdvisory: this.planMethodologyAdvisory, skillAdvisoryBlock: this.skillAdvisoryBlock ?? undefined, invokedSkillsBlock: skillRegistry.renderInvokedSkillsBlock([...this.invokedSkillNames], this.config.volatileCtx.cwd) ?? undefined, crossSessionMemoryBlock: this.crossSessionMemoryBlock ?? undefined, mentionContextBlock: this.mentionContextBlock ?? undefined, harnessAdvisoryBlock: this.harnessAdvisoryBlock, decisions: this.decisions, activeClaims: this.activeClaims, playbookLessons: this.playbookLessons, recentQuery: this.recentQuery, onLessonsRendered: this.onLessonsRendered, sessionMemoryBlock: this.sessionMemoryOverride ?? this.config.volatileCtx.sessionMemoryBlock, crossSessionEvents: this.crossSessionEvents, companionPresence: this.companionPresence, sessionState: this.sessionStateText, worktreeReality: this.worktreeReality, planModeState: this.planModeState, cognitiveProjection: this.cognitiveProjection, ...(refreshGit ? { gitStatus: undefined } : {}) } as VolatileContext
 
             if (this.tracker) {
               // activeDomain is no longer habituation-tracked — it is a session
@@ -785,6 +787,22 @@ export class PromptEngine {
 
   setSkillAdvisoryBlock(block: string | null): void {
     this.skillAdvisoryBlock = block
+  }
+
+  markSkillInvoked(name: string): void {
+    this.invokedSkillNames.add(name)
+  }
+
+  markSkillCompleted(name: string): void {
+    // Resolve case-insensitively then remove the canonical name.
+    const canonical = skillRegistry.get(name)?.name
+      ?? [...this.invokedSkillNames].find(n => n.toLowerCase() === name.toLowerCase())
+      ?? name
+    this.invokedSkillNames.delete(canonical)
+  }
+
+  getInvokedSkillNames(): string[] {
+    return [...this.invokedSkillNames]
   }
 
   setCrossSessionMemoryBlock(block: string | null): void {

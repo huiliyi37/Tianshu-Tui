@@ -174,6 +174,8 @@ export interface VolatileContext {
   planMethodologyAdvisory?: string | null
   /** Matched .rivet/skills — cache-safe dynamic appendix. */
   skillAdvisoryBlock?: string | null
+  /** Explicitly invoked .rivet/skills (full body) — cache-safe dynamic appendix. */
+  invokedSkillsBlock?: string | null
   /** Cross-session memory recall — cache-safe dynamic appendix. */
   crossSessionMemoryBlock?: string | null
   /** @mention context hints — cache-safe dynamic appendix. */
@@ -360,6 +362,21 @@ export function appendixBlockName(content: string): string {
 export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: number): AppendixPart[] {
   const parts: string[] = []
 
+  // ── Protected blocks: must render whole even under appendix budget pressure ──
+  // Explicitly-invoked skill bodies are high-salience by user intent: they should
+  // only disappear when the model marks them complete, not because another
+  // appendix block consumed the budget.
+  const protectedParts: string[] = []
+  if (ctx.invokedSkillsBlock) {
+    protectedParts.push(ctx.invokedSkillsBlock)
+  }
+
+  // Budget for ordinary appendix blocks is what's left after protected blocks.
+  const protectedLen = protectedParts.reduce((sum, p) => sum + p.length, 0)
+  const regularMaxChars = maxChars !== undefined && maxChars > 0
+    ? Math.max(0, maxChars - protectedLen)
+    : maxChars
+
   // ── P1b: cache-friendly ordering — stable sections first, volatile last ──
   // DeepSeek exact-prefix cache matches byte-for-byte from the start.
   // Sections that rarely change go first so their bytes stay in cache;
@@ -471,6 +488,10 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(ctx.skillAdvisoryBlock)
   }
 
+  if (ctx.invokedSkillsBlock) {
+    parts.push(ctx.invokedSkillsBlock)
+  }
+
   if (ctx.crossSessionMemoryBlock) {
     parts.push(ctx.crossSessionMemoryBlock)
   }
@@ -545,19 +566,21 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(renderTersenessNudge(ctx.tersenessEscalate ?? false))
   }
 
-  if (parts.length === 0) return []
+  const protectedResult = protectedParts.map(content => ({ name: appendixBlockName(content), content }))
+
+  if (parts.length === 0) return protectedResult
 
   // ── GWT Top-K selection (when budget is set) ────────────────────
-  if (maxChars !== undefined && maxChars > 0) {
+  if (regularMaxChars !== undefined && regularMaxChars > 0) {
     const scored = parts.map(content => ({
       content,
       salience: assignSalience(content),
     }))
-    const selected = selectTopKBlocks(scored, maxChars)
-    return selected.map(content => ({ name: appendixBlockName(content), content }))
+    const selected = selectTopKBlocks(scored, regularMaxChars)
+    return [...protectedResult, ...selected.map(content => ({ name: appendixBlockName(content), content }))]
   }
 
-  return parts.map(content => ({ name: appendixBlockName(content), content }))
+  return [...protectedResult, ...parts.map(content => ({ name: appendixBlockName(content), content }))]
 }
 
 /** Backward-compatible wrapper: full <context-update> block (no seq). */
