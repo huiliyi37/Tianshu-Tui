@@ -1,3 +1,5 @@
+import { isWindows } from './autonomy'
+
 export interface GlassConfig {
   sidebarOpacity: number // 10-100
   sidebarBlur: number // 0-64
@@ -32,12 +34,20 @@ export function loadGlassConfig(): GlassConfig {
   return DEFAULT_GLASS_CONFIG
 }
 
+/** On WebView2 every `backdrop-filter` blur repaints the surface each scroll/
+ *  stream frame, and the UI stacks several. Cap the radius on Windows so glass
+ *  mode stays usable there; other platforms keep the user's full value. */
+const WINDOWS_MAX_BLUR = 12
+
 export function applyGlassConfig(config: GlassConfig): void {
   const root = document.documentElement
+  const cap = isWindows() ? WINDOWS_MAX_BLUR : Infinity
+  const sidebarBlur = Math.min(config.sidebarBlur, cap)
+  const mainBlur = Math.min(config.mainBlur, cap)
   root.style.setProperty('--sidebar-glass-opacity', `${config.sidebarOpacity}%`)
-  root.style.setProperty('--sidebar-glass-blur', `${config.sidebarBlur}px`)
+  root.style.setProperty('--sidebar-glass-blur', `${sidebarBlur}px`)
   root.style.setProperty('--main-glass-opacity', `${config.mainOpacity}%`)
-  root.style.setProperty('--main-glass-blur', `${config.mainBlur}px`)
+  root.style.setProperty('--main-glass-blur', `${mainBlur}px`)
 }
 
 export function initGlassCustom(): void {

@@ -42,6 +42,12 @@ export function applyGlassMode(value: GlassMode): void {
   else root.removeAttribute('data-surface')
   // Sync surface tokens with visual glass state
   applyThemeJson(resolveTheme(loadThemePref()), value)
+  // Sync the native window backdrop (Windows Mica) with the preference so it
+  // only composites when glass is actually on — otherwise it's wasted DWM work
+  // behind opaque CSS. No-op on macOS (command is cfg-gated) and in browser/tests.
+  void import('@tauri-apps/api/core')
+    .then((m) => m.invoke('set_window_glass', { enabled: value }))
+    .catch(() => { /* not running under Tauri */ })
 }
 
 export function initGlassMode(): void {

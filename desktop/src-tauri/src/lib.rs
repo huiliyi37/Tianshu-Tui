@@ -26,6 +26,11 @@ pub struct RuntimeInfo {
     /// Which Node binary is hosting the sidecar: "bundled", "env", "system".
     /// Serialized as `nodeSource` for the TS frontend (see runtime/client.ts).
     pub node_source: String,
+    /// Whether the sidecar passed `/health` before the UI was handed this info.
+    /// When false the spawn failed or never came up — the port/token point at
+    /// nothing, so the frontend shows a fatal "failed to start" state instead of
+    /// looping forever on transient-reconnect copy.
+    pub ready: bool,
 }
 
 struct Sidecar {
@@ -36,6 +41,26 @@ struct Sidecar {
 #[tauri::command]
 fn runtime_info(state: State<Sidecar>) -> RuntimeInfo {
     state.info.clone()
+}
+
+/// Apply or clear the window's translucent backdrop (Windows Mica) to match the
+/// frontend glass preference. macOS vibrancy stays applied at setup; this is a
+/// no-op there. Called from the glass toggle + on startup so Mica only runs when
+/// the user actually wants glass surfaces.
+#[tauri::command]
+fn set_window_glass(window: tauri::WebviewWindow, enabled: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        if enabled {
+            let _ = window_vibrancy::apply_mica(&window, None);
+        } else {
+            let _ = window_vibrancy::clear_mica(&window);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (window, enabled);
+    }
 }
 
 /// Ask the OS for a free localhost port by binding to :0, then release it.
@@ -163,6 +188,7 @@ fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
 /// A bundled `.app` launched from Finder/Dock inherits a minimal PATH that
 /// usually lacks Homebrew/nvm dirs, so a bare `node` lookup fails. We probe the
 /// common install locations before falling back to PATH resolution.
+#[cfg(not(target_os = "windows"))]
 fn detect_system_node() -> String {
     let candidates = [
         "/opt/homebrew/bin/node",
@@ -177,6 +203,54 @@ fn detect_system_node() -> String {
     "node".to_string()
 }
 
+/// Windows fallback Node lookup. A GUI-launched app inherits a minimal PATH that
+/// rarely includes the Node install dir, so bare `"node"` usually fails. Probe
+/// the common install locations and `where.exe` (which respects PATH/PATHEXT)
+/// before giving up. Keeps the bundled binary as the primary source upstream.
+#[cfg(target_os = "windows")]
+fn detect_system_node() -> String {
+    use std::path::Path;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidates.push(Path::new(&pf).join("nodejs").join("node.exe"));
+    }
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        candidates.push(Path::new(&pf86).join("nodejs").join("node.exe"));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        // nvm-windows symlink target / standalone installs under LocalAppData.
+        candidates.push(Path::new(&local).join("Programs").join("nodejs").join("node.exe"));
+        // Volta default shim.
+        candidates.push(Path::new(&local).join("Volta").join("bin").join("node.exe"));
+    }
+    for c in &candidates {
+        if c.is_file() {
+            return c.to_string_lossy().to_string();
+        }
+    }
+
+    // `where.exe node` — respects PATH + PATHEXT. Suppress the console window it
+    // would otherwise flash (CREATE_NO_WINDOW) since the parent is a GUI app.
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut wcmd = Command::new("where");
+        wcmd.arg("node").creation_flags(CREATE_NO_WINDOW);
+        if let Ok(out) = wcmd.output() {
+            if out.status.success() {
+                if let Ok(s) = String::from_utf8(out.stdout) {
+                    if let Some(first) = s.lines().map(str::trim).find(|l| !l.is_empty()) {
+                        return first.to_string();
+                    }
+                }
+            }
+        }
+    }
+
+    "node".to_string()
+}
+
 /// Pick the Node.js command to host the sidecar.
 ///
 /// Priority:
@@ -185,7 +259,12 @@ fn detect_system_node() -> String {
 ///   3. Common system install locations + PATH fallback.
 fn resolve_node_cmd(app: &tauri::App) -> (String, &'static str) {
     if let Ok(cmd) = std::env::var("RIVET_SIDECAR_CMD") {
-        return (cmd, "env");
+        // An env override may be a verbatim (`\\?\D:\...`) path that Node chokes
+        // on; strip it too (no-op for bare commands like "node" and off Windows).
+        let resolved = strip_verbatim_prefix(PathBuf::from(cmd))
+            .to_string_lossy()
+            .to_string();
+        return (resolved, "env");
     }
     if let Some(bundled) = bundled_node_path(app) {
         return (bundled.to_string_lossy().to_string(), "bundled");
@@ -203,7 +282,9 @@ fn resolve_node_cmd(app: &tauri::App) -> (String, &'static str) {
 ///   3. Repo `dist/main.js` two levels up from `desktop/src-tauri` (dev mode).
 fn sidecar_entry(app: &tauri::App) -> PathBuf {
     if let Ok(p) = std::env::var("RIVET_SIDECAR_ENTRY") {
-        return PathBuf::from(p);
+        // Strip a verbatim (`\\?\…`) prefix so Node's realpathSync doesn't fail
+        // with `EISDIR: lstat '<drive>:'` (no-op for ordinary paths / off Windows).
+        return strip_verbatim_prefix(PathBuf::from(p));
     }
     let res = resource_dir_fallback(app);
     let bundled = res.join("rivet-runtime").join("main.js");
@@ -291,14 +372,27 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         .arg("serve")
         .arg("--port")
         .arg(port.to_string())
-        .env("RIVET_SERVER_TOKEN", &token);
+        .env("RIVET_SERVER_TOKEN", &token)
+        // Parent-death watchdog: the Node sidecar polls this PID and self-exits
+        // when the shell process is gone, so a crash / force-quit / Task Manager
+        // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
+        // only covers the clean-shutdown paths we control.)
+        .env("RIVET_PARENT_PID", std::process::id().to_string());
     // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
     // resolved to absolute paths above, so the child's different cwd can't break
     // locating them). Leave it inherited only if home can't be resolved.
     if let Some(dir) = sidecar_cwd(app) {
         cmd.current_dir(dir);
     }
-    let child = match cmd.spawn() {
+    // Windows: `node` is a console-subsystem binary, so a GUI parent spawning it
+    // flashes a black console window on every launch. CREATE_NO_WINDOW suppresses it.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = match cmd.spawn() {
         Ok(c) => Some(c),
         Err(e) => {
             eprintln!(
@@ -309,10 +403,16 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         }
     };
 
-    if child.is_some() && !wait_until_ready(port, &token, Duration::from_secs(15)) {
+    let ready = child.is_some() && wait_until_ready(port, &token, Duration::from_secs(15));
+    if child.is_some() && !ready {
         eprintln!(
             "[rivet] sidecar spawned but did not pass /health on port {port} within timeout"
         );
+        // Health never came up: reap the half-dead child so it can't linger
+        // holding the port behind a UI that's about to show a fatal error.
+        if let Some(mut c) = child.take() {
+            let _ = c.kill();
+        }
     }
 
     (
@@ -320,6 +420,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
             port,
             token,
             node_source: node_source.to_string(),
+            ready,
         },
         child,
     )
@@ -350,6 +451,7 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
+            set_window_glass,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
@@ -372,10 +474,10 @@ pub fn run() {
                 );
             }
 
-            #[cfg(target_os = "windows")]
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window_vibrancy::apply_mica(&window, None);
-            }
+            // Windows Mica is applied on demand from the frontend via
+            // `set_window_glass` (gated on the user's glass preference), not
+            // unconditionally — testers default to solid surfaces, where Mica is
+            // pure wasted DWM compositing behind opaque CSS.
 
             // ── 系统托盘（L1 #7）──
             let show = MenuItemBuilder::with_id("show", "显示天枢").build(app)?;

@@ -178,10 +178,29 @@ export function ThreadView(props: {
   // stays constant while a reply streams in, so we pin the bottom on text growth.
   const lastBlockTextLen = view.blocks[view.blocks.length - 1]?.text.length ?? 0
 
-  // Auto-scroll only when the user is near the bottom (incl. streaming growth).
+  // Auto-scroll only when the user is near the bottom, throttled to ~10Hz. During
+  // streaming these deps change every rAF batch; an unthrottled scrollToIndex
+  // forces a layout (plus a measureElement remeasure of the growing last row) on
+  // every token — a feedback loop that janks hard on WebView2. A leading+trailing
+  // throttle keeps the bottom pinned without the per-token layout storm.
+  const scrolledUpRef = useRef(scrolledUp)
+  scrolledUpRef.current = scrolledUp
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastScrollAtRef = useRef(0)
+  useEffect(() => () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current) }, [])
   useEffect(() => {
-    if (!scrolledUp && rendered.length > 0) {
+    if (scrolledUp || rendered.length === 0) return
+    const SCROLL_THROTTLE_MS = 100
+    const run = () => {
+      scrollTimerRef.current = null
+      if (scrolledUpRef.current) return // user scrolled up while the tick was pending
+      lastScrollAtRef.current = performance.now()
       virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
+    }
+    const elapsed = performance.now() - lastScrollAtRef.current
+    if (elapsed >= SCROLL_THROTTLE_MS) run()
+    else if (scrollTimerRef.current === null) {
+      scrollTimerRef.current = setTimeout(run, SCROLL_THROTTLE_MS - elapsed)
     }
   }, [rendered.length, lastBlockTextLen, scrolledUp, virtualizer])
 
@@ -592,7 +611,16 @@ export function ThreadView(props: {
                           onOpenImage={openImage}
                           domainGlyph={domainGlyph}
                           domainName={activeDomain?.name}
-                          isStreaming={false}
+                          // Live reasoning/text can land inside a timeline run too;
+                          // mark the tail block streaming (mirror of the top-level
+                          // branch) so it gets the ~10Hz throttle instead of
+                          // re-rendering plain text at full rAF rate.
+                          isStreaming={
+                            b.key === lastKey && (
+                              (b.kind === 'thinking' && view.private_thinkingOpen) ||
+                              (b.kind === 'assistant' && view.private_textOpen)
+                            )
+                          }
                         />
                       ))}
                     </TimelineGroup>
@@ -1085,6 +1113,12 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
   const wasStreaming = useRef(streaming)
   const bodyRef = useRef<HTMLDivElement>(null)
 
+  // Reasoning is plain text with no Markdown throttle of its own, so a fast model
+  // otherwise dumps tokens straight into the DOM at full rAF rate (~60Hz). Reuse
+  // the assistant-text throttle to update the body / peek / scroll at ~10Hz, then
+  // snap to the full text the instant streaming stops.
+  const shown = useThrottledStreamingSource(block.text, streaming)
+
   // Auto-collapse when the reasoning run completes (unless user pinned it open).
   useEffect(() => {
     if (wasStreaming.current && !streaming && !manual.current) setOpen(false)
@@ -1096,10 +1130,10 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
     if (streaming && open && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight
     }
-  }, [streaming, open, block.text])
+  }, [streaming, open, shown])
 
   const toggle = useCallback(() => { manual.current = true; setOpen((o) => !o) }, [])
-  const summary = useMemo(() => summarizeThinking(block.text), [block.text])
+  const summary = useMemo(() => summarizeThinking(shown), [shown])
 
   return (
     <div className={`reasoning${open ? ' open' : ''}${streaming ? ' streaming' : ''}`}>
@@ -1110,7 +1144,7 @@ function ThinkingBlock({ block, streaming }: { block: ConvoBlock; streaming: boo
         <span className="reasoning-caret" aria-hidden>{open ? '▾' : '▸'}</span>
       </div>
       {open && (
-        <div className="reasoning-body" ref={bodyRef}>{block.text}</div>
+        <div className="reasoning-body" ref={bodyRef}>{shown}</div>
       )}
     </div>
   )

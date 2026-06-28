@@ -27,6 +27,11 @@ export interface RuntimeInfo {
   /** Which Node hosts the sidecar: 'bundled' (shipped binary) | 'env' | 'system'.
    *  Reported by the Rust shell (runtime_info); absent in the browser-dev fallback. */
   nodeSource?: string
+  /** False when the sidecar failed to spawn or never passed /health before launch
+   *  — the port/token point at nothing, so the UI shows a fatal "failed to start"
+   *  state instead of an endless transient-reconnect banner. Absent (treated as
+   *  ready) in the browser-dev fallback and on older shells. */
+  ready?: boolean
 }
 
 let cached: RuntimeInfo | null = null

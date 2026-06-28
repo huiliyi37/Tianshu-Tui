@@ -3803,3 +3803,20 @@ html[data-theme="nebula"] .plan-panel {
 .sidebar-expand-capsule:hover svg {
   transform: translateX(2px);
 }
+
+/* ── Reduced motion ────────────────────────────────────────────────
+   Many status indicators loop forever (pulse-running box-shadow,
+   glyph-breath transform+text-shadow, spinners). On WebView2 these keep the
+   compositor busy every frame while an agent runs. Honour the OS
+   "reduce motion" accessibility setting: collapse continuous animations to a
+   single instant pass and cut transitions, keeping final states intact. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
