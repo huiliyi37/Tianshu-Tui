@@ -11,9 +11,17 @@ import {
   type UnconfiguredPreset,
 } from '../runtime/client'
 
+/** 对 key 引用做防御性脱敏：前端不应假定后端已脱敏，避免长 ref 泄漏 key 片段。
+ *  保留前 4 末 4，中间用 … 占位；短 ref（≤8）原样显示（通常是已脱敏指纹）。 */
+function maskRef(ref: string): string {
+  const r = ref.trim()
+  if (r.length <= 8) return r
+  return `${r.slice(0, 4)}…${r.slice(-4)}`
+}
+
 function KeyBadge({ status }: { status: ProviderListItem['keyStatus'] }) {
-  if (status.source === 'inline') return <span className="badge ok" title={`Inline key ${status.ref}`}>Key {status.ref}</span>
-  if (status.source === 'env') return <span className="badge ok" title={`From env: ${status.ref}`}>{status.ref}</span>
+  if (status.source === 'inline') return <span className="badge ok" title="Inline key（已配置）">Key {maskRef(status.ref)}</span>
+  if (status.source === 'env') return <span className="badge ok" title={`From env: ${maskRef(status.ref)}`}>{maskRef(status.ref)}</span>
   return <span className="badge warn">未配置</span>
 }
 
