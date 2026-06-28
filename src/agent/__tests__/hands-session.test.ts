@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
@@ -163,6 +163,54 @@ describe('runHandsSession', () => {
     // 落盘失败不致命：diffArtifactId 未设，但 diff 仍在 artifacts 里
     assert.equal(run.result.diffArtifactId, undefined)
     assert.ok(run.result.artifacts.find(a => a.kind === 'diff'), 'diff still in artifacts as fallback')
+  })
+
+  it('runs in-place (no worktree) when git is unavailable — no-git graceful degradation', async () => {
+    // Non-git temp dir: createWorktree will throw. hands-session must fall back
+    // to running in-place and still complete the task (parity with Claude Code /
+    // Codex, which don't require git).
+    const nonGitDir = mkdtempSync(join(tmpdir(), 'rivet-nogit-'))
+    // A wtCoordinator whose create() always throws, simulating no-git env without
+    // needing to actually invoke git on a non-repo.
+    const throwingWtCoordinator = {
+      create() { throw new Error('failed to create git worktree') },
+      remove() {},
+      cleanupAll() {},
+      getActiveCount() { return 0 },
+    } as unknown as WorktreeCoordinator
+
+    try {
+      mkdirSync(join(nonGitDir, 'src'), { recursive: true })
+      writeFileSync(join(nonGitDir, 'src', 'output.ts'), 'export const x = 1\n')
+
+      const order = testOrder({ id: 'wo-nogit' })
+      const config: HandsSessionConfig = {
+        order,
+        wtCoordinator: throwingWtCoordinator,
+        cwd: nonGitDir,
+        maxTurns: 2,
+        contextWindow: 128_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+        runAgent: async (_prompt, _callbacks, workerCwd) => {
+          // Should be running in-place: workerCwd === cwd (nonGitDir)
+          assert.equal(workerCwd, nonGitDir, 'worker must run in-place when worktree unavailable')
+          writeFileSync(join(workerCwd, 'src', 'output.ts'), 'export const x = 2\n')
+          return JSON.stringify({
+            workOrderId: order.id, status: 'passed', summary: 'updated output.ts',
+            findings: [], artifacts: [], changedFiles: ['src/output.ts'],
+            risks: [], nextActions: [], evidenceStatus: 'unverified',
+          })
+        },
+      }
+
+      const run = await runHandsSession(config)
+      assert.equal(run.result.status, 'passed', 'no-git worker must complete, not fail')
+      assert.equal(run.result.summary, 'updated output.ts')
+      // File was written in-place
+      assert.equal(readFileSync(join(nonGitDir, 'src', 'output.ts'), 'utf8'), 'export const x = 2\n')
+    } finally {
+      rmSync(nonGitDir, { recursive: true, force: true })
+    }
   })
 
   it('diffs worker changes against the current feature branch when baseRef is not provided', async () => {
