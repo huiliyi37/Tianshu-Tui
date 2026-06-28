@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { listFiles, listModels, switchModel } from '../runtime/client'
+import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
-import type { ModelEntry, PlanModeState } from '../runtime/types'
+import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
 
@@ -611,6 +611,7 @@ export function Composer(props: {
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
+        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -730,6 +731,105 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
                 <span className="model-picker-desc">切换中…</span>
               ) : m.contextWindow ? (
                 <span className="model-picker-desc">{Math.round(m.contextWindow / 1000)}K</span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Inline star-domain (星域) selector in the composer bar, beside the model picker. */
+function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
+  const [open, setOpen] = useState(false)
+  const [entries, setEntries] = useState<DomainEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [applyingKey, setApplyingKey] = useState<string | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const refresh = useCallback(async (withSpinner: boolean) => {
+    if (!sessionId) return
+    if (withSpinner) setLoading(true)
+    try {
+      const es = await listDomains(sessionId)
+      setEntries(es)
+    } catch (err) {
+      if (withSpinner) toast.error(`加载星域失败: ${(err as Error).message}`)
+    } finally {
+      if (withSpinner) setLoading(false)
+    }
+  }, [sessionId])
+
+  // Mirror ModelPicker: keep the closed trigger live via menuRev (domain_changed
+  // SSE bumps it), fetch on mount, and a spinnered fetch when the menu opens.
+  useEffect(() => { void refresh(false) }, [refresh, menuRev])
+  useEffect(() => { if (open) void refresh(true) }, [open, refresh])
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const current = entries.find((e) => e.current)
+  const glyph = current?.uiPersona?.glyph || '✦'
+  const label = current?.name || '星域'
+
+  const select = async (e: DomainEntry) => {
+    if (disabled || e.current) return
+    setApplyingKey(e.key)
+    try {
+      await setDomain(sessionId, e.key)
+      setEntries((prev) => prev.map((x) => ({ ...x, current: x.key === e.key })))
+      setOpen(false)
+    } catch (err) {
+      toast.error(`切换星域失败: ${(err as Error).message}`)
+    } finally {
+      setApplyingKey(null)
+    }
+  }
+
+  return (
+    <div className="model-picker domain-picker" ref={ref}>
+      <button
+        className="model-picker-trigger"
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled || !!applyingKey}
+        title={disabled ? '运行中不可切换星域' : '切换星域'}
+        aria-label="切换星域"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span aria-hidden>{glyph}</span>
+        <span className="model-picker-label">{applyingKey ? '切换中…' : label}</span>
+      </button>
+      {open && (
+        <div className="model-picker-menu" role="listbox">
+          {loading && (
+            <div className="model-picker-item" role="status" aria-busy>
+              <span className="model-picker-name">加载中…</span>
+            </div>
+          )}
+          {!loading && entries.map((e) => (
+            <button
+              key={e.key}
+              role="option"
+              aria-selected={e.current}
+              disabled={applyingKey === e.key}
+              className={`model-picker-item ${e.current ? 'active' : ''}`}
+              onClick={() => void select(e)}
+            >
+              <span className="model-picker-name">
+                {e.uiPersona?.glyph ? `${e.uiPersona.glyph} ` : ''}{e.name}
+              </span>
+              {applyingKey === e.key ? (
+                <span className="model-picker-desc">切换中…</span>
+              ) : (e.meta || e.motto) ? (
+                <span className="model-picker-desc">{e.meta || e.motto}</span>
               ) : null}
             </button>
           ))}
