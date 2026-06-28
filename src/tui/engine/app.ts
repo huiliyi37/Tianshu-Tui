@@ -2299,6 +2299,12 @@ export class TuiApp {
   }
 
   private renderLive(): void {
+    // 全屏覆盖层（命令面板 / splash / 详情页）激活时，Live 区域由覆盖层引擎
+    // 负责渲染，避免再次绘制内容产生右下角残留。
+    if (this.overlay.isActive()) {
+      return
+    }
+
     const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS
     const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
     const savedColumns = this.columns
