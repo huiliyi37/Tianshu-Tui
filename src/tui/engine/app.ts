@@ -46,6 +46,7 @@ import { formatTeamPanel } from '../format/team-panel.js'
 import { formatWorkerFleet } from '../format/worker-fleet.js'
 import { decodeTeamPanelModel, overlayFleetStatus, TEAM_PANEL_UI_PREFIX, type TeamPanelModel } from '../team-panel-model.js'
 import { buildWorkerDetailContent } from '../worker-detail.js'
+import { renderSidePanel, type SidePanelInput } from '../side-panel.js'
 import type { TasksFilter } from '../format/overlay.js'
 import {
   delegationObjectiveFromInput,
@@ -106,6 +107,10 @@ export function looksLikeFilePath(input: string): boolean {
   const spaceIdx = rest.indexOf(' ')
   return spaceIdx === -1 || slashIdx < spaceIdx
 }
+
+/** 右侧面板触发阈值与宽度。 */
+const SIDE_PANEL_MIN_COLUMNS = 120
+const SIDE_PANEL_WIDTH = 28
 
 // ── State types ────────────────────────────────────────────────
 
@@ -2224,10 +2229,10 @@ export class TuiApp {
    * 顶框泄漏进 scrollback（输入框重影）。多行内容（流式 tail/思考/工具卡片）
    * 是有意换行的，不走此钳制。
    */
-  private clampLine(text: string): string {
+  private clampLine(text: string, maxWidth = this.columns): string {
     // 留 1 列余量：吸收 get-east-asian-width 判为 neutral、但个别 CJK 终端仍按 2 列
     // 渲染的几何符（如 ◧）带来的 +1 残余误差。
-    return truncateToDisplayWidth(text, Math.max(1, this.columns - 1), { ambiguousAsWide: true })
+    return truncateToDisplayWidth(text, Math.max(1, maxWidth - 1), { ambiguousAsWide: true })
   }
 
   /**
@@ -2247,18 +2252,67 @@ export class TuiApp {
   }
 
   /** 渲染一条全宽反色提示条（用于审批/意图框顶部隔离）。 */
-  private renderBanner(text: string, bgColor: string, fgColor: string = '#000000'): string {
+  private renderBanner(text: string, bgColor: string, fgColor: string = '#000000', width = this.columns): string {
     const label = ` ${text} `
     const labelWidth = stringWidth(label)
-    const maxWidth = Math.max(1, this.columns - 1)
+    const maxWidth = Math.max(1, width - 1)
     const padWidth = Math.max(0, maxWidth - labelWidth)
     return `${bg(bgColor)}${fg(fgColor)}${label}${' '.repeat(padWidth)}\x1B[0m`
   }
 
-  private renderLive(): void {
-    const lines: LiveRegionLine[] = []
+  private mergeSidePanel(lines: LiveRegionLine[], panelLines: string[], contentCols: number, panelWidth: number): LiveRegionLine[] {
+    const merged: LiveRegionLine[] = []
+    const totalRows = Math.max(lines.length, panelLines.length)
+    const RESET = '\x1B[0m'
+    for (let i = 0; i < totalRows; i++) {
+      const mainRaw = lines[i]?.text ?? ''
+      const mainTrunc = truncateToDisplayWidth(mainRaw, contentCols, { ambiguousAsWide: true })
+      const mainPad = Math.max(0, contentCols - displayWidth(mainTrunc, { ambiguousAsWide: true }))
+      const panelRaw = panelLines[i] ?? ''
+      const panelPad = panelRaw ? '' : ' '.repeat(panelWidth)
+      merged.push({ text: `${mainTrunc}${RESET}${' '.repeat(mainPad)}${panelRaw}${panelPad}` })
+    }
+    return merged
+  }
 
-    // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
+  private renderLive(): void {
+    const showSidePanel = this.columns >= SIDE_PANEL_MIN_COLUMNS
+    const sidePanelWidth = showSidePanel ? SIDE_PANEL_WIDTH : 0
+    const savedColumns = this.columns
+    const contentCols = savedColumns - sidePanelWidth
+
+    // Metrics 供 side panel 与 GlanceBar 共享，提前计算。
+    const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
+    let glanceCacheHitRate: number | undefined
+    let glanceContextRatio: number | undefined
+    let glanceCost: number
+    let glanceEstimatedTokens: number | undefined
+    let glanceConversationTokens: number | undefined
+    let glanceMaxTokens: number | undefined
+    if (metrics) {
+      glanceCacheHitRate = metrics.cacheHitRate ?? undefined
+      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
+      glanceCost = metrics.cost
+      glanceEstimatedTokens = metrics.estimatedTokens
+      glanceConversationTokens = metrics.conversationTokens
+      glanceMaxTokens = metrics.maxTokens
+    } else {
+      glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
+      glanceContextRatio = this.metricsGlanceController.lastContextRatio
+      glanceCost = this.estimateSessionCost()
+    }
+
+    // 让 live 内容按主区域宽度排版；后续再把 side panel 拼到右侧。
+    if (showSidePanel) {
+      (this as any).columns = contentCols
+    }
+
+    let lines: LiveRegionLine[] = []
+    let chromeStart = 0
+    try {
+      lines = []
+
+      // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
     const stalled = this.streamRenderController.lastActivityMs > 0 && Date.now() - this.streamRenderController.lastActivityMs > 10_000
     const spinnerLine = formatSpinnerStatus({
       tick: this.streamRenderController.tick,
@@ -2297,50 +2351,53 @@ export class TuiApp {
     //  - team_orchestrate 运行中：渲染 wave/task DAG（运行态由 fleet 叠加）。
     //  - delegate_*：渲染 FleetRegistry 驱动的 per-worker 结构化总览。
     //  - 刚启动、活动未上行的窗口期：回退工具级 pill，避免空白。
-    if (this.liveTeamModel) {
-      const model = this.teamModelWithLiveStatus(this.liveTeamModel)
-      for (const line of formatTeamPanel(model, this.theme, this.columns)) {
-        lines.push({ text: line })
-      }
-    } else {
-    const activeWorkers = this.fleet.getActiveWorkers()
-    if (activeWorkers.length > 0) {
-      const summary = activeWorkers.reduce(
-        (acc, w) => {
-          const p = this.fleet.getGroupProgress(w.parentToolId)
-          if (!acc.seen.has(w.parentToolId)) {
-            acc.seen.add(w.parentToolId)
-            acc.total += p.total
-            acc.done += p.done
+    // 宽屏时这些汇总信息已移到右侧 side panel，避免主区重复。
+    if (!showSidePanel) {
+      if (this.liveTeamModel) {
+        const model = this.teamModelWithLiveStatus(this.liveTeamModel)
+        for (const line of formatTeamPanel(model, this.theme, this.columns)) {
+          lines.push({ text: line })
+        }
+      } else {
+        const activeWorkers = this.fleet.getActiveWorkers()
+        if (activeWorkers.length > 0) {
+          const summary = activeWorkers.reduce(
+            (acc, w) => {
+              const p = this.fleet.getGroupProgress(w.parentToolId)
+              if (!acc.seen.has(w.parentToolId)) {
+                acc.seen.add(w.parentToolId)
+                acc.total += p.total
+                acc.done += p.done
+              }
+              acc.running += 1
+              return acc
+            },
+            { total: 0, done: 0, running: 0, seen: new Set<string>() },
+          )
+          const fleetLines = formatWorkerFleet(
+            activeWorkers,
+            this.theme,
+            this.columns,
+            { done: summary.done, total: summary.total, running: summary.running },
+          )
+          for (const line of fleetLines) lines.push({ text: line })
+        } else {
+          const delegationTools = [...this.toolGroupController.getPendingEntries()]
+            .filter(([, meta]) => isDelegationTool(meta.name))
+          if (delegationTools.length > 0) {
+            const pills = delegationTools.map(([, meta]) => {
+              const elapsed = Date.now() - meta.startMs
+              const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
+              const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
+                ? color('[auto]', this.theme.success)
+                : color('[ask]', this.theme.warning)
+              const profile = delegationProfileFromInput(meta.name, meta.input)
+              return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
+            })
+            lines.push({ text: this.clampLine(` ${pills.join('  ')}`) })
           }
-          acc.running += 1
-          return acc
-        },
-        { total: 0, done: 0, running: 0, seen: new Set<string>() },
-      )
-      const fleetLines = formatWorkerFleet(
-        activeWorkers,
-        this.theme,
-        this.columns,
-        { done: summary.done, total: summary.total, running: summary.running },
-      )
-      for (const line of fleetLines) lines.push({ text: line })
-    } else {
-      const delegationTools = [...this.toolGroupController.getPendingEntries()]
-        .filter(([, meta]) => isDelegationTool(meta.name))
-      if (delegationTools.length > 0) {
-        const pills = delegationTools.map(([, meta]) => {
-          const elapsed = Date.now() - meta.startMs
-          const elapsedStr = elapsed > 1000 ? `${(elapsed / 1000).toFixed(0)}s` : `${elapsed}ms`
-          const approvalBadge = meta._approvalMode === 'dangerously-skip-permissions'
-            ? color('[auto]', this.theme.success)
-            : color('[ask]', this.theme.warning)
-          const profile = delegationProfileFromInput(meta.name, meta.input)
-          return `${domainBadge(meta.name)?.glyph ?? '◆'} ${profile} ${color(elapsedStr, this.theme.muted)} ${approvalBadge}`
-        })
-        lines.push({ text: this.clampLine(` ${pills.join('  ')}`) })
+        }
       }
-    }
     }
 
     // 2c. Collapsible 探索工具聚合行（避免 read×5 + grep×3 刷屏 live 区）
@@ -2437,38 +2494,17 @@ export class TuiApp {
     //    不会裁掉任务面板与输入框。
     const chromeStart = lines.length
 
-    // 3b. 常驻任务面板（todo 列表）——空列表不渲染。
-    const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
-    if (taskLines.length > 0) {
-      lines.push({ text: '' })
-      for (const taskLine of taskLines) lines.push({ text: taskLine })
+    // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
+    if (!showSidePanel) {
+      const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6 })
+      if (taskLines.length > 0) {
+        lines.push({ text: '' })
+        for (const taskLine of taskLines) lines.push({ text: taskLine })
+      }
     }
 
-    // 4. GlanceBar（context% / cache / cost / git branch） metrics 计算
-    // 优先用真实指标 provider（main-ansi 读 ctx.session）；无则回退内部估算。
-    // 运行态相位已收敛到顶部 spinner 状态行，GlanceBar 不再重复显示 phase。
-    const metrics = this.metricsGlanceController.metricsProvider?.() ?? null
-    let glanceCacheHitRate: number | undefined
-    let glanceContextRatio: number | undefined
-    let glanceCost: number
-    let glanceEstimatedTokens: number | undefined
-    let glanceConversationTokens: number | undefined
-    let glanceMaxTokens: number | undefined
-    if (metrics) {
-      glanceCacheHitRate = metrics.cacheHitRate ?? undefined
-      // Context pressure color still reflects the real API-facing occupancy,
-      // because the context window limit is enforced against the total prompt.
-      glanceContextRatio = metrics.maxTokens > 0 ? Math.min(1, metrics.estimatedTokens / metrics.maxTokens) : undefined
-      glanceCost = metrics.cost
-      glanceEstimatedTokens = metrics.estimatedTokens
-      // Display the chat-visible context size (excludes system prompt / tools).
-      glanceConversationTokens = metrics.conversationTokens
-      glanceMaxTokens = metrics.maxTokens
-    } else {
-      glanceCacheHitRate = this.metricsGlanceController.lastCacheHitRate
-      glanceContextRatio = this.metricsGlanceController.lastContextRatio
-      glanceCost = this.estimateSessionCost()
-    }
+    // 4. GlanceBar（context% / cache / cost / git branch） metrics 已在顶部计算，
+    //    与 side panel 共享同一份 glanceCacheHitRate / glanceEstimatedTokens / glanceCost。
 
     // 5. Input line / Ctrl+C hint（多行输入：每行单独 push）
     if (this.inputController.ctrlCPendingSince > 0) {
@@ -2587,6 +2623,38 @@ export class TuiApp {
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
       }
+    }
+
+    } finally {
+      if (showSidePanel) {
+        this.columns = savedColumns
+      }
+    }
+
+    if (showSidePanel) {
+      const currentTool = (() => {
+        for (const [id, meta] of this.toolGroupController.getPendingEntries()) {
+          if (isCollapsibleTool(meta.name)) continue
+          if (meta.name === 'bash' && this.toolGroupController.hasBashEntry(id)) continue
+          return { name: meta.name, elapsedMs: Date.now() - meta.startMs }
+        }
+        return undefined
+      })()
+      const sidePanelInput: SidePanelInput = {
+        columns: sidePanelWidth,
+        todos: this.state.todos,
+        workers: this.fleet.getActiveWorkers(),
+        currentTool,
+        modelName: this.state.modelName,
+        domainGlyph: this.state.domainGlyph,
+        domainName: this.state.domainName,
+        estimatedTokens: glanceEstimatedTokens,
+        maxTokens: glanceMaxTokens,
+        cacheHitRate: glanceCacheHitRate,
+        cost: glanceCost,
+      }
+      const panelLines = renderSidePanel(sidePanelInput, this.theme)
+      lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)
     }
 
     this.live.render(lines, { reservedTail: lines.length - chromeStart })
