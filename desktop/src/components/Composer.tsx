@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel } from '../runtime/client'
 import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
@@ -137,7 +137,30 @@ export function Composer(props: {
   const [imageError, setImageError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
   const recognitionRef = useRef<SpeechRecognition | null>(null)
+
+  // Parse mentions from the value prop
+  const { text, mentions } = useMemo(() => {
+    const regex = /@file:([^\s]+)\s?/g
+    const paths: string[] = []
+    const cleanText = value.replace(regex, (m, path) => {
+      paths.push(path)
+      return ''
+    })
+    return { text: cleanText, mentions: paths }
+  }, [value])
+
+  const removeMention = (pathToRemove: string) => {
+    const remaining = mentions.filter((m) => m !== pathToRemove)
+    const suffix = remaining.map((m) => `@file:${m}`).join(' ')
+    let newValue = text
+    if (suffix) {
+      const needsSpace = text.length > 0 && !text.endsWith(' ')
+      newValue = `${text}${needsSpace ? ' ' : ''}${suffix}`
+    }
+    onChange(newValue)
+  }
 
   // Restore caret after a programmatic value change (mention insertion).
   useLayoutEffect(() => {
@@ -155,7 +178,7 @@ export function Composer(props: {
     const next = computeComposerTextareaStyle(el.scrollHeight)
     el.style.height = next.height
     el.style.overflowY = next.overflowY
-  }, [value])
+  }, [text])
 
   useEffect(() => () => clearTimeout(debounce.current), [])
 
@@ -200,10 +223,10 @@ export function Composer(props: {
     }, 120)
   }
 
-  const onAfterCaret = (text: string, caret: number) => {
+  const onAfterCaret = (textVal: string, caret: number) => {
     // Slash command menu takes priority at line start.
     if (commands && commands.length > 0) {
-      const slash = detectSlash(text, caret)
+      const slash = detectSlash(textVal, caret)
       if (slash) {
         clearTimeout(debounce.current)
         const filtered = filterCommands(commands, slash.query)
@@ -215,21 +238,28 @@ export function Composer(props: {
         return
       }
     }
-    const token = detectMention(text, caret)
+    const token = detectMention(textVal, caret)
     if (token) queryFiles(token)
     else closeSuggest()
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const next = e.target.value
-    onChange(next)
-    onAfterCaret(next, e.target.selectionStart ?? next.length)
+    const nextText = e.target.value
+    const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+    let newValue = nextText
+    if (suffix) {
+      const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+      newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+    }
+    onChange(newValue)
+    onAfterCaret(newValue, e.target.selectionStart ?? newValue.length)
   }
 
   const selectFile = (token: MentionToken, path: string) => {
-    const { text, caret } = applyMention(value, token, path)
-    pendingCaret.current = caret
-    onChange(text)
+    const { text: nextRawValue, caret } = applyMention(value, token, path)
+    // Place caret at the end of the text segment (where the '@' query was)
+    pendingCaret.current = token.start
+    onChange(nextRawValue)
     closeSuggest()
   }
 
@@ -298,9 +328,23 @@ export function Composer(props: {
         else interim += result[0]?.transcript ?? ''
       }
       if (final) {
-        onChange(value ? `${value} ${final}`.trim() : final)
+        const nextText = text ? `${text} ${final}`.trim() : final
+        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        let newValue = nextText
+        if (suffix) {
+          const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+          newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+        }
+        onChange(newValue)
       } else if (interim) {
-        onChange(value ? `${value} ${interim}`.trim() : interim)
+        const nextText = text ? `${text} ${interim}`.trim() : interim
+        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        let newValue = nextText
+        if (suffix) {
+          const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
+          newValue = `${nextText}${needsSpace ? ' ' : ''}${suffix}`
+        }
+        onChange(newValue)
       }
     }
     recognition.onerror = () => setRecording(false)
@@ -473,11 +517,37 @@ export function Composer(props: {
           ))}
         </div>
       )}
+      {mentions.length > 0 && (
+        <div className="composer-chips flex flex-wrap gap-1.5 px-3 pt-2 pb-1">
+          {mentions.map((path) => (
+            <div key={path} className="composer-chip flex items-center gap-1 bg-panel-3 border border-border rounded-full pl-2 pr-1.5 py-0.5 text-xs text-text-secondary" title={path}>
+              <span className="text-muted shrink-0" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+              </span>
+              <span className="truncate max-w-[180px] font-mono text-[11px]">{path.split('/').pop()}</span>
+              <button
+                type="button"
+                className="chip-remove hover:text-error hover:bg-error-soft rounded-full p-0.5 transition-colors"
+                onClick={() => removeMention(path)}
+                aria-label={`移除 ${path}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {imageError && <div className="composer-error">{imageError}</div>}
       <div className="composer-row">
         <textarea
           ref={taRef}
-          value={value}
+          value={text}
           placeholder={planning
             ? '描述你的目标…'
             : busy

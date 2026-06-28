@@ -3414,3 +3414,44 @@ html[data-theme="nebula"] .plan-panel {
     opacity: 1;
   }
 }
+
+/* Composer Context Chips */
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 4px 12px;
+}
+.composer-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--dur) var(--ease);
+}
+.composer-chip:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+.chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 50%;
+  padding: 2px;
+  transition: all var(--dur) var(--ease);
+}
+.chip-remove:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
