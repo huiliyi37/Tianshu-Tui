@@ -6,6 +6,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { AppStateProvider } from './state/store'
 import { initTheme } from './lib/theme'
 import { initFontWeight } from './lib/font-weight'
+import { initFontFamily } from './lib/font-family'
 import { initGlassMode } from './lib/glass'
 import { initI18n } from './i18n'
 import './styles/tokens.css'
@@ -16,6 +17,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 initTheme()
 initFontWeight()
+initFontFamily()
 initGlassMode()
 initI18n()
 

@@ -207,13 +207,24 @@
 /* Glass mode overrides for light theme — higher opacity than dark (light
    backgrounds need more coverage to stay readable over a wallpaper). */
 :root[data-theme="light"][data-surface="glass"] {
-  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 62%, transparent);
-  --main-surface-bg: color-mix(in oklab, var(--bg) 82%, transparent);
-  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 68%, transparent);
-  --compose-surface-border: color-mix(in oklab, var(--border) 55%, transparent);
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 84%, transparent);
+  --sidebar-surface-blur: 32px;
+  --sidebar-surface-saturation: 1.1;
+  --main-surface-bg: color-mix(in oklab, var(--bg) 92%, transparent);
+  --main-surface-blur: 24px;
+  --main-surface-saturation: 1.05;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 88%, transparent);
+  --compose-surface-border: color-mix(in oklab, var(--border) 70%, transparent);
   --compose-surface-shadow: 0 12px 40px color-mix(in oklab, var(--text) 10%, transparent), 0 2px 8px color-mix(in oklab, var(--text) 5%, transparent);
-  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 90%, transparent);
-  --modal-surface-bg: color-mix(in oklab, var(--panel) 92%, transparent);
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 95%, transparent);
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 96%, transparent);
+
+  /* Boost text contrast specifically for light theme over wallpapers */
+  --link: #5c35cc;
+  --link-hover: #4a25a8;
+  --muted: #3a3a44;
+  --faint: #6e6e78;
+  --text-dim: #5c5c68;
 }
 
 /* Font-weight boost levels. All three semantic weights shift together so
@@ -227,6 +238,20 @@ html[data-font-weight="bold"] {
   --weight-normal: 500;
   --weight-medium: 600;
   --weight-semibold: 700;
+}
+
+/* Font family configurations */
+html[data-font-family="sans"] {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+html[data-font-family="kaiti"] {
+  --font-sans: "Kaiti SC", "STKaiti", "Noto Serif CJK SC", "STSong", "Georgia", serif;
+}
+html[data-font-family="geometric"] {
+  --font-sans: "Outfit", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+html[data-font-family="mono"] {
+  --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 /* ── Nebula (Starry Void & Neon) ────────────────────────────────── */

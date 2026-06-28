@@ -5,6 +5,7 @@ import { useUiDispatch, useUiState } from '../state/store'
 import { useHealth } from '../state/queries'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { loadFontWeightPref, setFontWeightPref, type FontWeightPref } from '../lib/font-weight'
+import { loadFontFamilyPref, setFontFamilyPref, type FontFamilyPref } from '../lib/font-family'
 import { useGlassMode } from '../lib/glass'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
@@ -58,6 +59,13 @@ const FONT_WEIGHT_LABEL: Record<FontWeightPref, string> = {
   bold: '加粗',
 }
 
+const FONT_FAMILY_LABEL: Record<FontFamilyPref, string> = {
+  sans: '系统无衬线 (Sans-Serif)',
+  kaiti: '优雅楷体 (Chinese Kaiti)',
+  geometric: '几何主义 (Outfit / Inter)',
+  mono: '极客等宽 (JetBrains Mono)',
+}
+
 export function SettingsSurface() {
   const [activeCat, setActiveCat] = useState<SettingsCat>('appearance')
   const health = useHealth()
@@ -67,6 +75,7 @@ export function SettingsSurface() {
   const [notifPref, setNotifPref] = useState<NotifPref>(() => loadNotifPref())
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const [fontWeight, setFontWeight] = useState<FontWeightPref>(() => loadFontWeightPref())
+  const [fontFamily, setFontFamily] = useState<FontFamilyPref>(() => loadFontFamilyPref())
 
   const pick = (t: ThemePref) => {
     setTheme(t)
@@ -76,6 +85,11 @@ export function SettingsSurface() {
   const pickFontWeight = (w: FontWeightPref) => {
     setFontWeight(w)
     setFontWeightPref(w)
+  }
+
+  const pickFontFamily = (f: FontFamilyPref) => {
+    setFontFamily(f)
+    setFontFamilyPref(f)
   }
 
   const pickAutonomy = (lvl: AutonomyLevel) => {
@@ -138,6 +152,20 @@ export function SettingsSurface() {
                 </SelectContent>
               </Select>
               <div className="meta">调整全局字重，实时生效。</div>
+            </section>
+            <section className="settings-group">
+              <h4>字体风格</h4>
+              <Select value={fontFamily} onValueChange={(v) => pickFontFamily(v as FontFamilyPref)}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="选择字体风格" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(['sans', 'kaiti', 'geometric', 'mono'] as FontFamilyPref[]).map((f) => (
+                    <SelectItem key={f} value={f}>{FONT_FAMILY_LABEL[f]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="meta">调整全局字体风格与排版，支持衬线、等宽等定制风格。</div>
             </section>
             <LanguageSection />
             <WallpaperSection />
