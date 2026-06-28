@@ -23,24 +23,6 @@ const AutomationsSurface = lazy(() =>
 const SettingsSurface = lazy(() =>
   import('./surfaces/SettingsSurface').then((m) => ({ default: m.SettingsSurface })),
 )
-const SkillsSurface = lazy(() =>
-  import('./surfaces/SkillsSurface').then((m) => ({ default: m.SkillsSurface })),
-)
-const GitSurface = lazy(() =>
-  import('./surfaces/GitSurface').then((m) => ({ default: m.GitSurface })),
-)
-const InsightsSurface = lazy(() =>
-  import('./surfaces/InsightsSurface').then((m) => ({ default: m.InsightsSurface })),
-)
-const DelegationSurface = lazy(() =>
-  import('./surfaces/DelegationSurface').then((m) => ({ default: m.DelegationSurface })),
-)
-const CouncilSurface = lazy(() =>
-  import('./surfaces/CouncilSurface').then((m) => ({ default: m.CouncilSurface })),
-)
-const HooksSurface = lazy(() =>
-  import('./surfaces/HooksSurface').then((m) => ({ default: m.HooksSurface })),
-)
 
 export function App() {
   const { t: tNav } = useTranslation('nav')
@@ -53,6 +35,8 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   useGlobalShortcuts(setPaletteOpen)
   const commands = useSurfaceCommands()
+
+  const isWorkspaceView = ['workspace', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks'].includes(ui.surface)
 
   const sidecarDown = health.isError
   const defaultCwd = useMemo(() => {
@@ -87,7 +71,7 @@ export function App() {
           </div>
         )}
 
-        {ui.surface !== 'workspace' && (
+        {!isWorkspaceView && (
           <header className="surface-topbar">
             <div className="surface-topbar-left">
               <button
@@ -112,16 +96,10 @@ export function App() {
         <div className="surface">
           <ErrorBoundary label="工作台">
             <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-              {ui.surface === 'workspace' && <WorkspaceSurface />}
+              {isWorkspaceView && <WorkspaceSurface />}
               {ui.surface === 'automations' && <AutomationsSurface />}
               {ui.surface === 'attention' && <InboxSurface />}
-              {ui.surface === 'delegation' && <DelegationSurface />}
-              {ui.surface === 'skills' && <SkillsSurface />}
-              {ui.surface === 'git' && <GitSurface />}
-              {ui.surface === 'insights' && <InsightsSurface />}
               {ui.surface === 'settings' && <SettingsSurface />}
-              {ui.surface === 'council' && <CouncilSurface />}
-              {ui.surface === 'hooks' && <HooksSurface />}
             </Suspense>
           </ErrorBoundary>
         </div>

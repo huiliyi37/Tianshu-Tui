@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
@@ -12,6 +12,14 @@ import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
+
+const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
+const GitSurface = lazy(() => import('./GitSurface').then((m) => ({ default: m.GitSurface })))
+const InsightsSurface = lazy(() => import('./InsightsSurface').then((m) => ({ default: m.InsightsSurface })))
+const DelegationSurface = lazy(() => import('./DelegationSurface').then((m) => ({ default: m.DelegationSurface })))
+const CouncilSurface = lazy(() => import('./CouncilSurface').then((m) => ({ default: m.CouncilSurface })))
+const HooksSurface = lazy(() => import('./HooksSurface').then((m) => ({ default: m.HooksSurface })))
+
 
 export function WorkspaceSurface() {
   const ui = useUiState()
@@ -158,43 +166,51 @@ export function WorkspaceSurface() {
           <div className="conversation">
             <div className="conversation-body">
               <ThreadTabs />
-              {active ? (
-                <ThreadView
-                  session={active}
-                  view={view}
-                  onSend={handleSend}
-                  onSteer={handleSteer}
-                  onAbort={() => abortSession.mutate(active.id)}
-                  onSetApprovalMode={handleSetApprovalMode}
-                  onSetPlanMode={handleSetPlanMode}
-                  onClose={handleClose}
-                />
-              ) : (
-                <div className="empty thread-empty onboard">
-                  <div className="onboard-glyph" aria-hidden>✦</div>
-                  <h2 className="onboard-title">开始你的第一个线程</h2>
-                  <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
-                  <div className="onboard-actions">
-                    <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
-                      + 新建线程
-                    </button>
+              <Suspense fallback={<div className="surface-loading">加载中…</div>}>
+                {ui.surface === 'delegation' ? <DelegationSurface /> :
+                 ui.surface === 'skills' ? <SkillsSurface /> :
+                 ui.surface === 'git' ? <GitSurface /> :
+                 ui.surface === 'insights' ? <InsightsSurface /> :
+                 ui.surface === 'council' ? <CouncilSurface /> :
+                 ui.surface === 'hooks' ? <HooksSurface /> :
+                 active ? (
+                  <ThreadView
+                    session={active}
+                    view={view}
+                    onSend={handleSend}
+                    onSteer={handleSteer}
+                    onAbort={() => abortSession.mutate(active.id)}
+                    onSetApprovalMode={handleSetApprovalMode}
+                    onSetPlanMode={handleSetPlanMode}
+                    onClose={handleClose}
+                  />
+                ) : (
+                  <div className="empty thread-empty onboard">
+                    <div className="onboard-glyph" aria-hidden>✦</div>
+                    <h2 className="onboard-title">开始你的第一个线程</h2>
+                    <p className="onboard-subtitle">天枢会理解你的项目，自主完成编码任务</p>
+                    <div className="onboard-actions">
+                      <button className="btn btn-primary" onClick={() => dispatch({ type: 'openNew', open: true })}>
+                        + 新建线程
+                      </button>
+                    </div>
+                    <div className="onboard-hints">
+                      <div className="onboard-hint">
+                        <kbd>⌘K</kbd>
+                        <span>打开命令面板</span>
+                      </div>
+                      <div className="onboard-hint">
+                        <kbd>⌘N</kbd>
+                        <span>新建线程</span>
+                      </div>
+                      <div className="onboard-hint">
+                        <kbd>/</kbd>
+                        <span>在输入框使用斜杠命令</span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="onboard-hints">
-                    <div className="onboard-hint">
-                      <kbd>⌘K</kbd>
-                      <span>打开命令面板</span>
-                    </div>
-                    <div className="onboard-hint">
-                      <kbd>⌘N</kbd>
-                      <span>新建线程</span>
-                    </div>
-                    <div className="onboard-hint">
-                      <kbd>/</kbd>
-                      <span>在输入框使用斜杠命令</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+                )}
+              </Suspense>
             </div>
             {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
           </div>
