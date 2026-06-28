@@ -161,9 +161,16 @@ export function WorkspaceSurface() {
           defaultSize={`${layout.sidebar}%`}
           minSize="12%"
           maxSize="35%"
-          onResize={({ asPercentage }) => saveSidebarWidth(Math.round(asPercentage))}
-          onCollapse={() => dispatch({ type: 'setSidebar', visible: false })}
-          onExpand={() => dispatch({ type: 'setSidebar', visible: true })}
+          onResize={(size, _id, prev) => {
+            const pct = Math.round(size.asPercentage)
+            if (pct > 0) saveSidebarWidth(pct)
+            // react-resizable-panels v4 dropped onCollapse/onExpand — derive the
+            // collapse transition from size (collapsedSize defaults to 0%).
+            const wasCollapsed = prev != null && prev.asPercentage <= 0
+            const nowCollapsed = size.asPercentage <= 0
+            if (nowCollapsed && !wasCollapsed) dispatch({ type: 'setSidebar', visible: false })
+            else if (!nowCollapsed && wasCollapsed) dispatch({ type: 'setSidebar', visible: true })
+          }}
         >
           <ProjectSidebar
             onCollapse={() => {
@@ -263,9 +270,14 @@ export function WorkspaceSurface() {
           defaultSize={`${layout.review}%`}
           minSize="15%"
           maxSize="45%"
-          onResize={({ asPercentage }) => saveReviewWidth(Math.round(asPercentage))}
-          onCollapse={() => dispatch({ type: 'setReview', visible: false })}
-          onExpand={() => dispatch({ type: 'setReview', visible: true })}
+          onResize={(size, _id, prev) => {
+            const pct = Math.round(size.asPercentage)
+            if (pct > 0) saveReviewWidth(pct)
+            const wasCollapsed = prev != null && prev.asPercentage <= 0
+            const nowCollapsed = size.asPercentage <= 0
+            if (nowCollapsed && !wasCollapsed) dispatch({ type: 'setReview', visible: false })
+            else if (!nowCollapsed && wasCollapsed) dispatch({ type: 'setReview', visible: true })
+          }}
         >
           <ReviewPanel
             sessionId={activeId}
