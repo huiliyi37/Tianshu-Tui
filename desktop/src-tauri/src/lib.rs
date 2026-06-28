@@ -58,6 +58,38 @@ fn random_token() -> String {
         .collect()
 }
 
+/// Resolve the resource directory, falling back to the exe directory on raw
+/// exe (uninstalled) Windows where `app.path().resource_dir()` returns a
+/// truncated path like `D:\`. In that case we use `current_exe().parent()` —
+/// the folder where the raw .exe lives — because the bundled `node-runtime/`
+/// and `rivet-runtime/` directories are siblings of the exe.
+fn resource_dir_fallback(app: &tauri::App) -> PathBuf {
+    match app.path().resource_dir() {
+        Ok(p) if !p.as_os_str().is_empty() => {
+            // Raw exe on Windows often returns just the drive root (e.g. "D:" or "D:\").
+            // A valid resource dir should contain subdirs — just the drive letter is a
+            // known Tauri quirk for unbundled exes.
+            if cfg!(target_os = "windows") {
+                let s = p.to_string_lossy();
+                // Drive letter only (e.g. "D:" or "D:\") — too shallow to be real.
+                if s.len() <= 3 {
+                    // Fall through to exe-relative fallback
+                } else {
+                    return p;
+                }
+            } else {
+                return p;
+            }
+        }
+        _ => { /* resource_dir failed — fall through */ }
+    }
+    // Fallback: exe directory (works for raw/uninstalled exes).
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 /// Resolve the bundled Node.js binary shipped as a Tauri resource.
 ///
 /// Resource layout after fetch-node-runtime runs:
@@ -67,7 +99,7 @@ fn random_token() -> String {
 ///   Resources/node-runtime/linux-arm64/node
 ///   Resources/node-runtime/linux-x64/node
 fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
-    let res = app.path().resource_dir().ok()?;
+    let res = resource_dir_fallback(app);
     let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
     let node_os = match os {
         "macos" => "darwin",
@@ -139,11 +171,10 @@ fn sidecar_entry(app: &tauri::App) -> PathBuf {
     if let Ok(p) = std::env::var("RIVET_SIDECAR_ENTRY") {
         return PathBuf::from(p);
     }
-    if let Ok(res) = app.path().resource_dir() {
-        let bundled = res.join("rivet-runtime").join("main.js");
-        if bundled.exists() {
-            return bundled;
-        }
+    let res = resource_dir_fallback(app);
+    let bundled = res.join("rivet-runtime").join("main.js");
+    if bundled.exists() {
+        return bundled;
     }
     let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     // desktop/src-tauri -> desktop -> repo root
