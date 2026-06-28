@@ -19,6 +19,10 @@ const InsightsSurface = lazy(() => import('./InsightsSurface').then((m) => ({ de
 const DelegationSurface = lazy(() => import('./DelegationSurface').then((m) => ({ default: m.DelegationSurface })))
 const CouncilSurface = lazy(() => import('./CouncilSurface').then((m) => ({ default: m.CouncilSurface })))
 const HooksSurface = lazy(() => import('./HooksSurface').then((m) => ({ default: m.HooksSurface })))
+const AutomationsSurface = lazy(() => import('./AutomationsSurface').then((m) => ({ default: m.AutomationsSurface })))
+const InboxSurface = lazy(() => import('./InboxSurface').then((m) => ({ default: m.InboxSurface })))
+const SettingsSurface = lazy(() => import('./SettingsSurface').then((m) => ({ default: m.SettingsSurface })))
+
 
 
 export function WorkspaceSurface() {
@@ -173,6 +177,9 @@ export function WorkspaceSurface() {
                  ui.surface === 'insights' ? <InsightsSurface /> :
                  ui.surface === 'council' ? <CouncilSurface /> :
                  ui.surface === 'hooks' ? <HooksSurface /> :
+                 ui.surface === 'automations' ? <AutomationsSurface /> :
+                 ui.surface === 'attention' ? <InboxSurface /> :
+                 ui.surface === 'settings' ? <SettingsSurface /> :
                  active ? (
                   <ThreadView
                     key={active.id}

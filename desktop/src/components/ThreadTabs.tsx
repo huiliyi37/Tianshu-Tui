@@ -63,8 +63,29 @@ export function ThreadTabs() {
     void navigator.clipboard.writeText(title)
   }
 
+  const isWorkspace = ui.surface === 'workspace'
+
   return (
     <div className="thread-tabs" role="tablist" aria-label="对话标签">
+      {!isWorkspace && (
+        <button
+          className="thread-tab back-tab"
+          onClick={() => dispatch({ type: 'setSurface', surface: 'workspace' })}
+          style={{
+            marginRight: '8px',
+            color: 'var(--accent)',
+            fontWeight: '600',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7" />
+          </svg>
+          返回对话
+        </button>
+      )}
       {tabSessions.map((s, i) => {
         const active = s.id === ui.activeSessionId
         const dragging = dragIndex === i
@@ -84,7 +105,10 @@ export function ThreadTabs() {
                   onDragOver={(e) => { e.preventDefault(); setOverIndex(i) }}
                   onDragEnd={() => { setDragIndex(null); setOverIndex(null) }}
                   onDrop={(e) => { e.preventDefault(); handleDrop() }}
-                  onClick={() => dispatch({ type: 'setActive', id: s.id })}
+                  onClick={() => {
+                    dispatch({ type: 'setActive', id: s.id })
+                    dispatch({ type: 'setSurface', surface: 'workspace' })
+                  }}
                   onAuxClick={(e) => {
                     if (e.button === 1) {
                       e.preventDefault()

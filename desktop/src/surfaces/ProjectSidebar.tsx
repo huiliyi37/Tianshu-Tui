@@ -283,7 +283,10 @@ export function ProjectSidebar() {
                     <div
                       key={s.id}
                       className={`thread-row ${s.id === ui.activeSessionId ? 'active' : ''}`}
-                      onClick={() => dispatch({ type: 'setActive', id: s.id })}
+                      onClick={() => {
+                        dispatch({ type: 'setActive', id: s.id })
+                        dispatch({ type: 'setSurface', surface: 'workspace' })
+                      }}
                     >
                       <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                         <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
