@@ -20,7 +20,6 @@ import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
 import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
-import { SlashRouter } from './tui/engine/slash-router.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
@@ -30,7 +29,7 @@ import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
-import { resolveAppPromptInput } from './tui/slash-commands.js'
+import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
 import { SessionPersist } from './agent/session-persist.js'
@@ -639,8 +638,7 @@ async function main() {
   })
 
   // ── SlashRouter ──────────────────────────────────────────────
-  const slashRouter = new SlashRouter(app, ctx)
-  app.setSlashHandler(async (input) => slashRouter.route(input))
+  registerTuiSlashCommands(app, ctx)
 
   // slash 命令提示列表（仅 / 开头的 command 类，过滤 __surface: 面板项）
   app.setSlashCommands(
