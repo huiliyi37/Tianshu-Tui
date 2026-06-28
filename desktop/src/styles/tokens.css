@@ -9,8 +9,8 @@
 
 :root {
   /* Typography */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -57,45 +57,45 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #0e0e10;
-  --panel: #151518;
-  --panel-2: #1c1c20;
-  --panel-3: #232328;
-  --border: #27272e;
-  --border-strong: #383842;
+  --bg: #1c1c1e;
+  --panel: #141416;
+  --panel-2: #232326;
+  --panel-3: #2d2d30;
+  --border: #2d2d30;
+  --border-strong: #3f3f46;
 
-  --text: #e7e7ec;
-  --text-strong: #f7f7f9;
-  --muted: #9a9ca8;
-  --faint: #6e707c;
-  --text-dim: #7d7f8a;
-  --text-secondary: #a8aab4;
-  --hover: rgba(255, 255, 255, 0.06);
-  --bg-elevated: #1c1c20;
-  --surface-2: rgba(127, 127, 127, 0.12);
+  --text: #d4d4d8;
+  --text-strong: #ffffff;
+  --muted: #71717a;
+  --faint: #52525b;
+  --text-dim: #a1a1aa;
+  --text-secondary: #e4e4e7;
+  --hover: rgba(255, 255, 255, 0.04);
+  --bg-elevated: #2a2a2e;
+  --surface-2: rgba(255, 255, 255, 0.06);
   --link: var(--accent);
   --link-hover: var(--accent-hover);
   --green: var(--success);
 
-  /* Cursor 3.0 inspired purple accent — high contrast against dark surfaces. */
-  --accent: #a277ff;
-  --accent-hover: #b894ff;
-  --accent-fg: #0b0814;
-  --accent-soft: rgba(162, 119, 255, 0.16);
+  /* Premium Indigo Blue Accent (No glowing effects) */
+  --accent: #5e6ad2;
+  --accent-hover: #7b88ff;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(94, 106, 210, 0.1);
 
-  --success: #43c463;
-  --success-soft: rgba(67, 196, 99, 0.14);
-  --warning: #e0a93a;
-  --warning-soft: rgba(224, 169, 58, 0.14);
-  --error: #f76b6b;
-  --error-soft: rgba(247, 107, 107, 0.13);
-  --info: #5aa9ff;
-  --info-soft: rgba(90, 169, 255, 0.13);
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.1);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.1);
+  --error: #ef4444;
+  --error-soft: rgba(239, 68, 68, 0.1);
+  --info: #3b82f6;
+  --info-soft: rgba(59, 130, 246, 0.1);
 
-  --overlay: rgba(0, 0, 0, 0.55);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.4);
 
   /* ── Frosted glass surface tokens (P2) ────────────────────────────
      Activated by --surface-mode: glass on :root. Each layer has a distinct
@@ -228,3 +228,65 @@ html[data-font-weight="bold"] {
   --weight-medium: 600;
   --weight-semibold: 700;
 }
+
+/* ── Nebula (Starry Void & Neon) ────────────────────────────────── */
+:root[data-theme="nebula"] {
+  color-scheme: dark;
+
+  --bg: #05050a;
+  --panel: #0d0d16;
+  --panel-2: #141421;
+  --panel-3: #1a1a2b;
+  --border: #232336;
+  --border-strong: #33334d;
+
+  --text: #e2e4f0;
+  --text-strong: #ffffff;
+  --muted: #8b8ea3;
+  --faint: #5f6275;
+  --text-dim: #70738a;
+  --text-secondary: #999cb5;
+  --hover: rgba(255, 255, 255, 0.05);
+  --bg-elevated: #161624;
+  --surface-2: rgba(127, 127, 145, 0.12);
+  --link: var(--accent);
+  --link-hover: var(--accent-hover);
+  --green: var(--success);
+
+  /* Cyberpunk Accent with glows */
+  --accent: #5e6ad2;
+  --accent-hover: #7b88ff;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(94, 106, 210, 0.16);
+
+  --success: #4ade80;
+  --success-soft: rgba(74, 222, 128, 0.14);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.14);
+  --error: #f87171;
+  --error-soft: rgba(229, 92, 92, 0.13);
+  --info: #4a9eff;
+  --info-soft: rgba(74, 158, 255, 0.13);
+
+  --overlay: rgba(2, 2, 6, 0.65);
+  --shadow-sm: 0 1px 3px rgba(2, 2, 8, 0.5);
+  --shadow-md: 0 6px 20px rgba(5, 5, 15, 0.6);
+  --shadow-lg: 0 16px 48px rgba(10, 10, 30, 0.7), 0 0 20px rgba(94, 106, 210, 0.1);
+}
+
+:root[data-theme="nebula"][data-surface="glass"] {
+  --sidebar-surface-bg: color-mix(in oklab, var(--bg) 78%, transparent);
+  --sidebar-surface-blur: 24px;
+  --sidebar-surface-saturation: 1.08;
+  --main-surface-bg: color-mix(in oklab, var(--bg) 88%, transparent);
+  --main-surface-blur: 16px;
+  --main-surface-saturation: 1.04;
+  --compose-surface-bg: color-mix(in oklab, var(--panel-2) 78%, transparent);
+  --compose-surface-border: color-mix(in oklab, var(--border) 60%, transparent);
+  --compose-surface-shadow: 0 12px 40px color-mix(in oklab, var(--text) 8%, transparent), 0 2px 8px color-mix(in oklab, var(--text) 4%, transparent);
+  --compose-surface-blur: 16px;
+  --compose-surface-saturation: 1.08;
+  --popup-surface-bg: color-mix(in oklab, var(--panel-2) 92%, transparent);
+  --modal-surface-bg: color-mix(in oklab, var(--panel) 94%, transparent);
+}
+

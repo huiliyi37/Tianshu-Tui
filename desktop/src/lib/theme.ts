@@ -1,15 +1,15 @@
 // Theme preference (P0). system|light|dark, persisted to localStorage and applied
 // as [data-theme] on <html>. `system` follows prefers-color-scheme live.
 
-export type ThemePref = 'system' | 'light' | 'dark'
-export type ResolvedTheme = 'light' | 'dark'
+export type ThemePref = 'system' | 'light' | 'dark' | 'nebula'
+export type ResolvedTheme = 'light' | 'dark' | 'nebula'
 
 const KEY = 'tianshu.theme'
 
 export function loadThemePref(): ThemePref {
   try {
     const v = localStorage.getItem(KEY)
-    if (v === 'light' || v === 'dark' || v === 'system') return v
+    if (v === 'light' || v === 'dark' || v === 'system' || v === 'nebula') return v
   } catch {
     // disabled storage — fall through
   }

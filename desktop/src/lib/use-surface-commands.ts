@@ -8,7 +8,7 @@ import { SURFACE_ORDER } from './use-global-shortcuts'
 import type { Command } from './commands'
 
 function nextTheme(p: ThemePref): ThemePref {
-  return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
+  return p === 'system' ? 'light' : p === 'light' ? 'dark' : p === 'dark' ? 'nebula' : 'system'
 }
 
 /** Build the Command Palette item list: surfaces, projects, threads, actions. */

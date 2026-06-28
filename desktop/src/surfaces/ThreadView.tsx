@@ -3,9 +3,11 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import { basename } from '../lib/projects'
-import { ToolGroup, ToolCard, isCollapsibleTool, isRunTestsTool, toolNameOf } from '../components/ToolGroup'
+import { ToolCard, toolNameOf } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
+import { TimelineGroup } from '../components/TimelineGroup'
+import { ArtifactCard } from '../components/ArtifactCard'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
@@ -22,7 +24,6 @@ import {
 } from '@/components/ui/alert-dialog'
 import type { ComposerCommand } from '../lib/composer-commands'
 import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
-import { useUiState } from '../state/store'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
@@ -71,7 +72,6 @@ export function ThreadView(props: {
   const [composerHeight, setComposerHeight] = useState(0)
   const composerWrapRef = useRef<HTMLDivElement | null>(null)
   const composerObserverRef = useRef<ResizeObserver | null>(null)
-  const toolDensity = useUiState().toolDensity
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
   const msgRef = useRef<HTMLDivElement>(null)
@@ -100,9 +100,9 @@ export function ThreadView(props: {
     getScrollElement: () => msgRef.current,
     estimateSize: () => 80,
     overscan: 8,
-    getItemKey: (i) => {
-      const item = rendered[i]!
-      return item.kind !== 'block' ? item.key : item.block.key
+    getItemKey: (index) => {
+      const item = rendered[index]!
+      return item.kind === 'timeline' ? item.key : item.block.key
     },
   })
 
@@ -196,9 +196,9 @@ export function ThreadView(props: {
     },
     {
       name: '/theme',
-      desc: '切换主题 (system→light→dark)',
+      desc: '切换主题 (system→light→dark→nebula)',
       run: () => {
-        const order = ['system', 'light', 'dark'] as const
+        const order = ['system', 'light', 'dark', 'nebula'] as const
         const cur = loadThemePref()
         setThemePref(order[(order.indexOf(cur) + 1) % order.length]!)
       },
@@ -470,8 +470,22 @@ export function ThreadView(props: {
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
-                  {item.kind !== 'block' ? (
-                    <ToolGroup items={item.items} density={toolDensity} />
+                  {item.kind === 'timeline' ? (
+                    <TimelineGroup blocks={item.items}>
+                      {item.items.map(b => (
+                        <Block
+                          key={b.key}
+                          block={b}
+                          sessionId={session.id}
+                          onOpenImage={openImage}
+                          domainGlyph={domainGlyph}
+                          domainName={activeDomain?.name}
+                          isStreaming={false}
+                        />
+                      ))}
+                    </TimelineGroup>
+                  ) : item.kind === 'artifact' ? (
+                    <ArtifactCard block={item.block} />
                   ) : (
                     <Block
                       block={item.block}
@@ -611,39 +625,70 @@ function ImageLightbox({ src, onClose }: { src: string; onClose: () => void }) {
   )
 }
 
+function isArtifactTool(b: ConvoBlock): boolean {
+  if (b.kind !== 'tool' && b.kind !== 'result') return false;
+  const name = toolNameOf(b);
+  if (name === 'write_file' || name === 'write_to_file' || name === 'edit_file') {
+    try {
+      const text = b.kind === 'tool' ? b.text : '';
+      if (text.includes('ArtifactMetadata') || text.includes('implementation_plan.md') || text.includes('task.md') || text.includes('walkthrough.md')) {
+        return true;
+      }
+    } catch(e) {}
+  }
+  return false;
+}
+
 type RenderItem =
-  | { kind: 'tools'; key: string; items: ConvoBlock[] }
-  | { kind: 'run_tests'; key: string; items: ConvoBlock[] }
+  | { kind: 'timeline'; key: string; items: ConvoBlock[] }
+  | { kind: 'artifact'; block: ConvoBlock }
   | { kind: 'block'; block: ConvoBlock }
 
-/** Only exploration tools (read/search/list) that succeeded fold into the
- *  compact group; action tools and errors render expanded as standalone cards. */
-function isFoldable(b: ConvoBlock): boolean {
-  return (b.kind === 'tool' || b.kind === 'result') && !b.isError && isCollapsibleTool(toolNameOf(b))
-}
-
-/** run_tests tool/result blocks eligible for action grouping (success or failure). */
-function isRunTestsFoldable(b: ConvoBlock): boolean {
-  return (b.kind === 'tool' || b.kind === 'result') && isRunTestsTool(toolNameOf(b))
-}
-
-/** Collapse runs of collapsible tool/result blocks into grouped render items.
- *  Exploration tools (read/search/list) and run_tests each form their own group
- *  type; everything else stays standalone. */
+/** Collapse contiguous agent reasoning and background tools into a unified timeline.
+ *  Artifacts and conversational turns break the timeline. */
 function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
   const out: RenderItem[] = []
   let run: ConvoBlock[] | null = null
-  let runKind: 'tools' | 'run_tests' | null = null
-  for (const b of blocks) {
-    const foldKind = isFoldable(b) ? 'tools' as const : isRunTestsFoldable(b) ? 'run_tests' as const : null
-    if (foldKind) {
-      if (!run || runKind !== foldKind) { run = []; runKind = foldKind; out.push({ kind: foldKind, key: `tg-${b.key}`, items: run }) }
-      run.push(b)
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!
+    if (
+      b.kind === 'user' ||
+      (b.kind === 'assistant' && b.text.trim()) ||
+      b.kind === 'phase' ||
+      b.kind === 'turn' ||
+      b.kind === 'steer' ||
+      b.kind === 'decision_shift' ||
+      isArtifactTool(b)
+    ) {
+      if (run) {
+        out.push({ kind: 'timeline', key: `tl-${run[0]!.key}`, items: run })
+        run = null
+      }
+      
+      if (isArtifactTool(b)) {
+        if (b.kind === 'tool') {
+          // If the next block is the corresponding result, skip it so we don't render it separately
+          const next = blocks[i+1]
+          if (next && next.kind === 'result' && toolNameOf(next) === toolNameOf(b)) {
+            out.push({ kind: 'artifact', block: b })
+            i++ // skip next
+          } else {
+            out.push({ kind: 'artifact', block: b })
+          }
+        } else {
+          // It's a result block of an artifact tool without a preceding tool block in this context
+          out.push({ kind: 'artifact', block: b })
+        }
+      } else {
+        out.push({ kind: 'block', block: b })
+      }
     } else {
-      run = null
-      runKind = null
-      out.push({ kind: 'block', block: b })
+      if (!run) run = []
+      run.push(b)
     }
+  }
+  if (run) {
+    out.push({ kind: 'timeline', key: `tl-${run[0]!.key}`, items: run })
   }
   return out
 }

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   LayoutDashboard, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Sun, Moon, Laptop, Scale, Plug, type LucideIcon,
+  Network, Settings, Sun, Moon, Laptop, Scale, Plug, Sparkles, type LucideIcon,
 } from 'lucide-react'
 import type { Surface } from '../state/store'
 import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
@@ -25,6 +25,7 @@ const THEME_ICON: Record<ThemePref, LucideIcon> = {
   system: Laptop,
   light: Sun,
   dark: Moon,
+  nebula: Sparkles,
 }
 
 /** Renders a lucide icon at the rail's standard size/color. */
@@ -33,7 +34,7 @@ function Icon({ icon: Ic }: { icon: LucideIcon }) {
 }
 
 function nextTheme(p: ThemePref): ThemePref {
-  return p === 'system' ? 'light' : p === 'light' ? 'dark' : 'system'
+  return p === 'system' ? 'light' : p === 'light' ? 'dark' : p === 'dark' ? 'nebula' : 'system'
 }
 
 export function Rail(props: {

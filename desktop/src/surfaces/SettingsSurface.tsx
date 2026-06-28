@@ -35,8 +35,10 @@ const SETTINGS_CATS: { id: SettingsCat; label: string; icon: LucideIcon }[] = [
 const THEME_LABEL: Record<ThemePref, string> = {
   system: '跟随系统',
   light: '亮色',
-  dark: '暗色',
+  dark: '暗色 (石板)',
+  nebula: '星空 (霓虹)',
 }
+
 
 const DENSITY_LABEL: Record<ToolDensity, string> = {
   compact: '紧凑',
@@ -117,7 +119,7 @@ export function SettingsSurface() {
                   <SelectValue placeholder="选择主题" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(['system', 'light', 'dark'] as ThemePref[]).map((t) => (
+                  {(['system', 'light', 'dark', 'nebula'] as ThemePref[]).map((t) => (
                     <SelectItem key={t} value={t}>{THEME_LABEL[t]}</SelectItem>
                   ))}
                 </SelectContent>
