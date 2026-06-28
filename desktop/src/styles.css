@@ -107,6 +107,10 @@
 * { box-sizing: border-box; }
 
 html, body, #root { height: 100%; margin: 0; }
+/* Kill the WKWebView elastic overscroll (rubber-band) at the document level —
+   without this, force-scrolling past the top/bottom bounces the content and the
+   sticky thread header / composer borders appear to jitter. */
+html, body { overscroll-behavior: none; }
 
 html[data-surface="glass"],
 html[data-surface="glass"] body {
@@ -245,8 +249,8 @@ body {
 .review-expand-hint svg {
   width: 14px; height: 14px;
 }
-.single-pane { height: 100%; overflow-y: auto; max-width: 1400px; margin: 0 auto; }
-.surface-scroll { height: 100%; overflow-y: auto; max-width: 1400px; margin: 0 auto; }
+.single-pane { height: 100%; overflow-y: auto; overscroll-behavior: contain; max-width: 1400px; margin: 0 auto; }
+.surface-scroll { height: 100%; overflow-y: auto; overscroll-behavior: contain; max-width: 1400px; margin: 0 auto; }
 
 .surface-topbar {
   flex: none;
@@ -1578,7 +1582,7 @@ body {
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
 }
 
-.messages { flex: 1; overflow-y: auto; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-5); position: relative; }
+.messages { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-5); position: relative; }
 /* P2 virtualization: .vlist is the total-height spacer; each .vrow is absolutely
    positioned by the virtualizer. padding-bottom restores the inter-message gap
    that the flex `gap` provided before windowing, and is included in measureElement. */
