@@ -2,7 +2,15 @@
 
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
-> 📖 [中文文档](README.zh-CN.md)
+## Prerequisites
+
+- **Node.js 22+** — required to run Rivet. Verify with `node --version`.
+- **Git (recommended)** — optional but strongly recommended. Rivet runs without it
+  (agents work in-place), but git unlocks: delegated worktree isolation, checkpoint
+  rollback, `commit`/`diff` review, and per-worker diff审查. First-run setup will
+  detect git and advise if it's missing.
+  - Install: <https://git-scm.com/downloads>
+  - No git? Rivet still works — delegation degrades to in-place execution.
 
 ## Quick Start
 
