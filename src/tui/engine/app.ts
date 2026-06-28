@@ -638,7 +638,7 @@ export class TuiApp {
         }
         // Leader not followed by 'r': fall through to normal input handling.
       }
-      if (key.char === ']' && !key.ctrl && !key.meta) {
+      if (key.name === 'ctrl_]') {
         this.toggleSidePanel()
         return
       }
@@ -1793,14 +1793,16 @@ export class TuiApp {
     this.renderLive()
   }
 
-  /** 切换右侧面板展开/折叠（仅宽终端生效）。 */
+  /** 切换右侧面板展开/折叠（仅宽终端生效）。overlay 激活时静默忽略。 */
   toggleSidePanel(): void {
+    if (this.overlay.isActive()) return
     this.setSidePanelOpen(!this.state.sidePanelOpen)
   }
 
-  /** 设置右侧面板展开状态；若终端太窄则静默不展开。 */
+  /** 设置右侧面板展开状态；若终端太窄或 overlay 激活则静默不展开。 */
   setSidePanelOpen(open: boolean): void {
     if (open && this.columns < SIDE_PANEL_MIN_COLUMNS) return
+    if (this.overlay.isActive()) return
     this.state.sidePanelOpen = open
     this.renderLive()
   }

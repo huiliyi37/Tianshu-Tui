@@ -154,7 +154,7 @@ export function renderSidePanel(input: SidePanelInput, theme: RivetTheme): strin
 
   // ── Section: 快捷键提示 ──
   lines.push(sectionDivider())
-  lines.push(line(dim('] toggle · ctrl+x r open')))
+  lines.push(line(dim('ctrl+] toggle · ctrl+x r open')))
 
   lines.push(botBorder)
   return lines
