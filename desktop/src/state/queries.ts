@@ -65,6 +65,8 @@ export function useSessions() {
     queryKey: qk.sessions,
     queryFn: listSessions,
     refetchInterval: 2000,
+    refetchIntervalInBackground: false,
+    retry: false,
   })
 }
 
