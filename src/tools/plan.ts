@@ -104,8 +104,11 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
     return { content: `Error: unknown action "${action}". Use "submit" or "close".`, isError: true }
   },
 
-  requiresApproval(params: ToolCallParams): boolean {
-    return params.input.action === 'close' && params.input.apply === true
+  requiresApproval(): boolean {
+    // Plan closure only touches plan markdown (checkboxes + closure section) under
+    // docs/superpowers/plans/ or .rivet/plans/. It is path-validated and reversible,
+    // so we skip the approval gate to avoid interrupting the automated close flow.
+    return false
   },
 
   isConcurrencySafe: () => false,

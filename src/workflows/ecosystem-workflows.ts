@@ -191,7 +191,7 @@ export function buildWritingPlanPrompt(options: WritingPlanPromptOptions): strin
 `
 }
 
-const PLAN_CLOSE_FLAGS = new Set(['--apply', '--tasks', '--verified', '--delivery', '--note'])
+const PLAN_CLOSE_FLAGS = new Set(['--apply', '--preview', '--tasks', '--verified', '--delivery', '--note'])
 
 function readUntilNextPlanCloseFlag(tokens: string[], start: number): { value: string; nextIndex: number } {
   const parts: string[] = []
@@ -211,7 +211,7 @@ export function parsePlanCloseArgs(args: string): PlanClosePromptOptions | null 
   if (!filePath || filePath.startsWith('--')) return null
 
   let tasks = ''
-  let apply = false
+  let apply = true
   const verifiedCommands: string[] = []
   let deliveryState: PlanClosePromptOptions['deliveryState']
   let note: string | undefined
@@ -221,6 +221,11 @@ export function parsePlanCloseArgs(args: string): PlanClosePromptOptions | null 
     const token = tokens[i]!
     if (token === '--apply') {
       apply = true
+      i++
+      continue
+    }
+    if (token === '--preview') {
+      apply = false
       i++
       continue
     }
@@ -280,7 +285,7 @@ export function buildPlanClosePrompt(options: PlanClosePromptOptions): string {
   return lines.join('\n')
 }
 
-const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
+const PLAN_CLOSE_USAGE = 'Plan close usage: /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview] [--verified <command>] [--delivery GREEN|YELLOW|RED] [--note <text>]'
 
 export const TEAM_USAGE = 'Team usage: /team <task|docs/superpowers/plans/file.md> or /team max <task>'
 

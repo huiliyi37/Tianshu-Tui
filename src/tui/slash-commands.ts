@@ -97,7 +97,7 @@ const HELP_TEXT = `Available commands:
 /skill [list|install <name>|import <name>|<name>|off <name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding
 /plan <feature> — Create implementation plan
-/plan close <file> --tasks <range|all> [--apply] — Close implementation plan tasks
+/plan close <file> --tasks <range|all> [--preview] — Close implementation plan tasks
 /team <task|plan> — Run team-mode workflow through team_orchestrate
 /team max <task> — Run team-mode max planning through team_orchestrate
 /council <task> [--seats id1,id2,...] [--rounds 1-2] — Convene a star-domain council (single round; --rounds 2 enables a rebuttal round)
@@ -2433,7 +2433,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview]\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }
@@ -2447,7 +2447,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const cmd = parts[0]!.toLowerCase()
       const feature = parts.slice(1).join(' ').trim()
       if (!feature) {
-        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--apply]\nExample: ${cmd} add Context7 MCP preset` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: ${cmd} <feature>\n       /plan close <docs/superpowers/plans/file.md> --tasks <1-7|all> [--preview]\nExample: ${cmd} add Context7 MCP preset` }))
         setIsStreaming(false)
         return true
       }
