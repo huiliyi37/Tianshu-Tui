@@ -180,11 +180,24 @@ function parseActivePlan(pointer: string | undefined): { title: string; path: st
 }
 
 function decodeXmlEntities(s: string): string {
+  // 两阶段解码：先展开具名/数字实体，**最后**再把 &amp; → &。
+  // 反过来（先解 &amp;）会让 "&amp;lt;" 被错解成 "<"：&amp; 先变 &，残留的 "lt;"
+  // 虽不再被匹配，但顺序错误时 "&amp;lt;" 这类已转义过的二次输入会被破坏。
+  // 数字实体（&#39; &#x27;）覆盖所有可打印字符，具名实体补齐 XML 五件套 + apos。
   return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => safeFromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => safeFromCodePoint(parseInt(dec, 10)))
     .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
+    .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+}
+
+/** 数字实体还原：拒绝代理对（U+D800–DFFF）与超平面外的非法码点，避免生成乱码。 */
+function safeFromCodePoint(cp: number): string {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return ''
+  try { return String.fromCodePoint(cp) } catch { return '' }
 }
 
 function truncateStr(s: string, max: number): string {

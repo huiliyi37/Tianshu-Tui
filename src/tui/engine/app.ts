@@ -580,37 +580,46 @@ export class TuiApp {
         this.overlay.activate('command-palette')
         return
       }
-      if (key.name === 'escape' && !this.inputLine.vimEnabled) {
-        if (this.overlay.isActive()) {
-          // Close active overlay
-          this.overlay.deactivate()
-          this.renderLive()
-        } else if (this.isAgentActive()) {
-          this.handleAbort()
-        } else {
-          // Idle: double-ESC within 400ms on empty input → rewind overlay
-          const now = Date.now()
-          if (this.inputLine.value.trim()) {
-            // Has text: ESC clears input (like Claude Code)
-            this.inputLine.setValue('')
+      if (key.name === 'escape') {
+        // Vim 模式下：overlay/agent 激活时 ESC 关闭 overlay 或中断 agent，
+        // 空闲时 ESC 落入输入框的 vim normal/insert 切换（保持原行为）。
+        if (this.inputLine.vimEnabled) {
+          if (this.overlay.isActive()) {
+            this.overlay.deactivate()
             this.renderLive()
-          } else if (now - this.inputController.lastEscAt < 400) {
-            // Double-ESC → rewind
-            this.inputController.lastEscAt = 0
-            this.overlayController.resetNav()
-            this.overlay.activate('rewind')
-            this.renderLive()
-          } else {
-            // First ESC — record timestamp
-            this.inputController.lastEscAt = now
+            return
           }
+          if (this.isAgentActive()) {
+            this.handleAbort()
+            return
+          }
+          // 空闲 + vim：ESC 落入输入框处理 vim 模式切换
+        } else {
+          if (this.overlay.isActive()) {
+            this.overlay.deactivate()
+            this.renderLive()
+          } else if (this.isAgentActive()) {
+            this.handleAbort()
+          } else {
+            // Idle: double-ESC within 400ms on empty input → rewind overlay
+            const now = Date.now()
+            if (this.inputLine.value.trim()) {
+              // Has text: ESC clears input (like Claude Code)
+              this.inputLine.setValue('')
+              this.renderLive()
+            } else if (now - this.inputController.lastEscAt < 400) {
+              // Double-ESC → rewind
+              this.inputController.lastEscAt = 0
+              this.overlayController.resetNav()
+              this.overlay.activate('rewind')
+              this.renderLive()
+            } else {
+              // First ESC — record timestamp
+              this.inputController.lastEscAt = now
+            }
+          }
+          return
         }
-        return
-      }
-      if (key.name === 'ctrl_l') {
-        process.stdout.write('\x1B[2J\x1B[H')
-        this.renderLive()
-        return
       }
       if (key.name === 'ctrl_o') {
         this.expandLastTruncatedTool()
@@ -1818,9 +1827,9 @@ export class TuiApp {
     this.renderLive()
   }
 
-  /** 查询右侧面板是否展开。 */
+  /** 查询右侧面板是否展开（对齐可见状态——窄终端下面板不可见即为关闭）。 */
   isSidePanelOpen(): boolean {
-    return this.state.sidePanelOpen
+    return this.state.sidePanelOpen && this.columns >= SIDE_PANEL_MIN_COLUMNS
   }
 
   /** 从 provider 拉取最新 todo 列表刷新面板（无 provider 时 no-op）。 */
