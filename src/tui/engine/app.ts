@@ -2406,11 +2406,9 @@ export class TuiApp {
     }
 
     let lines: LiveRegionLine[] = []
-    let chromeStart = 0
-    try {
-      lines = []
+    lines = []
 
-      // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
+    // 1. Spinner 状态行（⠋ Thinking… (12s · esc to interrupt)），10s 无 token 变琥珀
     const stalled = this.streamRenderController.lastActivityMs > 0 && Date.now() - this.streamRenderController.lastActivityMs > 10_000
     const spinnerLine = formatSpinnerStatus({
       tick: this.streamRenderController.tick,
@@ -2475,7 +2473,7 @@ export class TuiApp {
           const fleetLines = formatWorkerFleet(
             activeWorkers,
             this.theme,
-            this.columns,
+            cols,
             { done: summary.done, total: summary.total, running: summary.running },
           )
           for (const line of fleetLines) lines.push({ text: line })
@@ -2502,7 +2500,7 @@ export class TuiApp {
     if (this.toolGroupController.isActiveGroup()) {
       const activeGroup = this.toolGroupController.getActiveGroup()
       if (activeGroup && activeGroup.entries.length > 0) {
-        const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, this.columns)
+        const groupLines = formatCollapsedGroupLive(activeGroup, this.theme, cols)
         for (const line of groupLines) {
           lines.push({ text: line })
         }
@@ -2513,7 +2511,7 @@ export class TuiApp {
     if (this.toolGroupController.isActiveBashGroup()) {
       const activeBashGroup = this.toolGroupController.getActiveBashGroup()
       if (activeBashGroup && activeBashGroup.entries.length > 0) {
-        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, this.columns)
+        const groupLines = formatCollapsedBashGroupLive(activeBashGroup, this.theme, cols)
         for (const line of groupLines) {
           lines.push({ text: line })
         }
@@ -2532,7 +2530,7 @@ export class TuiApp {
           toolInput: meta.input,
           outputTail: this.toolGroupController.getAccumulated(id),
           elapsedMs: Date.now() - meta.startMs,
-          columns: this.columns,
+          columns: cols,
           tick: this.streamRenderController.tick,
         }, this.theme)
         for (const line of toolLines) {
@@ -2557,7 +2555,7 @@ export class TuiApp {
         lines.push({ text: this.clampLine(` │ Edit the JSON below, then Enter to confirm:`) })
         lines.push({ text: this.clampLine(` ╰─ ${keyHint('Enter', 'confirm')}  ${keyHint('Esc', 'back')}  ${keyHint('Ctrl+C', 'deny')} ─────────`) })
       } else {
-        const preview = renderApprovalPreview(p.name, p.input, this.columns - 4, this.theme)
+        const preview = renderApprovalPreview(p.name, p.input, cols - 4, this.theme)
         lines.push({ text: '' })
         lines.push({ text: this.clampLine(this.renderBanner('APPROVAL REQUIRED', this.theme.warning)) })
         lines.push({ text: this.clampLine(` │ Tool: ${p.name}`) })
@@ -2594,7 +2592,7 @@ export class TuiApp {
 
     // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
     if (!showSidePanel) {
-      const taskLines = formatTaskList(this.state.todos, this.theme, { width: this.columns, maxRows: 6, showProgressBar: false })
+      const taskLines = formatTaskList(this.state.todos, this.theme, { width: cols, maxRows: 6, showProgressBar: false })
       if (taskLines.length > 0) {
         lines.push({ text: '' })
         for (const taskLine of taskLines) lines.push({ text: taskLine })
@@ -2630,21 +2628,21 @@ export class TuiApp {
         dots:  { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '┄', v: '┊', m: '┬' },
       } as any)[uiSep] ?? { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', m: '┬' }
 
-      const innerWidth = Math.max(20, this.columns - 6)
+      const innerWidth = Math.max(20, cols - 6)
       const leftBar = color(chars.v + ' ', borderColor)
       const rightBar = color(' ' + chars.v, borderColor)
       const botBorder = color(`${chars.bl}${chars.h.repeat(innerWidth + 2)}${chars.br}`, borderColor)
 
       // 3. 构建高保真左右指标 Segment
       const leftStr = formatGlanceLeft({
-        width: this.columns,
+        width: cols,
         domainGlyph: this.state.domainGlyph,
         domainName: this.state.domainName,
         branch: this.metricsGlanceController.gitBranch,
       }, this.theme)
 
       const rightStr = formatGlanceRight({
-        width: this.columns,
+        width: cols,
         modelName: this.state.modelName,
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
@@ -2721,12 +2719,6 @@ export class TuiApp {
           lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
-      }
-    }
-
-    } finally {
-      if (showSidePanel) {
-        this.columns = savedColumns
       }
     }
 
