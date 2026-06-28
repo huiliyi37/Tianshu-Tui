@@ -769,9 +769,10 @@ body {
   background: var(--sidebar-surface-bg);
   backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
   -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
-  overflow-y: auto; display: flex; flex-direction: column;
+  overflow-y: hidden; display: flex; flex-direction: column;
   padding: var(--space-3);
   gap: var(--space-2);
+  height: 100%;
 }
 /* Custom Scrollbars */
 .project-sidebar::-webkit-scrollbar,
@@ -810,10 +811,29 @@ body {
 .sidebar-new-btn:hover {
   filter: brightness(1.1);
 }
+.sidebar-new-btn.outline {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  justify-content: flex-start;
+  height: 34px;
+}
+.sidebar-new-btn.outline:hover {
+  background: var(--hover);
+  border-color: var(--border-strong);
+  filter: none;
+}
 .sidebar-new-btn .snb-glyph {
   display: flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; border-radius: var(--radius-sm);
   background: var(--accent-fg); color: var(--accent); font-size: 14px; line-height: 1;
+}
+.sidebar-new-btn.outline .snb-glyph {
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  width: auto;
+  height: auto;
 }
 .sidebar-new-btn .snb-label { flex: 1; text-align: left; }
 .sidebar-new-btn .snb-hint {
@@ -939,7 +959,13 @@ body {
 }
 
 /* Project tree */
-.project-tree { display: flex; flex-direction: column; gap: var(--space-1); }
+.project-tree {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
 .project-tree-node { display: flex; flex-direction: column; }
 .project-tree-header {
   width: 100%;
@@ -978,6 +1004,7 @@ body {
   border-radius: var(--radius-sm); cursor: pointer;
 }
 .icon-btn:hover { color: var(--text); background: var(--panel-2); }
+
 .thread-row {
   padding: 6px 10px; margin: 2px 0;
   border-radius: var(--radius-md); cursor: pointer;
@@ -994,14 +1021,16 @@ body {
 .thread-row.active .title { font-weight: var(--weight-medium); }
 .thread-row .title > span:first-child { flex-shrink: 0; }
 .thread-row .title > span:not(.status-dot):not(.thread-plan-badge):not(.thread-wt-badge) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.thread-row .meta { color: var(--muted); font-size: var(--text-xs); margin-top: 1px; }
+.thread-row .meta { display: none; }
 .thread-row-close {
-  flex-shrink: 0; opacity: 0; border: none; background: none; cursor: pointer;
+  display: none;
+  flex-shrink: 0; border: none; background: none; cursor: pointer;
   color: var(--muted); padding: 2px; border-radius: var(--radius-sm);
-  display: flex; align-items: center; justify-content: center;
+  align-items: center; justify-content: center;
   transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
-.thread-row:hover .thread-row-close { opacity: 0.6; }
+.thread-row:hover .thread-time { display: none !important; }
+.thread-row:hover .thread-row-close { display: flex !important; opacity: 0.6; }
 .thread-row-close:hover { opacity: 1 !important; color: var(--text); background: var(--panel-3); }
 .thread-close { opacity: 0.6; cursor: pointer; }
 .thread-close:hover { opacity: 1; }
@@ -1140,6 +1169,25 @@ body {
 .deleg-badge.warn { background: var(--warning-soft); color: var(--warning); }
 .deleg-badge.bad { background: var(--error-soft); color: var(--error); }
 .deleg-elapsed { flex: none; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.deleg-model {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.deleg-children-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-3);
+  font-size: 10px;
+  color: var(--muted);
+  border-radius: var(--radius-pill);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 4px;
+}
 .deleg-progress {
   margin-left: 16px; color: var(--muted); font-size: 12px; font-family: var(--font-mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2743,4 +2791,144 @@ html[data-theme="nebula"] .plan-panel {
   font-family: var(--font-mono);
   font-weight: 500;
   color: var(--accent);
+}
+
+/* ── Delegation Tree Surface ─────────────────────────────────────── */
+.delegation-surface {
+  padding: var(--space-4);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.delegation-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.delegation-header h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  color: var(--text-strong);
+}
+.delegation-header .meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.delegation-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-4);
+}
+.delegation-filter-btn {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.delegation-filter-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.delegation-filter-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.delegation-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: var(--space-4);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .delegation-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.delegation-tree-pane {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.delegation-detail-pane {
+  position: sticky;
+  top: var(--space-4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+.delegation-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+.delegation-detail-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.delegation-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.delegation-detail-grid dt {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  margin: 0;
+}
+.delegation-detail-grid dd {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  margin: 0;
+}
+.delegation-section-title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin-bottom: var(--space-1);
+}
+.delegation-text-box {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: var(--space-3);
+}
+
+/* Specific button in delegation detail panel */
+.deleg-diff-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.deleg-diff-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
