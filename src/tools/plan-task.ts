@@ -1,9 +1,8 @@
 import type { Tool, ToolCallParams } from './types.js'
 import { decomposeObjective, renderTaskGraphSummary } from '../agent/task-planner.js'
 import { taskGraphToUnifiedPlan, unifiedPlanToTeamTasks, serializeUnifiedPlan, renderUnifiedPlanSummary, validateUnifiedPlan } from '../agent/unified-plan.js'
-import { runTeamSkeleton } from '../agent/team-orchestrator.js'
 import type { DelegationCoordinator } from '../agent/coordinator.js'
-import type { TeamOrchestratorDeps, TeamRunInput } from '../agent/team-orchestrator.js'
+import { executePlan, type PlanExecutorDeps, type PlanExecutorRun } from '../agent/plan-executor.js'
 import { storePlan } from '../agent/plan-store.js'
 import { classifyTaskDepth, type TaskContract } from '../context/task-contract.js'
 import { setTodos } from './todo.js'
@@ -111,11 +110,10 @@ function buildMethodologyGuidance(objective: string, files: string[]): string {
 
 export function createPlanTaskTool(deps: {
   getCoordinator: () => DelegationCoordinator | null
+  /** Shared closed-loop execution kernel (same one team_orchestrate uses). */
+  getExecutorDeps: () => PlanExecutorDeps
   getSessionTurn?: () => number | undefined
   getSessionId?: () => string | undefined
-  /** Optional: pass through telemetry hooks from bootstrap. */
-  recordTeamWaveTelemetry?: TeamOrchestratorDeps['recordTeamWaveTelemetry']
-  recordTeamSchedulerShadow?: TeamOrchestratorDeps['recordTeamSchedulerShadow']
 }): Tool {
   return {
     definition: {
@@ -216,7 +214,12 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
         }
       }
 
-      // Step 4: execute via team orchestrator
+      // Step 4: execute via the shared plan executor — the SAME closed loop as
+      // team_orchestrate, minus the review gate. plan_task's post-execution path
+      // is the commit flow, whose post-commit auto review gate already covers the
+      // diff; running a review-squadron here too would double-review. So
+      // reviewGate:false — plan_task still gets dispatch + scope-health +
+      // telemetry + reward/episode closure, just no review-squadron dispatch.
       const coordinator = deps.getCoordinator()
       if (!coordinator) {
         return {
@@ -226,30 +229,31 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
       }
 
       const tasks = unifiedPlanToTeamTasks(plan)
-      const input: TeamRunInput = {
-        mode: 'standard',
-        objective,
-        tasks,
-        maxParallel: 3,
-        parentTurnId: `plan:${params.toolUseId ?? Date.now()}`,
-        abortSignal: params.abortSignal,
-      }
-
-      const orchestratorDeps: TeamOrchestratorDeps = {
-        delegateBatch: (requests, policy, abortSignal, onProgress) =>
-          coordinator.delegateBatch(requests, policy, abortSignal, onProgress),
-        recordTeamWaveTelemetry: deps.recordTeamWaveTelemetry,
-        recordTeamSchedulerShadow: deps.recordTeamSchedulerShadow,
-        sessionId: deps.getSessionId?.(),
-      }
-
       try {
-        const summary = await runTeamSkeleton(input, orchestratorDeps)
+        const run: PlanExecutorRun = await executePlan(
+          {
+            mode: 'standard',
+            objective,
+            tasks,
+            fromWave: 0,
+            maxParallel: 3,
+            sessionId: params.sessionId,
+            parentTurnId: `plan:${params.toolUseId ?? Date.now()}`,
+            reviewDepth: params.reviewDepth ?? 0,
+            cwd: params.cwd,
+            abortSignal: params.abortSignal,
+            // Review handled by the post-commit auto gate — see comment above.
+            reviewGate: false,
+          },
+          deps.getExecutorDeps(),
+        )
         const guidance = buildMethodologyGuidance(objective, files ?? [])
         const todoNote = leafNodes.length > 0
           ? `\n\n✅ Todo list 已同步 (${leafNodes.length} 项)。`
           : ''
-        return { content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${summary.packet}` }
+        return {
+          content: `${renderUnifiedPlanSummary(plan)}\n\n${guidance}${todoNote}\n\n${run.summary.packet}${run.notes.scopeHealthNote}${run.notes.deliverySynthesis}`,
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         return { content: `${renderUnifiedPlanSummary(plan)}\n\nExecution failed: ${msg}`, isError: true }

@@ -41,3 +41,9 @@ export function consumePlan(sessionId?: string): string | null {
 export function getStoredPlan(sessionId?: string): string | null {
   return plans.get(currentKey(sessionId)) ?? null
 }
+
+/** Explicitly drop any stored plan for the session. Use when a caller supplies
+ *  its own plan and a stale stored plan must not leak into a later bare call. */
+export function clearPlan(sessionId?: string): void {
+  plans.delete(currentKey(sessionId))
+}
