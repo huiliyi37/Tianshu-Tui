@@ -140,23 +140,32 @@ describe('resolveAppPromptInput', () => {
     assert.ok(resolved.includes('收尾'))
   })
 
-  it('resolves /plan close into a plan_close workflow prompt', async () => {
+  it('resolves /plan close into a plan_close workflow prompt with apply by default', async () => {
     const resolved = resolveAppPromptInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7', '/cwd')
     assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('Use the plan_close tool'))
     assert.ok(resolved.includes('- file_path: docs/superpowers/plans/demo.md'))
     assert.ok(resolved.includes('- tasks: 1-7'))
-    assert.ok(resolved.includes('Preview only; do not write the file.'))
+    assert.ok(resolved.includes('- apply: true'))
+    assert.ok(!resolved.includes('Preview only'))
   })
 
-  it('resolves /plan-close into a plan_close workflow prompt', async () => {
-    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --apply', '/cwd')
+  it('resolves /plan-close into a plan_close workflow prompt with apply by default', async () => {
+    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all', '/cwd')
     assert.ok(resolved !== null)
 
     assert.ok(resolved.includes('Use the plan_close tool'))
     assert.ok(resolved.includes('- tasks: all'))
     assert.ok(resolved.includes('- apply: true'))
+  })
+
+  it('supports --preview to keep plan_close in preview mode', async () => {
+    const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --preview', '/cwd')
+    assert.ok(resolved !== null)
+
+    assert.ok(resolved.includes('- apply: false'))
+    assert.ok(resolved.includes('Preview only; do not write the file.'))
   })
 
   it('returns null for empty /plan (handled by handleSlashCommand before resolver)', async () => {
@@ -666,7 +675,7 @@ describe('/skill review|approve|reject — auto-distill drafts', () => {
 })
 
 describe('/permission', () => {
-  it('shows current mode and rules', async () => {
+  it('shows current mode and available modes', async () => {
     const entries: string[] = []
     const handled = await handleSlashCommand(makeCtx({
       parts: ['/permission'],
@@ -674,6 +683,9 @@ describe('/permission', () => {
     }))
     assert.equal(handled, true)
     assert.ok(entries[0]!.includes('当前模式: manual'), entries[0])
+    assert.ok(entries[0]!.includes('可选模式：'), entries[0])
+    assert.ok(entries[0]!.includes('→ manual'), entries[0])
+    assert.ok(entries[0]!.includes('yolo (dangerously-skip-permissions)'), entries[0])
   })
 
   it('switches approval mode', async () => {

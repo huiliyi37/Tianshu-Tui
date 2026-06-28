@@ -1067,6 +1067,12 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       function isRuntimeMode(m: string): m is RuntimeMode {
         return (VALID_MODES as readonly string[]).includes(m)
       }
+      const MODE_LABELS: Record<RuntimeMode, string> = {
+        'auto-accept': 'auto-accept — 自动接受低风险工具调用',
+        'auto-safe': 'auto-safe — 低/无风险自动过，高风险仍弹确认',
+        'manual': 'manual — 所有需 approval 的工具都弹确认',
+        'dangerously-skip-permissions': 'yolo (dangerously-skip-permissions) — 跳过所有权限确认',
+      }
 
       function parseKvPairs(tokens: string[]): Record<string, string> {
         const out: Record<string, string> = {}
@@ -1097,7 +1103,13 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         const bashDeny = [...(cfg?.bash?.denylist ?? []), ...(overlay?.bashDeny ?? [])]
 
         const lines: string[] = []
-        lines.push(`当前模式: ${agent.config.approvalMode ?? 'manual'}`)
+        const currentMode = agent.config.approvalMode ?? 'manual'
+        lines.push(`当前模式: ${currentMode}`)
+        lines.push('\n可选模式：')
+        for (const m of VALID_MODES) {
+          const marker = m === currentMode ? '→ ' : '  '
+          lines.push(`${marker}${MODE_LABELS[m]}`)
+        }
 
         if (allow.length > 0) {
           lines.push('\nAllow 规则：')
