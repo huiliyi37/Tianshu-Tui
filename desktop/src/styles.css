@@ -2322,22 +2322,35 @@ body {
 }
 .fe-error { color: var(--error); }
 /* Insights surface */
-.insights-surface { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); height: 100%; }
+.insights-surface { display: flex; flex-direction: column; gap: var(--space-5); padding: var(--space-4); height: 100%; }
 .insights-header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.insights-header h3 { margin: 0; font-size: var(--text-lg); }
-.insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3); }
+.insights-header h3 { margin: 0; font-size: var(--text-xl); font-weight: 600; }
+.insights-grid {
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
+}
 .insight-card {
+  flex: 1 1 180px; min-width: 160px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  justify-content: center;
+  gap: var(--space-2);
+  transition: transform var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
 }
-.insight-value { font-size: var(--text-xl); font-weight: 600; color: var(--text); }
+.insight-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.insight-value { font-size: var(--text-2xl); font-weight: 600; color: var(--text); letter-spacing: -0.5px; }
+.insight-card.primary {
+  flex: 2 1 360px;
+  background: linear-gradient(135deg, var(--accent-soft) 0%, var(--panel) 100%);
+  border-color: var(--accent);
+}
+.insight-card.primary .insight-value { color: var(--accent); font-size: var(--text-3xl); }
 .insight-label { font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.insights-section h4 { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.insights-section { display: flex; flex-direction: column; gap: var(--space-3); }
+.insights-section h4 { margin: 0; font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .insights-table {
   width: 100%;
   border-collapse: collapse;
