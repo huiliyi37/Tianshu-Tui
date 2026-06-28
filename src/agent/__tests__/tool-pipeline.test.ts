@@ -1,8 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs'
+import { join, resolve as resolvePath } from 'node:path'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
 import { fingerprintToolCall } from '../trace-store.js'
@@ -10,6 +9,12 @@ import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
 import { isWriteGranted, _resetGrantsForTest } from '../../tools/path-grants.js'
+
+/** Sandbox-safe temp directory — macOS sandbox blocks os.tmpdir() /var/folders/...
+ *  Must be absolute so resolve(cwd, target) in path validation works correctly. */
+const TEST_TMP = resolvePath('.rivet', 'tmp')
+mkdirSync(TEST_TMP, { recursive: true })
+function testTmp(): string { return TEST_TMP }
 
 const mockEvidence = {
   trackFileRead: () => {},
@@ -609,7 +614,7 @@ describe('executeToolUse', () => {
     const oldToolInputDebug = process.env.RIVET_DEBUG_TOOL_INPUT
     const oldSessionDir = process.env.RIVET_SESSION_DIR
     const oldWarn = console.warn
-    const traceDir = mkdtempSync(join(tmpdir(), 'tool-input-trace-'))
+    const traceDir = mkdtempSync(join(testTmp(), 'tool-input-trace-'))
     const warnings: string[] = []
     delete process.env.RIVET_DEBUG
     delete process.env.RIVET_DEBUG_TOOL_INPUT
@@ -934,8 +939,8 @@ describe('executeToolUse', () => {
 
   it('out-of-workspace write_file forces an approval prompt even in auto-safe, and records a grant on approval', async () => {
     _resetGrantsForTest()
-    const workspace = mkdtempSync(join(tmpdir(), 'rivet-ws-'))
-    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    const workspace = mkdtempSync(join(testTmp(), 'rivet-ws-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
     const target = join(external, 'out.txt')
     let approvalCalls = 0
     let executed = false
@@ -971,7 +976,7 @@ describe('executeToolUse', () => {
 
   it('denying the out-of-workspace prompt blocks the op and records no grant', async () => {
     _resetGrantsForTest()
-    const external = mkdtempSync(join(tmpdir(), 'rivet-ext-'))
+    const external = mkdtempSync(join(testTmp(), 'rivet-ext-'))
     const target = join(external, 'out.txt')
     let executed = false
     const deps = makeDeps({
@@ -1132,7 +1137,7 @@ describe('artifactIntercept in tool pipeline', () => {
   let store: ArtifactStore
 
   function setup() {
-    tempDir = mkdtempSync(join(tmpdir(), 'rivet-artifact-test-'))
+    tempDir = mkdtempSync(join(testTmp(), 'rivet-artifact-test-'))
     store = new ArtifactStore(tempDir, 'test-session')
   }
 
@@ -1445,8 +1450,8 @@ describe('artifactIntercept in tool pipeline', () => {
   })
 
   it('two ArtifactStore instances are isolated (worker independence)', async () => {
-    const dir1 = mkdtempSync(join(tmpdir(), 'rivet-worker-a-'))
-    const dir2 = mkdtempSync(join(tmpdir(), 'rivet-worker-b-'))
+    const dir1 = mkdtempSync(join(testTmp(), 'rivet-worker-a-'))
+    const dir2 = mkdtempSync(join(testTmp(), 'rivet-worker-b-'))
     try {
       const storeA = new ArtifactStore(dir1, 'worker-a')
       const storeB = new ArtifactStore(dir2, 'worker-b')
@@ -1503,8 +1508,8 @@ describe('artifactIntercept in tool pipeline', () => {
     // Worker 1 (code_scout) produces large output → artifact intercepted
     // Worker 2 (reviewer) produces large output → artifact intercepted
     // Each worker has its own ArtifactStore, artifacts don't leak across stores
-    const dir1 = mkdtempSync(join(tmpdir(), 'rivet-batch-w1-'))
-    const dir2 = mkdtempSync(join(tmpdir(), 'rivet-batch-w2-'))
+    const dir1 = mkdtempSync(join(testTmp(), 'rivet-batch-w1-'))
+    const dir2 = mkdtempSync(join(testTmp(), 'rivet-batch-w2-'))
     try {
       const store1 = new ArtifactStore(dir1, 'worker-wo_1')
       const store2 = new ArtifactStore(dir2, 'worker-wo_2')
