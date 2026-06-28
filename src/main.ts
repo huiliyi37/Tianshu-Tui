@@ -708,6 +708,12 @@ async function main() {
   // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。
   app.setActivePlanProvider(() => ctx!.agent.config.promptEngine?.getActivePlanPointer())
 
+  // ── Goal / plan-mode / plan-trace providers ──────────────────
+  // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
+  app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
+  app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  app.setPlanTraceProvider(() => ctx!.agent.planTrace)
+
   // ── Wire agent → TuiApp ──────────────────────────────────────
   // 消息队列已收编进 TuiApp：streaming 时 Enter 由 TuiApp 入队（steerBuffer），
   // onSteerDrain 由 TuiApp callbacks 真实 drain，此处无需外层 override。

@@ -267,6 +267,12 @@ export class TuiApp {
   private todosProvider?: () => TodoItem[]
   /** 当前已批准计划指针访问器（main-ansi 读 PromptEngine） */
   private activePlanProvider?: () => string | undefined
+  /** 当前 GoalTracker 快照访问器 */
+  private goalTrackerProvider?: () => import('../../agent/goal-tracker.js').GoalTracker | null
+  /** 当前 PlanExecutionTrace 访问器 */
+  private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
+  /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
+  private planModeProvider?: () => boolean
   /** Block stream writer: chunks streaming text into display-sized blocks */
   private blockWriter: BlockStreamWriter
   /** Write batcher: coalesces render calls into a single LiveEngine.render() */
@@ -1827,6 +1833,27 @@ export class TuiApp {
     this.activePlanProvider = provider
   }
 
+  /**
+   * 注入 GoalTracker 访问器，供 GlanceBar 展示目标迭代/预算状态。
+   */
+  setGoalTrackerProvider(provider: () => import('../../agent/goal-tracker.js').GoalTracker | null): void {
+    this.goalTrackerProvider = provider
+  }
+
+  /**
+   * 注入 PlanExecutionTrace 访问器，供右侧面板展示计划步骤进度。
+   */
+  setPlanTraceProvider(provider: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null): void {
+    this.planTraceProvider = provider
+  }
+
+  /**
+   * 注入 plan-mode 状态访问器，供 GlanceBar 显示 plan 指示灯。
+   */
+  setPlanModeProvider(provider: () => boolean): void {
+    this.planModeProvider = provider
+  }
+
   /** 直接设置任务面板内容（供测试与 provider 刷新复用）。 */
   setTodos(items: TodoItem[]): void {
     this.state.todos = items
@@ -2474,6 +2501,40 @@ export class TuiApp {
       glanceCost = this.estimateSessionCost()
     }
 
+    // 实时状态快照：goal / plan-mode / plan-trace / todo-summary
+    const goalSnapshot = (() => {
+      try {
+        const gt = this.goalTrackerProvider?.()
+        if (gt && gt.isActive()) {
+          return {
+            active: true,
+            status: gt.getStatus(),
+            goal: gt.getGoal(),
+            iteration: gt.getIteration(),
+            maxIterations: gt.getMaxIterations(),
+            elapsedMs: gt.getWallClockElapsedMs(),
+          }
+        }
+      } catch { /* provider 失败不应中断渲染 */ }
+      return undefined
+    })()
+    const planModeActive = (() => {
+      try { return this.planModeProvider?.() ?? false } catch { return false }
+    })()
+    const planTrace = (() => {
+      try { return this.planTraceProvider?.() ?? null } catch { return null }
+    })()
+    const todoSummary = (() => {
+      const t = this.state.todos
+      const total = t.length
+      if (total === 0) return undefined
+      return {
+        total,
+        done: t.filter(x => x.status === 'completed').length,
+        inProgress: t.filter(x => x.status === 'in_progress').length,
+      }
+    })()
+
     let lines: LiveRegionLine[] = []
     lines = []
 
@@ -2713,6 +2774,10 @@ export class TuiApp {
         cost: glanceCost,
         elapsedMs: Date.now() - this.state.turnStartMs,
         turnCount: this.state.turnNumber,
+        approvalMode: this._approvalMode,
+        planMode: planModeActive,
+        goal: goalSnapshot,
+        todoSummary,
       }, this.theme)
 
       const plainLeft = stripAnsiLen(leftStr)
@@ -2813,6 +2878,7 @@ export class TuiApp {
         cacheHitRate: glanceCacheHitRate,
         cost: glanceCost,
         activePlan,
+        planTrace,
       }
       const panelLines = renderSidePanel(sidePanelInput, this.theme)
       lines = this.mergeSidePanel(lines, panelLines, contentCols, sidePanelWidth)
