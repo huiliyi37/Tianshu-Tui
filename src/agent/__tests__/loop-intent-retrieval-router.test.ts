@@ -69,7 +69,10 @@ describe('AgentLoop intent retrieval router wiring', () => {
 
     assert.equal(requests.length, 1)
     const joined = requests[0]!.messages.map(message => typeof message.content === 'string' ? message.content : '').join('\n')
-    assert.doesNotMatch(joined, /<intent-retrieval-route/)
+    // Match the REAL injected block form (with attributes), not the bare
+    // `<intent-retrieval-route>` mention inside the static <rules> prompt — the
+    // latter is always present and is documentation, not an injected route.
+    assert.doesNotMatch(joined, /<intent-retrieval-route advisory=/)
   })
 
   it('injects rendered heuristic route for actionable turns without extra model call', async () => {
