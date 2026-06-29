@@ -74,6 +74,21 @@ function modelOptions(providers: ProviderListItem[]): { value: string; label: st
   return out
 }
 
+/** Profiles that are safe and recommended to route to a cheap/fast model. */
+const RECOMMENDED_PROFILES = SUBAGENT_PROFILES
+  .filter((p) => p.key !== 'council_expert')
+  .map((p) => p.key)
+
+/** Pick a sensible default sub-agent model: Flash > DeepSeek > first available. */
+function findRecommendedTarget(options: { value: string; label: string }[]): string | null {
+  if (options.length === 0) return null
+  const flash = options.find((o) => /flash/i.test(o.label) || /flash/i.test(o.value))
+  if (flash) return flash.value
+  const deepseek = options.find((o) => /deepseek/i.test(o.label) || /deepseek/i.test(o.value))
+  if (deepseek) return deepseek.value
+  return options[0]!.value
+}
+
 export function RoutingSettings() {
   const [config, setConfig] = useState<RoutingConfig | null>(null)
   const [providers, setProviders] = useState<ProviderListItem[]>([])
@@ -98,6 +113,7 @@ export function RoutingSettings() {
   useEffect(() => { load() }, [load])
 
   const options = useMemo(() => modelOptions(providers), [providers])
+  const recommendedValue = useMemo(() => findRecommendedTarget(options), [options])
   const workerProfileNames = useMemo(
     () => (config ? Object.keys(config.workers.profiles) : []),
     [config],
@@ -113,6 +129,26 @@ export function RoutingSettings() {
       .map((k) => ({ key: k, label: k, hint: '自定义 profile' }))
     return [...SUBAGENT_PROFILES, ...extra]
   }, [config])
+
+  const needsRecommendation = useMemo(() => {
+    if (!config || !recommendedValue) return false
+    return RECOMMENDED_PROFILES.some((key) => !config.review.profiles[key])
+  }, [config, recommendedValue])
+
+  const applyRecommendation = useCallback(() => {
+    if (!config || !recommendedValue) return
+    const target = decodeTarget(recommendedValue)
+    if (!target) return
+    setConfig((prev) => {
+      if (!prev) return prev
+      const profiles = { ...prev.review.profiles }
+      for (const key of RECOMMENDED_PROFILES) {
+        profiles[key] = target
+      }
+      return { ...prev, review: { ...prev.review, profiles } }
+    })
+    setDirty(true)
+  }, [config, recommendedValue])
 
   const setReviewProfile = (profileKey: string, value: string) => {
     setConfig((prev) => {
@@ -186,20 +222,35 @@ export function RoutingSettings() {
 
   return (
     <div className="routing-settings flex flex-col gap-5">
-      <div className="meta">
+      <div className="routing-intro">
         主会话与子代理可用不同 provider + 模型。典型用法：主会话用重型模型，审查 / 杂活子代理用便宜快的 Flash，
         避免 GLM/Kimi/Codex 这类无前缀缓存的 provider 因子代理并发请求淘汰主会话缓存。
         目标 provider 须已在「Provider」里配置且有 API Key，否则该项会静默回退到主会话模型。
       </div>
 
       {/* agent.review.profiles — 按 profile 覆盖子代理模型（review / council / team 通用） */}
-      <section className="flex flex-col gap-3">
-        <h5 className="text-xs font-semibold text-text">按 profile 覆盖子代理模型（agent.review.profiles）</h5>
-        <div className="meta">
-          按 worker profile 名覆盖,命中所有携带该 profile 的子代理——涵盖提交后审查、议事会席位（council_expert）、
-          team 编队（patcher / reviewer / scouts）。profile 覆盖<strong>优先于</strong>下方的任务路由,
+      <section className="routing-card">
+        <h5 className="routing-card-title">按 profile 覆盖子代理模型</h5>
+        <div className="routing-card-hint">
+          按 worker profile 名覆盖，命中所有携带该 profile 的子代理——涵盖提交后审查、议事会席位（council_expert）、
+          team 编队（patcher / reviewer / scouts）。profile 覆盖<strong>优先于</strong>下方的任务路由，
           适合「议事会用强模型、其余子代理走 Flash」这类精细控制。
         </div>
+
+        {needsRecommendation && (
+          <div className="routing-recommendation">
+            <div>
+              <strong>推荐：把常见子代理路由到便宜模型</strong>
+              <p>审查、验证、编码等子代理默认继承主会话模型，会和主对话争抢缓存。一键应用后，这些 profile 将使用检测到的便宜模型，主会话更稳定。</p>
+            </div>
+            <button className="btn-sm" onClick={applyRecommendation}>一键应用推荐配置</button>
+          </div>
+        )}
+        {!recommendedValue && providers.length > 0 && (
+          <div className="routing-recommendation muted">
+            未检测到便宜 / Flash 模型。建议先到「Provider」添加 DeepSeek Flash 等模型，再回来一键配置子代理路由。
+          </div>
+        )}
         {allProfiles.map((p) => {
           const current = config.review.profiles[p.key]
           return (
@@ -247,9 +298,9 @@ export function RoutingSettings() {
       </section>
 
       {/* workers — 通用能力任务路由 */}
-      <section className="flex flex-col gap-3">
-        <h5 className="text-xs font-semibold text-text">通用子代理任务路由（workers.routing）</h5>
-        <div className="meta">
+      <section className="routing-card">
+        <h5 className="routing-card-title">通用子代理任务路由</h5>
+        <div className="routing-card-hint">
           每个能力任务指向一个命名档位（在 workers.profiles 中定义，如 cheap-flash → DeepSeek Flash）。
         </div>
         {CAPABILITY_TASKS.map((task) => {
@@ -279,14 +330,14 @@ export function RoutingSettings() {
       </section>
 
       {/* agent.council.seats — 异构议事会：每席独立 provider/model */}
-      <section className="flex flex-col gap-3">
-        <h5 className="text-xs font-semibold text-text">异构议事会席位（agent.council.seats）</h5>
-        <div className="meta">
-          给每个议事会席位单独指定模型,实现「天权用 DeepSeek Pro、天府用 GLM」这类<strong>跨模型会诊</strong>——不同模型不同视角,
-          且各跑各的服务端缓存互不挤兑。留空则用内置默认（tianquan / tianfu / tianxuan,全席同模型）。
+      <section className="routing-card">
+        <h5 className="routing-card-title">异构议事会席位</h5>
+        <div className="routing-card-hint">
+          给每个议事会席位单独指定模型，实现「天权用 DeepSeek Pro、天府用 GLM」这类<strong>跨模型会诊</strong>——不同模型不同视角，
+          且各跑各的服务端缓存互不挤兑。留空则用内置默认（tianquan / tianfu / tianxuan，全席同模型）。
           席位级覆盖<strong>优先于</strong>上方 council_expert 的 profile 覆盖。
           <br />
-          authority 须为<strong>星域 id</strong>（内置 10 个见输入框建议,或已加载的自定义域）;非星域会让该席位无工具且无认知注入。每席 authority 不可重复。
+          authority 须为<strong>星域 id</strong>（内置 10 个见输入框建议，或已加载的自定义域）；非星域会让该席位无工具且无认知注入。每席 authority 不可重复。
         </div>
 
         <datalist id="council-domains">

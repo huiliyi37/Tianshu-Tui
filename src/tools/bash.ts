@@ -7,6 +7,7 @@ import { getShellCommand, WinStreamDecoder } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { applyCommandFilter } from './command-filters.js'
+import { denoiseWindowsError } from './powershell-filter.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
@@ -49,6 +50,50 @@ export function sanitizeEnv(env: NodeJS.ProcessEnv): Record<string, string | und
  */
 export function isExecFailure(exitCode: number): boolean {
   return exitCode === -1 || exitCode === 126 || exitCode === 127 || exitCode > 128
+}
+
+/** Windows command-not-found stderr fingerprints (PowerShell + cmd.exe). */
+const WIN_NOT_FOUND_PATTERNS = [
+  /is not recognized as the name of a cmdlet/i,      // PowerShell cmdlet/binary not found
+  /is not recognized as an internal or external command/i, // cmd.exe
+  /CommandNotFoundException/i,                        // PowerShell .NET exception id
+  /ObjectNotFound:/i,                                 // PowerShell CategoryInfo for missing command
+  /The term '[^']*' is not recognized/i,              // PowerShell long-form message
+]
+
+/** cmd.exe returns 9009 for an unrecognized command. */
+const WIN_NOT_FOUND_EXIT = 9009
+
+/**
+ * Outcome of a finished shell command.
+ *
+ * `errorClass: 'environment'` marks "the host could not run this" (command not
+ * found), which is NOT a competence failure — on Windows benign command-name
+ * differences (`python` vs `py`, missing POSIX tools) constantly produce these,
+ * and feeding them into momentum/doom/approval as failures makes the agent
+ * timid (低信念 → 频繁意图审批). Such outcomes still set `isError` so the model
+ * knows the command did not run, but downstream consumers can branch on the class.
+ */
+export function classifyBashOutcome(
+  exitCode: number,
+  stderr: string,
+  isWindows: boolean,
+): { isError: boolean; errorClass?: 'environment' | 'exec-failure' } {
+  if (isWindows) {
+    const notFound =
+      exitCode === WIN_NOT_FOUND_EXIT ||
+      ((exitCode === 1 || exitCode > 128) && WIN_NOT_FOUND_PATTERNS.some(p => p.test(stderr)))
+    if (notFound) return { isError: true, errorClass: 'environment' }
+    // 9009 is the only Windows-specific exec-failure code; otherwise fall through
+    // to POSIX semantics so non-zero domain results (e.g. findstr no-match) stay benign.
+    if (isExecFailure(exitCode)) return { isError: true, errorClass: 'exec-failure' }
+    return { isError: false }
+  }
+
+  // POSIX: 127 (not found) / 126 (not executable) are environment-class; signals are exec-failure.
+  if (exitCode === 127 || exitCode === 126) return { isError: true, errorClass: 'environment' }
+  if (isExecFailure(exitCode)) return { isError: true, errorClass: 'exec-failure' }
+  return { isError: false }
 }
 
 /**
@@ -238,15 +283,31 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         const raw = truncNote + stderrNote + stdout + (stderr ? '\n' + stderr : '')
         const totalRawBytes = stdoutRawBytes + stderrRawBytes
         const totalRawLines = raw.split('\n').length - (truncNote ? truncNote.split('\n').length - 1 : 0) - (stderrNote ? stderrNote.split('\n').length - 1 : 0)
-        // P1: Command-Aware filtering — apply before content construction so the
-        // model sees a condensed, semantically-relevant version. Raw output is
-        // still persisted for artifact recovery.
-        const filtered = applyCommandFilter(rawCommand, raw, code) ?? raw
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
         const meta = { command: rawCommand, exitCode, durationMs }
-        const isError = isExecFailure(exitCode)
+        const { isError, errorClass } = classifyBashOutcome(exitCode, stderr, process.platform === 'win32')
+        // P1: Command-Aware filtering — apply before content construction so the
+        // model sees a condensed, semantically-relevant version. Raw output is
+        // still persisted for artifact recovery.
+        const commandFiltered = applyCommandFilter(rawCommand, raw, code) ?? raw
+        // Windows: strip PowerShell/cmd error noise (CategoryInfo/FullyQualifiedErrorId/
+        // carets) and prepend a recovery hint for command-not-found so the wall of red
+        // text neither pollutes context nor misleads the model into self-assessed failure.
+        const filtered = process.platform === 'win32'
+          ? denoiseWindowsError(commandFiltered, { exitCode, errorClass, command: rawCommand })
+          : commandFiltered
         const rereadWarn = checkBashReread(rawCommand, params.toolUseId)
+
+        // Empty stdout on success must NOT be back-filled with a synthetic
+        // "Exit code: 0" body. Doing so rendered as "lines=1 — output complete\n
+        // Exit code: 0", which the model (especially on Windows, where it already
+        // distrusts bash) misreads as "output was swallowed / bash is a no-op" —
+        // the documented doom-loop trigger (writes & `… > file` redirects produce
+        // no stdout, so this hit constantly). Pass empty through so buildModelOutput
+        // emits the explicit "confirmed empty" marker instead. Failures/timeouts
+        // keep a synthetic body so the reason is never blank.
+        const modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
 
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
@@ -264,12 +325,13 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           if (!wrapInArtifact) {
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
-            const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+            const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
             return {
               content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
               uiContent: buildUiOutput(filtered, meta),
               rawPath,
               isError,
+              errorClass,
               lossiness: (stdoutTruncated || stderrTruncated) ? 'truncated' as const : 'lossless' as const,
               rawBytes: totalRawBytes,
               rawLines: totalRawLines,
@@ -295,13 +357,14 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           const successFold = exitCode === 0 && lineCount > SUCCESS_INLINE_LINES
           const modelOutput = successFold
             ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
-            : buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
+            : buildModelOutput(modelBody, meta)
           const baseContent = `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`
           return {
             content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
             uiContent: buildUiOutput(filtered, meta),
             rawPath: artifact?.rawPath,
             isError,
+            errorClass,
             lossiness: (stdoutTruncated || stderrTruncated) ? 'truncated' as const : 'lossless' as const,
             rawBytes: totalRawBytes,
             rawLines: totalRawLines,
@@ -311,12 +374,13 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         }
 
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+        const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
         return {
           content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
           uiContent: buildUiOutput(filtered, meta),
           rawPath,
           isError,
+          errorClass,
           lossiness: (stdoutTruncated || stderrTruncated) ? 'truncated' as const : 'lossless' as const,
           rawBytes: totalRawBytes,
           rawLines: totalRawLines,

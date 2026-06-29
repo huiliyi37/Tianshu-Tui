@@ -161,36 +161,72 @@ export class ToolAccumulator {
     // Parse per-command metadata from the output header:
     //   [ls -la .rivet/sessions/] exit=0 time=0.1s lines=248
     const headerRe = /^\[(.+?)\]\s+exit=(\d+)\s+time=[\d.]+\S\s+lines=(\d+)/
+
+    // Keep a short, bounded output tail per collapsed command. Stripping every
+    // byte of stdout is what let the model misread the collapse as "the commands
+    // produced nothing" → the doom-loop trigger (Windows bash 永远没效果 root cause).
+    // A few real lines per command keep the collapse honest while still saving
+    // context; larger outputs additionally expose their rawPath/artifact handle.
+    const TAIL_PER_CMD = 3
+    let tailBudget = 40
+
     const cmdLines: string[] = []
     for (const e of entries) {
       const m = e.content.match(headerRe)
       if (m) {
         const cmd = m[1]!.length > 72 ? m[1]!.slice(0, 69) + '…' : m[1]!
-        const exit = m[2]!
-        const lines = m[3]!
-        cmdLines.push(`  ${cmd}  exit=${exit}  ${lines} lines  (collapsed)`)
+        cmdLines.push(`  ${cmd}  exit=${m[2]!}  ${m[3]!} lines  (collapsed)`)
       } else {
-        // Fallback: show content size
-        const preview = e.content.slice(0, 80).replace(/\n/g, '↵')
         cmdLines.push(`  [unrecognized header] ${e.content.length} chars  (collapsed)`)
       }
+
+      if (tailBudget > 0) {
+        const tail = this.extractBodyTail(e.content, headerRe, Math.min(TAIL_PER_CMD, tailBudget))
+        for (const line of tail) {
+          cmdLines.push(`    | ${line}`)
+          tailBudget--
+        }
+      }
+
+      const handle = this.recoveryHandle(e.content)
+      if (handle) cmdLines.push(`    ↳ full output: ${handle}`)
     }
 
-    // Last output preview from most recent entry
-    const last = entries[entries.length - 1]!
-    const lastLines = last.content.trim().split('\n')
-    const lastPreview = lastLines.slice(-8)
-      .map(l => `  ${l}`)
-      .join('\n')
-    const lastCmd = last.command ?? (last.content.match(headerRe)?.[1] ?? 'unknown')
-
     const parts = [
-      `[storm-collapsed: ${count} bash calls consolidated — raw output saved, use rawPath or read_section to recover]`,
+      `[storm-collapsed: ${count} bash calls consolidated — 这些命令均已执行(见每条 exit + 输出尾部)；尾部不足时用各自 rawPath/read_section 取回完整输出，不要重跑命令]`,
       ...cmdLines,
-      `Last output from most recent call (${lastCmd}):`,
-      lastPreview,
     ]
     return parts.join('\n')
+  }
+
+  /**
+   * Last `n` real output lines from a tool result content, skipping the header
+   * line and meta/footer markers so only genuine stdout/stderr is surfaced.
+   */
+  private extractBodyTail(content: string, headerRe: RegExp, n: number): string[] {
+    if (n <= 0) return []
+    const lines = content.split('\n')
+    const start = lines[0] && headerRe.test(lines[0]) ? 1 : 0
+    const body = lines.slice(start)
+      .map(l => l.replace(/\s+$/, ''))
+      .filter(l => l.length > 0)
+      .filter(l =>
+        !l.startsWith('[output ') &&
+        !l.startsWith('[stdout truncated') &&
+        !l.startsWith('[stderr truncated') &&
+        !l.startsWith('[artifact:') &&
+        !/^\.\.\.\s/.test(l) &&
+        l !== '...')
+    return body.slice(-n).map(l => (l.length > 120 ? l.slice(0, 117) + '…' : l))
+  }
+
+  /** Recovery handle (rawPath or artifact id) embedded in tool output by output-store. */
+  private recoveryHandle(content: string): string | null {
+    const artifact = content.match(/\[artifact:([^\]]+)\]/)
+    if (artifact) return `read_section(artifactId="${artifact[1]!}")`
+    const rawPath = content.match(/full output: read_file\s+(\S+)/)
+    if (rawPath) return `read_file ${rawPath[1]!}`
+    return null
   }
 
   private buildGenericSummary(toolName: string, entries: AccumulatorEntry[], count: number, totalChars: number): string {

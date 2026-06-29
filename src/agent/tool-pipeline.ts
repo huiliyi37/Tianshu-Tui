@@ -223,7 +223,7 @@ export interface ToolPipelineDeps {
   onSkillInvoked?: (name: string) => void
   /** Called when the model explicitly marks a skill as complete via the skill tool. */
   onSkillCompleted?: (name: string) => void
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string): void
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure'): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
   /** Current sensorium snapshot — enables confidence-driven adaptive approval. */
@@ -1069,7 +1069,13 @@ export async function executeToolUse(
     const isTestRun = tu.name === 'run_tests'
     const isVerifyPhase = (deps.phaseHint ?? 'execute') === 'verify'
     const isTddRed = isTestRun && isVerifyPhase && harnessResult.isError
-    if (!isTddRed) {
+    // Environment-class failures (command-not-found on the host — endemic on
+    // Windows where `python`/POSIX tools are simply absent) are NOT competence
+    // failures. Recording them as prediction errors craters momentum/EFE and trips
+    // the cerebellar prediction-error gate, making the agent timid (低信念 → 不敢做事).
+    // Skip prediction recording entirely, exactly like TDD-red information gain.
+    const isEnvFailure = harnessResult.isError && rawToolResult?.errorClass === 'environment'
+    if (!isTddRed && !isEnvFailure) {
       deps.recordPrediction?.(!harnessResult.isError)
    }
     let outputClass: string
@@ -1116,7 +1122,7 @@ export async function executeToolUse(
 
     callbacks.onToolResult(tu.id, tu.name, finalContent, harnessResult.isError, rawToolResult?.rawPath, rawToolResult?.uiContent)
 
-    deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content)
+    deps.recordToolHistory(tu.name, tu.input, harnessResult.isError, harnessResult.content, rawToolResult?.errorClass)
 
     // B1 归属星轨：record tool events into TaskLedger
     if (deps.taskLedger) {

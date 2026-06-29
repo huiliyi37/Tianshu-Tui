@@ -179,7 +179,13 @@ export function modulateStrategyByVigor(
 ): StrategyProfile {
   let adjusted: StrategyProfile = { ...strategy }
 
-  if (vigor.vigor < 0.3 || vigor.phasic < -0.5) {
+  // Only raise commit threshold when vigor (the composite signal) is low.
+  // phasic < -0.5 was removed: a single tool failure (phasic ≈ -0.5) is
+  // normal workflow noise (TDD gate, test RED, env flake), not a confidence
+  // crisis. phasic already contributes to vigor via the composite formula;
+  // double-counting it here made every transient failure trigger intent
+  // warnings ("我对当前方向把握偏低") during legitimate work.
+  if (vigor.vigor < 0.3) {
     adjusted = {
       ...adjusted,
       reasoningEffort: stepReasoningEffort(adjusted.reasoningEffort, 1),

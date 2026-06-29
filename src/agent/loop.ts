@@ -64,7 +64,7 @@ import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
-import { classifyRecoveryTrigger } from './recovery-trigger.js'
+import { classifyRecoveryTrigger, type RecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
@@ -296,6 +296,10 @@ export class AgentLoop {
   private resourceSensor: ResourceSensor
   latestResourceSnapshot: ResourceSensorSnapshot | null = null
   latestReliabilityDecision: ReliabilityDecision | null = null
+  /** Triggers that have fired at error severity this session. Used by
+   *  refreshReliabilityDecision to cap recurring firings at degraded,
+   *  preventing permanent lock-in from non-self-resolving conditions. */
+  firedRecoveryTriggers: Set<RecoveryTrigger> = new Set()
   fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
@@ -601,8 +605,8 @@ export class AgentLoop {
     return this.planTraceCoordinator.buildStepResultFromTurn(turn)
   }
 
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
-      recordToolHistory(this, name, input, isError, result);
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string, errorClass?: 'environment' | 'exec-failure'): void {
+      recordToolHistory(this, name, input, isError, result, errorClass);
       // F-fix (session 803d897d): field habituation moves discipline text out of
       // focus after ~4 turns while a heavy turn can run 20+ tool calls. Re-anchor
       // a one-line discipline summary through the advisory bus every N calls —
@@ -954,6 +958,14 @@ export class AgentLoop {
   }
 
   refreshReliabilityDecision(): void {
+    // User override: RIVET_RELIABILITY_OVERRIDE=full disables all reliability
+    // locks. Use when the agent is permanently locked by a non-self-resolving
+    // condition (e.g. orphan tool_use blocks) and you accept the risk.
+    if (process.env.RIVET_RELIABILITY_OVERRIDE === 'full') {
+      this.latestReliabilityDecision = null
+      return
+    }
+
     this.latestResourceSnapshot = this.resourceSensor.sample(this.sessionPersistPath())
     const disk = this.latestResourceSnapshot.disk
     const trigger = classifyRecoveryTrigger({
@@ -985,7 +997,20 @@ export class AgentLoop {
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
       },
     })
-    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger, this.isGoalActive())
+
+    this.latestReliabilityDecision = modeForRecoveryTrigger(
+      trigger,
+      this.isGoalActive(),
+      this.firedRecoveryTriggers,
+    )
+
+    // Track triggers that fire at error severity for one-shot suppression.
+    // Add AFTER modeForRecoveryTrigger so the first occurrence reaches full
+    // severity (e.g. minimal). Subsequent occurrences are then capped at
+    // degraded by modeForRecoveryTrigger's suppressedTriggers check.
+    if (trigger && trigger.severity === 'error') {
+      this.firedRecoveryTriggers.add(trigger.trigger)
+    }
   }
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */

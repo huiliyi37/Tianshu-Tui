@@ -9,6 +9,11 @@
  * Environment variables:
  *   NODE_VERSION   e.g. 22.15.0 (default below)
  *   FORCE_FETCH    set to 1 to re-download even if the binary already exists
+ *   NODE_MIRROR    base URL for the Node.js dist tree (default nodejs.org).
+ *                  Set to a regional mirror (e.g. https://cdn.npmmirror.com/binaries/node)
+ *                  when nodejs.org is slow/blocked. The mirror must keep the
+ *                  official /v<ver>/<archive> + /v<ver>/SHASUMS256.txt layout so
+ *                  the checksum guard below still verifies against official hashes.
  */
 
 import { createReadStream, createWriteStream, existsSync, mkdirSync, rmSync } from 'node:fs'
@@ -26,6 +31,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_NODE_VERSION = '24.1.0'
 const NODE_VERSION = process.env.NODE_VERSION || DEFAULT_NODE_VERSION
 const FORCE_FETCH = process.env.FORCE_FETCH === '1'
+// Base of the Node.js dist tree. Override with a regional mirror when nodejs.org
+// is unreachably slow (the common case behind the GFW). Trailing slash trimmed
+// so URL joins stay clean regardless of how the env value is written.
+const NODE_MIRROR = (process.env.NODE_MIRROR || 'https://nodejs.org/dist').replace(/\/+$/, '')
 // No-data watchdog: abort a stalled connection so a hung mirror can't freeze
 // the whole build indefinitely.
 const DOWNLOAD_TIMEOUT_MS = Number(process.env.NODE_FETCH_TIMEOUT_MS || 120000)
@@ -135,13 +144,32 @@ async function main() {
   const binaryPath = join(targetDir, binaryName)
 
   if (existsSync(binaryPath) && !FORCE_FETCH) {
-    console.log(`[fetch-node-runtime] cached ${binaryPath}`)
-    return
+    // Version-aware cache: a cached binary is only trustworthy if it IS the
+    // requested version. Bumping NODE_VERSION while a stale binary sits on disk
+    // would otherwise be silently ignored, shipping a runtime whose ABI no
+    // longer matches the better-sqlite3 that pack-native built for NODE_VERSION
+    // (the exact trap that caused the NODE_MODULE_VERSION crash). So probe the
+    // cached binary and only short-circuit on an exact match; anything else
+    // (wrong version / unreadable) falls through to a fresh download.
+    let cachedVersion = ''
+    try {
+      cachedVersion = execSync(`"${binaryPath}" -v`, { encoding: 'utf8' }).trim()
+    } catch {
+      cachedVersion = ''
+    }
+    if (cachedVersion === `v${NODE_VERSION}`) {
+      console.log(`[fetch-node-runtime] cached ${binaryPath} (${cachedVersion})`)
+      return
+    }
+    console.log(
+      `[fetch-node-runtime] cached ${binaryPath} is ${cachedVersion || 'unreadable'}, ` +
+        `need v${NODE_VERSION} — re-downloading`,
+    )
   }
 
   const baseName = `node-v${NODE_VERSION}-${platform}-${arch}`
   const ext = isWindows ? 'zip' : platform === 'linux' ? 'tar.xz' : 'tar.gz'
-  const url = `https://nodejs.org/dist/v${NODE_VERSION}/${baseName}.${ext}`
+  const url = `${NODE_MIRROR}/v${NODE_VERSION}/${baseName}.${ext}`
   const tmpDir = join(__dirname, '..', '.tmp-node-runtime')
   const archivePath = join(tmpDir, `${baseName}.${ext}`)
 
@@ -156,7 +184,7 @@ async function main() {
   // straight into the shipped app. Fail-closed — abort the build on any mismatch.
   const archiveName = `${baseName}.${ext}`
   console.log(`[fetch-node-runtime] verifying ${archiveName} checksum`)
-  const shasums = await fetchText(`https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt`)
+  const shasums = await fetchText(`${NODE_MIRROR}/v${NODE_VERSION}/SHASUMS256.txt`)
   const expected = parseShasum(shasums, archiveName)
   if (!expected) {
     rmSync(tmpDir, { recursive: true, force: true })

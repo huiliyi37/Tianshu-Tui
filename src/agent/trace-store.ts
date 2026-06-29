@@ -121,7 +121,12 @@ export function bashCommandClass(command: string): string {
  * Class fingerprint for a tool call. Only bash gets one — bash is the
  * text-parsing escape hatch where the model mutates flags/pipes to "retry";
  * structured tools (read_file/grep/...) legitimately repeat with new inputs.
- * Returns null for non-bash tools.
+ *
+ * Only failing bash commands produce a class fingerprint. Successful
+ * exploration commands (grep, find, cat, npx tsc, etc.) are legitimate
+ * repetition, not a doom loop — 20 unique successful grep patterns must NOT
+ * be mistaken for the same tool failing repeatedly.
+ * Returns null for non-bash tools or successful bash commands.
  */
 export function fingerprintToolClass(
   name: string,
@@ -129,6 +134,8 @@ export function fingerprintToolClass(
   outputClass: string,
 ): string | null {
   if (name !== 'bash') return null
+  // Successful bash commands are normal exploration — don't class-track them.
+  if (outputClass === 'success') return null
   const command = typeof input.command === 'string' ? input.command : ''
   return `${bashCommandClass(command)}·${outputClass}`
 }

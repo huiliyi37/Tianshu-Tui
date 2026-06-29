@@ -756,6 +756,12 @@ function buildVolatileBlockInternal(ctx: VolatileContext): string {
   if (targetPlatform !== process.platform) {
     parts.push(`<platform-note>文件约定（换行/路径风格）按 ${targetPlatform} 生成；但 shell 命令在宿主 ${process.platform} 上执行——优先使用跨平台命令，避免目标平台专属语法在宿主机执行失败。</platform-note>`)
   }
+  // Windows 宿主原生指引：命令在 PowerShell/cmd 上跑，与 POSIX 习惯差异大。
+  // 国内 Windows 用户占多数——零配置给出原生约定，从源头减少命令失败导致的误判与退缩。
+  // session-static（仅依赖 process.platform）→ 留在 frozen，前缀缓存安全。
+  if (process.platform === 'win32') {
+    parts.push('<windows-shell-note>shell 是 PowerShell/cmd：Python 用 `py`（Windows launcher）而非 `python`；优先 PowerShell 原生命令（`Get-ChildItem`/`Get-Content`/`Test-Path`/`Remove-Item`，`ls`/`cat` 是别名可用）。非零退出码≠必然失败（很多工具用它表达正常结果）。命令报「is not recognized / not recognized as a cmdlet」是“此环境没有这个命令”，应换用可用工具，不要重试同一条——这不是你的错，也不影响判断。</windows-shell-note>')
+  }
 
   // 天枢本体锚点——常驻 frozen，简短心跳确认在场。
   // 行为层面的唤醒通过 advisory bus 按需注入（见 staleness-refresh advisory）。
