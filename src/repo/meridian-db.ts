@@ -164,6 +164,8 @@ export class MeridianDb {
         this.conn.pragma('busy_timeout = 3000')
         this.conn.exec(SCHEMA)
       } catch (err) {
+        // Packaged sidecar with a broken native bundle: fail loud, never degrade.
+        if ((err as { code?: string })?.code === 'ESQLITE_BUNDLE_BROKEN') throw err
         const reason = err instanceof Error ? err.message : String(err)
         console.warn(`⚠ better-sqlite3 not available. Code index (MeridianDb) disabled. Reason: ${reason}`)
         this._available = false

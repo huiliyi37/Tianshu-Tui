@@ -1,11 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveBetterSqlite3 } from '../native-resolver.js'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
-import { createRequire } from 'node:module'
-
-const require = createRequire(import.meta.url)
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 describe('native-resolver', () => {
   it('returns Database constructor when node_modules has better-sqlite3 (dev mode)', () => {
@@ -33,13 +32,36 @@ describe('native-resolver', () => {
     // Simulate running from dist/ — native/ dir is packed alongside main.js
     const distMainUrl = pathToFileURL(process.cwd() + '/dist/main.js').href
     if (!existsSync(process.cwd() + '/dist/native/better_sqlite3.node')) {
-      // pack-native.sh not run yet — skip, not fail
-      t.skip('dist/native/better_sqlite3.node not found — run: bash scripts/pack-native.sh')
+      // pack-native.js not run yet — skip, not fail
+      t.skip('dist/native/better_sqlite3.node not found — run: node scripts/pack-native.js')
       return
     }
     const db = resolveBetterSqlite3(distMainUrl)
-    assert.ok(db, 'should load from dist/native/')
+    assert.ok(db, 'should load via wrapper + nativeBinding')
+    // Bound constructor must behave like the real Database (prepare/exec round-trip).
     const instance = new db(':memory:')
+    instance.exec('CREATE TABLE t (x INTEGER)')
+    instance.prepare('INSERT INTO t VALUES (?)').run(7)
+    assert.equal((instance.prepare('SELECT x FROM t').get() as { x: number }).x, 7)
     instance.close()
+  })
+
+  it('throws (no silent degrade) when native binary is present but wrapper is unresolvable', () => {
+    // A location OUTSIDE the repo so node module resolution finds no
+    // better-sqlite3 — but with a native/ binary present, which is exactly the
+    // "broken packaging" signal that must fail loud instead of degrading.
+    const dir = join(tmpdir(), `native-resolver-broken-${process.pid}-${Date.now()}`)
+    mkdirSync(join(dir, 'native'), { recursive: true })
+    writeFileSync(join(dir, 'native', 'better_sqlite3.node'), 'not a real addon')
+    const moduleUrl = pathToFileURL(join(dir, 'main.js')).href
+    try {
+      assert.throws(
+        () => resolveBetterSqlite3(moduleUrl),
+        (err: unknown) => (err as { code?: string })?.code === 'ESQLITE_BUNDLE_BROKEN',
+        'must throw ESQLITE_BUNDLE_BROKEN rather than return a NullDatabase',
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
