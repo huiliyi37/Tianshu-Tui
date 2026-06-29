@@ -1785,21 +1785,101 @@ body {
 .tool-card {
   border: none; border-radius: 0;
   overflow: visible; background: transparent;
+  margin: var(--space-2) 0;
 }
-.tool-row.err { background: transparent; }
+.tool-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  overflow: hidden;
+  margin: 4px 0;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.tool-row:hover {
+  border-color: color-mix(in oklab, var(--border) 130%, var(--accent) 15%);
+}
+.tool-row.err {
+  border-color: var(--error);
+  box-shadow: 0 0 8px var(--error-soft);
+}
 .tool-row.err .tool-row-head:hover { background: var(--error-soft); }
 .tool-row-head {
   width: 100%; display: flex; align-items: center; gap: var(--space-2);
-  background: transparent; color: var(--text); border: none; cursor: pointer;
-  padding: 3px 0; font-size: var(--text-sm); text-align: left; min-width: 0;
-  border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-strong); border: none; cursor: pointer;
+  padding: 8px 12px; font-size: var(--text-sm); text-align: left; min-width: 0;
+  font-family: inherit;
 }
-.tool-row-head:hover { background: var(--panel-2); }
-.tool-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+.tool-row-head:hover { background: var(--hover); }
+.tool-name { font-weight: var(--weight-semibold); font-family: var(--font-mono); color: var(--text-strong); }
+.tool-preview {
+  color: var(--muted); font-family: var(--font-mono); font-size: var(--text-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  margin-left: var(--space-2);
+}
+.tool-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
 .tool-dot.ok { background: var(--success); }
 .tool-dot.err { background: var(--error); }
 .tool-dot.run { background: var(--accent); animation: pulse-running 1.5s var(--ease) infinite; }
-.tool-row .tool-body { border-top: none; margin-top: var(--space-1); border-radius: var(--radius-sm); }
+
+.tool-body-wrap {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.tool-input-section {
+  display: flex; gap: 8px; align-items: flex-start;
+  background: var(--panel-3); padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.tool-prompt-sym {
+  color: var(--accent); font-family: var(--font-mono); font-weight: bold;
+  user-select: none; font-size: var(--text-sm); margin-top: 1px;
+}
+.tool-cmd {
+  margin: 0; font-family: var(--font-mono); font-size: var(--text-sm);
+  color: var(--text-strong); white-space: pre-wrap; word-break: break-all;
+}
+.tool-output-section {
+  margin: 0; padding: var(--space-3);
+  background: var(--panel); font-family: var(--font-mono); font-size: var(--text-sm);
+  line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-all;
+  max-height: 400px; overflow-y: auto;
+}
+
+/* ── Timeline Group Styling (Cursor 3.0) ────────────────────────────────── */
+.timeline-group {
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  overflow: hidden;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.timeline-group.open {
+  border-color: color-mix(in oklab, var(--border) 140%, var(--accent) 15%);
+  box-shadow: var(--shadow-sm);
+}
+.timeline-summary {
+  width: 100%; display: flex; align-items: center; gap: var(--space-2);
+  padding: 10px 14px; background: transparent; border: none; cursor: pointer;
+  text-align: left; font-family: inherit; font-size: var(--text-sm);
+  color: var(--text); transition: background var(--dur) var(--ease);
+}
+.timeline-summary:hover { background: var(--hover); }
+.tl-icon { display: flex; align-items: center; justify-content: center; color: var(--muted); transition: color var(--dur) var(--ease); }
+.timeline-summary:hover .tl-icon { color: var(--accent); }
+.tl-label { font-weight: var(--weight-medium); color: var(--text-strong); flex-shrink: 0; }
+.tl-line { height: 1px; background: var(--border); flex: 1; margin: 0 var(--space-2); opacity: 0.5; }
+.timeline-body {
+  padding: 8px 14px 14px; background: var(--panel);
+  border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--space-1);
+}
+.timeline-more {
+  display: block; width: 100%; text-align: center;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 0; margin-bottom: var(--space-2); font-size: var(--text-xs);
+  color: var(--muted); cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.timeline-more:hover { color: var(--text-strong); background: var(--panel-3); border-color: var(--accent); }
 
 .thinking { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
 .dot-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: pulse 1.2s var(--ease) infinite; }

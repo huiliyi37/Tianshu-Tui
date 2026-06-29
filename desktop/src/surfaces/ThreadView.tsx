@@ -4,7 +4,8 @@ import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/type
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
 import { basename } from '../lib/projects'
-import { ToolCard, toolNameOf } from '../components/ToolGroup'
+import { ToolCard, toolNameOf, pairEntries, PairedRow } from '../components/ToolGroup'
+import type { PairedEntry } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
@@ -603,26 +604,25 @@ export function ThreadView(props: {
                 >
                   {item.kind === 'timeline' ? (
                     <TimelineGroup blocks={item.items}>
-                      {item.items.map(b => (
-                        <Block
-                          key={b.key}
-                          block={b}
-                          sessionId={session.id}
-                          onOpenImage={openImage}
-                          domainGlyph={domainGlyph}
-                          domainName={activeDomain?.name}
-                          // Live reasoning/text can land inside a timeline run too;
-                          // mark the tail block streaming (mirror of the top-level
-                          // branch) so it gets the ~10Hz throttle instead of
-                          // re-rendering plain text at full rAF rate.
-                          isStreaming={
-                            b.key === lastKey && (
-                              (b.kind === 'thinking' && view.private_thinkingOpen) ||
-                              (b.kind === 'assistant' && view.private_textOpen)
-                            )
-                          }
-                        />
-                      ))}
+                      {groupTimelineItems(item.items).map((tItem, idx) => {
+                        if (tItem.kind === 'thinking') {
+                          const isStreaming = tItem.block.key === lastKey && view.private_thinkingOpen
+                          return (
+                            <ThinkingBlock
+                              key={tItem.block.key ?? idx}
+                              block={tItem.block}
+                              streaming={!!isStreaming}
+                            />
+                          )
+                        } else {
+                          return (
+                            <PairedRow
+                              key={tItem.entry.tool?.key ?? tItem.entry.result?.key ?? idx}
+                              entry={tItem.entry}
+                            />
+                          )
+                        }
+                      })}
                     </TimelineGroup>
                   ) : item.kind === 'artifact' ? (
                     <ArtifactCard block={item.block} />
@@ -830,6 +830,31 @@ function isArtifactTool(b: ConvoBlock): boolean {
     } catch(e) {}
   }
   return false;
+}
+
+function groupTimelineItems(blocks: ConvoBlock[]) {
+  const items: Array<{ kind: 'thinking'; block: ConvoBlock } | { kind: 'paired'; entry: PairedEntry }> = []
+  let currentToolRun: ConvoBlock[] = []
+
+  const flushTools = () => {
+    if (currentToolRun.length === 0) return
+    const paired = pairEntries(currentToolRun)
+    for (const entry of paired) {
+      items.push({ kind: 'paired', entry })
+    }
+    currentToolRun = []
+  }
+
+  for (const b of blocks) {
+    if (b.kind === 'thinking') {
+      flushTools()
+      items.push({ kind: 'thinking', block: b })
+    } else {
+      currentToolRun.push(b)
+    }
+  }
+  flushTools()
+  return items
 }
 
 type RenderItem =

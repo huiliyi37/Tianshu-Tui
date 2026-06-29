@@ -53,13 +53,13 @@ function PreviewText({ text }: { text: string }) {
 
 // ── Pairing: merge tool_use + tool_result into single entries ───
 
-interface PairedEntry {
+export interface PairedEntry {
   tool?: ConvoBlock
   result?: ConvoBlock
   name: string
 }
 
-function pairEntries(items: ConvoBlock[]): PairedEntry[] {
+export function pairEntries(items: ConvoBlock[]): PairedEntry[] {
   const entries: PairedEntry[] = []
   for (const b of items) {
     const name = toolNameOf(b)
@@ -186,10 +186,28 @@ function McpBadge({ name }: { name: string }) {
 function PairedRowImpl({ entry }: { entry: PairedEntry }) {
   const [open, setOpen] = useState(!!entry.result?.isError)
   const name = entry.name
-  const text = entry.result?.text ?? entry.tool?.text ?? ''
-  const firstLine = text.split('\n', 1)[0] ?? ''
-  const preview = firstLine.length > 100 ? `${firstLine.slice(0, 100)}…` : firstLine
   const status = entry.result?.isError ? 'err' : entry.result ? 'ok' : 'run'
+
+  // Build a smart preview for the tool row head.
+  const previewText = useMemo(() => {
+    if (!entry.tool) return ''
+    const text = entry.tool.text
+    if (name === 'bash') {
+      const cmd = text.trim().split('\n')[0] ?? ''
+      return cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd
+    }
+    if (text.startsWith('{')) {
+      try {
+        const obj = JSON.parse(text)
+        if (obj.path) return obj.path
+        if (obj.TargetFile) return obj.TargetFile
+        if (obj.pattern) return obj.pattern
+        if (obj.query) return obj.query
+      } catch (e) {}
+    }
+    const firstLine = text.split('\n', 1)[0] ?? ''
+    return firstLine.length > 80 ? `${firstLine.slice(0, 80)}…` : firstLine
+  }, [entry.tool, name])
 
   return (
     <div className={`tool-row ${entry.result?.isError ? 'err' : ''}`}>
@@ -197,14 +215,26 @@ function PairedRowImpl({ entry }: { entry: PairedEntry }) {
         <span className={`tool-dot ${status}`} aria-hidden />
         <span className="tool-name">{name}</span>
         <McpBadge name={name} />
-        {!open && preview && <PreviewText text={preview} />}
+        {!open && previewText && <PreviewText text={previewText} />}
       </button>
-      {open && <pre className="tool-body">{truncateBody(text)}</pre>}
+      {open && (
+        <div className="tool-body-wrap">
+          {entry.tool && (
+            <div className="tool-input-section">
+              <span className="tool-prompt-sym">$</span>
+              <pre className="tool-cmd">{entry.tool.text}</pre>
+            </div>
+          )}
+          {entry.result && (
+            <pre className="tool-output-section">{truncateBody(entry.result.text)}</pre>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-const PairedRow = memo(PairedRowImpl, (a, b) =>
+export const PairedRow = memo(PairedRowImpl, (a, b) =>
   a.entry.tool === b.entry.tool && a.entry.result === b.entry.result
 )
 
@@ -242,12 +272,10 @@ const ToolRow = memo(ToolRowImpl, (a, b) => a.block === b.block && a.defaultOpen
 // aligns with Cursor's "Collapse Auto-Run Commands" and reduces the visual
 // clutter of repeated targeted test runs stacking up in the thread.
 function ToolCardImpl({ block }: { block: ConvoBlock }) {
-  const name = toolNameOf(block)
-  const isSuccessfulRunTests =
-    block.kind === 'result' && !block.isError && name.toLowerCase() === 'run_tests'
+  const shouldOpen = !!block.isError
   return (
     <div className="tool-card">
-      <ToolRow block={block} defaultOpen={!isSuccessfulRunTests} />
+      <ToolRow block={block} defaultOpen={shouldOpen} />
     </div>
   )
 }
