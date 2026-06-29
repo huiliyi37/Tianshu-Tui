@@ -254,9 +254,11 @@ function buildCompactClient(
   }
 
   const caps = resolveCapabilities(prov.name, prov.capabilities)
-  // Compaction is a single non-streaming-tool summarization; a 4K output cap is
-  // plenty even for the generous char budget (≈16K chars ≈ 4K tokens).
-  const maxTokens = Math.min(4096, spec.maxTokens)
+  // A dedicated compact client always runs the generous char budget (up to ~16K
+  // chars at 1M). maxTokens only caps output (billed per generated token), so a
+  // high ceiling is cost-neutral but prevents truncating a generous CJK summary
+  // mid-sentence — 16K chars is ~10K tokens for Chinese, far above a 4K cap.
+  const maxTokens = Math.min(16_384, spec.maxTokens)
   return createProviderClient(prov, caps, {
     apiKey,
     model: spec.id,
