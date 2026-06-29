@@ -998,18 +998,19 @@ export class AgentLoop {
       },
     })
 
-    // Track triggers that fire at error severity for one-shot suppression.
-    // Recurring firings of the same trigger are capped at degraded in
-    // modeForRecoveryTrigger, preventing permanent lock-in from conditions
-    // that never self-resolve (session_integrity, resource_pressure, etc.).
-    if (trigger && trigger.severity === 'error') {
-      this.firedRecoveryTriggers.add(trigger.trigger)
-    }
     this.latestReliabilityDecision = modeForRecoveryTrigger(
       trigger,
       this.isGoalActive(),
       this.firedRecoveryTriggers,
     )
+
+    // Track triggers that fire at error severity for one-shot suppression.
+    // Add AFTER modeForRecoveryTrigger so the first occurrence reaches full
+    // severity (e.g. minimal). Subsequent occurrences are then capped at
+    // degraded by modeForRecoveryTrigger's suppressedTriggers check.
+    if (trigger && trigger.severity === 'error') {
+      this.firedRecoveryTriggers.add(trigger.trigger)
+    }
   }
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */

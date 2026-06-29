@@ -102,6 +102,24 @@ describe('modeForRecoveryTrigger', () => {
     )
     assert.equal(decision.mode, 'minimal')
   })
+
+  it('AgentLoop ordering: first occurrence → minimal, second → degraded', () => {
+    const suppressed = new Set<RecoveryTrigger>()
+    const first = modeForRecoveryTrigger(
+      trigger({ trigger: 'session_integrity', severity: 'error', summary: 'orphan tools' }),
+      false,
+      suppressed,
+    )
+    assert.equal(first.mode, 'minimal')
+    suppressed.add('session_integrity')
+    const second = modeForRecoveryTrigger(
+      trigger({ trigger: 'session_integrity', severity: 'error', summary: 'orphan tools (recurring)' }),
+      false,
+      suppressed,
+    )
+    assert.equal(second.mode, 'degraded')
+    assert.match(second.reason, /capped at degraded/)
+  })
 })
 
 describe('isToolAllowedInReliabilityMode', () => {
