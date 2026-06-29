@@ -132,6 +132,8 @@ export class SessionRegistry {
       try { db.exec('ALTER TABLE retrospect_fingerprints ADD COLUMN project_hash TEXT') } catch { /* already exists */ }
       db.exec(SCHEMA)
     } catch (err) {
+      // Packaged sidecar with a broken native bundle: fail loud, never degrade.
+      if ((err as { code?: string })?.code === 'ESQLITE_BUNDLE_BROKEN') throw err
       // Distinguish "library missing" from "schema execution failed"
       if (err instanceof Error && err.message?.includes('better-sqlite3')) {
         console.warn(`⚠ better-sqlite3 not available. Session registry disabled — running in memory-only mode. Reason: ${(err as Error).message}`)

@@ -1,78 +1,12 @@
 import { defineConfig, type Options } from 'tsup'
 import { builtinModules } from 'node:module'
 
-/**
- * esbuild plugin: makes better-sqlite3 a runtime-optional dependency.
- *
- * The virtual module does a runtime require('better-sqlite3') inside try/catch.
- * If the native module is not installed, it returns a NullDatabase class that
- * implements the same interface (prepare, exec, pragma, close, transaction)
- * as no-ops. This way `new Database(path)` never throws, regardless of whether
- * better-sqlite3 is installed.
- *
- * Why a class proxy instead of null? Because esbuild tree-shakes null checks
- * on static imports. The source code's `if (!Database)` and `try/catch` get
- * stripped in the bundle. By always providing a valid constructor, we avoid
- * "Database is not a constructor" at runtime.
- */
-const optionalNativeModulePlugin = {
-  name: 'optional-native-module',
-  setup(build: any) {
-    build.onResolve({ filter: /^better-sqlite3$/ }, (args: any) => ({
-      path: args.path,
-      namespace: 'optional-native',
-    }))
-    build.onLoad({ filter: /.*/, namespace: 'optional-native' }, () => ({
-      contents: [
-        '// Runtime loader for optional native module better-sqlite3',
-        '// Resolution order: native/ dir → node_modules → NullDatabase',
-        'var NativeDB = null;',
-        'try {',
-        '  var { createRequire } = require("node:module");',
-        '  var { fileURLToPath } = require("node:url");',
-        '  var { dirname, join } = require("node:path");',
-        '  var { existsSync } = require("node:fs");',
-        '',
-        '  // 1. Try native/ directory adjacent to this module (production bundle)',
-        '  var selfPath = fileURLToPath(import.meta.url);',
-        '  var selfDir = dirname(selfPath);',
-        '  var nativePath = join(selfDir, "native", "better_sqlite3.node");',
-        '  if (existsSync(nativePath)) {',
-        '    var nativeRequire = createRequire(nativePath + "/");',
-        '    NativeDB = nativeRequire("./better_sqlite3.node");',
-        '  }',
-        '',
-        '  // 2. Fallback: try node_modules',
-        '  if (!NativeDB) {',
-        '    NativeDB = createRequire(import.meta.url)("better-sqlite3");',
-        '  }',
-        '} catch (e) {',
-        '  // better-sqlite3 not installed — NullDatabase will be used',
-        '}',
-        '',
-        '// No-op statement that mimics better-sqlite3 Statement API',
-        'var noopStmt = {',
-        '  run: function() { return { changes: 0, lastInsertRowid: 0 }; },',
-        '  all: function() { return []; },',
-        '  get: function() { return undefined; },',
-        '};',
-        '',
-        '// NullDatabase: drop-in replacement when better-sqlite3 is unavailable.',
-        '// All DB operations silently succeed — features degrade gracefully.',
-        'function NullDatabase() {}',
-        'NullDatabase.prototype.prepare = function() { return noopStmt; };',
-        'NullDatabase.prototype.exec = function() {};',
-        'NullDatabase.prototype.pragma = function() {};',
-        'NullDatabase.prototype.close = function() {};',
-        'NullDatabase.prototype.transaction = function(fn) { return fn; };',
-        '',
-        '// Export the real constructor if available, otherwise the null proxy',
-        'var Database = NativeDB || NullDatabase;',
-        'export default Database;',
-      ].join('\n'),
-    }))
-  },
-}
+// better-sqlite3 is kept `external` (below) and never imported as a bare
+// specifier at runtime — the live consumers (session-registry, meridian-db) load
+// it through `src/repo/native-resolver.ts`, which in the packaged sidecar binds
+// the staged JS wrapper (dist/node_modules/better-sqlite3) to the packed native
+// binary (dist/native/better_sqlite3.node) via better-sqlite3's `nativeBinding`
+// option. No esbuild plugin / NullDatabase shim is needed.
 
 export default defineConfig({
   entry: ['src/main.ts'],
@@ -89,8 +23,8 @@ export default defineConfig({
   // imports crash with ERR_MODULE_NOT_FOUND at startup. Force-bundle them here.
   // Only genuinely unbundlable modules stay external: node: builtins, esbuild
   // (native, lazily required in syntax-check), and the native/wasm packages that
-  // are dynamically imported behind feature gates (better-sqlite3 via the plugin,
-  // @ast-grep/*, web-tree-sitter, tree-sitter-wasms, typescript).
+  // are dynamically imported behind feature gates (better-sqlite3 via
+  // native-resolver, @ast-grep/*, web-tree-sitter, tree-sitter-wasms, typescript).
   external: [
     'esbuild',
     /^node:/,
@@ -121,7 +55,7 @@ export default defineConfig({
     '@modelcontextprotocol/sdk',
     'turndown',
   ],
-  esbuildPlugins: [optionalNativeModulePlugin],
+  esbuildPlugins: [],
   // platform:node makes esbuild externalize bare node builtin requires (e.g.
   // undici's internal `require('assert')`) instead of emitting a throwing
   // __require shim — required to bundle CJS node libs into the ESM output.
