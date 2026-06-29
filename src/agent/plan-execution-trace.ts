@@ -135,11 +135,10 @@ function mapTodoStatusToStepStatus(status: PlanStepInput['status']): StepStatus 
 type PlanStepLike = PlanStepInput | string
 
 function normalizePlanStepInputs(steps: PlanStepLike[]): PlanStepInput[] {
-  return steps.map((s, i) =>
-    typeof s === 'string'
-      ? { id: `step-${i + 1}`, content: s }
-      : s,
-  )
+  // String inputs carry no id — leave it undefined so numbering happens AFTER
+  // blank filtering in buildPlanSteps (otherwise a leading blank consumes step-1
+  // and the first real step ends up as step-2).
+  return steps.map(s => (typeof s === 'string' ? { content: s } : s))
 }
 
 /**
@@ -171,9 +170,14 @@ export function withPlanSteps(
   trace: PlanExecutionTrace,
   steps: PlanStep[],
 ): PlanExecutionTrace {
-  if (trace.history.length > 0 && trace.steps.length === 0) return { ...trace, steps }
+  // 幂等守卫：一旦执行已开始（有 history），绝不回填/重写计划步骤——中途重规划
+  // 会破坏 trace 稳定性。返回同一引用，下游可用引用相等判断"无变更"。
+  if (trace.history.length > 0) return trace
+  // 全新 trace（无步骤、无 history）：填入初始步骤。
   if (trace.steps.length === 0) return { ...trace, steps }
 
+  // 已有步骤（无 history）：只同步状态，不覆盖结构。无任何变更时返回同一引用。
+  let changed = false
   const merged = trace.steps.map(existing => {
     const match = steps.find(s =>
       (s.id && s.id === existing.id) || s.description === existing.description
@@ -181,9 +185,11 @@ export function withPlanSteps(
     if (!match) return existing
     // 不覆盖已经 done/replanned 的状态为 pending/active
     if (existing.status === 'done' || existing.status === 'replanned') return existing
+    if (existing.status === match.status) return existing
+    changed = true
     return { ...existing, status: match.status }
   })
-  return { ...trace, steps: merged }
+  return changed ? { ...trace, steps: merged } : trace
 }
 
 /**
