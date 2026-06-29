@@ -3684,7 +3684,7 @@ html[data-theme="nebula"] .plan-panel {
 .mission-surface {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   background: var(--main-surface-bg);
   backdrop-filter: blur(var(--main-surface-blur)) saturate(var(--main-surface-saturation));
@@ -3698,25 +3698,45 @@ html[data-theme="nebula"] .plan-panel {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
   flex: none;
+  background: var(--panel);
 }
-.mission-top-back {
+.mission-top-brand {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  transition: background var(--dur) var(--ease);
+  gap: var(--space-2);
 }
-.mission-top-back:hover { background: var(--panel-2); }
+.mission-top-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--accent);
+}
 .mission-top-title { font-size: var(--text-md); font-weight: var(--weight-semibold); margin: 0; }
-.mission-top-stat { color: var(--muted); font-size: var(--text-sm); }
+.mission-top-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.mission-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.mission-stat-pill.running { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.mission-stat-pill.live { color: var(--success); background: color-mix(in srgb, var(--success) 12%, transparent); }
 .mission-top-spacer { flex: 1; }
-.mission-filter { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.mission-filter { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--panel-2); }
 .mission-filter-btn {
   padding: var(--space-1) var(--space-3);
   background: transparent;
@@ -3724,8 +3744,10 @@ html[data-theme="nebula"] .plan-panel {
   border: none;
   cursor: pointer;
   font-size: var(--text-sm);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.mission-filter-btn.is-on { background: var(--panel-2); color: var(--text); }
+.mission-filter-btn:hover { background: var(--panel-3); color: var(--text); }
+.mission-filter-btn.is-on { background: var(--panel); color: var(--text); }
 .mission-top-new {
   display: inline-flex;
   align-items: center;

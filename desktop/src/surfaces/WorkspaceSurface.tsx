@@ -22,6 +22,7 @@ const HooksSurface = lazy(() => import('./HooksSurface').then((m) => ({ default:
 const AutomationsSurface = lazy(() => import('./AutomationsSurface').then((m) => ({ default: m.AutomationsSurface })))
 const InboxSurface = lazy(() => import('./InboxSurface').then((m) => ({ default: m.InboxSurface })))
 const SettingsSurface = lazy(() => import('./SettingsSurface').then((m) => ({ default: m.SettingsSurface })))
+const MissionControlSurface = lazy(() => import('./MissionControlSurface').then((m) => ({ default: m.MissionControlSurface })))
 
 
 
@@ -184,7 +185,8 @@ export function WorkspaceSurface() {
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-                {ui.surface === 'delegation' ? <DelegationSurface /> :
+                {ui.surface === 'mission' ? <MissionControlSurface /> :
+                 ui.surface === 'delegation' ? <DelegationSurface /> :
                  ui.surface === 'skills' ? <SkillsSurface /> :
                  ui.surface === 'git' ? <GitSurface /> :
                  ui.surface === 'insights' ? <InsightsSurface /> :
