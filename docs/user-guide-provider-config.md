@@ -763,6 +763,8 @@ rivet config providers  # 应该只显示内置 Provider
 - **不会压得太狠**：一旦走专用廉价压缩模型，摘要输出预算自动放宽（≈2×），优先保留决策/文件/错误等细节而非过度压缩——Flash 很便宜，多花几 KB 摘要比丢上下文划算。
 - 这条只管**压缩**，和上面的子代理/审查路由是两套独立机制；可以「主控 GLM + 压缩 Flash + 子代理 Flash」三者各自配置、互不影响。
 
+> 压缩还有几个**自动生效**的相关行为（专用压缩模型时放宽摘要预算、摘要迭代无损合并、空闲期提前压缩），以及空闲压缩的开关环境变量，详见 [`compaction-tuning.md`](./compaction-tuning.md)。
+
 ### 完整示例：主会话 GLM，子代理全部走 DeepSeek Flash
 
 仓库根目录的 [`config.example.json`](../config.example.json) 就是这个场景的可直接复制模板：主会话 GLM-5.2，提交后审查、team 侦察和通用子代理任务都路由到 DeepSeek Flash，从而不再竞争 GLM 的服务端缓存；同时把 `council_expert` 单独留在 DeepSeek Pro，演示「议事会保强、其余走 Flash」的 profile 覆盖配方。复制到 `~/.rivet/config.json`，确保 `ZHIPU_API_KEY` 和 `DEEPSEEK_API_KEY` 两个环境变量都已设置即可。
