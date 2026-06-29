@@ -1190,6 +1190,88 @@ body {
 .help-cmds dd { margin: 0; color: var(--muted); font-size: var(--text-base); line-height: 1.6; }
 .settings-content code { font-family: var(--font-mono); font-size: 0.92em; padding: 1px 5px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--border); color: var(--text); }
 
+/* Help page — topic tabs + card layout for clearer structure. */
+.help-tabs { display: flex; flex-direction: column; gap: var(--space-4); }
+.help-tabs-list { flex-wrap: wrap; height: auto !important; min-height: 32px; }
+.help-tab-trigger { flex: 0 0 auto; }
+.help-cards-stack { display: flex; flex-direction: column; gap: var(--space-4); }
+.help-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+.help-card h4 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.help-card .btn { margin-top: var(--space-3); }
+.help-lead {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+.help-lead:last-of-type { margin-bottom: 0; }
+.help-hint {
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+  background: var(--warning-soft, var(--panel-2));
+  border: 1px dashed color-mix(in srgb, var(--warning, var(--accent)) 40%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.help-cmds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+.help-cmd-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+.help-cmd-card code {
+  display: inline-block;
+  font-size: var(--text-xs);
+  background: var(--panel-3);
+  color: var(--text-strong);
+}
+.help-cmd-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+.help-cmd-card p strong { color: var(--text-strong); }
+.help-kv {
+  margin: 0 0 var(--space-3);
+  display: grid;
+  gap: var(--space-2);
+}
+.help-kv > div { display: flex; justify-content: space-between; font-size: var(--text-sm); gap: var(--space-3); }
+.help-kv dt { color: var(--muted); margin: 0; flex-shrink: 0; }
+.help-kv dd { margin: 0; color: var(--text); }
+.help-shortcuts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-5);
+  font-size: var(--text-sm);
+}
+.help-shortcuts dt { color: var(--muted); }
+.help-shortcuts dd { margin: 0; color: var(--text); }
+
 /* ── Hooks surface ─────────────────────────────────────────────── */
 .hooks-surface { padding: var(--space-4); height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .hooks-header {
@@ -1657,7 +1739,6 @@ body {
 .msg-role-label { text-transform: none; letter-spacing: normal; }
 .msg-body { position: relative; }
 /* Message cards: natural rendering, removed card backgrounds. */
-.msg.user { background: transparent; border: none; }
 .msg.assistant { background: transparent; border: none; }
 .msg.error { background: transparent; border-left: 2px solid var(--error); border-radius: 0; padding-left: var(--space-3); }
 .msg-copy-btn {
@@ -1669,14 +1750,28 @@ body {
 }
 .msg-body:hover .msg-copy-btn { opacity: 1; }
 .msg-copy-btn:hover { color: var(--text); background: var(--panel-3); }
-.msg.user .msg-body {
-  color: var(--text);
-  padding: 0;
-  border-radius: 0;
+
+/* User messages: right-aligned speech bubble so they don't get lost in the stream. */
+.msg.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   background: transparent;
   border: none;
 }
-.msg.user .msg-role { color: var(--accent); }
+.msg.user .msg-role { color: var(--accent); margin-right: var(--space-1); }
+.msg.user .msg-body {
+  position: relative;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  max-width: min(85%, 720px);
+  width: fit-content;
+  box-shadow: var(--shadow-sm);
+}
+.msg.user .msg-copy-btn { top: 6px; right: 8px; }
 .msg.assistant .msg-body { color: var(--text); }
 .msg.phase { color: var(--muted); font-size: var(--text-sm); }
 

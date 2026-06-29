@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system' | 'help'
 
 const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [
@@ -300,123 +301,142 @@ export function SettingsSurface() {
   )
 }
 
+type HelpTab = 'start' | 'commands' | 'config' | 'shortcuts'
+const HELP_TABS: { id: HelpTab; label: string }[] = [
+  { id: 'start', label: '快速开始' },
+  { id: 'commands', label: '任务命令' },
+  { id: 'config', label: '配置说明' },
+  { id: 'shortcuts', label: '快捷键' },
+]
+
+interface HelpCmd {
+  cmd: string
+  desc: React.ReactNode
+}
+const HELP_COMMANDS: HelpCmd[] = [
+  { cmd: '/team <任务>', desc: <>团队模式：拆解任务 → 多个 patcher 子代理分波并行；主控负责集成、验证、最终 <code>deliver_task</code>。也可传计划文件路径。</> },
+  { cmd: '/team max <任务>', desc: <>强编队：执行前先做依赖分析 / 风险审计 / 对抗盲点搜索，再并行落地。适合大改动 / 高风险重构。</> },
+  { cmd: '/council <目标>', desc: <>议事会：多星域专家对抗会诊，<strong>只出计划不执行</strong>。可指定席位、辩论轮数；每席可在「集成 → 路由」配成异构。</> },
+  { cmd: '/review [关注点]', desc: <>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。</> },
+  { cmd: '/review max [关注点]', desc: <>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。大改动或交付前用它兜底。</> },
+  { cmd: '/goal <高层目标>', desc: <>自主目标：设定高层目标后<strong>跨多个 turn 持续自主执行</strong>直到达成。用 <code>/cancel-goal</code> 取消。</> },
+  { cmd: '/plan <功能>', desc: <>规划模式：先读代码，出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</> },
+]
+
 /**
- * In-app user guide. Surfaces the few configuration concepts most likely to
- * trip up a first-time user (provider + key, sub-agent routing / cache
- * contention, autonomy, where config & session data live, shortcuts) and
- * provides jump buttons into the relevant settings category.
+ * In-app user guide. Organised into topic tabs so first-time users can scan
+ * what the help page covers instead of facing one long stacked list.
  */
 function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void }) {
+  const [tab, setTab] = useState<HelpTab>('start')
+
   return (
-    <>
-      <section className="settings-group">
-        <h4>快速开始</h4>
-        <ol className="help-steps">
-          <li>在「集成」里添加一个模型 Provider，并填入 API Key（首个 Provider 会自动设为主控模型）。</li>
-          <li>到「行为」选择新线程的默认自治档位。</li>
-          <li>用 <kbd>⌘N</kbd> 新建线程，描述你的任务，天枢会自主完成编码。</li>
-        </ol>
-        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 Provider →</button>
-      </section>
+    <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as HelpTab) }} className="help-tabs">
+      <TabsList variant="line" className="help-tabs-list">
+        {HELP_TABS.map((t) => (
+          <TabsTrigger key={t.id} value={t.id} className="help-tab-trigger">
+            {t.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
 
-      <section className="settings-group">
-        <h4>关键任务命令</h4>
-        <div className="meta">
-          在输入框打 <kbd>/</kbd> 会弹出命令补全，也可用 <kbd>⌘K</kbd> 命令面板。下面是几条最常用的重型任务命令——
-          带 <code>&lt;…&gt;</code> 的需要在命令后跟上你的任务描述。
+      <TabsContent value="start">
+        <div className="help-card">
+          <h4>快速开始</h4>
+          <ol className="help-steps">
+            <li>在「集成」里添加一个模型 Provider，并填入 API Key（首个 Provider 会自动设为主控模型）。</li>
+            <li>到「行为」选择新线程的默认自治档位。</li>
+            <li>用 <kbd>⌘N</kbd> 新建线程，描述你的任务，天枢会自主完成编码。</li>
+          </ol>
+          <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 Provider →</button>
         </div>
-        <dl className="help-cmds">
-          <div>
-            <dt><code>/team &lt;任务&gt;</code></dt>
-            <dd>团队模式：拆解任务 → 多个 patcher 子代理分波并行；主控负责集成、验证、最终 <code>deliver_task</code>。子代理不会自动提交，产出当作 diff 证据由主控审慎合并。也可传计划文件路径（<code>/team docs/…plan.md</code>）按计划执行。</dd>
-          </div>
-          <div>
-            <dt><code>/team max &lt;任务&gt;</code></dt>
-            <dd>强编队：执行前先做多视角规划（依赖分析 / 风险审计 / 对抗盲点搜索）再并行落地。适合大改动 / 高风险重构。</dd>
-          </div>
-          <div>
-            <dt><code>/council &lt;目标&gt;</code></dt>
-            <dd>议事会：多星域专家单轮对抗会诊，<strong>只出计划不执行</strong>，产出可审计的议事记录 + 任务表。可选 <code>--seats tianquan,tianfu,…</code> 指定席位、<code>--rounds 2</code> 开启辩论轮（仅首轮有冲突时才进第二轮）。每席模型可在「集成 → 路由」里配成异构。</dd>
-          </div>
-          <div>
-            <dt><code>/review [关注点]</code></dt>
-            <dd>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。关注点可选，用来聚焦审查范围。</dd>
-          </div>
-          <div>
-            <dt><code>/review max [关注点]</code></dt>
-            <dd>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。改动较大或要交付前用它兜底。</dd>
-          </div>
-          <div>
-            <dt><code>/goal &lt;高层目标&gt;</code></dt>
-            <dd>自主目标：设定一个高层目标后<strong>跨多个 turn 持续自主执行</strong>直到达成。中途用 <code>/cancel-goal</code> 取消。</dd>
-          </div>
-          <div>
-            <dt><code>/plan &lt;功能&gt;</code></dt>
-            <dd>规划模式：先读代码、出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</dd>
-          </div>
-        </dl>
-        <div className="meta" style={{ marginTop: 8 }}>
-          重型并发命令（team / review max / council）会派出子代理——务必先配好「子代理 / 审查模型路由」，
-          否则子代理和主控抢同一个无缓存 Provider 会拖慢主对话（见下一节）。
-        </div>
-      </section>
+      </TabsContent>
 
-      <section className="settings-group">
-        <h4>模型 Provider 与 API Key</h4>
-        <div className="meta">
-          在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。
-          其中一个被标记为「主控」，即对话主循环使用的模型。Key 只存在本地
-          <code> ~/.rivet/config.json</code>，不会上传。
+      <TabsContent value="commands">
+        <div className="help-card">
+          <h4>关键任务命令</h4>
+          <p className="help-lead">
+            在输入框打 <kbd>/</kbd> 会弹出命令补全，也可用 <kbd>⌘K</kbd> 命令面板。
+            带 <code>&lt;…&gt;</code> 的需要在命令后跟上你的任务描述。
+          </p>
+          <div className="help-cmds-grid">
+            {HELP_COMMANDS.map((c) => (
+              <div key={c.cmd} className="help-cmd-card">
+                <code>{c.cmd}</code>
+                <p>{c.desc}</p>
+              </div>
+            ))}
+          </div>
+          <div className="help-hint">
+            重型并发命令（<code>/team</code> / <code>/review max</code> / <code>/council</code>）会派出子代理——
+            务必先配好「子代理 / 审查模型路由」，否则子代理和主控抢同一个无缓存 Provider 会拖慢主对话。
+          </div>
         </div>
-      </section>
+      </TabsContent>
 
-      <section className="settings-group">
-        <h4>子代理 / 审查模型路由（重要）</h4>
-        <div className="meta">
-          天枢在「提交后审查」和「能力任务委派」时会派出子代理。如果子代理和主控用
-          <strong> 同一个无服务端前缀缓存的 Provider</strong>（GLM / Kimi / Codex 等），并发请求会
-          <strong> 抢占并驱逐主会话的服务端缓存</strong>，导致主对话突然变慢甚至看起来卡死。
-        </div>
-        <div className="meta" style={{ marginTop: 8 }}>
-          解决办法：把子代理路由到一个便宜的「副模型」（如 DeepSeek Flash）。
-          支持<strong>跨 Provider</strong>路由——主控用 GLM，子代理走 DeepSeek Flash，两条缓存互不干扰。
-          若指定的 Provider / 模型不存在或缺 Key，会静默回退到主控模型（不报错）。
-        </div>
-        <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置路由 →</button>
-      </section>
+      <TabsContent value="config">
+        <div className="help-cards-stack">
+          <div className="help-card">
+            <h4>模型 Provider 与 API Key</h4>
+            <p className="help-lead">
+              在「集成 → 模型 Provider」里管理多个 Provider（DeepSeek / GLM / Kimi / Codex 等）。
+              其中一个被标记为「主控」，即对话主循环使用的模型。Key 只存在本地
+              <code>~/.rivet/config.json</code>，不会上传。
+            </p>
+            <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置 →</button>
+          </div>
 
-      <section className="settings-group">
-        <h4>自治档位</h4>
-        <div className="meta">
-          在「行为 → 新线程默认自治档位」设置。高档位在项目目录内全自动执行；
-          项目目录外的写入仍受沙箱限制，且任何改动都可回滚。
-        </div>
-        <button className="btn" onClick={() => onNavigate('behavior')}>前往「行为」设置 →</button>
-      </section>
+          <div className="help-card">
+            <h4>子代理 / 审查模型路由（重要）</h4>
+            <p className="help-lead">
+              天枢在「提交后审查」和「能力任务委派」时会派出子代理。如果子代理和主控用
+              <strong>同一个无服务端前缀缓存的 Provider</strong>（GLM / Kimi / Codex 等），并发请求会
+              <strong>抢占并驱逐主会话的服务端缓存</strong>，导致主对话突然变慢甚至看起来卡死。
+            </p>
+            <p className="help-lead">
+              解决办法：把子代理路由到一个便宜的「副模型」（如 DeepSeek Flash）。支持<strong>跨 Provider</strong>路由——
+              主控用 GLM，子代理走 DeepSeek Flash，两条缓存互不干扰。若指定的 Provider / 模型不存在或缺 Key，会静默回退到主控模型。
+            </p>
+            <button className="btn" onClick={() => onNavigate('integrations')}>前往「集成」配置路由 →</button>
+          </div>
 
-      <section className="settings-group">
-        <h4>配置文件与数据位置</h4>
-        <dl className="kv">
-          <div><dt>主配置</dt><dd><code>~/.rivet/config.json</code>（JSON，camelCase 键）</dd></div>
-          <div><dt>项目级覆盖</dt><dd>项目根目录 <code>.rivet-config.json</code></dd></div>
-          <div><dt>会话日志</dt><dd><code>~/.rivet/sessions/&lt;项目&gt;/</code></dd></div>
-          <div><dt>配置示例</dt><dd>仓库根目录 <code>config.example.json</code></dd></div>
-        </dl>
-        <div className="meta" style={{ marginTop: 8 }}>
-          手改配置后无需重启桌面端，下一次新建会话即生效。注意加载器只接受
-          JSON 格式（不是 TOML），键名为 camelCase。
-        </div>
-      </section>
+          <div className="help-card">
+            <h4>自治档位</h4>
+            <p className="help-lead">
+              在「行为 → 新线程默认自治档位」设置。高档位在项目目录内全自动执行；
+              项目目录外的写入仍受沙箱限制，且任何改动都可回滚。
+            </p>
+            <button className="btn" onClick={() => onNavigate('behavior')}>前往「行为」设置 →</button>
+          </div>
 
-      <section className="settings-group">
-        <h4>常用快捷键</h4>
-        <dl className="kv">
-          <div><dt><kbd>⌘K</kbd></dt><dd>打开命令面板</dd></div>
-          <div><dt><kbd>⌘N</kbd></dt><dd>新建线程</dd></div>
-          <div><dt><kbd>/</kbd></dt><dd>在输入框使用斜杠命令</dd></div>
-        </dl>
-      </section>
-    </>
+          <div className="help-card">
+            <h4>配置文件与数据位置</h4>
+            <dl className="help-kv">
+              <div><dt>主配置</dt><dd><code>~/.rivet/config.json</code></dd></div>
+              <div><dt>项目级覆盖</dt><dd>项目根目录 <code>.rivet-config.json</code></dd></div>
+              <div><dt>会话日志</dt><dd><code>~/.rivet/sessions/&lt;项目&gt;/</code></dd></div>
+              <div><dt>配置示例</dt><dd>仓库根目录 <code>config.example.json</code></dd></div>
+            </dl>
+            <p className="help-lead">
+              手改配置后无需重启桌面端，下一次新建会话即生效。加载器只接受 JSON 格式，键名为 camelCase。
+            </p>
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="shortcuts">
+        <div className="help-card">
+          <h4>常用快捷键</h4>
+          <dl className="help-shortcuts">
+            <div><dt><kbd>⌘K</kbd></dt><dd>打开命令面板</dd></div>
+            <div><dt><kbd>⌘N</kbd></dt><dd>新建线程</dd></div>
+            <div><dt><kbd>⌘B</kbd></dt><dd>展开 / 收起左侧项目侧边栏</dd></div>
+            <div><dt><kbd>⌘⇧B</kbd></dt><dd>展开 / 收起右侧审查面板</dd></div>
+            <div><dt><kbd>/</kbd></dt><dd>在输入框使用斜杠命令</dd></div>
+          </dl>
+        </div>
+      </TabsContent>
+    </Tabs>
   )
 }
 
