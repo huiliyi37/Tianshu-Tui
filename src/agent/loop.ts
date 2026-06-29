@@ -296,6 +296,10 @@ export class AgentLoop {
   private resourceSensor: ResourceSensor
   latestResourceSnapshot: ResourceSensorSnapshot | null = null
   latestReliabilityDecision: ReliabilityDecision | null = null
+  /** Triggers that have fired at error severity this session. Used by
+   *  refreshReliabilityDecision to cap recurring firings at degraded,
+   *  preventing permanent lock-in from non-self-resolving conditions. */
+  firedRecoveryTriggers: Set<RecoveryTrigger> = new Set()
   fsWatcher: ReturnType<typeof createFsWatcher> | null = null
   latestFsWatcherState: FsWatcherState = { eventRate: 0, eventCount: 0, active: false }
   currentSeason: CognitiveSeason | null = null
