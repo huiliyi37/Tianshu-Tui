@@ -66,22 +66,60 @@ NODE_VERSION=24.1.0 node scripts/fetch-node-runtime.js
 
 ### macOS
 
-需要 Apple Developer ID 与 App-Specific Password。在 CI secrets 或本地环境变量中配置：
+**当前发布策略：未签名 + 用户首次 `xattr`。** 开源项目暂不付费做 Apple 公证（需 $99/年 Developer Program），所以正式包未签名。这是有意为之，不是缺陷。
 
-- `APPLE_SIGNING_IDENTITY`：签名证书名称（如 `"Developer ID Application: Your Name (TEAMID)"`）。
+#### 默认流程（无需任何 Apple 账号）
+
+照常 `bash scripts/sign-and-build.sh` 出 dmg（脚本检测到没配 `APPLE_SIGNING_IDENTITY` 会提示「未签名」）。发布时**必须**在 Release 说明里带上首次打开指引（见下方「发布说明模板」），否则用户点开报「已损坏」会以为包坏了。
+
+用户首次打开：拖入「应用程序」后执行一次
+
+```bash
+xattr -cr /Applications/天枢.app
+```
+
+清掉下载隔离属性即可。对「已损坏」提示，右键→打开通常无效，必须用 `xattr`。
+
+#### 发布说明模板（每次 macOS Release 粘贴）
+
+```markdown
+### macOS 安装说明（重要）
+
+下载 `天枢_x.x.x_aarch64.dmg`，拖入「应用程序」。
+
+首次打开如提示「天枢已损坏，移到废纸篓」——包没坏，这是 Apple 对未公证开源应用的拦截。
+打开「终端」执行一次即可正常使用：
+
+    xattr -cr /Applications/天枢.app
+```
+
+---
+
+#### 可选：Developer ID 签名 + 公证（想彻底免提示再做，需付费账号）
+
+> 配齐下面材料后，构建管线会自动签名 + 公证（含嵌套 Node/.node/esbuild），用户双击即开、无需 `xattr`。没配则自动退回上面的未签名流程，零副作用。
+
+##### 准备材料（一次性）
+
+1. 加入 Apple Developer Program（个人/公司账号，$99/年）。
+2. 在钥匙串创建 **Developer ID Application** 证书（Xcode → Settings → Accounts → Manage Certificates，或 developer.apple.com → Certificates 下载 .cer 双击导入）。`security find-identity -v -p codesigning` 应能看到它。
+3. 在 appleid.apple.com → 登录与安全 → App 专用密码，生成一个 **App-Specific Password**（用于公证，**不是**登录密码）。
+4. 在 developer.apple.com → Membership 记下 **10 位 Team ID**。
+
+##### 配置环境变量（写进 `desktop/.env`，已 gitignore）
+
+四项缺一不可——前者负责签名，后三者负责公证：
+
+- `APPLE_SIGNING_IDENTITY`：证书全名，如 `"Developer ID Application: Your Name (TEAMID)"`。
 - `APPLE_ID`：Apple ID 邮箱。
 - `APPLE_TEAM_ID`：10 字符团队 ID。
 - `APPLE_PASSWORD`：App-Specific Password。
 
-本地构建示例：
+配好后照常 `bash scripts/sign-and-build.sh`——脚本会自检并打印「将签名 + 公证」；缺公证三项时会显式警告（产物只签名、未公证，下载后仍报损坏）。
 
-```bash
-export APPLE_SIGNING_IDENTITY="..."
-export APPLE_ID="..."
-export APPLE_TEAM_ID="..."
-export APPLE_PASSWORD="..."
-cd desktop && npm run tauri:build
-```
+##### 嵌套二进制签名（已自动处理）
+
+天枢把 Node 运行时、`better_sqlite3.node` 等原生 `.node`、esbuild 二进制放在 `Contents/Resources/` 下。Tauri **只自动签标准位置（MacOS/Frameworks/PlugIns…）**，不签 Resources 里的这些 Mach-O，而 Apple 公证要求 bundle 内**每个** Mach-O 都签名。因此 `scripts/codesign-nested.js` 在 `beforeBuildCommand` 里、`tauri build` 组包前预签这些源二进制（签名随文件拷进 .app）。该脚本读同一个 `APPLE_SIGNING_IDENTITY`，未设则空操作。`entitlements.plist` 提供 V8/Node JIT 所需的 `allow-jit` / `allow-unsigned-executable-memory`（否则公证后启动即崩）。
 
 ### Windows
 

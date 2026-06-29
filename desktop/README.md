@@ -7,6 +7,19 @@ Agent-first 桌面外壳：**Tauri 2.x + React/Vite** 前端，复用现有 `riv
 > 本目录与 `src/`（runtime 内核）严格隔离：桌面依赖（Rust/Tauri/Vite）只在此处，后端只在
 > `src/server/` 加 API 面，不动 `AgentLoop` / prompt cache 不变量。
 
+## 下载与安装（macOS）
+
+从 GitHub Release 下载 `天枢_*_aarch64.dmg`，拖入「应用程序」。
+
+> ⚠️ **首次打开若提示「天枢已损坏，移到废纸篓」**——包没坏。本应用是开源未做 Apple 付费公证，
+> Apple Silicon 的 Gatekeeper 会拦截「未公证 + 下载隔离」的 app。在终端执行一次即可正常打开：
+>
+> ```bash
+> xattr -cr /Applications/天枢.app
+> ```
+>
+> （对「已损坏」提示，右键→打开通常无效，必须用 `xattr` 清掉隔离属性。之后双击照常使用。）
+
 ## 架构
 
 ```
