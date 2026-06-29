@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
 import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildDynamicAppendixParts, appendixBlockName, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
+import { setTargetConventions } from '../../platform.js'
 
 /** Fallback temp dir for sandboxed environments where os.tmpdir() is read-only. */
 function sandboxTmpDir(): string {
@@ -32,6 +33,32 @@ function ledger(): ContextLedger {
     apiInvariantStatus: { totalRounds: 3, okRounds: 3, repairedRounds: 0, brokenRounds: 0, orphanToolUse: [], orphanToolResult: [] },
   }
 }
+
+describe('environment platform hint (target vs host)', () => {
+  const restore = () => setTargetConventions('auto', 'auto')
+
+  it('auto: platform = real host, no host attr, no platform-note', () => {
+    restore()
+    const block = buildStableVolatileBlock({ cwd: '/repo' })
+    assert.match(block, new RegExp(`<environment platform="${process.platform}"`))
+    assert.doesNotMatch(block, / host="/)
+    assert.doesNotMatch(block, /<platform-note>/)
+  })
+
+  it('cross-target: emits target platform + host attr + advisory note', () => {
+    // Pick a target different from the host so the divergence branch fires.
+    const target = process.platform === 'win32' ? 'macos' : 'windows'
+    const expectedPlatform = target === 'windows' ? 'win32' : 'darwin'
+    setTargetConventions(target, 'auto')
+    try {
+      const block = buildStableVolatileBlock({ cwd: '/repo' })
+      assert.match(block, new RegExp(`<environment platform="${expectedPlatform}" host="${process.platform}"`))
+      assert.match(block, /<platform-note>/)
+    } finally {
+      restore()
+    }
+  })
+})
 
 describe('volatile context layers', () => {
   it('renders environment, ledger, working set, and memory as stable XML sections', () => {

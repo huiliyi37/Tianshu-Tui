@@ -285,7 +285,23 @@ export const cacheSchema = z.object({
   showHitRate: z.boolean().default(true),
 })
 
-export const editorSchema = z.object({})
+export const editorSchema = z.object({
+  /**
+   * Target-OS conventions for file artifacts and the system-prompt OS hint.
+   * 'auto' (default) follows the real host (process.platform). Explicit values
+   * let a project opt into another OS's conventions (e.g. a Windows-targeted
+   * project authored on macOS). NOTE: this only affects file conventions and
+   * the prompt hint — command execution always runs on the real host shell.
+   */
+  platform: z.enum(['auto', 'windows', 'macos', 'linux']).default('auto'),
+  /**
+   * New-file line-ending default. 'auto' derives from `platform`
+   * (windows → crlf, otherwise lf). Explicit 'lf'/'crlf' overrides it — for
+   * example a Windows host that still wants LF source files. Existing files
+   * always keep their own EOL, and .bat/.cmd are always CRLF regardless.
+   */
+  eol: z.enum(['auto', 'lf', 'crlf']).default('auto'),
+})
 
 export const workerProfileSchema = z.object({
   provider: z.string(),
@@ -344,6 +360,8 @@ export type AuthConfig = z.infer<typeof authConfigSchema>
 export type ProviderCapabilitiesConfig = z.infer<typeof providerCapabilitiesSchema>
 export type ModelConfig = z.infer<typeof modelConfigSchema>
 export type EditorConfig = z.infer<typeof editorSchema>
+export type EditorPlatform = EditorConfig['platform']
+export type EditorEol = EditorConfig['eol']
 export type AgentConfig = z.infer<typeof agentSchema>
 export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>

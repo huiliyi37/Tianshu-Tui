@@ -8,6 +8,7 @@
 import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import type { EditorPlatform, EditorEol } from './config/schema.js'
 
 /** Result of `getShellCommand()` — the command and args for spawning a shell. */
 export interface ShellCommand {
@@ -22,6 +23,47 @@ export function buildShellArgs(shell: ShellCommand, command: string): string[] {
 }
 
 const isWin = process.platform === 'win32'
+
+// ─── Target Conventions ────────────────────────────────────────────────────────
+//
+// The "target platform" governs file ARTIFACT conventions (line endings) and the
+// system-prompt OS hint — NOT command execution. Execution (shell/sandbox/kill)
+// always uses the real host `process.platform`, because you can't run PowerShell
+// on a macOS host. Resolved once at startup from `editor.platform`/`editor.eol`
+// via setTargetConventions(); reads before init safely fall back to the host.
+
+/** Map an `editor.platform` enum value to a concrete NodeJS.Platform. */
+function resolveTargetPlatform(platform: EditorPlatform): NodeJS.Platform {
+  switch (platform) {
+    case 'windows': return 'win32'
+    case 'macos': return 'darwin'
+    case 'linux': return 'linux'
+    case 'auto':
+    default: return process.platform
+  }
+}
+
+let _targetPlatform: NodeJS.Platform = process.platform
+let _targetEol: 'crlf' | 'lf' = process.platform === 'win32' ? 'crlf' : 'lf'
+
+/**
+ * Resolve and cache the target-OS conventions from config. Call once at startup
+ * (after loadConfig) in every entry point (TUI main, server sidecar).
+ */
+export function setTargetConventions(platform: EditorPlatform, eol: EditorEol): void {
+  _targetPlatform = resolveTargetPlatform(platform)
+  _targetEol = eol === 'auto' ? (_targetPlatform === 'win32' ? 'crlf' : 'lf') : eol
+}
+
+/** The resolved target platform (drives EOL default + prompt OS hint). */
+export function getTargetPlatform(): NodeJS.Platform {
+  return _targetPlatform
+}
+
+/** The resolved default EOL for newly-created files. */
+export function getTargetEol(): 'crlf' | 'lf' {
+  return _targetEol
+}
 
 // ─── Shell ───────────────────────────────────────────────────────────────────
 

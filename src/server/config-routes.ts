@@ -20,6 +20,8 @@ import {
   setApiKeyEnv,
   getRoutingConfig,
   setRoutingConfig,
+  getEditorConfig,
+  setEditorConfig,
 } from '../config/manager.js'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
@@ -152,6 +154,22 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       try {
         const result = setRoutingConfig({ review, workers, council })
         return { status: 200, body: { ok: true, ...result } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    'GET /config/editor': withAuth(() => {
+      return { status: 200, body: getEditorConfig() }
+    }, apiToken),
+
+    'PUT /config/editor': withAuth((body) => {
+      const { platform, eol } = (body ?? {}) as { platform?: unknown; eol?: unknown }
+      if (platform === undefined && eol === undefined) {
+        return { status: 400, body: { error: 'platform or eol is required' } }
+      }
+      try {
+        return { status: 200, body: { ok: true, ...setEditorConfig({ platform, eol }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

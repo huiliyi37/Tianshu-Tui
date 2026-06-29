@@ -664,6 +664,21 @@ export function setRoutingConfig(
   return apiPut<{ ok: boolean } & RoutingConfig>('/config/routing', input)
 }
 
+// ── Editor / target-platform conventions ────────────────────────────
+export type EditorPlatform = 'auto' | 'windows' | 'macos' | 'linux'
+export type EditorEol = 'auto' | 'lf' | 'crlf'
+export interface EditorConfig { platform: EditorPlatform; eol: EditorEol }
+
+export function getEditorConfig(): Promise<EditorConfig> {
+  return apiGet<EditorConfig>('/config/editor')
+}
+
+export function setEditorConfig(
+  input: { platform?: EditorPlatform; eol?: EditorEol },
+): Promise<{ ok: boolean } & EditorConfig> {
+  return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
+}
+
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
 import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse } from './types'

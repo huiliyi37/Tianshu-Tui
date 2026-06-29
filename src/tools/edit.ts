@@ -6,6 +6,8 @@ import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEdi
 import { syntaxCheck } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
+import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
+import { getTargetEol } from '../platform.js'
 
 // Large files are common (generated code, lockfiles, big modules). 100KB was
 // far too small. 8MB reads comfortably into the Node heap; anything larger is
@@ -66,22 +68,26 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
 
       // Smart stale recovery: instead of a generic "re-read" error, auto-read
       // the current content and either re-apply or show what changed.
-      const oldString = params.input.old_string as string
+      const oldString = toLf(params.input.old_string as string)
       try {
         // OOM guard: check file size before reading (same as normal path above)
         if (fileStat.size > MAX_EDIT_FILE_BYTES) {
           return { content: `File was modified externally and is now too large (${Math.round(fileStat.size / 1024 / 1024)}MB > ${MAX_EDIT_FILE_BYTES / 1024 / 1024}MB limit) for auto-recovery. Use hash_edit with current anchors instead.`, isError: true }
         }
-        const freshContent = await readFile(filePath, 'utf-8')
+        // Normalize to LF for matching; restore the file's EOL on write-back so a
+        // CRLF file stays CRLF instead of degrading into mixed line endings.
+        const freshRaw = await readFile(filePath, 'utf-8')
+        const freshEol = chooseEol(filePath, detectEol(freshRaw), getTargetEol())
+        const freshContent = toLf(freshRaw)
         const freshLines = freshContent.split('\n')
 
         if (freshContent.includes(oldString)) {
           // old_string still matches — just re-apply the edit
-          const newString = params.input.new_string as string
+          const newString = toLf(params.input.new_string as string)
           const replaceAll = (params.input.replace_all as boolean) ?? false
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
-            await writeFileAtomicAsync(filePath, newContent)
+            await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
             markSessionFileEdit(filePath)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
@@ -99,7 +105,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             return { content: buildMultipleMatchError(filePath, oldString, freshContent), isError: true }
           }
           const recovered = freshContent.replace(oldString, newString)
-          await writeFileAtomicAsync(filePath, recovered)
+          await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
           refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
           markSessionFileEdit(filePath)
           const warn = syntaxCheck(filePath, recovered)
@@ -154,9 +160,14 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       }
     }
 
-    const content = await readFile(filePath, 'utf-8')
-    const oldString = params.input.old_string as string
-    const newString = params.input.new_string as string
+    // Normalize to LF for matching; restore the file's EOL on write-back so a
+    // CRLF file stays CRLF instead of degrading into mixed line endings (the
+    // model's old_string/new_string are also normalized to LF to match).
+    const rawContent = await readFile(filePath, 'utf-8')
+    const eol = chooseEol(filePath, detectEol(rawContent), getTargetEol())
+    const content = toLf(rawContent)
+    const oldString = toLf(params.input.old_string as string)
+    const newString = toLf(params.input.new_string as string)
     const replaceAll = (params.input.replace_all as boolean) ?? false
 
     if (replaceAll) {
@@ -167,7 +178,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
         }
       }
       const newContent = content.replaceAll(oldString, newString)
-      await writeFileAtomicAsync(filePath, newContent)
+      await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
       refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
       markSessionFileEdit(filePath)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
@@ -188,7 +199,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       const fuzzy = findFuzzyMatch(content, oldString)
       if (fuzzy) {
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
-        await writeFileAtomicAsync(filePath, recovered)
+        await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
         refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
         markSessionFileEdit(filePath)
         const warn = syntaxCheck(filePath, recovered)
@@ -215,7 +226,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       }
     }
     const newContent = content.replace(oldString, newString)
-    await writeFileAtomicAsync(filePath, newContent)
+    await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)

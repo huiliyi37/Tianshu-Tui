@@ -2,7 +2,7 @@ import type { Config } from './schema.js'
 import { cloneProviderPreset } from './provider-presets.js'
 
 export const DEFAULT_CONFIG: Config = {
-  editor: {},
+  editor: { platform: 'auto', eol: 'auto' },
   provider: {
     default: 'deepseek',
     providers: {
