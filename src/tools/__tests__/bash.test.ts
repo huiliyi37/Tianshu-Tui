@@ -119,6 +119,43 @@ describe('BASH_TOOL timeout cleanup', () => {
   })
 })
 
+describe('BASH_TOOL 空 stdout 的成功命令 → confirmed empty(不是 "Exit code: 0")', () => {
+  it('exit 0 且无 stdout 时标记为 confirmed empty 并给出可操作提示', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-empty-'))
+    try {
+      // node -e "" 跨平台、退出 0、无任何 stdout —— 等价于写文件/重定向后的静默成功。
+      const result = await BASH_TOOL.execute({
+        input: { command: 'node -e ""' },
+        toolUseId: 'bash-empty-stdout-test',
+        cwd: dir,
+      })
+      assert.ok(!result.isError, '成功命令不应标记为 error')
+      assert.match(result.content, /confirmed empty/, '空成功输出必须显式标记 confirmed empty')
+      assert.ok(
+        !/Exit code: 0/.test(result.content),
+        '不得回灌 "Exit code: 0" 合成正文——那会被误读为 bash 把输出吞了/没执行',
+      )
+      assert.match(result.content, /read_file/, '应提示用 read_file 核实写出的文件')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exit 非零且无 stdout 时仍保留 "Exit code: N" 以免正文为空', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-exit1-'))
+    try {
+      const result = await BASH_TOOL.execute({
+        input: { command: 'node -e "process.exit(3)"' },
+        toolUseId: 'bash-exit3-test',
+        cwd: dir,
+      })
+      assert.match(result.content, /Exit code: 3/, '失败且无输出时正文不能为空，需带退出码')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('rtkRewrite cache behavior', () => {
   it('requiresApproval and execute see the same rewritten result for identical commands', () => {
     // When rtk is not installed, rtkRewrite returns the original command.

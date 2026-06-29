@@ -89,9 +89,15 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   // sed/head/python/tee variants to "see the rest" — the doom-loop trigger.
   const recovery = meta.rawPath ? ` · full output: read_file ${meta.rawPath} — 不要重跑命令` : ''
 
-  // Empty output: explicitly confirm it's genuinely empty (not collapsed)
+  // Empty output: explicitly confirm it's genuinely empty (not collapsed/swallowed).
+  // On a clean exit this is normal for writes, redirects (`… > file`) and silent
+  // successes; spell that out + point at read_file so the model doesn't conclude
+  // "bash produced nothing → bash is broken" (the Windows no-op misdiagnosis).
   if (lineCount === 0 && effectiveRaw.length === 0) {
-    return `${header}\n[output complete: 0 lines — confirmed empty]`
+    const emptyHint = meta.exitCode === 0
+      ? '\n命令已执行成功，只是没有 stdout（写文件 / 重定向 `> file` / 静默成功都属正常）。若你写了文件或重定向了输出，用 read_file 读它来确认——不要因为这里为空就判定命令没执行。'
+      : ''
+    return `${header}\n[output complete: 0 lines — confirmed empty]${emptyHint}`
   }
 
   // Success output that's folded (too many lines for inline display)

@@ -299,6 +299,16 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           : commandFiltered
         const rereadWarn = checkBashReread(rawCommand, params.toolUseId)
 
+        // Empty stdout on success must NOT be back-filled with a synthetic
+        // "Exit code: 0" body. Doing so rendered as "lines=1 — output complete\n
+        // Exit code: 0", which the model (especially on Windows, where it already
+        // distrusts bash) misreads as "output was swallowed / bash is a no-op" —
+        // the documented doom-loop trigger (writes & `… > file` redirects produce
+        // no stdout, so this hit constantly). Pass empty through so buildModelOutput
+        // emits the explicit "confirmed empty" marker instead. Failures/timeouts
+        // keep a synthetic body so the reason is never blank.
+        const modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
+
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,
         // so we don't double-write to output-store/.
@@ -315,7 +325,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           if (!wrapInArtifact) {
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
-            const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+            const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
             return {
               content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
               uiContent: buildUiOutput(filtered, meta),
@@ -347,7 +357,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
           const successFold = exitCode === 0 && lineCount > SUCCESS_INLINE_LINES
           const modelOutput = successFold
             ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
-            : buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), meta)
+            : buildModelOutput(modelBody, meta)
           const baseContent = `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`
           return {
             content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
@@ -364,7 +374,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         }
 
         const rawPath = await persistRawOutput(params.toolUseId, raw)
-        const baseContent = buildModelOutput(filtered || (isTimeout ? 'Command timed out' : `Exit code: ${code}`), { ...meta, rawPath })
+        const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
         return {
           content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
           uiContent: buildUiOutput(filtered, meta),
