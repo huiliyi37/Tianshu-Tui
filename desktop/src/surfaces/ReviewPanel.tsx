@@ -18,7 +18,6 @@ import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
-import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -54,7 +53,6 @@ export function ReviewPanel(props: {
   planMode?: PlanModeState
   planRev?: number
   latestPlanSlug?: string
-  onApproval: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
   onFeedbackSent?: () => void
   /** T2 — active task list for the Task tab. */
   todos?: TodoStateItem[]
@@ -62,10 +60,51 @@ export function ReviewPanel(props: {
   sources?: string[]
   onCollapse?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onFeedbackSent, todos = [], sources = [], onCollapse } = props
+  const { sessionId, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
+
+  // Tabs scroll & overflow detection
+  const tabsListRef = useRef<HTMLDivElement>(null)
+  const [canScrollLeft, setCanScrollLeft] = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
+
+  const checkScroll = useCallback(() => {
+    const el = tabsListRef.current
+    if (!el) return
+    setCanScrollLeft(el.scrollLeft > 1)
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1)
+  }, [])
+
+  useEffect(() => {
+    const el = tabsListRef.current
+    if (!el) return
+    checkScroll()
+    el.addEventListener('scroll', checkScroll)
+    window.addEventListener('resize', checkScroll)
+    const t = setTimeout(checkScroll, 200)
+
+    const ro = new ResizeObserver(checkScroll)
+    ro.observe(el)
+
+    return () => {
+      el.removeEventListener('scroll', checkScroll)
+      window.removeEventListener('resize', checkScroll)
+      clearTimeout(t)
+      ro.disconnect()
+    }
+  }, [checkScroll, artifacts, pendingApproval, todos])
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    const el = tabsListRef.current
+    if (!el) return
+    const amount = 120
+    el.scrollBy({
+      left: direction === 'left' ? -amount : amount,
+      behavior: 'smooth',
+    })
+  }
 
   // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
   // reviewable plan surfaces without a manual tab switch (Cursor 3.0 flow).
@@ -221,25 +260,50 @@ export function ReviewPanel(props: {
     <div className="review flex flex-col h-full relative">
       <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
         <div className="flex items-center justify-between pr-2">
-          <TabsList className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1">
-            {tabs.map((t) => {
-              const badge = t.badge?.()
-              return (
-                <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
-                  <span aria-hidden>{t.glyph}</span>
-                  <span>{t.label}</span>
-                  {badge != null && badge > 0 && (
-                    <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
-                      {badge}
-                    </span>
-                  )}
-                  {badge === -1 && (
-                    <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
-                  )}
-                </TabsTrigger>
-              )
-            })}
-          </TabsList>
+          <div className="relative flex items-center flex-1 min-w-0 overflow-hidden">
+            {canScrollLeft && (
+              <button
+                type="button"
+                className="tabs-scroll-btn left"
+                onClick={() => scrollTabs('left')}
+                title="向左滚动"
+              >
+                ‹
+              </button>
+            )}
+            <TabsList
+              ref={tabsListRef}
+              className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1"
+            >
+              {tabs.map((t) => {
+                const badge = t.badge?.()
+                return (
+                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                    <span aria-hidden>{t.glyph}</span>
+                    <span>{t.label}</span>
+                    {badge != null && badge > 0 && (
+                      <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] text-accent-fg">
+                        {badge}
+                      </span>
+                    )}
+                    {badge === -1 && (
+                      <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-accent" aria-label="进行中" />
+                    )}
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
+            {canScrollRight && (
+              <button
+                type="button"
+                className="tabs-scroll-btn right"
+                onClick={() => scrollTabs('right')}
+                title="向右滚动"
+              >
+                ›
+              </button>
+            )}
+          </div>
           {onCollapse && (
             <button
               onClick={onCollapse}
@@ -435,13 +499,6 @@ export function ReviewPanel(props: {
           </section>
         </TabsContent>
         <TabsContent value="review" className="review-body">
-          {pendingApproval && (
-            <section className="review-section">
-              <h4>待处理</h4>
-              <ApprovalReview request={pendingApproval} onDecision={onApproval} />
-            </section>
-          )}
-
           {autonomous && !pendingApproval && (
             <section className="review-section">
               <div className="autonomy-note">
@@ -555,74 +612,6 @@ export function ReviewPanel(props: {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// Inline approval (Q3) — replaces the blocking ApprovalModal. Diff/JSON preview +
-// approve/reject, with optional edit-before-approve for edit tools.
-function ApprovalReview(props: {
-  request: ApprovalRequest
-  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
-}) {
-  const { request, onDecision } = props
-  const mcp = parseMcpToolName(request.toolName)
-  const preview = previewOf(request)
-  const editKey = editableKey(request)
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(
-    editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
-  )
-
-  const approve = () => {
-    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
-    else onDecision('approve')
-  }
-
-  // MCP connector opt-in card — never silently use a connector the user didn't
-  // choose. Surfaces the connector identity + the tool/input, and frames the
-  // approval as authorizing the connector (read-only tools won't re-prompt).
-  if (mcp) {
-    return (
-      <div className="review-pending approval mcp-consent">
-        <div className="rp-head">
-          <span className="kind mcp">MCP 连接器</span>
-          <span className="rp-tool">{mcp.serverId}</span>
-        </div>
-        <div className="mcp-consent-note">
-          调用工具 <code>{mcp.toolName}</code>。授权即允许此次调用；只读工具在首次授权后将不再逐次询问。
-        </div>
-        <pre className="rp-preview">{preview.text}</pre>
-        <div className="rp-actions">
-          <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
-          <button className="btn sm" onClick={() => onDecision('approve')}>授权连接器</button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="review-pending approval">
-      <div className="rp-head">
-        <span className="kind">需批准</span>
-        <span className="rp-tool">{request.toolName}</span>
-      </div>
-      {editing && editKey ? (
-        <textarea className="edit-input" value={draft} onChange={(e) => setDraft(e.target.value)} />
-      ) : preview.isDiff ? (
-        <DiffView raw={preview.text} />
-      ) : (
-        <pre className="rp-preview">{preview.text}</pre>
-      )}
-      <div className="rp-actions">
-        {editKey && (
-          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
-            {editing ? '取消编辑' : '编辑'}
-          </button>
-        )}
-        <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
-        <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
-      </div>
     </div>
   )
 }

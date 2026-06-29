@@ -1,9 +1,9 @@
-import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
 import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
-import type { ApprovalMode, PlanModeState } from '../runtime/types'
+import type { ApprovalMode, PlanModeState, ApprovalRequest } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
@@ -12,6 +12,8 @@ import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
+import { parseMcpToolName, previewOf, editableKey } from '../lib/approval-preview'
+import { DiffView } from '../components/DiffView'
 
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
 const GitSurface = lazy(() => import('./GitSurface').then((m) => ({ default: m.GitSurface })))
@@ -174,7 +176,18 @@ export function WorkspaceSurface() {
             }}
           />
         </Panel>
-        <Separator className="panel-resize-handle" />
+        <Separator className="panel-resize-handle">
+          <button
+            className="resize-handle-knob left"
+            onClick={(e) => {
+              e.stopPropagation()
+              dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
+            }}
+            title={ui.sidebarVisible ? "收起侧边栏" : "展开侧边栏"}
+          >
+            {ui.sidebarVisible ? "‹" : "›"}
+          </button>
+        </Separator>
         <Panel minSize="30%">
           <div className="conversation">
             <div className="conversation-body">
@@ -260,7 +273,18 @@ export function WorkspaceSurface() {
             {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
           </div>
         </Panel>
-        <Separator className="panel-resize-handle" />
+        <Separator className="panel-resize-handle">
+          <button
+            className="resize-handle-knob right"
+            onClick={(e) => {
+              e.stopPropagation()
+              dispatch({ type: 'setReview', visible: !ui.reviewVisible })
+            }}
+            title={ui.reviewVisible ? "收起审查面板" : "展开审查面板"}
+          >
+            {ui.reviewVisible ? "›" : "‹"}
+          </button>
+        </Separator>
         <Panel
           panelRef={reviewRef}
           collapsible
@@ -284,7 +308,6 @@ export function WorkspaceSurface() {
             planMode={view.planMode}
             planRev={view.planRev}
             latestPlanSlug={view.latestPlanSlug}
-            onApproval={handleApproval}
             onFeedbackSent={() => sessions.refetch()}
             todos={view.todos}
             sources={view.sources}
@@ -329,6 +352,160 @@ export function WorkspaceSurface() {
           <span className="capsule-text">项目侧边栏</span>
         </button>
       )}
+
+      {view.pendingApproval && (
+        <ApprovalModal
+          request={view.pendingApproval}
+          onDecision={handleApproval}
+        />
+      )}
+    </div>
+  )
+}
+
+function getApprovalIntent(toolName: string, input: Record<string, unknown>): { title: string; desc: string; icon: string } {
+  const mcp = parseMcpToolName(toolName)
+  if (mcp) {
+    return {
+      title: `调用外部工具: ${mcp.toolName}`,
+      desc: `通过 MCP 连接器 [${mcp.serverId}] 执行操作`,
+      icon: "🔌"
+    }
+  }
+  
+  const path = String(input.path ?? input.file_path ?? input.target ?? "")
+  switch (toolName) {
+    case 'write_file':
+    case 'create_file':
+      return {
+        title: "创建/写入新文件",
+        desc: path ? `写入文件: ${path.split('/').pop()} (${path})` : "在工作区写入新文件",
+        icon: "📝"
+      }
+    case 'edit_file':
+    case 'apply_patch':
+    case 'hash_edit':
+      return {
+        title: "修改现有文件",
+        desc: path ? `修改文件: ${path.split('/').pop()} (${path})` : "对工作区文件进行代码修改",
+        icon: "⚡"
+      }
+    case 'read_file':
+      return {
+        title: "读取文件内容",
+        desc: path ? `读取文件: ${path.split('/').pop()} (${path})` : "读取工作区文件",
+        icon: "🔍"
+      }
+    case 'execute_bash':
+      return {
+        title: "执行终端命令",
+        desc: `在系统终端中运行命令: \`${String(input.command ?? "")}\``,
+        icon: "💻"
+      }
+    default:
+      return {
+        title: `调用系统工具: ${toolName}`,
+        desc: "请求执行系统级或工作区级操作",
+        icon: "⚙️"
+      }
+  }
+}
+
+interface ApprovalModalProps {
+  request: ApprovalRequest
+  onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
+}
+
+function ApprovalModal({ request, onDecision }: ApprovalModalProps) {
+  const preview = previewOf(request)
+  const editKey = editableKey(request)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(
+    editKey ? String((request.input as Record<string, unknown>)[editKey] ?? '') : '',
+  )
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isCmdEnter = (e.metaKey || e.ctrlKey) && e.key === 'Enter'
+      if (isCmdEnter) {
+        e.preventDefault()
+        if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
+        else onDecision('approve')
+      } else if (e.key === 'Escape' && !editing) {
+        e.preventDefault()
+        onDecision('reject')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editing, draft, request, onDecision, editKey])
+
+  const intent = getApprovalIntent(request.toolName, request.input as Record<string, unknown>)
+
+  const approve = () => {
+    if (editing && editKey) onDecision('approve', { ...request.input, [editKey]: draft })
+    else onDecision('approve')
+  }
+
+  return (
+    <div className="approval-modal-backdrop" onClick={() => onDecision('reject')}>
+      <div className="approval-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="approval-modal-header">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">{intent.icon}</span>
+            <div className="min-w-0">
+              <h3 className="approval-modal-title truncate">{intent.title}</h3>
+              <p className="approval-modal-subtitle truncate" title={intent.desc}>{intent.desc}</p>
+            </div>
+          </div>
+          <span className="approval-modal-badge shrink-0">需要批准</span>
+        </div>
+
+        <div className="approval-modal-body">
+          {editing && editKey ? (
+            <textarea
+              className="approval-modal-textarea font-mono"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          ) : preview.isDiff ? (
+            <div className="approval-modal-diff overflow-auto max-h-[350px] border border-border rounded">
+              <DiffView raw={preview.text} />
+            </div>
+          ) : (
+            <pre className="approval-modal-pre font-mono overflow-auto max-h-[350px] border border-border rounded p-2 bg-panel-2 text-xs">
+              {preview.text}
+            </pre>
+          )}
+        </div>
+
+        <div className="approval-modal-footer flex items-center justify-between">
+          <div>
+            {editKey && (
+              <button
+                className="btn ghost sm"
+                onClick={() => setEditing((v) => !v)}
+              >
+                {editing ? '取消编辑' : '编辑代码'}
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn ghost"
+              onClick={() => onDecision('reject')}
+            >
+              拒绝 (Esc)
+            </button>
+            <button
+              className="btn"
+              onClick={approve}
+            >
+              {editing ? '应用并批准' : '批准 (⌘Enter)'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
