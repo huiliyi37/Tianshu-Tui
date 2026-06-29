@@ -64,7 +64,7 @@ import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
 import { createTurnBudget, type TurnBudget } from './turn-budget.js'
-import { classifyRecoveryTrigger } from './recovery-trigger.js'
+import { classifyRecoveryTrigger, type RecoveryTrigger } from './recovery-trigger.js'
 import { modeForRecoveryTrigger, type ReliabilityDecision } from './reliability-mode.js'
 import { ResourceSensor, type ResourceSensorSnapshot } from './resource-sensor.js'
 import { type PlanMethodology, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
@@ -954,6 +954,14 @@ export class AgentLoop {
   }
 
   refreshReliabilityDecision(): void {
+    // User override: RIVET_RELIABILITY_OVERRIDE=full disables all reliability
+    // locks. Use when the agent is permanently locked by a non-self-resolving
+    // condition (e.g. orphan tool_use blocks) and you accept the risk.
+    if (process.env.RIVET_RELIABILITY_OVERRIDE === 'full') {
+      this.latestReliabilityDecision = null
+      return
+    }
+
     this.latestResourceSnapshot = this.resourceSensor.sample(this.sessionPersistPath())
     const disk = this.latestResourceSnapshot.disk
     const trigger = classifyRecoveryTrigger({
@@ -985,7 +993,19 @@ export class AgentLoop {
         memoryTrendBytesPerSample: this.latestResourceSnapshot.memoryTrendBytesPerSample,
       },
     })
-    this.latestReliabilityDecision = modeForRecoveryTrigger(trigger, this.isGoalActive())
+
+    // Track triggers that fire at error severity for one-shot suppression.
+    // Recurring firings of the same trigger are capped at degraded in
+    // modeForRecoveryTrigger, preventing permanent lock-in from conditions
+    // that never self-resolve (session_integrity, resource_pressure, etc.).
+    if (trigger && trigger.severity === 'error') {
+      this.firedRecoveryTriggers.add(trigger.trigger)
+    }
+    this.latestReliabilityDecision = modeForRecoveryTrigger(
+      trigger,
+      this.isGoalActive(),
+      this.firedRecoveryTriggers,
+    )
   }
 
   /** 中#5: Check for tool_calls that have no matching tool_result. */

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isScratchScopedWrite, isToolAllowedInReliabilityMode, modeForRecoveryTrigger, reliabilityBlockMessage } from '../reliability-mode.js'
-import type { RecoveryTriggerResult } from '../recovery-trigger.js'
+import type { RecoveryTrigger, RecoveryTriggerResult } from '../recovery-trigger.js'
 
 function trigger(overrides: Partial<RecoveryTriggerResult>): RecoveryTriggerResult {
   return {
@@ -59,6 +59,49 @@ describe('modeForRecoveryTrigger', () => {
     const decision = modeForRecoveryTrigger(trigger({ trigger: 'context_thrashing', severity: 'error', summary: 'thrash' }))
     assert.equal(decision.mode, 'minimal')
   })
+
+  it('caps recurring error triggers at degraded (one-shot suppression)', () => {
+    const suppressed = new Set<RecoveryTrigger>(['session_integrity'])
+    const decision = modeForRecoveryTrigger(
+      trigger({ trigger: 'session_integrity', severity: 'error', summary: 'orphan tools' }),
+      false,
+      suppressed,
+    )
+    assert.equal(decision.mode, 'degraded')
+    assert.match(decision.reason, /capped at degraded/)
+  })
+
+  it('does not suppress different triggers', () => {
+    const suppressed = new Set<RecoveryTrigger>(['session_integrity'])
+    const decision = modeForRecoveryTrigger(
+      trigger({ trigger: 'resource_pressure', severity: 'error', summary: 'oom' }),
+      false,
+      suppressed,
+    )
+    assert.equal(decision.mode, 'minimal')
+    assert.match(decision.reason, /oom/)
+  })
+
+  it('does not cap warn-severity triggers', () => {
+    const suppressed = new Set<RecoveryTrigger>(['resource_pressure'])
+    const decision = modeForRecoveryTrigger(
+      trigger({ trigger: 'resource_pressure', severity: 'warn', summary: 'pressure' }),
+      false,
+      suppressed,
+    )
+    assert.equal(decision.mode, 'degraded')
+    assert.match(decision.reason, /pressure/)
+  })
+
+  it('first-time error trigger is NOT suppressed (empty set)', () => {
+    const suppressed = new Set<RecoveryTrigger>()
+    const decision = modeForRecoveryTrigger(
+      trigger({ trigger: 'session_integrity', severity: 'error', summary: 'orphan tools' }),
+      false,
+      suppressed,
+    )
+    assert.equal(decision.mode, 'minimal')
+  })
 })
 
 describe('isToolAllowedInReliabilityMode', () => {
@@ -100,9 +143,21 @@ describe('isToolAllowedInReliabilityMode', () => {
     assert.equal(isToolAllowedInReliabilityMode('degraded', 'write_file', { file_path: '/work/project/src/index.ts' }), false)
   })
 
-  it('keeps scratch writes blocked in minimal mode', () => {
+  it('allows scratch-scoped writes even in minimal mode (last-resort self-rescue)', () => {
     const tmpFile = join(tmpdir(), 'rivet-scratch-probe.txt')
-    assert.equal(isToolAllowedInReliabilityMode('minimal', 'write_file', { file_path: tmpFile }), false)
+    assert.equal(isToolAllowedInReliabilityMode('minimal', 'write_file', { file_path: tmpFile }), true)
+    assert.equal(isToolAllowedInReliabilityMode('minimal', 'write_file', { file_path: '/work/project/.rivet/scratch/out.txt' }), true)
+    // Non-scratch workspace writes stay blocked even in minimal mode.
+    assert.equal(isToolAllowedInReliabilityMode('minimal', 'write_file', { file_path: '/work/project/src/index.ts' }), false)
+  })
+
+  it('minimal block message advertises scratch self-rescue and env var override', () => {
+    const decision = modeForRecoveryTrigger(trigger({ severity: 'error', summary: 'resource critical' }))
+    const message = reliabilityBlockMessage(decision, 'bash')
+    assert.match(message, /minimal/)
+    assert.match(message, /resource critical/)
+    assert.match(message, /scratch/)
+    assert.match(message, /RIVET_RELIABILITY_OVERRIDE/)
   })
 
   it('degraded block message advertises the scratch self-rescue path', () => {

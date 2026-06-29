@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { resolve, sep } from 'node:path'
 import { requiresBashWriteApproval } from './approval-risk.js'
-import type { RecoveryTriggerResult } from './recovery-trigger.js'
+import type { RecoveryTrigger, RecoveryTriggerResult } from './recovery-trigger.js'
 
 export type ReliabilityMode = 'full' | 'degraded' | 'minimal'
 
@@ -36,8 +36,24 @@ function decision(
 export function modeForRecoveryTrigger(
   trigger: RecoveryTriggerResult | null | undefined,
   goalActive?: boolean,
+  /** Triggers that have already fired at error level this session.
+   *  Recurring firings are capped at degraded to prevent permanent lock-in
+   *  from conditions that never self-resolve (e.g. orphan tool_use blocks). */
+  suppressedTriggers?: Set<RecoveryTrigger>,
 ): ReliabilityDecision {
   if (!trigger) return decision('full', 'no recovery trigger')
+
+  // One-shot suppression: if this trigger already fired at error this session,
+  // cap it at degraded so the agent retains edit_file + scratch write access.
+  // The first occurrence already alerted the user; persistent lock-in from
+  // non-self-resolving conditions (session_integrity, resource_pressure) is
+  // counterproductive — it forces the user to kill the session.
+  if (trigger.severity === 'error' && suppressedTriggers?.has(trigger.trigger)) {
+    return decision('degraded',
+      `${trigger.summary} (recurring — capped at degraded)`,
+      ['bash_write', 'high_risk'],
+      trigger.evidence)
+  }
 
   if (trigger.trigger === 'resource_pressure') {
     return trigger.severity === 'error'
@@ -99,6 +115,9 @@ export function isToolAllowedInReliabilityMode(
   if (mode === 'full') return true
 
   if (mode === 'minimal') {
+    // Scratch writes (temp dir / .rivet/scratch) are allowed even in minimal
+    // mode as a last-resort self-rescue: write a diagnostic → read it back.
+    if (isScratchScopedWrite(toolName, input)) return true
     return READ_ONLY_MINIMAL_TOOLS.has(toolName)
   }
 
@@ -125,8 +144,9 @@ export function reliabilityBlockMessage(
       ? [`Evidence: ${decision.evidence.join('; ')}`]
       : []),
     decision.mode === 'minimal'
-      ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question.'
+      ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question. Self-rescue: write_file to the OS temp dir or .rivet/scratch/ is still permitted.'
       : 'Degraded mode blocks write_file and bash commands with write side effects. edit_file is still allowed for debug fixes. Self-rescue: write_file to the OS temp dir or .rivet/scratch/ is still permitted, then read_file it back — use this to materialise output you cannot otherwise see (e.g. a rawPath dump).',
     'Suggested recovery: compact, reduce task scope, or start a fresh session if pressure persists.',
+    'To override: set RIVET_RELIABILITY_OVERRIDE=full in your environment and restart.',
   ].join('\n')
 }
