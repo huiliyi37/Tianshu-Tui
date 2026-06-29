@@ -33,6 +33,26 @@ fi
 : "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:=}"
 export TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
 
+# ── macOS Developer ID 签名 + 公证状态自检（仅提示，不阻断） ──
+# APPLE_* 已由上面的 `set -a; source .env` 自动导出，tauri build 会自取。
+# 嵌套二进制（Node 运行时 / .node / esbuild）由 beforeBuildCommand 里的
+# codesign-nested.js 在打包前预签——它同样读 APPLE_SIGNING_IDENTITY。
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ -n "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    echo "→ macOS：将用 Developer ID 签名（含嵌套 Node/.node/esbuild）。"
+    if [[ -n "${APPLE_ID:-}" && -n "${APPLE_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+      echo "  并提交 Apple 公证（notarization）→ 用户下载后双击即开。"
+    else
+      echo "  ⚠ 缺少 APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID：" >&2
+      echo "    产物会被签名但【不会公证】，下载后仍会被 Gatekeeper 拦截（报“已损坏”）。" >&2
+      echo "    要彻底解决请补全这三项再重打。" >&2
+    fi
+  else
+    echo "⚠ 未设置 APPLE_SIGNING_IDENTITY：产物【未签名/未公证】。" >&2
+    echo "  用户下载后会报“已损坏”，需手动执行：xattr -cr /Applications/天枢.app" >&2
+  fi
+fi
+
 echo "→ 先构建 runtime（仓库根 dist/）…"
 ( cd .. && npm run build )
 
