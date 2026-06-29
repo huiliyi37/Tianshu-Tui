@@ -3,13 +3,18 @@
 # The binary is placed at src-tauri/resources/node/<os>-<arch>/node[.exe]
 #
 # Environment variables:
-#   NODE_VERSION   e.g. 22.15.0 (default below)
+#   NODE_VERSION   e.g. 24.1.0 (default below)
 #   FORCE_FETCH    set to 1 to re-download even if the binary already exists
+#
+# NOTE: fetch-node-runtime.js (used by tauri.conf beforeBuildCommand) is the
+# canonical fetcher and the source of truth for the bundled Node version. Keep
+# this default in sync with its DEFAULT_NODE_VERSION; the packed better-sqlite3
+# ABI must match this runtime (enforced by scripts/pack-native.js).
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NODE_VERSION="${NODE_VERSION:-22.15.0}"
+NODE_VERSION="${NODE_VERSION:-24.1.0}"
 FORCE_FETCH="${FORCE_FETCH:-0}"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')

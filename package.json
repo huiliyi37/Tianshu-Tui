@@ -21,7 +21,7 @@
     "url": "https://github.com/huiliyi37/Tianshu-Tui/issues"
   },
   "engines": {
-    "node": "22.23.1"
+    "node": "24.1.0"
   },
   "files": [
     "dist/",
