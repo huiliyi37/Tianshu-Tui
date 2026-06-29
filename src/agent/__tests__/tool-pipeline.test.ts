@@ -1702,6 +1702,52 @@ describe('phase-aware prediction recording', () => {
     assert.equal(recorded, false, 'non-run_tests failures always record prediction')
   })
 
+  it('does NOT record prediction for environment-class failure (Windows command-not-found)', async () => {
+    let recorded: boolean | undefined = undefined
+    const deps = makeDeps({
+      phaseHint: 'execute',
+      recordPrediction: (correct: boolean) => { recorded = correct },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: "命令未找到：'python'", isError: true, errorClass: 'environment' }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-env-red', name: 'bash', input: { command: 'python --version' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(recorded, undefined, 'environment-class failure must NOT erode momentum (信念) via prediction')
+  })
+
+  it('threads errorClass through to recordToolHistory', async () => {
+    let captured: string | undefined = 'unset'
+    const deps = makeDeps({
+      phaseHint: 'execute',
+      recordToolHistory: (_n: any, _i: any, _e: any, _c: any, errorClass?: string) => { captured = errorClass },
+      config: {
+        ...makeDeps().config,
+        toolRegistry: {
+          execute: async () => ({ content: '命令未找到', isError: true, errorClass: 'environment' }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    await executeToolUse(
+      { id: 'tu-env-hist', name: 'bash', input: { command: 'python' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    assert.equal(captured, 'environment', 'recordToolHistory must receive errorClass for immune neutralisation')
+  })
+
   it('DOES record prediction for run_tests success in verify phase (TDD GREEN)', async () => {
     let recorded: boolean | undefined = undefined
     const deps = makeDeps({

@@ -58,6 +58,28 @@ describe('environment platform hint (target vs host)', () => {
       restore()
     }
   })
+
+  it('非 Windows 宿主：无 windows-shell-note', () => {
+    restore()
+    if (process.platform === 'win32') return // 真机就是 Windows 时跳过
+    const block = buildStableVolatileBlock({ cwd: '/repo' })
+    assert.doesNotMatch(block, /<windows-shell-note>/)
+  })
+
+  it('Windows 宿主：注入原生命令指引(py / PowerShell / not-recognized 换工具)', () => {
+    restore()
+    const original = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    try {
+      const block = buildStableVolatileBlock({ cwd: '/repo' })
+      assert.match(block, /<windows-shell-note>/)
+      assert.match(block, /`py`/)
+      assert.match(block, /not recognized/)
+      assert.match(block, /不要重试同一条/)
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true })
+    }
+  })
 })
 
 describe('volatile context layers', () => {

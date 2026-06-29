@@ -601,8 +601,8 @@ export class AgentLoop {
     return this.planTraceCoordinator.buildStepResultFromTurn(turn)
   }
 
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string): void {
-      recordToolHistory(this, name, input, isError, result);
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string, errorClass?: 'environment' | 'exec-failure'): void {
+      recordToolHistory(this, name, input, isError, result, errorClass);
       // F-fix (session 803d897d): field habituation moves discipline text out of
       // focus after ~4 turns while a heavy turn can run 20+ tool calls. Re-anchor
       // a one-line discipline summary through the advisory bus every N calls —

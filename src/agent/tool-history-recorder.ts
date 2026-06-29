@@ -13,7 +13,13 @@ export function recordToolHistory(
   input: Record<string, unknown>,
   isError: boolean,
   result: string,
+  errorClass?: 'environment' | 'exec-failure',
 ): void {
+    // Environment-class failures (host lacks the command — common on Windows) are
+    // not competence failures. The immune system must not amplify them into
+    // quarantine/doom, otherwise benign command-name differences make the agent
+    // recoil. Visible status stays honest; only the immune amplifier is neutralised.
+    const immuneError = errorClass === 'environment' ? false : isError
     const target = typeof input?.path === 'string'
       ? input.path
       : typeof input?.file_path === 'string'
@@ -106,7 +112,7 @@ export function recordToolHistory(
           targetFile: target,
           tokenUsage: capturedTokens,
           trajectoryHealth,
-          isError,
+          isError: immuneError,
         })
         if (immuneResult.contextHint) {
           self._lastImmuneHint = immuneResult.contextHint

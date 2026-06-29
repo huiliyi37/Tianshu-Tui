@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { BASH_TOOL, isExecFailure, sanitizeEnv } from '../bash.js'
+import { BASH_TOOL, isExecFailure, classifyBashOutcome, sanitizeEnv } from '../bash.js'
 
 describe('isExecFailure: 非零退出码 ≠ 真失败', () => {
   it('把 0 和"非零非致命码"判为非失败(grep 1/diff 1/test 失败码)', () => {
@@ -16,6 +16,43 @@ describe('isExecFailure: 非零退出码 ≠ 真失败', () => {
     assert.equal(isExecFailure(126), true)  // 不可执行
     assert.equal(isExecFailure(127), true)  // 命令未找到
     assert.equal(isExecFailure(139), true)  // 段错误 (128+SIGSEGV)
+  })
+})
+
+describe('classifyBashOutcome: Windows 感知的命令结果分类', () => {
+  it('Windows cmd.exe 未识别命令 (9009) → environment 类', () => {
+    const r = classifyBashOutcome(9009, "'python' is not recognized as an internal or external command", true)
+    assert.equal(r.isError, true)
+    assert.equal(r.errorClass, 'environment')
+  })
+  it('Windows PowerShell not-recognized (exit 1 + stderr) → environment 类', () => {
+    const r = classifyBashOutcome(1, "python : The term 'python' is not recognized as the name of a cmdlet", true)
+    assert.equal(r.isError, true)
+    assert.equal(r.errorClass, 'environment')
+  })
+  it('Windows CommandNotFoundException 文案 → environment 类', () => {
+    const r = classifyBashOutcome(1, 'CommandNotFoundException', true)
+    assert.equal(r.errorClass, 'environment')
+  })
+  it('Windows 普通非零码无 not-found 文案 → 非失败(语义结果)', () => {
+    // findstr 无匹配返回 1，不应误判为执行失败
+    const r = classifyBashOutcome(1, '', true)
+    assert.equal(r.isError, false)
+    assert.equal(r.errorClass, undefined)
+  })
+  it('Windows 段错误级 (>128) 无 not-found 文案 → exec-failure', () => {
+    const r = classifyBashOutcome(3221225477, '', true) // 0xC0000005 access violation
+    assert.equal(r.isError, true)
+    assert.equal(r.errorClass, 'exec-failure')
+  })
+  it('POSIX 127/126 → environment 类，信号 → exec-failure', () => {
+    assert.equal(classifyBashOutcome(127, 'sh: foo: command not found', false).errorClass, 'environment')
+    assert.equal(classifyBashOutcome(126, '', false).errorClass, 'environment')
+    assert.equal(classifyBashOutcome(139, '', false).errorClass, 'exec-failure')
+  })
+  it('POSIX 退出码 1/2 → 非失败(沿用 isExecFailure 语义)', () => {
+    assert.equal(classifyBashOutcome(1, '', false).isError, false)
+    assert.equal(classifyBashOutcome(0, '', false).isError, false)
   })
 })
 

@@ -59,7 +59,7 @@ export interface ToolExecutionDeps {
   getSessionTurnCount: () => number
   getSessionId: () => string | undefined
   addToolResults: (results: ContentBlock[]) => void
-  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string) => void
+  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure') => void
   buildRuntimeSnapshot: (extra?: Partial<RuntimeHookSnapshot>) => RuntimeHookSnapshot
   requestThetaCheck: (reason: string) => void
   getAutoReasoning: () => boolean
@@ -204,8 +204,8 @@ export class ToolExecutionController {
       latestRisk: state.latestRisk,
       sessionTurnCount: this.deps.getSessionTurnCount(),
       sessionId: this.deps.getSessionId(),
-      recordToolHistory: (name, input_, isError, content) =>
-        this.deps.recordToolHistory(name, input_, isError, content),
+      recordToolHistory: (name, input_, isError, content, errorClass) =>
+        this.deps.recordToolHistory(name, input_, isError, content, errorClass),
       onLeaveMark: this.deps.onLeaveMark,
       onPlanSteps: this.deps.onPlanSteps,
       onPlanClosed: this.deps.onPlanClosed,

@@ -205,6 +205,11 @@ export interface ToolResult {
   rawLines?: number
   /** Exit code for shell commands (bash). */
   exitCode?: number
+  /** Classification of a failing shell result. 'environment' = the command could not
+   *  run because the host lacks it (command-not-found / shell-not-found), NOT a model
+   *  competence failure — downstream (momentum/doom/approval) must not penalise these,
+   *  otherwise benign Windows command-name differences make the agent timid. */
+  errorClass?: 'environment' | 'exec-failure'
   /** Executed command (bash) — used by ToolAccumulator for per-command collapse summaries. */
   command?: string
   /** Signal the turn loop to end after this tool result (e.g. ask_user_question
