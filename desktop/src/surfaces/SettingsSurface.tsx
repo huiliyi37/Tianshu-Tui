@@ -283,9 +283,12 @@ export function SettingsSurface() {
           </div>
         )}
         {activeCat === 'system' && (
-          <>
-            <section className="settings-group">
-              <h4>{t('runtime')}</h4>
+          <div className="system-stack">
+            <section className="system-card">
+              <div className="system-card-header">
+                <h4>{t('runtime')}</h4>
+                <p className="meta">当前 sidecar 版本、会话数量与运行状态统计。</p>
+              </div>
               {health.isError ? (
                 <div className="meta warn">{t('sidecarOffline')}</div>
               ) : (
@@ -303,7 +306,7 @@ export function SettingsSurface() {
             <PlatformSection />
             <StorageSection />
             <UpdaterSection />
-          </>
+          </div>
         )}
         {activeCat === 'help' && <HelpSection onNavigate={setActiveCat} />}
       </div>
@@ -492,10 +495,10 @@ function PlatformSection() {
   if (!cfg) return null
 
   return (
-    <section className="settings-group">
-      <h4>平台约定（换行符 / 目标系统）</h4>
-      <div className="meta" style={{ marginBottom: 8 }}>
-        控制新建文件的换行符，以及系统提示里告诉模型的目标 OS。<code>auto</code> 跟随本机。命令始终在本机 shell 执行——跨平台覆盖只影响文件约定，不改变命令执行。
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>平台约定（换行符 / 目标系统）</h4>
+        <p className="meta">控制新建文件的换行符，以及系统提示里告诉模型的目标 OS。<code>auto</code> 跟随本机。命令始终在本机 shell 执行——跨平台覆盖只影响文件约定，不改变命令执行。</p>
       </div>
       <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
         <label className="flex items-center gap-2 text-xs text-text">
@@ -568,8 +571,11 @@ function StorageSection() {
   const archived = report?.archived ?? []
 
   return (
-    <section className="settings-group">
-      <h4>存储管理</h4>
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>存储管理</h4>
+        <p className="meta">查看会话文件占用，清理已归档会话以释放磁盘空间。删除不可逆，进行中的会话不受影响。</p>
+      </div>
       {loading && !report ? (
         <div className="meta">正在统计…</div>
       ) : !report ? (
@@ -717,8 +723,11 @@ function UpdaterSection() {
   }
 
   return (
-    <section className="settings-group">
-      <h4>{t('update')}</h4>
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>{t('update')}</h4>
+        <p className="meta">检查并安装应用更新。下载完成后会自动重启以完成安装。</p>
+      </div>
       <button className="btn" onClick={handleCheck} disabled={checking || installing}>
         {checking ? t('updateChecking') : t('updateCheck')}
       </button>
