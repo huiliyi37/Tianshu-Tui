@@ -1,5 +1,6 @@
 import { createProviderClient, resolveApiKey } from '../api/factory.js'
 import { resolveCapabilities } from '../api/provider.js'
+import { createAuthProvider } from '../auth/registry.js'
 import { PromptEngine } from '../prompt/engine.js'
 import { detectModelFamily } from '../prompt/static.js'
 import { createVolatileSnapshot } from '../prompt/volatile-snapshot.js'
@@ -105,7 +106,7 @@ export function createMainAgentConfigInput(params: MainAgentConfigInputParams): 
 
 export function createAgentConfig(input: AgentConfigInput): Pick<
   AgentConfig,
-  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
+  'client' | 'promptEngine' | 'contextWindow' | 'compact' | 'providerProfile' | 'providerName' | 'primaryClient' | 'compactClient' | 'sessionId' | 'approvalMode' | 'autoReasoning' | 'reasoningFloor' | 'turnLevelThinking' | 'songlineEnabled' | 'hearthObserveEnabled' | 'crossSessionEnabled' | 'antiAnchoring' | 'intentRetrievalRouter' | 'autoDelegateEnabled' | 'goalJudge' | 'allProviders' | 'permissions' | 'toolGating' | 'prefixCacheStrategy'
 > {
   const { model, apiKey, cwd, provider } = input
   const capabilities = resolveCapabilities(provider.name, provider.capabilities)
@@ -124,6 +125,12 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
   })
 
   const client = buildFallbackChain(primaryClient, provider, model, input)
+
+  // Optional dedicated compaction client (compact.provider + compact.model).
+  // Routes summarization to a cheap model on its own server-side cache so it
+  // neither spends the main model's tokens nor evicts its hot prefix. Silent
+  // fallback to primaryClient when unconfigured/invalid (mirrors review/council).
+  const compactClient = buildCompactClient(input)
 
   // 工具门控：构造期与 updateTools() 共用同一过滤（gateToolDefinitions），
   // 确保 MCP/LSP 异步注册后调用 updateTools 不会把 EXTENDED 工具整个还原。
@@ -157,6 +164,7 @@ export function createAgentConfig(input: AgentConfigInput): Pick<
     providerProfile: getProviderProfile(provider.name, model.contextWindow),
     providerName: provider.name,
     primaryClient: primaryClient,
+    compactClient,
     sessionId: input.sessionId,
     approvalMode: input.approvalMode,
     songlineEnabled: input.songlineEnabled,
@@ -209,4 +217,54 @@ function buildFallbackChain(
 
   if (entries.length === 0) return primary
   return new FallbackStreamClient(primary, provider.name, entries)
+}
+
+/**
+ * Build the dedicated compaction StreamClient from compact.provider+model.
+ * Returns undefined (→ caller falls back to primaryClient) when:
+ *  - provider/model not both set
+ *  - provider unknown, or model not in its model list
+ *  - credentials missing (apiKey empty / oauth not authenticated)
+ * This matches the silent-fallback contract of review/council routing: a
+ * misconfigured compact route degrades to the primary model, never errors.
+ */
+function buildCompactClient(
+  input: AgentConfigInput,
+): import('../api/stream-client.js').StreamClient | undefined {
+  const compactProvider = input.compact.provider
+  const compactModel = input.compact.model
+  if (!compactProvider || !compactModel) return undefined
+  const prov = input.allProviders?.[compactProvider]
+  if (!prov) return undefined
+  const spec = prov.models.find(m => m.id === compactModel || m.alias === compactModel)
+  if (!spec) return undefined
+
+  let apiKey = ''
+  let auth: AuthProvider | undefined
+  try {
+    if (prov.auth?.type === 'oauth') {
+      auth = prov.name === input.provider.name ? input.auth : createAuthProvider(prov.auth, process.env)
+      if (!auth?.isAuthenticated()) return undefined
+    } else {
+      apiKey = resolveApiKey(prov)
+      if (!apiKey) return undefined
+    }
+  } catch {
+    return undefined
+  }
+
+  const caps = resolveCapabilities(prov.name, prov.capabilities)
+  // A dedicated compact client always runs the generous char budget (up to ~16K
+  // chars at 1M). maxTokens only caps output (billed per generated token), so a
+  // high ceiling is cost-neutral but prevents truncating a generous CJK summary
+  // mid-sentence — 16K chars is ~10K tokens for Chinese, far above a 4K cap.
+  const maxTokens = Math.min(16_384, spec.maxTokens)
+  return createProviderClient(prov, caps, {
+    apiKey,
+    model: spec.id,
+    reasoningEffort: spec.reasoningEffort,
+    maxTokens,
+    auth,
+    sessionId: input.sessionId,
+  })
 }

@@ -486,6 +486,10 @@ function buildManagedAgent(
       const next = resolveModelSpec(ctx, modelId)
       if (!next) return null
       const oldCoordinator = stores.refs.coordinator
+      // Cancel the outgoing loop's idle compaction: it shares this SessionContext
+      // with the incoming loop, so a pending idle timer would race the new agent.
+      const oldAgent = agent
+      void oldAgent.cancelIdleCompaction()
       spec = next
       agent = assembleAgentLoop(ctx, cwd, sessionId, stores, spec, approvalMode, registry, shared)
       if (oldCoordinator && oldCoordinator !== stores.refs.coordinator) {
@@ -500,6 +504,7 @@ function buildManagedAgent(
     // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
     // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。
     shutdown: () => {
+      try { void agent.cancelIdleCompaction() } catch { /* best-effort */ }
       try { stores.refs.coordinator?.shutdown() } catch { /* best-effort */ }
     },
     // I1: 桌面端议事会入口，直接评审 artifact 中的 council-plan-json。

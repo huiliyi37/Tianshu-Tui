@@ -269,6 +269,26 @@ export interface PersistedSession {
   events: SessionEvent[]
 }
 
+/** One archived session's on-disk footprint, for the storage cleanup UI. */
+export interface SessionStorageEntry {
+  id: string
+  title?: string
+  status: SessionStatus
+  updatedAt: number
+  bytes: number
+}
+
+/** Aggregate disk-usage report for the desktop session store. */
+export interface StorageReport {
+  totalBytes: number
+  sessionCount: number
+  archivedCount: number
+  /** Bytes reclaimable by purging all archived sessions. */
+  archivedBytes: number
+  /** Archived sessions, oldest first (the natural cleanup order). */
+  archived: SessionStorageEntry[]
+}
+
 /**
  * Durable backing store for sessions (N1). Records are snapshotted; events are
  * append-only. Implementations must tolerate a corrupt trailing event line
@@ -278,6 +298,24 @@ export interface SessionPersistenceAdapter {
   saveRecord(record: SessionRecord): void
   appendEvent(sessionId: string, event: SessionEvent): void
   loadAll(): PersistedSession[]
+  /**
+   * Lazy-boot support (optional). `loadRecords` reads ONLY the lightweight
+   * index.json snapshot per session — never the (potentially huge) event log —
+   * so rehydrate is O(sessions) instead of O(total events ever). `loadEvents`
+   * reads a single session's full log on demand (first open). Adapters that omit
+   * both fall back to the eager `loadAll()` path (fine for tiny in-memory test
+   * stores). The file-backed store implements both.
+   */
+  loadRecords?(): SessionRecord[]
+  loadEvents?(sessionId: string): SessionEvent[]
+  /**
+   * Storage-management support (optional). `sizeReport`/`sizeOf` report on-disk
+   * byte usage via stat() only (never reading contents); `deleteSession`
+   * irreversibly removes a session's files. Used by the manual cleanup UI.
+   */
+  sizeReport?(): Map<string, number>
+  sizeOf?(sessionId: string): number
+  deleteSession?(sessionId: string): void
   /**
    * Persist a user-attached image as a standalone file so the event log only
    * carries a small reference id (not the base64). Optional — adapters that
@@ -296,6 +334,13 @@ export interface RuntimeSessionManagerOptions {
   idGenerator?: () => string
   /** Cap on retained events per session (ring buffer). Default 5000. */
   maxEvents?: number
+  /**
+   * Cap on how many sessions keep their event log resident at once. Lazy-loaded
+   * sessions beyond this (LRU, and only ones with no live agent / not running /
+   * unwatched) have their logs dropped back to disk, bounding memory regardless
+   * of how much history accumulates. Default 16.
+   */
+  maxLoadedSessions?: number
   /** Auto-resolve a pending intervention after this many ms. 0 = never. Default 0. */
   approvalTimeoutMs?: number
   /** Optional durable store. When set, sessions survive sidecar restarts. */
@@ -335,6 +380,12 @@ interface InternalSession {
   /** S — per-session autonomy override threaded into the agent on build. */
   approvalMode?: ApprovalMode
   events: SessionEvent[]
+  /**
+   * Whether `events` holds the full on-disk log. False for a rehydrated session
+   * whose log hasn't been read yet (lazy boot) or one whose log was evicted to
+   * bound memory — ensureEvents() (re)loads from disk on first access.
+   */
+  eventsLoaded: boolean
   seq: number
   running: boolean
   pending: Map<string, PendingIntervention>
@@ -413,6 +464,9 @@ export class RuntimeSessionManager {
   private readonly now: () => number
   private readonly idGenerator: () => string
   private readonly maxEvents: number
+  private readonly maxLoadedSessions: number
+  /** LRU of session ids whose event log is currently resident (oldest first). */
+  private readonly loadedOrder: string[] = []
   private readonly approvalTimeoutMs: number
   private readonly persistence?: SessionPersistenceAdapter
   private readonly getRegistry?: () => SessionRegistry | undefined
@@ -425,6 +479,7 @@ export class RuntimeSessionManager {
     this.now = opts.now ?? Date.now
     this.idGenerator = opts.idGenerator ?? (() => randomId())
     this.maxEvents = opts.maxEvents ?? 5000
+    this.maxLoadedSessions = opts.maxLoadedSessions ?? 16
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
     this.persistence = opts.persistence
     this.getRegistry = opts.getSessionRegistry
@@ -440,9 +495,61 @@ export class RuntimeSessionManager {
    * started in the same cwd. events.jsonl is the source of truth for seq.
    */
   private rehydrate(): void {
+    const p = this.persistence!
+    // Lazy boot: read only the lightweight index.json records — NOT the event
+    // logs — so a sidecar restart is O(sessions) instead of O(total events ever).
+    // With dozens of long sessions the eager path read+parsed tens of MB of
+    // events.jsonl synchronously on every launch (slow start + unbounded RAM);
+    // here each session starts with an empty log that ensureEvents() fills on
+    // first open. Falls back to eager loadAll() for adapters without lazy support.
+    if (typeof p.loadRecords === 'function' && typeof p.loadEvents === 'function') {
+      let records: SessionRecord[]
+      try { records = p.loadRecords() } catch { return }
+      for (const rec of records) {
+        const wasRunning = rec.status === 'running'
+        const session: InternalSession = {
+          record: {
+            ...rec,
+            status: wasRunning ? 'aborted' : rec.status,
+            lastSeq: rec.lastSeq,
+            pendingApprovals: 0,
+          },
+          agent: null,
+          events: [],
+          eventsLoaded: false,
+          seq: rec.lastSeq,
+          running: false,
+          pending: new Map(),
+          listeners: new Set(),
+          knownArtifacts: new Set(),
+          steer: new SteerBuffer(),
+          domainState: resolveDomainState(rec.domain ?? 'auto')?.state,
+          disabledSkills: new Set(),
+        }
+        this.sessions.set(session.record.id, session)
+        if (wasRunning) {
+          // Persist the honest "interrupted by restart" marker straight to disk
+          // WITHOUT loading the log (that would defeat lazy boot). It re-appears
+          // when ensureEvents() reads the log on first open.
+          const marker: SessionEvent = {
+            seq: ++session.seq,
+            ts: this.now(),
+            type: 'status',
+            data: { status: 'aborted', reason: 'sidecar-restart' },
+          }
+          session.record.lastSeq = session.seq
+          session.record.updatedAt = marker.ts
+          try { p.appendEvent(session.record.id, marker) } catch { /* best-effort */ }
+          this.persistRecord(session)
+        }
+      }
+      return
+    }
+
+    // Eager fallback (in-memory / legacy adapters with only loadAll()).
     let restored: PersistedSession[]
     try {
-      restored = this.persistence!.loadAll()
+      restored = p.loadAll()
     } catch {
       return
     }
@@ -459,6 +566,7 @@ export class RuntimeSessionManager {
         },
         agent: null,
         events,
+        eventsLoaded: true,
         seq: maxSeq,
         running: false,
         pending: new Map(),
@@ -481,11 +589,160 @@ export class RuntimeSessionManager {
     }
   }
 
+  /**
+   * Lazy-load a rehydrated/evicted session's event log on first access, then keep
+   * at most `maxLoadedSessions` logs resident (LRU). Idempotent. All code paths
+   * that read or append to `session.events` must funnel through here first so the
+   * in-memory log is the complete on-disk log (not an empty lazy placeholder).
+   */
+  private ensureEvents(session: InternalSession): void {
+    if (!session.eventsLoaded) {
+      const loader = this.persistence?.loadEvents
+      if (loader) {
+        let evs: SessionEvent[]
+        try { evs = loader.call(this.persistence, session.record.id) } catch { evs = [] }
+        evs.sort((a, b) => a.seq - b.seq)
+        session.events = evs
+        session.knownArtifacts = new Set(
+          evs.filter((e) => e.type === 'artifact').map((e) => String(e.data.id)),
+        )
+        const maxSeq = evs.length ? evs[evs.length - 1]!.seq : session.record.lastSeq
+        session.seq = Math.max(session.seq, maxSeq)
+      }
+      session.eventsLoaded = true
+    }
+    this.touchLoaded(session)
+    this.evictLoadedBeyondCap()
+  }
+
+  /** Mark a session's log as most-recently-used in the LRU. */
+  private touchLoaded(session: InternalSession): void {
+    if (!session.eventsLoaded) return
+    const id = session.record.id
+    const i = this.loadedOrder.indexOf(id)
+    if (i !== -1) this.loadedOrder.splice(i, 1)
+    this.loadedOrder.push(id)
+  }
+
+  /**
+   * Drop event logs of idle LRU sessions to bound resident memory. Never unloads
+   * a session that's live (agent built or running) or being watched (SSE
+   * listeners) — its in-memory log is the source of truth for in-flight appends
+   * and replay; those reload cleanly from disk once idle.
+   */
+  private evictLoadedBeyondCap(): void {
+    let i = 0
+    while (i < this.loadedOrder.length && this.loadedOrder.length > this.maxLoadedSessions) {
+      const id = this.loadedOrder[i]!
+      const s = this.sessions.get(id)
+      if (!s || s.agent || s.running || s.listeners.size > 0) { i++; continue }
+      s.events = []
+      s.knownArtifacts = new Set()
+      s.eventsLoaded = false
+      this.loadedOrder.splice(i, 1)
+    }
+  }
+
   /** Lightweight counts for GET /health. */
   stats(): { sessionCount: number; runningCount: number } {
     let runningCount = 0
     for (const s of this.sessions.values()) if (s.running) runningCount++
     return { sessionCount: this.sessions.size, runningCount }
+  }
+
+  /**
+   * Disk-usage report for the storage cleanup UI. Sizes come from the
+   * persistence adapter's stat()-only scan (no event-log reads), so this is
+   * cheap to call even with a large history. Archived sessions are the
+   * reclaimable set and are returned oldest-first.
+   */
+  storageReport(): StorageReport {
+    const sizes = this.persistence?.sizeReport?.() ?? new Map<string, number>()
+    let totalBytes = 0
+    let archivedBytes = 0
+    const archived: SessionStorageEntry[] = []
+    for (const s of this.sessions.values()) {
+      const bytes = sizes.get(s.record.id) ?? 0
+      totalBytes += bytes
+      if (s.record.archived === true) {
+        archivedBytes += bytes
+        archived.push({
+          id: s.record.id,
+          title: s.record.title,
+          status: s.record.status,
+          updatedAt: s.record.updatedAt,
+          bytes,
+        })
+      }
+    }
+    archived.sort((a, b) => a.updatedAt - b.updatedAt)
+    return {
+      totalBytes,
+      sessionCount: this.sessions.size,
+      archivedCount: archived.length,
+      archivedBytes,
+      archived,
+    }
+  }
+
+  /**
+   * Irreversibly delete ONE archived session's files. Guarded: refuses unless
+   * the session is archived and idle, so an active conversation can never be
+   * nuked by the cleanup UI. Returns the freed byte count (0 on no-op).
+   */
+  deleteSession(id: string): { ok: boolean; freedBytes: number } {
+    const s = this.sessions.get(id)
+    if (!s || s.record.archived !== true || s.running) return { ok: false, freedBytes: 0 }
+    const freedBytes = this.persistence?.sizeOf?.(id) ?? 0
+    return { ok: this.hardDelete(id), freedBytes }
+  }
+
+  /**
+   * Bulk-purge archived sessions. `ids` restricts to a specific set; otherwise
+   * all archived qualify. `olderThanMs` further keeps only sessions untouched
+   * for at least that long (relative to updatedAt). Never touches active or
+   * running sessions. Returns the count and total bytes reclaimed.
+   */
+  purgeArchived(opts: { ids?: string[]; olderThanMs?: number } = {}): {
+    deleted: number
+    freedBytes: number
+    ids: string[]
+  } {
+    const now = this.now()
+    const idFilter = opts.ids ? new Set(opts.ids) : null
+    const sizes = this.persistence?.sizeReport?.() ?? new Map<string, number>()
+    const targets: string[] = []
+    for (const s of this.sessions.values()) {
+      if (s.record.archived !== true || s.running) continue
+      if (idFilter && !idFilter.has(s.record.id)) continue
+      if (opts.olderThanMs != null && now - s.record.updatedAt < opts.olderThanMs) continue
+      targets.push(s.record.id)
+    }
+    let freedBytes = 0
+    const deleted: string[] = []
+    for (const id of targets) {
+      if (this.hardDelete(id)) {
+        freedBytes += sizes.get(id) ?? 0
+        deleted.push(id)
+      }
+    }
+    return { deleted: deleted.length, freedBytes, ids: deleted }
+  }
+
+  /**
+   * Remove a session from memory + disk + registry. Internal: callers enforce
+   * the archived/idle policy. Idempotent (missing id → false).
+   */
+  private hardDelete(id: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    try { s.agent?.shutdown?.() } catch { /* best-effort */ }
+    try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
+    this.sessions.delete(id)
+    const i = this.loadedOrder.indexOf(id)
+    if (i !== -1) this.loadedOrder.splice(i, 1)
+    try { this.persistence?.deleteSession?.(id) } catch { /* best-effort */ }
+    return true
   }
 
   /**
@@ -543,6 +800,7 @@ export class RuntimeSessionManager {
       agent: null,
       approvalMode: input.approvalMode,
       events: [],
+      eventsLoaded: true,
       seq: 0,
       running: false,
       pending: new Map(),
@@ -553,6 +811,7 @@ export class RuntimeSessionManager {
       disabledSkills: new Set(),
     }
     this.sessions.set(id, session)
+    this.touchLoaded(session)
     this.persistRecord(session)
     // 立即加载技能到共享 registry：技能列表查询（/skills）发生在用户发首条消息之前，
     // 而 agent 是懒创建的（ensureAgent 在 run() 时才建）——若把 loadProjectSkills 只留
@@ -573,6 +832,9 @@ export class RuntimeSessionManager {
   run(id: string, prompt: string, images?: string[]): boolean {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    // Materialize the on-disk log before appending — otherwise a reconnecting
+    // viewer (since=0) would replay only this run's events, not the history.
+    this.ensureEvents(session)
     const agent = this.ensureAgent(session)
     session.running = true
     // T3 — drop any guidance left from a previous run so it can't leak forward.
@@ -925,6 +1187,7 @@ export class RuntimeSessionManager {
   ): boolean {
     const s = this.sessions.get(id)
     if (!s || s.running) return false
+    this.ensureEvents(s)
     const meta = [...s.events].reverse().find(
       (e) => e.type === 'artifact' && e.data.id === artifactId,
     )
@@ -1080,6 +1343,8 @@ export class RuntimeSessionManager {
   getEvents(id: string, since = 0): { events: SessionEvent[]; lastSeq: number } | undefined {
     const s = this.sessions.get(id)
     if (!s) return undefined
+    // Reconnect/replay entry point — lazy-load the log from disk on first open.
+    this.ensureEvents(s)
     const events = s.events.filter((e) => e.seq > since)
     return { events, lastSeq: s.seq }
   }
@@ -1274,6 +1539,7 @@ export class RuntimeSessionManager {
     const s = this.sessions.get(id)
     if (!s) return undefined
     if (!s.agent) return []
+    this.ensureEvents(s)
     const msgs = s.agent.getMessages()
     // Collect user events (seq + ts + text) so we can map each user message to
     // both its submission time AND the seq of its originating `user` event. The
@@ -1320,6 +1586,7 @@ export class RuntimeSessionManager {
     if (!s) return false
     if (s.running) return false
     if (!s.agent) return false
+    this.ensureEvents(s)
 
     const msgs = s.agent.getMessages()
     if (messageIndex < 0 || messageIndex >= msgs.length) return false

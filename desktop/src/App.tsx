@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { getRuntimeInfo } from './runtime/client'
-import { useHealth, useCreateSession } from './state/queries'
+import { useHealth, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
-import { loadKnownProjects, projectId } from './lib/projects'
+import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
@@ -21,6 +21,7 @@ export function App() {
   const dispatch = useUiDispatch()
   const health = useHealth()
   const createSession = useCreateSession()
+  const sessions = useSessions()
   useGlobalNotifications()
 
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -31,28 +32,59 @@ export function App() {
   const sidecarDown = health.isError
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
-  // Fatal start failure (Rust reported ready=false): the sidecar never came up,
-  // so the reconnect loop can never succeed. Distinguish it from a transient
-  // drop so we don't show misleading "正在重连…" copy forever.
+  // Fatal start failure (Rust reported ready=false). IMPORTANT: Rust's readiness
+  // probe is a one-shot ~15s gate, and a cold launch (many sessions rehydrating,
+  // cold disk) can lose that race even though the sidecar comes up moments later.
+  // So treat ready===false as a *hint*, not a verdict:
+  //   1. live /health is ground truth — clear the fatal flag the instant the
+  //      sidecar answers, so a slow-but-successful start self-heals (no manual
+  //      restart, no permanently-stuck error banner).
+  //   2. only escalate to the fatal banner after a grace window during which the
+  //      sidecar is STILL unreachable, so a slow start never flashes "启动失败".
   const [sidecarFailed, setSidecarFailed] = useState(false)
+  const sidecarHealthyRef = useRef(false)
+  useEffect(() => {
+    if (health.data?.ok) {
+      sidecarHealthyRef.current = true
+      setSidecarFailed(false)
+    }
+  }, [health.data])
   useEffect(() => {
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     getRuntimeInfo()
-      .then((info) => { if (!cancelled && info.ready === false) setSidecarFailed(true) })
+      .then((info) => {
+        if (cancelled || info.ready !== false) return
+        // Grace window: only mark fatal if the sidecar hasn't answered /health by then.
+        timer = setTimeout(() => {
+          if (!cancelled && !sidecarHealthyRef.current) setSidecarFailed(true)
+        }, 20000)
+      })
       .catch(() => { /* browser-dev fallback has no ready flag */ })
-    return () => { cancelled = true }
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [])
   const restartApp = () => {
     void import('@tauri-apps/plugin-process')
       .then((m) => m.relaunch())
       .catch(() => window.location.reload())
   }
+  // New-thread default cwd. The bug: this used to resolve ONLY from
+  // loadKnownProjects(), so a project that exists only from past sessions (never
+  // opened via the folder picker) resolved to null → the dialog sent no cwd →
+  // the sidecar fell back to its home-dir cwd, dropping the user out of the
+  // project. Resolve from the same sources the sidebar uses:
+  //   1. the active thread's own cwd (new thread in the project you're viewing);
+  //   2. the active project's root via deriveProjects(known ∪ session-derived).
   const defaultCwd = useMemo(() => {
-    if (!ui.activeProject) return null
-    const known = loadKnownProjects()
-    const p = known.find((x) => x.id === ui.activeProject)
-    return p?.roots[0] ?? null
-  }, [ui.activeProject])
+    const list = sessions.data ?? []
+    const active = list.find((s) => s.id === ui.activeSessionId)
+    if (active?.cwd) return active.cwd
+    if (ui.activeProject) {
+      const p = deriveProjects(list, loadKnownProjects()).find((x) => x.id === ui.activeProject)
+      if (p?.roots[0]) return p.roots[0]
+    }
+    return null
+  }, [sessions.data, ui.activeSessionId, ui.activeProject])
 
   // U3: transient error banner auto-dismisses after 5s and can be closed manually.
   useEffect(() => {
@@ -67,7 +99,7 @@ export function App() {
       <div className="shell">
         <WallpaperLayer />
       <div className="main">
-        {sidecarFailed ? (
+        {sidecarFailed && sidecarDown ? (
           <div className="banner error">
             sidecar 启动失败：未找到 Node 运行时或端口被占用。请重启应用，若仍失败请检查安装。
             <button className="banner-action" onClick={restartApp}>重启应用</button>

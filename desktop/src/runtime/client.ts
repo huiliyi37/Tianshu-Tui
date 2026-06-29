@@ -227,6 +227,38 @@ export async function unarchiveSession(id: string): Promise<{ archived: boolean 
   return apiPost<{ archived: boolean }>(`/sessions/${id}/unarchive`)
 }
 
+export interface StorageEntry {
+  id: string
+  title?: string
+  status: string
+  updatedAt: number
+  bytes: number
+}
+
+export interface StorageReport {
+  totalBytes: number
+  sessionCount: number
+  archivedCount: number
+  archivedBytes: number
+  archived: StorageEntry[]
+}
+
+/** Disk-usage report for the desktop session store (stat-based, cheap). */
+export async function getStorageReport(): Promise<StorageReport> {
+  return apiGet<StorageReport>('/storage')
+}
+
+/**
+ * Irreversibly delete archived sessions' files. `ids` targets specific ones;
+ * `olderThanDays` keeps only archived idle for ≥ N days; omit both to purge all
+ * archived. Active/running sessions are never touched.
+ */
+export async function cleanupStorage(
+  opts: { ids?: string[]; olderThanDays?: number } = {},
+): Promise<{ deleted: number; freedBytes: number; ids: string[] }> {
+  return apiPost<{ deleted: number; freedBytes: number; ids: string[] }>('/storage/cleanup', opts)
+}
+
 export function fetchEvents(id: string, since: number): Promise<{ events: SessionEvent[]; lastSeq: number }> {
   return apiGet<{ events: SessionEvent[]; lastSeq: number }>(`/sessions/${id}/events?since=${since}`)
 }

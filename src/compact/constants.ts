@@ -124,11 +124,24 @@ export const LARGE_CONTEXT_WINDOW_TOKENS = 500_000
  * the prefix cache), so input truncation is not the bottleneck — the
  * summary output budget is. A 1M session squashed into a 3000-char summary
  * loses most of its decision history; large windows get a larger budget.
+ *
+ * `generous` ≈ 2× budget. Used when compaction is routed to a dedicated cheap
+ * model (compact.provider+model): the distillation is near-free, so we'd rather
+ * keep more decision/file/error detail than over-compress. A bigger summary
+ * costs a few KB of prefix on the *main* model, but that's a fair trade for not
+ * dropping context the agent later needs.
  */
-export function summaryOutputBudgetChars(contextWindow: number): { full: number; partial: number } {
-  if (contextWindow >= 1_000_000) return { full: 8_000, partial: 5_000 }
-  if (contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS) return { full: 6_000, partial: 4_000 }
-  return { full: 3_000, partial: 2_000 }
+export function summaryOutputBudgetChars(
+  contextWindow: number,
+  opts?: { generous?: boolean },
+): { full: number; partial: number } {
+  const base = contextWindow >= 1_000_000
+    ? { full: 8_000, partial: 5_000 }
+    : contextWindow >= LARGE_CONTEXT_WINDOW_TOKENS
+      ? { full: 6_000, partial: 4_000 }
+      : { full: 3_000, partial: 2_000 }
+  if (!opts?.generous) return base
+  return { full: base.full * 2, partial: base.partial * 2 }
 }
 
 export interface CompactionConfig {
@@ -136,6 +149,9 @@ export interface CompactionConfig {
   autoThreshold: number
   autoFloor: number
   model: string
+  /** Provider hosting the compaction model. When set together with `model`,
+   *  compaction is routed to a dedicated cheap client (own cache). Optional. */
+  provider?: string
   /** T9 turn-0 quality-compaction trigger ratios (provider cost-aware).
    *  Optional — runtime falls back to DEFAULT_QUALITY_COMPACT_THRESHOLDS when absent. */
   qualityCompact?: {

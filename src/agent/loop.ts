@@ -111,6 +111,12 @@ export function formatActivePlanPointer(plan: { slug: string; title: string }): 
 }
 
 
+/** Debounce before an idle compaction pass fires after a turn settles. */
+const IDLE_COMPACTION_DELAY_MS = 12_000
+/** Minimum context fill ratio that makes an idle compaction pass worthwhile
+ *  (deferred pending work bypasses this). Aligned with the stale-round floor. */
+const IDLE_COMPACTION_MIN_RATIO = 0.5
+
 export class AgentLoop {
     session!: SessionContext;
     config!: AgentConfig;
@@ -139,6 +145,14 @@ export class AgentLoop {
   sawTypecheckThisTask = false
   prewarm = new PrewarmCache(60_000, 50)
   private _running = false
+  /** Idle compaction: after a run settles, a debounced timer fires a turn-0
+   *  compaction pass so the NEXT user turn doesn't eat a synchronous full
+   *  compaction. Gated on real pressure / pending deferred work, cancelled the
+   *  moment a new run() starts. */
+  private _idleTimer: ReturnType<typeof setTimeout> | null = null
+  private _idleCompacting = false
+  private _idleAbort: AbortController | null = null
+  private _idleSettled: Promise<void> | null = null
   private physarumForWarmup?: PhysarumEngine
   private meridianDbForWarmup?: import('../repo/meridian-db.js').MeridianDb
   private memoriesWarmed = false
@@ -427,6 +441,7 @@ export class AgentLoop {
       contextWindow: this.config.contextWindow,
       providerProfile: this.config.providerProfile,
       primaryClient: this.config.primaryClient,
+      compactClient: this.config.compactClient,
       compactEnabled: this.config.compact.enabled,
       pressureMonitor: this.pressureMonitor,
       getTrajectoryEntries: () => this.trajectory.getEntries(),
@@ -1200,6 +1215,12 @@ export class AgentLoop {
       debugLog('[agent] run() called while already running — skipping duplicate')
       return
     }
+    // Cancel + drain any pending/in-flight idle compaction before mutating the
+    // session, so the user turn never races idle history rewrites. Awaiting the
+    // settle is correct (not a stall): the idle abort makes the in-flight pass
+    // bail at its next checkpoint; replaceMessages itself is synchronous so the
+    // session is always in a consistent state at the await boundary.
+    await this.cancelIdleCompaction()
     this._running = true
     // Eager abort controller: created synchronously before any await so an
     // Esc/Ctrl+C during warmupMemories()/intent-routing aborts a live signal
@@ -1211,6 +1232,76 @@ export class AgentLoop {
       await this._runInner(userInput, callbacks, images)
     } finally {
       this._running = false
+      this.scheduleIdleCompaction()
+    }
+  }
+
+  /**
+   * Schedule a debounced idle compaction pass. Called from run()'s finally so
+   * it only ever arms after at least one turn. The timer is unref'd so it never
+   * keeps the TUI/sidecar process alive. Disabled when discretionary compaction
+   * is off (worker sessions) or via RIVET_IDLE_COMPACTION=0.
+   */
+  scheduleIdleCompaction(): void {
+    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null }
+    if (!this.config.compact?.enabled) return
+    if (process.env['RIVET_IDLE_COMPACTION'] === '0') return
+    const delayMs = Number(process.env['RIVET_IDLE_COMPACTION_MS']) || IDLE_COMPACTION_DELAY_MS
+    this._idleTimer = setTimeout(() => {
+      this._idleTimer = null
+      if (this._running) return
+      void this.runIdleCompaction()
+    }, delayMs)
+    this._idleTimer.unref?.()
+  }
+
+  /**
+   * Cancel a scheduled idle timer and abort + await any in-flight idle
+   * compaction. Resolves only once the session is safe to mutate again.
+   */
+  async cancelIdleCompaction(): Promise<void> {
+    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null }
+    if (this._idleCompacting && this._idleAbort) this._idleAbort.abort()
+    if (this._idleSettled) { try { await this._idleSettled } catch { /* settled */ } }
+  }
+
+  /**
+   * Run a single turn-0-equivalent compaction pass while idle. Reuses the full
+   * boundary ladder (session split → maybeCompact → T9 → stale → heap, plus
+   * pending-flag drain) at turn=0 semantics — prefix-cache safe, identical to
+   * what the next user turn would run, just paid during idle time.
+   */
+  async runIdleCompaction(): Promise<void> {
+    if (this._running || this._idleCompacting) return
+    if (!this.config.compact?.enabled) return
+    const ctxWindow = this.config.contextWindow ?? 1_000_000
+    const ratio = this.session.getEstimatedTokens() / ctxWindow
+    // Light pre-gate: only bother when there's deferred mid-turn work or real
+    // pressure (≥0.5, the stale-round floor). The coordinator re-checks tiers
+    // and cache health internally, so this just avoids no-op churn at low fill.
+    if (!this.pendingStaleCompact && !this.pendingHeapCompact && ratio < IDLE_COMPACTION_MIN_RATIO) return
+
+    this._idleCompacting = true
+    const idleAbort = new AbortController()
+    this._idleAbort = idleAbort
+    // Point the shared abort accessor at the idle controller so the compaction
+    // ladder (and its LLM stream) is cancellable via cancelIdleCompaction().
+    this.abortController = idleAbort
+    this._idleSettled = (async () => {
+      try {
+        debugLog(`[idle-compact] starting (ratio=${ratio.toFixed(2)} pendingStale=${this.pendingStaleCompact} pendingHeap=${this.pendingHeapCompact})`)
+        await this.compactBoundaryCoordinator.runCompaction(0, null)
+      } catch (e) {
+        debugLog(`[idle-compact] error: ${(e as Error)?.message}`)
+      }
+    })()
+    try {
+      await this._idleSettled
+    } finally {
+      this._idleCompacting = false
+      this._idleSettled = null
+      this._idleAbort = null
+      if (this.abortController === idleAbort) this.abortController = null
     }
   }
 

@@ -20,7 +20,7 @@ import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref,
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
-import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer } from '../runtime/client'
+import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, type StorageReport } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
@@ -289,6 +289,7 @@ export function SettingsSurface() {
                 </dl>
               )}
             </section>
+            <StorageSection />
             <UpdaterSection />
           </>
         )}
@@ -415,6 +416,142 @@ function HelpSection({ onNavigate }: { onNavigate: (cat: SettingsCat) => void })
         </dl>
       </section>
     </>
+  )
+}
+
+function formatBytes(n: number): string {
+  if (!n) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
+}
+
+/**
+ * 存储管理 — 显示会话文件占用，并允许手动清理「归档会话」。归档会话的事件日志
+ * 会随历史无限增长，这里给用户一个可见、可控的回收入口。清理基于 stat（仅读元
+ * 数据，不读文件内容），对硬盘几乎无压力;删除不可逆,仅作用于已归档且空闲的会话。
+ */
+function StorageSection() {
+  const [report, setReport] = useState<StorageReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [days, setDays] = useState(30)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setReport(await getStorageReport())
+    } catch {
+      setReport(null)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const runCleanup = useCallback(async (opts: { ids?: string[]; olderThanDays?: number }, confirmText: string) => {
+    if (!window.confirm(confirmText)) return
+    setBusy(true)
+    setMsg(null)
+    try {
+      const res = await cleanupStorage(opts)
+      setMsg(`已清理 ${res.deleted} 个归档会话，释放 ${formatBytes(res.freedBytes)}`)
+      await refresh()
+    } catch (err) {
+      setMsg(`清理失败：${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [refresh])
+
+  const archived = report?.archived ?? []
+
+  return (
+    <section className="settings-group">
+      <h4>存储管理</h4>
+      {loading && !report ? (
+        <div className="meta">正在统计…</div>
+      ) : !report ? (
+        <div className="meta warn">无法读取存储信息（sidecar 离线？）</div>
+      ) : (
+        <>
+          <dl className="kv">
+            <div><dt>会话文件总占用</dt><dd>{formatBytes(report.totalBytes)}</dd></div>
+            <div><dt>会话总数</dt><dd>{report.sessionCount}</dd></div>
+            <div><dt>已归档会话</dt><dd>{report.archivedCount} 个 · {formatBytes(report.archivedBytes)} 可回收</dd></div>
+          </dl>
+
+          <div className="meta" style={{ marginTop: 8 }}>
+            归档会话的对话记录会一直保留在磁盘上。下面只清理「已归档」的会话，进行中的会话不受影响。<strong>删除不可逆。</strong>
+          </div>
+
+          <div className="flex items-center gap-2" style={{ marginTop: 10, flexWrap: 'wrap' }}>
+            <button
+              className="btn"
+              disabled={busy || archived.length === 0}
+              onClick={() => runCleanup(
+                { olderThanDays: days },
+                `确定清理 ${days} 天前的所有归档会话吗？此操作不可恢复。`,
+              )}
+            >
+              清理
+              <input
+                type="number"
+                min={0}
+                value={days}
+                onChange={(e) => setDays(Math.max(0, Number(e.target.value) || 0))}
+                onClick={(e) => e.stopPropagation()}
+                style={{ width: 52, margin: '0 4px', textAlign: 'center' }}
+              />
+              天前的归档
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={busy || archived.length === 0}
+              onClick={() => runCleanup(
+                {},
+                `确定清理全部 ${archived.length} 个归档会话吗？将释放约 ${formatBytes(report.archivedBytes)}，此操作不可恢复。`,
+              )}
+            >
+              清理全部归档（{archived.length}）
+            </button>
+            <button className="btn" disabled={loading || busy} onClick={() => void refresh()}>刷新</button>
+          </div>
+
+          {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
+
+          {archived.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div className="meta">归档会话（按最早在前）：</div>
+              <div className="flex flex-col gap-1" style={{ marginTop: 6, maxHeight: 220, overflowY: 'auto' }}>
+                {archived.map((s) => (
+                  <div key={s.id} className="flex items-center gap-2" style={{ justifyContent: 'space-between' }}>
+                    <span className="text-xs" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.title || s.id}
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="meta">{formatBytes(s.bytes)} · {new Date(s.updatedAt).toLocaleDateString()}</span>
+                      <button
+                        className="btn btn-sm"
+                        disabled={busy}
+                        onClick={() => runCleanup(
+                          { ids: [s.id] },
+                          `删除归档会话「${s.title || s.id}」(${formatBytes(s.bytes)})？此操作不可恢复。`,
+                        )}
+                      >删除</button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   )
 }
 
