@@ -218,6 +218,29 @@ export function resolveModelSpec(ctx: ServeContext, modelId: string): ResolvedMo
   return null
 }
 
+/**
+ * Resolve a model id against the startup `ctx`, falling back to a fresh on-disk
+ * read when the snapshot can't resolve it. On first install the server starts in
+ * setup mode (configured=false, no API key) and the user configures the key via
+ * /config afterwards — the startup snapshot then can't find a key for the target
+ * model, which would make switchModel 409 until restart. Re-reading config on the
+ * miss path (mirrors resolveInitialSpec) also covers providers added/edited via
+ * Settings after startup. Cheap: the fresh read only happens on the rare miss.
+ */
+export function resolveModelSpecWithReload(
+  ctx: ServeContext,
+  modelId: string,
+  reload: () => ServeContext = resolveServeContext,
+): ResolvedModelSpec | null {
+  const fromSnapshot = resolveModelSpec(ctx, modelId)
+  if (fromSnapshot) return fromSnapshot
+  try {
+    return resolveModelSpec(reload(), modelId)
+  } catch {
+    return null
+  }
+}
+
 /** Enumerate every selectable model across all configured providers. */
 export function listAllModels(ctx: ServeContext): { id: string; alias: string; provider: string; contextWindow?: number }[] {
   const out: { id: string; alias: string; provider: string; contextWindow?: number }[] = []
@@ -485,7 +508,9 @@ function buildManagedAgent(
     // Wave J: 透传 shared 让 switchModel 后仍复用 providerHealth/domainStore，
     // 健康数据不丢、knowledge 不重 load。
     switchModel: (modelId) => {
-      const next = resolveModelSpec(ctx, modelId)
+      // First-install / post-startup config edits: resolve against the live
+      // config, not just the startup snapshot. See resolveModelSpecWithReload.
+      const next = resolveModelSpecWithReload(ctx, modelId)
       if (!next) return null
       const oldCoordinator = stores.refs.coordinator
       // Cancel the outgoing loop's idle compaction: it shares this SessionContext
