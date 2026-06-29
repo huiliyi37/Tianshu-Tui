@@ -294,6 +294,8 @@ export class TurnStepProducer {
       recentToolHistory: this.self.recentToolHistory,
       onIntentPreview: callbacks.onIntentPreview,
       taskContractId: this.self.taskContract?.id,
+      // Only 监督/manual surfaces the intent confirmation; auto tiers stay silent.
+      interactive: this.self.config.approvalMode === 'manual',
     })
     debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
     if (intentResult === 'veto') {

@@ -58,6 +58,30 @@ describe('TurnIntentController', () => {
     assert.equal(controller.getShownCount(), 0)
   })
 
+  it('suppresses the preview in auto tiers (interactive=false) without calling back', async () => {
+    let calls = 0
+    const controller = makeController()
+    const input = { ...makeInput(async () => { calls++; return 'continue' as const }), interactive: false }
+
+    const result = await controller.evaluate(input)
+
+    assert.equal(result, 'continue')
+    assert.equal(calls, 0, 'auto tiers must not surface the intent popup')
+    assert.equal(controller.getShownCount(), 0)
+  })
+
+  it('still shows the preview when interactive=true (manual tier)', async () => {
+    let calls = 0
+    const controller = makeController()
+    const input = { ...makeInput(async () => { calls++; return 'continue' as const }), interactive: true }
+
+    const result = await controller.evaluate(input)
+
+    assert.equal(result, 'continue')
+    assert.equal(calls, 1)
+    assert.equal(controller.getShownCount(), 1)
+  })
+
   it('returns continue after user accepts preview and increments cap counter', async () => {
     const seen: IntentPreview[] = []
     const controller = makeController()

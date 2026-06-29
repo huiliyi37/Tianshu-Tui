@@ -22,6 +22,15 @@ export interface IntentEvalInput {
   onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
   /** Task contract ID for structured dead-end matching (P2). */
   taskContractId?: string
+  /**
+   * Whether the user has opted into proactive confirmations. The intent preview
+   * is an introspective "are you sure about this direction" gate; only the
+   * supervised (manual / 监督) approval tier surfaces it. In the auto tiers
+   * (auto-safe / 默认, auto-accept, dangerously-skip / 自治) the user delegated
+   * control, so an explicit `false` suppresses the popup entirely. Undefined
+   * preserves legacy behavior (show).
+   */
+  interactive?: boolean
 }
 
 const MAX_INTENT_PREVIEWS = 3
@@ -33,6 +42,14 @@ export class TurnIntentController {
 
   async evaluate(input: IntentEvalInput): Promise<IntentEvalResult> {
     if (!input.onIntentPreview || this.shown >= MAX_INTENT_PREVIEWS) {
+      return 'continue'
+    }
+
+    // Only the supervised (manual) tier asks the user proactively. Auto tiers
+    // (默认/auto-safe, 自治/dangerously-skip, auto-accept) never interrupt with a
+    // strategy/intent popup — high-risk *commands* are still gated by the tool
+    // approval pipeline; this only suppresses the meta-level confirmation.
+    if (input.interactive === false) {
       return 'continue'
     }
 
