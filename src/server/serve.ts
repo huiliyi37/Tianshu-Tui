@@ -253,6 +253,26 @@ export function listAllModels(ctx: ServeContext): { id: string; alias: string; p
 }
 
 /**
+ * Enumerate selectable models for the picker, preferring a fresh on-disk read
+ * so providers added/edited via Settings *after* startup show up without a
+ * restart — the companion to resolveModelSpecWithReload (which makes the actual
+ * switch resolve the freshly-configured key). The startup snapshot is only a
+ * fallback for the degraded case where the fresh read throws (e.g. a missing
+ * default provider mid-edit). Called on picker open — low frequency, so the
+ * extra config read is negligible.
+ */
+export function listAllModelsWithReload(
+  ctx: ServeContext,
+  reload: () => ServeContext = resolveServeContext,
+): { id: string; alias: string; provider: string; contextWindow?: number }[] {
+  try {
+    return listAllModels(reload())
+  } catch {
+    return listAllModels(ctx)
+  }
+}
+
+/**
  * Per-session, model-independent pieces. Built once and reused across model
  * rebuilds so switchModel preserves conversation (same SessionContext) and
  * shared stores (claims/file-history/playbook/tools/ledgers).
@@ -770,7 +790,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     // R1 — late-bound getter: registry resolves async after server start.
     getSessionRegistry: () => sessionRegistry,
     // PlusMenu — provider model source + default for the model picker.
-    listModels: () => listAllModels(ctx),
+    // Reload-aware: picks up providers configured after startup (no restart).
+    listModels: () => listAllModelsWithReload(ctx),
     defaultModelId: ctx.model.id,
   })
 

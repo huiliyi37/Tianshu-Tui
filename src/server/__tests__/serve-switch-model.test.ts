@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveModelSpecWithReload, type ServeContext } from '../serve.js'
+import { resolveModelSpecWithReload, listAllModelsWithReload, type ServeContext } from '../serve.js'
 import type { ProviderConfig } from '../../config/schema.js'
 
 /**
@@ -79,4 +79,50 @@ test('resolveModelSpecWithReload: reload throwing degrades to null (no crash)', 
     throw new Error('default provider not configured')
   })
   assert.equal(spec, null)
+})
+
+function extraProvider(name: string, modelId: string): ProviderConfig {
+  return {
+    name,
+    apiKey: 'sk-extra',
+    baseUrl: 'https://api.example.com',
+    protocol: 'openai',
+    capabilities: { cacheControl: false, stripParams: [], toolJsonBug: false, prefixCache: 'none', prefixCompletion: false },
+    models: [{ id: modelId, alias: modelId, contextWindow: 128_000, maxTokens: 8192 }],
+    thinking: 'enabled',
+    maxTokens: 64_000,
+    unsupported: [],
+  } as ProviderConfig
+}
+
+function ctxWith(providers: Record<string, ProviderConfig>): ServeContext {
+  const [firstName, firstProvider] = Object.entries(providers)[0]!
+  return {
+    config: { provider: { default: firstName, providers } } as unknown as ServeContext['config'],
+    provider: firstProvider,
+    model: firstProvider.models[0]!,
+    apiKey: firstProvider.apiKey ?? '',
+    configured: true,
+  }
+}
+
+test('listAllModelsWithReload: surfaces a provider added after startup (no restart)', () => {
+  // Startup snapshot only knew about deepseek...
+  const snapshot = ctxWith({ deepseek: deepseekProvider('sk-live') })
+  // ...the user later configured a brand-new provider via Settings.
+  const fresh = ctxWith({
+    deepseek: deepseekProvider('sk-live'),
+    glm: extraProvider('glm', 'glm-4-plus'),
+  })
+
+  const models = listAllModelsWithReload(snapshot, () => fresh)
+  const ids = models.map((m) => m.id)
+  assert.ok(ids.includes('deepseek-flash'))
+  assert.ok(ids.includes('glm-4-plus'), 'newly-configured provider must appear without a restart')
+})
+
+test('listAllModelsWithReload: falls back to the snapshot when the fresh read throws', () => {
+  const snapshot = ctxWith({ deepseek: deepseekProvider('sk-live') })
+  const models = listAllModelsWithReload(snapshot, () => { throw new Error('mid-edit config') })
+  assert.deepEqual(models.map((m) => m.id).sort(), ['deepseek-flash', 'deepseek-pro'])
 })
