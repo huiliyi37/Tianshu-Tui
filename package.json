@@ -25,6 +25,8 @@
   },
   "files": [
     "dist/",
+    "!dist/node_modules",
+    "!dist/native",
     "README.md",
     "LICENSE",
     "completions/"
@@ -33,7 +35,8 @@
     "rivet": "./dist/main.js"
   },
   "scripts": {
-    "postinstall": "patch-package",
+    "postinstall": "patch-package || node -e 1",
+    "prepublishOnly": "npm run build",
     "dev": "tsup --watch",
     "build": "tsup",
     "start": "node --expose-gc --max-old-space-size=1536 dist/main.js",
