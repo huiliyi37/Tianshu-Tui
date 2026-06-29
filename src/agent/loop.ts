@@ -413,10 +413,7 @@ export class AgentLoop {
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
     })
-    this.intent = new TurnIntentController({
-      depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
-      addUserMessage: message => { this.session.appendSystemReminder(message) },
-    })
+    this.intent = new TurnIntentController()
     this.contextInjection = new ContextInjectionController({
       session: this.session,
       promptEngine: this.config.promptEngine,

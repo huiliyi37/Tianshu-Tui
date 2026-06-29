@@ -10,15 +10,17 @@
  *  - Every event carries a monotonic `seq`; `getEvents(since)` replays the tail,
  *    so a dropped viewer never loses history (B3).
  *  - A viewer unsubscribing NEVER aborts the run; only abort() does.
- *  - Approvals/intents are requestId-keyed two-way interventions resolved out of
- *    band by answerIntervention() (B2).
+ *  - Approvals are requestId-keyed two-way interventions resolved out of
+ *    band by answerIntervention() (B2). Intent direction notes are one-way,
+ *    non-blocking timeline events (intent_note) — no pending state.
  *  - Artifacts are surfaced from each session's own ArtifactStore, never shared
  *    across sessions (B4).
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
-import type { IntentPreview, IntentPreviewAction } from '../agent/intent-preview.js'
+import type { IntentPreview } from '../agent/intent-preview.js'
+import { describeIntentNote } from '../agent/intent-preview.js'
 import type { Artifact } from '../artifact/types.js'
 import { ArtifactStore } from '../artifact/store.js'
 import type { OaiMessage } from '../api/oai-types.js'
@@ -56,8 +58,7 @@ export type SessionEventType =
   | 'checkpoint'
   | 'approval_required'
   | 'approval_resolved'
-  | 'intent_required'
-  | 'intent_resolved'
+  | 'intent_note'
   | 'delegation'
   | 'artifact'
   | 'status'
@@ -364,12 +365,12 @@ export interface RuntimeSessionManagerOptions {
   defaultModelId?: string
 }
 
-type InterventionKind = 'approval' | 'intent'
+type InterventionKind = 'approval'
 
 interface PendingIntervention {
   requestId: string
   kind: InterventionKind
-  resolve: (value: ApprovalResult | IntentPreviewAction) => void
+  resolve: (value: ApprovalResult | boolean) => void
   timer?: ReturnType<typeof setTimeout>
 }
 
@@ -1457,9 +1458,10 @@ export class RuntimeSessionManager {
   }
 
   /**
-   * Resolve a pending approval/intent. Returns false if the request is gone.
-   * For approvals, an optional `editedInput` lets the human tweak the tool input
+   * Resolve a pending approval. Returns false if the request is gone.
+   * An optional `editedInput` lets the human tweak the tool input
    * (e.g. per-hunk edit picks) before it runs — flows through ApprovalResult.
+   * (Intent is now a non-blocking timeline note and has no pending state.)
    */
   answerIntervention(
     id: string,
@@ -1474,25 +1476,18 @@ export class RuntimeSessionManager {
     s.pending.delete(requestId)
     if (pend.timer) clearTimeout(pend.timer)
 
-    if (pend.kind === 'approval') {
-      const approved = decision === 'approve' || decision === 'approved'
-      const result: ApprovalResult = { approved }
-      if (approved && editedInput && typeof editedInput === 'object') {
-        result.editedInput = editedInput
-      }
-      pend.resolve(result)
-      this.recountApprovals(s)
-      this.append(s, 'approval_resolved', {
-        requestId,
-        decision: approved ? 'approve' : 'reject',
-        edited: !!result.editedInput,
-      })
-    } else {
-      const action: IntentPreviewAction =
-        decision === 'veto' ? 'veto' : decision === 'alternative' ? 'alternative' : 'continue'
-      pend.resolve(action)
-      this.append(s, 'intent_resolved', { requestId, decision: action })
+    const approved = decision === 'approve' || decision === 'approved'
+    const result: ApprovalResult = { approved }
+    if (approved && editedInput && typeof editedInput === 'object') {
+      result.editedInput = editedInput
     }
+    pend.resolve(result)
+    this.recountApprovals(s)
+    this.append(s, 'approval_resolved', {
+      requestId,
+      decision: approved ? 'approve' : 'reject',
+      edited: !!result.editedInput,
+    })
     this.touch(s)
     this.persistRecord(s)
     return true
@@ -1724,7 +1719,7 @@ export class RuntimeSessionManager {
       },
       onApprovalRequired: (toolId, name, input) =>
         this.requestApproval(session, toolId, name, input),
-      onIntentPreview: (intent) => this.requestIntent(session, intent),
+      onIntentNote: (intent) => this.emitIntentNote(session, intent),
       // T3 — drain mid-run user guidance at the tool boundary (the agent appends
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
@@ -1767,7 +1762,7 @@ export class RuntimeSessionManager {
       const pend: PendingIntervention = {
         requestId,
         kind: 'approval',
-        resolve: resolve as (v: ApprovalResult | IntentPreviewAction) => void,
+        resolve: resolve as (v: ApprovalResult | boolean) => void,
       }
       if (this.approvalTimeoutMs > 0) {
         pend.timer = setTimeout(() => {
@@ -1784,43 +1779,29 @@ export class RuntimeSessionManager {
     })
   }
 
-  private requestIntent(session: InternalSession, intent: IntentPreview): Promise<IntentPreviewAction> {
-    return new Promise<IntentPreviewAction>((resolve) => {
-      const requestId = randomId()
-      const pend: PendingIntervention = {
-        requestId,
-        kind: 'intent',
-        resolve: resolve as (v: ApprovalResult | IntentPreviewAction) => void,
-      }
-      if (this.approvalTimeoutMs > 0) {
-        pend.timer = setTimeout(() => {
-          if (session.pending.delete(requestId)) {
-            resolve('continue')
-            this.append(session, 'intent_resolved', { requestId, decision: 'continue' })
-          }
-        }, this.approvalTimeoutMs)
-      }
-      session.pending.set(requestId, pend)
-      this.append(session, 'intent_required', {
-        requestId,
-        summary: intent.summary,
-        confidence: intent.confidence,
-        alternatives: intent.alternatives ?? [],
-        warnings: intent.warnings ?? [],
-      })
+  /**
+   * Non-blocking direction note: append a passive timeline event and return.
+   * The agent never waits — there is no pending Promise/timer. The user steers
+   * by typing (POST /sessions/:id/steer) if they want to change direction.
+   */
+  private emitIntentNote(session: InternalSession, intent: IntentPreview): void {
+    const copy = describeIntentNote(intent)
+    this.append(session, 'intent_note', {
+      summary: intent.summary,
+      confidence: intent.confidence,
+      warnings: intent.warnings ?? [],
+      title: copy.title,
+      reasons: copy.reasons,
+      action: copy.action,
+      steerHint: copy.steerHint,
     })
   }
 
   private rejectAllPending(session: InternalSession, reason: string): void {
     for (const [requestId, pend] of session.pending) {
       if (pend.timer) clearTimeout(pend.timer)
-      if (pend.kind === 'approval') {
-        pend.resolve({ approved: false })
-        this.append(session, 'approval_resolved', { requestId, decision: reason })
-      } else {
-        pend.resolve('veto')
-        this.append(session, 'intent_resolved', { requestId, decision: reason })
-      }
+      pend.resolve({ approved: false })
+      this.append(session, 'approval_resolved', { requestId, decision: reason })
     }
     session.pending.clear()
     this.recountApprovals(session)

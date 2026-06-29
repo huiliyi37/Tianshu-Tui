@@ -876,6 +876,7 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
       b.kind === 'turn' ||
       b.kind === 'steer' ||
       b.kind === 'decision_shift' ||
+      b.kind === 'intent_note' ||
       isArtifactTool(b)
     ) {
       if (run) {
@@ -1004,6 +1005,25 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
             {s.methods.map((m, i) => <li key={i}>{m}</li>)}
           </ul>
         )}
+      </div>
+    )
+  }
+  if (block.kind === 'intent_note' && block.note) {
+    const n = block.note
+    return (
+      <div className="decision-shift info intent-note">
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>✦</span>
+          <span className="ds-domain">{n.title}</span>
+          <span className="ds-tag">方向提示</span>
+        </div>
+        {n.reasons.length > 0 && (
+          <ul className="ds-methods">
+            {n.reasons.map((r, i) => <li key={i}>{r}</li>)}
+          </ul>
+        )}
+        {n.action && <div className="ds-reason">{n.action}</div>}
+        {n.steerHint && <div className="intent-note-steer">{n.steerHint}</div>}
       </div>
     )
   }

@@ -170,7 +170,8 @@ export interface TuiState {
 // ── Agent callbacks interface (aligned to loop-types.ts AgentCallbacks) ──
 
 import type { Usage } from '../../api/types.js'
-import type { IntentPreview, IntentPreviewAction } from '../../agent/intent-preview.js'
+import type { IntentPreview } from '../../agent/intent-preview.js'
+import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import { FleetRegistry } from '../fleet-registry.js'
@@ -186,7 +187,7 @@ export interface AgentCallbacks {
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
-  onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
+  onIntentNote?: (intent: IntentPreview) => void
   onSteerDrain?: () => string | null
   /** T4 — structured per-worker delegation status/progress feeding the fleet read model. */
   onDelegationActivity?: (activity: DelegationActivity) => void
@@ -513,24 +514,6 @@ export class TuiApp {
         }
       }
 
-      // ── Intent preview mode short-circuit ──
-      // 意图闸是「先确认再动手」的安全机制，旧实现 onIntentPreview 永远 'continue'
-      // 等于旁路了这道闸。这里把按键解析成 IntentPreviewAction，绝不落入普通输入。
-      if (this.input.getMode() === 'intent' && this.approvalIntentController.intentPending) {
-        const c = key.char.toLowerCase()
-        const hasAlt = (this.approvalIntentController.intentPending.intent.alternatives?.length ?? 0) > 0
-        if (key.name === 'ctrl_c') {
-          this.resolveIntent('veto')
-          // 继续走下方全局 ctrl_c（abort / exit）
-        } else {
-          if (key.name === 'return' || c === 'y') this.resolveIntent('continue')
-          else if (key.name === 'escape' || c === 'n') this.resolveIntent('veto')
-          else if (c === 'a' && hasAlt) this.resolveIntent('alternative')
-          // 其余按键在意图态一律吞掉，不污染输入框
-          return
-        }
-      }
-
       // ── Approval edit mode short-circuit ──
       // 编辑工具入参模式：Enter 解析 JSON → approve with editedInput，
       // Esc 回到审批 y/n 提示。其余键落入 InputLine 正常编辑。
@@ -768,7 +751,7 @@ export class TuiApp {
         // Unknown phases (heartbeat, convergence-warning, etc.) are ignored
         // for the status bar display
       },
-      onIntentPreview: async (intent) => this.handleIntentPreview(intent),
+      onIntentNote: (intent) => this.handleIntentNote(intent),
       onSteerDrain: () => this.steerBuffer.drain(),
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
@@ -785,16 +768,6 @@ export class TuiApp {
     if (!this.approvalIntentController.approvalPending) return
     this.approvalIntentController.approvalPending.resolve(result)
     this.approvalIntentController.approvalPending = null
-    this.input.setMode('input')
-    this.renderLive()
-  }
-
-  // ── Intent preview resolution ───────────────────────────────
-
-  private resolveIntent(action: IntentPreviewAction): void {
-    if (!this.approvalIntentController.intentPending) return
-    this.approvalIntentController.intentPending.resolve(action)
-    this.approvalIntentController.intentPending = null
     this.input.setMode('input')
     this.renderLive()
   }
@@ -2313,11 +2286,10 @@ export class TuiApp {
   private handleAbort(reason?: string): void {
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
-    // 中断时若停在审批/意图确认态：解析为拒绝/否决，让 tool-pipeline 的前置 await
-    // 立即 settle，并复位输入模式。否则审批/意图态残留——后续按键被当确认解析、
+    // 中断时若停在审批确认态：解析为拒绝，让 tool-pipeline 的前置 await
+    // 立即 settle，并复位输入模式。否则审批态残留——后续按键被当确认解析、
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
     if (this.approvalIntentController.approvalPending) { this.approvalIntentController.approvalEditMode = false; this.approvalIntentController.approvalEditError = ''; this.resolveApproval(false) }
-    if (this.approvalIntentController.intentPending) this.resolveIntent('veto')
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
     if (this.toolGroupController.isActiveBashGroup()) this.flushBashGroup()
@@ -2713,25 +2685,6 @@ export class TuiApp {
       }
     }
 
-    // 3a. Intent preview prompt (when pending) — 意图闸确认框
-    if (this.approvalIntentController.intentPending) {
-      const it = this.approvalIntentController.intentPending.intent
-      const hasAlt = (it.alternatives?.length ?? 0) > 0
-      const keyHint = (key: string, label: string) =>
-        `${color('[', this.theme.secondary)}${color(key, this.theme.secondary, { bold: true })}${color(`] ${label}`, this.theme.secondary)}`
-      lines.push({ text: '' })
-      lines.push({ text: this.clampLine(this.renderBanner('INTENT PREVIEW', this.theme.primary)) })
-      lines.push({ text: this.clampLine(` │ ${it.summary}`) })
-      for (const w of it.warnings ?? []) {
-        lines.push({ text: this.clampLine(` │ ${color(`⚠ ${w}`, this.theme.warning)}`) })
-      }
-      for (const alt of it.alternatives ?? []) {
-        lines.push({ text: this.clampLine(` │ ↳ ${alt}`) })
-      }
-      const altHint = hasAlt ? `  ${keyHint('a', 'alternative')}` : ''
-      lines.push({ text: this.clampLine(` ╰─ ${keyHint('y', 'continue')}  ${keyHint('n', 'veto')}${altHint} ────────────────`) })
-    }
-
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
     //    恒可见的保留区，内容超屏时 LiveEngine 截断的是上方 dynamic 段，
     //    不会裁掉任务面板与输入框。
@@ -2961,13 +2914,20 @@ export class TuiApp {
     })
   }
 
-  private handleIntentPreview(intent: IntentPreview): Promise<IntentPreviewAction> {
-    return new Promise((resolve) => {
-      this.approvalIntentController.intentPending = { intent, resolve }
-      this.input.setMode('intent')
-      this.setPhase('waiting')
-      this.renderLive()
-    })
+  /**
+   * Non-blocking 方向提示: surfaces the intent gate's reasoning as a passive
+   * timeline card. The agent keeps running; the user steers by typing.
+   */
+  private handleIntentNote(intent: IntentPreview): void {
+    const copy = describeIntentNote(intent)
+    const lines: string[] = []
+    lines.push(this.renderBanner(copy.title, this.theme.primary))
+    for (const reason of copy.reasons) {
+      lines.push(` │ ${color(`· ${reason}`, this.theme.warning)}`)
+    }
+    lines.push(` │ ${color(copy.action, this.theme.secondary)}`)
+    lines.push(` ╰─ ${color(copy.steerHint, this.theme.secondary)}`)
+    this.commitStatic(lines.join('\n'))
   }
 
   /**

@@ -105,7 +105,7 @@ function buildRecoveryCallbacks(rl: ReadlineInterface, output: NodeJS.WritableSt
     },
     onCheckpoint: () => {},
     onPhaseChange: () => {},
-    onIntentPreview: async () => 'continue',
+    onIntentNote: () => {},
     onSteerDrain: () => null,
     onDelegationActivity: () => {},
   }

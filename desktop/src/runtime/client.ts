@@ -308,15 +308,6 @@ export function answerApproval(
   })
 }
 
-/** N2 — resolve an intent-preview intervention. */
-export function answerIntent(
-  id: string,
-  requestId: string,
-  decision: 'continue' | 'veto' | 'alternative',
-): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
-}
-
 // ── PlusMenu: models / star-domains / skills ────────────────────────
 
 /** List selectable models for a session (current one flagged). */

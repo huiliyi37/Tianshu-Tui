@@ -1,4 +1,3 @@
-import type { IntentPreview, IntentPreviewAction } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 
 export interface PendingApproval {
@@ -8,19 +7,14 @@ export interface PendingApproval {
   resolve: (result: ApprovalResult | boolean) => void
 }
 
-export interface PendingIntent {
-  intent: IntentPreview
-  resolve: (action: IntentPreviewAction) => void
-}
-
 /**
- * Approval + intent state manager — holds the 4 approval/intent state fields
- * extracted from TuiApp (W-B4). Key handling, rendering, and resolution logic
- * stay in TuiApp; this class only manages the pending state objects.
+ * Approval state manager — holds the approval state fields extracted from
+ * TuiApp (W-B4). Key handling, rendering, and resolution logic stay in TuiApp;
+ * this class only manages the pending state objects. (Intent is now a
+ * non-blocking timeline note with no pending state.)
  */
 export class ApprovalIntentController {
   approvalPending: PendingApproval | null = null
   approvalEditMode = false
   approvalEditError = ''
-  intentPending: PendingIntent | null = null
 }

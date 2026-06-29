@@ -29,14 +29,7 @@ const pressureResult: PressureResult = {
   ratio: 0.1,
 }
 
-function makeController(events: string[] = []): TurnIntentController {
-  return new TurnIntentController({
-    depositDeadEnd: async deposit => { events.push(`deposit:${deposit.signal}:${deposit.context}:${deposit.path}`) },
-    addUserMessage: message => { events.push(`message:${message}`) },
-  })
-}
-
-function makeInput(onIntentPreview?: (intent: IntentPreview) => Promise<'continue' | 'veto' | 'alternative'>) {
+function makeInput(onIntentNote?: (intent: IntentPreview) => void) {
   return {
     strategy,
     vigor: createVigorState(),
@@ -44,116 +37,71 @@ function makeInput(onIntentPreview?: (intent: IntentPreview) => Promise<'continu
     pheromones: [],
     pressureResult,
     recentToolHistory: [{ tool: 'read_file', target: 'src/agent/loop.ts', status: 'success' as const }],
-    onIntentPreview,
+    onIntentNote,
   }
 }
 
 describe('TurnIntentController', () => {
-  it('returns continue when no preview callback is available', async () => {
-    const controller = makeController()
+  it('does nothing when no note sink is available', () => {
+    const controller = new TurnIntentController()
 
-    const result = await controller.evaluate(makeInput())
+    controller.evaluate(makeInput())
 
-    assert.equal(result, 'continue')
     assert.equal(controller.getShownCount(), 0)
   })
 
-  it('suppresses the preview in auto tiers (interactive=false) without calling back', async () => {
-    let calls = 0
-    const controller = makeController()
-    const input = { ...makeInput(async () => { calls++; return 'continue' as const }), interactive: false }
+  it('fires the note (fire-and-forget) when the gate trips, never blocks/vetoes', () => {
+    const seen: IntentPreview[] = []
+    const controller = new TurnIntentController()
 
-    const result = await controller.evaluate(input)
+    controller.evaluate(makeInput(intent => { seen.push(intent) }))
 
-    assert.equal(result, 'continue')
-    assert.equal(calls, 0, 'auto tiers must not surface the intent popup')
-    assert.equal(controller.getShownCount(), 0)
+    assert.equal(controller.getShownCount(), 1)
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0]!.summary, '处理 src/agent/loop.ts')
   })
 
-  it('still shows the preview when interactive=true (manual tier)', async () => {
+  it('surfaces the note regardless of approval tier (no interactive gate)', () => {
+    // 非阻塞后不再按档位屏蔽：自治/默认/监督一律可见。
     let calls = 0
-    const controller = makeController()
-    const input = { ...makeInput(async () => { calls++; return 'continue' as const }), interactive: true }
+    const controller = new TurnIntentController()
 
-    const result = await controller.evaluate(input)
+    controller.evaluate(makeInput(() => { calls++ }))
 
-    assert.equal(result, 'continue')
     assert.equal(calls, 1)
     assert.equal(controller.getShownCount(), 1)
   })
 
-  it('returns continue after user accepts preview and increments cap counter', async () => {
-    const seen: IntentPreview[] = []
-    const controller = makeController()
-
-    const result = await controller.evaluate(makeInput(async intent => {
-      seen.push(intent)
-      return 'continue'
-    }))
-
-    assert.equal(result, 'continue')
-    assert.equal(controller.getShownCount(), 1)
-    assert.equal(seen[0]!.summary, '处理 src/agent/loop.ts')
-  })
-
-  it('deposits a dead-end and injects re-plan message on veto', async () => {
-    const events: string[] = []
-    const controller = makeController(events)
-
-    const result = await controller.evaluate(makeInput(async () => 'veto'))
-
-    assert.equal(result, 'veto')
-    // path 存原始 target（非 preview.summary 摘要），绕开「处理 」前缀耦合
-    assert.equal(events[0], 'deposit:dead-end:intent veto:src/agent/loop.ts')
-    assert.match(events[1]!, /^message:<intent-veto>/)
-    assert.equal(events.length, 2)
-  })
-
-  it('does NOT deposit dead-end when veto has no concrete target', async () => {
-    // 无具体目标（全为 <... 伪目标或空）时不沉积——避免产生永不匹配的永久噪声 dead-end
-    const events: string[] = []
-    const controller = makeController(events)
-    const input = makeInput(async () => 'veto')
-    input.recentToolHistory = [{ tool: 'bash', target: '<ephemeral>', status: 'success' }]
-
-    const result = await controller.evaluate(input)
-
-    assert.equal(result, 'veto')
-    assert.ok(!events.some(e => e.startsWith('deposit:')), '无具体目标不应沉积 dead-end')
-    assert.match(events[0]!, /^message:<intent-veto>/)
-  })
-
-  it('injects alternative guidance on alternative action', async () => {
-    const events: string[] = []
-    const controller = makeController(events)
-
-    const result = await controller.evaluate(makeInput(async () => 'alternative'))
-
-    assert.equal(result, 'alternative')
-    assert.deepEqual(events, [
-      'message:<intent-alternative>User requested an alternative path. Prefer a lower-risk option and explain the tradeoff before using tools.</intent-alternative>',
-    ])
-  })
-
-  it('caps previews at three until reset', async () => {
+  it('does not fire when the gate does not trip', () => {
     let calls = 0
-    const controller = makeController()
-    const input = makeInput(async () => {
-      calls++
-      return 'continue'
-    })
+    const controller = new TurnIntentController()
+    // commitThreshold 低 + 无 dead-end + 无抖动 → shouldShowIntent=false
+    const input = {
+      ...makeInput(() => { calls++ }),
+      strategy: { ...strategy, commitThreshold: 0.5 },
+    }
 
-    await controller.evaluate(input)
-    await controller.evaluate(input)
-    await controller.evaluate(input)
-    const capped = await controller.evaluate(input)
+    controller.evaluate(input)
 
-    assert.equal(capped, 'continue')
+    assert.equal(calls, 0)
+    assert.equal(controller.getShownCount(), 0)
+  })
+
+  it('caps notes at three until reset', () => {
+    let calls = 0
+    const controller = new TurnIntentController()
+    const input = makeInput(() => { calls++ })
+
+    controller.evaluate(input)
+    controller.evaluate(input)
+    controller.evaluate(input)
+    controller.evaluate(input)
+
     assert.equal(calls, 3)
     assert.equal(controller.getShownCount(), 3)
 
     controller.reset()
-    await controller.evaluate(input)
+    controller.evaluate(input)
     assert.equal(calls, 4)
     assert.equal(controller.getShownCount(), 1)
   })

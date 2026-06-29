@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
-import { answerApproval, answerIntent, setApprovalMode, steerSession } from '../runtime/client'
+import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
@@ -98,11 +98,6 @@ export function WorkspaceSurface() {
     },
     [activeId, view.pendingApproval],
   )
-
-  const handleIntent = useCallback((decision: 'continue' | 'veto' | 'alternative') => {
-    if (!activeId || !view.pendingIntent) return
-    void answerIntent(activeId, view.pendingIntent.requestId, decision)
-  }, [activeId, view.pendingIntent])
 
   const handleSetApprovalMode = useCallback((mode: ApprovalMode) => {
     if (!activeId) return
@@ -285,13 +280,11 @@ export function WorkspaceSurface() {
             sessionId={activeId}
             artifacts={artifacts.data ?? []}
             pendingApproval={view.pendingApproval}
-            pendingIntent={view.pendingIntent}
             approvalMode={active?.approvalMode}
             planMode={view.planMode}
             planRev={view.planRev}
             latestPlanSlug={view.latestPlanSlug}
             onApproval={handleApproval}
-            onIntent={handleIntent}
             onFeedbackSent={() => sessions.refetch()}
             todos={view.todos}
             sources={view.sources}

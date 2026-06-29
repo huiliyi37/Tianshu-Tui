@@ -174,18 +174,23 @@ test('approval answer carries editedInput through to ApprovalResult', async () =
   assert.equal(resolved!.data.edited, true)
 })
 
-test('intent intervention resolves continue/veto/alternative', async () => {
+test('intent note appends a non-blocking timeline event (no pending state)', async () => {
   const { manager, agents, router } = setup()
   const created = await router('POST', '/sessions', { prompt: 'go' }, AUTH)
   const id = (created.body as { id: string }).id
 
-  const pending = agents[0]!.callbacks!.onIntentPreview!({
-    summary: 'about to delete', confidence: 0.4, alternatives: ['ask first'], warnings: ['destructive'],
+  // Fire the non-blocking direction note (fire-and-forget, returns void).
+  agents[0]!.callbacks!.onIntentNote!({
+    summary: 'about to delete', confidence: 0.4, warnings: ['high commit threshold', 'destructive'],
   })
-  const reqEvent = manager.getEvents(id, 0)!.events.find((e) => e.type === 'intent_required')!
-  const rid = reqEvent.data.requestId as string
 
-  const res = await router('POST', `/sessions/${id}/interventions/${rid}/answer`, { decision: 'veto' }, AUTH)
-  assert.equal(res.status, 200)
-  assert.equal(await pending, 'veto')
+  const events = manager.getEvents(id, 0)!.events
+  const noteEvent = events.find((e) => e.type === 'intent_note')!
+  assert.ok(noteEvent, 'intent_note event should be appended')
+  assert.equal(noteEvent.data.summary, 'about to delete')
+  // 文案翻译：high commit threshold → 大白话
+  assert.ok(Array.isArray(noteEvent.data.reasons))
+  assert.ok((noteEvent.data.reasons as string[]).some((r) => r.includes('把握偏低')))
+  // 非阻塞：intent_note 不携带 requestId（无 pending intervention 可回复）
+  assert.equal(noteEvent.data.requestId, undefined)
 })

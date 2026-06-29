@@ -63,13 +63,24 @@ test('approval_required sets pending, approval_resolved clears it', () => {
   assert.equal(resolved.pendingApproval, null)
 })
 
-test('intent_required/resolved tracked', () => {
+test('intent_note appends a non-blocking timeline block (no pending state)', () => {
   seq = 0
-  const a = fold([ev('intent_required', { requestId: 'i1', summary: 's', confidence: 0.9 })])
-  assert.equal(a.pendingIntent?.requestId, 'i1')
-  assert.equal(a.pendingIntent?.confidence, 0.9)
-  const b = eventReducer(a, { type: 'event', event: ev('intent_resolved', { requestId: 'i1' }) })
-  assert.equal(b.pendingIntent, null)
+  const s = fold([ev('intent_note', {
+    summary: 'about to refactor',
+    confidence: 0.4,
+    warnings: ['high commit threshold'],
+    title: '天权 · 方向提示',
+    reasons: ['我对当前方向把握偏低'],
+    action: '已记录，我会继续执行（必要时先自检一步）',
+    steerHint: '想改方向就直接在下面打字告诉我',
+  })])
+  const block = s.blocks.find((b) => b.kind === 'intent_note')
+  assert.ok(block, 'intent_note should produce a timeline block')
+  assert.equal(block!.note?.title, '天权 · 方向提示')
+  assert.deepEqual(block!.note?.reasons, ['我对当前方向把握偏低'])
+  assert.equal(block!.note?.action, '已记录，我会继续执行（必要时先自检一步）')
+  assert.equal(block!.text, 'about to refactor')
+  assert.ok(s.blocksRev > 0)
 })
 
 test('artifact events bump artifactRev', () => {

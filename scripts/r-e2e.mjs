@@ -82,10 +82,8 @@ async function waitDone(sid, timeoutMs = 240000) {
       if (ev.type === 'approval_required') {
         await api(`/sessions/${sid}/interventions/${ev.data.requestId}/answer`,
           { method: 'POST', body: JSON.stringify({ decision: 'approve' }) })
-      } else if (ev.type === 'intent_required') {
-        await api(`/sessions/${sid}/interventions/${ev.data.requestId}/answer`,
-          { method: 'POST', body: JSON.stringify({ decision: 'continue' }) })
       }
+      // intent_note is a non-blocking direction note — nothing to answer.
     }
     if (all.some((e) => e.type === 'done')) return all
     await sleep(800)
@@ -241,12 +239,6 @@ async function main() {
       while (Date.now() - start < 60000) {
         const { json } = await getEvents(sidT, 0)
         const evs = json.events || []
-        for (const ev of evs) {
-          if (ev.type === 'intent_required') {
-            await api(`/sessions/${sidT}/interventions/${ev.data.requestId}/answer`,
-              { method: 'POST', body: JSON.stringify({ decision: 'continue' }) })
-          }
-        }
         if (evs.some((e) => e.type === 'done')) break
         if (evs.length > 0) {
           const sres = await api(`/sessions/${sidT}/steer`,
