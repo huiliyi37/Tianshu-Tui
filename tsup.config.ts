@@ -1,4 +1,5 @@
 import { defineConfig, type Options } from 'tsup'
+import { builtinModules } from 'node:module'
 
 /**
  * esbuild plugin: makes better-sqlite3 a runtime-optional dependency.
@@ -83,9 +84,57 @@ export default defineConfig({
   clean: true,
   shims: true,
   treeshake: false,
-  external: ['esbuild', /^node:/],
+  // tsup externalizes every package.json dependency by default. For a packaged
+  // sidecar (no node_modules shipped) that's fatal: pure-JS deps left as bare
+  // imports crash with ERR_MODULE_NOT_FOUND at startup. Force-bundle them here.
+  // Only genuinely unbundlable modules stay external: node: builtins, esbuild
+  // (native, lazily required in syntax-check), and the native/wasm packages that
+  // are dynamically imported behind feature gates (better-sqlite3 via the plugin,
+  // @ast-grep/*, web-tree-sitter, tree-sitter-wasms, typescript).
+  external: [
+    'esbuild',
+    /^node:/,
+    // Bare-specifier node builtins (e.g. `assert`, `fs`) so esbuild externalizes
+    // them instead of routing CJS deps' internal `require('assert')` through a
+    // throwing __require shim (undici hit exactly this). node: forms covered above.
+    ...builtinModules,
+    'better-sqlite3',
+    '@ast-grep/napi',
+    '@ast-grep/lang-json',
+    '@ast-grep/lang-python',
+    'web-tree-sitter',
+    'tree-sitter-wasms',
+    'typescript',
+    // Optional dev-only devtools dependency of ink; not installed and only
+    // reached when DEV devtools are enabled. Keep it external so bundling ink
+    // doesn't fail on the missing module.
+    'react-devtools-core',
+  ],
+  noExternal: [
+    'string-width',
+    'get-east-asian-width',
+    'ink',
+    'react',
+    'diff',
+    'undici',
+    'zod',
+    '@modelcontextprotocol/sdk',
+    'turndown',
+  ],
   esbuildPlugins: [optionalNativeModulePlugin],
-  banner: {
-    js: '#!/usr/bin/env -S node --expose-gc --max-old-space-size=1536',
+  // platform:node makes esbuild externalize bare node builtin requires (e.g.
+  // undici's internal `require('assert')`) instead of emitting a throwing
+  // __require shim — required to bundle CJS node libs into the ESM output.
+  esbuildOptions(options) {
+    options.platform = 'node'
+    // Per-file banner (applies to every chunk, not just the entry). Bundled CJS
+    // deps (undici, turndown, …) call `require()` internally; in ESM output
+    // esbuild routes those through a __require shim that throws unless a real
+    // `require` is in scope. createRequire gives each chunk one. The shebang
+    // stays on the entry for direct CLI exec (node strips it from imported
+    // modules) and carries the GC/heap flags.
+    options.banner = {
+      js: "#!/usr/bin/env -S node --expose-gc --max-old-space-size=1536\nimport { createRequire as __rivetCreateRequire } from 'node:module'; const require = __rivetCreateRequire(import.meta.url);",
+    }
   },
 } satisfies Options)

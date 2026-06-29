@@ -1,5 +1,22 @@
-import { transformSync } from 'esbuild'
 import { extname } from 'path'
+import { createRequire } from 'node:module'
+
+// esbuild ships a native binary, so it can't be inlined into the tsup bundle.
+// Load it lazily via require so a packaged sidecar without esbuild on disk
+// degrades (skips the JS/TS parse check) instead of crashing at startup with
+// ERR_MODULE_NOT_FOUND. Resolved once, then cached (null = unavailable).
+type TransformSync = (input: string, options: Record<string, unknown>) => unknown
+let _transformSync: TransformSync | null | undefined
+function getTransformSync(): TransformSync | null {
+  if (_transformSync !== undefined) return _transformSync
+  try {
+    const req = createRequire(import.meta.url)
+    _transformSync = (req('esbuild') as { transformSync: TransformSync }).transformSync
+  } catch {
+    _transformSync = null
+  }
+  return _transformSync
+}
 
 /**
  * Language-agnostic syntax and structural integrity check for written files.
@@ -25,6 +42,8 @@ export function syntaxCheck(filePath: string, content: string): string | null {
       '.ts': 'ts', '.tsx': 'tsx', '.js': 'js', '.jsx': 'jsx', '.mjs': 'js', '.cjs': 'js',
     }
     const loader = loaderMap[ext] ?? 'js'
+    const transformSync = getTransformSync()
+    if (!transformSync) return null
     try {
       transformSync(content, { loader, target: 'esnext', jsx: 'automatic' })
       return null
