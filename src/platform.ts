@@ -9,6 +9,7 @@ import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import type { EditorPlatform, EditorEol } from './config/schema.js'
+import { TextDecoder } from 'node:util'
 
 /** Result of `getShellCommand()` — the command and args for spawning a shell. */
 export interface ShellCommand {
@@ -197,4 +198,53 @@ export function getDefaultEditor(): string {
     return process.env['VISUAL'] || process.env['EDITOR'] || 'notepad'
   }
   return process.env['VISUAL'] || process.env['EDITOR'] || 'vi'
+}
+
+// ─── Encoding Decoder for Windows Mojibake Prevention ─────────────────────────
+
+const isUtf8Buffer = typeof (Buffer as any).isUtf8 === 'function'
+  ? (Buffer as any).isUtf8
+  : (buf: Buffer) => {
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(buf)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+/**
+ * Streaming decoder for Windows console output to prevent mojibake/gibberish (乱码).
+ * Automatically detects whether stdout/stderr stream is encoded in UTF-8 or GBK/OEM code page
+ * on the first chunk, and stream-decodes it without splitting multi-byte characters.
+ */
+export class WinStreamDecoder {
+  private decoder: TextDecoder | null = null
+  private isUtf8 = true
+  private first = true
+
+  write(chunk: Buffer): string {
+    if (!isWin) {
+      return chunk.toString('utf8')
+    }
+
+    if (this.first) {
+      this.first = false
+      this.isUtf8 = isUtf8Buffer(chunk)
+      const encoding = this.isUtf8 ? 'utf-8' : 'gbk'
+      this.decoder = new TextDecoder(encoding, { fatal: false })
+    }
+
+    if (this.decoder) {
+      return this.decoder.decode(chunk, { stream: true })
+    }
+    return chunk.toString('utf8')
+  }
+
+  end(): string {
+    if (this.decoder) {
+      return this.decoder.decode()
+    }
+    return ''
+  }
 }

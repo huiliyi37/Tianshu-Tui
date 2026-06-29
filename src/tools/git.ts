@@ -4,6 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 import { killProcessTree } from './process-kill.js'
+import { WinStreamDecoder } from '../platform.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'log_graph', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
@@ -61,12 +62,17 @@ async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): P
       abortSignal.addEventListener('abort', onAbort, { once: true })
     }
 
-    child.stdout!.on('data', (data: Buffer) => { stdout += data.toString() })
-    child.stderr!.on('data', (data: Buffer) => { stderr += data.toString() })
+    const stdoutDecoder = new WinStreamDecoder()
+    const stderrDecoder = new WinStreamDecoder()
+
+    child.stdout!.on('data', (data: Buffer) => { stdout += stdoutDecoder.write(data) })
+    child.stderr!.on('data', (data: Buffer) => { stderr += stderrDecoder.write(data) })
 
     child.on('close', (code) => {
       if (settled) return
       if (abortSignal) abortSignal.removeEventListener('abort', onAbort)
+      stdout += stdoutDecoder.end()
+      stderr += stderrDecoder.end()
       if (code !== 0) {
         const err = new Error((stderr || '').trim() || `git exited with status ${code}`)
         const gitErr = err as GitExitError
