@@ -18,7 +18,7 @@ import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
-import { editableKey, previewOf, parseMcpToolName, getApprovalActionProps } from '../lib/approval-preview'
+import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -585,10 +585,6 @@ function ApprovalReview(props: {
     else onDecision('approve')
   }
 
-  const rejectProps = getApprovalActionProps('reject')
-  const approveProps = getApprovalActionProps('approve', editing)
-  const editProps = getApprovalActionProps('edit', editing)
-
   // MCP connector opt-in card — never silently use a connector the user didn't
   // choose. Surfaces the connector identity + the tool/input, and frames the
   // approval as authorizing the connector (read-only tools won't re-prompt).
@@ -604,11 +600,8 @@ function ApprovalReview(props: {
         </div>
         <pre className="rp-preview">{preview.text}</pre>
         <div className="rp-actions">
-          <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
-          <button className={approveProps.variant} onClick={() => onDecision('approve')}>
-            {approveProps.label}
-            <span className="rp-default-mark" aria-hidden>●</span>
-          </button>
+          <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+          <button className="btn sm" onClick={() => onDecision('approve')}>授权连接器</button>
         </div>
       </div>
     )
@@ -629,13 +622,12 @@ function ApprovalReview(props: {
       )}
       <div className="rp-actions">
         {editKey && (
-          <button className={editProps.variant} onClick={() => setEditing((v) => !v)}>{editProps.label}</button>
+          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
+            {editing ? '取消编辑' : '编辑'}
+          </button>
         )}
-        <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
-        <button className={approveProps.variant} onClick={approve}>
-          {approveProps.label}
-          <span className="rp-default-mark" aria-hidden>●</span>
-        </button>
+        <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+        <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
       </div>
     </div>
   )
