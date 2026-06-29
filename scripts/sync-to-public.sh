@@ -23,10 +23,13 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   echo "[dry-run] 不实际写入，只显示将要同步的内容"
 fi
 
-echo "=== 同步: src/ ==="
+echo "=== 同步: src/（排除测试文件）==="
 rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   --exclude 'dist/' \
+  --exclude '__tests__/' \
+  --exclude '*.test.ts' \
+  --exclude '*.test.tsx' \
   "$DEV_DIR/src/" "$PUB_DIR/src/"
 
 echo "=== 同步: scripts/ ==="
@@ -47,13 +50,16 @@ rsync $RSYNC_FLAGS \
   --exclude='test-incremental.ts' \
   "$DEV_DIR/scripts/" "$PUB_DIR/scripts/"
 
-echo "=== 同步: desktop/ ==="
+echo "=== 同步: desktop/（排除测试文件）==="
 rsync $RSYNC_FLAGS \
   --exclude 'node_modules/' \
   --exclude 'dist/' \
   --exclude 'src-tauri/target/' \
   --exclude 'src-tauri/gen/' \
   --exclude '.DS_Store' \
+  --exclude '__tests__/' \
+  --exclude '*.test.ts' \
+  --exclude '*.test.tsx' \
   "$DEV_DIR/desktop/" "$PUB_DIR/desktop/"
 
 echo "=== 同步: 胶囊 ==="
