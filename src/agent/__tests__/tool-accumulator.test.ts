@@ -116,7 +116,48 @@ describe('ToolAccumulator', () => {
     const result = acc.tryCollapse('bash')!
     assert.ok(result.summary.includes('bash calls consolidated'))
     assert.ok(result.summary.includes('collapsed'))
-    assert.ok(result.summary.includes('Last output'))
+  })
+
+  it('keeps a real output tail per collapsed bash call (no "no output" illusion)', () => {
+    for (let i = 0; i < 5; i++) {
+      acc.record({ toolName: 'bash', toolUseId: `b${i}`, content: `[cmd_${i}] exit=0 time=0.1s lines=2\nhello-${i}\nworld-${i}`, turn: 1 })
+    }
+    const result = acc.tryCollapse('bash')!
+    // The stale calls (b0..b3) must each surface their actual stdout tail —
+    // stripping it entirely is the doom-loop root cause.
+    assert.ok(result.summary.includes('| world-0'), 'collapsed call output tail must be retained')
+    assert.ok(result.summary.includes('| hello-0') || result.summary.includes('| world-0'))
+    // Header line itself must NOT leak into the tail body.
+    assert.ok(!/\|\s+\[cmd_0\]/.test(result.summary), 'header line should be skipped in tail')
+  })
+
+  it('surfaces a recovery handle when bash output embeds rawPath or artifact', () => {
+    for (let i = 0; i < 5; i++) {
+      acc.record({
+        toolName: 'bash',
+        toolUseId: `b${i}`,
+        content: `[big_${i}] exit=0 time=0.1s lines=900\n...lots of output...\n[output truncated: head 100 + tail 80 of 900 lines shown — 720 lines omitted · full output: read_file /tmp/rivet-raw/abc${i}.raw — 不要重跑命令]`,
+        turn: 1,
+      })
+    }
+    const result = acc.tryCollapse('bash')!
+    assert.ok(/↳ full output: read_file \/tmp\/rivet-raw\/abc\d\.raw/.test(result.summary), 'rawPath recovery handle must be exposed')
+    // Meta footer lines must not be mistaken for stdout in the tail.
+    assert.ok(!result.summary.includes('| [output truncated'), 'footer marker should be filtered from tail')
+  })
+
+  it('exposes artifact recovery handle for artifact-wrapped bash output', () => {
+    for (let i = 0; i < 5; i++) {
+      acc.record({
+        toolName: 'bash',
+        toolUseId: `b${i}`,
+        content: `[gen_${i}] exit=0 time=2s lines=40 — output complete\nline-a\nline-b\n[artifact:art-${i}]`,
+        turn: 1,
+      })
+    }
+    const result = acc.tryCollapse('bash')!
+    assert.ok(/read_section\(artifactId="art-\d"\)/.test(result.summary), 'artifact recovery handle must be exposed')
+    assert.ok(!result.summary.includes('| [artifact:'), 'artifact marker should be filtered from tail')
   })
 
   it('builds generic summary for unknown tool types', () => {

@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isToolAllowedInReliabilityMode, modeForRecoveryTrigger, reliabilityBlockMessage } from '../reliability-mode.js'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { isScratchScopedWrite, isToolAllowedInReliabilityMode, modeForRecoveryTrigger, reliabilityBlockMessage } from '../reliability-mode.js'
 import type { RecoveryTriggerResult } from '../recovery-trigger.js'
 
 function trigger(overrides: Partial<RecoveryTriggerResult>): RecoveryTriggerResult {
@@ -88,5 +90,42 @@ describe('isToolAllowedInReliabilityMode', () => {
     assert.match(message, /minimal/)
     assert.match(message, /resource critical/)
     assert.match(message, /Suggested recovery/)
+  })
+
+  it('allows scratch-scoped write_file in degraded mode (self-rescue escape hatch)', () => {
+    const tmpFile = join(tmpdir(), 'rivet-scratch-probe.txt')
+    assert.equal(isToolAllowedInReliabilityMode('degraded', 'write_file', { file_path: tmpFile }), true)
+    assert.equal(isToolAllowedInReliabilityMode('degraded', 'write_file', { file_path: '/work/project/.rivet/scratch/out.txt' }), true)
+    // Non-scratch workspace writes stay blocked.
+    assert.equal(isToolAllowedInReliabilityMode('degraded', 'write_file', { file_path: '/work/project/src/index.ts' }), false)
+  })
+
+  it('keeps scratch writes blocked in minimal mode', () => {
+    const tmpFile = join(tmpdir(), 'rivet-scratch-probe.txt')
+    assert.equal(isToolAllowedInReliabilityMode('minimal', 'write_file', { file_path: tmpFile }), false)
+  })
+
+  it('degraded block message advertises the scratch self-rescue path', () => {
+    const decision = modeForRecoveryTrigger(trigger({ trigger: 'doom_loop_blocked', severity: 'error', summary: 'doom' }))
+    const message = reliabilityBlockMessage(decision, 'write_file')
+    assert.match(message, /scratch/)
+  })
+})
+
+describe('isScratchScopedWrite', () => {
+  it('recognises temp dir and .rivet/scratch targets', () => {
+    assert.equal(isScratchScopedWrite('write_file', { file_path: join(tmpdir(), 'x.txt') }), true)
+    assert.equal(isScratchScopedWrite('write_file', { file_path: '/a/b/.rivet/scratch/y.txt' }), true)
+    assert.equal(isScratchScopedWrite('write_file', { path: join(tmpdir(), 'z.txt') }), true)
+  })
+
+  it('rejects non-scratch writes and non-write tools', () => {
+    assert.equal(isScratchScopedWrite('write_file', { file_path: '/a/b/src/index.ts' }), false)
+    assert.equal(isScratchScopedWrite('write_file', {}), false)
+    assert.equal(isScratchScopedWrite('bash', { command: 'echo hi > /tmp/x' }), false)
+  })
+
+  it('does not treat a sibling dir like .rivet/scratchpad as scratch', () => {
+    assert.equal(isScratchScopedWrite('write_file', { file_path: '/a/.rivet/scratchpad/x' }), false)
   })
 })

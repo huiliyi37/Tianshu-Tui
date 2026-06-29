@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os'
+import { resolve, sep } from 'node:path'
 import { requiresBashWriteApproval } from './approval-risk.js'
 import type { RecoveryTriggerResult } from './recovery-trigger.js'
 
@@ -68,6 +70,27 @@ export function modeForRecoveryTrigger(
   return decision('degraded', trigger.summary, ['bash_write', 'high_risk'], trigger.evidence)
 }
 
+/**
+ * Whether a write targets a scratch location (OS temp dir or a `.rivet/scratch`
+ * sub-tree). These are low-risk, self-contained writes that enable the
+ * "write a diagnostic file → read it back" self-rescue path. Allowing them in
+ * degraded mode gives a stuck agent an escape hatch without reopening writes to
+ * the workspace proper — the degraded lock-out is otherwise a dead-end when the
+ * agent needs to materialise output it cannot otherwise see.
+ */
+export function isScratchScopedWrite(toolName: string, input: Record<string, unknown>): boolean {
+  if (toolName !== 'write_file') return false
+  const raw = typeof input.file_path === 'string' ? input.file_path
+    : typeof input.path === 'string' ? input.path
+      : ''
+  if (!raw) return false
+  const target = resolve(raw)
+  const tmp = resolve(tmpdir())
+  const underTmp = target === tmp || target.startsWith(tmp + sep)
+  const underScratch = /[/\\]\.rivet[/\\]scratch(?:[/\\]|$)/.test(target)
+  return underTmp || underScratch
+}
+
 export function isToolAllowedInReliabilityMode(
   mode: ReliabilityMode,
   toolName: string,
@@ -82,6 +105,9 @@ export function isToolAllowedInReliabilityMode(
   // degraded: block new file creation and shell writes, but allow edit_file
   // so debug workflows (fix → verify) can continue under resource pressure.
   // edit_file is low-risk: it modifies existing files with small diffs, no new processes.
+  // Scratch writes (temp dir / .rivet/scratch) stay allowed as a self-rescue
+  // escape hatch: write a diagnostic file then read it back.
+  if (isScratchScopedWrite(toolName, input)) return true
   if (toolName === 'write_file') return false
   if (requiresBashWriteApproval(toolName, input)) return false
   return true
@@ -100,7 +126,7 @@ export function reliabilityBlockMessage(
       : []),
     decision.mode === 'minimal'
       ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question.'
-      : 'Degraded mode blocks write_file and bash commands with write side effects. edit_file is still allowed for debug fixes.',
+      : 'Degraded mode blocks write_file and bash commands with write side effects. edit_file is still allowed for debug fixes. Self-rescue: write_file to the OS temp dir or .rivet/scratch/ is still permitted, then read_file it back — use this to materialise output you cannot otherwise see (e.g. a rawPath dump).',
     'Suggested recovery: compact, reduce task scope, or start a fresh session if pressure persists.',
   ].join('\n')
 }
