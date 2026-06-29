@@ -152,7 +152,9 @@ export function reliabilityBlockMessage(
     decision.mode === 'minimal'
       ? 'Allowed tools: read_file, grep, glob, diff, inspect_project, repo_map, related_tests, recall, ask_user_question. Self-rescue: write_file to the OS temp dir or .rivet/scratch/ is still permitted.'
       : 'Degraded mode blocks write_file and bash commands with write side effects. edit_file is still allowed for debug fixes. Self-rescue: write_file to the OS temp dir or .rivet/scratch/ is still permitted, then read_file it back — use this to materialise output you cannot otherwise see (e.g. a rawPath dump).',
-    'Suggested recovery: compact, reduce task scope, or start a fresh session if pressure persists.',
+    decision.mode === 'minimal'
+      ? 'This mode triggers on critical resource pressure, context thrashing, or session integrity issues. If this is a false alarm, use RIVET_RELIABILITY_OVERRIDE=full.'
+      : 'This mode triggers on repeated failures, moderate resource pressure, or repeated interrupts. Try a different approach or tool; as a last resort, start a fresh session.',
     'To override: set RIVET_RELIABILITY_OVERRIDE=full in your environment and restart.',
   ].join('\n')
 }

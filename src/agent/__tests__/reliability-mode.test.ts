@@ -132,7 +132,7 @@ describe('isToolAllowedInReliabilityMode', () => {
     const message = reliabilityBlockMessage(decision, 'bash')
     assert.match(message, /minimal/)
     assert.match(message, /resource critical/)
-    assert.match(message, /Suggested recovery/)
+    assert.match(message, /RIVET_RELIABILITY_OVERRIDE/)
   })
 
   it('allows scratch-scoped write_file in degraded mode (self-rescue escape hatch)', () => {

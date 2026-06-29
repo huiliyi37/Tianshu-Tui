@@ -215,8 +215,11 @@ describe('bashCommandClass', () => {
 })
 
 describe('fingerprintToolClass', () => {
-  it('returns a class fingerprint for bash including output class', () => {
-    assert.equal(fingerprintToolClass('bash', { command: 'git status | head' }, 'success'), 'git:status·success')
+  it('returns class fingerprint only for failing bash commands', () => {
+    // Successful bash = normal exploration, no class fingerprint
+    assert.equal(fingerprintToolClass('bash', { command: 'git status | head' }, 'success'), null)
+    // Failing bash = potential doom loop, class fingerprint recorded
+    assert.equal(fingerprintToolClass('bash', { command: 'git push --force' }, 'error'), 'git:push·error')
   })
 
   it('returns null for non-bash tools', () => {
