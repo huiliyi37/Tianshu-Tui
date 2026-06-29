@@ -1,7 +1,6 @@
 import type {
   ApprovalRequest,
   DelegationNode,
-  IntentRequest,
   PlanModeState,
   SessionEvent,
   TodoStateItem,
@@ -19,6 +18,8 @@ export type ConvoKind =
   | 'phase'
   | 'error'
   | 'decision_shift'
+  // Non-blocking 方向提示 (intent gate) — passive direction note.
+  | 'intent_note'
   // T1 — process observability blocks.
   | 'thinking'
   | 'turn'
@@ -39,6 +40,13 @@ export interface ConvoBlock {
     reason: string
     methods: string[]
     severity: 'info' | 'warn'
+  }
+  /** Non-blocking 方向提示 (intent_note) — plain-language direction note. */
+  note?: {
+    title: string
+    reasons: string[]
+    action: string
+    steerHint: string
   }
   /** T1 — turn boundary metadata (turn_complete). */
   turn?: {
@@ -63,7 +71,6 @@ export interface EventViewState {
    *  consumers can memoize without paying for a full array copy each delta. */
   blocksRev: number
   pendingApproval: ApprovalRequest | null
-  pendingIntent: IntentRequest | null
   /** Bumped on every artifact event so consumers can invalidate the artifact query. */
   artifactRev: number
   delegation: Record<string, DelegationNode>
@@ -105,7 +112,6 @@ export const initialEventState: EventViewState = {
   blocks: [],
   blocksRev: 0,
   pendingApproval: null,
-  pendingIntent: null,
   artifactRev: 0,
   delegation: {},
   todos: [],
@@ -378,20 +384,24 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         next.pendingApproval = null
       }
       return next
-    case 'intent_required':
-      next.pendingIntent = {
-        requestId: String(ev.data.requestId ?? ''),
-        summary: String(ev.data.summary ?? ''),
-        confidence: Number(ev.data.confidence ?? 0),
-        alternatives: (ev.data.alternatives as string[]) ?? [],
-        warnings: (ev.data.warnings as string[]) ?? [],
-      }
+    case 'intent_note': {
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      const reasons = Array.isArray(ev.data.reasons) ? (ev.data.reasons as unknown[]).map((r) => String(r)) : []
+      next.blocks = [...next.blocks, {
+        key: `in-${ev.seq}`,
+        kind: 'intent_note',
+        text: String(ev.data.summary ?? ''),
+        note: {
+          title: String(ev.data.title ?? '方向提示'),
+          reasons,
+          action: String(ev.data.action ?? ''),
+          steerHint: String(ev.data.steerHint ?? ''),
+        },
+      }]
+      next.blocksRev = next.blocksRev + 1
       return next
-    case 'intent_resolved':
-      if (next.pendingIntent && next.pendingIntent.requestId === ev.data.requestId) {
-        next.pendingIntent = null
-      }
-      return next
+    }
     case 'delegation': {
       const workerId = String(ev.data.workerId ?? '')
       if (!workerId) return next

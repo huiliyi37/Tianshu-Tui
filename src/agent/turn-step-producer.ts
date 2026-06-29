@@ -281,26 +281,23 @@ export class TurnStepProducer {
     userMessageConsumed: boolean,
     callbacks: AgentCallbacks,
   ): Promise<{
-    action: 'proceed' | 'veto' | 'abort'
+    action: 'proceed' | 'abort'
     request?: OaiChatRequest
   }> {
     let _tb = Date.now()
-    const intentResult = await this.self.intent.evaluate({
+    // Non-blocking direction note: fire-and-forget. The agent always continues;
+    // the user steers by typing if they want to change direction.
+    this.self.intent.evaluate({
       strategy: currentStrategy,
       vigor: this.self.vigorState,
       sensorium: currentSensorium,
       pheromones: this.self.loadedPheromones,
       pressureResult,
       recentToolHistory: this.self.recentToolHistory,
-      onIntentPreview: callbacks.onIntentPreview,
+      onIntentNote: callbacks.onIntentNote,
       taskContractId: this.self.taskContract?.id,
     })
     debugLog(`[turn-boundary] turn=${turn} intent: ${Date.now() - _tb}ms`)
-    if (intentResult === 'veto') {
-      callbacks.onPhaseChange?.('intent-veto', { reason: 'user vetoed intent', suggestion: 're-plan before tool use' })
-      callbacks.onTurnComplete(this.self.session.getTotalUsage(), this.self.session.getTurnCount(), false)
-      return { action: 'veto' }
-    }
 
     // Pass 5: adaptive repair hint injection
     this.self.contextInjection.refreshRepairHint()

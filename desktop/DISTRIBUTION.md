@@ -55,7 +55,7 @@ npm run tauri:build
 如需指定 Node 版本：
 
 ```bash
-NODE_VERSION=22.15.0 node scripts/fetch-node-runtime.js
+NODE_VERSION=24.1.0 node scripts/fetch-node-runtime.js
 ```
 
 ## 代码签名与公证

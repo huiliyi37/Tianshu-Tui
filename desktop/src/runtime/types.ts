@@ -130,8 +130,7 @@ export type SessionEventType =
   | 'checkpoint'
   | 'approval_required'
   | 'approval_resolved'
-  | 'intent_required'
-  | 'intent_resolved'
+  | 'intent_note'
   | 'delegation'
   | 'artifact'
   | 'status'
@@ -162,12 +161,15 @@ export interface ApprovalRequest {
   input: Record<string, unknown>
 }
 
-export interface IntentRequest {
-  requestId: string
+/** Non-blocking 方向提示 — a passive direction note (no requestId, no reply). */
+export interface IntentNote {
   summary: string
   confidence: number
-  alternatives: string[]
   warnings: string[]
+  title: string
+  reasons: string[]
+  action: string
+  steerHint: string
 }
 
 export type ApprovalDecision = 'approve' | 'reject'

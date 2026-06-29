@@ -12,6 +12,7 @@
 // Windows EPERM scandir noise filter — must register before any dependency
 // that might trigger fs operations against system-protected directories.
 import { installEpermFilter } from './platform/eperm-filter.js'
+import { setTargetConventions } from './platform.js'
 installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
@@ -191,6 +192,7 @@ async function main() {
     }
 
     const cfg = loadConfig()
+    setTargetConventions(cfg.editor.platform, cfg.editor.eol)
     const prov = cfg.provider.providers[cfg.provider.default]
     if (!prov) { process.stderr.write('Provider not configured. Run: rivet config setup <provider>\n'); process.exit(1) }
     const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']

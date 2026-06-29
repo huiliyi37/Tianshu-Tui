@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
-import { answerApproval, answerIntent, setApprovalMode, steerSession } from '../runtime/client'
+import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
@@ -10,7 +10,7 @@ import { ReviewPanel } from './ReviewPanel'
 import { TerminalTabs } from '../components/TerminalTabs'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
-import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout, shouldAutoCollapseReview } from '../lib/panel-layout'
+import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
 
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
@@ -22,6 +22,7 @@ const HooksSurface = lazy(() => import('./HooksSurface').then((m) => ({ default:
 const AutomationsSurface = lazy(() => import('./AutomationsSurface').then((m) => ({ default: m.AutomationsSurface })))
 const InboxSurface = lazy(() => import('./InboxSurface').then((m) => ({ default: m.InboxSurface })))
 const SettingsSurface = lazy(() => import('./SettingsSurface').then((m) => ({ default: m.SettingsSurface })))
+const MissionControlSurface = lazy(() => import('./MissionControlSurface').then((m) => ({ default: m.MissionControlSurface })))
 
 
 
@@ -57,8 +58,7 @@ export function WorkspaceSurface() {
     const ro = new ResizeObserver(([entry]) => {
       if (!entry) return
       const w = entry.contentRect.width
-      const reviewWidthPx = reviewRef.current?.getSize().inPixels ?? 0
-      if (shouldAutoCollapseReview(w, reviewWidthPx)) {
+      if (w < 1200) {
         if (reviewVisibleRef.current && !reviewManualRef.current) {
           dispatch({ type: 'setReview', visible: false })
         }
@@ -98,11 +98,6 @@ export function WorkspaceSurface() {
     },
     [activeId, view.pendingApproval],
   )
-
-  const handleIntent = useCallback((decision: 'continue' | 'veto' | 'alternative') => {
-    if (!activeId || !view.pendingIntent) return
-    void answerIntent(activeId, view.pendingIntent.requestId, decision)
-  }, [activeId, view.pendingIntent])
 
   const handleSetApprovalMode = useCallback((mode: ApprovalMode) => {
     if (!activeId) return
@@ -185,7 +180,8 @@ export function WorkspaceSurface() {
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-                {ui.surface === 'delegation' ? <DelegationSurface /> :
+                {ui.surface === 'mission' ? <MissionControlSurface /> :
+                 ui.surface === 'delegation' ? <DelegationSurface /> :
                  ui.surface === 'skills' ? <SkillsSurface /> :
                  ui.surface === 'git' ? <GitSurface /> :
                  ui.surface === 'insights' ? <InsightsSurface /> :
@@ -269,7 +265,7 @@ export function WorkspaceSurface() {
           panelRef={reviewRef}
           collapsible
           defaultSize={`${layout.review}%`}
-          minSize="20%"
+          minSize="15%"
           maxSize="45%"
           onResize={(size, _id, prev) => {
             const pct = Math.round(size.asPercentage)
@@ -284,13 +280,11 @@ export function WorkspaceSurface() {
             sessionId={activeId}
             artifacts={artifacts.data ?? []}
             pendingApproval={view.pendingApproval}
-            pendingIntent={view.pendingIntent}
             approvalMode={active?.approvalMode}
             planMode={view.planMode}
             planRev={view.planRev}
             latestPlanSlug={view.latestPlanSlug}
             onApproval={handleApproval}
-            onIntent={handleIntent}
             onFeedbackSent={() => sessions.refetch()}
             todos={view.todos}
             sources={view.sources}

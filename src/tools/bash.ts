@@ -3,7 +3,7 @@ import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
-import { getShellCommand } from '../platform.js'
+import { getShellCommand, WinStreamDecoder } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { applyCommandFilter } from './command-filters.js'
@@ -175,7 +175,16 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
     return new Promise((resolve) => {
       const shell = getShellCommand()
-      const child = track(spawn(shell.cmd, [...shell.args, command], {
+      let commandToRun = command
+      if (process.platform === 'win32') {
+        if (shell.cmd.includes('powershell') || shell.cmd.includes('pwsh')) {
+          commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+        } else if (shell.cmd.includes('cmd')) {
+          commandToRun = `chcp 65001 > nul && ${command}`
+        }
+      }
+
+      const child = track(spawn(shell.cmd, [...shell.args, commandToRun], {
         cwd: params.cwd,
         env: sanitizeEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -190,8 +199,11 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       let stdoutRawBytes = 0
       let stderrRawBytes = 0
 
+      const stdoutDecoder = new WinStreamDecoder()
+      const stderrDecoder = new WinStreamDecoder()
+
       child.stdout!.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = stdoutDecoder.write(data)
         stdoutRawBytes += data.length
         stdout += text
         params.onOutput?.(text)
@@ -204,7 +216,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       })
 
       child.stderr!.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = stderrDecoder.write(data)
         stderrRawBytes += data.length
         stderr += text
         params.onOutput?.(text)
@@ -215,6 +227,8 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       })
 
       const buildResult = async (code: number, isTimeout = false) => {
+        stdout += stdoutDecoder.end()
+        stderr += stderrDecoder.end()
         const truncNote = stdoutTruncated
           ? `[stdout truncated: output exceeded 32KB (${stdoutRawBytes} bytes total), showing last 24KB — full output at rawPath below]\n`
           : ''
@@ -341,7 +355,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         cleanupAbort()
         killProcessTree(child, 'SIGTERM')
         forceKillTimer = setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
-        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const finalStdout = stdout + stdoutDecoder.end()
+        const finalStderr = stderr + stderrDecoder.end()
+        const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         resolve({
           content: raw ? `[aborted] 命令被用户中止，部分输出:\n${raw.slice(-2000)}` : 'Command aborted by user.',
           uiContent: '⏹ aborted',

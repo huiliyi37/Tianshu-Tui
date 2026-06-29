@@ -9,5 +9,21 @@
   "delegation": "Delegation",
   "council": "Council",
   "hooks": "Hooks",
-  "settings": "Settings"
+  "settings": "Settings",
+  "sidebar": {
+    "mainNav": "Main navigation",
+    "newConversation": "New Conversation",
+    "collapseSidebar": "Collapse Sidebar",
+    "tools": "Domain Tools",
+    "projects": "Projects",
+    "searchSessions": "Search sessions…",
+    "clearSearch": "Clear search",
+    "noSessions": "No sessions yet",
+    "noMatches": "No matches",
+    "archivedSessions": "Archived Sessions",
+    "currentProject": "Current Project",
+    "archive": "Archived Sessions",
+    "closeSession": "Close session",
+    "restore": "Restore"
+  }
 }

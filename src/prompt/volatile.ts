@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import os from 'os'
 import { gitStatusCache } from './volatile-git.js'
+import { getTargetPlatform } from '../platform.js'
 import type { ContextLedger } from '../context/types.js'
 import type { TaskState } from '../agent/task-state.js'
 import { renderActiveClaimsBlock, type ContextClaim } from '../context/claims.js'
@@ -746,7 +747,15 @@ export function buildVolatileBlock(ctx: VolatileContext): string {
 function buildVolatileBlockInternal(ctx: VolatileContext): string {
   const parts: string[] = []
 
-  parts.push(`<environment platform="${process.platform}" cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
+  // Target platform drives file-artifact conventions (path style, etc.). When it
+  // differs from the real host, surface BOTH — and advise cross-platform commands,
+  // since the shell still runs on the host. Session-static → prefix-cache safe.
+  const targetPlatform = getTargetPlatform()
+  const hostAttr = targetPlatform !== process.platform ? ` host="${process.platform}"` : ''
+  parts.push(`<environment platform="${targetPlatform}"${hostAttr} cwd="${escapeXml(ctx.cwd)}" os="${escapeXml(`${os.type()} ${os.release()}`)}" />`)
+  if (targetPlatform !== process.platform) {
+    parts.push(`<platform-note>文件约定（换行/路径风格）按 ${targetPlatform} 生成；但 shell 命令在宿主 ${process.platform} 上执行——优先使用跨平台命令，避免目标平台专属语法在宿主机执行失败。</platform-note>`)
+  }
 
   // 天枢本体锚点——常驻 frozen，简短心跳确认在场。
   // 行为层面的唤醒通过 advisory bus 按需注入（见 staleness-refresh advisory）。

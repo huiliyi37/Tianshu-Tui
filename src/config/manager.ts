@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
@@ -188,6 +188,28 @@ export function setRoutingConfig(input: { review?: unknown; workers?: unknown; c
 }
 
 // --- API key management ---
+
+// --- Editor / target-platform conventions ---
+
+/** Snapshot of the editor conventions block for the desktop settings UI. */
+export function getEditorConfig(): EditorConfig {
+  return loadConfig().editor
+}
+
+/**
+ * Persist editor conventions (target platform + EOL) to the user global config.
+ * Validated through editorSchema. Takes effect on the next sidecar/session start
+ * (the target is resolved once at startup via setTargetConventions).
+ */
+export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): EditorConfig {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.editor }
+  if (input.platform !== undefined) merged.platform = input.platform
+  if (input.eol !== undefined) merged.eol = input.eol
+  cfg.editor = editorSchema.parse(merged)
+  saveConfig(cfg)
+  return cfg.editor
+}
 
 export function setApiKey(providerName: string, key: string): void {
   const cfg = loadConfig()

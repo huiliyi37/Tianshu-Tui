@@ -3,7 +3,7 @@ import { readFile, stat, glob } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
-import { gracefulKill, forceKill } from '../platform.js'
+import { gracefulKill, forceKill, WinStreamDecoder } from '../platform.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 
 interface RunnableTestCommand {
@@ -514,8 +514,11 @@ function runTestCommandIn(
       let stderr = ''
       let onOutputBudget = 20_000
 
+      const stdoutDecoder = new WinStreamDecoder()
+      const stderrDecoder = new WinStreamDecoder()
+
       child.stdout!.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = stdoutDecoder.write(data)
         stdout += text
         if (onOutputBudget > 0) {
           const chunk = text.slice(0, onOutputBudget)
@@ -528,7 +531,7 @@ function runTestCommandIn(
       })
 
       child.stderr!.on('data', (data: Buffer) => {
-        const text = data.toString()
+        const text = stderrDecoder.write(data)
         stderr += text
         if (onOutputBudget > 0) {
           const chunk = text.slice(0, onOutputBudget)
@@ -545,7 +548,9 @@ function runTestCommandIn(
       const timer = setTimeout(async () => {
         gracefulKill(child)
         setTimeout(() => forceKill(child), 3000)
-        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const finalStdout = stdout + stdoutDecoder.end()
+        const finalStderr = stderr + stderrDecoder.end()
+        const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
         const meta = { command: testCommand.display, exitCode: -1, durationMs: Date.now() - startTime }
         const rawPath = await persistRawOutput(params.toolUseId, raw)
         resolve({
@@ -575,7 +580,9 @@ function runTestCommandIn(
       child.on('close', async (code, _exitSignal) => {
         clearTimeout(timer)
         if (signal) signal.removeEventListener('abort', onAbort)
-        const raw = stdout + (stderr ? '\n' + stderr : '')
+        const finalStdout = stdout + stdoutDecoder.end()
+        const finalStderr = stderr + stderrDecoder.end()
+        const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
 
         // EPERM auto-degradation: tsx IPC pipe fails in sandboxed environments.
         // When stderr contains EPERM and the runner is tsx, retry once with

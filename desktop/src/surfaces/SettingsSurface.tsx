@@ -20,7 +20,7 @@ import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref,
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
-import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, type StorageReport } from '../runtime/client'
+import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
@@ -289,6 +289,7 @@ export function SettingsSurface() {
                 </dl>
               )}
             </section>
+            <PlatformSection />
             <StorageSection />
             <UpdaterSection />
           </>
@@ -433,6 +434,72 @@ function formatBytes(n: number): string {
  * 会随历史无限增长，这里给用户一个可见、可控的回收入口。清理基于 stat（仅读元
  * 数据，不读文件内容），对硬盘几乎无压力;删除不可逆,仅作用于已归档且空闲的会话。
  */
+/**
+ * Target-OS conventions: new-file line endings + the OS the system prompt tells
+ * the model it's on. Writes to the user global config; takes effect on the next
+ * sidecar start (the target is resolved once at startup). Per-project overrides
+ * still go through the project's .rivet-config.json `editor` block.
+ */
+function PlatformSection() {
+  const [cfg, setCfg] = useState<EditorConfig | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    void getEditorConfig().then(setCfg).catch(() => setCfg(null))
+  }, [])
+
+  const update = useCallback(async (patch: { platform?: EditorPlatform; eol?: EditorEol }) => {
+    setMsg(null)
+    try {
+      const next = await setEditorConfig(patch)
+      setCfg({ platform: next.platform, eol: next.eol })
+      setMsg('已保存 · 重启应用后生效')
+    } catch (err) {
+      setMsg(`保存失败：${(err as Error).message}`)
+    }
+  }, [])
+
+  if (!cfg) return null
+
+  return (
+    <section className="settings-group">
+      <h4>平台约定（换行符 / 目标系统）</h4>
+      <div className="meta" style={{ marginBottom: 8 }}>
+        控制新建文件的换行符，以及系统提示里告诉模型的目标 OS。<code>auto</code> 跟随本机。命令始终在本机 shell 执行——跨平台覆盖只影响文件约定，不改变命令执行。
+      </div>
+      <div className="flex items-center gap-3" style={{ flexWrap: 'wrap' }}>
+        <label className="flex items-center gap-2 text-xs text-text">
+          <span className="text-muted">目标平台</span>
+          <Select value={cfg.platform} onValueChange={(v) => void update({ platform: v as EditorPlatform })}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动（跟随本机）</SelectItem>
+              <SelectItem value="windows">Windows (CRLF)</SelectItem>
+              <SelectItem value="macos">macOS (LF)</SelectItem>
+              <SelectItem value="linux">Linux (LF)</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-text">
+          <span className="text-muted">换行符</span>
+          <Select value={cfg.eol} onValueChange={(v) => void update({ eol: v as EditorEol })}>
+            <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">自动（由平台推导）</SelectItem>
+              <SelectItem value="lf">LF</SelectItem>
+              <SelectItem value="crlf">CRLF</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
+      <div className="meta" style={{ marginTop: 6 }}>
+        <code>.bat</code> / <code>.cmd</code> 始终用 CRLF；已存在的文件始终沿用其原有换行符。也可在项目根的 <code>.rivet-config.json</code> 的 <code>editor</code> 段做按项目覆盖。
+      </div>
+    </section>
+  )
+}
+
 function StorageSection() {
   const [report, setReport] = useState<StorageReport | null>(null)
   const [loading, setLoading] = useState(false)

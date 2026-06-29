@@ -19,7 +19,11 @@ import { createHash } from 'node:crypto'
 import { execSync } from 'node:child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DEFAULT_NODE_VERSION = '22.23.1'
+// Single source of truth for the bundled sidecar Node runtime version.
+// scripts/pack-native.js imports this to keep its build-time ABI assertion in
+// lockstep — the packed better-sqlite3 ABI must match THIS runtime, not the
+// build machine's Node. Bump here and the ABI guard follows automatically.
+export const DEFAULT_NODE_VERSION = '24.1.0'
 const NODE_VERSION = process.env.NODE_VERSION || DEFAULT_NODE_VERSION
 const FORCE_FETCH = process.env.FORCE_FETCH === '1'
 // No-data watchdog: abort a stalled connection so a hung mirror can't freeze

@@ -4,7 +4,8 @@ import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/type
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
 import { basename } from '../lib/projects'
-import { ToolCard, toolNameOf } from '../components/ToolGroup'
+import { ToolCard, toolNameOf, pairEntries, PairedRow } from '../components/ToolGroup'
+import type { PairedEntry } from '../components/ToolGroup'
 import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
@@ -30,7 +31,6 @@ import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
-import { estimateBlockSize, estimateTimelineSize } from '../lib/thread-layout.js'
 
 const STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -167,11 +167,7 @@ export function ThreadView(props: {
   const virtualizer = useVirtualizer({
     count: rendered.length,
     getScrollElement: () => msgRef.current,
-    estimateSize: (index) => {
-      const item = rendered[index]!
-      if (item.kind === 'timeline') return estimateTimelineSize(item.items)
-      return estimateBlockSize(item.block)
-    },
+    estimateSize: () => 80,
     overscan: 8,
     getItemKey: (index) => {
       const item = rendered[index]!
@@ -608,26 +604,25 @@ export function ThreadView(props: {
                 >
                   {item.kind === 'timeline' ? (
                     <TimelineGroup blocks={item.items}>
-                      {item.items.map(b => (
-                        <Block
-                          key={b.key}
-                          block={b}
-                          sessionId={session.id}
-                          onOpenImage={openImage}
-                          domainGlyph={domainGlyph}
-                          domainName={activeDomain?.name}
-                          // Live reasoning/text can land inside a timeline run too;
-                          // mark the tail block streaming (mirror of the top-level
-                          // branch) so it gets the ~10Hz throttle instead of
-                          // re-rendering plain text at full rAF rate.
-                          isStreaming={
-                            b.key === lastKey && (
-                              (b.kind === 'thinking' && view.private_thinkingOpen) ||
-                              (b.kind === 'assistant' && view.private_textOpen)
-                            )
-                          }
-                        />
-                      ))}
+                      {groupTimelineItems(item.items).map((tItem, idx) => {
+                        if (tItem.kind === 'thinking') {
+                          const isStreaming = tItem.block.key === lastKey && view.private_thinkingOpen
+                          return (
+                            <ThinkingBlock
+                              key={tItem.block.key ?? idx}
+                              block={tItem.block}
+                              streaming={!!isStreaming}
+                            />
+                          )
+                        } else {
+                          return (
+                            <PairedRow
+                              key={tItem.entry.tool?.key ?? tItem.entry.result?.key ?? idx}
+                              entry={tItem.entry}
+                            />
+                          )
+                        }
+                      })}
                     </TimelineGroup>
                   ) : item.kind === 'artifact' ? (
                     <ArtifactCard block={item.block} />
@@ -837,6 +832,31 @@ function isArtifactTool(b: ConvoBlock): boolean {
   return false;
 }
 
+function groupTimelineItems(blocks: ConvoBlock[]) {
+  const items: Array<{ kind: 'thinking'; block: ConvoBlock } | { kind: 'paired'; entry: PairedEntry }> = []
+  let currentToolRun: ConvoBlock[] = []
+
+  const flushTools = () => {
+    if (currentToolRun.length === 0) return
+    const paired = pairEntries(currentToolRun)
+    for (const entry of paired) {
+      items.push({ kind: 'paired', entry })
+    }
+    currentToolRun = []
+  }
+
+  for (const b of blocks) {
+    if (b.kind === 'thinking') {
+      flushTools()
+      items.push({ kind: 'thinking', block: b })
+    } else {
+      currentToolRun.push(b)
+    }
+  }
+  flushTools()
+  return items
+}
+
 type RenderItem =
   | { kind: 'timeline'; key: string; items: ConvoBlock[] }
   | { kind: 'artifact'; block: ConvoBlock }
@@ -856,6 +876,7 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
       b.kind === 'turn' ||
       b.kind === 'steer' ||
       b.kind === 'decision_shift' ||
+      b.kind === 'intent_note' ||
       isArtifactTool(b)
     ) {
       if (run) {
@@ -984,6 +1005,25 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
             {s.methods.map((m, i) => <li key={i}>{m}</li>)}
           </ul>
         )}
+      </div>
+    )
+  }
+  if (block.kind === 'intent_note' && block.note) {
+    const n = block.note
+    return (
+      <div className="decision-shift info intent-note">
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>✦</span>
+          <span className="ds-domain">{n.title}</span>
+          <span className="ds-tag">方向提示</span>
+        </div>
+        {n.reasons.length > 0 && (
+          <ul className="ds-methods">
+            {n.reasons.map((r, i) => <li key={i}>{r}</li>)}
+          </ul>
+        )}
+        {n.action && <div className="ds-reason">{n.action}</div>}
+        {n.steerHint && <div className="intent-note-steer">{n.steerHint}</div>}
       </div>
     )
   }

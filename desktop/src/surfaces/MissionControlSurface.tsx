@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { Plus, LayoutGrid, Radio } from 'lucide-react'
 import { useSessions } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { projectId } from '../lib/projects'
@@ -31,11 +31,11 @@ function livePriority(a: SessionRecord, b: SessionRecord): number {
 }
 
 /**
- * 任务中控台 — a full-width dashboard observing N sessions at once. Every card
- * is driven by the shared 2s session poll; a capped pool of running sessions
- * additionally hold a live SSE mini-stream (phase + tail blocks + edit counts).
+ * 任务中控台 — a dashboard observing N sessions at once. Every card is driven
+ * by the shared 2s session poll; a capped pool of running sessions additionally
+ * holds a live SSE mini-stream (phase + tail blocks + edit counts).
  *
- * Mounted in place of WorkspaceSurface (App.tsx), so the active thread's stream
+ * Rendered as a surface inside WorkspaceSurface, so the active thread's stream
  * is unloaded while mission is open — that frees the connection budget for the
  * live pool here.
  */
@@ -87,17 +87,19 @@ export function MissionControlSurface() {
   return (
     <div className="mission-surface">
       <header className="mission-top">
-        <button
-          className="mission-top-back"
-          onClick={() => dispatch({ type: 'setSurface', surface: 'workspace' })}
-          title="返回工作台"
-        >
-          <ArrowLeft size={16} strokeWidth={1.8} aria-hidden />
-          <span>工作台</span>
-        </button>
-        <h1 className="mission-top-title">任务中控台</h1>
+        <div className="mission-top-brand">
+          <span className="mission-top-icon" aria-hidden>
+            <LayoutGrid size={18} strokeWidth={1.8} />
+          </span>
+          <h1 className="mission-top-title">任务中控台</h1>
+        </div>
         <span className="mission-top-stat">
-          {cards.length} 会话 · {runningCount} 运行中 · {liveCount} 实时
+          <span className="mission-stat-pill">{cards.length} 会话</span>
+          <span className="mission-stat-pill running">{runningCount} 运行中</span>
+          <span className="mission-stat-pill live">
+            <Radio size={12} strokeWidth={2} aria-hidden />
+            {liveCount} 实时
+          </span>
         </span>
         <div className="mission-top-spacer" />
         {ui.activeProject && (

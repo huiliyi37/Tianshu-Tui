@@ -18,6 +18,7 @@ import { dirname, join, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { execSync, spawn } from 'node:child_process'
 import { writeFileAtomicSync } from '../fs-atomic.js'
+import { WinStreamDecoder } from '../platform.js'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
 const GITHUB_API_URL = 'https://api.github.com/repos'
@@ -332,8 +333,8 @@ export interface UpdateResult {
   message: string
 }
 
-function emitLines(data: Buffer, onLine: (line: string) => void): void {
-  const text = data.toString('utf-8')
+export function emitLines(text: string, onLine: (line: string) => void): void {
+  if (text.length === 0) return
   const lines = text.split(/\r?\n/)
   for (const line of lines) {
     if (line.length === 0 && text.endsWith('\n')) continue
@@ -387,18 +388,27 @@ export async function runUpdate(
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let lastErr = ''
+    // Windows: npm/git may emit localized lines in the console code page (GBK),
+    // not UTF-8 — stream-decode with auto-detection to avoid mojibake (乱码).
+    const stdoutDecoder = new WinStreamDecoder()
+    const stderrDecoder = new WinStreamDecoder()
     child.stdout?.on('data', (data: Buffer) => {
-      emitLines(data, onLine)
+      emitLines(stdoutDecoder.write(data), onLine)
       lastErr = ''
     })
     child.stderr?.on('data', (data: Buffer) => {
-      emitLines(data, onLine)
-      lastErr += data.toString('utf-8')
+      const text = stderrDecoder.write(data)
+      emitLines(text, onLine)
+      lastErr += text
     })
     child.on('error', (err) => {
       resolve({ ok: false, skipped: false, message: `Failed to start update: ${err.message}` })
     })
     child.on('close', (code) => {
+      // Flush any bytes buffered mid multi-byte character.
+      emitLines(stdoutDecoder.end(), onLine)
+      const stderrTail = stderrDecoder.end()
+      if (stderrTail) { emitLines(stderrTail, onLine); lastErr += stderrTail }
       if (code === 0) {
         resolve({ ok: true, skipped: false, message: 'Update completed.' })
       } else {

@@ -84,13 +84,11 @@ export function wrapCallbacksWithTuiApp(
       app.callbacks.onPhaseChange?.(phase, detail)
       original.onPhaseChange?.(phase, detail)
     },
-    onIntentPreview: async (intent) => {
-      // 旧 run 的意图预览 → 默认放行（不阻塞已死的 run）
-      if (!live()) return 'continue'
-      if (original.onIntentPreview) {
-        return original.onIntentPreview(intent)
-      }
-      return app.callbacks.onIntentPreview?.(intent) ?? 'continue'
+    onIntentNote: (intent) => {
+      // 迟到的旧 run 方向提示 → 丢弃，不为已死的 run 追加时间线卡片。
+      if (!live()) return
+      app.callbacks.onIntentNote?.(intent)
+      original.onIntentNote?.(intent)
     },
     onSteerDrain: () => {
       if (!live()) return null

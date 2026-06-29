@@ -86,7 +86,7 @@ export interface InputHandlerOptions {
 const PASTE_START = '\x1B[200~'
 const PASTE_END = '\x1B[201~'
 
-export type InputMode = 'normal' | 'input' | 'overlay' | 'approval' | 'intent'
+export type InputMode = 'normal' | 'input' | 'overlay' | 'approval'
 
 /**
  * Ctrl+key 的 ASCII 范围：Ctrl+A = 0x01 .. Ctrl+Z = 0x1A

@@ -22,6 +22,7 @@ import type { BaselineSnapshot } from './agent/worktree-baseline.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 
 import { loadConfig as loadLayeredConfig } from './config/manager.js'
+import { setTargetConventions } from './platform.js'
 import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
 import { SessionContext } from './agent/context.js'
@@ -1344,6 +1345,7 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
 
   // 2. Config
   const config = loadRivetConfig(cwd, opts.args)
+  setTargetConventions(config.editor.platform, config.editor.eol)
 
   // Announce the command sandbox's protection level up-front. Stays silent when
   // a real kernel boundary is active; warns loudly (esp. on native Windows or

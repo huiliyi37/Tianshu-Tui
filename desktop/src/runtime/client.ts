@@ -308,15 +308,6 @@ export function answerApproval(
   })
 }
 
-/** N2 — resolve an intent-preview intervention. */
-export function answerIntent(
-  id: string,
-  requestId: string,
-  decision: 'continue' | 'veto' | 'alternative',
-): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/sessions/${id}/interventions/${requestId}/answer`, { decision })
-}
-
 // ── PlusMenu: models / star-domains / skills ────────────────────────
 
 /** List selectable models for a session (current one flagged). */
@@ -662,6 +653,21 @@ export function setRoutingConfig(
   input: { review?: ReviewRoutingConfig; workers?: WorkersRoutingConfig; council?: CouncilRoutingConfig },
 ): Promise<{ ok: boolean } & RoutingConfig> {
   return apiPut<{ ok: boolean } & RoutingConfig>('/config/routing', input)
+}
+
+// ── Editor / target-platform conventions ────────────────────────────
+export type EditorPlatform = 'auto' | 'windows' | 'macos' | 'linux'
+export type EditorEol = 'auto' | 'lf' | 'crlf'
+export interface EditorConfig { platform: EditorPlatform; eol: EditorEol }
+
+export function getEditorConfig(): Promise<EditorConfig> {
+  return apiGet<EditorConfig>('/config/editor')
+}
+
+export function setEditorConfig(
+  input: { platform?: EditorPlatform; eol?: EditorEol },
+): Promise<{ ok: boolean } & EditorConfig> {
+  return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

@@ -171,7 +171,7 @@ export interface TurnOrchestratorDeps {
   }>
   runReplanCheck: () => void
   buildTurnRequest: (turn: number, strategy: StrategyProfile, sensorium: Sensorium, pressureResult: PressureResult, assistantResponded: boolean, userMessageConsumed: boolean, callbacks: AgentCallbacks) => Promise<{
-    action: 'proceed' | 'veto' | 'abort'
+    action: 'proceed' | 'abort'
     request?: import('../api/oai-types.js').OaiChatRequest
   }>
   prewarmRecentReads: () => Promise<void>
@@ -377,7 +377,6 @@ export class TurnOrchestrator {
           signal!,
           'build-request',
         )
-        if (turnRequest.action === 'veto') continue
         if (turnRequest.action === 'abort') return
         const request = turnRequest.request!
 

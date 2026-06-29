@@ -8,7 +8,43 @@ export interface IntentPreview {
   warnings?: string[]
 }
 
-export type IntentPreviewAction = 'continue' | 'veto' | 'alternative'
+/** Plain-language rendering of an {@link IntentPreview} direction note. */
+export interface IntentNoteCopy {
+  title: string
+  /** Reasons translated from raw `warnings` into 大白话. */
+  reasons: string[]
+  /** What the agent is going to do (it always continues). */
+  action: string
+  /** How the user can steer if they want to change direction. */
+  steerHint: string
+}
+
+/**
+ * Translate an {@link IntentPreview} payload into plain-language copy shared by
+ * the TUI card and the desktop timeline note. Keeps both ends in sync.
+ */
+export function describeIntentNote(intent: IntentPreview): IntentNoteCopy {
+  const reasons: string[] = []
+  for (const w of intent.warnings ?? []) {
+    if (w.includes('high commit threshold')) {
+      reasons.push('我对当前方向把握偏低')
+    } else if (w.startsWith('历史 dead-end')) {
+      const detail = w.replace(/^历史 dead-end:\s*/, '').trim()
+      reasons.push(detail ? `这个目标之前走过死路（${detail}）` : '这个目标之前走过死路')
+    } else if (w.includes('抖动')) {
+      reasons.push('上下文在抖，可能要拆任务')
+    } else {
+      reasons.push(w)
+    }
+  }
+  if (reasons.length === 0) reasons.push('当前方向有一点不确定')
+  return {
+    title: '天权 · 方向提示',
+    reasons,
+    action: '已记录，我会继续执行（必要时先自检一步）',
+    steerHint: '想改方向就直接在下面打字告诉我，比如「先停下，换个思路」',
+  }
+}
 
 export interface BuildIntentPreviewInput {
   strategy: StrategyProfile | null

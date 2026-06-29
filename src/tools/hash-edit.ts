@@ -7,6 +7,8 @@ import { syntaxCheck } from './syntax-check.js'
 import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
+import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
+import { getTargetEol } from '../platform.js'
 
 /**
  * Compute a 8-char hex hash of a line's content (stripped of trailing \r).
@@ -145,7 +147,13 @@ Note: For large new_string, the message history keeps only a short pointer
       }
     }
 
-    const content = await readFile(filePath, 'utf-8')
+    // Normalize to LF for line splitting/rebuild; restore the file's EOL on
+    // write-back. Without this, splicing LF new_string lines into a CRLF file's
+    // (still \r-terminated) lines produces a mixed-EOL file. hashLine already
+    // strips trailing \r, so anchor matching is unaffected either way.
+    const rawContent = await readFile(filePath, 'utf-8')
+    const eol = chooseEol(filePath, detectEol(rawContent), getTargetEol())
+    const content = toLf(rawContent)
     const lines = content.split('\n')
 
     // Staleness guard for position-only anchors: if every anchor omits the
@@ -254,7 +262,7 @@ Note: For large new_string, the message history keeps only a short pointer
             const relPath = relative(params.cwd, filePath)
             trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
-            await writeFileAtomicAsync(filePath, newContent)
+            await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
             refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
             markSessionFileEdit(filePath)
             const warn = syntaxCheck(filePath, newContent)
@@ -294,7 +302,7 @@ Note: For large new_string, the message history keeps only a short pointer
     const relPath = relative(params.cwd, filePath)
     trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
-    await writeFileAtomicAsync(filePath, newContent)
+    await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)

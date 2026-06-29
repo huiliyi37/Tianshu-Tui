@@ -8,7 +8,7 @@ import {
   rollbackSession,
   type RollbackResult,
 } from '../runtime/client'
-import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, IntentRequest, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
+import type { ApprovalMode, ApprovalRequest, ArtifactSummary, FileContent, LineComment, PlanModeState, TodoStateItem } from '../runtime/types'
 import { useEnabledTabs } from '../lib/review-tabs'
 import { DiffView } from '../components/DiffView'
 import { FilePath } from '../components/FilePath'
@@ -18,7 +18,7 @@ import { PlanPanel } from './PlanPanel'
 import { GithubPanel } from './GithubPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
-import { editableKey, previewOf, parseMcpToolName, getApprovalActionProps } from '../lib/approval-preview'
+import { editableKey, previewOf, parseMcpToolName } from '../lib/approval-preview'
 import { isAutonomous } from '../lib/autonomy'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
@@ -42,20 +42,19 @@ interface TabDef {
 }
 
 // Review panel (P3/Q3) — Codex's third pane. Aggregates the trust-layer surfaces
-// of the active thread: pending approvals/intents handled INLINE (no blocking
-// modal) + artifacts/diff/screenshots. The tab bar reserves slots for future CVM
-// council/sensorium views (not rendered yet).
+// of the active thread: pending approvals handled INLINE (no blocking modal) +
+// artifacts/diff/screenshots. Intent direction notes are non-blocking timeline
+// cards (rendered in ThreadView), not handled here. The tab bar reserves slots
+// for future CVM council/sensorium views (not rendered yet).
 export function ReviewPanel(props: {
   sessionId: string | null
   artifacts: ArtifactSummary[]
   pendingApproval: ApprovalRequest | null
-  pendingIntent: IntentRequest | null
   approvalMode?: ApprovalMode
   planMode?: PlanModeState
   planRev?: number
   latestPlanSlug?: string
   onApproval: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
-  onIntent: (decision: 'continue' | 'veto' | 'alternative') => void
   onFeedbackSent?: () => void
   /** T2 — active task list for the Task tab. */
   todos?: TodoStateItem[]
@@ -63,7 +62,7 @@ export function ReviewPanel(props: {
   sources?: string[]
   onCollapse?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, pendingIntent, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onIntent, onFeedbackSent, todos = [], sources = [], onCollapse } = props
+  const { sessionId, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onApproval, onFeedbackSent, todos = [], sources = [], onCollapse } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
@@ -193,7 +192,7 @@ export function ReviewPanel(props: {
     }
   }, [sessionId, open, comment, lineComments, onFeedbackSent])
 
-  const pendingCount = (pendingApproval ? 1 : 0) + (pendingIntent ? 1 : 0)
+  const pendingCount = pendingApproval ? 1 : 0
   const incompleteTasks = todos.filter((t) => t.status !== 'completed').length
 
   const tabs = useMemo<TabDef[]>(() => {
@@ -436,19 +435,14 @@ export function ReviewPanel(props: {
           </section>
         </TabsContent>
         <TabsContent value="review" className="review-body">
-          {(pendingApproval || pendingIntent) && (
+          {pendingApproval && (
             <section className="review-section">
               <h4>待处理</h4>
-              {pendingApproval && (
-                <ApprovalReview request={pendingApproval} onDecision={onApproval} />
-              )}
-              {pendingIntent && (
-                <IntentReview request={pendingIntent} onDecision={onIntent} />
-              )}
+              <ApprovalReview request={pendingApproval} onDecision={onApproval} />
             </section>
           )}
 
-          {autonomous && !pendingApproval && !pendingIntent && (
+          {autonomous && !pendingApproval && (
             <section className="review-section">
               <div className="autonomy-note">
                 <span className="ab-glyph" aria-hidden>✦</span>
@@ -585,10 +579,6 @@ function ApprovalReview(props: {
     else onDecision('approve')
   }
 
-  const rejectProps = getApprovalActionProps('reject')
-  const approveProps = getApprovalActionProps('approve', editing)
-  const editProps = getApprovalActionProps('edit', editing)
-
   // MCP connector opt-in card — never silently use a connector the user didn't
   // choose. Surfaces the connector identity + the tool/input, and frames the
   // approval as authorizing the connector (read-only tools won't re-prompt).
@@ -604,11 +594,8 @@ function ApprovalReview(props: {
         </div>
         <pre className="rp-preview">{preview.text}</pre>
         <div className="rp-actions">
-          <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
-          <button className={approveProps.variant} onClick={() => onDecision('approve')}>
-            {approveProps.label}
-            <span className="rp-default-mark" aria-hidden>●</span>
-          </button>
+          <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+          <button className="btn sm" onClick={() => onDecision('approve')}>授权连接器</button>
         </div>
       </div>
     )
@@ -629,13 +616,12 @@ function ApprovalReview(props: {
       )}
       <div className="rp-actions">
         {editKey && (
-          <button className={editProps.variant} onClick={() => setEditing((v) => !v)}>{editProps.label}</button>
+          <button className="btn ghost sm" onClick={() => setEditing((v) => !v)}>
+            {editing ? '取消编辑' : '编辑'}
+          </button>
         )}
-        <button className={rejectProps.variant} onClick={() => onDecision('reject')}>{rejectProps.label}</button>
-        <button className={approveProps.variant} onClick={approve}>
-          {approveProps.label}
-          <span className="rp-default-mark" aria-hidden>●</span>
-        </button>
+        <button className="btn ghost sm" onClick={() => onDecision('reject')}>拒绝</button>
+        <button className="btn sm" onClick={approve}>{editing ? '应用并批准' : '批准'}</button>
       </div>
     </div>
   )
@@ -730,39 +716,6 @@ function RollbackSection(props: { sessionId: string }) {
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-// Inline intent preview (Q3) — replaces IntentModal.
-function IntentReview(props: {
-  request: IntentRequest
-  onDecision: (decision: 'continue' | 'veto' | 'alternative') => void
-}) {
-  const { request, onDecision } = props
-  return (
-    <div className="review-pending intent">
-      <div className="rp-head">
-        <span className="kind">意图预览 · {(request.confidence * 100).toFixed(0)}%</span>
-      </div>
-      <p className="rp-summary">{request.summary}</p>
-      {request.alternatives.length > 0 && (
-        <>
-          <label className="meta">备选</label>
-          <ul>{request.alternatives.map((a, i) => <li key={i}>{a}</li>)}</ul>
-        </>
-      )}
-      {request.warnings.length > 0 && (
-        <>
-          <label className="meta">警告</label>
-          <ul>{request.warnings.map((w, i) => <li key={i} className="warn">{w}</li>)}</ul>
-        </>
-      )}
-      <div className="rp-actions">
-        <button className="btn ghost sm" onClick={() => onDecision('veto')}>否决</button>
-        <button className="btn ghost sm" onClick={() => onDecision('alternative')}>换方案</button>
-        <button className="btn sm" onClick={() => onDecision('continue')}>继续</button>
-      </div>
     </div>
   )
 }

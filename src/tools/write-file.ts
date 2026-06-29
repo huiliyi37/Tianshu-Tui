@@ -6,6 +6,8 @@ import { syntaxCheck } from './syntax-check.js'
 import { refreshFileReadMtime, getFileReadMtime, markSessionFileEdit } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
+import { applyEol, chooseEol, detectFileEol } from './line-endings.js'
+import { getTargetEol } from '../platform.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -82,12 +84,18 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
       // File doesn't exist yet — skip staleness check
     }
 
-    await writeFileAtomicAsync(filePath, content)
+    // Line-ending policy: force CRLF for Windows batch files, preserve an
+    // existing file's dominant EOL on overwrite, default to LF for new files.
+    // The LF branch is byte-identical to writing `content` verbatim.
+    const existingEol = fileExists ? await detectFileEol(filePath) : null
+    const finalContent = applyEol(content, chooseEol(filePath, existingEol, getTargetEol()))
+
+    await writeFileAtomicAsync(filePath, finalContent)
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     markSessionFileEdit(filePath)
-    const lines = content.split('\n').length
-    const warn = syntaxCheck(filePath, content)
-    return { content: `Wrote ${content.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : '') }
+    const lines = finalContent.split('\n').length
+    const warn = syntaxCheck(filePath, finalContent)
+    return { content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : '') }
   },
 
   requiresApproval: () => true,

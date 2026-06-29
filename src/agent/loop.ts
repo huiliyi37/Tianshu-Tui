@@ -413,10 +413,7 @@ export class AgentLoop {
       setReasoningEffort: effort => { this.setReasoningEffort(effort) },
       getFingerprint: () => this.config.promptEngine.getFingerprint(),
     })
-    this.intent = new TurnIntentController({
-      depositDeadEnd: deposit => this.stigmergyStore.deposit(deposit),
-      addUserMessage: message => { this.session.appendSystemReminder(message) },
-    })
+    this.intent = new TurnIntentController()
     this.contextInjection = new ContextInjectionController({
       session: this.session,
       promptEngine: this.config.promptEngine,
@@ -1215,6 +1212,15 @@ export class AgentLoop {
       debugLog('[agent] run() called while already running — skipping duplicate')
       return
     }
+    // Eager abort controller: created synchronously before any await (incl. the
+    // cancelIdleCompaction() drain below) so an Esc/Ctrl+C during the init/warmup
+    // window aborts a live signal instead of a no-op. Pending latch is cleared
+    // for this fresh run. cancelIdleCompaction only aborts the idle controller
+    // and its finally nulls abortController only when it === idleAbort, so this
+    // fresh user-turn controller survives the drain untouched.
+    this._pendingAbort = false
+    this._watchdogAborted = false
+    this.abortController = new AbortController()
     // Cancel + drain any pending/in-flight idle compaction before mutating the
     // session, so the user turn never races idle history rewrites. Awaiting the
     // settle is correct (not a stall): the idle abort makes the in-flight pass
@@ -1222,12 +1228,6 @@ export class AgentLoop {
     // session is always in a consistent state at the await boundary.
     await this.cancelIdleCompaction()
     this._running = true
-    // Eager abort controller: created synchronously before any await so an
-    // Esc/Ctrl+C during warmupMemories()/intent-routing aborts a live signal
-    // instead of a no-op. Pending latch is cleared for this fresh run.
-    this._pendingAbort = false
-    this._watchdogAborted = false
-    this.abortController = new AbortController()
     try {
       await this._runInner(userInput, callbacks, images)
     } finally {

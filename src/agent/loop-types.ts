@@ -18,7 +18,7 @@ import type { ProviderHealthTracker } from './provider-health.js'
 import type { PlaybookStore } from './playbook-store.js'
 import type { AntiAnchoringConfig } from './anti-anchoring-config.js'
 import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router.js'
-import type { IntentPreview, IntentPreviewAction } from './intent-preview.js'
+import type { IntentPreview } from './intent-preview.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import type { DelegationActivity } from '../tools/types.js'
 
@@ -212,7 +212,14 @@ export interface AgentCallbacks {
   onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
   /** R4 — structured course-correction signal surfaced to the desktop conversation. */
   onDecisionShift?: (shift: DecisionShift) => void
-  onIntentPreview?: (intent: IntentPreview) => Promise<IntentPreviewAction>
+  /**
+   * Non-blocking "direction note": fired when the intent gate trips (high commit
+   * threshold / linked dead-end / thrashing). The agent always continues — this
+   * only surfaces the reasoning/risk as a passive timeline card. The user steers
+   * by typing if they want to change direction. (Replaces the old blocking
+   * 3-way onIntentPreview confirmation.)
+   */
+  onIntentNote?: (intent: IntentPreview) => void
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
   /** T4 — structured per-worker delegation status/progress (subagent panel). */

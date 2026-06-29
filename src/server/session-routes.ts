@@ -13,7 +13,7 @@
  *   GET    /sessions/:id/events?since=N                replay tail (B3)
  *   GET    /sessions/:id/files?q=&limit=                @file mention picker (D2)
  *   GET    /sessions/:id/stream?since=N                live SSE (B3)
- *   POST   /sessions/:id/interventions/:rid/answer     resolve approval/intent (B2)
+ *   POST   /sessions/:id/interventions/:rid/answer     resolve approval (B2)
  *   GET    /sessions/:id/artifacts                     list (B4)
  *   GET    /sessions/:id/artifacts/:artifactId         read raw (B4)
  *   GET    /worktrees                                  list git worktrees

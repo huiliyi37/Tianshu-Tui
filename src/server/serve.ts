@@ -27,6 +27,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
+import { setTargetConventions } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
 import { createAuthProvider } from '../auth/registry.js'
 import type { AuthProvider } from '../auth/types.js'
@@ -77,6 +78,7 @@ export interface ServeContext {
  */
 export function resolveServeContext(loader: () => Config = loadConfig): ServeContext {
   const config = loader()
+  setTargetConventions(config.editor.platform, config.editor.eol)
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {
     throw new Error(`Provider "${config.provider.default}" not configured. Run 'rivet config setup' first.`)
@@ -216,6 +218,29 @@ export function resolveModelSpec(ctx: ServeContext, modelId: string): ResolvedMo
   return null
 }
 
+/**
+ * Resolve a model id against the startup `ctx`, falling back to a fresh on-disk
+ * read when the snapshot can't resolve it. On first install the server starts in
+ * setup mode (configured=false, no API key) and the user configures the key via
+ * /config afterwards — the startup snapshot then can't find a key for the target
+ * model, which would make switchModel 409 until restart. Re-reading config on the
+ * miss path (mirrors resolveInitialSpec) also covers providers added/edited via
+ * Settings after startup. Cheap: the fresh read only happens on the rare miss.
+ */
+export function resolveModelSpecWithReload(
+  ctx: ServeContext,
+  modelId: string,
+  reload: () => ServeContext = resolveServeContext,
+): ResolvedModelSpec | null {
+  const fromSnapshot = resolveModelSpec(ctx, modelId)
+  if (fromSnapshot) return fromSnapshot
+  try {
+    return resolveModelSpec(reload(), modelId)
+  } catch {
+    return null
+  }
+}
+
 /** Enumerate every selectable model across all configured providers. */
 export function listAllModels(ctx: ServeContext): { id: string; alias: string; provider: string; contextWindow?: number }[] {
   const out: { id: string; alias: string; provider: string; contextWindow?: number }[] = []
@@ -225,6 +250,26 @@ export function listAllModels(ctx: ServeContext): { id: string; alias: string; p
     }
   }
   return out
+}
+
+/**
+ * Enumerate selectable models for the picker, preferring a fresh on-disk read
+ * so providers added/edited via Settings *after* startup show up without a
+ * restart — the companion to resolveModelSpecWithReload (which makes the actual
+ * switch resolve the freshly-configured key). The startup snapshot is only a
+ * fallback for the degraded case where the fresh read throws (e.g. a missing
+ * default provider mid-edit). Called on picker open — low frequency, so the
+ * extra config read is negligible.
+ */
+export function listAllModelsWithReload(
+  ctx: ServeContext,
+  reload: () => ServeContext = resolveServeContext,
+): { id: string; alias: string; provider: string; contextWindow?: number }[] {
+  try {
+    return listAllModels(reload())
+  } catch {
+    return listAllModels(ctx)
+  }
 }
 
 /**
@@ -483,7 +528,9 @@ function buildManagedAgent(
     // Wave J: 透传 shared 让 switchModel 后仍复用 providerHealth/domainStore，
     // 健康数据不丢、knowledge 不重 load。
     switchModel: (modelId) => {
-      const next = resolveModelSpec(ctx, modelId)
+      // First-install / post-startup config edits: resolve against the live
+      // config, not just the startup snapshot. See resolveModelSpecWithReload.
+      const next = resolveModelSpecWithReload(ctx, modelId)
       if (!next) return null
       const oldCoordinator = stores.refs.coordinator
       // Cancel the outgoing loop's idle compaction: it shares this SessionContext
@@ -743,7 +790,8 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     // R1 — late-bound getter: registry resolves async after server start.
     getSessionRegistry: () => sessionRegistry,
     // PlusMenu — provider model source + default for the model picker.
-    listModels: () => listAllModels(ctx),
+    // Reload-aware: picks up providers configured after startup (no restart).
+    listModels: () => listAllModelsWithReload(ctx),
     defaultModelId: ctx.model.id,
   })
 

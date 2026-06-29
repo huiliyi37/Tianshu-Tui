@@ -9,5 +9,21 @@
   "delegation": "委派树",
   "council": "议事会",
   "hooks": "Hooks",
-  "settings": "设置"
+  "settings": "设置",
+  "sidebar": {
+    "mainNav": "主导航",
+    "newConversation": "新建对话",
+    "collapseSidebar": "收起侧边栏",
+    "tools": "星域工具",
+    "projects": "项目",
+    "searchSessions": "搜索会话…",
+    "clearSearch": "清除搜索",
+    "noSessions": "还没有会话",
+    "noMatches": "没有匹配结果",
+    "archivedSessions": "归档会话",
+    "currentProject": "当前项目",
+    "archive": "归档会话",
+    "closeSession": "关闭会话",
+    "restore": "恢复"
+  }
 }

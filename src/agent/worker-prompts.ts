@@ -331,6 +331,13 @@ export function buildWorkerRepairPrompt(order: WorkOrder, previousText: string, 
     instruction = `The JSON could not be parsed. Error: ${parseError}. Follow the exact shape below.`
   }
 
+  // Always surface the concrete parser error so the worker knows exactly what
+  // failed — the classified branches give generic advice; without the raw error
+  // the model is repairing blind. (The fallback branch already embeds it.)
+  if (parseError && !instruction.includes(parseError)) {
+    instruction = `${instruction}\nParser error: ${parseError}`
+  }
+
   return [
     `YOUR PREVIOUS ANSWER COULD NOT BE USED. ${instruction}`,
     'Output EXACTLY one JSON object and NOTHING else — no ``` fences, no markdown, no prose outside the object.',
