@@ -156,7 +156,7 @@ export function WorkspaceSurface() {
         <Panel
           panelRef={sidebarRef}
           collapsible
-          defaultSize={`${layout.sidebar}%`}
+          defaultSize={ui.sidebarVisible ? `${layout.sidebar}%` : '0%'}
           minSize="12%"
           maxSize="35%"
           onResize={(size, _id, prev) => {
@@ -170,23 +170,29 @@ export function WorkspaceSurface() {
             else if (!nowCollapsed && wasCollapsed) dispatch({ type: 'setSidebar', visible: true })
           }}
         >
-          <ProjectSidebar
-            onCollapse={() => {
-              dispatch({ type: 'setSidebar', visible: false })
-            }}
-          />
+          {ui.sidebarVisible ? (
+            <ProjectSidebar
+              onCollapse={() => {
+                dispatch({ type: 'setSidebar', visible: false })
+              }}
+            />
+          ) : (
+            <div className="panel-collapsed-placeholder" aria-hidden="true" />
+          )}
         </Panel>
-        <Separator className="panel-resize-handle">
-          <button
-            className="resize-handle-knob left"
-            onClick={(e) => {
-              e.stopPropagation()
-              dispatch({ type: 'setSidebar', visible: !ui.sidebarVisible })
-            }}
-            title={ui.sidebarVisible ? "收起侧边栏" : "展开侧边栏"}
-          >
-            {ui.sidebarVisible ? "‹" : "›"}
-          </button>
+        <Separator className={`panel-resize-handle ${!ui.sidebarVisible ? 'collapsed' : ''}`}>
+          {ui.sidebarVisible && (
+            <button
+              className="resize-handle-knob left"
+              onClick={(e) => {
+                e.stopPropagation()
+                dispatch({ type: 'setSidebar', visible: false })
+              }}
+              title="收起侧边栏"
+            >
+              ‹
+            </button>
+          )}
         </Separator>
         <Panel minSize="30%">
           <div className="conversation">
@@ -273,22 +279,24 @@ export function WorkspaceSurface() {
             {ui.terminalVisible && <TerminalTabs cwd={ui.activeProject ?? ''} />}
           </div>
         </Panel>
-        <Separator className="panel-resize-handle">
-          <button
-            className="resize-handle-knob right"
-            onClick={(e) => {
-              e.stopPropagation()
-              dispatch({ type: 'setReview', visible: !ui.reviewVisible })
-            }}
-            title={ui.reviewVisible ? "收起审查面板" : "展开审查面板"}
-          >
-            {ui.reviewVisible ? "›" : "‹"}
-          </button>
+        <Separator className={`panel-resize-handle ${!ui.reviewVisible ? 'collapsed' : ''}`}>
+          {ui.reviewVisible && (
+            <button
+              className="resize-handle-knob right"
+              onClick={(e) => {
+                e.stopPropagation()
+                dispatch({ type: 'setReview', visible: false })
+              }}
+              title="收起审查面板"
+            >
+              ›
+            </button>
+          )}
         </Separator>
         <Panel
           panelRef={reviewRef}
           collapsible
-          defaultSize={`${layout.review}%`}
+          defaultSize={ui.reviewVisible ? `${layout.review}%` : '0%'}
           minSize="15%"
           maxSize="45%"
           onResize={(size, _id, prev) => {
@@ -300,21 +308,25 @@ export function WorkspaceSurface() {
             else if (!nowCollapsed && wasCollapsed) dispatch({ type: 'setReview', visible: true })
           }}
         >
-          <ReviewPanel
-            sessionId={activeId}
-            artifacts={artifacts.data ?? []}
-            pendingApproval={view.pendingApproval}
-            approvalMode={active?.approvalMode}
-            planMode={view.planMode}
-            planRev={view.planRev}
-            latestPlanSlug={view.latestPlanSlug}
-            onFeedbackSent={() => sessions.refetch()}
-            todos={view.todos}
-            sources={view.sources}
-            onCollapse={() => {
-              dispatch({ type: 'setReview', visible: false })
-            }}
-          />
+          {ui.reviewVisible ? (
+            <ReviewPanel
+              sessionId={activeId}
+              artifacts={artifacts.data ?? []}
+              pendingApproval={view.pendingApproval}
+              approvalMode={active?.approvalMode}
+              planMode={view.planMode}
+              planRev={view.planRev}
+              latestPlanSlug={view.latestPlanSlug}
+              onFeedbackSent={() => sessions.refetch()}
+              todos={view.todos}
+              sources={view.sources}
+              onCollapse={() => {
+                dispatch({ type: 'setReview', visible: false })
+              }}
+            />
+          ) : (
+            <div className="panel-collapsed-placeholder" aria-hidden="true" />
+          )}
         </Panel>
       </Group>
 
