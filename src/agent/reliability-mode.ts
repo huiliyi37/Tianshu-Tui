@@ -102,7 +102,13 @@ export function isScratchScopedWrite(toolName: string, input: Record<string, unk
   if (!raw) return false
   const target = resolve(raw)
   const tmp = resolve(tmpdir())
-  const underTmp = target === tmp || target.startsWith(tmp + sep)
+  // Windows: paths are case-insensitive — normalise to lowercase for comparison.
+  // Without this, C:\Users\... vs c:\users\... would fail startsWith,
+  // breaking the scratch-write self-rescue escape hatch on Windows.
+  const cmp = process.platform === 'win32'
+    ? (p: string) => p.toLowerCase()
+    : (p: string) => p
+  const underTmp = cmp(target) === cmp(tmp) || cmp(target).startsWith(cmp(tmp) + sep)
   const underScratch = /[/\\]\.rivet[/\\]scratch(?:[/\\]|$)/.test(target)
   return underTmp || underScratch
 }
