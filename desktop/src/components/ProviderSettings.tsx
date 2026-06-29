@@ -616,21 +616,47 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
   )
 }
 
+const PAGE_SIZE = 5
+
 export function ProviderSettings() {
   const { data, isLoading, isError } = useConfigProviders()
   const qc = useQueryClient()
   const refresh = () => qc.invalidateQueries({ queryKey: qk.configProviders })
+  const [page, setPage] = useState(0)
 
   if (isLoading) return <div className="meta">加载中…</div>
   if (isError) return <div className="meta warn">无法加载 Provider 配置（sidecar 离线？）</div>
 
   const { providers, unconfigured } = data!
+  const totalPages = Math.max(1, Math.ceil(providers.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages - 1)
+  const pagedProviders = providers.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
 
   return (
     <div className="provider-settings">
-      {providers.map(p => (
+      {pagedProviders.map(p => (
         <ProviderRow key={p.name} p={p} onRefresh={refresh} />
       ))}
+
+      {providers.length > PAGE_SIZE && (
+        <div className="provider-pagination">
+          <button
+            className="btn-mini"
+            disabled={safePage === 0}
+            onClick={() => setPage(safePage - 1)}
+          >
+            上一页
+          </button>
+          <span>第 {safePage + 1} / {totalPages} 页</span>
+          <button
+            className="btn-mini"
+            disabled={safePage >= totalPages - 1}
+            onClick={() => setPage(safePage + 1)}
+          >
+            下一页
+          </button>
+        </div>
+      )}
 
       <div className="preset-section">
         <div className="preset-header">添加 Provider</div>

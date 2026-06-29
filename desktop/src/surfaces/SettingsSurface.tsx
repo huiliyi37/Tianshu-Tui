@@ -258,19 +258,29 @@ export function SettingsSurface() {
           </>
         )}
         {activeCat === 'integrations' && (
-          <>
-            <section className="settings-group">
-              <h4>{t('provider')}</h4>
+          <div className="integration-stack">
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>{t('provider')}</h4>
+                <p className="meta">管理模型 Provider、API Key 与可用模型。首个配置好的 Provider 会自动成为主控。</p>
+              </div>
               <ProviderSettings />
             </section>
-            <section className="settings-group">
-              <h4>子代理 / 审查模型路由</h4>
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>子代理 / 审查模型路由</h4>
+                <p className="meta">把审查、团队、议事会等子代理路由到不同模型，避免它们和主会话争抢缓存。</p>
+              </div>
               <RoutingSettings />
             </section>
-            <section className="settings-group">
+            <section className="integration-card">
+              <div className="integration-card-header">
+                <h4>MCP 服务器</h4>
+                <p className="meta">连接外部工具服务器（如 Context7），为 agent 提供文档查询等扩展能力。</p>
+              </div>
               <McpSettingsManager />
             </section>
-          </>
+          </div>
         )}
         {activeCat === 'system' && (
           <>
