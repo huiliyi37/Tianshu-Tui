@@ -108,7 +108,7 @@ export function App() {
         ) : null}
         {needsSetup && !setupDismissed && (
           <div className="banner warn">
-            首次使用，请先配置 API Key
+            未配置 DeepSeek API Key，无法开始对话或委派子代理。请在设置中填入 Key（子代理推荐使用 deepseek-v4-flash）。
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
@@ -159,7 +159,7 @@ export function App() {
           onClose={() => dispatch({ type: 'openNew', open: false })}
         />
       )}
-      <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
+      <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
     </WallpaperProvider>
   )

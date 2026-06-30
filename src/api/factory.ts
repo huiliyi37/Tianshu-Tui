@@ -21,6 +21,15 @@ export interface RuntimeParams {
 
 /**
  * Resolve the API key from config, falling back to environment variable.
+ *
+ * Fallback order:
+ *   1. provider.apiKey (inline key in config)
+ *   2. provider.apiKeyEnv (explicit env var name in config)
+ *   3. Standard env var: `<PROVIDER_NAME_UPPER>_API_KEY` (e.g. DEEPSEEK_API_KEY)
+ *
+ * Step 3 handles the common case where a user has the standard env var set but
+ * the provider config lost its apiKeyEnv reference (manual edits, migration,
+ * or deleting/re-entering the key in the desktop UI).
  */
 export function resolveApiKey(provider: ProviderConfig): string {
   if (provider.apiKey) return provider.apiKey
@@ -28,9 +37,12 @@ export function resolveApiKey(provider: ProviderConfig): string {
     const env = process.env[provider.apiKeyEnv]
     if (env) return env
   }
+  const defaultEnvVar = `${provider.name.toUpperCase()}_API_KEY`
+  const env = process.env[defaultEnvVar]
+  if (env) return env
   throw new Error(
     `No API key configured for provider "${provider.name}". ` +
-    `Set apiKey in config or the ${provider.apiKeyEnv ?? 'API key'} environment variable.`
+    `Set apiKey in config or the ${provider.apiKeyEnv ?? defaultEnvVar} environment variable.`
   )
 }
 
