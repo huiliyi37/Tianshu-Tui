@@ -24,7 +24,7 @@ import {
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
 // automations (was schedule), attention (was inbox), settings, git.
-export type Surface = 'workspace' | 'mission' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
+export type Surface = 'home' | 'workspace' | 'mission' | 'automations' | 'attention' | 'settings' | 'skills' | 'git' | 'insights' | 'delegation' | 'council' | 'hooks'
 
 export interface UiState {
   activeSessionId: string | null

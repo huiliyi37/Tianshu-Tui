@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  History, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  History, Home, Clock, Bell, Puzzle, GitBranch, BarChart3,
   Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, LayoutGrid, type LucideIcon,
 } from 'lucide-react'
 import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
@@ -16,6 +16,7 @@ const CORE_SURFACES: Surface[] = ['workspace', 'mission', 'automations']
 const TOOL_SURFACES: Surface[] = ['git', 'skills', 'insights', 'delegation', 'council', 'hooks']
 
 const NAV_ICONS: Record<Surface, LucideIcon> = {
+  home: Home,
   workspace: History,
   mission: LayoutGrid,
   automations: Clock,

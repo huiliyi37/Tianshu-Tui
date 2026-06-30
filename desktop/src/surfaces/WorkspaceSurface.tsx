@@ -15,6 +15,7 @@ import { UpdateBanner } from '../components/UpdateBanner'
 import { parseMcpToolName, previewOf, editableKey } from '../lib/approval-preview'
 import { DiffView } from '../components/DiffView'
 
+const HomeSurface = lazy(() => import('./HomeSurface').then((m) => ({ default: m.HomeSurface })))
 const SkillsSurface = lazy(() => import('./SkillsSurface').then((m) => ({ default: m.SkillsSurface })))
 const GitSurface = lazy(() => import('./GitSurface').then((m) => ({ default: m.GitSurface })))
 const InsightsSurface = lazy(() => import('./InsightsSurface').then((m) => ({ default: m.InsightsSurface })))
@@ -156,7 +157,7 @@ export function WorkspaceSurface() {
         <Panel
           panelRef={sidebarRef}
           collapsible
-          defaultSize={ui.sidebarVisible ? `${layout.sidebar}%` : '0%'}
+          defaultSize={`${layout.sidebar}%`}
           minSize="12%"
           maxSize="35%"
           onResize={(size, _id, prev) => {
@@ -199,7 +200,8 @@ export function WorkspaceSurface() {
             <div className="conversation-body">
               <ThreadTabs />
               <Suspense fallback={<div className="surface-loading">加载中…</div>}>
-                {ui.surface === 'mission' ? <MissionControlSurface /> :
+                {ui.surface === 'home' ? <HomeSurface /> :
+                 ui.surface === 'mission' ? <MissionControlSurface /> :
                  ui.surface === 'delegation' ? <DelegationSurface /> :
                  ui.surface === 'skills' ? <SkillsSurface /> :
                  ui.surface === 'git' ? <GitSurface /> :
@@ -296,7 +298,7 @@ export function WorkspaceSurface() {
         <Panel
           panelRef={reviewRef}
           collapsible
-          defaultSize={ui.reviewVisible ? `${layout.review}%` : '0%'}
+          defaultSize={`${layout.review}%`}
           minSize="15%"
           maxSize="45%"
           onResize={(size, _id, prev) => {

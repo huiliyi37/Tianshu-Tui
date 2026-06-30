@@ -1,11 +1,24 @@
 # Tianshu (天枢)
 
-> 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md)
+> 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md) · 📚 [User Guide](docs/user-guide.md) · 🛡️ [Sandbox Permissions](docs/user-guide-sandbox-permissions.md) · ⚙️ [Provider Config](docs/user-guide-provider-config.md)
+
+[![GitHub release](https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?logo=github&style=flat-square)](https://github.com/huiliyi37/Tianshu-Tui/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
 
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
 > The project was originally codenamed **Rivet**; the installed CLI binary is still
 > named `rivet` for backward compatibility.
+
+## Download Desktop App
+
+Get the desktop build from GitHub Releases:
+
+- **[macOS (.dmg)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+- **[Windows (.msi)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+- **[Linux (.AppImage)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+
+Or build from source (see **Quick Start** below).
 
 ## Prerequisites
 

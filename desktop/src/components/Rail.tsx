@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  LayoutDashboard, LayoutGrid, Clock, Bell, Puzzle, GitBranch, BarChart3,
+  Home, LayoutDashboard, LayoutGrid, Clock, Bell, Puzzle, GitBranch, BarChart3,
   Network, Settings, Sun, Moon, Laptop, Scale, Plug, Sparkles, Flower2, Zap, Apple, type LucideIcon,
 } from 'lucide-react'
 import type { Surface } from '../state/store'
@@ -9,6 +9,7 @@ import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 const ICONS: Record<Surface, LucideIcon> = {
+  home: Home,
   workspace: LayoutDashboard,
   mission: LayoutGrid,
   automations: Clock,
@@ -56,7 +57,7 @@ export function Rail(props: {
   const { t: tTheme } = useTranslation('theme')
   const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
 
-  const order: Surface[] = ['workspace', 'mission', 'automations', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
+  const order: Surface[] = ['home', 'workspace', 'mission', 'automations', 'skills', 'git', 'insights', 'delegation', 'council', 'hooks', 'settings']
 
   const cycleTheme = () => {
     const t = nextTheme(theme)

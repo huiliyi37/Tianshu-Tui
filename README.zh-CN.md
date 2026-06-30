@@ -2,9 +2,22 @@
 
 一个全功能的终端编程智能体运行时——智能上下文管理、多模型协调、DeepSeek V4 前缀缓存优化、结构化审查纪律、可扩展工具架构。
 
-> 🇨🇳 [中文文档](README.zh-CN.md) · 📖 [English](README.md)
+> 🇨🇳 [中文文档](README.zh-CN.md) · 📖 [English](README.md) · 📚 [用户手册](docs/user-guide.md) · 🛡️ [沙箱权限说明](docs/user-guide-sandbox-permissions.md) · ⚙️ [Provider 配置](docs/user-guide-provider-config.md)
+
+[![GitHub release](https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?logo=github&style=flat-square)](https://github.com/huiliyi37/Tianshu-Tui/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
 
 基于 **TypeScript strict** + **ANSI 终端渲染引擎 (T9)** + 流式 API 构建。约 15 万行源码,520+ 测试文件。
+
+## 下载桌面端
+
+天枢提供桌面端应用，开箱即用：
+
+- **[macOS (.dmg)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+- **[Windows (.msi)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+- **[Linux (.AppImage)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+
+也支持从源码构建（见下方「快速开始」）。
 
 ## 为什么做天枢
 
