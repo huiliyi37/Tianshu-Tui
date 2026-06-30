@@ -60,6 +60,7 @@ import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
 import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
+import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
 import type { ChangeSet } from '../agent/review-discipline.js'
@@ -114,6 +115,7 @@ const HELP_TEXT = `Available commands:
 /domain [id|list] — Switch star domain (no arg = open domain picker)
 /status — Show agent status (model, domain, cache, tokens)
 /mirror [status|on|off|china|default] — Toggle domestic mirrors for GitHub/npm/pip/go/rust downloads
+/python [status|setup] — Check Python/uv/Git environment or auto-setup a Python project with uv
 /tools — Show available tools and their descriptions
 /compact — Compact context (summarize old messages)
 /workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
@@ -755,6 +757,45 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         pushStatic(createLogEntry({ type: 'system', content: `✅ Reset mirrors to default (off).\n${formatMirrorStatus(next)}` }))
       } else {
         pushStatic(createLogEntry({ type: 'system', content: `${formatMirrorStatus(current)}\n\nUsage: /mirror [on|off|china|default]` }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/python',
+    immediate: true,
+    async handler(ctx) {
+      const { parts, pushStatic, setIsStreaming, agent } = ctx
+      const sub = parts[1]?.toLowerCase()
+      const env = await detectEnv(agent.cwd)
+
+      if (sub === 'status') {
+        const lines = [
+          `Python: ${env.python.available ? `${env.python.command} (${env.python.version ?? 'unknown'})` : '未安装'}`,
+          `uv: ${env.uv.available ? `已安装 (${env.uv.version ?? 'unknown'})` : '未安装'}`,
+          `Git: ${env.git.available ? `已安装 (${env.git.version ?? 'unknown'})` : '未安装'}`,
+          `Node: ${env.node.available ? `已安装 (${env.node.version ?? 'unknown'})` : '未安装'}`,
+          `平台: ${env.platform}`,
+        ]
+        const guidance = formatEnvGuidance(env)
+        pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') }))
+      } else if (sub === 'setup') {
+        if (!env.python.available) {
+          pushStatic(createLogEntry({ type: 'system', content: '未检测到 Python，无法自动配置项目。\n\n' + formatEnvGuidance(env) }))
+        } else if (!env.uv.available) {
+          pushStatic(createLogEntry({ type: 'system', content: '已检测到 Python。推荐安装 uv 来自动管理依赖：\n\n' + formatEnvGuidance(env) }))
+        } else {
+          const recommendation = recommendUvSetup(agent.cwd)
+          if (recommendation.ok && recommendation.command) {
+            pushStatic(createLogEntry({ type: 'system', content: `${recommendation.message}\n即将执行：${recommendation.command}\n\n你可以直接粘贴该命令，或者说"执行 Python 项目初始化"。` }))
+          } else {
+            pushStatic(createLogEntry({ type: 'system', content: recommendation.message }))
+          }
+        }
+      } else {
+        const hasProject = isPythonProject(agent.cwd)
+        pushStatic(createLogEntry({ type: 'system', content: `当前目录 ${hasProject ? '是' : '不像'} Python 项目。\n\nUsage: /python [status|setup]` }))
       }
       setIsStreaming(false)
       return true

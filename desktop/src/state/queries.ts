@@ -8,6 +8,7 @@ import {
   createSchedule,
   createSession,
   deleteSchedule,
+  getEnvironment,
   getHealth,
   getGithubPr,
   getHooks,
@@ -38,6 +39,7 @@ import type { HookEntry, PlanModeState } from '../runtime/types'
 
 export const qk = {
   health: ['health'] as const,
+  environment: ['environment'] as const,
   sessions: ['sessions'] as const,
   artifacts: (id: string | null) => ['artifacts', id] as const,
   plans: (id: string | null) => ['plans', id] as const,
@@ -57,6 +59,15 @@ export function useHealth() {
     queryKey: qk.health,
     queryFn: getHealth,
     refetchInterval: 4000,
+    retry: false,
+  })
+}
+
+export function useEnvironment() {
+  return useQuery({
+    queryKey: qk.environment,
+    queryFn: getEnvironment,
+    refetchInterval: 30000,
     retry: false,
   })
 }

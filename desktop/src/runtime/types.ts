@@ -184,6 +184,21 @@ export interface HealthInfo {
   configured: boolean
 }
 
+export interface ToolVersionInfo {
+  available: boolean
+  version?: string
+  command: string
+  path?: string
+}
+
+export interface EnvironmentInfo {
+  python: ToolVersionInfo
+  uv: ToolVersionInfo
+  git: ToolVersionInfo
+  node: ToolVersionInfo
+  platform: string
+}
+
 export interface ScheduledTask {
   id: string
   prompt: string

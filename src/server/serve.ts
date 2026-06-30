@@ -18,6 +18,7 @@ import { buildSessionRoutes } from './session-routes.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
 import { buildConfigRoutes } from './config-routes.js'
+import { buildEnvRoute } from './env-route.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { buildMcpRoutes } from './mcp-api.js'
@@ -846,6 +847,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Config routes: provider + API key management for the desktop settings UI.
   Object.assign(routes, buildConfigRoutes(apiToken))
+
+  // Environment route: host toolchain availability (python, uv, git, node) for setup UI.
+  Object.assign(routes, buildEnvRoute(apiToken))
 
   // MCP routes: server management + live status for the desktop MCP settings UI.
   Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))
