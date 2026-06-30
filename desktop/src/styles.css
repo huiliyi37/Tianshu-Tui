@@ -3269,6 +3269,11 @@ html[data-theme="dark"] body {
 
 /* Storage location panel — first-run + system settings */
 .storage-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.git-install-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.git-install-steps { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--space-2); line-height: 1.5; }
+.git-install-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.git-install-hint { margin: 0; font-size: 0.8rem; color: var(--text-dim, var(--text)); opacity: 0.8; }
 .storage-intro p { margin: 0; line-height: 1.5; }
 .storage-options { display: flex; flex-direction: column; gap: var(--space-2); }
 .storage-option {

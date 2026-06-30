@@ -32,3 +32,24 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  windows-smoke:
+    # Real-execution smoke for the Windows command path (Git Bash on the runner).
+    # windows-latest ships Git for Windows, so this exercises the actual
+    # spawn → stdio pipe → output capture → file side-effect chain that unit
+    # tests on Linux cannot reach. Guards the "exit=0, empty stdout" regression.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Windows bash smoke test
+        run: node --import tsx --test src/tools/__tests__/bash-windows-smoke.test.ts

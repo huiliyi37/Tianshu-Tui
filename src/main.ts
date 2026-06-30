@@ -43,6 +43,7 @@ import { join } from 'path'
 import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
 import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
+import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -856,6 +857,18 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // 启动期主动环境体检：git 缺失时(尤其 Windows，Git Bash 是命令执行首选 shell)
+  // 醒目提示，而非等命令失败后被动提醒。异步、失败静默、不阻塞启动。
+  void (async () => {
+    try {
+      const env = await detectEnv(process.cwd())
+      const banner = formatGitMissingBanner(env.git.available, env.platform)
+      if (banner) app?.commitStatic(banner)
+    } catch {
+      // fail-open: 环境探测失败不打扰用户
+    }
+  })()
 
   // 异步检查更新：不阻塞启动，失败静默，有新版本时写入 scrollback 提示。
   if (!process.env.RIVET_NO_UPDATE_CHECK) {

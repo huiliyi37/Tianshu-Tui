@@ -191,6 +191,11 @@ export async function openFile(path: string): Promise<void> {
   await apiPost('/open-file', { path })
 }
 
+/** Open an external URL in the system browser via the sidecar. */
+export async function openExternal(url: string): Promise<void> {
+  await apiPost('/open-external', { url })
+}
+
 export async function listAllSessions(): Promise<SessionRecord[]> {
   const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions?includeArchived=true')
   return sessions

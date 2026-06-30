@@ -4,12 +4,32 @@ import {
   buildNotFoundHint,
   extractMissingCommand,
   formatEnvGuidance,
+  formatGitMissingBanner,
   getInstallCommand,
   isPythonProject,
   recommendUvSetup,
 } from '../env-check.js'
 
 describe('env-check', () => {
+  describe('formatGitMissingBanner', () => {
+    it('returns empty string when git is available', () => {
+      assert.equal(formatGitMissingBanner(true, 'win32'), '')
+      assert.equal(formatGitMissingBanner(true, 'darwin'), '')
+    })
+
+    it('emphasizes Git Bash on Windows when git missing', () => {
+      const banner = formatGitMissingBanner(false, 'win32')
+      assert.match(banner, /Git Bash/)
+      assert.match(banner, /git-scm\.com\/download\/win/)
+    })
+
+    it('gives repo-ops rationale on non-Windows when git missing', () => {
+      const banner = formatGitMissingBanner(false, 'darwin')
+      assert.match(banner, /未检测到 Git/)
+      assert.ok(!banner.includes('Git Bash'))
+    })
+  })
+
   describe('buildNotFoundHint', () => {
     it('returns python install hint on macOS', () => {
       const hint = buildNotFoundHint('python3', 'darwin')
