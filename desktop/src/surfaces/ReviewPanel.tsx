@@ -81,20 +81,28 @@ export function ReviewPanel(props: {
     const el = tabsListRef.current
     if (!el) return
     checkScroll()
-    el.addEventListener('scroll', checkScroll)
     window.addEventListener('resize', checkScroll)
-    const t = setTimeout(checkScroll, 200)
+    const t1 = setTimeout(checkScroll, 200)
+    const t2 = setTimeout(checkScroll, 600)
 
     const ro = new ResizeObserver(checkScroll)
     ro.observe(el)
 
     return () => {
-      el.removeEventListener('scroll', checkScroll)
       window.removeEventListener('resize', checkScroll)
-      clearTimeout(t)
+      clearTimeout(t1)
+      clearTimeout(t2)
       ro.disconnect()
     }
-  }, [checkScroll, artifacts, pendingApproval, todos])
+  }, [checkScroll])
+
+  // Re-check after the active tab changes: base-ui may auto-scroll the list to
+  // keep the selected tab in view, which can leave scrollLeft in the middle and
+  // hide the left arrow if our state hasn't caught up.
+  useEffect(() => {
+    const t = setTimeout(checkScroll, 50)
+    return () => clearTimeout(t)
+  }, [tab, checkScroll])
 
   const scrollTabs = (direction: 'left' | 'right') => {
     const el = tabsListRef.current
@@ -104,6 +112,15 @@ export function ReviewPanel(props: {
       left: direction === 'left' ? -amount : amount,
       behavior: 'smooth',
     })
+  }
+
+  const onWheelTabs = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = tabsListRef.current
+    if (!el) return
+    const dx = e.deltaY !== 0 ? e.deltaY : e.deltaX
+    if (Math.abs(dx) < 1) return
+    e.preventDefault()
+    el.scrollBy({ left: dx, behavior: 'smooth' })
   }
 
   // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
@@ -274,11 +291,13 @@ export function ReviewPanel(props: {
             <TabsList
               ref={tabsListRef}
               className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1"
+              onScroll={checkScroll}
+              onWheel={onWheelTabs}
             >
               {tabs.map((t) => {
                 const badge = t.badge?.()
                 return (
-                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs flex-none">
                     <span aria-hidden>{t.glyph}</span>
                     <span>{t.label}</span>
                     {badge != null && badge > 0 && (
