@@ -5,68 +5,33 @@
 #       所以分两步: 先 build 出裸包(createUpdaterArtifacts=false),
 #       再用 tauri signer sign 手动签(这步 env 正常)。
 
-param(
-    [string]$KeyPath = (Join-Path $env:USERPROFILE ".tauri" "tianshu.key"),
-    [string]$KeyPassword = "",
-    [string]$RepoSlug = "huiliyi37/Tianshu-Tui"
-)
-
 $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
 
 $confPath = "src-tauri\tauri.conf.json"
-$backupPath = "$confPath.bak"
-
-function Set-UpdaterArtifacts {
-    param([bool]$enabled)
-    $raw = Get-Content $confPath -Raw
-    $value = if ($enabled) { "true" } else { "false" }
-    # 兼容任意空白与 true/false 大小写
-    $raw = $raw -replace '("createUpdaterArtifacts"\s*:\s*)(true|false)', "`$1$value"
-    $raw | Set-Content $confPath -NoNewline
-}
-
-function Assert-Command {
-    param([string]$name)
-    if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
-        throw "$name 命令未找到，请先安装依赖 (pnpm/npm install)"
-    }
-}
-
-function Assert-Path {
-    param([string]$path, [string]$desc)
-    if (-not (Test-Path $path)) { throw "$desc 不存在: $path" }
-}
-
-Assert-Command npx
-Assert-Path $KeyPath "签名私钥"
-
-# 备份配置
-Copy-Item $confPath $backupPath -Force
+$conf = Get-Content $confPath -Raw
 
 # Step 1: build 不签名
 Write-Host "[1/4] Building (no signing)..."
-Set-UpdaterArtifacts -enabled $false
+$conf -replace '"createUpdaterArtifacts":\s*true', '"createUpdaterArtifacts": false' | Set-Content $confPath -NoNewline
 try {
     npx tauri build
     if ($LASTEXITCODE -ne 0) { throw "tauri build failed: exit $LASTEXITCODE" }
-}
-finally {
+} finally {
     # 恢复 createUpdaterArtifacts: true
-    Set-UpdaterArtifacts -enabled $true
-    Remove-Item $backupPath -Force -ErrorAction SilentlyContinue
+    (Get-Content $confPath -Raw) -replace '"createUpdaterArtifacts":\s*false', '"createUpdaterArtifacts": true' | Set-Content $confPath -NoNewline
 }
 
 # Step 2: 手动签名
 Write-Host "[2/4] Signing..."
-$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content $KeyPath -Raw).Trim()
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $KeyPassword
+$env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content "$env:USERPROFILE\.tauri\tianshu.key" -Raw).Trim()
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 
-$nsisExe = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-$msiFile = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Select-Object -First 1
+$nsisExe = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe" | Select-Object -First 1
+$msiFile = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi" | Select-Object -First 1
 
-if (-not $nsisExe) { throw "NSIS installer not found in src-tauri\target\release\bundle\nsis\" }
-if (-not $msiFile) { throw "MSI installer not found in src-tauri\target\release\bundle\msi\" }
+if (-not $nsisExe) { throw "NSIS installer not found in bundle\nsis\" }
+if (-not $msiFile) { throw "MSI installer not found in bundle\msi\" }
 
 npx tauri signer sign $nsisExe.FullName
 if ($LASTEXITCODE -ne 0) { throw "sign NSIS failed" }
@@ -77,7 +42,7 @@ if ($LASTEXITCODE -ne 0) { throw "sign MSI failed" }
 Write-Host "[3/4] Generating latest.json..."
 $version = (Get-Content $confPath -Raw | ConvertFrom-Json).version
 $notes = "$version release"
-$downloadBase = "https://github.com/$RepoSlug/releases/download/v$version"
+$downloadBase = "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v$version"
 $bundleDir = "src-tauri\target\release\bundle"
 
 node scripts\gen-latest-json.js --version $version --notes $notes --bundle-dir $bundleDir --download-base $downloadBase > "$bundleDir\latest.json"
