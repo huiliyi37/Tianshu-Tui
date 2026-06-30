@@ -1008,7 +1008,7 @@ export class AgentLoop {
     // Add AFTER modeForRecoveryTrigger so the first occurrence reaches full
     // severity (e.g. minimal). Subsequent occurrences are then capped at
     // degraded by modeForRecoveryTrigger's suppressedTriggers check.
-    if (trigger && trigger.severity === 'error') {
+    if (trigger && trigger.severity === 'error' && trigger.trigger) {
       this.firedRecoveryTriggers.add(trigger.trigger)
     }
   }

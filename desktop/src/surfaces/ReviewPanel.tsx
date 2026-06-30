@@ -73,22 +73,8 @@ export function ReviewPanel(props: {
   const checkScroll = useCallback(() => {
     const el = tabsListRef.current
     if (!el) return
-    const left = el.scrollLeft > 1
-    const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 1
-    // @ts-ignore
-    if (typeof window !== 'undefined') {
-      // @ts-ignore
-      window.__scrollDebug = {
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-        scrollLeft: el.scrollLeft,
-        left,
-        right,
-        time: Date.now(),
-      }
-    }
-    setCanScrollLeft(left)
-    setCanScrollRight(right)
+    setCanScrollLeft(el.scrollLeft > 1)
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 1)
   }, [])
 
   useEffect(() => {
