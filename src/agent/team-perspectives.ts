@@ -2,6 +2,7 @@ import { extractJsonCandidates, type WorkerResult } from './work-order.js'
 import type { TeamTask, RiskItem } from './team-plan.js'
 import { mergeRoleFor, type ExpertRole } from './expert-router.js'
 import { starDomainRegistry } from './star-domain-registry.js'
+import { validateTaskGraph, type TaskGraph } from './task-graph.js'
 
 // ── Perspective output schema ──────────────────────────────────────────────
 
@@ -53,6 +54,11 @@ export interface MergedPlan {
   accepted: Array<{ source: string; title: string; reason: string }>
   rejected: Array<{ source: string; title: string; reason: string }>
   deferred: Array<{ source: string; title: string; reason: string }>
+  /** Orthogonal shards from challenger/specialist that were folded into the
+   *  executable `tasks` graph: gap-filled (disjoint) or monolith-split (cleanly
+   *  partitioned a coarse base block). Distinct from `accepted` (advisory wins)
+   *  because these change the dispatched task graph. */
+  augmented: Array<{ source: string; title: string; reason: string }>
   conflicts: Array<{ description: string; tianquan: string; tianfu: string; tianxuan?: string }>
 }
 
@@ -111,7 +117,7 @@ function domainName(perspective: string): string {
 export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): MergedPlan {
   const base = perspectives.find(p => mergeRoleFor(p.perspective) === 'base') ?? perspectives[0]
   if (!base) {
-    return { tasks: [], dependencyNotes: [], risks: [], verification: [], accepted: [], rejected: [], deferred: [], conflicts: [] }
+    return { tasks: [], dependencyNotes: [], risks: [], verification: [], accepted: [], rejected: [], deferred: [], augmented: [], conflicts: [] }
   }
   const others = perspectives.filter(p => p !== base)
   const roleOf = (p: TeamPerspectivePlan): ExpertRole => mergeRoleFor(p.perspective)
@@ -133,6 +139,7 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
   const accepted: MergedPlan['accepted'] = []
   const rejected: MergedPlan['rejected'] = []
   const deferred: MergedPlan['deferred'] = []
+  const augmented: MergedPlan['augmented'] = []
   const conflicts: MergedPlan['conflicts'] = []
 
   // Step 2+3: constraint risk upgrades + verification gates
@@ -192,10 +199,8 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
       }
     }
 
-    // Extra tasks from challengers are deferred for manual review.
-    for (const extraTask of ch.tasks.filter(t => !baseTaskIds.has(t.id))) {
-      deferred.push({ source: ch.perspective, title: `Extra task: ${extraTask.id}`, reason: `Not in ${domainName(base.perspective)} base plan; deferred for manual review` })
-    }
+    // Extra tasks are handled by the augment pass below (gap-fill / monolith-split
+    // into the executable graph; only the leftovers fall back to deferred).
 
     // Classify challenger alternatives.
     for (const alt of ch.alternatives) {
@@ -221,6 +226,83 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
     }
   }
 
+  // Step 6: augment — fold orthogonal shards from challenger/specialist into the
+  // executable graph when base拆得过粗。Two levers, fail-safe to deferred otherwise:
+  //   (B) monolith-split: a coarse base task (files≥2) cleanly partitioned by ≥2
+  //       of one source's extras (parts pairwise-disjoint, each ⊆ base files) →
+  //       replace the base block with the parts and reconnect dependents.
+  //   (A) gap-fill: remaining extras with non-empty files disjoint from ALL current
+  //       tasks → append (run in parallel). Overlap / no clean split → deferred
+  //       (never silently written back, to avoid double-write/stomping).
+  const existingIds = new Set(tasks.map(t => t.id))
+  for (const src of [...challengers, ...specialists]) {
+    const extras = src.tasks.filter(t => t.id && !existingIds.has(t.id) && !baseTaskIds.has(t.id))
+    if (extras.length === 0) continue
+    const consumed = new Set<TeamTask>()
+
+    // (B) monolith-split over the current (possibly already-augmented) graph.
+    for (const b of [...tasks]) {
+      if (!existingIds.has(b.id)) continue
+      const bFiles = filesOfTask(b)
+      if (bFiles.length < 2) continue
+      const bSet = new Set(bFiles)
+      const parts = extras.filter(e => {
+        if (consumed.has(e)) return false
+        const ef = filesOfTask(e)
+        return ef.length > 0 && ef.every(f => bSet.has(f))
+      })
+      if (parts.length < 2 || !pairwiseDisjoint(parts.map(filesOfTask))) continue
+      const shards = parts.map(p => adoptShard(p, existingIds))
+      for (const s of shards) {
+        s.dependsOn = [...new Set([...s.dependsOn, ...b.dependsOn])].filter(d => d !== b.id && d !== s.id)
+        existingIds.add(s.id)
+      }
+      const bi = tasks.findIndex(t => t.id === b.id)
+      tasks.splice(bi, 1, ...shards)
+      taskIndex.delete(b.id)
+      existingIds.delete(b.id)
+      for (const s of shards) taskIndex.set(s.id, s)
+      const replacementIds = shards.map(s => s.id)
+      for (const t of tasks) {
+        if (t.dependsOn.includes(b.id)) {
+          t.dependsOn = [...new Set([...t.dependsOn.filter(d => d !== b.id), ...replacementIds])]
+        }
+      }
+      for (const p of parts) consumed.add(p)
+      augmented.push({ source: src.perspective, title: `Monolith-split: ${b.id} → [${replacementIds.join(', ')}]`, reason: `${domainName(src.perspective)} cleanly partitioned a coarse base shard into parallel orthogonal shards` })
+    }
+
+    // (A) gap-fill remaining disjoint extras.
+    for (const e of extras) {
+      if (consumed.has(e)) continue
+      const ef = filesOfTask(e)
+      if (ef.length === 0) {
+        deferred.push({ source: src.perspective, title: `Extra task: ${e.id}`, reason: 'No files declared; cannot verify orthogonality — deferred for manual review' })
+        continue
+      }
+      if (tasks.every(t => fileSetsDisjoint(ef, filesOfTask(t)))) {
+        const adopted = adoptShard(e, existingIds)
+        tasks.push(adopted)
+        taskIndex.set(adopted.id, adopted)
+        existingIds.add(adopted.id)
+        augmented.push({ source: src.perspective, title: `Gap-fill shard: ${adopted.id}`, reason: `${domainName(src.perspective)} orthogonal shard touches only disjoint files; folded into the execution graph for parallelism` })
+      } else {
+        deferred.push({ source: src.perspective, title: `Extra task: ${e.id}`, reason: 'Overlaps base files without a clean split; deferred to avoid double-write' })
+      }
+    }
+  }
+
+  // Step 7: validateTaskGraph fail-safe — strip dangling deps introduced by augment.
+  const augmentedGraph: TaskGraph = {
+    mission: base.summary,
+    nodes: tasks.map(t => ({ id: t.id, title: t.title, objective: t.objective, profile: t.profile, kind: t.kind, files: t.files, dependsOn: t.dependsOn, riskTier: t.riskTier })),
+    createdAt: 0,
+  }
+  if (!validateTaskGraph(augmentedGraph).valid) {
+    const liveIds = new Set(tasks.map(t => t.id))
+    for (const t of tasks) t.dependsOn = t.dependsOn.filter(d => liveIds.has(d))
+  }
+
   // Build merged risks: base + (constraints ∪ specialists) deduped & name-prefixed.
   // Challenger risks surface via conflicts/alternatives, not the risk ledger.
   const risks: RiskItem[] = base.risks.map(r => ({ taskId: r.taskId, severity: r.severity, claim: r.claim, mitigation: r.mitigation }))
@@ -240,7 +322,54 @@ export function mergePerspectivesByRole(perspectives: TeamPerspectivePlan[]): Me
     }
   }
 
-  return { tasks, dependencyNotes, risks, verification, accepted, rejected, deferred, conflicts }
+  return { tasks, dependencyNotes, risks, verification, accepted, rejected, deferred, augmented, conflicts }
+}
+
+/** Effective file footprint of a task — prefer touchSet (write set) over the
+ *  broader read/scope `files` when present. */
+function filesOfTask(t: { files: string[]; touchSet?: string[] }): string[] {
+  return t.touchSet && t.touchSet.length > 0 ? t.touchSet : (t.files ?? [])
+}
+
+/** True only when both sets are non-empty and share no file. Empty = unknown
+ *  footprint → NOT provably disjoint (conservative → caller defers). */
+function fileSetsDisjoint(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0) return false
+  const setB = new Set(b)
+  return !a.some(f => setB.has(f))
+}
+
+/** All groups pairwise disjoint (used to confirm a clean monolith split). */
+function pairwiseDisjoint(groups: string[][]): boolean {
+  for (let i = 0; i < groups.length; i++) {
+    for (let j = i + 1; j < groups.length; j++) {
+      if (!fileSetsDisjoint(groups[i]!, groups[j]!)) return false
+    }
+  }
+  return true
+}
+
+/** Normalize an adopted shard into a clean TeamTask with a unique id and safe
+ *  defaults (planner output may omit fields at runtime despite the type). */
+function adoptShard(raw: TeamTask, existingIds: Set<string>): TeamTask {
+  const files = [...(raw.files ?? [])]
+  const touchSet = raw.touchSet && raw.touchSet.length > 0 ? [...raw.touchSet] : [...files]
+  const baseId = raw.id || 'shard'
+  let id = baseId
+  let suffix = 2
+  while (existingIds.has(id)) id = `${baseId}__aug${suffix++}`
+  return {
+    id,
+    title: raw.title ?? id,
+    objective: raw.objective ?? '',
+    files,
+    profile: raw.profile ?? 'patcher',
+    kind: raw.kind ?? 'patch_proposal',
+    verification: [...(raw.verification ?? [])],
+    dependsOn: [...(raw.dependsOn ?? [])],
+    riskTier: raw.riskTier ?? 'medium',
+    touchSet,
+  }
 }
 
 /**
@@ -312,9 +441,9 @@ function sameDependencySet(a: string[], b: string[]): boolean {
 /** Role → council responsibility line. The role (not the specific domain)
  *  defines what a planner must produce, so any domain can fill any seat. */
 const ROLE_BRIEFS: Record<ExpertRole, string> = {
-  base: '职责：依赖分析、任务拆解、执行顺序，产出任务主图。',
-  constraint: '职责：风险评估、验证门禁、回归测试、串行约束；遇歧义 fail-closed。',
-  challenger: '职责：定向反证、盲区发现、备选方案；质疑前提。',
+  base: '职责：把任务横向切成正交自包含分片，产出任务主图。每片是一个完整、独立的交付单元，由一个能力强的 flash 端到端独占（实现 + 自跑 tsc/lint/相关测试至全绿）。按模块/关注点边界切，分片间文件尽量两两不相交以便并行；只有真有先后依赖时才标 dependsOn。禁止按工序竖切（不要把 explore/patch/import/test/lint/type/verify 拆成独立角色任务）。宁可几个分量足的分片，不要一堆工序碎片。',
+  constraint: '职责：聚焦跨分片的集成验证门禁与串行约束（每片已自验，你补的是分片之间的）。指出哪些分片因共享文件/接口必须串行并标 dependsOn；评估风险、回归测试；遇歧义 fail-closed。不要重新竖切别人的分片。',
+  challenger: '职责：定向反证、盲区发现、质疑前提；并且——当 base 把某个分片拆得过粗（一个分片塞了多个本可并行的正交模块）时，提出更细的正交分片替代，每片标明 files（取自真实代码而非猜测），这些分片可被采纳进执行图。',
   specialist: '职责：从你的专业领域视角给出建议与约束（默认进入 advisory）。',
 }
 
@@ -345,6 +474,7 @@ export function buildPlannerObjective(
     '',
     'TeamPerspectivePlan = { perspective, summary, tasks, dependencyNotes, risks, verification, blockers, alternatives }.',
     'Each task = { id, title, objective, files, profile, kind, verification, dependsOn, riskTier, touchSet }.',
+    '分片契约：每个 task 是一个横向正交、自包含的交付分片 —— 一个 flash 端到端做完（实现 + 自跑 tsc/lint/相关测试至全绿），profile 用 "patcher"、kind 用 "patch_proposal"。分片间 files 尽量两两不相交以便并行；两片必须改同一文件时用 dependsOn 排序，不要并发抢写。禁止按工序竖切成 explore/lint/type/import/test 等独立角色任务。files 填该分片真正会改的真实路径（来自代码查证，不要猜）。',
     `Set perspective to "${perspective}".`,
   ].join('\n')
 }

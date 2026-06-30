@@ -369,7 +369,9 @@ test('formatTeamSummary renders the council merge ledger when present', () => {
       risks: [{ taskId: 'T1', severity: 'high', claim: 'race', mitigation: 'lock' }],
       deferred: [{ source: 'tianxuan', title: 'Alt approach', reason: 'simpler' }],
       rejected: [],
+      augmented: [{ source: 'tianxuan', title: 'Gap-fill shard: T3', reason: 'orthogonal shard folded in' }],
     },
+    advisories: ['分片 T1 与 T2 都改 src/x.ts 但未标 dependsOn —— 补一条依赖让写入顺序明确(否则会被同文件检测自动串行排波)。'],
   }), 0)
 
   assert.match(out, /Plan conflicts/)
@@ -378,6 +380,9 @@ test('formatTeamSummary renders the council merge ledger when present', () => {
   assert.match(out, /\[high\] T1: race/)
   assert.match(out, /Deferred alternatives/)
   assert.match(out, /Alt approach — simpler/)
+  assert.match(out, /已补入执行图的分片/)
+  assert.match(out, /Gap-fill shard: T3/)
+  assert.match(out, /分片建议\(不阻断\)/)
 })
 
 test('formatTeamSummary omits the merge ledger on cache-hit waves (planMerge absent)', () => {

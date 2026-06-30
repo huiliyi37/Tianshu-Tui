@@ -154,9 +154,18 @@ export interface UnifiedPlanValidation {
   warnings: string[]
 }
 
+/** Minimal task shape for overlap/ordering checks — works for UnifiedTaskNode
+ *  and TeamTask alike (touchSet optional). */
+export interface OverlapCheckTask {
+  id: string
+  files: string[]
+  touchSet?: string[]
+  dependsOn: string[]
+}
+
 /** Build transitive dependency reachability: id → set of all ids it depends on
  *  (directly or transitively). Visited-guarded so cycles don't loop forever. */
-function buildDependencyReachability(tasks: UnifiedTaskNode[]): Map<string, Set<string>> {
+function buildDependencyReachability(tasks: Array<{ id: string; dependsOn: string[] }>): Map<string, Set<string>> {
   const direct = new Map<string, string[]>()
   for (const t of tasks) direct.set(t.id, t.dependsOn)
   const reach = new Map<string, Set<string>>()
@@ -172,6 +181,39 @@ function buildDependencyReachability(tasks: UnifiedTaskNode[]): Map<string, Set<
     reach.set(t.id, acc)
   }
   return reach
+}
+
+/**
+ * Advisory detector: two shards that touch the same file but with no dependsOn
+ * (direct or transitive) between them. Not an error — groupTeamTasks serializes
+ * same-file writes onto different waves and the file-claim registry is a second
+ * backstop — but explicit dependsOn makes the intended write order clear and
+ * avoids surprise serialization. Caller should skip this when the graph has
+ * cycles (reachability is meaningless then). Reused by plan_task validation and
+ * the team max merged-plan check.
+ */
+export function detectOverlapWithoutOrder(tasks: OverlapCheckTask[]): string[] {
+  const warnings: string[] = []
+  const reach = buildDependencyReachability(tasks)
+  for (let i = 0; i < tasks.length; i++) {
+    for (let j = i + 1; j < tasks.length; j++) {
+      const a = tasks[i]!
+      const b = tasks[j]!
+      const aFiles = a.touchSet && a.touchSet.length > 0 ? a.touchSet : a.files
+      const bFiles = b.touchSet && b.touchSet.length > 0 ? b.touchSet : b.files
+      if (aFiles.length === 0 || bFiles.length === 0) continue
+      const shared = aFiles.filter(f => bFiles.includes(f))
+      if (shared.length === 0) continue
+      const ordered = reach.get(a.id)?.has(b.id) === true || reach.get(b.id)?.has(a.id) === true
+      if (!ordered) {
+        warnings.push(
+          `分片 ${a.id} 与 ${b.id} 都改 ${shared.join(', ')} 但未标 dependsOn —— `
+          + `补一条依赖让写入顺序明确(否则会被同文件检测自动串行排波)。`,
+        )
+      }
+    }
+  }
+  return warnings
 }
 
 /** Validate a UnifiedPlan before execution. */
@@ -224,34 +266,11 @@ export function validateUnifiedPlan(plan: UnifiedPlan): UnifiedPlanValidation {
     }
   }
 
-  // Advisory: orthogonal-shard overlap without ordering. Two shards touching the
-  // same file but with no dependsOn between them aren't invalid — groupTeamTasks
-  // serializes same-file writes onto different waves and the file-claim registry
-  // is a second backstop — but explicit dependsOn makes the intended write order
-  // clear and avoids surprise serialization. Skip when cycles exist (reachability
-  // is meaningless then).
-  const warnings: string[] = []
-  if (graphValidation.cycles.length === 0) {
-    const reach = buildDependencyReachability(plan.tasks)
-    for (let i = 0; i < plan.tasks.length; i++) {
-      for (let j = i + 1; j < plan.tasks.length; j++) {
-        const a = plan.tasks[i]!
-        const b = plan.tasks[j]!
-        const aFiles = a.touchSet && a.touchSet.length > 0 ? a.touchSet : a.files
-        const bFiles = b.touchSet && b.touchSet.length > 0 ? b.touchSet : b.files
-        if (aFiles.length === 0 || bFiles.length === 0) continue
-        const shared = aFiles.filter(f => bFiles.includes(f))
-        if (shared.length === 0) continue
-        const ordered = reach.get(a.id)?.has(b.id) === true || reach.get(b.id)?.has(a.id) === true
-        if (!ordered) {
-          warnings.push(
-            `分片 ${a.id} 与 ${b.id} 都改 ${shared.join(', ')} 但未标 dependsOn —— `
-            + `补一条依赖让写入顺序明确(否则会被同文件检测自动串行排波)。`,
-          )
-        }
-      }
-    }
-  }
+  // Advisory: orthogonal-shard overlap without ordering (skip when cycles exist —
+  // reachability is meaningless then). Shared with the team max merged-plan check.
+  const warnings = graphValidation.cycles.length === 0
+    ? detectOverlapWithoutOrder(plan.tasks)
+    : []
 
   return {
     valid: errors.length === 0 && nodeErrors.length === 0,

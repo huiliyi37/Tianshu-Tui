@@ -190,6 +190,7 @@ export const DEFAULT_CONFIG: Config = {
       code_edit: 'cheap-flash',
       test_failure_diagnosis: 'cheap-flash',
       risky_refactor: 'cheap-flash',
+      planning: 'capable',
     },
   },
   skills: {

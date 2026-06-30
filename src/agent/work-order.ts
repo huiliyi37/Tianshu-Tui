@@ -367,7 +367,7 @@ export function mapWorkOrderKindToCapabilityTask(kind: WorkOrderKind): Capabilit
     case 'doc_research':
       return 'repo_summarization'
     case 'plan':
-      return 'code_edit'
+      return 'planning'
     case 'verify':
       return 'test_failure_diagnosis'
     case 'review':

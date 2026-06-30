@@ -142,16 +142,15 @@ describe('config permissions schema', () => {
     assert.equal(parsed.routing.code_edit, 'cheap-flash')
   })
 
-  it('routes ALL worker tasks to non-Pro models', () => {
+  it('routes the planning model to the strong tier, all other workers to cheap-flash', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
-    // Pro is for primary session only — workers never get 'capable'
-    const capableRoutes = Object.entries(parsed.workers.routing)
-      .filter(([, profile]) => profile === 'capable')
-    assert.equal(capableRoutes.length, 0, `Found Pro routes: ${capableRoutes.map(([k]) => k).join(', ')}`)
+    // 规划模型独立路由：planning 走强档（base planner 产出即执行分片图，
+    // 规划质量决定并行拆分好坏）。其余 worker 任务仍全部走 cheap-flash。
+    assert.equal(parsed.workers.routing.planning, 'capable')
 
-    // All routes point to cheap-flash (V4 Flash)
     for (const [task, profile] of Object.entries(parsed.workers.routing)) {
+      if (task === 'planning') continue
       assert.equal(profile, 'cheap-flash', `${task} should route to cheap-flash, got ${profile}`)
     }
   })

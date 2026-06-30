@@ -313,6 +313,9 @@ export const workerRoutingSchema = z.record(z.string(), z.string()).default({
   code_edit: 'cheap-flash',
   test_failure_diagnosis: 'cheap-flash',
   risky_refactor: 'cheap-flash',
+  // 规划模型独立路由：默认走强档（capable/deepseek-v4-pro）。base planner
+  // 产出即执行分片图，规划质量决定并行拆分好坏，故默认强、可在此键改 provider。
+  planning: 'capable',
 })
 
 export const workersSchema = z.object({

@@ -62,6 +62,10 @@ function formatPlanMerge(planMerge: NonNullable<TeamRunSummary['planMerge']>): s
     planMerge.conflicts.map(c => c.description),
   )
   section(
+    '已补入执行图的分片 (orthogonal shards folded in):',
+    planMerge.augmented.map(a => `${a.title} — ${a.reason}`),
+  )
+  section(
     'Deferred alternatives (not in base plan):',
     planMerge.deferred.map(d => `${d.title} — ${d.reason}`),
   )
@@ -87,6 +91,11 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
   if (summary.planMerge) {
     const mergeLines = formatPlanMerge(summary.planMerge)
     if (mergeLines.length > 0) lines.push('', ...mergeLines)
+  }
+  if (summary.advisories && summary.advisories.length > 0) {
+    lines.push('', '分片建议(不阻断):')
+    for (const a of summary.advisories.slice(0, 3)) lines.push(`  - ${a}`)
+    if (summary.advisories.length > 3) lines.push(`  … (+${summary.advisories.length - 3} more)`)
   }
   const nextWave = fromWave + 1
   if (summary.waves.length > nextWave) {

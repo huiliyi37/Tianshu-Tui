@@ -175,6 +175,7 @@ describe('work-order contract', () => {
     assert.equal(mapWorkOrderKindToCapabilityTask('code_search'), 'repo_summarization')
     assert.equal(mapWorkOrderKindToCapabilityTask('review'), 'risky_refactor')
     assert.equal(mapWorkOrderKindToCapabilityTask('verify'), 'test_failure_diagnosis')
+    assert.equal(mapWorkOrderKindToCapabilityTask('plan'), 'planning')
   })
 
   it('creates a write-capable work order with expanded tool allowlist', () => {

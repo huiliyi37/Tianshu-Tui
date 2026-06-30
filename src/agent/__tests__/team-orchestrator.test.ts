@@ -265,6 +265,90 @@ describe('team orchestrator skeleton', () => {
     const t1 = summary.tasks.find(t => t.id === 'T1')!
     assert.deepEqual(t1.verification, ['npx tsc --noEmit', 'npm test'], 'constraint gate folded into task')
   })
+
+  it('max folds a challenger orthogonal shard into the executable graph and dispatches it', async () => {
+    const plans: Record<string, unknown> = {
+      tianquan: {
+        perspective: 'tianquan', summary: 'base',
+        tasks: [{ id: 'T1', title: 'impl x', objective: 'impl x', files: ['src/x.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/x.ts'] }],
+      },
+      tianxuan: {
+        perspective: 'tianxuan', summary: 'challenger',
+        // Disjoint orthogonal shard (src/y.ts) → should be gap-filled into the graph.
+        tasks: [{ id: 'T2', title: 'impl y', objective: 'impl y', files: ['src/y.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/y.ts'] }],
+      },
+    }
+    const dispatchedIds: string[] = []
+    const summary = await runTeamSkeleton({ mode: 'max', objective: 'design the subsystem from scratch' }, {
+      delegateBatch: async (requests) => {
+        const isPlanner = requests.some(r => r.parentTurnId.includes('planner-'))
+        if (isPlanner) {
+          return {
+            status: 'completed', packet: 'planned',
+            results: requests.map(r => {
+              const persp = r.parentTurnId.includes('tianquan') ? 'tianquan'
+                : r.parentTurnId.includes('tianfu') ? 'tianfu'
+                : r.parentTurnId.includes('tianxuan') ? 'tianxuan' : 'other'
+              const plan = plans[persp]
+              return {
+                workOrderId: `team:planner-${persp}`,
+                status: 'passed' as const, summary: 'p', findings: [],
+                artifacts: plan ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify(plan) }] : [],
+                changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' as const,
+              }
+            }),
+          }
+        }
+        for (const r of requests) dispatchedIds.push(r.parentTurnId)
+        return { status: 'completed', results: [], packet: 'executed' }
+      },
+    })
+
+    assert.ok(summary.tasks.some(t => t.id === 'T1'), 'base shard kept')
+    assert.ok(summary.tasks.some(t => t.id === 'T2'), 'disjoint challenger shard folded in')
+    assert.ok(summary.planMerge!.augmented.some(a => a.title.includes('Gap-fill shard: T2')), 'augment ledger records the folded shard')
+    // T1 and T2 are disjoint → same wave, both dispatched together.
+    assert.ok(dispatchedIds.some(id => id.includes('T2')), 'folded shard reaches dispatch')
+  })
+
+  it('max surfaces a non-blocking advisory when merged shards overlap without ordering', async () => {
+    const plans: Record<string, unknown> = {
+      tianquan: {
+        perspective: 'tianquan', summary: 'base',
+        // Two shards touch the SAME file with no dependsOn between them.
+        tasks: [
+          { id: 'T1', title: 'a', objective: 'a', files: ['src/shared.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/shared.ts'] },
+          { id: 'T2', title: 'b', objective: 'b', files: ['src/shared.ts'], profile: 'patcher', kind: 'patch_proposal', verification: [], dependsOn: [], riskTier: 'low', touchSet: ['src/shared.ts'] },
+        ],
+      },
+    }
+    const summary = await runTeamSkeleton({ mode: 'max', objective: 'design the subsystem from scratch' }, {
+      delegateBatch: async (requests) => {
+        const isPlanner = requests.some(r => r.parentTurnId.includes('planner-'))
+        if (isPlanner) {
+          return {
+            status: 'completed', packet: 'planned',
+            results: requests.map(r => {
+              const persp = r.parentTurnId.includes('tianquan') ? 'tianquan'
+                : r.parentTurnId.includes('tianfu') ? 'tianfu'
+                : r.parentTurnId.includes('tianxuan') ? 'tianxuan' : 'other'
+              const plan = plans[persp]
+              return {
+                workOrderId: `team:planner-${persp}`,
+                status: 'passed' as const, summary: 'p', findings: [],
+                artifacts: plan ? [{ kind: 'note' as const, title: 'perspective-plan', content: JSON.stringify(plan) }] : [],
+                changedFiles: [], risks: [], nextActions: [], evidenceStatus: 'verified' as const,
+              }
+            }),
+          }
+        }
+        return { status: 'completed', results: [], packet: 'executed' }
+      },
+    })
+
+    assert.ok(summary.advisories && summary.advisories.length > 0, 'advisory surfaced for overlap without ordering')
+    assert.ok(summary.advisories!.some(a => a.includes('T1') && a.includes('T2')), 'advisory names the overlapping shards')
+  })
 })
 
 describe('team orchestrator wave dispatch', () => {
@@ -450,7 +534,7 @@ depends: T1
       delegateBatch: async (requests) => { captured = requests; return run('reduced') },
     })
 
-    assert.equal(summary.waves[0]!.taskIds.length, 2, 'grouping hard cap remains unchanged')
+    assert.equal(summary.waves[0]!.taskIds.length, 3, 'grouping hard cap = MAX_WRITE_WORKERS (3)')
     assert.equal(summary.dispatched, 1)
     assert.equal(captured.length, 1)
     assert.ok(summary.blocked.some(item => item.includes('deferred by scheduler')))

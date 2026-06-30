@@ -211,17 +211,61 @@ describe('mergePerspectives', () => {
     assert.ok(merged.rejected.some(r => r.title === 'Bad idea'))
   })
 
-  it('defers extra tasks from 天璇 not in 天权', () => {
-    const tianquan = basePerspective()
+  it('gap-fills an orthogonal (disjoint) extra task from 天璇 into the execution graph', () => {
+    const tianquan = basePerspective() // T1 (src/T1.ts), T2 (src/T2.ts)
     const tianfu = normalizePerspective('tianfu', {})
     const tianxuan = normalizePerspective('tianxuan', {
-      tasks: [makeTask('T3')],
+      tasks: [makeTask('T3')], // src/T3.ts — disjoint from base
     })
 
     const merged = mergePerspectives(tianquan, tianfu, tianxuan)
 
-    assert.equal(merged.tasks.length, 2) // Only 天权 tasks
+    assert.equal(merged.tasks.length, 3, 'disjoint extra is folded into the graph')
+    assert.ok(merged.tasks.some(t => t.id === 'T3'))
+    assert.ok(merged.augmented.some(a => a.title.includes('Gap-fill shard: T3')))
+    assert.ok(!merged.deferred.some(d => d.title.includes('T3')), 'adopted shard is not also deferred')
+  })
+
+  it('defers an extra task that overlaps base files (no clean split)', () => {
+    const tianquan = basePerspective() // T1 (src/T1.ts), T2 (src/T2.ts)
+    const tianfu = normalizePerspective('tianfu', {})
+    const overlapping: TeamTask = {
+      ...makeTask('T3'),
+      files: ['src/T1.ts', 'src/new.ts'], // touches base T1's file
+      touchSet: ['src/T1.ts', 'src/new.ts'],
+    }
+    const tianxuan = normalizePerspective('tianxuan', { tasks: [overlapping] })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.equal(merged.tasks.length, 2, 'overlapping extra is NOT folded in')
     assert.ok(merged.deferred.some(d => d.title.includes('T3')))
+    assert.ok(!merged.augmented.some(a => a.title.includes('T3')))
+  })
+
+  it('monolith-splits a coarse base block when a challenger cleanly partitions it', () => {
+    const coarse: TeamTask = {
+      ...makeTask('BIG'),
+      files: ['src/a.ts', 'src/b.ts'],
+      touchSet: ['src/a.ts', 'src/b.ts'],
+    }
+    const dependent: TeamTask = { ...makeTask('AFTER'), dependsOn: ['BIG'] }
+    const tianquan = basePerspective({ tasks: [coarse, dependent] })
+    const tianfu = normalizePerspective('tianfu', {})
+    const partA: TeamTask = { ...makeTask('BIG_A'), files: ['src/a.ts'], touchSet: ['src/a.ts'] }
+    const partB: TeamTask = { ...makeTask('BIG_B'), files: ['src/b.ts'], touchSet: ['src/b.ts'] }
+    const tianxuan = normalizePerspective('tianxuan', { tasks: [partA, partB] })
+
+    const merged = mergePerspectives(tianquan, tianfu, tianxuan)
+
+    assert.ok(!merged.tasks.some(t => t.id === 'BIG'), 'coarse base block is replaced')
+    assert.ok(merged.tasks.some(t => t.id === 'BIG_A'))
+    assert.ok(merged.tasks.some(t => t.id === 'BIG_B'))
+    assert.ok(merged.augmented.some(a => a.title.includes('Monolith-split: BIG')))
+    // dependents reconnect to ALL replacement shards
+    const after = merged.tasks.find(t => t.id === 'AFTER')!
+    assert.ok(after.dependsOn.includes('BIG_A') && after.dependsOn.includes('BIG_B'))
+    assert.ok(!after.dependsOn.includes('BIG'))
   })
 
   it('records 天璇 blind spots as accepted', () => {
