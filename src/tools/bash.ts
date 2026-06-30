@@ -239,7 +239,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         cwd: params.cwd,
         env: { ...sanitizeEnv(process.env), ...mirrorEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true,
+        // detached: true breaks stdio pipes on Windows cmd.exe — the new
+        // console created in detached mode doesn't connect back to the parent's
+        // pipes, causing all commands to return exit=0 with empty output.
+        detached: process.platform !== 'win32',
       }))
 
       let stdout = ''

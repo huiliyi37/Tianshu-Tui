@@ -606,7 +606,7 @@ fn is_portable_location(p: &std::path::Path) -> bool {
             KnownFolder::Windows,
         ];
         for folder in system_folders {
-            if let Ok(folder) = get_known_folder_path(folder) {
+            if let Some(folder) = get_known_folder_path(folder) {
                 if p.starts_with(&folder) {
                     return false;
                 }
