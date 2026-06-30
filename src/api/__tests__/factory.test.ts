@@ -352,6 +352,28 @@ describe('resolveApiKey', () => {
     assert.equal(resolveApiKey(provider), 'sk-123')
   })
 
+  it('falls back to the standard <PROVIDER>_API_KEY env var', () => {
+    const provider: ProviderConfig = { ...deepseekProvider } // no apiKey, no apiKeyEnv
+    process.env.DEEPSEEK_API_KEY = 'sk-from-env'
+    try {
+      assert.equal(resolveApiKey(provider), 'sk-from-env')
+    } finally {
+      delete process.env.DEEPSEEK_API_KEY
+    }
+  })
+
+  it('prefers apiKeyEnv over the standard env var', () => {
+    const provider: ProviderConfig = { ...deepseekProvider, apiKeyEnv: 'CUSTOM_DEEPSEEK_KEY' }
+    process.env.DEEPSEEK_API_KEY = 'sk-standard'
+    process.env.CUSTOM_DEEPSEEK_KEY = 'sk-custom'
+    try {
+      assert.equal(resolveApiKey(provider), 'sk-custom')
+    } finally {
+      delete process.env.DEEPSEEK_API_KEY
+      delete process.env.CUSTOM_DEEPSEEK_KEY
+    }
+  })
+
   it('throws when no key is configured', () => {
     const provider: ProviderConfig = { ...deepseekProvider } // no apiKey, no apiKeyEnv
     assert.throws(

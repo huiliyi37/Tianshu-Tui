@@ -233,7 +233,12 @@ export function getApiKeyStatus(providerName: string): { source: 'inline' | 'env
   const provider = getProvider(providerName)
   if (!provider) return { source: 'none', ref: '' }
   if (provider.apiKey) return { source: 'inline', ref: '***' + provider.apiKey.slice(-4) }
-  if (provider.apiKeyEnv) return { source: 'env', ref: provider.apiKeyEnv }
+  if (provider.apiKeyEnv && process.env[provider.apiKeyEnv]) {
+    return { source: 'env', ref: provider.apiKeyEnv }
+  }
+  // Standard env var fallback so the UI shows "env" even when apiKeyEnv is missing.
+  const defaultEnvVar = `${providerName.toUpperCase()}_API_KEY`
+  if (process.env[defaultEnvVar]) return { source: 'env', ref: defaultEnvVar }
   return { source: 'none', ref: '' }
 }
 
