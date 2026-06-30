@@ -2087,8 +2087,10 @@ export class TuiApp {
       this.state.committedCount++
     })
 
-    // todo 工具写入后刷新常驻任务面板（canonical 源为 TodoStore）。
-    if (name === 'todo') {
+    // todo / plan_task 写入后刷新常驻任务面板（canonical 源为 TodoStore）。
+    // plan_task 同样调用 setTodos 落库，但工具名不是 'todo'，过去走不到立即刷新，
+    // 面板要等下次 ticker 轮询或回合结束才更新——这里一并立即刷新。
+    if (name === 'todo' || name === 'plan_task') {
       this.refreshTodos()
       this.renderLive()
     }
@@ -2524,6 +2526,7 @@ export class TuiApp {
         total,
         done: t.filter(x => x.status === 'completed').length,
         inProgress: t.filter(x => x.status === 'in_progress').length,
+        current: t.find(x => x.status === 'in_progress')?.content,
       }
     })()
 

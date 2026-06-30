@@ -71,6 +71,17 @@ test('todo 工具结果经 todosProvider 刷新面板', () => {
   assert.ok(plain.includes('provider task'), `refreshed from provider: ${plain}`)
 })
 
+test('plan_task 工具结果经 todosProvider 刷新面板', () => {
+  const { app, out } = makeApp()
+  let current: TodoItem[] = []
+  app.setTodosProvider(() => current)
+  // plan_task 同样 setTodos 落库，工具名不是 'todo'，过去走不到立即刷新。
+  current = [mk('p1', 'planned step', 'pending')]
+  app.callbacks.onToolResult('t2', 'plan_task', 'Plan created: 1 step', false)
+  const plain = stripAnsi(out.chunks.join(''))
+  assert.ok(plain.includes('planned step'), `refreshed after plan_task: ${plain}`)
+})
+
 test('空列表不渲染面板（仅底部 chrome）', () => {
   const { app, out } = makeApp()
   app.setTodos([])

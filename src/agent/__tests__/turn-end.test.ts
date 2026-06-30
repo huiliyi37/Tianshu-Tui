@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { processTurnEnd, type TurnEndDeps } from '../turn-end.js'
+import { setTodos } from '../../tools/todo.js'
 
 describe('processTurnEnd', () => {
   function makeDeps(overrides?: Partial<TurnEndDeps>): TurnEndDeps {
@@ -69,5 +70,26 @@ describe('processTurnEnd', () => {
       decisions: ['d1', 'd2', 'd3', 'd4'],
     }))
     assert.ok(result.decisions.length <= 3)
+  })
+
+  it('backfills task progress from turn 0 when a todo list exists', () => {
+    setTodos([{ id: '1', content: 'wire it up', status: 'in_progress' }])
+    try {
+      let called = false
+      processTurnEnd(makeDeps({
+        session: { getTurnCount: () => 1 } as any,
+        config: {
+          promptEngine: {
+            setTaskProgress: () => { called = true },
+            setDecisions: () => {},
+          },
+        } as any,
+      }))
+      // Existing list is the model's own decomposition → injected even at turn ≤3,
+      // unlike the heuristic which stays gated behind turn > 3.
+      assert.equal(called, true)
+    } finally {
+      setTodos([]) // restore singleton so the "skips early turns" test stays valid
+    }
   })
 })

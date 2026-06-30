@@ -31,6 +31,7 @@ import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.j
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
+import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
@@ -422,6 +423,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Fires when TS files were edited + tests ran + no typecheck since.
   if (deps.advisoryBus) {
     hooks.push(createTypecheckReminderHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Todo-Reminder: postTurn hook — nudges the model to (a) create a todo list
+  // when a multi-step task is running without one, and (b) refresh a stale list.
+  // Soft by default, escalates wording when a long task still has no todo.
+  if (deps.advisoryBus) {
+    hooks.push(createTodoReminderHook({ advisoryBus: deps.advisoryBus }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {

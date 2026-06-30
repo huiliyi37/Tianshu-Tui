@@ -87,11 +87,23 @@ export function createTodoTool(store: TodoStore = defaultStore): Tool {
   return {
     definition: {
       name: 'todo',
-      description: `Read and write the session task list. Use this to track progress on multi-step tasks.
-- write: Replace the entire todo list with a new one. Each item has id, content, and status (pending/in_progress/completed).
-- read: Return the current todo list.
+      description: `Read and write the session task list — your goal decomposition. Use it PROACTIVELY.
 
-Always update the list when completing or starting a task.`,
+Actions:
+- write: Replace the ENTIRE list (full-replace, not a patch). Each item has id, content, status (pending/in_progress/completed). Always re-send completed items so they are not lost.
+- read: Return the current list.
+
+When to create/update (do it without being asked):
+- A task needs 3+ distinct steps, or is non-trivial / multi-file.
+- The user gives multiple tasks (a numbered or comma-separated list).
+- Right after receiving new instructions — capture them as todos immediately, BEFORE starting work.
+
+When NOT to use: a single trivial step (don't add ceremony to one-shot edits).
+
+Status rules:
+- Mark a task in_progress BEFORE you start it; keep exactly ONE task in_progress at a time.
+- Mark a task completed IMMEDIATELY when done — do not batch completions.
+- Never silently drop or reset a completed item when rewriting the list.`,
       input_schema: {
         type: 'object',
         properties: {
