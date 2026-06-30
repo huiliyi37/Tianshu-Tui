@@ -25,7 +25,8 @@ async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): P
     const child = spawn('git', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true, // create process group for clean kill
+      // detached: true breaks stdio pipes on Windows — see bash.ts fix for details.
+      detached: process.platform !== 'win32',
     })
 
     let stdout = ''
