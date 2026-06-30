@@ -4,7 +4,7 @@
 
 > 🇨🇳 [中文文档](README.zh-CN.md) · 📖 [English](README.md)
 
-基于 **TypeScript strict** + **Ink 6 (React TUI)** + 流式 API 构建。约 15 万行源码,520+ 测试文件。
+基于 **TypeScript strict** + **ANSI 终端渲染引擎 (T9)** + 流式 API 构建。约 15 万行源码,520+ 测试文件。
 
 ## 为什么做天枢
 
