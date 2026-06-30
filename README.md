@@ -89,7 +89,21 @@ rivet
 ```
 
 > Global install from the repo requires `dist/main.js` to exist. Run `npm run build` first.
-> If the package is published to npm, you can also use `npm install -g tianshu-tui && rivet`.
+
+### npm Registry Install (Recommended)
+
+The package is published to the npm registry as `tianshu-tui`. This is the
+recommended install method — no local build needed, and you get automatic
+update checks on every startup.
+
+```bash
+npm install -g tianshu-tui
+rivet
+```
+
+When a newer version is published, Tianshu shows an update banner at startup
+and `/update` upgrades in-place. Set `RIVET_NO_UPDATE_CHECK=1` to suppress
+the startup check.
 
 ## Core Features
 
@@ -266,6 +280,20 @@ rivet --dangerously-skip-permissions   # one-session override
 
 Skipping prompts does **not** disable tool validation, path safety, evidence tracking, checkpoints, or delivery gates.
 
+### Auto-Update
+
+When installed via `npm install -g tianshu-tui`, Tianshu checks for newer versions
+at startup (once per 24h). If an update is available, a banner appears:
+
+```
+⬆️  Update available: 2.9.0 → 2.9.1. Run /update to upgrade.
+```
+
+`/update` runs `npm install -g tianshu-tui@latest` and restarts the process.
+Source installs (git clone) use `git pull && npm install && npm run build` instead.
+
+Suppress the startup check: `RIVET_NO_UPDATE_CHECK=1`.
+
 ## Configuration
 
 ### Provider Setup
@@ -367,6 +395,7 @@ MCP tools appear as `mcp__<serverId>__<toolName>` and auto-discover at startup.
 | `/debug [prompt\|cache\|mcp]` | Debug prompt, cache stats, or MCP |
 | `/mcp` | MCP server connection status |
 | `/memory <text>` | Save session memory entry |
+| `/update` | Check for and install updates (npm) |
 | `/exit` `/quit` | Save session and exit |
 
 Double-tap **ESC** for rewind overlay. Press **Esc** to dismiss any overlay.
