@@ -13,5 +13,16 @@
   "autonomyLevel": "自治档位",
   "worktree": "隔离 Worktree",
   "worktreeHint": "独立 Git 分支，并行工作互不冲突",
-  "returnToWorkspace": "返回工作台"
+  "returnToWorkspace": "返回工作台",
+  "completionTitle": "任务完成总结",
+  "completionFilesRead": "读取 {{count}} 个文件",
+  "completionFilesModified": "改动 {{count}} 个文件",
+  "completionChangedFiles": "改动文件（{{count}}）",
+  "completionVerificationTitle": "验证结果",
+  "completionTestsPassed": "通过 {{passed}} / 失败 {{failed}}",
+  "completionTestsFailed": "通过 {{passed}} / 失败 {{failed}}",
+  "completionTestsBlocked": "验证被阻塞",
+  "completionTestsNotRun": "未运行验证",
+  "completionNoChanges": "无文件改动",
+  "completionNextAction": "建议下一步"
 }

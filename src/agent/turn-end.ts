@@ -2,7 +2,7 @@ import type { AgentConfig } from './loop-types.js'
 import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
-import type { EvidenceTracker } from './evidence.js'
+import type { EvidenceTracker, AuthoritativeGateView } from './evidence.js'
 import { extractTaskState, taskStateFromTodos } from './task-state.js'
 import { detectMirror } from './behavior-mirror.js'
 import { inferTaskType } from '../model/task-inferrer.js'
@@ -23,6 +23,7 @@ export interface TurnEndDeps {
 export interface TurnEndResult {
   decisions: string[]
   badge: string | null
+  gateV2?: AuthoritativeGateView
 }
 
 export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
@@ -83,7 +84,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   } catch {
     gateV2 = undefined
   }
-  const badge = evidence.buildBadge(gateV2)
+  const badge = evidence.buildBadge({ locale: 'zh-CN', gateV2 })
 
-  return { decisions, badge }
+  return { decisions, badge, gateV2 }
 }

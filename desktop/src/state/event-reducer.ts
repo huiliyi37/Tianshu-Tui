@@ -5,6 +5,7 @@ import type {
   SessionEvent,
   TodoStateItem,
 } from '../runtime/types'
+import type { EvidenceSummary } from '../../../src/agent/evidence.js'
 
 const FILE_TOOLS = new Set([
   'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'read_file', 'create_file',
@@ -105,6 +106,8 @@ export interface EventViewState {
   sources: string[]
   /** I4 — latest user hook results surfaced as raw hook_result events. */
   hookResults: SessionEvent[]
+  /** Completion evidence summary surfaced from the final turn_complete event. */
+  completionSummary?: EvidenceSummary
 }
 
 export const initialEventState: EventViewState = {
@@ -126,6 +129,18 @@ export const initialEventState: EventViewState = {
   prevTotalTokens: 0,
   sources: [],
   hookResults: [],
+  completionSummary: undefined,
+}
+
+/** Strip the inline Evidence markdown section from assistant text so the desktop
+ *  can render it as a CompletionCurtain card instead of duplicate inline Markdown. */
+function stripEvidenceMarkdown(text: string): string {
+  const idx = Math.max(
+    text.lastIndexOf('\n---\n## 任务完成总结'),
+    text.lastIndexOf('\n---\n## Evidence'),
+  )
+  if (idx <= 0) return text
+  return text.slice(0, idx)
 }
 
 export type EventAction =
@@ -288,6 +303,19 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (totalTokens && totalTokens > 0) {
         next.prevTotalTokens = next.lastTotalTokens
         next.lastTotalTokens = totalTokens
+      }
+      // Capture structured completion evidence for the desktop curtain card.
+      if (ev.data.evidence && typeof ev.data.evidence === 'object') {
+        next.completionSummary = ev.data.evidence as EvidenceSummary
+      }
+      // Avoid duplicating the evidence markdown inline when a curtain card will render it.
+      if (lastBlock.kind === 'assistant') {
+        const stripped = stripEvidenceMarkdown(lastBlock.text)
+        if (stripped !== lastBlock.text) {
+          next.blocks = next.blocks.slice(0, -1)
+          next.blocks.push({ ...lastBlock, text: stripped })
+          next.blocksRev = next.blocksRev + 1
+        }
       }
       next.blocks = [...next.blocks, {
         key: `turn-${ev.seq}`,

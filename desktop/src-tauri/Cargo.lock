@@ -1963,6 +1963,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "known-folders"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a1886916523694cd6ea3d175f03a1e5010699a2a4cc13696d83d7bea1d80638"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4043,21 +4052,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-plugin-single-instance"
-version = "2.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c8f29386f5e9fdc699182388a33ee80a56de436d91b67459e86afef426282af"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "thiserror 2.0.18",
- "tracing",
- "windows-sys 0.60.2",
- "zbus",
-]
-
-[[package]]
 name = "tauri-plugin-updater"
 version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4294,6 +4288,7 @@ name = "tianshu-desktop"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "known-folders",
  "portable-pty",
  "rand 0.8.6",
  "serde",
@@ -4303,9 +4298,9 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-process",
- "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "time",
  "window-vibrancy 0.7.1",
 ]
 

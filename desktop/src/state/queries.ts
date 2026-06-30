@@ -8,6 +8,7 @@ import {
   createSchedule,
   createSession,
   deleteSchedule,
+  deleteSession,
   getEnvironment,
   getHealth,
   getGithubPr,
@@ -24,6 +25,7 @@ import {
   listSessions,
   pauseSchedule,
   rejectPlan,
+  renameSession,
   sendArtifactFeedback,
   sendPrompt,
   setDomain,
@@ -236,6 +238,22 @@ export function useUnarchiveSession() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: string) => unarchiveSession(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useRenameSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => renameSession(id, title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
+  })
+}
+
+export function useDeleteSession() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteSession(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.sessions }),
   })
 }

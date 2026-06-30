@@ -20,7 +20,9 @@ import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref,
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
+import { StorageLocationPanel } from '../components/StorageLocationPanel'
 import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { toast } from 'sonner'
 import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
@@ -304,6 +306,7 @@ export function SettingsSurface() {
               )}
             </section>
             <PlatformSection />
+            <StorageLocationSection />
             <StorageSection />
             <UpdaterSection />
           </div>
@@ -529,6 +532,31 @@ function PlatformSection() {
       <div className="meta" style={{ marginTop: 6 }}>
         <code>.bat</code> / <code>.cmd</code> 始终用 CRLF；已存在的文件始终沿用其原有换行符。也可在项目根的 <code>.rivet-config.json</code> 的 <code>editor</code> 段做按项目覆盖。
       </div>
+    </section>
+  )
+}
+
+function StorageLocationSection() {
+  const handleApplied = async (requiresRestart: boolean) => {
+    if (requiresRestart) {
+      toast.success('存储位置已保存，应用即将重启')
+      try {
+        await relaunch()
+      } catch {
+        window.location.reload()
+      }
+    } else {
+      toast.success('存储位置已保存')
+    }
+  }
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>存储位置</h4>
+        <p className="meta">设置天枢数据根目录（RIVET_HOME）。更改后需重启应用，可选择是否迁移已有数据。</p>
+      </div>
+      <StorageLocationPanel onApplied={handleApplied} />
     </section>
   )
 }

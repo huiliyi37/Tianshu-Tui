@@ -1,9 +1,9 @@
 import { execFile } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
-import { homedir } from 'os'
 import { join, isAbsolute, relative } from 'path'
 import { promisify } from 'util'
+import { rivetHome } from '../config/paths.js'
 import { classifyIrreversibleEffects } from './side-effect-classifier.js'
 
 const execFileP = promisify(execFile)
@@ -85,16 +85,14 @@ interface CheckpointData {
   confirmationToken?: string
 }
 
-const RIVET_DIR = join(homedir(), '.rivet')
-
 function checkpointFile(cwd: string): string {
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
-  return join(RIVET_DIR, `checkpoint-${slug}.json`)
+  return join(rivetHome(), `checkpoint-${slug}.json`)
 }
 
 /** Returns the checkpoint file path scoped to a session ID. */
 export function checkpointFileForSession(sessionId: string): string {
-  return join(RIVET_DIR, `checkpoint-${sessionId}.json`)
+  return join(rivetHome(), `checkpoint-${sessionId}.json`)
 }
 
 function loadCheckpointData(cwd: string): CheckpointData | null {
@@ -128,7 +126,7 @@ export interface CheckpointIndexEntry {
 
 function checkpointIndexFile(cwd: string): string {
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, '_').slice(-64)
-  return join(RIVET_DIR, `checkpoint-index-${slug}.json`)
+  return join(rivetHome(), `checkpoint-index-${slug}.json`)
 }
 
 export function loadCheckpointIndex(cwd: string): CheckpointIndexEntry[] {
@@ -189,9 +187,9 @@ export function pruneOrphanCheckpoints(max = MAX_CHECKPOINTS): number {
   let removed = 0
   let entries: { file: string; mtime: number }[]
   try {
-    entries = readdirSync(RIVET_DIR)
+    entries = readdirSync(rivetHome())
       .filter(n => n.startsWith('checkpoint-') && n.endsWith('.json') && !n.startsWith('checkpoint-index-'))
-      .map(n => join(RIVET_DIR, n))
+      .map(n => join(rivetHome(), n))
       .map(file => ({ file, mtime: safeMtime(file) }))
   } catch {
     return 0
@@ -242,7 +240,7 @@ export async function createCheckpoint(cwd: string, label?: string, sessionId?: 
     const hash = stdout.trim()
     const snapshot = await getDirtySnapshot(cwd)
 
-    mkdirSync(RIVET_DIR, { recursive: true })
+    mkdirSync(rivetHome(), { recursive: true })
     const msg = label ?? 'checkpoint'
     const data: CheckpointData = {
       version: 2,

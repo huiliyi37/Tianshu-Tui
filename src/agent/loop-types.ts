@@ -21,6 +21,7 @@ import type { IntentRetrievalRouterConfigInput } from './intent-retrieval-router
 import type { IntentPreview } from './intent-preview.js'
 import type { DomainKnowledgeStore } from './domain-knowledge-store.js'
 import type { DelegationActivity } from '../tools/types.js'
+import type { EvidenceSummary } from './evidence.js'
 
 export type ApprovalMode = 'auto-accept' | 'auto-safe' | 'manual' | 'dangerously-skip-permissions'
 
@@ -204,7 +205,7 @@ export interface AgentCallbacks {
   onThinkingDelta: (thinking: string) => void
   onToolUse: (id: string, name: string, input: Record<string, unknown>) => void
   onToolResult: (id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string) => void
-  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
+  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean, evidenceSummary?: EvidenceSummary) => void
   onError: (error: Error) => void
   onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>

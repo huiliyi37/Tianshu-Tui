@@ -15,9 +15,9 @@
 
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, sep } from 'node:path'
-import { homedir } from 'node:os'
 import { execSync, spawn } from 'node:child_process'
 import { writeFileAtomicSync } from '../fs-atomic.js'
+import { updateCheckPath } from '../config/paths.js'
 import { WinStreamDecoder } from '../platform.js'
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
@@ -32,7 +32,7 @@ interface UpdateCache {
 }
 
 function getUpdateCachePath(): string {
-  return join(homedir(), '.rivet', 'update-check.json')
+  return updateCheckPath()
 }
 
 function readUpdateCache(): UpdateCache | null {

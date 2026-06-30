@@ -119,7 +119,7 @@ function summarizeJsTs(content: string, filePath: string): SummarizeResult {
 // Python summarizer
 // ---------------------------------------------------------------------------
 
-function summarizePython(content: string, filePath: string): SummarizeResult {
+function summarizePython(content: string, _filePath: string): SummarizeResult {
   const lines = content.split('\n')
   const sections: ArtifactSection[] = []
 
@@ -166,7 +166,7 @@ function summarizePython(content: string, filePath: string): SummarizeResult {
 // Rust summarizer
 // ---------------------------------------------------------------------------
 
-function summarizeRust(content: string, filePath: string): SummarizeResult {
+function summarizeRust(content: string, _filePath: string): SummarizeResult {
   const lines = content.split('\n')
   const sections: ArtifactSection[] = []
 
@@ -214,7 +214,7 @@ function summarizeRust(content: string, filePath: string): SummarizeResult {
 // Go summarizer — currently low-detail (test expects low-detail for .go)
 // ---------------------------------------------------------------------------
 
-function summarizeGo(content: string, filePath: string): SummarizeResult {
+function summarizeGo(content: string, _filePath: string): SummarizeResult {
   const lines = content.split('\n')
   return {
     summary: `go file, ${lines.length} lines. low-detail summary (no Go structural parser yet), consider read_section for details.`,
@@ -226,7 +226,7 @@ function summarizeGo(content: string, filePath: string): SummarizeResult {
 // Markdown summarizer
 // ---------------------------------------------------------------------------
 
-function summarizeMarkdown(content: string, filePath: string): SummarizeResult {
+function summarizeMarkdown(content: string, _filePath: string): SummarizeResult {
   const lines = content.split('\n')
   const sections: ArtifactSection[] = []
   const headings: string[] = []
@@ -258,7 +258,7 @@ function summarizeMarkdown(content: string, filePath: string): SummarizeResult {
 // JSON summarizer
 // ---------------------------------------------------------------------------
 
-function summarizeJson(content: string, filePath: string): SummarizeResult {
+function summarizeJson(content: string, _filePath: string): SummarizeResult {
   const lines = content.split('\n')
   const sections: ArtifactSection[] = []
 

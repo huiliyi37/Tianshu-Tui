@@ -25,6 +25,12 @@
     "currentProject": "Current Project",
     "archive": "Archived Sessions",
     "closeSession": "Close session",
-    "restore": "Restore"
+    "restore": "Restore",
+    "renameProject": "Rename project",
+    "removeProject": "Remove project",
+    "renameSession": "Rename session",
+    "deleteSession": "Delete permanently",
+    "confirmRemoveProject": "Remove project \"{name}\"? All its sessions will be archived.",
+    "confirmDeleteSession": "Permanently delete session \"{title}\"? This cannot be undone."
   }
 }

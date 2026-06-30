@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   History, Home, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, LayoutGrid, type LucideIcon,
+  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, LayoutGrid, Pencil, Trash2, type LucideIcon,
 } from 'lucide-react'
-import { useCloseSession, useSessions, useUnarchiveSession } from '../state/queries'
+import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useUnarchiveSession } from '../state/queries'
 import { useUiDispatch, useUiState, type Surface } from '../state/store'
-import { addKnownProject, deriveProjects, loadKnownProjects, projectId } from '../lib/projects'
+import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
@@ -57,7 +57,11 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const sessions = useSessions()
   const closeSession = useCloseSession()
   const unarchive = useUnarchiveSession()
+  const renameSession = useRenameSession()
+  const deleteSession = useDeleteSession()
   const [known, setKnown] = useState(() => loadKnownProjects())
+  const [renamingProject, setRenamingProject] = useState<string | null>(null)
+  const [renamingSession, setRenamingSession] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
@@ -137,6 +141,22 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
       else next.add(id)
       return next
     })
+  }
+
+  const commitProjectRename = (id: string, name: string, roots: string[]) => {
+    if (!name.trim()) return
+    setKnown(renameKnownProject(id, name.trim(), roots))
+    setRenamingProject(null)
+  }
+
+  const removeProject = (p: { id: string; name: string }) => {
+    if (!window.confirm(t('sidebar.confirmRemoveProject', { name: p.name }))) return
+    const group = projectGroups.get(p.id) ?? []
+    for (const s of group) {
+      if (!s.archived) closeSession.mutate(s.id)
+    }
+    setKnown(removeKnownProject(p.id))
+    if (ui.activeProject === p.id) dispatch({ type: 'setProject', projectId: '' })
   }
 
   const activeProjectName = projects.find((p) => p.id === ui.activeProject)?.name
@@ -285,13 +305,55 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                     <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
                   </svg>
                 </span>
-                <span className="pt-name">{p.name}</span>
-                {p.roots.length > 1 && (
-                  <span className="pt-repo-badge" title={p.roots.join('\n')}>
-                    {p.roots.length}
+                <div className="project-tree-header-body">
+                  <div className="project-tree-header-top">
+                    {renamingProject === p.id ? (
+                      <input
+                        className="pt-rename-input"
+                        defaultValue={p.name}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => commitProjectRename(p.id, e.target.value, p.roots)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            commitProjectRename(p.id, (e.target as HTMLInputElement).value, p.roots)
+                          } else if (e.key === 'Escape') {
+                            setRenamingProject(null)
+                          }
+                        }}
+                      />
+                    ) : (
+                      <span className="pt-name" onDoubleClick={() => setRenamingProject(p.id)} title={t('sidebar.renameProject')}>
+                        {p.name}
+                      </span>
+                    )}
+                    {p.roots.length > 1 && (
+                      <span className="pt-repo-badge" title={p.roots.join('\n')}>
+                        {p.roots.length}
+                      </span>
+                    )}
+                    <span className="pt-count">{group.length}</span>
+                  </div>
+                  <span className="pt-path" title={p.roots.join('\n')}>
+                    {p.roots[0]}
                   </span>
-                )}
-                <span className="pt-count">{group.length}</span>
+                </div>
+                <div className="pt-actions" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="pt-action-btn"
+                    title={t('sidebar.renameProject')}
+                    onClick={() => setRenamingProject(p.id)}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    className="pt-action-btn"
+                    title={t('sidebar.removeProject')}
+                    onClick={() => removeProject(p)}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </button>
               {expanded && (
                 <div className="project-tree-children">
@@ -307,9 +369,37 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                       <div className="thread-row-main" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                         <div className="title" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                           <span className={`status-dot status-${s.status}`} />
-                          <span className="thread-title-text" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {s.title ?? s.id.slice(0, 8)}
-                          </span>
+                          {renamingSession === s.id ? (
+                            <input
+                              className="thread-rename-input"
+                              defaultValue={s.title ?? ''}
+                              autoFocus
+                              onClick={(e) => e.stopPropagation()}
+                              onBlur={(e) => {
+                                const title = e.target.value.trim()
+                                if (title) renameSession.mutate({ id: s.id, title })
+                                setRenamingSession(null)
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const title = (e.target as HTMLInputElement).value.trim()
+                                  if (title) renameSession.mutate({ id: s.id, title })
+                                  setRenamingSession(null)
+                                } else if (e.key === 'Escape') {
+                                  setRenamingSession(null)
+                                }
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="thread-title-text"
+                              style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                              onDoubleClick={() => setRenamingSession(s.id)}
+                              title={t('sidebar.renameSession')}
+                            >
+                              {s.title ?? s.id.slice(0, 8)}
+                            </span>
+                          )}
                           {s.planMode === 'planning' && <span className="thread-plan-badge">Plan</span>}
                           {s.worktreeBranch && (
                             <span className="thread-wt-badge" title={`Worktree: ${s.worktreeBranch}`}>
@@ -369,6 +459,16 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
                 }}
                 style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-3)', border: 'none', cursor: 'pointer' }}
               >{t('sidebar.restore')}</button>
+              <button
+                className="btn-sm"
+                title={t('sidebar.deleteSession')}
+                onClick={() => {
+                  if (!window.confirm(t('sidebar.confirmDeleteSession', { title: s.title ?? s.id.slice(0, 8) }))) return
+                  deleteSession.mutate(s.id)
+                  setArchivedSessions((prev) => prev.filter((a) => a.id !== s.id))
+                }}
+                style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'var(--panel-3)', border: 'none', cursor: 'pointer', color: 'var(--error)' }}
+              >{t('sidebar.deleteSession')}</button>
             </div>
           ))}
         </div>

@@ -13,5 +13,16 @@
   "autonomyLevel": "Autonomy level",
   "worktree": "Isolated worktree",
   "worktreeHint": "Separate git branch, parallel work without conflicts",
-  "returnToWorkspace": "Back to workspace"
+  "returnToWorkspace": "Back to workspace",
+  "completionTitle": "Task completed",
+  "completionFilesRead": "{{count}} files read",
+  "completionFilesModified": "{{count}} files modified",
+  "completionChangedFiles": "Changed files ({{count}})",
+  "completionVerificationTitle": "Verification",
+  "completionTestsPassed": "{{passed}} passed / {{failed}} failed",
+  "completionTestsFailed": "{{passed}} passed / {{failed}} failed",
+  "completionTestsBlocked": "Verification blocked",
+  "completionTestsNotRun": "No verification run",
+  "completionNoChanges": "No files changed",
+  "completionNextAction": "Next action"
 }

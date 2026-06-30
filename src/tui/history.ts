@@ -2,10 +2,10 @@ import { readFileSync, existsSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
 import { join } from 'path'
-import { homedir } from 'os'
+import { historyPath } from '../config/paths.js'
 
 export const MAX_HISTORY = 1000
-const HISTORY_PATH = join(homedir(), '.rivet', 'history.json')
+const HISTORY_PATH = historyPath()
 
 export function loadHistory(): string[] {
   try {

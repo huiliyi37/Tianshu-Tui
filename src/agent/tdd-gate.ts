@@ -100,6 +100,10 @@ export function evaluateTddGate(
   // The gate only governs edit/write tools. Reads, bash, search, etc. pass through.
   if (!EDIT_TOOLS.has(toolName)) return { action: 'allow' }
 
+  // Doc-only edits (no code files modified) → allow. The gate's purpose is TDD
+  // for code changes; documentation, config, and plan files have no tests to run.
+  if (!gateState.hasCodeEdits) return { action: 'allow' }
+
   // No files modified yet → nothing to verify, let the first edit through cleanly.
   if (gateState.filesModified === 0) return { action: 'allow' }
 
@@ -202,6 +206,8 @@ export function buildTddGateHint(
 ): ImmuneContextHint | null {
   if (!config.enabled) return null
   if (state.filesModified === 0) return null
+  // Doc-only edits: no hint needed — there are no tests to run.
+  if (!state.hasCodeEdits) return null
 
   // Zero verifications: edits accumulating without any test run.
   if (state.verifications === 0 && state.editsSinceLastTest > 0) {

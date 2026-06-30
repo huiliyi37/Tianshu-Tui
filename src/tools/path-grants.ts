@@ -18,9 +18,9 @@
  * symlinked child. `write` implies `read`.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { writeFileAtomicSync } from '../fs-atomic.js'
+import { rivetHome } from '../config/paths.js'
 
 export type GrantMode = 'read' | 'write'
 
@@ -33,7 +33,7 @@ export interface PathGrant {
   persisted?: boolean
 }
 
-const RIVET_DIR = join(homedir(), '.rivet')
+const RIVET_DIR = rivetHome()
 
 /** In-memory grants for the current process/session. */
 let _grants: PathGrant[] = []

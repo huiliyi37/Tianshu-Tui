@@ -2,54 +2,23 @@ mod pty;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use known_folders::{get_known_folder_path, KnownFolder};
 use rand::Rng;
 use serde::Serialize;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
-
-/// 进程级退出标志。托盘「退出」触发后置 true，退出过程中所有可见性切换
-/// （托盘点击 toggle、CloseRequested→hide）都让它先让路，避免退出清理
-/// （cleanup 在 Windows 上是 window.hide 而非 destroy）与可见性切换打架，
-/// 表现为窗口/托盘"一闪一闪"且进程退不干净。
-static EXITING: AtomicBool = AtomicBool::new(false);
-
-/// 轻量退出诊断日志：追加写 ~/.rivet/desktop/exit-debug.log。失败静默
-/// （绝不影响退出流程）。便于远程协助用户定位"退不掉/闪烁"根因。
-fn exit_debug(msg: &str) {
-    let _ = (|| {
-        // Tauri 2 没有 tauri::api::path::home_dir；用环境变量取 home，零依赖。
-        let home = std::env::var_os(if cfg!(target_os = "windows") {
-            "USERPROFILE"
-        } else {
-            "HOME"
-        })?;
-        let dir = PathBuf::from(home).join(".rivet").join("desktop");
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("exit-debug.log");
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let line = format!("[{secs}] {msg}\n");
-        use std::io::Write;
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .ok()?;
-        f.write_all(line.as_bytes()).ok()
-    })();
-}
 
 /// Live coordinates of the rivet sidecar, handed to the frontend so it can talk
 /// to 127.0.0.1:<port> with the per-launch Bearer token.
@@ -66,6 +35,9 @@ pub struct RuntimeInfo {
     /// nothing, so the frontend shows a fatal "failed to start" state instead of
     /// looping forever on transient-reconnect copy.
     pub ready: bool,
+    /// The resolved RIVET_HOME passed to the sidecar. Empty string when the
+    /// shell could not resolve a data directory.
+    pub rivet_home: String,
 }
 
 struct Sidecar {
@@ -76,6 +48,158 @@ struct Sidecar {
 #[tauri::command]
 fn runtime_info(state: State<Sidecar>) -> RuntimeInfo {
     state.info.clone()
+}
+
+// ── Storage location (RIVET_HOME) UI commands ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageOptions {
+    current: String,
+    default_path: String,
+    portable_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageApplyResult {
+    success: bool,
+    migrated: bool,
+    requires_restart: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn is_storage_configured(app: tauri::AppHandle) -> bool {
+    launcher_config_path(&app).map(|p| p.exists()).unwrap_or(false)
+}
+
+#[tauri::command]
+fn get_storage_options(app: tauri::AppHandle) -> StorageOptions {
+    let current = resolve_rivet_home(&app).to_string_lossy().to_string();
+    let default_path = default_rivet_home(&app).to_string_lossy().to_string();
+    let portable_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .filter(|p| is_portable_location(p))
+        .map(|p| p.join("TianshuData").join(".rivet").to_string_lossy().to_string());
+    StorageOptions {
+        current,
+        default_path,
+        portable_path,
+    }
+}
+
+fn validate_storage_path(path: &Path) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err("请选择绝对路径".to_string());
+    }
+    let s = path.to_string_lossy();
+    if s.starts_with(r"\\") || s.starts_with("//") {
+        return Err("不支持网络路径（UNC）".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    if s.starts_with("/Volumes/") {
+        return Err("不支持 /Volumes/ 网络卷".to_string());
+    }
+    Ok(())
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("无法创建父目录: {}", e))?;
+    }
+    Ok(())
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+
+        // Skip symlinks — they can point outside the data tree or create cycles.
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
+
+        let dst_path = dst.join(entry.file_name());
+
+        // Merge, don't overwrite — the design contract says "不覆盖同名文件".
+        if dst_path.exists() {
+            continue;
+        }
+
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn apply_storage_location(
+    app: tauri::AppHandle,
+    path: String,
+    migrate: bool,
+) -> Result<StorageApplyResult, String> {
+    let new_home = PathBuf::from(path);
+    validate_storage_path(&new_home)?;
+
+    let old_home = resolve_rivet_home(&app);
+
+    // Guard against setting a path inside the current data root.
+    if new_home.starts_with(&old_home) && new_home != old_home {
+        return Err("新路径不能位于当前数据目录内部".to_string());
+    }
+
+    let mut migrated = false;
+    if migrate && old_home.exists() && old_home != new_home {
+        ensure_parent_dir(&new_home)?;
+        let old_data = old_home.join(".rivet");
+        let new_data = new_home.join(".rivet");
+        if old_data.exists() {
+            // Run the recursive copy on a blocking thread — session data can
+            // be hundreds of MB and must not freeze the UI.
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                copy_dir_all(&old_data, &new_data)
+            })
+            .await
+            .map_err(|e| format!("迁移线程异常: {}", e))?;
+            match result {
+                Ok(()) => migrated = true,
+                Err(e) => {
+                    return Ok(StorageApplyResult {
+                        success: false,
+                        migrated: false,
+                        requires_restart: false,
+                        error: Some(format!("迁移失败: {}", e)),
+                    });
+                }
+            }
+        }
+    }
+
+    // Write launcher config so the next sidecar spawn uses the new path.
+    let cfg_path = launcher_config_path(&app).ok_or("无法定位启动器配置目录")?;
+    ensure_parent_dir(&cfg_path)?;
+    let cfg = LauncherConfig {
+        rivet_home: new_home.to_string_lossy().to_string(),
+        source: "user-selected".to_string(),
+        updated_at: OffsetDateTime::now_utc().format(&Rfc3339).ok(),
+    };
+    let raw = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&cfg_path, raw).map_err(|e| format!("写入 launcher.json 失败: {}", e))?;
+
+    Ok(StorageApplyResult {
+        success: true,
+        migrated,
+        requires_restart: true,
+        error: None,
+    })
 }
 
 /// Apply or clear the window's translucent backdrop (Windows Mica) to match the
@@ -393,11 +517,112 @@ fn sidecar_cwd(app: &tauri::App) -> Option<PathBuf> {
     app.path().home_dir().ok()
 }
 
+/// Launcher-level config stored outside the data root so the shell can decide
+/// where the data root is before the sidecar starts.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherConfig {
+    #[serde(default)]
+    rivet_home: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    updated_at: Option<String>,
+}
+
+fn launcher_config_path<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d: PathBuf| d.join("launcher.json"))
+}
+
+fn read_launcher_config<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> LauncherConfig {
+    let Some(path) = launcher_config_path(app) else {
+        return LauncherConfig::default();
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<LauncherConfig>(&raw).unwrap_or_default(),
+        Err(_) => LauncherConfig::default(),
+    }
+}
+
+/// Resolve the data root (RIVET_HOME) for the sidecar.
+///
+/// Priority:
+///   1. launcher.json rivetHome (set by desktop Settings > Storage)
+///   2. default: platform default, with portable-mode detection on first run
+fn resolve_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
+    let cfg = read_launcher_config(app);
+    if !cfg.rivet_home.is_empty() {
+        return PathBuf::from(cfg.rivet_home);
+    }
+    default_rivet_home(app)
+}
+
+fn default_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
+    // Portable-mode detection: if the exe lives next to the data directory
+    // (e.g., green/zip install on D:\Tools\Tianshu), keep data beside the exe.
+    // System installs (Program Files, /Applications, /usr, /opt) use the OS user dir.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if is_portable_location(parent) {
+                return parent.join("TianshuData").join(".rivet");
+            }
+        }
+    }
+    if cfg!(target_os = "windows") {
+        PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join(".rivet")
+    } else {
+        app.path()
+            .home_dir()
+            .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()))
+            .join(".rivet")
+    }
+}
+
+/// True when the exe parent is NOT a known system install directory.
+/// Uses the Windows Known Folders API so non-English "Program Files" variants
+/// (Programme, Archivos de programa, プログラムファイル, etc.) are handled.
+fn is_portable_location(p: &std::path::Path) -> bool {
+    let s = p.to_string_lossy().to_lowercase();
+
+    #[cfg(target_os = "macos")]
+    if s.starts_with("/applications/") {
+        return false;
+    }
+
+    #[cfg(target_os = "linux")]
+    if s.starts_with("/usr/") || s.starts_with("/opt/") {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let system_folders = [
+            KnownFolder::ProgramFiles,
+            KnownFolder::ProgramFilesX86,
+            KnownFolder::ProgramFilesCommon,
+            KnownFolder::Windows,
+        ];
+        for folder in system_folders {
+            if let Ok(folder) = get_known_folder_path(folder) {
+                if p.starts_with(&folder) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let port = pick_free_port();
     let token = random_token();
     let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
+    let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
 
     // Report spawn failures instead of swallowing them with `.ok()`: a missing
     // node / bad entry path otherwise leaves the UI with a valid-looking handle
@@ -408,6 +633,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         .arg("--port")
         .arg(port.to_string())
         .env("RIVET_SERVER_TOKEN", &token)
+        .env("RIVET_HOME", rivet_home.to_string_lossy().as_ref())
         // Parent-death watchdog: the Node sidecar polls this PID and self-exits
         // when the shell process is gone, so a crash / force-quit / Task Manager
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
@@ -456,6 +682,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
             token,
             node_source: node_source.to_string(),
             ready,
+            rivet_home: rivet_home.to_string_lossy().to_string(),
         },
         child,
     )
@@ -467,11 +694,7 @@ fn kill_sidecar(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<Sidecar>() {
         if let Ok(mut guard) = state.child.lock() {
             if let Some(mut c) = guard.take() {
-                exit_debug("kill_sidecar: take() got child, calling kill()");
                 let _ = c.kill();
-                exit_debug("kill_sidecar: kill() returned");
-            } else {
-                exit_debug("kill_sidecar: take() got None (already killed)");
             }
         }
     }
@@ -482,16 +705,6 @@ pub fn run() {
     let tray_icon_bytes = include_bytes!("../icons/32x32.png");
 
     tauri::Builder::default()
-        // 单例保护：必须是第一个 plugin。第二个实例启动直接退出并唤起已有窗口，
-        // 杜绝多实例争抢同一 ~/.rivet/desktop/registry.db。仅桌面端生效。
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            exit_debug("single_instance: second launch detected, focusing existing");
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.unminimize();
-                let _ = w.set_focus();
-            }
-        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -500,6 +713,9 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
+            is_storage_configured,
+            get_storage_options,
+            apply_storage_location,
             set_window_glass,
             pty::pty_spawn,
             pty::pty_write,
@@ -545,18 +761,6 @@ pub fn run() {
                 .menu(&tray_menu)
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     let id = event.id().as_ref();
-                    if id == "quit" {
-                        // 退出优先：先立 flag，让退出过程中所有可见性切换让路，
-                        // 再杀 sidecar、退 app。避免 hide/show 打架导致"一闪一闪"。
-                        exit_debug("tray quit: requested");
-                        EXITING.store(true, Ordering::SeqCst);
-                        kill_sidecar(app);
-                        app.exit(0);
-                        return;
-                    }
-                    if EXITING.load(Ordering::SeqCst) {
-                        return;
-                    }
                     if let Some(w) = app.get_webview_window("main") {
                         match id {
                             "show" => {
@@ -569,12 +773,12 @@ pub fn run() {
                             _ => {}
                         }
                     }
+                    if id == "quit" {
+                        kill_sidecar(app);
+                        app.exit(0);
+                    }
                 })
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
-                    // 退出过程中忽略托盘点击 toggle，避免与 cleanup 的 window.hide 打架。
-                    if EXITING.load(Ordering::SeqCst) {
-                        return;
-                    }
                     if let TrayIconEvent::Click { button: _, .. } = event {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
@@ -593,12 +797,7 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                if EXITING.load(Ordering::SeqCst) {
-                    // 正在退出 → 不 prevent_close，让窗口正常关闭，避免挡住退出流程。
-                    exit_debug("CloseRequested during exit: allowing close");
-                    return;
-                }
-                // 用户点 X → 隐藏到托盘，不杀 sidecar
+                // 关闭窗口 → 隐藏到托盘，不杀 sidecar
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -610,19 +809,8 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            match event {
-                tauri::RunEvent::ExitRequested { code, .. } => {
-                    exit_debug(&format!(
-                        "RunEvent::ExitRequested code={:?}",
-                        code
-                    ));
-                }
-                tauri::RunEvent::Exit => {
-                    exit_debug("RunEvent::Exit: kill_sidecar + process ending");
-                    kill_sidecar(app_handle);
-                    exit_debug("RunEvent::Exit: done");
-                }
-                _ => {}
+            if let tauri::RunEvent::Exit = event {
+                kill_sidecar(app_handle);
             }
         });
 }

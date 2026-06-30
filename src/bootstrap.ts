@@ -10,7 +10,6 @@
  */
 
 import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici'
-import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID, createHash } from 'crypto'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'fs'
@@ -22,6 +21,7 @@ import type { BaselineSnapshot } from './agent/worktree-baseline.js'
 import type { ModelCapabilityCard } from './model/capability.js'
 
 import { loadConfig as loadLayeredConfig } from './config/manager.js'
+import { lastSessionPointerDir, rivetHome, stateDir } from './config/paths.js'
 import { setTargetConventions } from './platform.js'
 import { AgentLoop } from './agent/loop.js'
 import { createAgentConfig, createMainAgentConfigInput } from './agent/create-agent-config.js'
@@ -247,7 +247,7 @@ export function wasSessionResumed(): boolean {
  *  session, never another project's). Hashed cwd mirrors the memory-store
  *  convention (sha256(cwd).slice(0,12)). */
 function lastSessionPointerFile(cwd: string): string {
-  const dir = join(homedir(), '.rivet', 'last-session')
+  const dir = lastSessionPointerDir()
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   const hash = createHash('sha256').update(cwd).digest('hex').slice(0, 12)
   return join(dir, `${hash}.txt`)
@@ -269,7 +269,7 @@ function lastSessionPointerFile(cwd: string): string {
 export function getOrCreateSessionId(): string {
   if (_cachedSessionId) return _cachedSessionId
   const cwd = process.cwd()
-  const dir = join(homedir(), '.rivet')
+  const dir = rivetHome()
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
@@ -1056,9 +1056,9 @@ export async function createSessionInfrastructure(): Promise<{
   sessionId: string
   heartbeatInterval: ReturnType<typeof setInterval>
 }> {
-  const stateDir = join(homedir(), '.rivet', 'state')
+  const stateDirPath = stateDir()
   const { SessionRegistry } = await import('./agent/session-registry.js')
-  const registry = await SessionRegistry.create(stateDir)
+  const registry = await SessionRegistry.create(stateDirPath)
 
   // Reap dead sessions' registry rows/claims so they don't block fresh claims.
   // Default startup is fresh — we do NOT auto-resume crashed sessions; this only

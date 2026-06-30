@@ -21,6 +21,8 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  StorageApplyResult,
+  StorageOptions,
   WorkingTreeResponse,
 } from './types'
 
@@ -35,6 +37,8 @@ export interface RuntimeInfo {
    *  state instead of an endless transient-reconnect banner. Absent (treated as
    *  ready) in the browser-dev fallback and on older shells. */
   ready?: boolean
+  /** Resolved RIVET_HOME passed to the sidecar. Reported by the Rust shell. */
+  rivetHome?: string
 }
 
 let cached: RuntimeInfo | null = null
@@ -74,6 +78,21 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
  */
 export function clearRuntimeCache(): void {
   cached = null
+}
+
+/** True once the user has chosen a data-root via First-run storage dialog. */
+export function isStorageConfigured(): Promise<boolean> {
+  return invoke<boolean>('is_storage_configured')
+}
+
+/** List available RIVET_HOME locations (current/default/portable). */
+export function getStorageOptions(): Promise<StorageOptions> {
+  return invoke<StorageOptions>('get_storage_options')
+}
+
+/** Set RIVET_HOME and optionally migrate existing data. Requires app restart. */
+export function applyStorageLocation(path: string, migrate: boolean): Promise<StorageApplyResult> {
+  return invoke<StorageApplyResult>('apply_storage_location', { path, migrate })
 }
 
 /** Test-only: inspect the memoized runtime handle (null when cleared). */
@@ -240,6 +259,23 @@ export async function closeSession(id: string): Promise<{ archived: boolean }> {
 /** Restore a previously archived session back to the active list. */
 export async function unarchiveSession(id: string): Promise<{ archived: boolean }> {
   return apiPost<{ archived: boolean }>(`/sessions/${id}/unarchive`)
+}
+
+/** Rename a session title. */
+export async function renameSession(id: string, title: string): Promise<{ id: string; title: string }> {
+  const res = await rivetFetch(`/sessions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`PATCH /sessions/${id} -> ${res.status}`)
+  return res.json() as Promise<{ id: string; title: string }>
+}
+
+/** Permanently delete an archived session. */
+export async function deleteSession(id: string): Promise<{ deleted: boolean; freedBytes: number }> {
+  const res = await rivetFetch(`/sessions/${id}/permanent`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE /sessions/${id}/permanent -> ${res.status}`)
+  return res.json() as Promise<{ deleted: boolean; freedBytes: number }>
 }
 
 export interface StorageEntry {

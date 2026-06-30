@@ -1432,6 +1432,19 @@ export class RuntimeSessionManager {
     return true
   }
 
+  /**
+   * Rename a session. Updates the record title and persists it.
+   * Returns false when the session is missing.
+   */
+  setTitle(id: string, title: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    s.record.title = title.trim()
+    this.touch(s)
+    this.persistRecord(s)
+    return true
+  }
+
   /** List git worktrees for a given cwd (defaults to the manager's default cwd). */
   getWorktrees(cwd?: string): WorktreeEntry[] {
     return listWorktrees(cwd ?? this.defaultCwd)
@@ -1695,8 +1708,8 @@ export class RuntimeSessionManager {
         }
         this.scanArtifacts(session)
       },
-      onTurnComplete: (usage, turnNumber, isFinal) =>
-        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal }),
+      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) =>
+        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) }),
       onError: (err) => this.append(session, 'error', { error: redactText(err.message) }),
       onAbort: () => {
         if (session.record.status === 'running') session.record.status = 'aborted'

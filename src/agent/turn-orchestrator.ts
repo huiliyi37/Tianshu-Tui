@@ -235,9 +235,9 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
       hb.tick(`${name} returned`)
       cb.onToolResult(id, name, result, isError, rawPath, uiContent)
     },
-    onTurnComplete: (usage, turnNumber, isFinal) => {
+    onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
       hb.tick(`turn ${turnNumber} complete`)
-      cb.onTurnComplete(usage, turnNumber, isFinal)
+      cb.onTurnComplete(usage, turnNumber, isFinal, evidenceSummary)
     },
     onPhaseChange: (phase, detail) => {
       // Heartbeat-emitted phases must NOT recursively reset the clock.

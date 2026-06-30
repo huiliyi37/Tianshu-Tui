@@ -20,7 +20,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { planTemplatesDir } from '../config/paths.js'
 
 const TEMPLATES_DIR = '.rivet/plan-templates'
 
@@ -55,7 +55,7 @@ function getTemplatesDir(cwd: string): string {
 
 /** Get the user-global templates directory (~/.rivet/plan-templates). */
 function getUserTemplatesDir(): string {
-  return join(homedir(), '.rivet', 'plan-templates')
+  return planTemplatesDir()
 }
 
 /**
