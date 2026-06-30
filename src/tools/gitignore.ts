@@ -43,6 +43,11 @@ export class GitignoreFilter {
     const absPath = resolve(cwd, filePath)
     const relPath = relativePosix(cwd, absPath)
 
+    // Gitignore rules only apply inside the project tree. Paths outside the
+    // project (e.g. ~/.rivet/sessions/ on the same machine) must not be blocked
+    // — the user may have explicitly granted access to read session logs.
+    if (relPath.startsWith('..')) return false
+
     for (const pattern of this.patterns) {
       if (this.matchPattern(pattern, relPath)) return true
     }
