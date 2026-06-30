@@ -109,8 +109,8 @@ describe('buildSystemPrompt', () => {
     // no-fabricated-tests 门禁 + output-style 已并入 <delivery-contract>。
     assert.ok(prompt.includes('<delivery-contract>'), '应有统一的交付契约块')
     assert.ok(prompt.includes('0 passed 当成功'), '诚实门禁内核（未运行=未验证）必须有落点')
-    assert.ok(prompt.includes('交付物'), '三项报告内核必须有落点')
-    assert.ok(prompt.includes('遗留项'), '遗留项报告必须保留')
+    assert.ok(prompt.includes('涉及文件'), '收束必须包含commit+文件信息')
+    assert.ok(prompt.includes('没什么可说就跳过'), '收束不强制填表——无内容可跳过')
     assert.ok(prompt.includes('自我设限'), 'NEVER narrate session limits 必须有落点')
   })
 
@@ -166,9 +166,9 @@ describe('buildSystemPrompt', () => {
 
   it('includes task completion reporting requirements', () => {
     const prompt = buildSystemPrompt({ tools: [] })
-    assert.ok(prompt.includes('遗留项'))
-    assert.ok(prompt.includes('设计偏离'))
-    assert.ok(prompt.includes('交付物'))
+    assert.ok(prompt.includes('涉及文件'), '收束应有 commit + 文件信息')
+    assert.ok(prompt.includes('效果预期'), '收束应提示可写效果预期但不必强制')
+    assert.ok(prompt.includes('没什么可说就跳过'), '收束不强制填表')
   })
 
   it('includes only a short manifest entry for sensitive knowledge domains', () => {
