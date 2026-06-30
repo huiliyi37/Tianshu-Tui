@@ -1,12 +1,31 @@
-# Tianshu (天枢)
+<p align="center">
+  <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="Tianshu Banner" width="100%">
+</p>
 
-> 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md) · 📚 [User Guide](docs/user-guide.md) · 🛡️ [Sandbox Permissions](docs/user-guide-sandbox-permissions.md) · ⚙️ [Provider Config](docs/user-guide-provider-config.md)
+<p align="center">
+  <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
+</p>
 
-[![GitHub release](https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?logo=github&style=flat-square)](https://github.com/huiliyi37/Tianshu-Tui/releases)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+<p align="center">
+  <a href="README.md">📖 English</a> · 
+  <a href="README.zh-CN.md">🇨🇳 中文</a> · 
+  <a href="docs/user-guide.md">📚 User Guide</a> · 
+  <a href="docs/user-guide-sandbox-permissions.md">🛡️ Sandbox</a> · 
+  <a href="docs/user-guide-provider-config.md">⚙️ Provider Config</a>
+</p>
 
-Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
+  <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Tests-2700%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+</p>
 
+---
+
+Tianshu (天枢) is a high-performance terminal coding agent runtime featuring a robust **Cognitive Virtual Machine (CVM)**, a continuous self-perception engine, stigmergic file-based memory, and deep prefix-cache optimization (boasting up to **99.6% cache hit rate** on DeepSeek V4). It is designed to act as an autonomous developmental partner rather than a passive code editing utility.
+
+> [!NOTE]
 > The project was originally codenamed **Rivet**; the installed CLI binary is still
 > named `rivet` for backward compatibility.
 
@@ -104,6 +123,43 @@ rivet
 When a newer version is published, Tianshu shows an update banner at startup
 and `/update` upgrades in-place. Set `RIVET_NO_UPDATE_CHECK=1` to suppress
 the startup check.
+
+## Why Tianshu?
+
+Most AI coding agents treat context as a garbage can—they dump everything in until it overflows, and then perform naive compression. Tianshu introduces a structured, highly optimized **Cognitive Runtime** built around the concept of a **Cognitive Virtual Machine (CVM)** and **Prefix-Cache-Friendly** optimization.
+
+```mermaid
+graph TD
+    LLM[Large Language Model] -->|Raw Action / Defect| CVM[Cognitive VM Runtime]
+    CVM -->|19 Hooks / 5 Phases| Engine[Self-Correction & Mirroring]
+    Engine -->|Approved & Safe Action| Tools[Tool System]
+    Tools -->|Evidence & Claims| Stigmergy[Stigmergic Memory]
+    Stigmergy -->|Pheromones & Trails| LLM
+```
+
+### The Three Pillars of Tianshu's Architecture
+
+1. **Cognitive Virtual Machine (CVM - Tianshu Exclusive)**:
+   A dedicated virtual runtime layer implementing `19 hooks` across `5 cognitive phases` (Stream, Perception, Intent, Tool, Compaction). CVM traps and emulates LLM behavior at runtime, actively correcting alignment drift, attention decay, and loop oscillations without modifying model weights.
+2. **Stigmergic Memory**:
+   Unlike static memory files, Tianshu implements a biology-inspired stigmergic memory system. It leaves behavioral "pheromones" directly mapped onto codebase files that decay naturally over time. The agent gets faster and smarter on files it modifies frequently.
+3. **99.6% Prefix Cache Optimization**:
+   DeepSeek V4 charges 50× more for cache misses. Tianshu's prompt engine is architected around prefix-cache optimization (including Ice Mirror 3-zone cache anchors and frozen-prefix matching), achieving a steady-state **95–99% cache hit rate** on long sessions, slashing development API costs by up to 97%.
+
+### Tianshu vs. MiMo-Code vs. Claude Code
+
+| Dimension | Tianshu | MiMo-Code | Claude Code |
+| :--- | :--- | :--- | :--- |
+| **Core Architecture** | **Cognitive Runtime (CVM)** | Product Experience/Ecosystem | Proprietary Enterprise Agent |
+| **Cognitive Virtual Machine** | **Yes (19 Hooks × 5 Phases)** | No (Standard agent loop) | No (User-custom hooks only) |
+| **Prefix Cache Hit Rate** | **99.6% (DeepSeek V4 tuned)** | Basic / Not optimized | Anthropic Cache (Basic) |
+| **Self-Perception (Sensorium)**| **Yes (Continuous 6D Vector)** | No | No |
+| **Stigmergic Memory** | **Yes (File-level pheromones)**| SQLite & Manual MEMORY.md | Limited Project Memory |
+| **Multi-Agent Concurrency** | **Yes (Concurrent commits)** | Yes (Background Execution) | Yes (Single worker sandbox) |
+| **Delivery Gates** | **Yes (Rigorous verification)**| No | No |
+| **Open Source License** | **Apache 2.0** | MIT | Closed Source |
+
+---
 
 ## Core Features
 

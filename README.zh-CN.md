@@ -1,13 +1,32 @@
-# 天枢 (Tianshu)
+<p align="center">
+  <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="Tianshu Banner" width="100%">
+</p>
 
-一个全功能的终端编程智能体运行时——智能上下文管理、多模型协调、DeepSeek V4 前缀缓存优化、结构化审查纪律、可扩展工具架构。
+<p align="center">
+  <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
+</p>
 
-> 🇨🇳 [中文文档](README.zh-CN.md) · 📖 [English](README.md) · 📚 [用户手册](docs/user-guide.md) · 🛡️ [沙箱权限说明](docs/user-guide-sandbox-permissions.md) · ⚙️ [Provider 配置](docs/user-guide-provider-config.md)
+<p align="center">
+  <a href="README.md">📖 English</a> · 
+  <a href="README.zh-CN.md">🇨🇳 中文</a> · 
+  <a href="docs/user-guide.md">📚 用户手册</a> · 
+  <a href="docs/user-guide-sandbox-permissions.md">🛡️ 沙箱权限</a> · 
+  <a href="docs/user-guide-provider-config.md">⚙️ Provider 配置</a>
+</p>
 
-[![GitHub release](https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?logo=github&style=flat-square)](https://github.com/huiliyi37/Tianshu-Tui/releases)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
+  <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Tests-2700%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+</p>
 
-基于 **TypeScript strict** + **ANSI 终端渲染引擎 (T9)** + 流式 API 构建。约 15 万行源码,520+ 测试文件。
+---
+
+**天枢 (Tianshu)** 是一个全功能的、高性能的终端编程智能体运行时（TUI）。天枢的核心架构跳出了传统 AI 编程助手将 LLM 仅当成“工具”的局限，基于**认知虚拟机 (CVM)**、**自感知感知层**和**信息素（Stigmergy）自衰减记忆**构建，使 AI 成为拥有独立思想和认知防护的“开发伙伴”。同时，天枢针对 DeepSeek V4 进行了前缀缓存的极致工程优化（实战中**前缀缓存命中率达 99.6%**）。
+
+> [!NOTE]
+> 本项目最初的开发代号为 **Rivet**；为保持向后兼容，已安装的 CLI 二进制命令名仍为 `rivet`。
 
 ## 下载桌面端
 
@@ -21,12 +40,40 @@
 
 ## 为什么做天枢
 
-大多数 AI 编程助手把上下文当作桶——装满就溢出,然后盲目压缩。天枢把上下文当作**结构化、可缓存的资源**:
+大多数 AI 编程助手把上下文当作桶——装满就溢出，然后盲目压缩。天枢引入了围绕**认知虚拟机 (CVM)**与**前缀缓存友好 (Prefix-Cache-Friendly)**设计的结构化、高性能**认知运行时**。
 
-- **前缀缓存命中率高达 99.6%**——通过冻结/易变提示词分层、基于 SHA-256 指纹的漂移检测和自适应压缩阈值,在 DeepSeek V4 的 1M 上下文窗口上实现
-- **跨回合验证**——每项代码改动在提交前都要经过追踪、测试和交付门禁;"测试通过"是底线,不是天花板
-- **多模型 Worker 委派**——生成独立上下文的无界面 worker,自适应模型路由,4 种聚合策略
-- **结构化审查纪律**——内置对抗性验证、路径边界检查和复杂规格的数据流验证
+```mermaid
+graph TD
+    LLM[大型语言模型] -->|原始动作 / 缺陷行为| CVM[认知虚拟机 CVM]
+    CVM -->|19 Hooks / 5 大认知阶段| Engine[自我修正与认知镜映射]
+    Engine -->|被批准的物理动作| Tools[工具系统]
+    Tools -->|证据追踪与文件确权| Stigmergy[行为信息素记忆]
+    Stigmergy -->|信息素衰减 / 行为印记| LLM
+```
+
+### 天枢的三大核心架构支柱
+
+1. **认知虚拟机 (CVM - 天枢独有)**
+   天枢在运行时建立了一个独立的虚拟层，横跨 `5 大认知阶段`（流式输出、感知、意图、工具执行、上下文压缩）并暴露 `19 个生命周期 Hook`。CVM 可以在不改变模型权重的前提下，在运行时主动拦截并纠正 LLM 的服从性漂移、注意力衰减以及陷入重复工具调用的 Doom Loop。
+2. **生物启发式信息素记忆 (Stigmergy - 天枢独有)**
+   区别于市面上死板的静态记忆文件（如 MEMORY.md），天枢实现了基于生物学“化学信息素”的 Stigmergy 记忆系统。它会将开发者的行为足迹和认知标记直接映射在代码文件上，并伴随时间自动衰减。AI 在修改频繁的文件时会变得越发熟悉和高效。
+3. **99.6% 前缀缓存命中率**
+   DeepSeek 对缓存未命中的部分加收高达 50 倍的 Token 费用。天枢的提示词引擎围绕前缀缓存友好（包含冰镜三区缓存锚点、冻结系统提示词等）进行重构，在长会话中实现稳态 **95–99% 的前缀缓存命中率**，将 API 消耗成本降低至多 97%。
+
+### 天枢 vs. MiMo-Code vs. Claude Code
+
+| 对标维度 | 天枢 (Tianshu) | MiMo-Code | Claude Code |
+| :--- | :--- | :--- | :--- |
+| **核心架构** | **认知运行时 (CVM)** | 产品生态与开发工作流封装 | 闭源企业级 Agent |
+| **认知虚拟机** | **✅ 支持 (19 Hooks × 5 阶段)** | ❌ 不支持 (基础 Agent 循环) | ❌ 不支持 (仅用户配置 Hook) |
+| **前缀缓存优化** | **✅ 99.6% 深度适配 (DeepSeek V4)** | ⚠️ 基础适配 | ⚠️ 基础适配 (Anthropic Cache) |
+| **自感知 (Sensorium)** | **✅ 支持 (连续 6 维认知状态向量)** | ❌ 不支持 | ❌ 不支持 |
+| **行为信息素记忆** | **✅ 支持 (文件级自动衰减记忆)** | ❌ 不支持 (SQLite + 手动 memory) | ❌ 不支持 (基本项目记忆) |
+| **多任务并发协调** | **✅ 支持 (多会话并发提交与冲突锁)**| ✅ 支持 (后台独立 Worker 执行) | ✅ 支持 (远程隔离环境运行) |
+| **交付门禁** | **✅ 支持 (证据链跟踪与所有权归属)**| ❌ 不支持 | ❌ 不支持 |
+| **开源协议** | **Apache 2.0** | MIT | 闭源 (Closed Source) |
+
+---
 
 ## 特性
 
