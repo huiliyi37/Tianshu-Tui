@@ -48,7 +48,7 @@ export function modeForRecoveryTrigger(
   // The first occurrence already alerted the user; persistent lock-in from
   // non-self-resolving conditions (session_integrity, resource_pressure) is
   // counterproductive — it forces the user to kill the session.
-  if (trigger.severity === 'error' && suppressedTriggers?.has(trigger.trigger)) {
+  if (trigger.severity === 'error' && trigger.trigger && suppressedTriggers?.has(trigger.trigger)) {
     return decision('degraded',
       `${trigger.summary} (recurring — capped at degraded)`,
       ['bash_write', 'high_risk'],
