@@ -2,7 +2,7 @@
   "name": "tianshu-tui",
   "version": "2.9.1",
   "description": "Terminal coding agent optimized for DeepSeek V4 prefix cache",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "keywords": [
     "coding-agent",

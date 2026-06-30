@@ -1,32 +1,35 @@
-# Rivet
+# Tianshu (天枢)
 
 > 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md)
 
 Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
 
+> The project was originally codenamed **Rivet**; the installed CLI binary is still
+> named `rivet` for backward compatibility.
+
 ## Prerequisites
 
-- **Node.js 22+** — required to run Rivet. Verify with `node --version`.
-- **Git (recommended)** — optional but strongly recommended. Rivet runs without it
+- **Node.js 24.1.0** (recommended; 22+ may work) — required to run Tianshu. Verify with `node --version`.
+- **Git (recommended)** — optional but strongly recommended. Tianshu runs without it
   (agents work in-place), but git unlocks: delegated worktree isolation, checkpoint
   rollback, `commit`/`diff` review, and per-worker diff审查. First-run setup will
   detect git and advise if it's missing.
   - Install: <https://git-scm.com/downloads>
-  - No git? Rivet still works — delegation degrades to in-place execution.
+  - No git? Tianshu still works — delegation degrades to in-place execution.
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-- **Node.js 22+** — verify with `node --version`.
-- **Git** — optional but strongly recommended. Without it Rivet still runs, but
+- **Node.js 24.1.0** (recommended; 22+ may work) — verify with `node --version`.
+- **Git** — optional but strongly recommended. Without it Tianshu still runs, but
 delegation/checkpoint/rollback features degrade. See [Prerequisites](#prerequisites).
 
 ### 2. Clone & Build
 
 ```bash
 git clone https://github.com/huiliyi37/Tianshu-Tui.git
-cd Tianshu
+cd Tianshu-Tui
 npm install
 npm run build
 ```
@@ -57,6 +60,23 @@ npm start
 ```
 
 You should see the TUI with a `〉` prompt. Type your request and press Enter.
+
+> The installed CLI command is `rivet` (the package's original codename). The repo
+> and project are named **Tianshu**; the binary name remains `rivet` for backward
+> compatibility.
+
+### Optional: Global Install
+
+After building, you can install the `rivet` command globally so it is available
+from any directory:
+
+```bash
+npm install -g .
+rivet
+```
+
+> Global install from the repo requires `dist/main.js` to exist. Run `npm run build` first.
+> If the package is published to npm, you can also use `npm install -g tianshu-tui && rivet`.
 
 ## Core Features
 
@@ -437,4 +457,4 @@ Each launch gets a unique session ID. Session files, checkpoints, and memory are
 
 ## License
 
-Apache-2.o
+Licensed under the [Apache License, Version 2.0](LICENSE).

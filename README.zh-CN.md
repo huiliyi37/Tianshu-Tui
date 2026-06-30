@@ -194,19 +194,59 @@ rivet --dangerously-skip-permissions   # 单次覆盖
 
 ## 快速开始
 
+### 1. 环境要求
+
+- **Node.js 24.1.0**（推荐；22+ 可能可用）— 用 `node --version` 检查。
+- **Git** — 可选但强烈建议；没有它天枢仍可运行，但委派/检查点/回滚功能会降级。
+
+### 2. 克隆并构建
+
 ```bash
-# 安装与构建
-npm install && npm run build
-
-# 设置 API Key(任选一种)
-export DEEPSEEK_API_KEY=sk-xxx          # 环境变量
-rivet config set-key deepseek sk-xxx    # CLI(保存到 ~/.rivet/config.json)
-
-# 启动
-node dist/main.js
-# 或全局安装后:
-npm install -g && rivet
+git clone https://github.com/huiliyi37/Tianshu-Tui.git
+cd Tianshu-Tui
+npm install
+npm run build
 ```
+
+这会生成 TUI 入口文件 `dist/main.js`。
+
+### 3. 配置 API Key
+
+```bash
+# A. 环境变量（首次试用最简单）
+export DEEPSEEK_API_KEY=sk-xxx
+
+# B. 持久化 CLI 配置（保存到 ~/.rivet/config.json）
+node dist/main.js config set-key deepseek sk-xxx
+```
+
+> 其他提供商（Claude、GLM、Codex、MiniMax、MiMo）使用相同模式。运行
+> `node dist/main.js config set-key <provider> <key>` 或查看
+> [Provider Config](docs/user-guide-provider-config.md)。
+
+### 4. 启动
+
+```bash
+npm start
+# 或直接运行：node dist/main.js
+```
+
+你应该会看到带有 `〉` 提示符的 TUI。输入需求后按回车即可。
+
+> 安装的 CLI 命令是 `rivet`（项目早期代号）。仓库与项目名为**天枢/Tianshu**，
+> 二进制名保持 `rivet` 以兼容旧用法。
+
+### 可选：全局安装
+
+构建完成后，可以将 `rivet` 命令全局安装，方便从任意目录启动：
+
+```bash
+npm install -g .
+rivet
+```
+
+> 注意：从仓库全局安装依赖 `dist/main.js` 已存在，请先执行 `npm run build`。
+> 从 npm 安装则直接运行 `npm install -g tianshu-tui && rivet`（需已发布到 registry）。
 
 ### 无界面模式
 
@@ -493,6 +533,6 @@ src/
 
 ## 许可证
 
-[MIT](LICENSE)
+本项目采用 [Apache License, Version 2.0](LICENSE) 开源许可。
 
 Copyright 2025-2026 Tianshu Contributors
