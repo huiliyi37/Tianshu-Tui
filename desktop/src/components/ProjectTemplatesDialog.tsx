@@ -42,7 +42,7 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield size={18} className="text-accent" />
@@ -54,7 +54,7 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
         </DialogHeader>
 
         {preview ? (
-          <div className="flex flex-col gap-3">
+          <div className="flex min-w-0 flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-text-strong">
                 {preview === 'agents' ? 'AGENTS.md' : '.rivet.md'} 模板预览
@@ -66,7 +66,7 @@ export function ProjectTemplatesDialog(props: ProjectTemplatesDialogProps) {
                 返回
               </button>
             </div>
-            <pre className="max-h-[320px] overflow-auto rounded-lg border bg-panel-2 p-3 text-xs font-mono text-text">
+            <pre className="max-h-[320px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded-lg border bg-panel-2 p-3 text-xs font-mono text-text">
               {templateText}
             </pre>
           </div>
