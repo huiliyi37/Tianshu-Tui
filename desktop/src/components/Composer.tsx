@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
-import { detectMention, applyMention, type MentionToken } from '../lib/mention-input'
+import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
 import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
@@ -142,10 +142,12 @@ export function Composer(props: {
 
   // Parse mentions from the value prop
   const { text, mentions } = useMemo(() => {
-    const regex = /@file:([^\s]+)\s?/g
+    // Accept quoted (`@file:"a b.ts"`) and bare (`@file:src/a.ts`) forms so
+    // paths with spaces (Windows) survive the round-trip.
+    const regex = /@file:(?:"([^"]+)"|([^\s]+))\s?/g
     const paths: string[] = []
-    const cleanText = value.replace(regex, (_m, path) => {
-      paths.push(path)
+    const cleanText = value.replace(regex, (_m, quoted, bare) => {
+      paths.push(quoted ?? bare)
       return ''
     })
     return { text: cleanText, mentions: paths }
@@ -153,7 +155,7 @@ export function Composer(props: {
 
   const removeMention = (pathToRemove: string) => {
     const remaining = mentions.filter((m) => m !== pathToRemove)
-    const suffix = remaining.map((m) => `@file:${m}`).join(' ')
+    const suffix = remaining.map(formatFileMention).join(' ')
     let newValue = text
     if (suffix) {
       const needsSpace = text.length > 0 && !text.endsWith(' ')
@@ -245,7 +247,7 @@ export function Composer(props: {
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextText = e.target.value
-    const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+    const suffix = mentions.map(formatFileMention).join(' ')
     let newValue = nextText
     if (suffix) {
       const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
@@ -332,7 +334,7 @@ export function Composer(props: {
       }
       if (final) {
         const nextText = text ? `${text} ${final}`.trim() : final
-        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        const suffix = mentions.map(formatFileMention).join(' ')
         let newValue = nextText
         if (suffix) {
           const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
@@ -341,7 +343,7 @@ export function Composer(props: {
         onChange(newValue)
       } else if (interim) {
         const nextText = text ? `${text} ${interim}`.trim() : interim
-        const suffix = mentions.map((m) => `@file:${m}`).join(' ')
+        const suffix = mentions.map(formatFileMention).join(' ')
         let newValue = nextText
         if (suffix) {
           const needsSpace = nextText.length > 0 && !nextText.endsWith(' ')
@@ -448,15 +450,18 @@ export function Composer(props: {
     if (textFiles.length > 0) {
       const contents: string[] = []
       for (const f of textFiles) {
+        // Dropped text files are INLINED as content, not added as @file path
+        // references (the browser only exposes the basename, not a real path).
+        // Use a plain header so this is never parsed as an @file: mention.
         if (f.size > 512 * 1024) {
-          contents.push(`@file:${f.name} (文件过大，已跳过)`)
+          contents.push(`📎 ${f.name}（文件过大，已跳过）`)
           continue
         }
         try {
           const text = await f.text()
-          contents.push(`@file:${f.name}\n\`\`\`\n${text}\n\`\`\``)
+          contents.push(`📎 ${f.name}（内联内容）\n\`\`\`\n${text}\n\`\`\``)
         } catch {
-          contents.push(`@file:${f.name} (读取失败)`)
+          contents.push(`📎 ${f.name}（读取失败）`)
         }
       }
       if (contents.length > 0) {
@@ -534,7 +539,7 @@ export function Composer(props: {
                   <polyline points="14 2 14 8 20 8" />
                 </svg>
               </span>
-              <span className="truncate max-w-[180px] font-mono text-[11px]">{path.split('/').pop()}</span>
+              <span className="truncate max-w-[180px] font-mono text-[11px]">{path.split(/[/\\]/).pop()}</span>
               <button
                 type="button"
                 className="chip-remove hover:text-error hover:bg-error-soft rounded-full p-0.5 transition-colors"

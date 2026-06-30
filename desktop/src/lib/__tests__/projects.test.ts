@@ -14,6 +14,7 @@ class MemStorage {
 const {
   basename,
   projectId,
+  normalizePath,
   deriveProjects,
   addKnownProject,
   loadKnownProjects,
@@ -67,6 +68,23 @@ test('known projects round trip + dedupe (new StoredProject shape)', () => {
   assert.deepEqual(loaded[1]!.roots, ['/p1'])
   removeKnownProject(loaded[1]!.id)
   assert.equal(loadKnownProjects().length, 1)
+})
+
+test('projectId is stable across separator and case on Windows paths', () => {
+  // Same Windows folder reached via backslash/forward-slash and mixed case must
+  // map to one project (Windows filesystems are case-insensitive).
+  assert.equal(projectId('C:\\Users\\Me\\proj'), projectId('C:/Users/me/proj'))
+  assert.equal(normalizePath('C:\\Users\\Me\\proj\\'), 'c:/users/me/proj')
+  // POSIX paths keep their case (case-sensitive filesystem).
+  assert.notEqual(normalizePath('/Users/Me/proj'), normalizePath('/users/me/proj'))
+})
+
+test('deriveProjects folds a session cwd into a known root regardless of separator', () => {
+  const known = [{ id: 'mono', roots: ['C:\\repo\\app'], name: 'app' }]
+  const projects = deriveProjects([{ cwd: 'C:/repo/app', updatedAt: 1 }], known)
+  const mono = projects.find((p) => p.id === 'mono')!
+  assert.ok(mono, 'session should fold into the known project')
+  assert.equal(mono.threadCount, 1)
 })
 
 test('projectId avoids cross-disk basename collisions', () => {

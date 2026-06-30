@@ -50,7 +50,7 @@ function parseFileFromHeader(line: string): string | undefined {
  * anchor on (file, oldLine, newLine) uniquely across multi-file diffs.
  */
 function parseDiff(raw: string): { fileLines: string[]; hunks: Hunk[] } {
-  const lines = raw.split('\n')
+  const lines = raw.split(/\r?\n/)
   const fileLines: string[] = []
   const hunks: Hunk[] = []
   let currentHunk: Hunk | null = null
@@ -147,7 +147,7 @@ export function DiffView(props: DiffViewProps) {
 
   // Fallback to simple rendering if no hunks detected (non-diff content)
   if (!hasHunks) {
-    const lines = raw.split('\n')
+    const lines = raw.split(/\r?\n/)
     return (
       <pre className="diff">
         {lines.map((line, i) => {

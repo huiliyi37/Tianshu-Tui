@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { detectMention, applyMention } from '../mention-input'
+import { detectMention, applyMention, formatFileMention } from '../mention-input'
 
 test('detectMention: detects @ token after whitespace', () => {
   const text = 'hello @src/fo'
@@ -48,4 +48,16 @@ test('applyMention: preserves text after the token', () => {
   const t = detectMention(text, 3)!
   const { text: next } = applyMention(text, t, 'a/b.ts')
   assert.equal(next, '@file:a/b.ts  end')
+})
+
+test('formatFileMention: quotes paths containing spaces', () => {
+  assert.equal(formatFileMention('src/a.ts'), '@file:src/a.ts')
+  assert.equal(formatFileMention('C:\\Program Files\\app\\main.ts'), '@file:"C:\\Program Files\\app\\main.ts"')
+})
+
+test('applyMention: quotes a spaced path on insert', () => {
+  const text = 'see @sr'
+  const t = detectMention(text, text.length)!
+  const { text: next } = applyMention(text, t, 'C:\\Program Files\\x.ts')
+  assert.equal(next, 'see @file:"C:\\Program Files\\x.ts" ')
 })

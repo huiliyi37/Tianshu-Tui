@@ -85,7 +85,7 @@ export function FileViewer(props: {
 }) {
   const { content, language, startLine = 1, highlightLines = [] } = props
   const parentRef = useRef<HTMLDivElement>(null)
-  const lines = useMemo(() => content.split('\n'), [content])
+  const lines = useMemo(() => content.split(/\r?\n/), [content])
   const highlightSet = useMemo(() => new Set(highlightLines), [highlightLines])
 
   const highlighted = useMemo(() => {
@@ -103,7 +103,7 @@ export function FileViewer(props: {
     }
   }, [content, language, lines.length])
 
-  const highlightedLines = useMemo(() => highlighted.split('\n'), [highlighted])
+  const highlightedLines = useMemo(() => highlighted.split(/\r?\n/), [highlighted])
 
   const virtualizer = useVirtualizer({
     count: lines.length,

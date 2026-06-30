@@ -40,8 +40,14 @@ export function detectMention(text: string, caret: number): MentionToken | null 
  * (the form the sidecar AgentLoop parses). Returns the new text and the caret
  * position just after the inserted token (with a trailing space).
  */
+/** Canonical `@file:` reference, quoting paths that contain spaces (Windows
+ *  `C:\Program Files\…`) so the mention parser keeps them whole. */
+export function formatFileMention(path: string): string {
+  return path.includes(' ') ? `@file:"${path}"` : `@file:${path}`
+}
+
 export function applyMention(text: string, token: MentionToken, path: string): { text: string; caret: number } {
-  const insert = `@file:${path} `
+  const insert = `${formatFileMention(path)} `
   const next = text.slice(0, token.start) + insert + text.slice(token.end)
   return { text: next, caret: token.start + insert.length }
 }

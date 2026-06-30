@@ -10,6 +10,13 @@ describe('mention-parser', () => {
     assert.equal(refs[0]!.value, 'src/a.ts')
   })
 
+  it('parses a quoted path with spaces (Windows)', () => {
+    const refs = parseMentions('look at @file:"C:\\Program Files\\app\\main.ts" please')
+    assert.equal(refs.length, 1)
+    assert.equal(refs[0]!.type, 'file')
+    assert.equal(refs[0]!.value, 'C:\\Program Files\\app\\main.ts')
+  })
+
   it('strips mentions from input', () => {
     assert.equal(stripMentions('hello @file:src/a.ts world'), 'hello world')
   })
