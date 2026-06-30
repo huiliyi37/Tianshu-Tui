@@ -131,4 +131,27 @@ describe('EvidenceTracker delivery status', () => {
     assert.equal(gate.editsSinceLastTest, 0)
     assert.equal(gate.hasCodeEdits, false)
   })
+
+  it('buildSummary returns structured evidence snapshot', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileRead('src/a.ts')
+    tracker.trackFileModified('src/b.ts')
+    tracker.trackVerification({ command: 'npm test', status: 'passed', scope: 'full', exitCode: 0, passed: 3, failed: 0, skipped: 0, durationMs: 100 })
+
+    const summary = tracker.buildSummary()
+    assert.deepEqual(summary.filesRead, ['src/a.ts'])
+    assert.deepEqual(summary.filesModified, ['src/b.ts'])
+    assert.equal(summary.verificationStatus, 'verified')
+    assert.equal(summary.verifications.length, 1)
+    assert.equal(summary.gate.state, 'ok')
+  })
+
+  it('buildBadge supports zh-CN locale', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('src/b.ts')
+    const badge = tracker.buildBadge({ locale: 'zh-CN' })!
+    assert.match(badge, /任务完成总结/)
+    assert.match(badge, /改动文件/)
+    assert.match(badge, /未验证|未经验证/)
+  })
 })

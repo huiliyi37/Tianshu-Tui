@@ -1,6 +1,6 @@
 import type { VerificationMetadata } from '../tools/types.js'
 import { buildDeliveryGate } from './delivery-gate.js'
-import { buildFinalVerificationReport, type VerificationState } from './verification.js'
+import type { VerificationState } from './verification.js'
 
 export type DeliveryVerificationStatus = 'verified' | 'failed' | 'blocked' | 'unverified'
 export type VerificationLevel = 'tested' | 'typed' | 'linted' | 'pending'
@@ -40,6 +40,24 @@ export interface VerificationSummary {
   files: Array<{ path: string; level: VerificationLevel }>
 }
 
+export interface EvidenceSummary {
+  filesRead: string[]
+  filesModified: string[]
+  verificationStatus: DeliveryVerificationStatus
+  verifications: VerificationMetadata[]
+  gate: {
+    state: 'GREEN' | 'YELLOW' | 'RED' | 'ok' | 'warn' | 'error'
+    label: string
+    reason?: string
+    blockingReason?: string
+    nextAction?: string
+  }
+  impactedFiles: string[]
+  impactedTests: string[]
+}
+
+export type EvidenceLocale = 'zh-CN' | 'en'
+
 const MAX_VERIFICATIONS = 50
 
 /** Code file extensions whose edits should count toward the TDD gate. */
@@ -67,7 +85,8 @@ export interface EvidenceTrackerPublic {
   getState(): EvidenceState
   getVerificationSummary(): VerificationSummary
   getGateState(): TddGateState
-  buildBadge(gateV2?: AuthoritativeGateView): string | null
+  buildSummary(gateV2?: AuthoritativeGateView): EvidenceSummary
+  buildBadge(options?: { locale?: EvidenceLocale; gateV2?: AuthoritativeGateView }): string | null
   reset(): void
 }
 
@@ -78,6 +97,74 @@ export interface AuthoritativeGateView {
   reason?: string
   blockingReason?: string
   shortestNextStep?: string
+}
+
+const UI_LABELS: Record<EvidenceLocale, {
+  evidence: string
+  filesRead: string
+  filesModified: string
+  deliveryGate: string
+  blocking: string
+  nextAction: string
+  impactedFiles: string
+  testsToVerify: string
+  verification: string
+  verified: string
+  failed: string
+  blocked: string
+  unverified: string
+  verificationFailed: string
+  verificationBlocked: string
+  unverifiedChanges: string
+  testsNotRun: string
+  targeted: string
+  full: string
+  passed: string
+}> = {
+  'zh-CN': {
+    evidence: '任务完成总结',
+    filesRead: '读取文件',
+    filesModified: '改动文件',
+    deliveryGate: '交付门禁',
+    blocking: '阻塞原因',
+    nextAction: '建议下一步',
+    impactedFiles: '影响文件',
+    testsToVerify: '待验证测试',
+    verification: '验证结果',
+    verified: '已通过',
+    failed: '失败',
+    blocked: '被阻塞',
+    unverified: '未验证',
+    verificationFailed: '验证失败',
+    verificationBlocked: '验证被阻塞',
+    unverifiedChanges: '未经验证的改动',
+    testsNotRun: '未运行测试',
+    targeted: '定向',
+    full: '全量',
+    passed: '通过',
+  },
+  en: {
+    evidence: 'Evidence',
+    filesRead: 'Files read',
+    filesModified: 'Files modified',
+    deliveryGate: 'Delivery gate',
+    blocking: 'Blocking',
+    nextAction: 'Next action',
+    impactedFiles: 'Impacted files',
+    testsToVerify: 'Tests to verify',
+    verification: 'Verification',
+    verified: 'verified',
+    failed: 'failed',
+    blocked: 'blocked',
+    unverified: 'unverified',
+    verificationFailed: 'Verification failed',
+    verificationBlocked: 'Verification blocked',
+    unverifiedChanges: 'Unverified changes',
+    testsNotRun: 'Tests not run',
+    targeted: 'targeted',
+    full: 'full',
+    passed: 'passed',
+  },
 }
 
 export class EvidenceTracker implements EvidenceTrackerPublic {
@@ -202,67 +289,112 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     }
   }
 
-  buildBadge(gateV2?: AuthoritativeGateView): string | null {
+  buildSummary(gateV2?: AuthoritativeGateView): EvidenceSummary {
     const read = [...this.state.filesRead].sort()
     const modified = [...this.state.filesModified].sort()
 
-    if (read.length + modified.length === 0 && this.state.verifications.length === 0) {
+    let gateState: EvidenceSummary['gate']['state']
+    let gateLabel: string
+    let gateReason: string | undefined
+    let gateBlockingReason: string | undefined
+    let gateNextAction: string | undefined
+
+    if (gateV2) {
+      gateState = gateV2.state
+      gateLabel = gateV2.state
+      gateReason = gateV2.reason
+      gateBlockingReason = gateV2.blockingReason
+      gateNextAction = gateV2.shortestNextStep
+    } else {
+      const gate = buildDeliveryGate(this.state)
+      gateState = gate.severity
+      gateLabel = gate.message
+      gateBlockingReason = gate.blockingReason
+      gateNextAction = gate.nextAction
+    }
+
+    return {
+      filesRead: read,
+      filesModified: modified,
+      verificationStatus: this.state.deliveryStatus,
+      verifications: [...this.state.verifications],
+      gate: {
+        state: gateState,
+        label: gateLabel,
+        reason: gateReason,
+        blockingReason: gateBlockingReason,
+        nextAction: gateNextAction,
+      },
+      impactedFiles: [...this.state.impactedFiles].sort(),
+      impactedTests: [...this.state.impactedTests].sort(),
+    }
+  }
+
+  buildBadge(options?: { locale?: EvidenceLocale; gateV2?: AuthoritativeGateView }): string | null {
+    const locale = options?.locale ?? 'en'
+    const gateV2 = options?.gateV2
+    const summary = this.buildSummary(gateV2)
+    const L = UI_LABELS[locale]
+
+    if (summary.filesRead.length + summary.filesModified.length === 0 && summary.verifications.length === 0) {
       return null
     }
 
-    const parts: string[] = ['---', '## Evidence']
+    const parts: string[] = ['---', `## ${L.evidence}`]
 
-    if (read.length > 0) {
-      parts.push(`- Files read: ${read.length}`)
+    if (summary.filesRead.length > 0) {
+      parts.push(`- ${L.filesRead}：${summary.filesRead.length}`)
     }
-    if (modified.length > 0) {
-      parts.push(`- Files modified: ${modified.length}`)
-      for (const f of modified) parts.push(`  - ${f}`)
+    if (summary.filesModified.length > 0) {
+      parts.push(`- ${L.filesModified}：${summary.filesModified.length}`)
+      for (const f of summary.filesModified) parts.push(`  - ${f}`)
     }
 
     if (gateV2) {
-      // Track 3 合一：v2 为权威 — 门禁行直接呈现 GREEN/YELLOW/RED。
-      if (modified.length > 0 || gateV2.state !== 'GREEN') {
-        parts.push(`- **Delivery gate**: ${gateV2.state}${gateV2.reason ? ` — ${gateV2.reason}` : ''}`)
+      if (summary.filesModified.length > 0 || gateV2.state !== 'GREEN') {
+        parts.push(`- **${L.deliveryGate}**：${gateV2.state}${gateV2.reason ? ` — ${gateV2.reason}` : ''}`)
         if (gateV2.state === 'RED' && gateV2.blockingReason) {
-          parts.push(`- **Blocking**: ${gateV2.blockingReason}`)
+          parts.push(`- **${L.blocking}**：${gateV2.blockingReason}`)
         }
         if (gateV2.shortestNextStep) {
-          parts.push(`- **Next action**: ${gateV2.shortestNextStep}`)
+          parts.push(`- **${L.nextAction}**：${gateV2.shortestNextStep}`)
         }
       }
     } else {
-      const gate = buildDeliveryGate(this.state)
-      const status = gate.status
+      const status = summary.verificationStatus
       if (status === 'failed') {
-        const failedRun = this.state.verifications.find(r => r.status === 'failed')
-        parts.push(`- **Verification failed**: ${failedRun?.command ?? ''}`)
+        const failedRun = summary.verifications.find(r => r.status === 'failed')
+        parts.push(`- **${L.verificationFailed}**：${failedRun?.command ?? ''}`)
       } else if (status === 'blocked') {
-        parts.push('- **Verification blocked**')
-      } else if (status === 'unverified' && modified.length > 0) {
-        parts.push(`- **Unverified changes**: ${modified.join(', ')}`)
+        parts.push(`- **${L.verificationBlocked}**`)
+      } else if (status === 'unverified' && summary.filesModified.length > 0) {
+        parts.push(`- **${L.unverifiedChanges}**：${summary.filesModified.join(', ')}`)
       }
 
-      if (modified.length > 0) {
-        parts.push(`- **Delivery gate**: ${gate.message}`)
-        if (gate.nextAction) parts.push(`- **Next action**: ${gate.nextAction}`)
+      if (summary.filesModified.length > 0) {
+        parts.push(`- **${L.deliveryGate}**：${summary.gate.label}`)
+        if (summary.gate.nextAction) parts.push(`- **${L.nextAction}**：${summary.gate.nextAction}`)
       }
     }
 
-    if (this.state.verifications.length > 0 || modified.length > 0) {
-      const verification: VerificationState = { runs: this.state.verifications }
-      const report = buildFinalVerificationReport({
-        modifiedFiles: modified,
-        verification,
-      })
-      parts.push(report)
+    if (summary.verifications.length > 0 || summary.filesModified.length > 0) {
+      parts.push(`## ${L.verification}`)
+      const last = summary.verifications[summary.verifications.length - 1]
+      if (!last) {
+        parts.push(`- ${L.testsNotRun}`)
+      } else if (last.status === 'blocked') {
+        parts.push(`- ${L.testsNotRun}：${last.command}`)
+      } else {
+        const scope = last.scope === 'targeted' ? L.targeted : L.full
+        parts.push(`- ${scope}${L.verification}：${last.passed} ${L.passed} / ${last.failed} ${L.failed}`)
+      }
     }
 
-    if (this.state.impactedFiles.size > 0) {
-      parts.push(`- **Impacted files**: ${[...this.state.impactedFiles].join(', ')}`)
+    if (summary.impactedFiles.length > 0) {
+      parts.push(`- **${L.impactedFiles}**：${summary.impactedFiles.join(', ')}`)
     }
-    if (this.state.impactedTests.size > 0) {
-      parts.push(`- **Tests to verify**: ${[...this.state.impactedTests].join(', ')}`)
+    if (summary.impactedTests.length > 0) {
+      parts.push(`- **${L.testsToVerify}**：${summary.impactedTests.join(', ')}`)
     }
 
     return parts.join('\n')
