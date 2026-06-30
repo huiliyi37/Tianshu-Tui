@@ -15,6 +15,8 @@ import type {
   PlanDoc,
   PlanModeState,
   PlanSummary,
+  ProjectTemplatesApplyResult,
+  ProjectTemplatesStatus,
   ScheduledTask,
   SessionEvent,
   SessionRecord,
@@ -134,6 +136,14 @@ export function getHealth(): Promise<HealthInfo> {
 
 export function getEnvironment(): Promise<EnvironmentInfo> {
   return apiGet<EnvironmentInfo>('/environment')
+}
+
+export function getProjectTemplatesStatus(cwd: string): Promise<ProjectTemplatesStatus> {
+  return apiGet<ProjectTemplatesStatus>(`/project-templates/status?cwd=${encodeURIComponent(cwd)}`)
+}
+
+export function applyProjectTemplates(cwd: string, agentsMode: 'overwrite' | 'append' | 'skip'): Promise<ProjectTemplatesApplyResult> {
+  return apiPost<ProjectTemplatesApplyResult>('/project-templates/apply', { cwd, agentsMode })
 }
 
 // ── Session API ─────────────────────────────────────────────────────
