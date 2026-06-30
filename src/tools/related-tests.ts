@@ -118,8 +118,8 @@ export function createRelatedTestsTool(
     async execute(params: ToolCallParams) {
       let file = params.input.file as string
 
-      // Reject absolute paths — only relative paths within cwd allowed
-      if (file.startsWith('/') || file.includes('..')) {
+      // Reject absolute paths (incl. Windows `C:\`) — only relative paths within cwd allowed
+      if (isAbsolute(file) || file.includes('..')) {
         return { content: 'Error: file path must be relative to project directory.', isError: true }
       }
 

@@ -56,4 +56,7 @@ test('looksLikeFilePath distinguishes absolute paths from slash commands', () =>
   assert.equal(looksLikeFilePath('/team max plan'), false)
   assert.equal(looksLikeFilePath('plain text'), false)
   assert.equal(looksLikeFilePath('./relative/path'), false)
+  // Windows 盘符路径应被识别为文件路径，而非 slash 命令
+  assert.equal(looksLikeFilePath('C:\\Users\\me\\main.ts'), true)
+  assert.equal(looksLikeFilePath('D:/work/readme.md'), true)
 })

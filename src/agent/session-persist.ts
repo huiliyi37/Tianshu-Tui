@@ -1,7 +1,7 @@
 import { appendFile } from 'fs/promises'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, rmSync, readdirSync, statSync } from 'fs'
 import { writeFileAtomicSync, writeFileAtomicAsync } from '../fs-atomic.js'
-import { join, resolve } from 'path'
+import { isAbsolute, join, relative, resolve } from 'path'
 import { sessionsDir } from '../config/paths.js'
 import type { ContentBlock, Message } from '../api/types.js'
 import type { OaiAssistantMessage, OaiMessage, OaiToolCall, OaiToolMessage } from '../api/oai-types.js'
@@ -452,12 +452,13 @@ export class SessionPersist {
       if (cwd) {
         const fileEvidence = claim.evidence.filter(e => e.path)
         if (fileEvidence.length > 0) {
-          const sep = cwd.endsWith('/') ? '' : '/'
-          const cwdPrefix = cwd + sep
           const hasRelevantFile = fileEvidence.some(e => {
             const abs = resolve(cwd, e.path!)
-            // P3: exact prefix boundary — /Users/a/proj must not match /Users/a/proj-backup
-            return abs === cwd || abs.startsWith(cwdPrefix)
+            // P3: exact prefix boundary — /Users/a/proj must not match /Users/a/proj-backup.
+            // Use path.relative (cross-platform; handles Windows separators/drive) instead
+            // of string prefix: inside iff rel is '' or a non-'..', non-absolute subpath.
+            const rel = relative(cwd, abs)
+            return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
           })
           if (!hasRelevantFile) continue
         }

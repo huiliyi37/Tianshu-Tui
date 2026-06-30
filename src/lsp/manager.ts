@@ -1,4 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
+import { isAbsolute, resolve as resolvePath, relative as relativePath } from 'node:path'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { createRpcClient, type RpcClient } from './rpc.js'
 import { PassThrough, type Readable, type Writable } from 'node:stream'
 
@@ -47,15 +49,29 @@ export interface LspManager {
 
 type SpawnFn = () => ChildProcess
 
+/** Absolute filesystem path for a possibly-relative file, rooted at cwd.
+ *  Cross-platform: handles Windows drive-letter absolute paths correctly. */
+function absFromCwd(filePath: string, cwd: string): string {
+  return isAbsolute(filePath) ? filePath : resolvePath(cwd, filePath)
+}
+
+/** Build an LSP file:// URI for a path. Uses pathToFileURL so Windows yields the
+ *  required `file:///C:/...` form (not the invalid `file://C:\...`). */
+function fileToUri(filePath: string, cwd: string): string {
+  return pathToFileURL(absFromCwd(filePath, cwd)).href
+}
+
+/** Convert an LSP file:// URI back to a cwd-relative, forward-slash path. */
 function uriToRelPath(uri: string, cwd: string): string {
-  // file:///project/src/foo.ts → src/foo.ts (relative to cwd)
-  const prefix = `file://${cwd}/`
-  if (uri.startsWith(prefix)) {
-    return uri.slice(prefix.length)
+  let abs: string
+  try {
+    abs = fileURLToPath(uri)
+  } catch {
+    abs = uri.replace(/^file:\/\/\/?/, '')
   }
-  // Fallback: strip file:// and leading slash
-  const stripped = uri.replace(/^file:\/\/\/?/, '')
-  return stripped
+  const rel = relativePath(cwd, abs)
+  const out = rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : abs
+  return out.split('\\').join('/')
 }
 
 function languageId(filePath: string): string {
@@ -82,8 +98,8 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
    */
   async function ensureDocument(filePath: string): Promise<void> {
     if (!rpc) return
-    const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
-    const uri = `file://${absPath}`
+    const absPath = absFromCwd(filePath, cwd)
+    const uri = fileToUri(filePath, cwd)
     if (openedDocs.has(uri)) return
     openedDocs.add(uri)
     try {
@@ -126,7 +142,7 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
 
         const initResult = await rpc.request('initialize', {
           processId: process.pid,
-          rootUri: `file://${cwd}`,
+          rootUri: pathToFileURL(cwd).href,
           capabilities: {
             textDocument: {
               definition: { linkSupport: false },
@@ -173,9 +189,8 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
       if (!rpc || !ready) return []
       try {
         await ensureDocument(filePath)
-        const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
         const result = await rpc.request('textDocument/definition', {
-          textDocument: { uri: `file://${absPath}` },
+          textDocument: { uri: fileToUri(filePath, cwd) },
           position: { line: line - 1, character }, // LSP uses 0-based lines
         })
 
@@ -195,9 +210,8 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
       if (!rpc || !ready) return []
       try {
         await ensureDocument(filePath)
-        const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
         const result = await rpc.request('textDocument/references', {
-          textDocument: { uri: `file://${absPath}` },
+          textDocument: { uri: fileToUri(filePath, cwd) },
           position: { line: line - 1, character },
           context: { includeDeclaration: false },
         })
@@ -216,8 +230,7 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
 
     changeFile(filePath) {
       if (!rpc || !ready) return
-      const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
-      const uri = `file://${absPath}`
+      const uri = fileToUri(filePath, cwd)
       if (!openedDocs.has(uri)) return // never opened, server has no cached state
       try {
         rpc.notify('textDocument/didChange', {
@@ -231,8 +244,8 @@ export function createLspManager(spawnFn: SpawnFn, cwd: string): LspManager {
 
     async getFileDiagnostics(filePath, timeoutMs = 2000) {
       if (!rpc || !ready) return []
-      const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
-      const uri = `file://${absPath}`
+      const absPath = absFromCwd(filePath, cwd)
+      const uri = fileToUri(filePath, cwd)
 
       try {
         // Prefer pull model (LSP 3.17+ textDocument/diagnostic)

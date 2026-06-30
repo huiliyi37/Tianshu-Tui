@@ -102,6 +102,8 @@ export function truncateToWidth(text: string, maxWidth: number): string {
  *  避免被当作未知 slash 命令报失败。 */
 export function looksLikeFilePath(input: string): boolean {
   if (input.startsWith('~/')) return true
+  // Windows 盘符路径 C:\... 或 C:/...（不是 slash 命令）
+  if (/^[a-zA-Z]:[\\/]/.test(input)) return true
   if (!input.startsWith('/')) return false
   const rest = input.slice(1)
   const slashIdx = rest.indexOf('/')

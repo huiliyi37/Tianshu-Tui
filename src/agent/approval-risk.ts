@@ -1,4 +1,5 @@
 import { isIP } from 'node:net'
+import { isAbsolute } from 'node:path'
 import { evaluateMcpPolicy } from '../mcp/policy.js'
 import type { ContextClaim } from '../context/claims.js'
 import type { Sensorium } from './sensorium.js'
@@ -158,7 +159,8 @@ export function assessToolRisk(
 
   // Path traversal
   const targets = [input.file_path, input.path, input.target].filter((v): v is string => typeof v === 'string')
-  if (targets.some(t => t.startsWith('/') || t.split('/').includes('..'))) {
+  // Absolute (incl. Windows `C:\`) or any `..` traversal segment (either separator).
+  if (targets.some(t => isAbsolute(t) || /(^|[\\/])\.\.([\\/]|$)/.test(t))) {
     reasons.push('absolute path target')
     level = level === 'high' ? 'high' : 'medium'
   }
