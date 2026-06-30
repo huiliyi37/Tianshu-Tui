@@ -14,11 +14,12 @@
  * turn" model, whose 4000/8000-char budgets caused silent truncation.
  */
 
-import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-export type SkillSource = 'rivet' | 'project-claude' | 'global-claude'
+export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin'
 
 export interface SkillDefinition {
   name: string
@@ -617,6 +618,75 @@ export function countInstalledSkills(cwd: string): number {
 }
 
 /**
+ * Locate the `bundled-skills/` directory shipped alongside the runtime bundle.
+ * In the packaged sidecar / CLI it sits next to the emitted JS (tsup copies
+ * `runtime-assets/` into `dist/` via publicDir; the desktop ships the whole
+ * `dist/` as `rivet-runtime/`). Resolved relative to this module's URL with a
+ * parent-dir fallback. Returns null in source/dev (tsx) where it isn't built —
+ * callers treat that as "nothing to seed".
+ */
+function bundledSkillsDir(): string | null {
+  let base: string
+  try {
+    base = dirname(fileURLToPath(import.meta.url))
+  } catch {
+    return null
+  }
+  for (const candidate of [join(base, 'bundled-skills'), join(base, '..', 'bundled-skills')]) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {
+      /* ignore */
+    }
+  }
+  return null
+}
+
+/**
+ * Seed app-bundled skills from `src` into `<cwd>/.rivet/skills`. Kept separate
+ * from path resolution so it is unit-testable. Idempotent per entry: an entry
+ * the project already has (dir or flat `.md`) is left untouched so project
+ * customizations win. Copying into `.rivet/skills` (inside the workspace) is
+ * deliberate — bundled skills must live where the read boundary allows the model
+ * to open their sub-files, otherwise directory skills like brainstorming would
+ * ship with unreadable references. Returns the names actually seeded.
+ */
+export function seedBundledSkillsFrom(src: string, cwd: string): string[] {
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(src, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const destDir = join(cwd, '.rivet', 'skills')
+  const seeded: string[] = []
+  for (const e of entries) {
+    try {
+      const isFlat = e.isFile() && e.name.endsWith('.md')
+      if (!e.isDirectory() && !isFlat) continue
+      const name = isFlat ? e.name.replace(/\.md$/, '') : e.name
+      if (existsSync(join(destDir, name)) || existsSync(join(destDir, `${name}.md`))) continue
+      mkdirSync(destDir, { recursive: true })
+      cpSync(join(src, e.name), join(destDir, e.name), { recursive: true })
+      seeded.push(name)
+    } catch {
+      /* best-effort per entry — a read-only cwd just skips */
+    }
+  }
+  return seeded
+}
+
+/**
+ * Seed the skills shipped with this install into the project. No-op in dev where
+ * the bundle isn't built. Best-effort. Returns the names actually seeded.
+ */
+export function seedBundledSkills(cwd: string): string[] {
+  const src = bundledSkillsDir()
+  if (!src) return []
+  return seedBundledSkillsFrom(src, cwd)
+}
+
+/**
  * Load skills into the shared registry.
  *
  * Single runtime source: built-ins + `.rivet/skills/` (flat `name.md` AND
@@ -638,6 +708,13 @@ export function loadProjectSkills(
   const errors: string[] = []
   // Built-in skills first; .rivet/skills files may override by name.
   loaded.push(...registerBuiltinSkills())
+  // Seed app-bundled skills into .rivet/skills so they ship with every install
+  // and stay readable (inside the workspace). Idempotent; project copies win.
+  try {
+    seedBundledSkills(cwd)
+  } catch {
+    /* best-effort */
+  }
   const names = options?.importFromClaude
   if (names && names.length > 0) {
     errors.push(...importSkillsIntoRivet(cwd, names).errors)

@@ -4,7 +4,8 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills } from '../skill-loader.js'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom } from '../skill-loader.js'
+import { readFileSync } from 'node:fs'
 import { validatePathSafe } from '../../tools/path-validate.js'
 
 describe('skill-loader', () => {
@@ -175,5 +176,49 @@ Router body.`, 'utf-8')
     assert.equal(validatePathSafe(cwd, sub, 'read').ok, true)
     // boundary still bites for escapes
     assert.equal(validatePathSafe(cwd, '../../etc/passwd', 'read').ok, false)
+  })
+
+  it('seeds bundled skills (dir + flat + sub-files) into .rivet/skills', () => {
+    const src = mkdtempSync(join(tmpdir(), 'rivet-bundled-'))
+    // directory skill with a sub-file
+    mkdirSync(join(src, 'brainstorming'), { recursive: true })
+    writeFileSync(join(src, 'brainstorming', 'SKILL.md'), '---\ndescription: bs\n---\nbody', 'utf-8')
+    writeFileSync(join(src, 'brainstorming', 'helper.md'), 'helper ref', 'utf-8')
+    // flat skill
+    writeFileSync(join(src, 'research-spec.md'), '---\nname: research-spec\ndescription: rs\n---\nbody', 'utf-8')
+
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    const seeded = seedBundledSkillsFrom(src, cwd).sort()
+    assert.deepEqual(seeded, ['brainstorming', 'research-spec'])
+
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    // dir skill + its sub-file land inside the workspace (model-readable)
+    assert.ok(existsSync(join(skillsDir, 'brainstorming', 'SKILL.md')))
+    assert.ok(existsSync(join(skillsDir, 'brainstorming', 'helper.md')))
+    assert.ok(existsSync(join(skillsDir, 'research-spec.md')))
+  })
+
+  it('seed is idempotent — existing project skills are not overwritten', () => {
+    const src = mkdtempSync(join(tmpdir(), 'rivet-bundled-'))
+    mkdirSync(join(src, 'brainstorming'), { recursive: true })
+    writeFileSync(join(src, 'brainstorming', 'SKILL.md'), '---\ndescription: bundled\n---\nBUNDLED', 'utf-8')
+    writeFileSync(join(src, 'research-spec.md'), '---\nname: research-spec\ndescription: bundled\n---\nBUNDLED', 'utf-8')
+
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    const skillsDir = join(cwd, '.rivet', 'skills')
+    // project already customized both (dir form + flat form)
+    mkdirSync(join(skillsDir, 'brainstorming'), { recursive: true })
+    writeFileSync(join(skillsDir, 'brainstorming', 'SKILL.md'), 'PROJECT', 'utf-8')
+    writeFileSync(join(skillsDir, 'research-spec.md'), 'PROJECT', 'utf-8')
+
+    const seeded = seedBundledSkillsFrom(src, cwd)
+    assert.deepEqual(seeded, [])
+    assert.equal(readFileSync(join(skillsDir, 'brainstorming', 'SKILL.md'), 'utf-8'), 'PROJECT')
+    assert.equal(readFileSync(join(skillsDir, 'research-spec.md'), 'utf-8'), 'PROJECT')
+  })
+
+  it('seed returns [] when source dir is missing', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-cwd-'))
+    assert.deepEqual(seedBundledSkillsFrom(join(cwd, 'nope'), cwd), [])
   })
 })

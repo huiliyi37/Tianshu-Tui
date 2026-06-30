@@ -18,6 +18,11 @@ export default defineConfig({
   clean: true,
   shims: true,
   treeshake: false,
+  // Ship runtime-assets/ alongside the bundle: contents are copied into dist/ so
+  // dist/bundled-skills/ sits next to main.js. skill-loader.bundledSkillsDir()
+  // resolves it relative to the emitted module and seeds it into each project's
+  // .rivet/skills on load. Keep this in sync with that resolver.
+  publicDir: 'runtime-assets',
   // tsup externalizes every package.json dependency by default. For a packaged
   // sidecar (no node_modules shipped) that's fatal: pure-JS deps left as bare
   // imports crash with ERR_MODULE_NOT_FOUND at startup. Force-bundle them here.
