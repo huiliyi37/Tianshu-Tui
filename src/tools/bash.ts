@@ -11,6 +11,8 @@ import { denoiseWindowsError } from './powershell-filter.js'
 import { summarizeBashOutput } from '../artifact/summarize.js'
 import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
+import { loadConfig } from '../config/manager.js'
+import { buildMirrorEnv, rewriteGitHubUrls } from './mirror-env.js'
 
 /** Success output inline threshold: commands that succeed with ≤ this many lines
  *  return full output to the model. Beyond this, only a header summary is returned
@@ -213,7 +215,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
   async execute(params: ToolCallParams) {
     const rawCommand = params.input.command as string
     const rewritten = rtkRewrite(rawCommand, params.toolUseId)
-    const sandbox = wrapSandboxCommand(rewritten, params.cwd)
+    const mirrorConfig = loadConfig({ cwd: params.cwd }).mirrors
+    const rewrittenWithMirrors = rewriteGitHubUrls(rewritten, mirrorConfig)
+    const sandbox = wrapSandboxCommand(rewrittenWithMirrors, params.cwd)
     const command = sandbox.command
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
@@ -229,9 +233,10 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         }
       }
 
+      const mirrorEnv = buildMirrorEnv(mirrorConfig)
       const child = track(spawn(shell.cmd, [...shell.args, commandToRun], {
         cwd: params.cwd,
-        env: sanitizeEnv(process.env),
+        env: { ...sanitizeEnv(process.env), ...mirrorEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       }))

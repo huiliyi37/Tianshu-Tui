@@ -195,4 +195,13 @@ export const DEFAULT_CONFIG: Config = {
   skills: {
     importFromClaude: [],
   },
+  mirrors: {
+    enabled: false,
+    preset: 'default',
+    github: 'default',
+    npm: 'default',
+    pypi: 'default',
+    go: 'default',
+    rust: 'default',
+  },
 }

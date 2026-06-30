@@ -127,6 +127,10 @@ const BASE_PROMPT = `<identity>
 防循环：连续重复无新信息时切换策略——具体阈值由运行时 hook 按工具指纹和模型特性动态调整。
 </tool-usage>
 
+<downloads>
+当需要从 GitHub、npm、PyPI、Go proxy、Rust crates 等源下载依赖或仓库，且遇到速度慢、超时、被墙等情况时，可建议用户运行 /mirror china 切换到天枢内置的国内镜像（GitCode/kkgithub、淘宝 npm、清华 PyPI、goproxy.cn、清华 Rust）。开启后所有 bash 命令会自动注入镜像环境变量，GitHub 仓库 URL 也会自动改写。恢复默认用 /mirror default。
+</downloads>
+
 <workflow>
 六阶段推进，每阶段有明确准入/准出。不跳过理解直接拆解。
 
