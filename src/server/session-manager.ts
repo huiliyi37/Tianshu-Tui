@@ -1432,6 +1432,19 @@ export class RuntimeSessionManager {
     return true
   }
 
+  /**
+   * Rename a session. Updates the record title and persists it.
+   * Returns false when the session is missing.
+   */
+  setTitle(id: string, title: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s) return false
+    s.record.title = title.trim()
+    this.touch(s)
+    this.persistRecord(s)
+    return true
+  }
+
   /** List git worktrees for a given cwd (defaults to the manager's default cwd). */
   getWorktrees(cwd?: string): WorktreeEntry[] {
     return listWorktrees(cwd ?? this.defaultCwd)

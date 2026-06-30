@@ -6,6 +6,8 @@
  *   GET    /sessions                                   list
  *   DELETE /sessions/:id                               archive (soft-close)
  *   POST   /sessions/:id/unarchive                     restore an archived session
+ *   PATCH  /sessions/:id                               rename session title
+ *   DELETE /sessions/:id/permanent                     permanently delete archived session
  *   GET    /sessions/:id                               one record
  *   POST   /sessions/:id/prompt                        start a run
  *   POST   /sessions/:id/steer                         queue mid-run guidance (T3)
@@ -299,6 +301,27 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found or not archived' } }
       }
       return { status: 200, body: { archived: false } }
+    }, apiToken),
+
+    // Rename a session (title only). Empty title clears it.
+    'PATCH /sessions/:id': withAuth((body, params) => {
+      const data = (body ?? {}) as { title?: unknown }
+      if (typeof data.title !== 'string') {
+        return { status: 400, body: { error: 'Missing or invalid "title"' } }
+      }
+      if (!manager.setTitle(params!.id!, data.title)) {
+        return { status: 404, body: { error: 'Session not found' } }
+      }
+      return { status: 200, body: { id: params!.id!, title: data.title } }
+    }, apiToken),
+
+    // Permanently delete an archived session. Active/running sessions are refused.
+    'DELETE /sessions/:id/permanent': withAuth((_body, params) => {
+      const result = manager.deleteSession(params!.id!)
+      if (!result.ok) {
+        return { status: 409, body: { error: 'Session not found, not archived, or still running' } }
+      }
+      return { status: 200, body: { deleted: true, freedBytes: result.freedBytes } }
     }, apiToken),
 
     // Storage usage report — total/archived bytes + per-archived-session sizes.

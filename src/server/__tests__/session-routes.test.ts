@@ -531,3 +531,49 @@ test('POST /sessions/:id/unarchive 404 for missing or non-archived session', asy
   const notArchived = await router('POST', `/sessions/${id}/unarchive`, {}, AUTH)
   assert.equal(notArchived.status, 404)
 })
+
+// ── Rename + permanent delete ─────────────────────────────────────
+
+test('PATCH /sessions/:id renames a session title', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { title: 'Old' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  const renamed = await router('PATCH', `/sessions/${id}`, { title: 'New' }, AUTH)
+  assert.equal(renamed.status, 200)
+
+  const one = await router('GET', `/sessions/${id}`, {}, AUTH)
+  assert.equal((one.body as { title: string }).title, 'New')
+})
+
+test('PATCH /sessions/:id returns 404 for missing session', async () => {
+  const { router } = setup()
+  const res = await router('PATCH', '/sessions/ghost', { title: 'x' }, AUTH)
+  assert.equal(res.status, 404)
+})
+
+test('DELETE /sessions/:id/permanent removes an archived session', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { title: 'Doomed' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  await router('DELETE', `/sessions/${id}`, {}, AUTH)
+  const archived = await router('GET', `/sessions/${id}`, {}, AUTH)
+  assert.equal((archived.body as { archived?: boolean }).archived, true)
+
+  const deleted = await router('DELETE', `/sessions/${id}/permanent`, {}, AUTH)
+  assert.equal(deleted.status, 200)
+  assert.equal((deleted.body as { deleted: boolean }).deleted, true)
+
+  const missing = await router('GET', `/sessions/${id}`, {}, AUTH)
+  assert.equal(missing.status, 404)
+})
+
+test('DELETE /sessions/:id/permanent refuses active sessions', async () => {
+  const { router } = setup()
+  const created = await router('POST', '/sessions', { title: 'Active' }, AUTH)
+  const id = (created.body as { id: string }).id
+
+  const res = await router('DELETE', `/sessions/${id}/permanent`, {}, AUTH)
+  assert.equal(res.status, 409)
+})

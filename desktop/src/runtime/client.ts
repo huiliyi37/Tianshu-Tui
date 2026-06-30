@@ -261,6 +261,23 @@ export async function unarchiveSession(id: string): Promise<{ archived: boolean 
   return apiPost<{ archived: boolean }>(`/sessions/${id}/unarchive`)
 }
 
+/** Rename a session title. */
+export async function renameSession(id: string, title: string): Promise<{ id: string; title: string }> {
+  const res = await rivetFetch(`/sessions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+  if (!res.ok) throw new Error(`PATCH /sessions/${id} -> ${res.status}`)
+  return res.json() as Promise<{ id: string; title: string }>
+}
+
+/** Permanently delete an archived session. */
+export async function deleteSession(id: string): Promise<{ deleted: boolean; freedBytes: number }> {
+  const res = await rivetFetch(`/sessions/${id}/permanent`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`DELETE /sessions/${id}/permanent -> ${res.status}`)
+  return res.json() as Promise<{ deleted: boolean; freedBytes: number }>
+}
+
 export interface StorageEntry {
   id: string
   title?: string

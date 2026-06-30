@@ -25,6 +25,12 @@
     "currentProject": "当前项目",
     "archive": "归档会话",
     "closeSession": "关闭会话",
-    "restore": "恢复"
+    "restore": "恢复",
+    "renameProject": "重命名项目",
+    "removeProject": "移除项目",
+    "renameSession": "重命名会话",
+    "deleteSession": "永久删除",
+    "confirmRemoveProject": "确定移除项目「{name}」吗？其下的所有会话将被归档。",
+    "confirmDeleteSession": "确定永久删除会话「{title}」吗？此操作不可恢复。"
   }
 }

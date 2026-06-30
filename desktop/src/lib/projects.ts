@@ -135,6 +135,22 @@ export function removeKnownProject(id: string): StoredProject[] {
   return next
 }
 
+/** Rename a known project. If it only exists as a derived project, create a
+ *  known entry with the custom name so the rename survives reloads. */
+export function renameKnownProject(id: string, name: string, roots: string[]): StoredProject[] {
+  const list = loadKnownProjects()
+  const idx = list.findIndex((p) => p.id === id)
+  const nextName = name.trim()
+  if (idx >= 0) {
+    list[idx] = { ...list[idx]!, name: nextName }
+    saveKnownProjects(list)
+    return list
+  }
+  const next = [{ id, roots: roots.slice(), name: nextName }, ...list]
+  saveKnownProjects(next)
+  return next
+}
+
 /** Last path segment, tolerant of trailing slashes and both separators. */
 export function basename(p: string): string {
   if (!p) return p
