@@ -455,6 +455,8 @@ Each launch gets a unique session ID. Session files, checkpoints, and memory are
 - **File-level undo** — Versioned backups before every write/edit
 - **Worker safety** — Timeout budget via AbortController, tool allowlist enforcement
 
+For details on the sandbox backends, approval modes, path grants, and risk classification, see [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md).
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
