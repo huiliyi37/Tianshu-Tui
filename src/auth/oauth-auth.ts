@@ -1,9 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { join } from 'node:path'
 import type { AuthProvider } from './types.js'
 import { generatePKCE, buildAuthorizeUrl } from './oauth.js'
 import { TokenStore, type TokenData } from './token-store.js'
 import { shouldRefresh } from './refresh.js'
+import { rivetHome } from '../config/paths.js'
 
 export interface OAuthConfig {
   clientId: string
@@ -32,7 +34,10 @@ export class OAuthAuth implements AuthProvider {
       authorizeBase: config.authorizeBase ?? 'https://auth.openai.com/oauth/authorize',
     }
     this.store = new TokenStore(
-      authDir ?? config.authDir ?? `${process.env.HOME ?? '.'}/${DEFAULT_AUTH_DIR}`,
+      // Fallback lands in the platform data root (%LOCALAPPDATA%\.rivet\auth on
+      // Windows, ~/.rivet/auth elsewhere). The old process.env.HOME default was
+      // unset on native Windows, so login state was silently lost between runs.
+      authDir ?? config.authDir ?? join(rivetHome(), 'auth'),
       'codex',
     )
   }

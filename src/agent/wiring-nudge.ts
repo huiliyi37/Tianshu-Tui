@@ -12,6 +12,8 @@
  */
 
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 export interface WroteButNeverReadFinding {
   symbol: string
@@ -50,8 +52,13 @@ function gitAddedLines(cwd: string, file: string): string[] {
     // Untracked new file: the whole content is "added".
     const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd, encoding: 'utf-8', timeout: 5000 })
     if (tracked.status !== 0) {
-      const cat = spawnSync('cat', [file], { cwd, encoding: 'utf-8', timeout: 5000 })
-      if (cat.status === 0) return cat.stdout.split('\n')
+      // Read directly instead of spawning `cat`, which doesn't exist on native
+      // Windows (the symbol scan silently returned nothing there).
+      try {
+        return readFileSync(resolve(cwd, file), 'utf-8').split('\n')
+      } catch {
+        return []
+      }
     }
   } catch {
     // fail open — nudge is best-effort
