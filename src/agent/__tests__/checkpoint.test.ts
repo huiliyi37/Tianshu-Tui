@@ -4,6 +4,7 @@ import { execSync } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { rivetHome } from '../../config/paths.js'
 import {
   createCheckpoint,
   getRollbackPreview,
@@ -15,7 +16,6 @@ import {
   pruneOrphanCheckpoints,
   type ClaimLookup,
 } from '../checkpoint.js'
-import { homedir } from 'os'
 
 function makeTempGitRepo(): string {
   const repo = join(tmpdir(), `rivet-ck-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
@@ -36,7 +36,7 @@ function cleanupRepo(repo: string): void {
 describe('checkpoint module', () => {
   describe('pruneOrphanCheckpoints', () => {
     it('removes checkpoint files whose cwd no longer exists', () => {
-      const rivetDir = join(homedir(), '.rivet')
+      const rivetDir = rivetHome()
       mkdirSync(rivetDir, { recursive: true })
       const deadCwd = join(tmpdir(), `rivet-ck-gone-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
       // deadCwd is never created → orphan.
@@ -53,7 +53,7 @@ describe('checkpoint module', () => {
     it('keeps checkpoints whose cwd still exists', () => {
       const repo = makeTempGitRepo()
       try {
-        const rivetDir = join(homedir(), '.rivet')
+        const rivetDir = rivetHome()
         const tag = `prunekeep-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
         const live = join(rivetDir, `checkpoint-${tag}.json`)
         writeFileSync(live, JSON.stringify({ version: 2, hash: 'x', timestamp: Date.now(), label: 'auto', cwd: repo, preExistingDirtyFiles: [], preExistingUntrackedFiles: [], agentTouchedFiles: [] }))

@@ -4,9 +4,9 @@ import type { ProviderConfig } from '../config/schema.js'
 import { filterToolRegistry, ToolRegistry } from '../tools/registry.js'
 import { ProviderHealthTracker } from './provider-health.js'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { subagentsDir } from '../config/paths.js'
 import { debugLog } from '../utils/debug.js'
 import { CircuitBreakerManager } from './worker-circuit-breaker.js'
 import { InMemoryMailbox, type WorkerMailbox } from './worker-mailbox.js'
@@ -360,7 +360,7 @@ export function evictOldSubagentResults(dir: string, limit = MAX_SUBAGENT_RESULT
 /** Persist worker result to ~/.rivet/subagents/<orderId>.json for future resume/inspection. */
 function persistWorkerResult(result: WorkerResult, fingerprint?: string): void {
   try {
-    const dir = join(homedir(), '.rivet', 'subagents')
+    const dir = subagentsDir()
     mkdirSync(dir, { recursive: true })
     const json = JSON.stringify(result, null, 2)
     writeFileSync(join(dir, `${result.workOrderId}.json`), json, 'utf-8')
@@ -378,9 +378,16 @@ function persistWorkerResult(result: WorkerResult, fingerprint?: string): void {
 /** B1: read back a previously persisted worker result for resume/inspection.
  *  The persistWorkerResult sink used to have no reader (write-only grave).
  *  Returns null on cold miss or unparseable content — callers must handle it. */
-export function loadPersistedResult(orderId: string, homeDir = homedir()): WorkerResult | null {
+function coordinatorSubagentsDir(homeDir?: string): string {
+  // `homeDir` is the legacy "user home" parameter used by tests.
+  // In production, default to the unified subagentsDir() under RIVET_HOME.
+  if (homeDir) return join(homeDir, '.rivet', 'subagents')
+  return subagentsDir()
+}
+
+export function loadPersistedResult(orderId: string, homeDir?: string): WorkerResult | null {
   try {
-    const path = join(homeDir, '.rivet', 'subagents', `${orderId}.json`)
+    const path = join(coordinatorSubagentsDir(homeDir), `${orderId}.json`)
     if (!existsSync(path)) return null
     return parseWorkerResult(readFileSync(path, 'utf-8'), orderId)
   } catch {
@@ -400,10 +407,10 @@ function tryResumeWorkerResult(
   files: string[] | undefined,
   profile: string,
   nowMs: number,
-  homeDir = homedir(),
+  homeDir?: string,
 ): WorkerResult | null {
   const fp = fingerprintRequest(objective, files, profile)
-  const path = join(homeDir, '.rivet', 'subagents', `${fp}.json`)
+  const path = join(coordinatorSubagentsDir(homeDir), `${fp}.json`)
   if (!existsSync(path)) return null
   try {
     const stat = statSync(path)

@@ -11,8 +11,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { memoryDir } from '../config/paths.js'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
@@ -62,12 +62,12 @@ function projectHash(cwd: string): string {
   return createHash('sha256').update(cwd).digest('hex').slice(0, 12)
 }
 
-function memoryDir(cwd: string): string {
-  return join(homedir(), '.rivet', 'memory', projectHash(cwd))
+function projectMemoryDir(cwd: string): string {
+  return memoryDir(projectHash(cwd))
 }
 
 function memoryPath(cwd: string): string {
-  return join(memoryDir(cwd), 'memory.jsonl')
+  return join(projectMemoryDir(cwd), 'memory.jsonl')
 }
 
 function generateId(): string {
@@ -81,7 +81,7 @@ export function appendMemoryEntry(
   cwd: string,
   partial: Omit<MemoryEntry, 'id' | 'ts' | 'repeatCount'> & { id?: string; ts?: number },
 ): MemoryEntry {
-  const dir = memoryDir(cwd)
+  const dir = projectMemoryDir(cwd)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
   // Count existing similar entries for repeatCount — streaming scan, no full parse.
@@ -216,7 +216,7 @@ export function countSimilarMemoryEntries(cwd: string, text: string): number {
  *  entries whose IDs already exist in the unified log. Safe to re-run after
  *  partial migration (crash recovery). */
 export function migrateObservationsToUnified(cwd: string): number {
-  const oldPath = join(memoryDir(cwd), 'observations.jsonl')
+  const oldPath = join(projectMemoryDir(cwd), 'observations.jsonl')
   if (!existsSync(oldPath)) return 0
 
   // Load existing unified entries to skip already-migrated observations
@@ -244,7 +244,7 @@ export function migrateObservationsToUnified(cwd: string): number {
           sessionId: obs.sessionId,
         }
         // Direct append — bypass appendMemoryEntry's repeatCount read-back
-        const dir = memoryDir(cwd)
+        const dir = projectMemoryDir(cwd)
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
         appendFileSync(memoryPath(cwd), JSON.stringify(entry) + '\n', 'utf-8')
         existingIds.add(entry.id)

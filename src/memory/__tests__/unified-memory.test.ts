@@ -5,8 +5,9 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { tmpdir, homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { memoryDir } from '../../config/paths.js'
 import {
   appendMemoryEntry,
   readMemoryEntries,
@@ -25,13 +26,13 @@ function projectHash(cwd: string): string {
 function setup() {
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true })
   mkdirSync(TEST_DIR, { recursive: true })
-  const memDir = join(homedir(), '.rivet', 'memory', projectHash(TEST_DIR))
+  const memDir = memoryDir(projectHash(TEST_DIR))
   try { rmSync(memDir, { recursive: true }) } catch {}
 }
 
 function teardown() {
   try { rmSync(TEST_DIR, { recursive: true }) } catch {}
-  try { rmSync(join(homedir(), '.rivet', 'memory', projectHash(TEST_DIR)), { recursive: true }) } catch {}
+  try { rmSync(memoryDir(projectHash(TEST_DIR)), { recursive: true }) } catch {}
 }
 
 describe('unified-memory', () => {
@@ -107,7 +108,7 @@ describe('unified-memory', () => {
 
   it('migration is idempotent', () => {
     // migrateObservationsToUnified reads from ~/.rivet/memory/<hash>/observations.jsonl
-    const obsDir = join(homedir(), '.rivet', 'memory', projectHash(TEST_DIR))
+    const obsDir = memoryDir(projectHash(TEST_DIR))
     mkdirSync(obsDir, { recursive: true })
     const obsFile = join(obsDir, 'observations.jsonl')
     writeFileSync(obsFile, [

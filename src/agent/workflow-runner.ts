@@ -32,7 +32,7 @@
 
 import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { workflowsDir } from '../config/paths.js'
 
 const WORKFLOWS_DIR = '.rivet/workflows'
 const TRACES_DIR = '.rivet/traces'
@@ -363,7 +363,7 @@ export function loadWorkflow(cwd: string, name: string): WorkflowDef | null {
   const paths = [
     join(cwd, WORKFLOWS_DIR, `${name}.yaml`),
     join(cwd, WORKFLOWS_DIR, `${name}.yml`),
-    join(homedir(), '.rivet', 'workflows', `${name}.yaml`),
+    join(workflowsDir(), `${name}.yaml`),
   ]
   for (const p of paths) {
     if (existsSync(p)) return parseWorkflow(readFileSync(p, 'utf-8'))
@@ -374,7 +374,7 @@ export function loadWorkflow(cwd: string, name: string): WorkflowDef | null {
 /** List all available workflows. */
 export function listWorkflows(cwd: string): string[] {
   const names = new Set<string>()
-  for (const dir of [join(cwd, WORKFLOWS_DIR), join(homedir(), '.rivet', 'workflows')]) {
+  for (const dir of [join(cwd, WORKFLOWS_DIR), workflowsDir()]) {
     if (existsSync(dir)) {
       for (const f of readdirSync(dir)) {
         if (f.endsWith('.yaml') || f.endsWith('.yml')) names.add(f.replace(/\.ya?ml$/, ''))

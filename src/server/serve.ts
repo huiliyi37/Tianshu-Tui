@@ -7,9 +7,9 @@
  * existing AgentLoop / ArtifactStore — no runtime rewrite, only an API surface.
  */
 import { randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { startServer } from './index.js'
+import { desktopDir, desktopSessionsDir } from '../config/paths.js'
 import { serverLogger } from './logger.js'
 import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
@@ -732,7 +732,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // pre-built registry. Ephemeral mode (tests) skips it → behavior unchanged.
   let sessionRegistry: SessionRegistry | undefined = opts.sessionRegistry
   if (!sessionRegistry && !opts.ephemeral) {
-    const registryDir = process.env.RIVET_DESKTOP_DIR ?? join(homedir(), '.rivet', 'desktop')
+    const registryDir = desktopDir()
     void SessionRegistry.create(registryDir)
       .then((r) => { sessionRegistry = r })
       .catch((err) => {
@@ -747,9 +747,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   const persistence = opts.ephemeral
     ? undefined
     : new FileSessionPersistence(
-        opts.sessionDir ??
-          process.env.RIVET_DESKTOP_SESSION_DIR ??
-          join(homedir(), '.rivet', 'desktop', 'sessions'),
+        opts.sessionDir ?? desktopSessionsDir(),
       )
 
   // Wave J: sidecar 级 SharedRuntime——providerHealth 跨 session 共享让
@@ -891,7 +889,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   let scheduler: CronScheduler | undefined
   let wiring: CronWiring | undefined
   if (!opts.ephemeral) {
-    const rivetDir = process.env.RIVET_DESKTOP_DIR ?? join(homedir(), '.rivet', 'desktop')
+    const rivetDir = desktopDir()
     scheduler = new CronScheduler({ schedulePath: join(rivetDir, 'scheduled_tasks.json') })
     const registry = new TaskRegistry({ taskStore: new JsonTaskStore(join(rivetDir, 'tasks')) })
     const runtimePool = new SessionRuntimePool({ manager: sessions, defaultCwd: process.cwd() })

@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { rivetHome } from '../../config/paths.js'
 import {
   checkpointFileForSession,
   loadCheckpointIndex,
@@ -10,7 +10,7 @@ import {
   removeFromCheckpointIndex,
 } from '../checkpoint.js'
 
-const RIVET_DIR = join(homedir(), '.rivet')
+const RIVET_DIR = rivetHome()
 
 function indexFileForCwd(cwd: string): string {
   const slug = cwd.replace(/[^a-zA-Z0-9]/g, '_').slice(-64)

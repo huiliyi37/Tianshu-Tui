@@ -1,9 +1,10 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, existsSync, readFileSync } from 'node:fs'
-import { tmpdir, homedir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { rivetHome } from '../../config/paths.js'
 import {
   grantPath,
   isReadGranted,
@@ -96,7 +97,7 @@ describe('path-grants', () => {
     const target = tmp()
     try {
       grantPath(target, 'write', { persist: true, cwd: cwdA })
-      const file = join(homedir(), '.rivet')
+      const file = rivetHome()
       assert.ok(existsSync(file), '.rivet dir exists')
 
       // Fresh process simulation: reset memory, hydrate from B → nothing.

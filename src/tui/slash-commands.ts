@@ -31,7 +31,7 @@ import { resolveEcosystemWorkflowInput } from '../workflows/ecosystem-workflows.
 import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { homedir } from 'node:os'
+import { exportsDir } from '../config/paths.js'
 import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
@@ -1930,7 +1930,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           return true
         }
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-        const outPath = join(homedir(), '.rivet', 'exports', `${timestamp}.json`)
+        const outPath = join(exportsDir(), `${timestamp}.json`)
         const count = exportDurableClaims(store, outPath)
         pushStatic(createLogEntry({ type: 'system', content: `Exported ${count} durable claims to ${outPath}` }))
         setIsStreaming(false)

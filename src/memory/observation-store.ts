@@ -4,8 +4,8 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { createHash } from 'node:crypto'
+import { memoryDir } from '../config/paths.js'
 import { appendMemoryEntry } from './unified-memory.js'
 import { migrateObservationsToUnified } from './unified-memory.js'
 
@@ -27,16 +27,16 @@ function projectHash(cwd: string): string {
   return createHash('sha256').update(cwd).digest('hex').slice(0, 12)
 }
 
-function memoryDir(cwd: string): string {
-  return join(homedir(), '.rivet', 'memory', projectHash(cwd))
+function projectMemoryDir(cwd: string): string {
+  return memoryDir(projectHash(cwd))
 }
 
 function observationsPath(cwd: string): string {
-  return join(memoryDir(cwd), 'observations.jsonl')
+  return join(projectMemoryDir(cwd), 'observations.jsonl')
 }
 
 export function appendObservation(cwd: string, obs: Omit<Observation, 'id' | 'ts'> & { id?: string; ts?: number }): Observation {
-  const dir = memoryDir(cwd)
+  const dir = projectMemoryDir(cwd)
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
   // Lazy auto-migrate old observations.jsonl → memory.jsonl on first write

@@ -1,12 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { userConfigPath } from '../paths.js'
 import { configSchema } from '../schema.js'
 
 describe('Config schema integration', () => {
-  const configPath = join(homedir(), '.rivet', 'config.json')
+  const configPath = userConfigPath()
 
   it('parses full user config through Zod schema', () => {
     if (!existsSync(configPath)) return // skip if no user config

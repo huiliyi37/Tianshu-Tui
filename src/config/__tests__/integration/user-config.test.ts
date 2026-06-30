@@ -1,11 +1,10 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { homedir } from 'node:os'
+import { userConfigPath } from '../../paths.js'
 
 function loadConfig() {
-  const configPath = join(homedir(), '.rivet', 'config.json')
+  const configPath = userConfigPath()
   if (!existsSync(configPath)) return null
   try {
     return JSON.parse(readFileSync(configPath, 'utf-8'))
@@ -22,7 +21,7 @@ describe('User config validation', () => {
   const config = loadConfig()
 
   it('config file exists', () => {
-    assert.ok(config !== null, `Config not found at ${join(homedir(), '.rivet', 'config.json')}`)
+    assert.ok(config !== null, `Config not found at ${userConfigPath()}`)
   })
 
   it('config has required providers', () => {

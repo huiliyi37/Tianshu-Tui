@@ -1,6 +1,6 @@
 import { join } from 'node:path'
-import { homedir } from 'node:os'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { subagentsDir } from '../config/paths.js'
 import type { OaiMessage } from '../api/oai-types.js'
 
 /** Persisted worker session history — the full OaiMessage transcript from a
@@ -13,8 +13,15 @@ export interface WorkerSessionRecord {
   readonly savedAt: number
 }
 
-export function workerSessionPath(workOrderId: string, homeDir: string = homedir()): string {
-  return join(homeDir, '.rivet', 'subagents', `${workOrderId}.session.jsonl`)
+function workerSubagentsDir(homeDir?: string): string {
+  // Legacy: tests pass a parent directory and expect `.rivet/subagents` under it.
+  // In production, default to the unified subagentsDir() under RIVET_HOME.
+  if (homeDir) return join(homeDir, '.rivet', 'subagents')
+  return subagentsDir()
+}
+
+export function workerSessionPath(workOrderId: string, homeDir?: string): string {
+  return join(workerSubagentsDir(homeDir), `${workOrderId}.session.jsonl`)
 }
 
 /** Persist worker session history to ~/.rivet/subagents/<orderId>.session.jsonl.
@@ -24,10 +31,10 @@ export function saveWorkerSession(
   profile: string,
   objective: string,
   messages: readonly OaiMessage[],
-  homeDir: string = homedir(),
+  homeDir?: string,
 ): void {
   try {
-    const dir = join(homeDir, '.rivet', 'subagents')
+    const dir = workerSubagentsDir(homeDir)
     mkdirSync(dir, { recursive: true })
     const record: WorkerSessionRecord = {
       workOrderId,
@@ -45,7 +52,7 @@ export function saveWorkerSession(
 /** Load a previously persisted worker session history.
  *  Returns null on cold miss, empty file, or unparseable content — callers
  *  must handle it (typically by degrading to a fresh worker). */
-export function loadWorkerSession(workOrderId: string, homeDir: string = homedir()): WorkerSessionRecord | null {
+export function loadWorkerSession(workOrderId: string, homeDir?: string): WorkerSessionRecord | null {
   const path = workerSessionPath(workOrderId, homeDir)
   if (!existsSync(path)) return null
   try {
