@@ -498,6 +498,25 @@ body {
 }
 .diff-sign { flex-shrink: 0; width: 14px; text-align: center; user-select: none; }
 .diff-text { flex: 1; min-width: 0; }
+/* Syntax-highlight token colors for diff rows and the file viewer (highlight.js
+ * emits .hljs-* spans). Mirrors the markdown palette but scoped here so code
+ * surfaces outside .md get colored too. */
+.diff-text .hljs-comment, .diff-text .hljs-quote,
+.file-line-content .hljs-comment, .file-line-content .hljs-quote { color: var(--faint); font-style: italic; }
+.diff-text .hljs-keyword, .diff-text .hljs-selector-tag, .diff-text .hljs-literal, .diff-text .hljs-type,
+.file-line-content .hljs-keyword, .file-line-content .hljs-selector-tag, .file-line-content .hljs-literal, .file-line-content .hljs-type { color: var(--accent); }
+.diff-text .hljs-string, .diff-text .hljs-meta .hljs-string,
+.file-line-content .hljs-string, .file-line-content .hljs-meta .hljs-string { color: var(--success); }
+.diff-text .hljs-number, .diff-text .hljs-symbol, .diff-text .hljs-bullet,
+.file-line-content .hljs-number, .file-line-content .hljs-symbol, .file-line-content .hljs-bullet { color: var(--warning); }
+.diff-text .hljs-title, .diff-text .hljs-section, .diff-text .hljs-name, .diff-text .hljs-built_in,
+.file-line-content .hljs-title, .file-line-content .hljs-section, .file-line-content .hljs-name, .file-line-content .hljs-built_in { color: var(--info); }
+.diff-text .hljs-attr, .diff-text .hljs-attribute, .diff-text .hljs-variable, .diff-text .hljs-template-variable,
+.file-line-content .hljs-attr, .file-line-content .hljs-attribute, .file-line-content .hljs-variable, .file-line-content .hljs-template-variable { color: var(--text-strong); }
+.diff-text .hljs-regexp, .diff-text .hljs-link,
+.file-line-content .hljs-regexp, .file-line-content .hljs-link { color: var(--success); }
+.diff-text .hljs-emphasis, .file-line-content .hljs-emphasis { font-style: italic; }
+.diff-text .hljs-strong, .file-line-content .hljs-strong { font-weight: var(--weight-semibold); }
 .diff-row.diff-add { background: color-mix(in srgb, #22c55e 10%, transparent); }
 .diff-row.diff-del { background: color-mix(in srgb, #ef4444 10%, transparent); }
 .diff-row.diff-hunk { color: var(--text-faint); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 2px 0; }
@@ -2961,22 +2980,34 @@ body {
 .git-page-info { padding: 0 var(--space-2); font-family: var(--font-mono); color: var(--text); }
 .git-page-size { display: flex; align-items: center; gap: var(--space-2); }
 
-/* Changes tab (working-tree diff) */
-.changes-tab { display: flex; height: 100%; min-height: 0; }
-.changes-file-list {
-  width: 280px; flex: none; border-right: 1px solid var(--border);
-  overflow-y: auto; background: var(--sidebar-surface-bg);
-  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
-  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+/* Changes tab (working-tree diff) — Antigravity-style single-column overview */
+.changes-overview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.changes-summary {
+  display: flex; align-items: center; gap: var(--space-3); flex: none;
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 1; background: var(--panel);
 }
-.changes-file-count { padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: inherit; }
-.changes-file {
+.changes-summary-count { font-size: var(--text-xs); color: var(--muted); }
+.changes-summary-delta { display: flex; gap: 6px; font-family: var(--font-mono); font-size: var(--text-xs); }
+.changes-summary-delta .add { color: var(--success); }
+.changes-summary-delta .del { color: var(--error); }
+.changes-summary .diff-toggle { margin-left: auto; }
+.changes-cards { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+
+.file-diff-card { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--panel); }
+.file-diff-card-head {
   display: flex; align-items: center; gap: var(--space-2); width: 100%;
-  padding: var(--space-1) var(--space-3); cursor: pointer; border: none; background: none;
+  padding: var(--space-2) var(--space-3); cursor: pointer; border: none; background: none;
   text-align: left; transition: background var(--dur) var(--ease);
 }
-.changes-file:hover { background: var(--panel-2); }
-.changes-file.selected { background: var(--accent-soft, var(--panel-2)); }
+.file-diff-card-head:hover { background: var(--panel-2); }
+.file-diff-chevron { flex: none; color: var(--muted); font-size: var(--text-xs); width: 12px; }
+.file-diff-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary); }
+.file-diff-delta { flex: none; display: flex; gap: 4px; font-family: var(--font-mono); font-size: var(--text-xs); }
+.file-diff-delta .add { color: var(--success); }
+.file-diff-delta .del { color: var(--error); }
+.file-diff-card-body { border-top: 1px solid var(--border); overflow-x: auto; padding: var(--space-2) var(--space-3); }
+
 .changes-status {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; flex: none; border-radius: var(--radius-sm);
@@ -2988,11 +3019,6 @@ body {
 .st-deleted { color: var(--error); background: var(--error-soft, var(--panel-3)); }
 .st-renamed { color: var(--accent); background: var(--accent-soft, var(--panel-3)); }
 .st-untracked { color: var(--muted); }
-.changes-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary); }
-.changes-delta { flex: none; display: flex; gap: 4px; font-family: var(--font-mono); font-size: var(--text-xs); }
-.changes-delta .add { color: var(--success); }
-.changes-delta .del { color: var(--error); }
-.changes-diff-view { flex: 1; min-width: 0; overflow: auto; padding: var(--space-3); }
 
 /* TerminalTabs — multi-tab terminal panel (Gap 4) */
 .terminal-tabs { display: flex; flex-direction: column; height: 100%; min-height: 0; }

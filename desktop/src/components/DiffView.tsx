@@ -1,5 +1,9 @@
 import { useState, useMemo } from 'react'
 import type { LineComment } from '../runtime/types'
+import { highlightLine, languageFromPath } from '../lib/highlight'
+
+/** Beyond this many diff rows, skip per-line syntax highlighting for responsiveness. */
+const HIGHLIGHT_MAX_ROWS = 2_000
 
 interface DiffLine {
   type: 'add' | 'del' | 'ctx' | 'hunk' | 'meta'
@@ -99,6 +103,11 @@ export interface DiffViewProps {
   comments?: LineComment[]
   /** Called when the user submits a line-level comment on a row. */
   onLineComment?: (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => void
+  /** Controlled side-by-side mode. When provided, the internal toggle state is
+   *  ignored — the parent owns the layout (e.g. a global toolbar). */
+  sideBySide?: boolean
+  /** Hide the built-in single/double-column toggle (parent renders its own). */
+  hideToolbar?: boolean
 }
 
 /**
@@ -107,8 +116,10 @@ export interface DiffViewProps {
  * an inline textarea; submitted comments route through `onLineComment`.
  */
 export function DiffView(props: DiffViewProps) {
-  const { raw, comments, onLineComment } = props
-  const [sideBySide, setSideBySide] = useState(false)
+  const { raw, comments, onLineComment, hideToolbar } = props
+  const [internalSideBySide, setInternalSideBySide] = useState(false)
+  const controlled = props.sideBySide !== undefined
+  const sideBySide = controlled ? props.sideBySide! : internalSideBySide
   // map anchor-key → list of comments, for marker/bubble rendering
   const commentMap = useMemo(() => {
     const m = new Map<string, LineComment[]>()
@@ -124,6 +135,15 @@ export function DiffView(props: DiffViewProps) {
   const parsed = useMemo(() => parseDiff(raw), [raw])
   const hasHunks = parsed.hunks.length > 0
   const interactive = Boolean(onLineComment)
+
+  // Derive the language from the first content line's file path, and disable
+  // highlighting for very large diffs to keep rendering responsive.
+  const language = useMemo(() => {
+    const rowCount = parsed.hunks.reduce((n, h) => n + h.lines.length, 0)
+    if (rowCount > HIGHLIGHT_MAX_ROWS) return 'plaintext'
+    const filed = parsed.hunks.flatMap((h) => h.lines).find((l) => l.file)
+    return languageFromPath(filed?.file)
+  }, [parsed])
 
   // Fallback to simple rendering if no hunks detected (non-diff content)
   if (!hasHunks) {
@@ -144,18 +164,20 @@ export function DiffView(props: DiffViewProps) {
 
   return (
     <div className="diff-hunked">
-      <div className="diff-toolbar">
-        <button
-          className={`diff-toggle ${sideBySide ? 'active' : ''}`}
-          onClick={() => setSideBySide((v) => !v)}
-        >
-          {sideBySide ? '双列' : '单列'}
-        </button>
-      </div>
+      {!hideToolbar && (
+        <div className="diff-toolbar">
+          <button
+            className={`diff-toggle ${sideBySide ? 'active' : ''}`}
+            onClick={() => setInternalSideBySide((v) => !v)}
+          >
+            {sideBySide ? '双列' : '单列'}
+          </button>
+        </div>
+      )}
       {sideBySide ? (
-        <SideBySide hunks={parsed.hunks} commentMap={commentMap} interactive={interactive} onLineComment={onLineComment} />
+        <SideBySide hunks={parsed.hunks} commentMap={commentMap} interactive={interactive} onLineComment={onLineComment} language={language} />
       ) : (
-        <Unified hunks={parsed.hunks} commentMap={commentMap} interactive={interactive} onLineComment={onLineComment} />
+        <Unified hunks={parsed.hunks} commentMap={commentMap} interactive={interactive} onLineComment={onLineComment} language={language} />
       )}
     </div>
   )
@@ -167,15 +189,22 @@ function DiffRow({
   comments,
   interactive,
   onLineComment,
+  language,
 }: {
   line: DiffLine
   comments?: LineComment[]
   interactive: boolean
   onLineComment?: DiffViewProps['onLineComment']
+  language?: string
 }) {
   const [drafting, setDrafting] = useState(false)
   const [draft, setDraft] = useState('')
   const canComment = interactive && (line.type === 'add' || line.type === 'del' || line.type === 'ctx')
+  const isCode = line.type === 'add' || line.type === 'del' || line.type === 'ctx'
+  const highlighted = useMemo(
+    () => (isCode && language && language !== 'plaintext' ? highlightLine(line.content, language) : null),
+    [isCode, language, line.content],
+  )
 
   const submit = () => {
     if (!draft.trim() || !onLineComment) return
@@ -195,7 +224,11 @@ function DiffRow({
         <span className="diff-sign">
           {line.type === 'add' ? '+' : line.type === 'del' ? '-' : ' '}
         </span>
-        <span className="diff-text">{line.content || ' '}</span>
+        {highlighted !== null ? (
+          <span className="diff-text hljs" dangerouslySetInnerHTML={{ __html: highlighted || ' ' }} />
+        ) : (
+          <span className="diff-text">{line.content || ' '}</span>
+        )}
         {canComment && !drafting && (
           <button
             className="diff-row-comment-btn"
@@ -240,11 +273,13 @@ function Unified({
   commentMap,
   interactive,
   onLineComment,
+  language,
 }: {
   hunks: Hunk[]
   commentMap: Map<string, LineComment[]>
   interactive: boolean
   onLineComment?: DiffViewProps['onLineComment']
+  language?: string
 }) {
   return (
     <div className="diff-unified">
@@ -257,6 +292,7 @@ function Unified({
               comments={commentMap.get(lineAnchor(line))}
               interactive={interactive}
               onLineComment={onLineComment}
+              language={language}
             />
           ))}
         </div>
@@ -270,11 +306,13 @@ function SideBySide({
   commentMap,
   interactive,
   onLineComment,
+  language,
 }: {
   hunks: Hunk[]
   commentMap: Map<string, LineComment[]>
   interactive: boolean
   onLineComment?: DiffViewProps['onLineComment']
+  language?: string
 }) {
   return (
     <div className="diff-split">
@@ -307,6 +345,7 @@ function SideBySide({
                     comments={commentMap.get(lineAnchor(line))}
                     interactive={interactive}
                     onLineComment={onLineComment}
+                    language={language}
                   />
                 ))}
               </div>
@@ -318,6 +357,7 @@ function SideBySide({
                     comments={commentMap.get(lineAnchor(line))}
                     interactive={interactive}
                     onLineComment={onLineComment}
+                    language={language}
                   />
                 ))}
               </div>

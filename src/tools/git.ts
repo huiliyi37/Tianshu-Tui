@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { readFile as fsReadFile, stat as fsStat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { auditCommitTagScope } from './commit-audit.js'
@@ -78,6 +79,10 @@ async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): P
         const err = new Error((stderr || '').trim() || `git exited with status ${code}`)
         const gitErr = err as GitExitError
         gitErr.exitCode = code ?? 1
+        // Preserve stdout even on non-zero exit — `git diff --no-index` exits 1
+        // when files differ but prints the diff on stdout. Callers that need it
+        // (getFileDiff fallback) read err.stdout via runGitExitCode.
+        gitErr.stdout = stdout
         finish('', err)
       } else {
         let output = stdout
@@ -105,16 +110,17 @@ async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): P
   })
 }
 
-interface GitExitError extends Error { exitCode: number }
+interface GitExitError extends Error { exitCode: number; stdout?: string }
 
-/** runGit variant that returns exit code instead of throwing — for callers that need to distinguish exit codes. */
+/** runGit variant that returns exit code instead of throwing — for callers that need to distinguish exit codes.
+ *  stdout is preserved on non-zero exit (e.g. `git diff --no-index` exits 1 with the diff on stdout). */
 async function runGitExitCode(args: string[], cwd: string, abortSignal?: AbortSignal): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const stdout = await runGit(args, cwd, abortSignal)
     return { code: 0, stdout, stderr: '' }
   } catch (err) {
-    const exitCode = (err as GitExitError).exitCode
-    if (exitCode !== undefined) return { code: exitCode, stdout: '', stderr: (err as Error).message }
+    const gitErr = err as GitExitError
+    if (gitErr.exitCode !== undefined) return { code: gitErr.exitCode, stdout: gitErr.stdout ?? '', stderr: gitErr.message }
     throw err // non-exit errors (spawn failure, timeout) still throw
   }
 }
@@ -238,7 +244,38 @@ export async function getWorkingTreeFiles(cwd: string): Promise<{ files: Working
     // Both failed — likely not a git repo
     return { files: [], isRepo: false }
   }
-  return { files: parseWorkingTreeFiles(numstatOk ? numstat : '', statusOk ? statusOut : ''), isRepo: true }
+  const files = parseWorkingTreeFiles(numstatOk ? numstat : '', statusOk ? statusOut : '')
+  // Untracked files aren't in `git diff HEAD --numstat`, so their +N badge would
+  // read 0. Backfill the addition count by reading the file and counting lines
+  // (cheap, no spawn). Skip oversized/binary/unreadable files — badge stays 0.
+  await backfillUntrackedAdditions(cwd, files)
+  return { files, isRepo: true }
+}
+
+/** Max bytes to read when counting lines of an untracked file for its +N badge. */
+const UNTRACKED_COUNT_MAX_BYTES = 1_000_000
+
+async function backfillUntrackedAdditions(cwd: string, files: WorkingTreeFile[]): Promise<void> {
+  await Promise.all(
+    files
+      .filter((f) => f.status === 'untracked' && f.additions === 0)
+      .map(async (f) => {
+        const rel = normalizeProjectRelativePath(cwd, f.path)
+        if (!rel) return
+        try {
+          const stat = await fsStat(resolve(cwd, rel))
+          if (!stat.isFile() || stat.size > UNTRACKED_COUNT_MAX_BYTES) return
+          const content = await fsReadFile(resolve(cwd, rel), 'utf8')
+          if (content.includes('\u0000')) return // binary — leave badge at 0
+          if (content.length === 0) return
+          // Count lines like git: a trailing newline doesn't add an empty line.
+          const nl = (content.match(/\n/g) ?? []).length
+          f.additions = content.endsWith('\n') ? nl : nl + 1
+        } catch {
+          // unreadable — leave badge at 0
+        }
+      }),
+  )
 }
 
 /**
@@ -250,9 +287,34 @@ export async function getFileDiff(cwd: string, path: string): Promise<string> {
   // Guard against path traversal / pathspec injection — pathspec must be relative
   const rel = normalizeProjectRelativePath(cwd, path)
   if (!rel) throw new Error(`Invalid file path: ${path}`)
-  const { ok, output } = await runGitSafe(['diff', 'HEAD', '--', rel], cwd)
-  if (!ok) return '' // untracked / binary / not in HEAD — no unified diff
-  return output
+  // Tracked changes (modified/deleted/staged) diff cleanly against HEAD.
+  const tracked = await runGitSafe(['diff', 'HEAD', '--', rel], cwd)
+  if (tracked.ok && tracked.output.trim()) return tracked.output
+  // New / untracked file: not in HEAD, so `git diff HEAD` is empty. Render the
+  // whole file as additions via --no-index against /dev/null. This exits 1 when
+  // the files differ (the normal case) but prints the diff on stdout, which
+  // runGitExitCode preserves. Binary files print "Binary files ... differ".
+  const fallback = await runGitExitCode(['diff', '--no-index', '--', '/dev/null', rel], cwd)
+  const out = fallback.stdout
+  if (out && out.trim()) return normalizeNoIndexHeader(out, rel)
+  return tracked.ok ? tracked.output : ''
+}
+
+/**
+ * `git diff --no-index /dev/null file` emits headers referencing the literal
+ * paths ("/dev/null" and the file path without a/ b/ prefixes). Rewrite the
+ * `+++` header to the conventional `b/<rel>` form so the desktop diff parser
+ * (which strips a leading `b/`) anchors line comments on the right file path.
+ */
+function normalizeNoIndexHeader(diff: string, rel: string): string {
+  return diff
+    .split('\n')
+    .map((line) => {
+      if (line.startsWith('+++ ')) return `+++ b/${rel}`
+      if (line.startsWith('--- ')) return '--- /dev/null'
+      return line
+    })
+    .join('\n')
 }
 
 

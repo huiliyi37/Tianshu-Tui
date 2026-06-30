@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
-import { GIT_TOOL } from '../git.js'
+import { GIT_TOOL, getWorkingTreeFiles, getFileDiff } from '../git.js'
 
 const TMP = join(import.meta.dirname, '.git-test-tmp')
 
@@ -227,5 +228,62 @@ describe('GIT_TOOL', () => {
 
   it('does not require approval for stash action', () => {
     assert.equal(GIT_TOOL.requiresApproval({ input: { action: 'stash' }, toolUseId: 't', cwd: '/' }), false)
+  })
+})
+
+describe('getWorkingTreeFiles / getFileDiff (desktop changes tab)', () => {
+  const TMP2 = join(import.meta.dirname, '.git-wt-test-tmp')
+
+  beforeEach(() => {
+    rmSync(TMP2, { recursive: true, force: true })
+    mkdirSync(TMP2, { recursive: true })
+    execSync('git init', { cwd: TMP2 })
+    execSync('git config user.email "test@test.com"', { cwd: TMP2 })
+    execSync('git config user.name "Test"', { cwd: TMP2 })
+    writeFileSync(join(TMP2, 'base.txt'), 'base\n')
+    execSync('git add .', { cwd: TMP2 })
+    execSync('git commit -m "init"', { cwd: TMP2 })
+  })
+
+  afterEach(() => {
+    rmSync(TMP2, { recursive: true, force: true })
+  })
+
+  it('renders a full-addition diff for a new/untracked file', async () => {
+    writeFileSync(join(TMP2, 'fresh.txt'), 'line1\nline2\nline3\n')
+    const diff = await getFileDiff(TMP2, 'fresh.txt')
+    assert.ok(diff.includes('+line1'), 'new file lines should appear as additions')
+    assert.ok(diff.includes('+line2'))
+    assert.ok(diff.includes('+line3'))
+    assert.ok(diff.includes('b/fresh.txt'), 'header should anchor on b/<rel>')
+  })
+
+  it('counts additions for an untracked file in the working-tree list', async () => {
+    writeFileSync(join(TMP2, 'fresh.txt'), 'a\nb\nc\n')
+    const { files, isRepo } = await getWorkingTreeFiles(TMP2)
+    assert.equal(isRepo, true)
+    const fresh = files.find((f) => f.path === 'fresh.txt')
+    assert.ok(fresh, 'untracked file should be listed')
+    assert.equal(fresh!.status, 'untracked')
+    assert.equal(fresh!.additions, 3)
+  })
+
+  it('still diffs a tracked modified file against HEAD', async () => {
+    writeFileSync(join(TMP2, 'base.txt'), 'base changed\n')
+    const diff = await getFileDiff(TMP2, 'base.txt')
+    assert.ok(diff.includes('-base'), 'old content should appear as deletion')
+    assert.ok(diff.includes('+base changed'), 'new content should appear as addition')
+  })
+
+  it('returns notARepo gracefully outside a git repo', async () => {
+    // Must live outside the project repo, else git finds the parent repo.
+    const nonRepo = mkdtempSync(join(tmpdir(), 'git-nonrepo-'))
+    try {
+      const { files, isRepo } = await getWorkingTreeFiles(nonRepo)
+      assert.equal(isRepo, false)
+      assert.equal(files.length, 0)
+    } finally {
+      rmSync(nonRepo, { recursive: true, force: true })
+    }
   })
 })
