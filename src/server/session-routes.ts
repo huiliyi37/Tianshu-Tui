@@ -36,6 +36,7 @@ import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '..
 import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
+import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
@@ -276,6 +277,31 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found' } }
       }
       return { status: 200, body: { id: params!.id!, name: data.name.trim(), enabled: data.enabled } }
+    }, apiToken),
+
+    // ── Skills install (from .claude/skills) ──
+    // Read — candidates installable from project/global .claude/skills.
+    'GET /sessions/:id/skills/installable': withAuth((_body, params) => {
+      const skills = manager.listInstallableSkills(params!.id!)
+      if (!skills) return { status: 404, body: { error: 'Session not found' } }
+      const installedCount = manager.installedSkillCount(params!.id!) ?? 0
+      return { status: 200, body: { skills, installedCount, recommendedMax: RECOMMENDED_MAX_SKILLS } }
+    }, apiToken),
+
+    // Write — copy the named skills into .rivet/skills (no hot-load; takes effect
+    // on next session). Returns { copied, skipped, errors }.
+    'POST /sessions/:id/skills/install': withAuth((body, params) => {
+      const data = (body ?? {}) as { names?: unknown }
+      if (!Array.isArray(data.names) || data.names.some((n) => typeof n !== 'string' || !n.trim())) {
+        return { status: 400, body: { error: 'Missing or invalid "names" (non-empty string array)' } }
+      }
+      const names = (data.names as string[]).map((n) => n.trim())
+      if (names.length === 0) {
+        return { status: 400, body: { error: 'Missing or invalid "names" (non-empty string array)' } }
+      }
+      const result = manager.installSkills(params!.id!, names)
+      if (!result) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: result }
     }, apiToken),
 
     'GET /sessions': withAuth((_body, params) => {

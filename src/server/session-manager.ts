@@ -39,7 +39,7 @@ import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domai
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
-import { skillRegistry, loadProjectSkills } from '../skills/skill-loader.js'
+import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
@@ -1023,6 +1023,40 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.append(session, 'skills_changed', { name, enabled })
     return true
+  }
+
+  /**
+   * Skills install — list skills discoverable under .claude/skills that can be
+   * copied into this session's project .rivet/skills. Read-only; returns
+   * undefined when the session is missing.
+   */
+  listInstallableSkills(id: string): InstallableSkill[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return listInstallableSkills(session.record.cwd)
+  }
+
+  /**
+   * Skills install — count skills already installed under .rivet/skills. Drives
+   * the soft install cap in UIs. Returns undefined when the session is missing.
+   */
+  installedSkillCount(id: string): number | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return countInstalledSkills(session.record.cwd)
+  }
+
+  /**
+   * Skills install — copy the named skills from .claude/skills into the project
+   * .rivet/skills (idempotent; already-present ones are skipped). Intentionally
+   * does NOT hot-load into the live registry or emit skills_changed: changing
+   * the available-skill set mid-session shatters the prefix cache. The copied
+   * skills take effect on the next session. Returns undefined when missing.
+   */
+  installSkills(id: string, names: string[]): { copied: string[]; skipped: string[]; errors: string[] } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return importSkillsIntoRivet(session.record.cwd, names)
   }
 
   /**

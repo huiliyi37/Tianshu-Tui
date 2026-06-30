@@ -36,7 +36,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
-import { skillRegistry, listSkillFiles, importSkillsIntoRivet } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles, importSkillsIntoRivet, countInstalledSkills, RECOMMENDED_MAX_SKILLS, SKILL_RESTRAINT_NOTICE } from '../skills/skill-loader.js'
 import { listSkillDrafts, approveSkillDraft, rejectSkillDraft } from '../agent/skill-distill.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
@@ -2663,7 +2663,13 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         if (copied.length > 0) lines.push(`✅ 已安装: ${copied.join(', ')}`)
         if (skipped.length > 0) lines.push(`⏭ 已存在/跳过: ${skipped.join(', ')}`)
         if (errors.length > 0) lines.push(`❌ 失败:\n${errors.map(e => `  • ${e}`).join('\n')}`)
-        if (copied.length > 0) lines.push('⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。')
+        if (copied.length > 0) {
+          lines.push('⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。')
+          const installed = countInstalledSkills(ctx.agent.cwd)
+          if (installed >= RECOMMENDED_MAX_SKILLS) {
+            lines.push(`⚠ 已安装 ${installed} 个,超过建议上限 ${RECOMMENDED_MAX_SKILLS}。${SKILL_RESTRAINT_NOTICE}`)
+          }
+        }
         pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') || '无变更。' }))
         setIsStreaming(false)
         return true

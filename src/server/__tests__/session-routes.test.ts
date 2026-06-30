@@ -6,9 +6,10 @@ import { RuntimeSessionManager, type ManagedAgent } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { skillRegistry } from '../../skills/skill-loader.js'
 
 const TOKEN = 'secret-token'
 const AUTH = { authorization: `Bearer ${TOKEN}` }
@@ -416,6 +417,49 @@ test('PlusMenu read routes 404 on a missing session', async () => {
     const res = await router('GET', `/sessions/ghost/${path}`, {}, AUTH)
     assert.equal(res.status, 404)
   }
+})
+
+test('GET /skills/installable lists .claude candidates; POST /skills/install copies without hot-loading', async () => {
+  const { router } = setupPlus()
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-install-route-'))
+  const claudeSkill = join(cwd, '.claude', 'skills', 'install-route-demo')
+  mkdirSync(claudeSkill, { recursive: true })
+  writeFileSync(join(claudeSkill, 'SKILL.md'), '---\nname: install-route-demo\ndescription: a demo\n---\nBody.')
+
+  const s = await router('POST', '/sessions', { cwd }, AUTH)
+  const id = (s.body as { id: string }).id
+
+  // Installable list surfaces the .claude candidate, not yet installed, plus cap context.
+  const list = await router('GET', `/sessions/${id}/skills/installable`, {}, AUTH)
+  assert.equal(list.status, 200)
+  const listBody = list.body as { skills: Array<{ name: string; installed: boolean }>; installedCount: number; recommendedMax: number }
+  const cand = listBody.skills.find((c) => c.name === 'install-route-demo')
+  assert.ok(cand, 'candidate should appear')
+  assert.equal(cand!.installed, false)
+  assert.equal(listBody.installedCount, 0)
+  assert.equal(listBody.recommendedMax, 5)
+
+  // Install copies into .rivet/skills.
+  const installed = await router('POST', `/sessions/${id}/skills/install`, { names: ['install-route-demo'] }, AUTH)
+  assert.equal(installed.status, 200)
+  assert.deepEqual((installed.body as { copied: string[] }).copied, ['install-route-demo'])
+  assert.ok(existsSync(join(cwd, '.rivet', 'skills', 'install-route-demo', 'SKILL.md')))
+
+  // No hot-load: the live registry must NOT contain the just-installed skill.
+  assert.equal(skillRegistry.get('install-route-demo'), undefined)
+
+  // Re-listing now flags it installed and bumps the installed count.
+  const list2 = await router('GET', `/sessions/${id}/skills/installable`, {}, AUTH)
+  const list2Body = list2.body as { skills: Array<{ name: string; installed: boolean }>; installedCount: number }
+  const cand2 = list2Body.skills.find((c) => c.name === 'install-route-demo')
+  assert.equal(cand2!.installed, true)
+  assert.equal(list2Body.installedCount, 1)
+
+  // Bad body → 400; ghost session → 404.
+  const bad = await router('POST', `/sessions/${id}/skills/install`, { names: [] }, AUTH)
+  assert.equal(bad.status, 400)
+  const ghost = await router('GET', '/sessions/ghost/skills/installable', {}, AUTH)
+  assert.equal(ghost.status, 404)
 })
 
 test('classifyArtifact taxonomy mapping', () => {

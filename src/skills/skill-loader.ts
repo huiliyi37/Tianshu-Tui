@@ -429,6 +429,13 @@ export const BUILTIN_SKILLS: SkillDefinition[] = [
     body: [
       '# Skill 装载机制（给 agent 自己看）',
       '',
+      '## 安装克制（默认立场）',
+      '默认**不建议盲目安装技能**。天枢已原生集成开发工作流，覆盖约 90% 真实任务',
+      '场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，',
+      '本体 70% 的代码即由此完成；**不装技能不影响真实任务的完成**。',
+      '用户让你"把 ~/.claude 的技能都装上"时，不要全量拷（常有 70+ 个）——',
+      '只装当前任务确需的那一两个，其余靠原生能力。',
+      '',
       '## 运行时单一来源',
       '本项目运行时**只从 `.rivet/skills/` 加载技能**（外加少量内置技能），',
       '**默认不扫描任何外部目录**（不读 `~/.claude/skills` 或项目 `.claude/skills`）。',
@@ -515,6 +522,98 @@ export function importSkillsIntoRivet(
     }
   }
   return { copied, skipped, errors }
+}
+
+/** A skill discoverable under .claude/skills that can be copied into .rivet/skills. */
+export interface InstallableSkill {
+  name: string
+  description: string
+  source: 'project-claude' | 'global-claude'
+  /** Already present in .rivet/skills (dir or flat .md) — nothing to copy. */
+  installed: boolean
+}
+
+/**
+ * Enumerate skills installable from .claude/skills (project first, then global
+ * ~/.claude). Mirrors the candidate set importSkillsIntoRivet can copy. Project
+ * entries take precedence on name collision. `installed` flags candidates that
+ * already exist under .rivet/skills so the UI can grey them out.
+ *
+ * Read-only: scanning .claude does NOT load anything into the live registry.
+ */
+export function listInstallableSkills(cwd: string): InstallableSkill[] {
+  const rivetDir = join(cwd, '.rivet', 'skills')
+  const isInstalled = (name: string): boolean =>
+    existsSync(join(rivetDir, name)) || existsSync(join(rivetDir, `${name}.md`))
+  const seen = new Set<string>()
+  const out: InstallableSkill[] = []
+  const scan = (dir: string, source: 'project-claude' | 'global-claude'): void => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      let name: string | null = null
+      let skillMd: string | null = null
+      if (e.isDirectory()) {
+        const md = join(dir, e.name, 'SKILL.md')
+        if (existsSync(md)) { name = e.name; skillMd = md }
+      } else if (e.isFile() && e.name.endsWith('.md')) {
+        name = e.name.replace(/\.md$/, '')
+        skillMd = join(dir, e.name)
+      }
+      if (!name || !skillMd || seen.has(name)) continue
+      seen.add(name) // project scanned first → wins on collision
+      let description = ''
+      try {
+        description = parseSkillMarkdown(readFileSync(skillMd, 'utf8'), `${name}.md`).description
+      } catch {
+        // Malformed/frontmatter-less file: still listable, just without a description.
+      }
+      out.push({ name, description, source, installed: isInstalled(name) })
+    }
+  }
+  scan(join(cwd, '.claude', 'skills'), 'project-claude')
+  scan(join(homedir(), '.claude', 'skills'), 'global-claude')
+  return out
+}
+
+/**
+ * Recommended soft cap on installed project skills. Not a hard limit — UIs warn
+ * past it. The rationale: Rivet/天枢's native dev workflow already covers ~90% of
+ * real tasks; this repo itself shipped 70% of its own code with fewer than 5
+ * installed skills. Blindly importing a large skill library (e.g. 70+ from
+ * ~/.claude) just bloats the discovery block and the prefix cache.
+ */
+export const RECOMMENDED_MAX_SKILLS = 5
+
+/** One-line restraint guidance shared across CLI/desktop install surfaces. */
+export const SKILL_RESTRAINT_NOTICE =
+  '默认不建议盲目安装技能。天枢已原生集成开发工作流，覆盖约 90% 真实任务场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，本体 70% 的代码即由此完成；不装技能不影响真实任务的完成。'
+
+/**
+ * Count skills already installed under .rivet/skills (directory `<name>/SKILL.md`
+ * or flat `<name>.md`). Used to drive the soft install cap. Read-only.
+ */
+export function countInstalledSkills(cwd: string): number {
+  const dir = join(cwd, '.rivet', 'skills')
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  let count = 0
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (existsSync(join(dir, e.name, 'SKILL.md'))) count++
+    } else if (e.isFile() && e.name.endsWith('.md')) {
+      count++
+    }
+  }
+  return count
 }
 
 /**

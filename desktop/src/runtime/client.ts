@@ -21,6 +21,8 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  InstallableSkillsResponse,
+  SkillInstallResult,
   StorageApplyResult,
   StorageOptions,
   WorkingTreeResponse,
@@ -401,6 +403,19 @@ export function setSkillEnabled(
   enabled: boolean,
 ): Promise<{ id: string; name: string; enabled: boolean }> {
   return apiPost<{ id: string; name: string; enabled: boolean }>(`/sessions/${id}/skills`, { name, enabled })
+}
+
+/** List skills installable from .claude/skills (project + global) + install-cap context. */
+export function listInstallableSkills(id: string): Promise<InstallableSkillsResponse> {
+  return apiGet<InstallableSkillsResponse>(`/sessions/${id}/skills/installable`)
+}
+
+/**
+ * Copy the named skills into .rivet/skills. No hot-load: the installed skills
+ * take effect on the next session.
+ */
+export function installSkills(id: string, names: string[]): Promise<SkillInstallResult> {
+  return apiPost<SkillInstallResult>(`/sessions/${id}/skills/install`, { names })
 }
 
 // ── Plan mode ───────────────────────────────────────────────────────

@@ -380,13 +380,41 @@ body {
 .thread-tab.drag-over { border-bottom-color: var(--accent); opacity: 0.7; }
 
 /* Skills surface */
-.skills-toolbar { padding: var(--space-3) var(--space-4); }
+.skills-toolbar { padding: var(--space-3) var(--space-4); display: flex; gap: var(--space-2); align-items: center; }
 .skills-search {
-  width: 100%; padding: 6px 10px; border-radius: 6px;
+  flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--bg);
   color: var(--text); font-size: var(--text-sm); outline: none;
 }
 .skills-search:focus { border-color: var(--accent); }
+.skills-install-btn {
+  flex-shrink: 0; padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: var(--text-sm); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.skills-install-btn:hover { border-color: var(--accent); }
+.skills-install-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.skills-install-panel { border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+.skills-restraint {
+  margin: 0 var(--space-4) var(--space-2); padding: var(--space-2) var(--space-3);
+  border-radius: 6px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text-dim); font-size: var(--text-xs); line-height: 1.5;
+}
+.skills-cap-line {
+  margin: 0 var(--space-4) var(--space-2); font-size: var(--text-xs); color: var(--text-faint);
+}
+.skills-cap-line.over { color: var(--warning); font-weight: 600; }
+.skills-install-action.confirm { border-color: var(--warning); color: var(--warning); }
+.skills-install-action {
+  flex-shrink: 0; padding: 4px 12px; border-radius: 6px;
+  border: 1px solid var(--accent); background: transparent;
+  color: var(--accent); font-size: var(--text-xs); cursor: pointer;
+  transition: background var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.skills-install-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.skills-install-action:disabled { border-color: var(--border); color: var(--text-faint); cursor: default; opacity: 0.7; }
 .skills-group-label {
   font-size: 11px; font-weight: 600; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.06em;

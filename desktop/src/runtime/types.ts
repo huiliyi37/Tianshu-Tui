@@ -82,6 +82,30 @@ export interface SkillStatus {
   enabled: boolean
 }
 
+/** A skill discoverable under .claude/skills that can be copied into .rivet/skills. */
+export interface InstallableSkill {
+  name: string
+  description: string
+  source: 'project-claude' | 'global-claude'
+  installed: boolean
+}
+
+/** GET /skills/installable response: candidates + soft install-cap context. */
+export interface InstallableSkillsResponse {
+  skills: InstallableSkill[]
+  /** Skills already present under .rivet/skills. */
+  installedCount: number
+  /** Recommended soft cap on installed skills (advisory, not enforced). */
+  recommendedMax: number
+}
+
+/** Result of copying skills into .rivet/skills. */
+export interface SkillInstallResult {
+  copied: string[]
+  skipped: string[]
+  errors: string[]
+}
+
 /** P2-2 — file content viewer response. */
 export interface FileContent {
   path: string

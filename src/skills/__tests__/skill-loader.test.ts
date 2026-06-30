@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet } from '../skill-loader.js'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills } from '../skill-loader.js'
 import { validatePathSafe } from '../../tools/path-validate.js'
 
 describe('skill-loader', () => {
@@ -115,6 +115,46 @@ Router body.`, 'utf-8')
     assert.deepEqual(res.copied, [])
     assert.equal(res.errors.length, 1)
     assert.match(res.errors[0]!, /nope: not found/)
+  })
+
+  it('listInstallableSkills enumerates project .claude candidates and flags installed', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-installable-'))
+    // Two project .claude skills; one is already copied into .rivet/skills.
+    const mkSkill = (root: string, name: string, desc: string) => {
+      const dir = join(root, name)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${desc}\n---\n\nbody`, 'utf-8')
+    }
+    mkSkill(join(cwd, '.claude', 'skills'), 'alpha', 'alpha skill')
+    mkSkill(join(cwd, '.claude', 'skills'), 'beta', 'beta skill')
+    // A directory entry without SKILL.md must be ignored.
+    mkdirSync(join(cwd, '.claude', 'skills', 'not-a-skill'), { recursive: true })
+    // beta is already installed under .rivet/skills.
+    mkSkill(join(cwd, '.rivet', 'skills'), 'beta', 'beta skill')
+
+    const list = listInstallableSkills(cwd)
+    const alpha = list.find((s) => s.name === 'alpha')
+    const beta = list.find((s) => s.name === 'beta')
+    assert.ok(alpha, 'alpha should be listed')
+    assert.equal(alpha!.source, 'project-claude')
+    assert.equal(alpha!.description, 'alpha skill')
+    assert.equal(alpha!.installed, false)
+    assert.equal(beta!.installed, true)
+    assert.equal(list.find((s) => s.name === 'not-a-skill'), undefined)
+  })
+
+  it('countInstalledSkills counts dir + flat skills under .rivet/skills', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-count-'))
+    assert.equal(countInstalledSkills(cwd), 0) // missing dir → 0
+    const rivet = join(cwd, '.rivet', 'skills')
+    // directory skill with SKILL.md
+    mkdirSync(join(rivet, 'dir-skill'), { recursive: true })
+    writeFileSync(join(rivet, 'dir-skill', 'SKILL.md'), '---\nname: dir-skill\n---\nbody', 'utf-8')
+    // flat skill
+    writeFileSync(join(rivet, 'flat.md'), '---\nname: flat\n---\nbody', 'utf-8')
+    // directory WITHOUT SKILL.md → not counted
+    mkdirSync(join(rivet, 'empty-dir'), { recursive: true })
+    assert.equal(countInstalledSkills(cwd), 2)
   })
 
   it('Tier-3 sub-files of a .rivet/skills directory skill are readable (path boundary)', () => {
