@@ -39,14 +39,21 @@ export function App() {
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
 
+  const activeProjectCwd = useMemo(() => {
+    if (!ui.activeProject) return null
+    const list = sessions.data ?? []
+    const p = deriveProjects(list, loadKnownProjects()).find((x) => x.id === ui.activeProject)
+    return p?.roots[0] ?? null
+  }, [sessions.data, ui.activeProject])
+
   useEffect(() => {
-    if (!ui.activeProject) {
+    if (!activeProjectCwd) {
       setTemplatesStatus(null)
       setTemplatesOpen(false)
       return
     }
     let cancelled = false
-    getProjectTemplatesStatus(ui.activeProject)
+    getProjectTemplatesStatus(activeProjectCwd)
       .then((status) => {
         if (cancelled) return
         setTemplatesStatus(status)
@@ -56,7 +63,7 @@ export function App() {
         // Best-effort: don't block project loading on template check failure.
       })
     return () => { cancelled = true }
-  }, [ui.activeProject])
+  }, [activeProjectCwd])
   // Fatal start failure (Rust reported ready=false). IMPORTANT: Rust's readiness
   // probe is a one-shot ~15s gate, and a cold launch (many sessions rehydrating,
   // cold disk) can lose that race even though the sidecar comes up moments later.
@@ -224,8 +231,8 @@ export function App() {
         open={templatesOpen}
         onOpenChange={setTemplatesOpen}
         onApply={async (agentsMode) => {
-          if (!ui.activeProject || !templatesStatus) return
-          await applyProjectTemplates(ui.activeProject, agentsMode)
+          if (!activeProjectCwd || !templatesStatus) return
+          await applyProjectTemplates(activeProjectCwd, agentsMode)
           setTemplatesStatus((prev) => prev ? { ...prev, needsInit: false } : prev)
         }}
       />

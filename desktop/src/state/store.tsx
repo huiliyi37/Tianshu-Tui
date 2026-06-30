@@ -28,7 +28,7 @@ export type Surface = 'home' | 'workspace' | 'mission' | 'automations' | 'attent
 
 export interface UiState {
   activeSessionId: string | null
-  activeProject: string | null // project cwd
+  activeProject: string | null // project id (slug derived from cwd)
   surface: Surface
   newSessionOpen: boolean
   error: string | null
