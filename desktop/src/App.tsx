@@ -159,7 +159,7 @@ export function App() {
           onClose={() => dispatch({ type: 'openNew', open: false })}
         />
       )}
-      <Toaster position="bottom-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
+      <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
     </WallpaperProvider>
   )
