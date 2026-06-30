@@ -6,12 +6,6 @@
 
 基于 **TypeScript strict** + **Ink 6 (React TUI)** + 流式 API 构建。约 15 万行源码,520+ 测试文件。
 
-## 前置要求
-
-- **Node.js 22+** — 运行天枢的必需环境。
-- **Git（强烈推荐）** — 没有 Git 天枢也能运行,但 Git 能解锁:委派工作区隔离、检查点回滚、`commit`/`diff` 审查、per-worker diff 审查。首次启动时会检测并提示缺失。
-  - 安装: <https://git-scm.com/downloads>
-
 ## 为什么做天枢
 
 大多数 AI 编程助手把上下文当作桶——装满就溢出,然后盲目压缩。天枢把上下文当作**结构化、可缓存的资源**:
@@ -84,7 +78,7 @@ GoalTracker 与回合循环、doom-loop 检测、交付门禁集成。在 goal �
 
 ### Skills 系统
 
-可复用的工作流剧本,从 `.rivet/skills/*.md` 加载。两层渐进式披露:只有 name + description 进入上下文,完整指令按需通过 `skill` 工具或 `/skill` 斜杠命令加载。配置中可按名导入指定 Claude Code skills。
+可复用的工作流剧本,从 `.rivet/skills/*.md` 加载。两层渐进式披露:只有 name + description 进入上下文,完整指令按需通过 `skill` 工具加载。配置中可按名导入指定 Claude Code skills。
 
 **内置 skills** 随仓库发布在 `.rivet/skills/`:
 
@@ -99,12 +93,8 @@ GoalTracker 与回合循环、doom-loop 检测、交付门禁集成。在 goal �
 **使用 skill**:
 
 ```
-/skill writing-plans                # 加载并立即执行该 skill 协议
-/skill writing-plans <你的任务>      # 加载 skill 并附带初始任务
-/skill off writing-plans            # 停止持续注入该 skill 指令
+/skill writing-plans       # 把完整指令加载进上下文
 ```
-
-调用 skill 后,其完整指令会作为当前 prompt,agent 本轮立即响应。随后每轮动态附录会以受保护的 `<invoked-skills>` 块重新注入完整技能体,使其在上下文压缩后仍然生效。模型可在 workflow 走完后调用 `skill(name="writing-plans", complete=true)` 释放;用户也可手动用 `/skill off <name>` 释放。
 
 或当任务匹配触发模式时,agent 自动加载。
 
@@ -204,46 +194,59 @@ rivet --dangerously-skip-permissions   # 单次覆盖
 
 ## 快速开始
 
-### 1. 前置要求
+### 1. 环境要求
 
-- **Node.js 22+** — 用 `node --version` 确认版本。
-- **Git** — 可选但强烈推荐。没有 Git 天枢也能运行,但委派、检查点、回滚等能力会降级。详见[前置要求](#前置要求)。
+- **Node.js 24.1.0**（推荐；22+ 可能可用）— 用 `node --version` 检查。
+- **Git** — 可选但强烈建议；没有它天枢仍可运行，但委派/检查点/回滚功能会降级。
 
 ### 2. 克隆并构建
 
 ```bash
 git clone https://github.com/huiliyi37/Tianshu-Tui.git
-cd Tianshu
+cd Tianshu-Tui
 npm install
 npm run build
 ```
 
-构建完成后会生成 TUI 入口 `dist/main.js`。
+这会生成 TUI 入口文件 `dist/main.js`。
 
 ### 3. 配置 API Key
 
-任选一种方式,启动时会读取该 key。
-
 ```bash
-# A. 环境变量(最快上手)
+# A. 环境变量（首次试用最简单）
 export DEEPSEEK_API_KEY=sk-xxx
 
-# B. 持久化到 CLI 配置(写入 ~/.rivet/config.json)
+# B. 持久化 CLI 配置（保存到 ~/.rivet/config.json）
 node dist/main.js config set-key deepseek sk-xxx
 ```
 
-> 其他模型提供商(Claude、智谱 GLM、Codex、MiniMax、MiMo)使用相同格式。
-> 运行 `node dist/main.js config set-key <provider> <key>` 或查看
+> 其他提供商（Claude、GLM、Codex、MiniMax、MiMo）使用相同模式。运行
+> `node dist/main.js config set-key <provider> <key>` 或查看
 > [Provider Config](docs/user-guide-provider-config.md)。
 
 ### 4. 启动
 
 ```bash
 npm start
-# 或直接运行: node dist/main.js
+# 或直接运行：node dist/main.js
 ```
 
-看到 `〉` 提示符后输入需求,按回车即可开始。
+你应该会看到带有 `〉` 提示符的 TUI。输入需求后按回车即可。
+
+> 安装的 CLI 命令是 `rivet`（项目早期代号）。仓库与项目名为**天枢/Tianshu**，
+> 二进制名保持 `rivet` 以兼容旧用法。
+
+### 可选：全局安装
+
+构建完成后，可以将 `rivet` 命令全局安装，方便从任意目录启动：
+
+```bash
+npm install -g .
+rivet
+```
+
+> 注意：从仓库全局安装依赖 `dist/main.js` 已存在，请先执行 `npm run build`。
+> 从 npm 安装则直接运行 `npm install -g tianshu-tui && rivet`（需已发布到 registry）。
 
 ### 无界面模式
 
@@ -390,20 +393,16 @@ $ARGUMENTS' > .rivet/commands/review.md
 | `/rollback` | 预览/恢复 git 检查点(`confirm` 执行) |
 | `/undo` | 撤销上次文件变更(预览,`confirm` 恢复) |
 | `/rewind` | 双 ESC:倒带到过往用户消息 |
-| `/sessions` `/resume <n>` | 列出/恢复已保存会话(恢复侧边面板、todo 列表与当前计划) |
+| `/sessions` `/resume <n>` | 列出/恢复已保存会话 |
 | `/effort [off\|low\|medium\|high\|max]` | 控制推理深度 |
 | `/theme [name\|list]` | 切换色彩主题 |
-| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | 管理权限模式和工具/bash 允许/拒绝规则 |
-| `/skill <name>` | 加载并立即执行 skill |
-| `/skill off <name>` | 停止持续注入已调用 skill |
+| `/skill <name>` | 加载 skill 的完整指令 |
 | `/debug [prompt\|cache\|mcp]` | 调试 prompt、缓存统计或 MCP |
 | `/mcp` | MCP 服务器连接状态 |
 | `/memory <text>` | 保存会话记忆条目 |
 | `/exit` `/quit` | 保存会话并退出 |
 
 双击 **ESC** 打开倒带覆盖层。按 **Esc** 关闭任何覆盖层。
-
-> **斜杠命令补全**——命令面板支持多 token 斜杠命令,如 `/skill <name>`、`/permission ...`、`/model <name>`。输入 `/skill ` 后,面板会模糊匹配 skill 名称,无需用方向键搜索。
 
 ## 开发
 
@@ -534,6 +533,6 @@ src/
 
 ## 许可证
 
-[MIT](LICENSE)
+本项目采用 [Apache License, Version 2.0](LICENSE) 开源许可。
 
 Copyright 2025-2026 Tianshu Contributors
