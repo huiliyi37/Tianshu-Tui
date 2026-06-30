@@ -42,6 +42,15 @@
 
 **推测**：`bash` 工具在此 Windows 环境下可能使用了不存在的 shell，或工具实现层面直接跳过了命令执行（进程未实际 spawn）。
 
+### 2.1 子代理（delegate_task worker）bash 同样不可用
+
+对 `delegate_task` 派出的 worker（profile=troubleshooter），bash 被**显式禁用**——worker 返回：
+> "This worker cannot execute bash commands."
+
+worker 只能做只读扫描（`read_file`、`file_info`、`glob`），无法执行任何 shell 命令。两次 `delegate_task` 尝试均以 `status: blocked` 结束，证实子代理也无力执行 `npx tauri build`。
+
+至此确认：本会话的主进程和子代理均无法执行 shell 命令。构建只能靠用户手动在外部 cmd 窗口运行。
+
 ---
 
 ## 3. Glob 工具对点目录/隐藏目录无效
