@@ -106,6 +106,15 @@ export function ReviewPanel(props: {
     })
   }
 
+  const onWheelTabs = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = tabsListRef.current
+    if (!el) return
+    const dx = e.deltaY !== 0 ? e.deltaY : e.deltaX
+    if (Math.abs(dx) < 1) return
+    e.preventDefault()
+    el.scrollBy({ left: dx, behavior: 'smooth' })
+  }
+
   // Auto-focus the plan tab when planning starts or a fresh plan lands, so the
   // reviewable plan surfaces without a manual tab switch (Cursor 3.0 flow).
   const prevSlug = useRef<string | undefined>(undefined)
@@ -274,11 +283,12 @@ export function ReviewPanel(props: {
             <TabsList
               ref={tabsListRef}
               className="mx-2 mt-2 mb-1 w-auto overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden flex-1"
+              onWheel={onWheelTabs}
             >
               {tabs.map((t) => {
                 const badge = t.badge?.()
                 return (
-                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs">
+                  <TabsTrigger key={t.id} value={t.id} className="gap-1 px-2 text-xs flex-none">
                     <span aria-hidden>{t.glyph}</span>
                     <span>{t.label}</span>
                     {badge != null && badge > 0 && (

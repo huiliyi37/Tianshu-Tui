@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
@@ -209,6 +209,34 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
   cfg.editor = editorSchema.parse(merged)
   saveConfig(cfg)
   return cfg.editor
+}
+
+/** Snapshot of the mirror configuration block. */
+export function getMirrorConfig(): MirrorsConfig {
+  return loadConfig().mirrors
+}
+
+/**
+ * Persist mirror configuration to the user global config.
+ * Validated through mirrorsSchema. Takes effect on the next bash execution.
+ */
+export function setMirrorConfig(input: {
+  enabled?: unknown
+  preset?: unknown
+  github?: unknown
+  npm?: unknown
+  pypi?: unknown
+  go?: unknown
+  rust?: unknown
+}): MirrorsConfig {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.mirrors }
+  for (const key of ['enabled', 'preset', 'github', 'npm', 'pypi', 'go', 'rust'] as const) {
+    if (input[key] !== undefined) merged[key] = input[key]
+  }
+  cfg.mirrors = mirrorsSchema.parse(merged)
+  saveConfig(cfg)
+  return cfg.mirrors
 }
 
 export function setApiKey(providerName: string, key: string): void {

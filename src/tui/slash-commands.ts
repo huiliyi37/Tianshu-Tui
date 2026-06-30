@@ -58,6 +58,8 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
+import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
+import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
 import type { ChangeSet } from '../agent/review-discipline.js'
@@ -111,6 +113,7 @@ const HELP_TEXT = `Available commands:
 /model [id] — Switch model (no arg = open model picker)
 /domain [id|list] — Switch star domain (no arg = open domain picker)
 /status — Show agent status (model, domain, cache, tokens)
+/mirror [status|on|off|china|default] — Toggle domestic mirrors for GitHub/npm/pip/go/rust downloads
 /tools — Show available tools and their descriptions
 /compact — Compact context (summarize old messages)
 /workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
@@ -724,6 +727,34 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         } else {
           pushStatic(createLogEntry({ type: 'system', content: result.error ?? `Model "${targetModel}" not found.` }))
         }
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/mirror',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const cmd = parts[0]!.toLowerCase()
+      const sub = parts[1]?.toLowerCase()
+      const current = getMirrorConfig()
+
+      if (sub === 'on') {
+        const next = setMirrorConfig({ enabled: true, preset: current.preset === 'default' ? 'china' : current.preset })
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Mirrors enabled.\n${formatMirrorStatus(next)}` }))
+      } else if (sub === 'off') {
+        const next = setMirrorConfig({ enabled: false })
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Mirrors disabled.\n${formatMirrorStatus(next)}` }))
+      } else if (sub === 'china') {
+        const next = setMirrorConfig({ enabled: true, preset: 'china' })
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Switched to China mirror preset.\n${formatMirrorStatus(next)}` }))
+      } else if (sub === 'default') {
+        const next = setMirrorConfig({ enabled: false, preset: 'default', github: 'default', npm: 'default', pypi: 'default', go: 'default', rust: 'default' })
+        pushStatic(createLogEntry({ type: 'system', content: `✅ Reset mirrors to default (off).\n${formatMirrorStatus(next)}` }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: `${formatMirrorStatus(current)}\n\nUsage: /mirror [on|off|china|default]` }))
       }
       setIsStreaming(false)
       return true

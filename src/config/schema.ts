@@ -330,6 +330,25 @@ export const skillsSchema = z.object({
   importFromClaude: z.array(z.string()).default([]),
 }).default({})
 
+export const mirrorsSchema = z.object({
+  /** Master switch for domestic mirror injection. When enabled, bash tool
+   *  executions automatically receive mirror registry env vars and GitHub
+   *  clone URLs are rewritten to the chosen mirror. */
+  enabled: z.boolean().default(false),
+  /** Preset selector: 'default' = no mirrors, 'china' = domestic mirrors. */
+  preset: z.enum(['default', 'china']).default('default'),
+  /** GitHub mirror override. 'default' falls back to the preset default. */
+  github: z.enum(['default', 'gitcode', 'kkgithub', 'fastgit']).default('default'),
+  /** npm/yarn/pnpm registry override. */
+  npm: z.enum(['default', 'taobao', 'tencent', 'huawei']).default('default'),
+  /** PyPI pip index override. */
+  pypi: z.enum(['default', 'tsinghua', 'aliyun', 'tencent']).default('default'),
+  /** Go module proxy override. */
+  go: z.enum(['default', 'goproxy_cn', 'aliyun']).default('default'),
+  /** Rust rustup/crates.io override. */
+  rust: z.enum(['default', 'tsinghua', 'tuna', 'ustc']).default('default'),
+}).default({})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -342,6 +361,7 @@ export const configSchema = z.object({
   mcp: mcpConfigSchema.default({}),
   workers: workersSchema,
   skills: skillsSchema,
+  mirrors: mirrorsSchema,
 })
 
 export type Config = {
@@ -353,6 +373,7 @@ export type Config = {
   mcp: McpConfig
   workers: WorkersConfig
   skills: SkillsConfig
+  mirrors: MirrorsConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
@@ -367,3 +388,4 @@ export type CompactConfig = z.infer<typeof compactSchema>
 export type CacheConfig = z.infer<typeof cacheSchema>
 export type WorkersConfig = z.infer<typeof workersSchema>
 export type SkillsConfig = z.infer<typeof skillsSchema>
+export type MirrorsConfig = z.infer<typeof mirrorsSchema>
