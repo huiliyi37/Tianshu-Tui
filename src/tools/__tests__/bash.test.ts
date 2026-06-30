@@ -119,6 +119,23 @@ describe('BASH_TOOL timeout cleanup', () => {
   })
 })
 
+describe('BASH_TOOL 基本命令输出可达', () => {
+  it('echo hello 返回可见 stdout（Windows detached 回归保护）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-stdout-'))
+    try {
+      const result = await BASH_TOOL.execute({
+        input: { command: 'echo hello' },
+        toolUseId: 'bash-stdout-test',
+        cwd: dir,
+      })
+      assert.ok(!result.isError, 'echo hello 不应报错')
+      assert.match(result.content, /hello/, 'stdout 必须包含命令输出，空输出说明 Windows detached 或 stdio 管道断裂')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('BASH_TOOL 空 stdout 的成功命令 → confirmed empty(不是 "Exit code: 0")', () => {
   it('exit 0 且无 stdout 时标记为 confirmed empty 并给出可操作提示', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-empty-'))
