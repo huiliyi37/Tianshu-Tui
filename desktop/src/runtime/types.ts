@@ -433,3 +433,18 @@ export interface HookResult {
 export interface HooksConfig {
   hooks: HookEntry[]
 }
+
+/** Desktop shell — available data-root locations. */
+export interface StorageOptions {
+  current: string
+  defaultPath: string
+  portablePath?: string
+}
+
+/** Desktop shell — result of applying a new RIVET_HOME. */
+export interface StorageApplyResult {
+  success: boolean
+  migrated: boolean
+  requiresRestart: boolean
+  error?: string
+}

@@ -21,6 +21,8 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  StorageApplyResult,
+  StorageOptions,
   WorkingTreeResponse,
 } from './types'
 
@@ -76,6 +78,21 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
  */
 export function clearRuntimeCache(): void {
   cached = null
+}
+
+/** True once the user has chosen a data-root via First-run storage dialog. */
+export function isStorageConfigured(): Promise<boolean> {
+  return invoke<boolean>('is_storage_configured')
+}
+
+/** List available RIVET_HOME locations (current/default/portable). */
+export function getStorageOptions(): Promise<StorageOptions> {
+  return invoke<StorageOptions>('get_storage_options')
+}
+
+/** Set RIVET_HOME and optionally migrate existing data. Requires app restart. */
+export function applyStorageLocation(path: string, migrate: boolean): Promise<StorageApplyResult> {
+  return invoke<StorageApplyResult>('apply_storage_location', { path, migrate })
 }
 
 /** Test-only: inspect the memoized runtime handle (null when cleared). */

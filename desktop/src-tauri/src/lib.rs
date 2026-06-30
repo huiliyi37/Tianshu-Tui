@@ -2,7 +2,7 @@ mod pty;
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use known_folders::{get_known_folder_path, KnownFolder};
 use rand::Rng;
 use serde::Serialize;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
@@ -46,6 +48,140 @@ struct Sidecar {
 #[tauri::command]
 fn runtime_info(state: State<Sidecar>) -> RuntimeInfo {
     state.info.clone()
+}
+
+// ── Storage location (RIVET_HOME) UI commands ───────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageOptions {
+    current: String,
+    default_path: String,
+    portable_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StorageApplyResult {
+    success: bool,
+    migrated: bool,
+    requires_restart: bool,
+    error: Option<String>,
+}
+
+#[tauri::command]
+fn is_storage_configured(app: tauri::AppHandle) -> bool {
+    launcher_config_path(&app).map(|p| p.exists()).unwrap_or(false)
+}
+
+#[tauri::command]
+fn get_storage_options(app: tauri::AppHandle) -> StorageOptions {
+    let current = resolve_rivet_home(&app).to_string_lossy().to_string();
+    let default_path = default_rivet_home(&app).to_string_lossy().to_string();
+    let portable_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .filter(|p| is_portable_location(p))
+        .map(|p| p.join("TianshuData").join(".rivet").to_string_lossy().to_string());
+    StorageOptions {
+        current,
+        default_path,
+        portable_path,
+    }
+}
+
+fn validate_storage_path(path: &Path) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err("请选择绝对路径".to_string());
+    }
+    let s = path.to_string_lossy();
+    if s.starts_with(r"\\") || s.starts_with("//") {
+        return Err("不支持网络路径（UNC）".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    if s.starts_with("/Volumes/") {
+        return Err("不支持 /Volumes/ 网络卷".to_string());
+    }
+    Ok(())
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("无法创建父目录: {}", e))?;
+    }
+    Ok(())
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            copy_dir_all(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn apply_storage_location(
+    app: tauri::AppHandle,
+    path: String,
+    migrate: bool,
+) -> Result<StorageApplyResult, String> {
+    let new_home = PathBuf::from(path);
+    validate_storage_path(&new_home)?;
+
+    let old_home = resolve_rivet_home(&app);
+
+    // Guard against setting a path inside the current data root.
+    if new_home.starts_with(&old_home) && new_home != old_home {
+        return Err("新路径不能位于当前数据目录内部".to_string());
+    }
+
+    let mut migrated = false;
+    if migrate && old_home.exists() && old_home != new_home {
+        ensure_parent_dir(&new_home)?;
+        let old_data = old_home.join(".rivet");
+        let new_data = new_home.join(".rivet");
+        if old_data.exists() {
+            match copy_dir_all(&old_data, &new_data) {
+                Ok(()) => migrated = true,
+                Err(e) => {
+                    return Ok(StorageApplyResult {
+                        success: false,
+                        migrated: false,
+                        requires_restart: false,
+                        error: Some(format!("迁移失败: {}", e)),
+                    });
+                }
+            }
+        }
+    }
+
+    // Write launcher config so the next sidecar spawn uses the new path.
+    let cfg_path = launcher_config_path(&app).ok_or("无法定位启动器配置目录")?;
+    ensure_parent_dir(&cfg_path)?;
+    let cfg = LauncherConfig {
+        rivet_home: new_home.to_string_lossy().to_string(),
+        source: "user-selected".to_string(),
+        updated_at: OffsetDateTime::now_utc().format(&Rfc3339).ok(),
+    };
+    let raw = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&cfg_path, raw).map_err(|e| format!("写入 launcher.json 失败: {}", e))?;
+
+    Ok(StorageApplyResult {
+        success: true,
+        migrated,
+        requires_restart: true,
+        error: None,
+    })
 }
 
 /// Apply or clear the window's translucent backdrop (Windows Mica) to match the
@@ -376,11 +512,14 @@ struct LauncherConfig {
     updated_at: Option<String>,
 }
 
-fn launcher_config_path(app: &tauri::App) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("launcher.json"))
+fn launcher_config_path<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> Option<PathBuf> {
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d: PathBuf| d.join("launcher.json"))
 }
 
-fn read_launcher_config(app: &tauri::App) -> LauncherConfig {
+fn read_launcher_config<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> LauncherConfig {
     let Some(path) = launcher_config_path(app) else {
         return LauncherConfig::default();
     };
@@ -395,7 +534,7 @@ fn read_launcher_config(app: &tauri::App) -> LauncherConfig {
 /// Priority:
 ///   1. launcher.json rivetHome (set by desktop Settings > Storage)
 ///   2. default: platform default, with portable-mode detection on first run
-fn resolve_rivet_home(app: &tauri::App) -> PathBuf {
+fn resolve_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
     let cfg = read_launcher_config(app);
     if !cfg.rivet_home.is_empty() {
         return PathBuf::from(cfg.rivet_home);
@@ -403,7 +542,7 @@ fn resolve_rivet_home(app: &tauri::App) -> PathBuf {
     default_rivet_home(app)
 }
 
-fn default_rivet_home(app: &tauri::App) -> PathBuf {
+fn default_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBuf {
     // Portable-mode detection: if the exe lives next to the data directory
     // (e.g., green/zip install on D:\Tools\Tianshu), keep data beside the exe.
     // System installs (Program Files, /Applications, /usr, /opt) use the OS user dir.
@@ -556,6 +695,9 @@ pub fn run() {
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
+            is_storage_configured,
+            get_storage_options,
+            apply_storage_location,
             set_window_glass,
             pty::pty_spawn,
             pty::pty_write,

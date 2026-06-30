@@ -15,7 +15,8 @@ import { WallpaperProvider } from './components/WallpaperContext'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { useSurfaceCommands } from './lib/use-surface-commands'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
-import { applyProjectTemplates, getProjectTemplatesStatus } from './runtime/client'
+import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
+import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
 
 export function App() {
@@ -38,6 +39,13 @@ export function App() {
   const [envDismissed, setEnvDismissed] = useState(false)
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    isStorageConfigured()
+      .then((configured) => setStorageConfigured(configured))
+      .catch(() => setStorageConfigured(true))
+  }, [])
 
   const activeProjectCwd = useMemo(() => {
     if (!ui.activeProject) return null
@@ -236,6 +244,9 @@ export function App() {
           setTemplatesStatus((prev) => prev ? { ...prev, needsInit: false } : prev)
         }}
       />
+      {storageConfigured === false && (
+        <FirstRunStorageDialog open />
+      )}
       <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
     </WallpaperProvider>
