@@ -19,6 +19,7 @@ import { buildHealthRoute } from './health-route.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
 import { buildConfigRoutes } from './config-routes.js'
 import { buildEnvRoute } from './env-route.js'
+import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
 import { CronScheduler } from './cron-scheduler.js'
 import { CronWiring } from './cron-wiring.js'
 import { buildMcpRoutes } from './mcp-api.js'
@@ -850,6 +851,9 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
 
   // Environment route: host toolchain availability (python, uv, git, node) for setup UI.
   Object.assign(routes, buildEnvRoute(apiToken))
+
+  // Project templates route: first-run AGENTS.md / .rivet.md bootstrap for desktop UI.
+  Object.assign(routes, buildProjectTemplatesRoutes(apiToken))
 
   // MCP routes: server management + live status for the desktop MCP settings UI.
   Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))

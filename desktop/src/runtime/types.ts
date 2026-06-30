@@ -199,6 +199,20 @@ export interface EnvironmentInfo {
   platform: string
 }
 
+export interface ProjectTemplatesStatus {
+  needsInit: boolean
+  cwd: string
+  agentsTemplate: string
+  rivetTemplate: string
+}
+
+export interface ProjectTemplatesApplyResult {
+  created: string[]
+  appended: string[]
+  skipped: string[]
+  decision: 'created' | 'declined' | 'skipped'
+}
+
 export interface ScheduledTask {
   id: string
   prompt: string

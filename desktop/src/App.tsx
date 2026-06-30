@@ -14,6 +14,9 @@ import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { useSurfaceCommands } from './lib/use-surface-commands'
+import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
+import { applyProjectTemplates, getProjectTemplatesStatus } from './runtime/client'
+import type { ProjectTemplatesStatus } from './runtime/types'
 
 export function App() {
   const ui = useUiState()
@@ -33,6 +36,27 @@ export function App() {
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
   const [envDismissed, setEnvDismissed] = useState(false)
+  const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+
+  useEffect(() => {
+    if (!ui.activeProject) {
+      setTemplatesStatus(null)
+      setTemplatesOpen(false)
+      return
+    }
+    let cancelled = false
+    getProjectTemplatesStatus(ui.activeProject)
+      .then((status) => {
+        if (cancelled) return
+        setTemplatesStatus(status)
+        if (status.needsInit) setTemplatesOpen(true)
+      })
+      .catch(() => {
+        // Best-effort: don't block project loading on template check failure.
+      })
+    return () => { cancelled = true }
+  }, [ui.activeProject])
   // Fatal start failure (Rust reported ready=false). IMPORTANT: Rust's readiness
   // probe is a one-shot ~15s gate, and a cold launch (many sessions rehydrating,
   // cold disk) can lose that race even though the sidecar comes up moments later.
@@ -195,6 +219,16 @@ export function App() {
           onClose={() => dispatch({ type: 'openNew', open: false })}
         />
       )}
+      <ProjectTemplatesDialog
+        status={templatesStatus}
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        onApply={async (agentsMode) => {
+          if (!ui.activeProject || !templatesStatus) return
+          await applyProjectTemplates(ui.activeProject, agentsMode)
+          setTemplatesStatus((prev) => prev ? { ...prev, needsInit: false } : prev)
+        }}
+      />
       <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>
     </WallpaperProvider>
