@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { getRuntimeInfo } from './runtime/client'
-import { useHealth, useCreateSession, useSessions } from './state/queries'
+import { useHealth, useEnvironment, useCreateSession, useSessions } from './state/queries'
 import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
@@ -19,6 +19,7 @@ export function App() {
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const health = useHealth()
+  const env = useEnvironment()
   const createSession = useCreateSession()
   const sessions = useSessions()
   useGlobalNotifications()
@@ -31,6 +32,7 @@ export function App() {
   const sidecarDown = health.isError
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
+  const [envDismissed, setEnvDismissed] = useState(false)
   // Fatal start failure (Rust reported ready=false). IMPORTANT: Rust's readiness
   // probe is a one-shot ~15s gate, and a cold launch (many sessions rehydrating,
   // cold disk) can lose that race even though the sidecar comes up moments later.
@@ -116,6 +118,40 @@ export function App() {
               前往设置
             </button>
             <button className="banner-close" onClick={() => setSetupDismissed(true)} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
+        {env.data && !env.data.python.available && !envDismissed && (
+          <div className="banner warn">
+            未检测到 Python。运行 Python 脚本或项目前请先安装 Python。
+            {env.data.platform === 'darwin' && 'macOS 推荐：brew install python'}
+            {env.data.platform === 'win32' && 'Windows 推荐：Microsoft Store 安装 Python 3.12'}
+            {env.data.platform === 'linux' && 'Linux 推荐：sudo apt install python3 python3-pip'}
+            <button
+              className="banner-action"
+              onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+            >
+              查看环境
+            </button>
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
+        {env.data && !env.data.git.available && !envDismissed && (
+          <div className="banner warn">
+            未检测到 Git。代码仓库操作需要 Git。
+            {env.data.platform === 'darwin' && 'macOS 推荐：xcode-select --install 或 brew install git'}
+            {env.data.platform === 'win32' && 'Windows 推荐：从 git-scm.com/download/win 下载安装'}
+            {env.data.platform === 'linux' && 'Linux 推荐：sudo apt install git'}
+            <button
+              className="banner-action"
+              onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+            >
+              查看环境
+            </button>
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
               ×
             </button>
           </div>

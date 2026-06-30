@@ -13,6 +13,7 @@ import { getToolArtifactThreshold } from './artifact-threshold.js'
 import { debugLog } from '../utils/debug.js'
 import { loadConfig } from '../config/manager.js'
 import { buildMirrorEnv, rewriteGitHubUrls } from './mirror-env.js'
+import { buildNotFoundHint, extractMissingCommand } from './env-check.js'
 
 /** Success output inline threshold: commands that succeed with ≤ this many lines
  *  return full output to the model. Beyond this, only a header summary is returned
@@ -299,9 +300,13 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         // Windows: strip PowerShell/cmd error noise (CategoryInfo/FullyQualifiedErrorId/
         // carets) and prepend a recovery hint for command-not-found so the wall of red
         // text neither pollutes context nor misleads the model into self-assessed failure.
-        const filtered = process.platform === 'win32'
+        let filtered = process.platform === 'win32'
           ? denoiseWindowsError(commandFiltered, { exitCode, errorClass, command: rawCommand })
           : commandFiltered
+        // POSIX / macOS / Linux: append install guidance for missing python/git/uv.
+        if (errorClass === 'environment' && process.platform !== 'win32') {
+          filtered += buildNotFoundHint(extractMissingCommand(filtered, rawCommand), process.platform)
+        }
         const rereadWarn = checkBashReread(rawCommand, params.toolUseId)
 
         // Empty stdout on success must NOT be back-filled with a synthetic

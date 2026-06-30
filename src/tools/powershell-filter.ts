@@ -1,3 +1,5 @@
+import { buildNotFoundHint, extractMissingCommand } from './env-check.js'
+
 /**
  * Windows shell (PowerShell / cmd.exe) error-output denoiser.
  *
@@ -32,27 +34,15 @@ export interface WindowsErrorContext {
   command: string
 }
 
-/** Leading token of a command, unwrapping a single layer of quotes. */
-function firstToken(command: string): string {
-  const trimmed = command.trim()
-  const m = trimmed.match(/^['"]?([\w.\-]+)/)
-  return m ? m[1]! : (trimmed.split(/\s+/)[0] ?? '')
-}
-
-/** Best-effort name of the missing command, read from the error text first. */
-function missingCommandName(body: string, command: string): string {
-  const m1 = body.match(/The term '([^']+)' is not recognized/i)
-  if (m1) return m1[1]!
-  const m2 = body.match(/'([^']+)' is not recognized as an internal/i)
-  if (m2) return m2[1]!
-  return firstToken(command)
-}
-
 function recoveryHint(body: string, command: string): string {
-  const name = missingCommandName(body, command)
+  const name = extractMissingCommand(body, command)
   const lower = name.toLowerCase()
   if (lower === 'python' || lower === 'python3') {
     return `命令未找到：'${name}' → Windows 上用 'py'（Python launcher），不要重试同一条命令`
+  }
+  const installHint = buildNotFoundHint(name, 'win32')
+  if (installHint) {
+    return `命令未找到：'${name}'${installHint}`
   }
   return `命令未找到：'${name}' → 此环境不可识别该命令，换用可用工具/跨平台命令，不要重试同一条`
 }

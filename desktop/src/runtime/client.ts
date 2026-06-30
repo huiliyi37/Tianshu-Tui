@@ -4,6 +4,7 @@ import type {
   ApprovalMode,
   ArtifactSummary,
   DomainEntry,
+  EnvironmentInfo,
   FileContent,
   GitGraphResponse,
   HealthInfo,
@@ -129,6 +130,10 @@ async function apiPut<T>(path: string, body?: unknown): Promise<T> {
 
 export function getHealth(): Promise<HealthInfo> {
   return apiGet<HealthInfo>('/health')
+}
+
+export function getEnvironment(): Promise<EnvironmentInfo> {
+  return apiGet<EnvironmentInfo>('/environment')
 }
 
 // ── Session API ─────────────────────────────────────────────────────
