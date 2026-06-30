@@ -35,6 +35,8 @@ export interface RuntimeInfo {
    *  state instead of an endless transient-reconnect banner. Absent (treated as
    *  ready) in the browser-dev fallback and on older shells. */
   ready?: boolean
+  /** Resolved RIVET_HOME passed to the sidecar. Reported by the Rust shell. */
+  rivetHome?: string
 }
 
 let cached: RuntimeInfo | null = null

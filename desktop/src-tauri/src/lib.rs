@@ -7,6 +7,8 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "windows")]
+use known_folders::{get_known_folder_path, KnownFolder};
 use rand::Rng;
 use serde::Serialize;
 use tauri::{
@@ -31,6 +33,9 @@ pub struct RuntimeInfo {
     /// nothing, so the frontend shows a fatal "failed to start" state instead of
     /// looping forever on transient-reconnect copy.
     pub ready: bool,
+    /// The resolved RIVET_HOME passed to the sidecar. Empty string when the
+    /// shell could not resolve a data directory.
+    pub rivet_home: String,
 }
 
 struct Sidecar {
@@ -358,11 +363,109 @@ fn sidecar_cwd(app: &tauri::App) -> Option<PathBuf> {
     app.path().home_dir().ok()
 }
 
+/// Launcher-level config stored outside the data root so the shell can decide
+/// where the data root is before the sidecar starts.
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LauncherConfig {
+    #[serde(default)]
+    rivet_home: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    updated_at: Option<String>,
+}
+
+fn launcher_config_path(app: &tauri::App) -> Option<PathBuf> {
+    app.path().app_config_dir().ok().map(|d| d.join("launcher.json"))
+}
+
+fn read_launcher_config(app: &tauri::App) -> LauncherConfig {
+    let Some(path) = launcher_config_path(app) else {
+        return LauncherConfig::default();
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<LauncherConfig>(&raw).unwrap_or_default(),
+        Err(_) => LauncherConfig::default(),
+    }
+}
+
+/// Resolve the data root (RIVET_HOME) for the sidecar.
+///
+/// Priority:
+///   1. launcher.json rivetHome (set by desktop Settings > Storage)
+///   2. default: platform default, with portable-mode detection on first run
+fn resolve_rivet_home(app: &tauri::App) -> PathBuf {
+    let cfg = read_launcher_config(app);
+    if !cfg.rivet_home.is_empty() {
+        return PathBuf::from(cfg.rivet_home);
+    }
+    default_rivet_home(app)
+}
+
+fn default_rivet_home(app: &tauri::App) -> PathBuf {
+    // Portable-mode detection: if the exe lives next to the data directory
+    // (e.g., green/zip install on D:\Tools\Tianshu), keep data beside the exe.
+    // System installs (Program Files, /Applications, /usr, /opt) use the OS user dir.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if is_portable_location(parent) {
+                return parent.join("TianshuData").join(".rivet");
+            }
+        }
+    }
+    if cfg!(target_os = "windows") {
+        PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join(".rivet")
+    } else {
+        app.path()
+            .home_dir()
+            .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()))
+            .join(".rivet")
+    }
+}
+
+/// True when the exe parent is NOT a known system install directory.
+/// Uses the Windows Known Folders API so non-English "Program Files" variants
+/// (Programme, Archivos de programa, プログラムファイル, etc.) are handled.
+fn is_portable_location(p: &std::path::Path) -> bool {
+    let s = p.to_string_lossy().to_lowercase();
+
+    #[cfg(target_os = "macos")]
+    if s.starts_with("/applications/") {
+        return false;
+    }
+
+    #[cfg(target_os = "linux")]
+    if s.starts_with("/usr/") || s.starts_with("/opt/") {
+        return false;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let system_folders = [
+            KnownFolder::ProgramFiles,
+            KnownFolder::ProgramFilesX86,
+            KnownFolder::ProgramFilesCommon,
+            KnownFolder::Windows,
+        ];
+        for folder in system_folders {
+            if let Ok(folder) = get_known_folder_path(folder) {
+                if p.starts_with(&folder) {
+                    return false;
+                }
+            }
+        }
+    }
+
+    true
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     let port = pick_free_port();
     let token = random_token();
     let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
+    let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
 
     // Report spawn failures instead of swallowing them with `.ok()`: a missing
     // node / bad entry path otherwise leaves the UI with a valid-looking handle
@@ -373,6 +476,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         .arg("--port")
         .arg(port.to_string())
         .env("RIVET_SERVER_TOKEN", &token)
+        .env("RIVET_HOME", rivet_home.to_string_lossy().as_ref())
         // Parent-death watchdog: the Node sidecar polls this PID and self-exits
         // when the shell process is gone, so a crash / force-quit / Task Manager
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
@@ -421,6 +525,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
             token,
             node_source: node_source.to_string(),
             ready,
+            rivet_home: rivet_home.to_string_lossy().to_string(),
         },
         child,
     )
