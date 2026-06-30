@@ -64,7 +64,8 @@ const winAsset = findAsset('nsis', /-setup\.exe$/)
 
 function entry(assetAbsPath) {
   if (!assetAbsPath) return undefined
-  const name = assetAbsPath.split('/').pop()
+  // 兼容 Windows 反斜杠路径：先统一成正斜杠再 split，否则 .pop() 会返回整段路径。
+  const name = String(assetAbsPath).replace(/\\/g, '/').split('/').pop()
   return {
     url: `${downloadBase}/${name}`,
     signature: readSig(assetAbsPath),
