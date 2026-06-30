@@ -144,8 +144,8 @@ describe('groupTeamTasks', () => {
     assert.ok(!waves[0]!.taskIds.includes('T2') || !waves[1]!.taskIds.includes('T1'))
   })
 
-  it('defaults to MAX_WRITE_WORKERS=2 and MAX_READ_WORKERS=3', () => {
-    assert.equal(MAX_WRITE_WORKERS, 2)
+  it('defaults to MAX_WRITE_WORKERS=3 and MAX_READ_WORKERS=3', () => {
+    assert.equal(MAX_WRITE_WORKERS, 3)
     assert.equal(MAX_READ_WORKERS, 3)
   })
 

@@ -2,7 +2,7 @@ import type { TeamTask } from './team-plan.js'
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-export const MAX_WRITE_WORKERS = 2
+export const MAX_WRITE_WORKERS = 3
 export const MAX_READ_WORKERS = 3
 
 export interface GroupingOptions {

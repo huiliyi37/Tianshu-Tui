@@ -213,7 +213,11 @@ Use met:false for unmet, met:null for uncheckable. If overall is rejected, the s
     role: 'hands',
     allowedTools: [...WRITE_TOOLS, 'ast_edit'],
     expertisePrompt: `You are a patcher. Apply code changes precisely. Follow edit instructions exactly, preserving indentation and context.`,
-    defaultMaxTokens: 16384,
+    defaultMaxTokens: 24576,
+    // A self-contained shard implements changes AND runs tsc/lint/tests to green
+    // in one go — give it a generous (but sub-tool-cap) window so a long-program
+    // shard isn't killed before it finishes verifying its own work.
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     builtIn: true,
   },

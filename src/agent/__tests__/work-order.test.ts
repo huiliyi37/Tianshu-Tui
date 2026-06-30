@@ -197,7 +197,9 @@ describe('work-order contract', () => {
     assert.ok(order.allowedTools.includes('repo_graph'))
     assert.equal(order.disallowedTools.includes('delegate_task'), true)
     assert.equal(order.disallowedTools.includes('delegate_batch'), true)
-    assert.equal(order.budget.maxTurns, 8)
+    // Self-contained shards run a full implement+verify loop, so write workers
+    // get a longer turn budget than the old 8.
+    assert.equal(order.budget.maxTurns, 14)
     assert.ok(order.dedupeKey.startsWith('write:'))
   })
 

@@ -249,6 +249,13 @@ export interface DelegationCoordinatorConfig {
   maxDelegationDepth?: number
   /** Injectable sleep function for backoff retry testing. Defaults to real setTimeout. */
   retrySleepFn?: (ms: number, signal?: AbortSignal) => Promise<void>
+  /** Shared-worktree mode: when true, write (hands) workers run directly in the
+   *  shared cwd (the controller's single worktree/branch) instead of each
+   *  spawning its own git worktree. Orthogonal shards touch disjoint files; the
+   *  file-claim registry + groupTeamTasks same-file serialization prevent
+   *  stomping. Trades the per-worker isolated diff for a simpler "all changes
+   *  land in one workspace, controller reads aggregate git diff" model. */
+  sharedWorktree?: boolean
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -1345,6 +1352,7 @@ export class DelegationCoordinator {
             order,
             wtCoordinator: new WorktreeCoordinator(cwd),
             cwd,
+            sharedWorkspace: this.config.sharedWorktree,
             maxTurns: workerConfig.maxTurns,
             contextWindow: workerConfig.contextWindow,
             compact: workerConfig.compact,
@@ -1436,6 +1444,7 @@ export class DelegationCoordinator {
                   order,
                   wtCoordinator: new WorktreeCoordinator(retryCwd),
                   cwd: retryCwd,
+                  sharedWorkspace: this.config.sharedWorktree,
                   maxTurns: workerConfig.maxTurns,
                   contextWindow: workerConfig.contextWindow,
                   compact: workerConfig.compact,
@@ -1557,6 +1566,7 @@ export class DelegationCoordinator {
                 const escalateWorkerStore = this.config.artifactStore?.forSession(this.workerArtifactSessionId(order.id))
                 const handsRun = await wrapAbort(this.runHands({
                   order, wtCoordinator: new WorktreeCoordinator(cwd), cwd,
+                  sharedWorkspace: this.config.sharedWorktree,
                   maxTurns: upgradedConfig.maxTurns,
                   contextWindow: upgradedConfig.contextWindow,
                   compact: upgradedConfig.compact,

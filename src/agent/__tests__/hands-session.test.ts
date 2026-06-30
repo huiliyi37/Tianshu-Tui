@@ -296,3 +296,87 @@ describe('runHandsSession', () => {
     assert.equal(wtCoordinator.getActiveCount(), 0)
   })
 })
+
+describe('runHandsSession — shared-worktree mode', () => {
+  let baseDir: string
+
+  before(() => {
+    baseDir = mkdtempSync(join(tmpdir(), 'rivet-hands-shared-'))
+    initGitRepo(baseDir)
+  })
+
+  after(() => {
+    rmSync(baseDir, { recursive: true, force: true })
+  })
+
+  it('runs directly in the shared cwd and never creates a per-worker worktree', async () => {
+    // wtCoordinator.create must NOT be called in shared mode — throw if it is.
+    const forbiddenWtCoordinator = {
+      create() { throw new Error('per-worker worktree must NOT be created in shared mode') },
+      remove() {},
+      cleanupAll() {},
+      getActiveCount() { return 0 },
+    } as unknown as WorktreeCoordinator
+
+    const order = testOrder({ id: 'wo-shared-1' })
+    const config: HandsSessionConfig = {
+      order,
+      wtCoordinator: forbiddenWtCoordinator,
+      cwd: baseDir,
+      sharedWorkspace: true,
+      maxTurns: 2,
+      contextWindow: 128_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      runAgent: async (_prompt, _callbacks, workerCwd) => {
+        // Worker runs in the controller's shared cwd, not an isolated worktree.
+        assert.equal(workerCwd, baseDir, 'shared mode must run in the shared cwd')
+        writeFileSync(join(workerCwd, 'shared-out.ts'), 'export const a = 1\n')
+        return JSON.stringify({
+          workOrderId: order.id, status: 'passed', summary: 'wrote shared-out.ts',
+          findings: [], artifacts: [], changedFiles: ['shared-out.ts'],
+          risks: [], nextActions: [], evidenceStatus: 'verified',
+        })
+      },
+    }
+
+    const run = await runHandsSession(config)
+    assert.equal(run.result.status, 'passed')
+    // No per-worker isolated diff is collected in shared mode.
+    assert.ok(!run.result.artifacts.some(a => a.kind === 'diff'), 'shared mode collects no per-worker diff')
+    assert.equal(readFileSync(join(baseDir, 'shared-out.ts'), 'utf8'), 'export const a = 1\n')
+  })
+
+  it('parallel shards writing disjoint files in the shared cwd do not stomp each other', async () => {
+    mkdirSync(join(baseDir, 'src'), { recursive: true })
+    // src/ scope paths aren't materialize-checked, so the worker creates them fresh.
+    const mkConfig = (id: string, file: string, body: string): HandsSessionConfig => ({
+      order: testOrder({ id, scope: { files: [file] } }),
+      wtCoordinator: { create() { throw new Error('no worktree') }, remove() {}, cleanupAll() {}, getActiveCount() { return 0 } } as unknown as WorktreeCoordinator,
+      cwd: baseDir,
+      sharedWorkspace: true,
+      maxTurns: 2,
+      contextWindow: 128_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      runAgent: async (_prompt, _callbacks, workerCwd) => {
+        writeFileSync(join(workerCwd, file), body)
+        return JSON.stringify({
+          workOrderId: id, status: 'passed', summary: `wrote ${file}`,
+          findings: [], artifacts: [], changedFiles: [file],
+          risks: [], nextActions: [], evidenceStatus: 'verified',
+        })
+      },
+    })
+
+    // Two orthogonal shards writing different files concurrently.
+    const [runA, runB] = await Promise.all([
+      runHandsSession(mkConfig('wo-par-a', 'src/mod-a.ts', 'export const A = 1\n')),
+      runHandsSession(mkConfig('wo-par-b', 'src/mod-b.ts', 'export const B = 2\n')),
+    ])
+
+    assert.equal(runA.result.status, 'passed')
+    assert.equal(runB.result.status, 'passed')
+    // Both files landed in the single shared workspace — no stomping.
+    assert.equal(readFileSync(join(baseDir, 'src', 'mod-a.ts'), 'utf8'), 'export const A = 1\n')
+    assert.equal(readFileSync(join(baseDir, 'src', 'mod-b.ts'), 'utf8'), 'export const B = 2\n')
+  })
+})

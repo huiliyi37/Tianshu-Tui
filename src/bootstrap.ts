@@ -972,6 +972,12 @@ export function createAgentRuntime(deps: {
     resumeEnabled: true,
     reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
     maxDelegationDepth: config.agent.maxDelegationDepth,
+    // Shared-worktree mode: write workers run directly in the controller's single
+    // shared cwd/branch (no per-worker git worktree, no diff回流/apply_patch merge).
+    // Orthogonal shards write disjoint files; the file-claim registry +
+    // groupTeamTasks same-file serialization prevent stomping. Mirrors the real
+    // "multiple sessions, one branch" workflow.
+    sharedWorktree: true,
   })
 
   return { agent }

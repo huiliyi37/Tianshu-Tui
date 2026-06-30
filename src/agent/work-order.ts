@@ -342,7 +342,10 @@ export function createWriteWorkOrder(input: CreateWriteWorkOrderInput): WorkOrde
     dependencies: input.dependencies ?? [],
     aggregationPolicy: input.aggregationPolicy ?? 'primary_decides',
     budget: {
-      maxTurns: input.budget?.maxTurns ?? 8,
+      // Self-contained shards run a full loop (implement + tsc/lint/tests) in one
+      // context, so write workers need a longer turn budget than the old 8 to
+      // finish a long-program shard without being cut off mid-task.
+      maxTurns: input.budget?.maxTurns ?? 14,
       maxTokens: input.budget?.maxTokens ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultMaxTokens ?? 16384,
       timeoutMs: input.budget?.timeoutMs ?? profileRegistry.get(input.profile ?? 'patcher')?.defaultTimeoutMs ?? progressiveTimeout(input.sessionTurn),
       maxRetries: input.budget?.maxRetries ?? 1,

@@ -44,6 +44,14 @@ export interface HandsSessionConfig {
   domainKnowledgeStore?: DomainKnowledgeStore
   /** Base git ref to diff worker changes against. Defaults to current branch/HEAD of cwd. */
   baseRef?: string
+  /** Shared-worktree mode: when true, the worker runs directly in `cwd` (the
+   *  controller's single shared worktree/branch) instead of spawning its own
+   *  git worktree. Orthogonal shards write disjoint files; the file-claim
+   *  registry + same-file wave serialization prevent stomping. No per-worker
+   *  isolated diff is collected — the controller reads aggregate git diff on the
+   *  shared workspace. Reuses the same code path as the git-absent in-place
+   *  fallback. */
+  sharedWorkspace?: boolean
   /** Optional artifact store to persist the worker diff for independent review.
    *  When provided, the diff is saved (into the worker's fallback session) and the
    *  resulting artifactId is attached to the WorkerResult, so the UI can fetch it.
@@ -74,20 +82,28 @@ export interface HandsSessionRun {
  * 5. Clean up the worktree (always, even on failure)
  */
 export async function runHandsSession(config: HandsSessionConfig): Promise<HandsSessionRun> {
-  // Worktree isolation requires git. When git is absent (or the cwd isn't a git
-  // repo), createWorktree throws — we fall back to running in-place in the
-  // primary cwd. This mirrors session-manager's isolatedWorktree fallback
-  // (session-manager.ts). In-place is safe because Rivet's file-claim registry
-  // already prevents cross-worker write conflicts on the same branch — same
-  // guarantee that lets multiple sessions share a cwd. The only loss is the
-  // worktree-scoped diff (collected below only when a real worktree exists).
   let wt: { path: string; branch?: string }
   let inPlace = false
-  try {
-    wt = config.wtCoordinator.create(config.order.id)
-  } catch {
+  if (config.sharedWorkspace) {
+    // Shared-worktree mode: run directly in the controller's single shared cwd.
+    // No per-worker worktree, no isolated diff — orthogonal shards write disjoint
+    // files and the file-claim registry prevents same-file stomping.
     wt = { path: config.cwd }
     inPlace = true
+  } else {
+    // Worktree isolation requires git. When git is absent (or the cwd isn't a git
+    // repo), createWorktree throws — we fall back to running in-place in the
+    // primary cwd. This mirrors session-manager's isolatedWorktree fallback
+    // (session-manager.ts). In-place is safe because Rivet's file-claim registry
+    // already prevents cross-worker write conflicts on the same branch — same
+    // guarantee that lets multiple sessions share a cwd. The only loss is the
+    // worktree-scoped diff (collected below only when a real worktree exists).
+    try {
+      wt = config.wtCoordinator.create(config.order.id)
+    } catch {
+      wt = { path: config.cwd }
+      inPlace = true
+    }
   }
   config.order.workerCwd = wt.path
   try {
