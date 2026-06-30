@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { createDefaultToolRegistry } from '../default-registry.js'
+import { TodoStore } from '../todo-store.js'
+import { defaultStore } from '../todo.js'
 import type { Tool, ToolCallParams } from '../types.js'
 
 function extraTool(): Tool {
@@ -68,6 +70,33 @@ describe('createDefaultToolRegistry', () => {
     const primary = createDefaultToolRegistry([extraTool()])
 
     assert.equal(primary.has('delegate_task'), true)
+  })
+
+  it('injects a per-session todo store when todoStore option is set (multi-session isolation)', async () => {
+    const s1 = new TodoStore()
+    const s2 = new TodoStore()
+    const reg1 = createDefaultToolRegistry([], { todoStore: s1 })
+    const reg2 = createDefaultToolRegistry([], { todoStore: s2 })
+
+    const todo1 = reg1.getAll().find(t => t.definition.name === 'todo')!
+    const todo2 = reg2.getAll().find(t => t.definition.name === 'todo')!
+
+    await todo1.execute({ input: { action: 'write', todos: [{ id: 'a', content: 'session-A task', status: 'pending' }] }, toolUseId: 't1', cwd: '/fake' })
+    await todo2.execute({ input: { action: 'write', todos: [{ id: 'b', content: 'session-B task', status: 'pending' }] }, toolUseId: 't2', cwd: '/fake' })
+
+    assert.deepEqual(s1.read().map(t => t.id), ['a'])
+    assert.deepEqual(s2.read().map(t => t.id), ['b'])
+    // 隔离：互不污染，也不落到全局 defaultStore。
+    assert.equal(defaultStore.read().some(t => t.id === 'a' || t.id === 'b'), false)
+  })
+
+  it('falls back to the global TODO_TOOL (defaultStore) when no todoStore is injected', async () => {
+    defaultStore.write([])
+    const reg = createDefaultToolRegistry()
+    const todo = reg.getAll().find(t => t.definition.name === 'todo')!
+    await todo.execute({ input: { action: 'write', todos: [{ id: 'g', content: 'global', status: 'pending' }] }, toolUseId: 't3', cwd: '/fake' })
+    assert.deepEqual(defaultStore.read().map(t => t.id), ['g'])
+    defaultStore.write([])
   })
 
   it('plan tool does not require approval for close action', () => {

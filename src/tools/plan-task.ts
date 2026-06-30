@@ -114,6 +114,8 @@ export function createPlanTaskTool(deps: {
   getExecutorDeps: () => PlanExecutorDeps
   getSessionTurn?: () => number | undefined
   getSessionId?: () => string | undefined
+  /** 多会话隔离：写入本会话的 TodoStore。缺省回退全局 setTodos（defaultStore）。 */
+  writeTodos?: (todos: TodoItem[]) => void
 }): Tool {
   return {
     definition: {
@@ -181,7 +183,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           content: n.title,
           status: 'pending' as const,
         }))
-        setTodos(todoItems)
+        ;(deps.writeTodos ?? setTodos)(todoItems)
         params.onPlanSteps?.(todoItems.map(t => ({ id: t.id, content: t.content, status: t.status })))
       }
 

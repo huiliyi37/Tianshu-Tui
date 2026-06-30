@@ -25,14 +25,14 @@ const todoActionSchema = z.discriminatedUnion('action', [
 // CLI/TUI (one process == one session; `main.ts` wires the TUI todo panel via
 // `setTodosProvider(() => getTodos())` and `turn-end.ts` reads `getTodos()`).
 //
-// KNOWN MULTI-SESSION LIMITATION: the desktop server (`src/server/serve.ts`)
-// builds a fresh ToolRegistry per session but registers the shared `TODO_TOOL`
-// singleton, so concurrent sessions in one process currently share this one
-// list. True isolation means injecting a per-session store via
-// `createTodoTool(new TodoStore())` AND routing the TUI/turn-end readers to that
-// same store — a multi-session-isolation change tracked separately, not a local
-// tweak (it touches every `createDefaultToolRegistry` caller).
-const defaultStore = new TodoStore()
+// MULTI-SESSION: the desktop server injects a per-session store via
+// `createDefaultToolRegistry(..., { todoStore })` (refs.todoStore = new
+// TodoStore() per session), and turn-end/todo-reminder read that same store
+// through `config.getTodos`. The TUI keeps `refs.todoStore = defaultStore` so
+// its `setTodoSession/loadTodos` persistence and session-switch behavior are
+// unchanged. This `defaultStore` therefore stays the single-session default
+// and the fallback for any caller that does not inject its own store.
+export const defaultStore = new TodoStore()
 
 export function getTodos(): TodoItem[] {
   return defaultStore.read()

@@ -170,6 +170,9 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** 多会话隔离：读取本会话 TodoStore（透传给 todo-reminder 做快照/活跃度判断）。
+   *  缺省时 todo-reminder 回退全局 getTodos()。 */
+  getTodos?: () => import('../tools/todo-store.js').TodoItem[]
   /** CCR telemetry callback — invoked on each capsule router trigger for offline analysis. */
   onCcrTrigger?: (event: CcrTriggerEvent) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
@@ -429,7 +432,7 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // when a multi-step task is running without one, and (b) refresh a stale list.
   // Soft by default, escalates wording when a long task still has no todo.
   if (deps.advisoryBus) {
-    hooks.push(createTodoReminderHook({ advisoryBus: deps.advisoryBus }))
+    hooks.push(createTodoReminderHook({ advisoryBus: deps.advisoryBus, getTodos: deps.getTodos }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {

@@ -38,7 +38,7 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   // "todo 退回重做". (Thread 3)
   // The trajectory heuristic is a weaker fallback and only kicks in after a few
   // turns of activity, so it stays gated behind turn > 3 when no todo exists.
-  const todos = getTodos()
+  const todos = (config.getTodos ?? getTodos)()
   if (todos.length > 0) {
     // Decisions still come from the heuristic text pass (todos don't carry them).
     const heuristic = extractTaskState(trajectory.getEntries(), streamedText)

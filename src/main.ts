@@ -24,7 +24,7 @@ import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
-import { getTodos, loadTodos, setTodoSession } from './tools/todo.js'
+import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
@@ -725,8 +725,9 @@ async function main() {
   })
 
   // ── 常驻任务面板 provider（todo 列表）──────────────────────
-  // 读 TodoStore 单例（todo 工具的 canonical 源），T9 不直接 import 工具层单例。
-  app.setTodosProvider(() => getTodos())
+  // 统一读本会话 refs.todoStore（多会话隔离的 canonical 源）。TUI 下它就是全局
+  // defaultStore，故与旧的 getTodos() 行为一致；server/桌面下则各会话独立。
+  app.setTodosProvider(() => ctx!.refs.todoStore.read())
 
   // ── 当前已批准计划指针 provider ─────────────────────────────
   // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。

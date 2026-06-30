@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { extractPlanPath, parseChecklistItems } from '../plan-task.js'
+import { extractPlanPath, parseChecklistItems, createPlanTaskTool } from '../plan-task.js'
+import { getTodos, setTodos } from '../todo.js'
+import type { TodoItem } from '../todo-store.js'
 
 // ── extractPlanPath ─────────────────────────────────────────────────
 
@@ -64,6 +66,34 @@ describe('parseChecklistItems', () => {
   it('returns empty array for all-checked checklist', () => {
     const md = '- [x] add field\n- [x] write test\n- [x] run typecheck'
     assert.equal(parseChecklistItems(md).length, 0)
+  })
+})
+
+// ── writeTodos injection (multi-session isolation) ──
+
+describe('createPlanTaskTool writeTodos routing', () => {
+  it('routes generated todos to the injected writeTodos, not the global defaultStore', async () => {
+    setTodos([]) // 清空全局，证明 plan_task 不写全局
+    const captured: TodoItem[][] = []
+    const tool = createPlanTaskTool({
+      getCoordinator: () => null,
+      getExecutorDeps: () => ({} as any),
+      writeTodos: todos => { captured.push(todos) },
+    })
+
+    const res = await tool.execute({
+      input: { objective: '实现用户登录与商品列表两个模块', execute: false },
+      toolUseId: 'p1',
+      cwd: process.cwd(),
+    } as any)
+
+    assert.equal(res.isError ?? false, false)
+    // 隔离的核心断言：全局 defaultStore 始终为空（写入只去了注入 store）。
+    assert.deepEqual(getTodos(), [])
+    // 若计划产出了叶子节点，则它们经 writeTodos 落到注入 store。
+    if (captured.length > 0) {
+      assert.ok(captured[0]!.length > 0)
+    }
   })
 })
 

@@ -28,7 +28,8 @@ import { READ_SECTION_TOOL } from './read-section.js'
 import { RELATED_TESTS_TOOL } from './related-tests.js'
 import { REPO_MAP_TOOL } from './repo-map.js'
 import { RUN_TESTS_TOOL } from './run-tests.js'
-import { TODO_TOOL } from './todo.js'
+import { TODO_TOOL, createTodoTool } from './todo.js'
+import type { TodoStore } from './todo-store.js'
 import { ToolRegistry } from './registry.js'
 import type { Tool } from './types.js'
 import { WEB_FETCH_TOOL } from './web-fetch.js'
@@ -42,6 +43,10 @@ export interface DefaultRegistryOptions {
   desktopTools?: boolean
   /** N4 桌面浏览器验证工具。默认关闭：新攻击面 + 占 kernel budget，仅桌面 sidecar 开启。 */
   browserTool?: boolean
+  /** 多会话隔离：注入 per-session TodoStore。缺省回退全局 TODO_TOOL（defaultStore）。
+   *  注意工具 definition（name/description/schema）与 TODO_TOOL 字节一致，仅 store 不同，
+   *  不影响系统提示词前缀缓存。 */
+  todoStore?: TodoStore
 }
 
 export function createDefaultToolRegistry(extraTools: Tool[] = [], options: DefaultRegistryOptions = {}): ToolRegistry {
@@ -72,7 +77,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(DIFF_TOOL)
   registry.register(RUN_TESTS_TOOL)
   registry.register(GIT_TOOL)
-  registry.register(TODO_TOOL)
+  registry.register(options.todoStore ? createTodoTool(options.todoStore) : TODO_TOOL)
   registry.register(WEB_FETCH_TOOL)
   registry.register(WEB_SEARCH_TOOL)
   registry.register(INSPECT_PROJECT_TOOL)

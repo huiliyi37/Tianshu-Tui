@@ -45,6 +45,7 @@ import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
 import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
+import { TodoStore } from '../tools/todo-store.js'
 import { loadProjectSkills } from '../skills/skill-loader.js'
 import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
@@ -339,6 +340,9 @@ function buildSessionStores(
       ? () => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0
       : undefined,
     goalTrackerRef: { current: null },
+    // 多会话隔离：每会话独立内存态 TodoStore，杜绝并发会话清单串台（提示词注入污染）。
+    // 不做磁盘持久化（按决策），展示与跨重启恢复靠事件日志重放。
+    todoStore: new TodoStore(),
   }
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
 

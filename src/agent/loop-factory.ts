@@ -382,6 +382,8 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     sycophancyTrap: self.sycophancyTrap,
     getEstimatedTokens: () => self.session.getEstimatedTokens(),
     getContextWindow: () => self.config.contextWindow ?? 128_000,
+    // 多会话隔离：todo-reminder 经此读本会话 TodoStore（缺省回退全局 getTodos）。
+    getTodos: self.config.getTodos,
   })
 
   // I4: when any runtime hook throws, run user `onError` hooks and emit the
