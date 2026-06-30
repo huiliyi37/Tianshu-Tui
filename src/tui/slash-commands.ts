@@ -2608,8 +2608,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         const res = approveSkillDraft(ctx.agent.cwd, name)
         if (res.ok && res.skill) {
-          skillRegistry.register(res.skill)
-          pushStatic(createLogEntry({ type: 'system', content: `✅ 已入库 skill: ${res.skill.name}\n已注册到本会话发现层,可用 /skill ${res.skill.name} 加载或由模型自动发现。` }))
+          // Do NOT hot-load into the live registry: changing the available-skill
+          // set mid-session shatters the prefix cache (cost can be tens of times
+          // higher). The draft is persisted to disk; it takes effect on next session.
+          pushStatic(createLogEntry({ type: 'system', content: `✅ 已入库 skill: ${res.skill.name} → .rivet/skills/\n⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。` }))
         } else {
           pushStatic(createLogEntry({ type: 'system', content: `❌ 入库失败: ${res.error ?? 'unknown error'}` }))
         }
@@ -2654,13 +2656,14 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           return true
         }
         const { copied, skipped, errors } = importSkillsIntoRivet(ctx.agent.cwd, names)
-        if (copied.length > 0) {
-          skillRegistry.loadFromDirectory(join(ctx.agent.cwd, '.rivet', 'skills'), 'rivet')
-        }
+        // Do NOT hot-load into the live registry: changing the available-skill set
+        // mid-session shatters the prefix cache (cost can be tens of times higher).
+        // Files are copied to disk; they take effect on next session.
         const lines: string[] = []
         if (copied.length > 0) lines.push(`✅ 已安装: ${copied.join(', ')}`)
         if (skipped.length > 0) lines.push(`⏭ 已存在/跳过: ${skipped.join(', ')}`)
         if (errors.length > 0) lines.push(`❌ 失败:\n${errors.map(e => `  • ${e}`).join('\n')}`)
+        if (copied.length > 0) lines.push('⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。')
         pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') || '无变更。' }))
         setIsStreaming(false)
         return true

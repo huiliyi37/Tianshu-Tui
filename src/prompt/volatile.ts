@@ -489,9 +489,8 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
     parts.push(ctx.skillAdvisoryBlock)
   }
 
-  if (ctx.invokedSkillsBlock) {
-    parts.push(ctx.invokedSkillsBlock)
-  }
+  // invokedSkillsBlock is rendered once via protectedParts (above) — do not
+  // push it again here or the activated skill body gets injected twice.
 
   if (ctx.crossSessionMemoryBlock) {
     parts.push(ctx.crossSessionMemoryBlock)
