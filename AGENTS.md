@@ -19,6 +19,8 @@
 
 会话日志存储在项目外的 `~/.rivet/sessions/<project-slug>/`（`<project-slug>` = 目录名 + cwd 哈希前 6 位），项目内 `.rivet/` 只保留知识库、信息素等共享数据。可用 `RIVET_SESSION_DIR` 覆盖。
 
+> **Windows 注意**：`~/.rivet` 不是 `%USERPROFILE%\.rivet`，而是 `%LOCALAPPDATA%\.rivet`（通常为 `C:\Users\<user>\AppData\Local\.rivet`）。源码见 `src/config/paths.ts::defaultRivetHome()`。
+
 | 路径 | 内容 |
 |------|------|
 | `~/.rivet/sessions/<slug>/<id>.jsonl` | 会话对话记录（主体），`model_switch` 行含模型名 |
