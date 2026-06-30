@@ -72,9 +72,9 @@ function seatbeltQuote(path: string): string {
  * build/test/install workflows are not broken by the boundary.
  *
  * Extra roots can be appended via RIVET_SANDBOX_WRITABLE (path-list separated
- * by the platform delimiter — ':' on POSIX).
+ * by the platform delimiter — ':' on POSIX, ';' on Windows).
  */
-export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv }): string[] {
+export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform }): string[] {
   const env = ctx.env ?? process.env
   const home = env.HOME || homedir()
   const tmp = env.TMPDIR || tmpdir()
@@ -97,7 +97,10 @@ export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv
 
   const extra = env.RIVET_SANDBOX_WRITABLE
   if (extra) {
-    for (const p of extra.split(':')) {
+    // Path-list separator is platform-specific: ';' on Windows (where absolute
+    // paths carry a drive-letter colon, e.g. C:\data), ':' on POSIX.
+    const delim = (ctx.platform ?? process.platform) === 'win32' ? ';' : ':'
+    for (const p of extra.split(delim)) {
       const trimmed = p.trim()
       if (trimmed) roots.add(trimmed)
     }
@@ -336,7 +339,7 @@ export function wrapSandboxCommand(command: string, ctx: SandboxContext): Sandbo
   }
 
   const backend = selectSandboxBackend(ctx)
-  const writableRoots = defaultWritableRoots({ cwd: ctx.cwd, env })
+  const writableRoots = defaultWritableRoots({ cwd: ctx.cwd, env, platform: ctx.platform })
 
   switch (backend) {
     case 'seatbelt':

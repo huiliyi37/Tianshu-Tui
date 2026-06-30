@@ -44,6 +44,16 @@ describe('sandbox-profile: defaultWritableRoots', () => {
     assert.ok(roots.includes('/data'))
     assert.ok(roots.includes('/scratch'))
   })
+  it('splits RIVET_SANDBOX_WRITABLE on ; for Windows without shredding drive-letter paths', () => {
+    const roots = defaultWritableRoots({
+      cwd: 'C:\\work',
+      platform: 'win32',
+      env: { RIVET_SANDBOX_WRITABLE: 'C:\\data;D:\\scratch' },
+    })
+    assert.ok(roots.includes('C:\\data'), 'C:\\data kept whole')
+    assert.ok(roots.includes('D:\\scratch'), 'D:\\scratch kept whole')
+    assert.ok(!roots.includes('C'), 'colon must not split the drive letter off')
+  })
   it('includes user-approved WRITE grants, excludes read-only grants', () => {
     _resetGrantsForTest()
     const wdir = mkdtempSync(join(tmpdir(), 'rivet-w-'))
