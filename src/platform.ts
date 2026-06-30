@@ -169,7 +169,11 @@ export interface ShellProbeDeps {
  */
 export function resolveShellCommand(deps: ShellProbeDeps): ShellCommand {
   if (deps.isWindows) {
-    if (deps.gitBashPath) {
+    // Opt-in: force PowerShell even when Git Bash is present (parity with
+    // CLAUDE_CODE_USE_POWERSHELL_TOOL). Default stays Git-Bash-first since our
+    // model is bash-biased; power users who want native cmdlets set this.
+    const forcePwsh = /^(1|true|yes)$/i.test(deps.env['RIVET_USE_POWERSHELL'] ?? '')
+    if (!forcePwsh && deps.gitBashPath) {
       // -l (login) so /etc/profile puts Git's usr/bin on PATH → coreutils
       // (ls/cat/grep) work, not just bash builtins.
       return { cmd: deps.gitBashPath, args: ['-l', '-c'], kind: 'bash' }
@@ -222,6 +226,21 @@ export function rewriteWindowsNullRedirect(command: string): string {
   return command.replace(
     /(^|\s)(\d?)>\s*nul(?=\s|$|;|&|\|)/gi,
     (_m, pre: string, fd: string) => `${pre}${fd}>/dev/null`,
+  )
+}
+
+/**
+ * Normalize null-device redirects to the PowerShell form `$null`. The model,
+ * being bash/cmd-biased, often emits `2>nul` (cmd) or `2>/dev/null` (POSIX) under
+ * PowerShell — both create a literal file named `nul`/`null` or just fail. Rewrite
+ * either to `2>$null`. Only meant for the `kind: 'powershell'` path. Leaves
+ * `2>&1` and other redirects untouched. Safe normalization only — NOT a general
+ * bash→PowerShell translator (that fragile path is deliberately avoided).
+ */
+export function rewritePowershellNullRedirect(command: string): string {
+  return command.replace(
+    /(^|\s)(\d?)>\s*(?:nul|\/dev\/null)(?=\s|$|;|&|\|)/gi,
+    (_m, pre: string, fd: string) => `${pre}${fd}>$null`,
   )
 }
 

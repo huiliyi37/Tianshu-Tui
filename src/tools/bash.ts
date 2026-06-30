@@ -3,7 +3,7 @@ import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
-import { getShellCommand, WinStreamDecoder, rewriteWindowsNullRedirect } from '../platform.js'
+import { getShellCommand, WinStreamDecoder, rewriteWindowsNullRedirect, rewritePowershellNullRedirect } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { applyCommandFilter } from './command-filters.js'
@@ -237,7 +237,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
       if (shell.kind === 'bash') {
         commandToRun = rewriteWindowsNullRedirect(command)
       } else if (shell.kind === 'powershell') {
-        commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+        // Normalize stray `2>nul`/`2>/dev/null` (bash/cmd habit) → `2>$null`
+        // before prefixing the UTF-8 encoding setup.
+        commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${rewritePowershellNullRedirect(command)}`
       } else if (shell.kind === 'cmd') {
         commandToRun = `chcp 65001 > nul && ${command}`
       }

@@ -5,6 +5,7 @@ import {
   resolveGitBashPath,
   resolveShellCommand,
   rewriteWindowsNullRedirect,
+  rewritePowershellNullRedirect,
   type GitBashProbeDeps,
   type ShellProbeDeps,
 } from '../platform.js'
@@ -121,6 +122,59 @@ describe('resolveShellCommand — Windows priority Git Bash > PowerShell > cmd',
     assert.equal(shell.kind, 'sh')
     assert.equal(shell.cmd, 'sh')
     assert.deepEqual(shell.args, ['-c'])
+  })
+
+  it('RIVET_USE_POWERSHELL=1 forces PowerShell even when Git Bash is present', () => {
+    const shell = resolveShellCommand(winDeps({
+      env: { RIVET_USE_POWERSHELL: '1' },
+      gitBashPath: 'C:\\Git\\bin\\bash.exe',
+      hasPwsh: (c) => c === 'pwsh.exe',
+    }))
+    assert.equal(shell.kind, 'powershell')
+    assert.equal(shell.cmd, 'pwsh.exe')
+  })
+
+  it('RIVET_USE_POWERSHELL falls through to cmd when no PowerShell present', () => {
+    const shell = resolveShellCommand(winDeps({
+      env: { RIVET_USE_POWERSHELL: 'true', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+      gitBashPath: 'C:\\Git\\bin\\bash.exe',
+    }))
+    assert.equal(shell.kind, 'cmd')
+  })
+
+  it('RIVET_USE_POWERSHELL=0 keeps Git Bash preference', () => {
+    const shell = resolveShellCommand(winDeps({
+      env: { RIVET_USE_POWERSHELL: '0' },
+      gitBashPath: 'C:\\Git\\bin\\bash.exe',
+    }))
+    assert.equal(shell.kind, 'bash')
+  })
+})
+
+describe('rewritePowershellNullRedirect', () => {
+  it('rewrites cmd-style 2>nul to 2>$null', () => {
+    assert.equal(rewritePowershellNullRedirect('dir 2>nul'), 'dir 2>$null')
+  })
+
+  it('rewrites POSIX 2>/dev/null to 2>$null', () => {
+    assert.equal(rewritePowershellNullRedirect('git status 2>/dev/null'), 'git status 2>$null')
+  })
+
+  it('rewrites bare >nul and > /dev/null', () => {
+    assert.equal(rewritePowershellNullRedirect('echo hi >nul'), 'echo hi >$null')
+    assert.equal(rewritePowershellNullRedirect('echo hi > /dev/null'), 'echo hi >$null')
+  })
+
+  it('leaves 2>&1 untouched', () => {
+    assert.equal(rewritePowershellNullRedirect('cmd >/dev/null 2>&1'), 'cmd >$null 2>&1')
+  })
+
+  it('does not touch a filename that merely contains nul', () => {
+    assert.equal(rewritePowershellNullRedirect('Get-Content nullable.txt'), 'Get-Content nullable.txt')
+  })
+
+  it('is a no-op when there is no null redirect', () => {
+    assert.equal(rewritePowershellNullRedirect('Get-ChildItem'), 'Get-ChildItem')
   })
 })
 

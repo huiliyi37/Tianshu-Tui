@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ContextLedger } from '../../context/types.js'
-import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildDynamicAppendixParts, appendixBlockName, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, type VolatileContext, type SalientBlock } from '../volatile.js'
-import { setTargetConventions } from '../../platform.js'
+import { buildVolatileBlock, buildStableVolatileBlock, buildLatestTurnVolatileBlock, buildDynamicAppendix, buildDynamicAppendixParts, appendixBlockName, assignSalience, selectTopKBlocks, renderPlanMethodologyAdvisory, stripFirstMarkdownTable, windowsShellNote, type VolatileContext, type SalientBlock } from '../volatile.js'
+import { setTargetConventions, getShellCommand } from '../../platform.js'
 
 /** Fallback temp dir for sandboxed environments where os.tmpdir() is read-only. */
 function sandboxTmpDir(): string {
@@ -34,6 +34,34 @@ function ledger(): ContextLedger {
   }
 }
 
+describe('windowsShellNote — guidance follows the resolved shell', () => {
+  it('Git Bash note advertises POSIX commands, not PowerShell', () => {
+    const note = windowsShellNote('bash')
+    assert.match(note, /Git Bash/)
+    assert.match(note, /2>\/dev\/null/)
+    assert.doesNotMatch(note, /\$env:/)
+  })
+
+  it('PowerShell note carries PS syntax cheatsheet', () => {
+    const note = windowsShellNote('powershell')
+    assert.match(note, /PowerShell/)
+    assert.match(note, /\$env:NAME/)
+    assert.match(note, /2>\$null/)
+    assert.match(note, /\$LASTEXITCODE/)
+  })
+
+  it('cmd note uses cmd idioms', () => {
+    const note = windowsShellNote('cmd')
+    assert.match(note, /cmd\.exe/)
+    assert.match(note, /%VAR%/)
+    assert.match(note, /2>nul/)
+  })
+
+  it('sh (Unix) injects nothing', () => {
+    assert.equal(windowsShellNote('sh'), '')
+  })
+})
+
 describe('environment platform hint (target vs host)', () => {
   const restore = () => setTargetConventions('auto', 'auto')
 
@@ -59,25 +87,18 @@ describe('environment platform hint (target vs host)', () => {
     }
   })
 
-  it('非 Windows 宿主：无 windows-shell-note', () => {
+  it('shell-note 跟随真实解析出的 shell（与 windowsShellNote 一致）', () => {
+    // The note now keys on the actually-resolved shell (getShellCommand().kind,
+    // process-cached), NOT on process.platform — so mutating process.platform no
+    // longer flips it. Assert the integration matches the pure function on this
+    // host: Unix(sh) → no note; Windows → the kind's note is present verbatim.
     restore()
-    if (process.platform === 'win32') return // 真机就是 Windows 时跳过
     const block = buildStableVolatileBlock({ cwd: '/repo' })
-    assert.doesNotMatch(block, /<windows-shell-note>/)
-  })
-
-  it('Windows 宿主：注入原生命令指引(py / PowerShell / not-recognized 换工具)', () => {
-    restore()
-    const original = process.platform
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
-    try {
-      const block = buildStableVolatileBlock({ cwd: '/repo' })
-      assert.match(block, /<windows-shell-note>/)
-      assert.match(block, /`py`/)
-      assert.match(block, /not recognized/)
-      assert.match(block, /不要重试同一条/)
-    } finally {
-      Object.defineProperty(process, 'platform', { value: original, configurable: true })
+    const expected = windowsShellNote(getShellCommand().kind)
+    if (expected) {
+      assert.ok(block.includes(expected))
+    } else {
+      assert.doesNotMatch(block, /<shell-note>/)
     }
   })
 })
