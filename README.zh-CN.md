@@ -513,6 +513,7 @@ src/
 |------|------|
 | [`docs/user-guide-provider-config.md`](docs/user-guide-provider-config.md) | 模型提供商配置指南 |
 | [`docs/dangerously-skip-permissions.md`](docs/dangerously-skip-permissions.md) | 权限跳过说明与安全边界 |
+| [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md) | 沙箱与权限模型完整指南 |
 | [`docs/meridian-architecture.md`](docs/meridian-architecture.md) | Meridian DB 架构(跨会话学习存储) |
 | [`docs/review-discipline.md`](docs/review-discipline.md) | 结构化代码审查规则体系 |
 | [`docs/WINDOWS-INSTALL.md`](docs/WINDOWS-INSTALL.md) | Windows 安装与 Shell 兼容性指南 |
