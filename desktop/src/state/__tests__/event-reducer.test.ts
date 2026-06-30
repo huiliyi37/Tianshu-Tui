@@ -55,6 +55,17 @@ test('tool_result falls back to result when uiContent is absent', () => {
   assert.equal(block!.text, 'ok')
 })
 
+test('sources dedup treats Windows separator/case variants as one file', () => {
+  seq = 0
+  const s = fold([
+    ev('tool_use', { name: 'edit_file', input: { path: 'C:\\proj\\app.ts' } }),
+    ev('tool_use', { name: 'edit_file', input: { path: 'C:/proj/app.ts' } }),
+    ev('tool_use', { name: 'edit_file', input: { path: 'c:\\proj\\App.ts' } }),
+  ])
+  assert.equal(s.sources.length, 1, `expected one deduped source, got: ${s.sources.join(', ')}`)
+  assert.equal(s.sources[0], 'C:\\proj\\app.ts')
+})
+
 test('approval_required sets pending, approval_resolved clears it', () => {
   seq = 0
   const after = fold([ev('approval_required', { requestId: 'r1', toolName: 'bash', input: {} })])

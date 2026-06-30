@@ -129,6 +129,19 @@ describe('summarizeGrepResult', () => {
     assert.ok(result.summary.includes('src/a.ts'))
     assert.ok(result.summary.includes('src/b.ts'))
   })
+
+  it('keeps Windows drive-letter paths whole and tolerates CRLF', () => {
+    const result = summarizeGrepResult(
+      'C:\\proj\\a.ts:1:Foo\r\nC:\\proj\\b.ts:2:Foo\r\nC:\\proj\\a.ts-3-context',
+      'Foo',
+    )
+    assert.ok(result.summary.includes('3 matches'))
+    assert.ok(result.summary.includes('2 files'), `expected 2 files, got: ${result.summary}`)
+    assert.ok(result.summary.includes('C:\\proj\\a.ts'))
+    assert.ok(result.summary.includes('C:\\proj\\b.ts'))
+    // The drive letter must not become its own "file" entry.
+    assert.ok(!/Files:[^\n]*\bC\b(?!:)/.test(result.summary), 'drive letter must not be a separate file')
+  })
 })
 
 describe('summarizeBashOutput', () => {

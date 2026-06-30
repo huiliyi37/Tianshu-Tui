@@ -72,7 +72,7 @@ export const FILE_INFO_TOOL: Tool = {
       lines.push(`Size: ${formatBytes(ls.size)}`)
       if (ext) lines.push(`Extension: ${ext}`)
       lines.push(`Modified: ${ls.mtime.toISOString()}`)
-      lines.push(`Permissions: ${octalPermissions(ls.mode)}`)
+      lines.push(`Permissions: ${formatPermissions(ls.mode)}`)
 
       const isText = isLikelyTextFile(name, ext)
       lines.push(`Encoding: ${isText ? 'text' : 'binary'}`)
@@ -133,7 +133,13 @@ function formatBytes(bytes: number): string {
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-function octalPermissions(mode: number): string {
+/** Human-readable permissions. POSIX octal (0755) where it is meaningful; on
+ *  Windows the mode has no POSIX bits, so report the only real distinction —
+ *  whether the file is writable — instead of a misleading octal string. */
+export function formatPermissions(mode: number, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    return (mode & 0o200) ? 'read-write' : 'read-only'
+  }
   return `0${(mode & 0o777).toString(8)}`
 }
 

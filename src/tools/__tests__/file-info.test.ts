@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { FILE_INFO_TOOL } from '../file-info.js'
+import { FILE_INFO_TOOL, formatPermissions } from '../file-info.js'
 
 function makeParams(input: Record<string, unknown>, cwd: string) {
   return { input, toolUseId: 'test', cwd }
@@ -95,5 +95,17 @@ describe('FILE_INFO_TOOL', () => {
     const result = await FILE_INFO_TOOL.execute(makeParams({ path: absPath }, tmpCwd))
     assert.equal(result.isError, undefined)
     assert.match(result.content, /Exists: true/)
+  })
+})
+
+describe('formatPermissions', () => {
+  it('returns POSIX octal on non-Windows platforms', () => {
+    assert.equal(formatPermissions(0o755, 'linux'), '0755')
+    assert.equal(formatPermissions(0o644, 'darwin'), '0644')
+  })
+
+  it('reports read-write / read-only on Windows (octal is meaningless there)', () => {
+    assert.equal(formatPermissions(0o666, 'win32'), 'read-write')
+    assert.equal(formatPermissions(0o444, 'win32'), 'read-only')
   })
 })
