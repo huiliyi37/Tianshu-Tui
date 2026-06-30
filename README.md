@@ -437,4 +437,4 @@ Each launch gets a unique session ID. Session files, checkpoints, and memory are
 
 ## License
 
-MIT
+Apache-2.o
