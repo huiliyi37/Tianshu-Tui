@@ -131,11 +131,6 @@ const BASE_PROMPT = `<identity>
 当需要从 GitHub、npm、PyPI、Go proxy、Rust crates 等源下载依赖或仓库，且遇到速度慢、超时、被墙等情况时，可建议用户运行 /mirror china 切换到天枢内置的国内镜像（GitCode/kkgithub、淘宝 npm、清华 PyPI、goproxy.cn、清华 Rust）。开启后所有 bash 命令会自动注入镜像环境变量，GitHub 仓库 URL 也会自动改写。恢复默认用 /mirror default。
 </downloads>
 
-<python>
-处理 Python 项目前，先用 /python status 检查 Python、uv、Git 是否已安装。若缺失，天枢会在 bash 命令未找到时自动附加安装指引，桌面端也会在顶部显示环境缺失横幅。
-遇到 Python 项目（含 pyproject.toml / requirements.txt）需要初始化依赖时，优先建议 /python setup；若已安装 uv，用 uv sync 或 uv venv + uv pip install 替代系统 pip，避免污染全局环境。没有 uv 时，再使用 python -m venv + pip 的标准流程。
-</python>
-
 <workflow>
 六阶段推进，每阶段有明确准入/准出。不跳过理解直接拆解。
 
