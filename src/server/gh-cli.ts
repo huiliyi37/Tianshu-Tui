@@ -3,7 +3,7 @@
  * All calls are best-effort: returns null when `gh` is not installed or not
  * authenticated, so the desktop can gracefully degrade.
  */
-import { spawn } from 'node:child_process'
+import { spawnHidden } from '../tools/spawn-hidden.js'
 
 export interface PrSummary {
   number: number
@@ -45,13 +45,13 @@ const TIMEOUT_MS = 15_000
 
 async function runGh(args: string[], cwd: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const child = spawn('gh', args, {
+    const child = spawnHidden('gh', args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: TIMEOUT_MS,
     })
     const chunks: Buffer[] = []
-    child.stdout.on('data', (d: Buffer) => chunks.push(d))
+    child.stdout?.on('data', (d: Buffer) => chunks.push(d))
     child.on('error', () => resolve(null))
     child.on('close', (code) => {
       resolve(code === 0 ? Buffer.concat(chunks).toString('utf-8') : null)

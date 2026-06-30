@@ -10,7 +10,7 @@
  */
 
 import type { ChildProcess } from 'node:child_process'
-import { spawn } from 'node:child_process'
+import { spawnHidden } from '../tools/spawn-hidden.js'
 import { createLspManager, type LspManager, type LspDiagnostic } from './manager.js'
 import {
   serverForFile,
@@ -34,7 +34,7 @@ export interface MultiLspOptions {
 export function createMultiLspManager(cwd: string, opts: MultiLspOptions = {}): LspManager {
   const which = opts.which ?? defaultWhich
   const spawnFor = opts.spawnFor
-    ?? ((def: LspServerDef) => spawn(def.command, def.args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] }))
+    ?? ((def: LspServerDef) => spawnHidden(def.command, def.args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] }))
 
   const managers = new Map<string, { mgr: LspManager; ready: Promise<void> }>()
   let availableCache: LspServerDef[] | null = null

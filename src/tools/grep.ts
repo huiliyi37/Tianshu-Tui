@@ -1,4 +1,5 @@
 import { spawn } from 'child_process'
+import { spawnHidden } from './spawn-hidden.js'
 import { createReadStream } from 'fs'
 import { lstat, readdir, realpath, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
@@ -297,7 +298,7 @@ async function tryRipgrep(
 
     let child: ReturnType<typeof spawn>
     try {
-      child = track(spawn('rg', args, {
+      child = track(spawnHidden('rg', args, {
         cwd,
         env: { ...process.env },
         stdio: ['ignore', 'pipe', 'pipe'],
