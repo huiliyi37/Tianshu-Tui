@@ -861,6 +861,44 @@ export function buildSessionRoutes(
       }
     }, apiToken),
 
+    // 用户主动派后台子代理：在已有会话上、独立于主 turn 启动一个 worker。
+    // 不置 session.running，子代理跑在隔离子会话，进度走 delegation SSE。
+    'POST /sessions/:id/delegate': withAuth((body, params) => {
+      const data = (body ?? {}) as { objective?: unknown; profile?: unknown; authority?: unknown; files?: unknown }
+      if (typeof data.objective !== 'string' || !data.objective.trim()) {
+        return { status: 400, body: { error: 'Missing or empty "objective" field' } }
+      }
+      if (data.profile !== undefined && typeof data.profile !== 'string') {
+        return { status: 400, body: { error: 'Invalid "profile"' } }
+      }
+      if (data.authority !== undefined && typeof data.authority !== 'string') {
+        return { status: 400, body: { error: 'Invalid "authority"' } }
+      }
+      if (data.files !== undefined && (!Array.isArray(data.files) || data.files.some((f: unknown) => typeof f !== 'string'))) {
+        return { status: 400, body: { error: 'Invalid "files"' } }
+      }
+      const result = manager.delegate(params!.id!, {
+        objective: data.objective.trim(),
+        ...(data.profile ? { profile: data.profile } : {}),
+        ...(data.authority ? { authority: data.authority } : {}),
+        ...(data.files ? { files: data.files as string[] } : {}),
+      })
+      if (result.ok) return { status: 200, body: { workerId: result.workerId } }
+      switch (result.reason) {
+        case 'not_found': return { status: 404, body: { error: 'Session not found' } }
+        case 'invalid': return { status: 400, body: { error: 'Missing or empty "objective" field' } }
+        case 'unsupported': return { status: 503, body: { error: 'Agent not ready' } }
+        case 'limit': return { status: 429, body: { error: 'Too many concurrent background workers' } }
+      }
+    }, apiToken),
+
+    // 取消一个用户派的后台子代理。
+    'POST /sessions/:id/delegate/:workerId/abort': withAuth((_body, params) => {
+      const ok = manager.cancelDelegate(params!.id!, params!.workerId!)
+      if (!ok) return { status: 404, body: { error: 'Background worker not found' } }
+      return { status: 200, body: { ok: true } }
+    }, apiToken),
+
     // I4 — read user-defined .rivet/hooks.json for this session.
     'GET /sessions/:id/hooks': withAuth((_body, params) => {
       const rec = manager.getSession(params!.id!)

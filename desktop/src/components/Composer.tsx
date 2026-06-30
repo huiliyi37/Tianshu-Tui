@@ -108,10 +108,12 @@ export function Composer(props: {
   commands?: ComposerCommand[]
   planMode?: PlanModeState
   onSetPlanMode?: (state: PlanModeState) => void
+  /** PlusMenu — open the "派子代理" dispatch dialog. */
+  onDelegate?: () => void
   /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
   menuRev?: number
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, menuRev } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -612,6 +614,7 @@ export function Composer(props: {
             imageDisabled={images.length >= MAX_IMAGES}
             commands={commands}
             onRunCommand={runCommand}
+            onDelegate={onDelegate}
             onClose={() => {}}
           />
         </div>

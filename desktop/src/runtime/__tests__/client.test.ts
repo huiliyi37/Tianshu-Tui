@@ -13,6 +13,8 @@ import {
   setSkillEnabled,
   getHooks,
   setHooks,
+  delegateWorker,
+  abortDelegateWorker,
 } from '../client.ts'
 import type { HookEntry } from '../types.ts'
 
@@ -114,6 +116,35 @@ test('listDomains GETs /domains and unwraps entries', async () => {
     const entries = await listDomains('s1')
     assert.equal(entries[0]!.key, 'auto')
     assert.match(calls[0]!.url, /\/sessions\/s1\/domains$/)
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('delegateWorker POSTs objective/profile/files to /delegate', async () => {
+  clearRuntimeCache()
+  const { calls } = stubFetch({ workerId: 'user:abc' })
+  try {
+    const res = await delegateWorker('s1', { objective: 'go', profile: 'code_scout', files: ['a.ts'] })
+    assert.equal(res.workerId, 'user:abc')
+    assert.match(calls[0]!.url, /\/sessions\/s1\/delegate$/)
+    assert.equal(calls[0]!.method, 'POST')
+    const body = JSON.parse(calls[0]!.body!)
+    assert.equal(body.objective, 'go')
+    assert.equal(body.profile, 'code_scout')
+    assert.deepEqual(body.files, ['a.ts'])
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('abortDelegateWorker POSTs to /delegate/:workerId/abort', async () => {
+  clearRuntimeCache()
+  const { calls } = stubFetch({ ok: true })
+  try {
+    await abortDelegateWorker('s1', 'user:abc')
+    assert.match(calls[0]!.url, /\/sessions\/s1\/delegate\/user:abc\/abort$/)
+    assert.equal(calls[0]!.method, 'POST')
   } finally {
     globalThis.fetch = realFetch
   }

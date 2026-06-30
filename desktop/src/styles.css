@@ -1453,6 +1453,104 @@ body {
 /* T4 — subagent fleet panel. Visual language ported from the 子代理流程 design
    prototype; colors strictly from design tokens so it tracks the active theme. */
 .delegation-tree { border-top: 1px solid var(--border); padding: 10px 14px; max-height: 260px; overflow-y: auto; }
+/* Inside the drawer there's plenty of room — drop the 260px cap, fill & scroll. */
+.delegation-overlay-body .delegation-tree { border-top: none; max-height: none; height: 100%; padding: 12px 16px; }
+
+/* ── Subagent collapsed pill (main conversation, ~28px) ── */
+.delegation-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 4px 12px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.delegation-pill:hover { background: var(--panel-2, var(--bg-elevated)); }
+.delegation-pill.open { border-color: var(--accent); color: var(--text); }
+.delegation-pill.attention { border-color: color-mix(in srgb, var(--warning) 50%, var(--border)); }
+.delegation-pill .dp-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+}
+.delegation-pill .dp-dot.pulse { animation: dp-pulse 1.4s ease-in-out infinite; }
+@keyframes dp-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.delegation-pill .dp-label { font-weight: 500; color: var(--text); }
+.delegation-pill .dp-progress { font-variant-numeric: tabular-nums; }
+.delegation-pill .dp-attention {
+  padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--warning-soft); color: var(--warning); font-weight: 500;
+}
+.delegation-pill .dp-chevron { color: var(--text-secondary); }
+.delegation-pill .dp-origin,
+.deleg-origin {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+.deleg-origin { margin-left: 4px; }
+
+/* "汇入主会话" — adopt a finished worker's summary into the composer. */
+.deleg-adopt {
+  margin: 4px 0 2px 18px;
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.deleg-adopt:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* ── Subagent overlay drawer (right-side slide-in) ── */
+.delegation-overlay {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 480px;
+  max-width: 90vw;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 32px color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  animation: do-slide-in 200ms ease-out;
+}
+@keyframes do-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.delegation-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.delegation-overlay-header .do-title { font-weight: 600; color: var(--text-strong); }
+.delegation-overlay-header .do-counts {
+  font-size: var(--text-xs); color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.delegation-overlay-header .do-running { color: var(--accent); }
+.delegation-overlay-header .do-attention { color: var(--warning); }
+.delegation-overlay-header .do-close {
+  margin-left: auto;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); font-size: 16px; line-height: 1;
+  padding: 4px 6px; border-radius: var(--radius-sm, 6px);
+}
+.delegation-overlay-header .do-close:hover { background: var(--panel); color: var(--text); }
+.delegation-overlay-body { flex: 1; overflow-y: auto; min-height: 0; }
 
 /* Summary header — title + done/total count + per-status chips. */
 .deleg-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -4984,6 +5082,46 @@ html[data-theme="nebula"] .plan-panel {
 .cc-status-badge.warning { background: var(--warning-soft); color: var(--warning); }
 .cc-status-badge.error { background: var(--error-soft); color: var(--error); }
 .cc-status-badge.info { background: var(--accent-soft); color: var(--accent); }
+
+/* Collapsed delivery report: one clickable summary row, expands in place. */
+.completion-curtain.collapsed { padding: var(--space-2) var(--space-3); }
+.cc-summary-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.cc-summary-row .cc-icon { width: 24px; height: 24px; flex-shrink: 0; }
+.cc-summary-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.cc-summary-metric { display: inline-flex; align-items: center; gap: 3px; }
+.cc-summary-verify {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-expand-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.completion-curtain.collapsed .cc-expand-chevron { margin-left: var(--space-2); }
+.completion-curtain.expanded .cc-summary-row { margin-bottom: var(--space-3); }
+.completion-curtain.expanded .cc-expand-chevron { margin-left: auto; }
 
 .cc-metrics {
   display: flex;

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RuntimeSessionManager, type ManagedAgent, type ModelOption } from '../session-manager.js'
+import { RuntimeSessionManager, type ManagedAgent, type ModelOption, type DelegateActivityUpdate } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
 import type { OaiMessage } from '../../api/oai-types.js'
@@ -635,4 +635,120 @@ test('PlusMenu: missing session yields undefined/false from menu methods', () =>
   assert.equal(manager.setDomain('nope', 'auto'), false)
   assert.equal(manager.switchModel('nope', 'model-a'), false)
   assert.equal(manager.setSkillEnabled('nope', 'x', false), false)
+})
+
+// ── User-dispatched background subagent ─────────────────────────────
+
+/** Fake exposing delegateWorker; lets a test drive activity + completion. */
+class DelegateFakeAgent implements ManagedAgent {
+  callbacks?: AgentCallbacks
+  lastInput?: { objective: string; profile?: string; authority?: string; files?: string[] }
+  lastOpts?: { workerId: string; signal: AbortSignal; onActivity: (a: DelegateActivityUpdate) => void }
+  private resolveRun?: () => void
+  run(_p: string, cb: AgentCallbacks): Promise<void> { this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
+  finish(): void { this.resolveRun?.() }
+  abort(): void { this.resolveRun?.() }
+  listArtifacts(): Artifact[] { return [] }
+  readArtifact(): Promise<string | null> { return Promise.resolve(null) }
+  getMessages(): OaiMessage[] { return [] }
+  replaceMessages(): void {}
+  rewindToMessages(): void {}
+  delegateWorker(
+    input: { objective: string; profile?: string; authority?: string; files?: string[] },
+    opts: { workerId: string; signal: AbortSignal; onActivity: (a: DelegateActivityUpdate) => void },
+  ): Promise<void> {
+    this.lastInput = input
+    this.lastOpts = opts
+    // Stay pending so the test can drive onActivity then resolve manually.
+    return new Promise<void>(() => {})
+  }
+}
+
+function makeDelegateManager() {
+  const agents: DelegateFakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => { const a = new DelegateFakeAgent(); agents.push(a); return a },
+    defaultCwd: '/tmp/work',
+  })
+  return { manager, agents }
+}
+
+test('delegate: dispatches a worker WITHOUT setting session.running', () => {
+  const { manager, agents } = makeDelegateManager()
+  const s = manager.createSession({})
+  const res = manager.delegate(s.id, { objective: '查登录验证码', profile: 'code_scout' })
+  assert.equal(res.ok, true)
+  // Session stays idle — a background worker must not flip the main turn flag.
+  assert.notEqual(manager.getSession(s.id)!.status, 'running')
+  // The agent received the request with our stable workerId as parent key.
+  assert.equal(agents[0]!.lastInput!.objective, '查登录验证码')
+  assert.equal(agents[0]!.lastOpts!.workerId, res.ok ? res.workerId : '')
+})
+
+test('delegate: emits a running delegation node with origin=user', () => {
+  const { manager } = makeDelegateManager()
+  const s = manager.createSession({})
+  const res = manager.delegate(s.id, { objective: 'go', profile: 'reviewer' })
+  assert.equal(res.ok, true)
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'delegation')
+  assert.equal(evs.length, 1)
+  assert.equal(evs[0]!.data.status, 'running')
+  assert.equal(evs[0]!.data.origin, 'user')
+  assert.equal(evs[0]!.data.objective, 'go')
+  assert.equal(evs[0]!.data.profile, 'reviewer')
+})
+
+test('delegate: onActivity terminal update carries summary + origin', () => {
+  const { manager, agents } = makeDelegateManager()
+  const s = manager.createSession({})
+  const res = manager.delegate(s.id, { objective: 'go' })
+  assert.ok(res.ok)
+  const workerId = res.ok ? res.workerId : ''
+  // Simulate the worker finishing with a digest.
+  agents[0]!.lastOpts!.onActivity({
+    workOrderId: workerId,
+    status: 'passed',
+    summary: '改了 2 个文件',
+    changedFiles: ['a.ts', 'b.ts'],
+  })
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'delegation')
+  const terminal = evs[evs.length - 1]!
+  assert.equal(terminal.data.status, 'passed')
+  assert.equal(terminal.data.summary, '改了 2 个文件')
+  assert.equal(terminal.data.origin, 'user')
+  assert.deepEqual(terminal.data.changedFiles, ['a.ts', 'b.ts'])
+})
+
+test('delegate: empty objective is rejected', () => {
+  const { manager } = makeDelegateManager()
+  const s = manager.createSession({})
+  const res = manager.delegate(s.id, { objective: '   ' })
+  assert.deepEqual(res, { ok: false, reason: 'invalid' })
+})
+
+test('delegate: missing session is rejected', () => {
+  const { manager } = makeDelegateManager()
+  const res = manager.delegate('nope', { objective: 'go' })
+  assert.deepEqual(res, { ok: false, reason: 'not_found' })
+})
+
+test('cancelDelegate: aborts the worker signal; unknown returns false', () => {
+  const { manager, agents } = makeDelegateManager()
+  const s = manager.createSession({})
+  const res = manager.delegate(s.id, { objective: 'go' })
+  assert.ok(res.ok)
+  const workerId = res.ok ? res.workerId : ''
+  assert.equal(agents[0]!.lastOpts!.signal.aborted, false)
+  assert.equal(manager.cancelDelegate(s.id, workerId), true)
+  assert.equal(agents[0]!.lastOpts!.signal.aborted, true)
+  assert.equal(manager.cancelDelegate(s.id, 'ghost'), false)
+})
+
+test('delegate: coexists with a running main turn (anytime dispatch)', () => {
+  const { manager } = makeDelegateManager()
+  const s = manager.createSession({ prompt: 'main task' })
+  assert.equal(manager.getSession(s.id)!.status, 'running')
+  // Background dispatch must succeed even while the main turn runs.
+  const res = manager.delegate(s.id, { objective: 'side quest' })
+  assert.equal(res.ok, true)
 })

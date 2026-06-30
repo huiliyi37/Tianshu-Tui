@@ -10,7 +10,9 @@ import { Markdown, closeUnterminatedFence } from '../components/Markdown'
 import { Composer } from '../components/Composer'
 import { TimelineGroup } from '../components/TimelineGroup'
 import { ArtifactCard } from '../components/ArtifactCard'
-import { DelegationTree } from '../components/DelegationTree'
+import { DelegationPill } from '../components/DelegationPill'
+import { DelegationOverlay } from '../components/DelegationOverlay'
+import { DelegateDialog } from '../components/DelegateDialog'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
@@ -74,6 +76,8 @@ export function ThreadView(props: {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
   const [input, setInput] = useState('')
   const [showRewind, setShowRewind] = useState(false)
+  const [showDelegation, setShowDelegation] = useState(false)
+  const [showDelegateDialog, setShowDelegateDialog] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [composerHeight, setComposerHeight] = useState(0)
   const composerWrapRef = useRef<HTMLDivElement | null>(null)
@@ -261,6 +265,7 @@ export function ThreadView(props: {
   // D3 — composer slash commands: desktop-actionable items + prompt pass-throughs.
   const commands = useMemo<ComposerCommand[]>(() => [
     { name: '/rewind', desc: '回滚到某条消息', run: () => setShowRewind(true) },
+    { name: '/subagents', desc: '打开子代理面板', run: () => setShowDelegation(true) },
     { name: '/supervise', desc: '监督档 · 每步确认', run: () => onSetApprovalMode(levelToMode('supervised')) },
     { name: '/default', desc: '默认档 · 低风险自动', run: () => onSetApprovalMode(levelToMode('default')) },
     { name: '/autonomous', desc: '自治档 · 项目内全自动', run: () => onSetApprovalMode(levelToMode('autonomous')) },
@@ -666,7 +671,11 @@ export function ThreadView(props: {
         <CompletionCurtain summary={view.completionSummary} />
       )}
 
-      <DelegationTree nodes={view.delegation} />
+      <DelegationPill
+        nodes={view.delegation}
+        open={showDelegation}
+        onToggle={() => setShowDelegation((v) => !v)}
+      />
 
       <div className="composer-float" ref={composerWrapRef}>
         <div className="composer-float-inner">
@@ -738,10 +747,25 @@ export function ThreadView(props: {
             commands={commands}
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
+            onDelegate={() => setShowDelegateDialog(true)}
             menuRev={view.menuRev}
           />
         </div>
       </div>
+      {showDelegation && (
+        <DelegationOverlay
+          nodes={view.delegation}
+          onClose={() => setShowDelegation(false)}
+          onAdopt={(text) => { setInput(text); setShowDelegation(false) }}
+        />
+      )}
+      {showDelegateDialog && (
+        <DelegateDialog
+          sessionId={session.id}
+          onClose={() => setShowDelegateDialog(false)}
+          onDispatched={() => setShowDelegation(true)}
+        />
+      )}
       {showRewind && (
         <RewindOverlay
           sessionId={session.id}

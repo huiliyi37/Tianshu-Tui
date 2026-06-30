@@ -279,6 +279,12 @@ export interface DelegationNode {
   artifactId?: string
   /** Files this worker changed (for diff review entry hints). */
   changedFiles?: string[]
+  /** Terminal digest text — populated when a user-dispatched worker finishes.
+   *  Drives the "汇入主会话" adopt-to-composer button. */
+  summary?: string
+  /** Who launched this worker: 'user' = user-dispatched background subagent,
+   *  'agent' (or undefined) = the model's own auto-delegation. */
+  origin?: 'user' | 'agent'
 }
 
 export interface InsightsWorker {

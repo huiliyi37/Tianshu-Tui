@@ -47,31 +47,52 @@ function verificationLabel(summary: EvidenceSummary, t: (key: string, options?: 
 
 function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
   const { t } = useTranslation('thread')
+  // Default COLLAPSED to a single summary row — the full curtain ate too much
+  // main-conversation vertical space. Click the header row to expand in place.
+  const [expanded, setExpanded] = useState(false)
   const [filesOpen, setFilesOpen] = useState(false)
   const status = statusFromSummary(summary)
 
   return (
-    <div className={`completion-curtain status-${status.kind}`} role="region" aria-label={t('completionTitle')}>
-      <div className="cc-header">
+    <div
+      className={`completion-curtain status-${status.kind} ${expanded ? 'expanded' : 'collapsed'}`}
+      role="region"
+      aria-label={t('completionTitle')}
+    >
+      <button
+        className="cc-summary-row"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
         <span className="cc-icon" aria-hidden>{status.icon}</span>
-        <div className="cc-title-stack">
-          <span className="cc-title">{t('completionTitle')}</span>
-          <span className={`cc-status-badge ${status.kind}`}>{status.label}</span>
-        </div>
-      </div>
+        <span className="cc-title">{t('completionTitle')}</span>
+        <span className={`cc-status-badge ${status.kind}`}>{status.label}</span>
+        {!expanded && (
+          <span className="cc-summary-metrics">
+            <span className="cc-summary-metric"><FileText size={12} aria-hidden /> {summary.filesRead.length}</span>
+            <span className="cc-summary-metric"><FileCheck size={12} aria-hidden /> {summary.filesModified.length}</span>
+            <span className="cc-summary-verify" title={verificationLabel(summary, t)}>{verificationLabel(summary, t)}</span>
+          </span>
+        )}
+        <span className="cc-expand-chevron" aria-hidden>
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </span>
+      </button>
 
-      <div className="cc-metrics">
-        <div className="cc-metric">
-          <FileText size={14} />
-          <span>{t('completionFilesRead', { count: summary.filesRead.length })}</span>
-        </div>
-        <div className="cc-metric">
-          <FileCheck size={14} />
-          <span>{t('completionFilesModified', { count: summary.filesModified.length })}</span>
-        </div>
-      </div>
+      {expanded && (
+        <div className="cc-body">
+          <div className="cc-metrics">
+            <div className="cc-metric">
+              <FileText size={14} />
+              <span>{t('completionFilesRead', { count: summary.filesRead.length })}</span>
+            </div>
+            <div className="cc-metric">
+              <FileCheck size={14} />
+              <span>{t('completionFilesModified', { count: summary.filesModified.length })}</span>
+            </div>
+          </div>
 
-      {summary.filesModified.length > 0 && (
+          {summary.filesModified.length > 0 && (
         <div className="cc-section">
           <button
             className="cc-section-toggle"
@@ -98,10 +119,12 @@ function CompletionCurtainImpl({ summary }: CompletionCurtainProps) {
         <div className="cc-verification-text">{verificationLabel(summary, t)}</div>
       </div>
 
-      {summary.gate.nextAction && (
-        <div className="cc-section">
-          <div className="cc-section-title">{t('completionNextAction')}</div>
-          <div className="cc-next-action">{summary.gate.nextAction}</div>
+          {summary.gate.nextAction && (
+            <div className="cc-section">
+              <div className="cc-section-title">{t('completionNextAction')}</div>
+              <div className="cc-next-action">{summary.gate.nextAction}</div>
+            </div>
+          )}
         </div>
       )}
     </div>

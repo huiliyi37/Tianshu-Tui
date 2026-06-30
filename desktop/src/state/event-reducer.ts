@@ -452,6 +452,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         usage: ev.data.usage != null && typeof ev.data.usage === 'object' ? (ev.data.usage as DelegationNode['usage']) : prev?.usage,
         artifactId: ev.data.artifactId != null ? String(ev.data.artifactId) : prev?.artifactId,
         changedFiles: Array.isArray(ev.data.changedFiles) ? (ev.data.changedFiles as string[]) : prev?.changedFiles,
+        summary: ev.data.summary != null ? String(ev.data.summary) : prev?.summary,
+        origin: ev.data.origin === 'user' || ev.data.origin === 'agent' ? ev.data.origin : prev?.origin,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }

@@ -378,6 +378,20 @@ test('T4: delegation merges fields; terminal update keeps prior objective', () =
   assert.equal(node.elapsedMs, 3400)
 })
 
+test('delegation: user-dispatched node merges origin + terminal summary', () => {
+  seq = 0
+  const s = fold([
+    ev('delegation', { workerId: 'user:abc', objective: 'go', profile: 'reviewer', status: 'running', origin: 'user' }),
+    ev('delegation', { workerId: 'user:abc', status: 'passed', summary: '改了 2 个文件', changedFiles: ['a.ts', 'b.ts'] }),
+  ])
+  const node = s.delegation['user:abc']!
+  assert.equal(node.origin, 'user', 'origin preserved across terminal update')
+  assert.equal(node.status, 'passed')
+  assert.equal(node.summary, '改了 2 个文件')
+  assert.deepEqual(node.changedFiles, ['a.ts', 'b.ts'])
+  assert.equal(node.objective, 'go', 'objective preserved')
+})
+
 test('empty turn_complete (no preceding content) creates no turn block', () => {
   seq = 0
   const s = fold([ev('turn_complete', { turnNumber: 0, isFinal: false })])

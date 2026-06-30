@@ -54,6 +54,8 @@ export function PlusMenu(props: {
   imageDisabled?: boolean
   commands?: ComposerCommand[]
   onRunCommand: (cmd: ComposerCommand) => void
+  /** Open the "派子代理" dispatch dialog (user-launched background subagent). */
+  onDelegate?: () => void
   onClose: () => void
   /** Controlled open state for the root dropdown. */
   open?: boolean
@@ -61,7 +63,7 @@ export function PlusMenu(props: {
 }) {
   const {
     sessionId, menuRev, sessionRunning, planMode, onSetPlanMode,
-    onPickImage, imageDisabled, commands, onRunCommand, onClose,
+    onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onClose,
     open, onOpenChange,
   } = props
   const planning = planMode === 'planning'
@@ -106,6 +108,14 @@ export function PlusMenu(props: {
             <span>图片</span>
             <span className="ml-auto text-xs text-muted-foreground">PNG/JPEG/WebP/GIF</span>
           </DropdownMenuItem>
+
+          {onDelegate && (
+            <DropdownMenuItem onClick={pick(onDelegate)}>
+              <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>⌗</span>
+              <span>派子代理</span>
+              <span className="ml-auto text-xs text-muted-foreground">后台跑</span>
+            </DropdownMenuItem>
+          )}
 
           {commands && commands.length > 0 && (
             <>

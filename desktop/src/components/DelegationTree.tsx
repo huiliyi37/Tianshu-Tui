@@ -44,7 +44,30 @@ function shortId(workerId: string): string {
   return tail.length > 0 ? tail : workerId.slice(0, 12)
 }
 
-export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: Record<string, DelegationNode> }) {
+export interface DelegationSummary {
+  total: number
+  done: number
+  running: number
+  attention: number
+}
+
+/**
+ * Derive subagent fleet counts from the delegation node map. Shared by the
+ * inline pill (collapsed view) and the overlay header so they never drift.
+ * `attention` = blocked + escalated + failed; `done` = passed + completed.
+ */
+export function summarizeDelegation(nodes: Record<string, DelegationNode>): DelegationSummary {
+  const list = Object.values(nodes)
+  let done = 0, running = 0, attention = 0
+  for (const n of list) {
+    if (n.status === 'passed' || n.status === 'completed') done++
+    else if (n.status === 'running') running++
+    if (n.status === 'blocked' || n.status === 'escalated' || n.status === 'failed') attention++
+  }
+  return { total: list.length, done, running, attention }
+}
+
+export const DelegationTree = memo(function DelegationTree({ nodes, onAdopt }: { nodes: Record<string, DelegationNode>; onAdopt?: (text: string) => void }) {
   const [viewMode, setViewMode] = useState<'list' | 'graph'>('graph')
 
   // 派生列表与计数放进 useMemo：仅 nodes 引用变化时才重算 Object.values + sort + filter。
@@ -135,6 +158,7 @@ export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: R
           <div className="deleg-row">
             <span className={`dot ${cls}${cls === 'running' ? ' pulse' : ''}`} />
             <span className="deleg-id" title={n.workerId}>{shortId(n.workerId)}</span>
+            {n.origin === 'user' && <span className="deleg-origin" title="你手动派的子代理">你派的</span>}
             {n.profile && <span className="deleg-profile">{n.profile}</span>}
             {n.objective && <span className="obj">{n.objective}</span>}
             <span className={`deleg-badge ${cls}`}>
@@ -143,6 +167,15 @@ export const DelegationTree = memo(function DelegationTree({ nodes }: { nodes: R
             {elapsed && <span className="deleg-elapsed">{elapsed}</span>}
           </div>
           {n.progressLine && <div className="deleg-progress">⎿ {n.progressLine}</div>}
+          {onAdopt && n.summary && (
+            <button
+              className="deleg-adopt"
+              onClick={(e) => { e.stopPropagation(); onAdopt(n.summary!) }}
+              title="把子代理结果摘要填入输入框,编辑后发送"
+            >
+              汇入主会话 →
+            </button>
+          )}
           {renderList(n.workerId, depth + 1)}
         </div>
       )

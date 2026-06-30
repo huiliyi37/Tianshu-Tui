@@ -211,6 +211,23 @@ export function sendPrompt(id: string, prompt: string, images?: string[]): Promi
   return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt, ...(images?.length ? { images } : {}) })
 }
 
+/** User-dispatched background subagent. Returns the worker id; progress arrives
+ *  via the session's delegation SSE events. Does not block the main turn. */
+export interface DelegateWorkerInput {
+  objective: string
+  profile?: string
+  authority?: string
+  files?: string[]
+}
+export function delegateWorker(id: string, input: DelegateWorkerInput): Promise<{ workerId: string }> {
+  return apiPost<{ workerId: string }>(`/sessions/${id}/delegate`, input)
+}
+
+/** Cancel a user-dispatched background subagent. */
+export function abortDelegateWorker(id: string, workerId: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/delegate/${workerId}/abort`)
+}
+
 /**
  * Fetch a server-persisted user image and return a blob object URL. The image
  * route is Bearer-gated (an `<img src>` cannot carry the header), so we fetch

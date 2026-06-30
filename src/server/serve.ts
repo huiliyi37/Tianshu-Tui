@@ -13,6 +13,8 @@ import { desktopDir, desktopSessionsDir } from '../config/paths.js'
 import { serverLogger } from './logger.js'
 import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
+import type { DelegateWorkerInput, DelegateActivityUpdate } from './session-manager.js'
+import { activityProgressLine } from '../tools/worker-activity-stream.js'
 import { FileSessionPersistence } from './session-persistence.js'
 import { buildSessionRoutes } from './session-routes.js'
 import { buildHealthRoute } from './health-route.js'
@@ -562,6 +564,8 @@ function buildManagedAgent(
     },
     // I1: 桌面端议事会入口，直接评审 artifact 中的 council-plan-json。
     conveneCouncil: (input) => conveneCouncilOnCoordinator(agent, stores.refs.coordinator, stores.refs, input),
+    // 用户主动派后台子代理：独立 AbortSignal，跑在隔离子会话，不碰主历史。
+    delegateWorker: (input, opts) => delegateWorkerOnCoordinator(stores.refs.coordinator, input, opts),
   }
 }
 
@@ -688,6 +692,96 @@ function extractCouncilPlanJson(raw: string): UnifiedPlan | null {
   const match = raw.match(/```council-plan-json\n([\s\S]*?)\n```/)
   if (!match) return null
   return deserializeUnifiedPlan(match[1]!)
+}
+
+/** Map a friendly profile to a work-order kind so patch/review/verify workers
+ *  get the right execution mode (mirrors delegate_task's kind semantics). */
+function kindForProfile(profile: string): import('../agent/coordinator.js').DelegationRequest['kind'] {
+  switch (profile) {
+    case 'patcher': return 'patch_proposal'
+    case 'reviewer': return 'review'
+    case 'verifier':
+    case 'adversarial_verifier': return 'verify'
+    case 'planner':
+    case 'perspective_planner': return 'plan'
+    case 'doc_scout': return 'doc_research'
+    default: return 'code_search'
+  }
+}
+
+/** Build the terminal digest shown in the panel + adopted into the composer by
+ *  the "汇入主会话" button. Markdown: objective + outcome + changed files +
+ *  worker summary (truncated). Pure — easy to unit test. */
+export function buildDelegateSummary(
+  input: { objective: string },
+  run: import('../agent/coordinator.js').CoordinatorRun,
+): string {
+  const result = run.results[0]
+  const statusLabel = result?.status === 'passed' ? '完成'
+    : result?.status === 'blocked' ? '受阻'
+    : result?.status === 'escalated' ? '已升级'
+    : result?.status === 'failed' ? '失败'
+    : run.status === 'skipped' ? '已跳过' : '完成'
+  const lines: string[] = []
+  lines.push(`子代理任务「${input.objective}」${statusLabel}。`)
+  const changed = result?.changedFiles ?? []
+  if (changed.length > 0) {
+    lines.push('', '变更文件：')
+    for (const f of changed.slice(0, 20)) lines.push(`- ${f}`)
+    if (changed.length > 20) lines.push(`- …其余 ${changed.length - 20} 个`)
+  }
+  if (result?.summary) {
+    lines.push('', '子代理总结：', result.summary.slice(0, 1200))
+  }
+  lines.push('', '请审查以上结果，确认无误后继续。')
+  return lines.join('\n')
+}
+
+/** User-dispatched background subagent runner. Mirrors delegate_task's request
+ *  shaping but bridges activity to a plain callback (no tool pipeline) and
+ *  produces a terminal summary for the adopt-to-composer flow. */
+async function delegateWorkerOnCoordinator(
+  coordinator: import('../agent/coordinator.js').DelegationCoordinator | null,
+  input: DelegateWorkerInput,
+  opts: { workerId: string; signal: AbortSignal; onActivity: (a: DelegateActivityUpdate) => void },
+): Promise<void> {
+  if (!coordinator) throw new Error('DelegationCoordinator not initialized')
+  const profile = input.profile && input.profile.trim() ? input.profile.trim() : 'code_scout'
+  const request: import('../agent/coordinator.js').DelegationRequest = {
+    // Use the manager-owned workerId as the stable node key (parentTurnId derives
+    // the work order id), so every activity update merges into the same panel node.
+    parentTurnId: opts.workerId,
+    objective: input.objective,
+    kind: kindForProfile(profile),
+    profile: profile as import('../agent/work-order.js').WorkerProfile,
+    scope: input.files && input.files.length ? { files: input.files } : {},
+    delegationDepth: 0,
+    onActivity: (ev) => {
+      opts.onActivity({
+        workOrderId: opts.workerId,
+        profile: ev.profile ?? profile,
+        authority: ev.authority,
+        status: 'running',
+        progressLine: activityProgressLine(ev),
+      })
+    },
+  }
+  if (input.authority) request.authority = input.authority
+  const run = await coordinator.delegate(request, opts.signal)
+  const result = run.results[0]
+  const status: DelegateActivityUpdate['status'] = result?.status ?? (run.status === 'skipped' ? 'blocked' : 'passed')
+  opts.onActivity({
+    workOrderId: opts.workerId,
+    profile,
+    status,
+    progressLine: result?.summary ? result.summary.slice(0, 120) : undefined,
+    summary: buildDelegateSummary(input, run),
+    changedFiles: result?.changedFiles && result.changedFiles.length > 0 ? result.changedFiles : undefined,
+    artifactId: result?.diffArtifactId,
+    model: run.selectedModel ?? result?.model,
+    provider: result?.provider,
+    usage: result?.usage,
+  })
 }
 
 export interface RunServeOptions {
