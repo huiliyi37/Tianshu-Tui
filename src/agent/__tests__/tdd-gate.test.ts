@@ -14,6 +14,7 @@ describe('evaluateTddGate', () => {
     verifications: 0,
     editsSinceLastTest: 0,
     hasFailedTests: false,
+    hasCodeEdits: false,
     ...overrides,
   })
 
@@ -29,7 +30,7 @@ describe('evaluateTddGate', () => {
   // Modified + verified (passing) → allow
   it('allows edit when files are modified but tests already passed', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 2, verifications: 1, hasFailedTests: false }),
+      state({ filesModified: 2, verifications: 1, hasFailedTests: false, hasCodeEdits: true }),
       'edit_file',
       enforce,
     )
@@ -47,7 +48,7 @@ describe('evaluateTddGate', () => {
   // Modified, no verification, under threshold → suggest (L1)
   it('suggests (not blocks) when edits are under the block threshold', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 1 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 1, hasCodeEdits: true }),
       'edit_file',
       enforce,
     )
@@ -58,7 +59,7 @@ describe('evaluateTddGate', () => {
   // Modified, no verification, at/over threshold, enforce → block (L2)
   it('blocks edit in enforce mode when threshold is reached', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3, hasCodeEdits: true }),
       'edit_file',
       enforce,
     )
@@ -70,7 +71,7 @@ describe('evaluateTddGate', () => {
   it('only suggests in suggest mode even past the threshold', () => {
     const suggest = { enabled: true, mode: 'suggest' as const, threshold: 3 }
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true }),
       'edit_file',
       suggest,
     )
@@ -91,7 +92,7 @@ describe('evaluateTddGate', () => {
   // Modified, verified but failed → suggest (nudge to fix tests)
   it('suggests fixing when tests were run but failed', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 2, verifications: 1, hasFailedTests: true }),
+      state({ filesModified: 2, verifications: 1, hasFailedTests: true, hasCodeEdits: true }),
       'edit_file',
       enforce,
     )
@@ -102,7 +103,7 @@ describe('evaluateTddGate', () => {
   // write_file is also an edit tool
   it('treats write_file as an edit tool', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3, hasCodeEdits: true }),
       'write_file',
       enforce,
     )
@@ -112,7 +113,7 @@ describe('evaluateTddGate', () => {
   // apply_patch is also an edit tool
   it('treats apply_patch as an edit tool', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3, hasCodeEdits: true }),
       'apply_patch',
       enforce,
     )
@@ -122,10 +123,57 @@ describe('evaluateTddGate', () => {
   // hash_edit is also an edit tool
   it('treats hash_edit as an edit tool', () => {
     const decision = evaluateTddGate(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 3, hasCodeEdits: true }),
       'hash_edit',
       enforce,
     )
     assert.equal(decision.action, 'block')
+  })
+
+  // ── Doc-only edits: no code files modified → always allow ──
+
+  it('allows doc-only edits even past the threshold (hasCodeEdits: false)', () => {
+    const docOnly = state({
+      filesModified: 5,
+      verifications: 0,
+      editsSinceLastTest: 10,
+      hasCodeEdits: false,
+    })
+    assert.equal(evaluateTddGate(docOnly, 'edit_file', enforce).action, 'allow')
+    assert.equal(evaluateTddGate(docOnly, 'write_file', enforce).action, 'allow')
+    assert.equal(evaluateTddGate(docOnly, 'hash_edit', enforce).action, 'allow')
+    assert.equal(evaluateTddGate(docOnly, 'apply_patch', enforce).action, 'allow')
+  })
+
+  it('blocks code edits when hasCodeEdits is true and threshold is reached', () => {
+    const codeEdit = state({
+      filesModified: 3,
+      verifications: 0,
+      editsSinceLastTest: 5,
+      hasCodeEdits: true,
+    })
+    assert.equal(evaluateTddGate(codeEdit, 'edit_file', enforce).action, 'block')
+  })
+
+  it('suggests code edits when hasCodeEdits is true but under threshold', () => {
+    const codeEdit = state({
+      filesModified: 1,
+      verifications: 0,
+      editsSinceLastTest: 2,
+      hasCodeEdits: true,
+    })
+    assert.equal(evaluateTddGate(codeEdit, 'edit_file', enforce).action, 'suggest')
+  })
+
+  // ── Mixed: both code and doc edits → code edits gate normally ──
+
+  it('gates code edits normally even when docs were also edited (hasCodeEdits: true)', () => {
+    const mixed = state({
+      filesModified: 5, // mix of .md + .ts
+      verifications: 0,
+      editsSinceLastTest: 3,
+      hasCodeEdits: true,
+    })
+    assert.equal(evaluateTddGate(mixed, 'edit_file', enforce).action, 'block')
   })
 })

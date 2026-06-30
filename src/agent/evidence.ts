@@ -18,6 +18,9 @@ export interface TddGateState {
   editsSinceLastTest: number
   /** Whether any verification ended in failure. */
   hasFailedTests: boolean
+  /** Whether any of the modified files is a code file (vs. docs/config only).
+   *  When false, the TDD gate skips entirely — no constraint on doc-only edits. */
+  hasCodeEdits: boolean
 }
 
 export interface EvidenceState {
@@ -38,6 +41,23 @@ export interface VerificationSummary {
 }
 
 const MAX_VERIFICATIONS = 50
+
+/** Code file extensions whose edits should count toward the TDD gate. */
+const CODE_EXTENSIONS = new Set([
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.py', '.rs', '.go', '.java', '.kt', '.scala',
+  '.c', '.cpp', '.cc', '.h', '.hpp',
+  '.rb', '.swift', '.vue', '.svelte',
+  '.sh', '.bash', '.zsh',
+  '.sql', '.graphql',
+  '.css', '.scss', '.less',
+  '.yaml', '.yml', '.toml', // config-as-code counts
+])
+
+function isCodeFile(path: string): boolean {
+  const ext = path.slice(path.lastIndexOf('.'))
+  return CODE_EXTENSIONS.has(ext)
+}
 
 export interface EvidenceTrackerPublic {
   trackFileRead(path: string): void
@@ -64,10 +84,13 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
   private state: EvidenceState
   /**
    * Consecutive edits since the most recent test run. Incremented on every
-   * trackFileModified; reset to 0 on trackVerification. Drives the TDD gate
-   * (evaluateTddGate) — after 3 unverified edits, the gate hard-blocks.
+   * trackFileModified of a code file; skipped for docs/config/etc.
+   * Reset to 0 on trackVerification. Drives the TDD gate (evaluateTddGate) —
+   * after 3 unverified edits, the gate hard-blocks.
    */
   #editsSinceLastTest = 0
+  /** Whether any modified file is a code file (vs. docs/config only). */
+  #hasCodeEdits = false
 
   constructor() {
     this.state = {
@@ -88,7 +111,13 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
   trackFileModified(path: string): void {
     this.state.filesModified.add(path)
     this.state.fileVerificationLevels?.set(path, 'pending')
-    this.#editsSinceLastTest++
+    // Only code-file edits drive the TDD gate counter. Docs, configs, plans,
+    // and other non-code files are excluded so the gate doesn't block pure
+    // documentation work (which has no tests to run).
+    if (isCodeFile(path)) {
+      this.#editsSinceLastTest++
+      this.#hasCodeEdits = true
+    }
     this.refreshDeliveryStatus()
   }
 
@@ -124,6 +153,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
       verifications: this.state.verifications.length,
       editsSinceLastTest: this.#editsSinceLastTest,
       hasFailedTests: this.state.verifications.some(v => v.status === 'failed'),
+      hasCodeEdits: this.#hasCodeEdits,
     }
   }
 
@@ -247,6 +277,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
     this.state.impactedTests.clear()
     this.state.fileVerificationLevels?.clear()
     this.#editsSinceLastTest = 0
+    this.#hasCodeEdits = false
   }
 
   getState(): EvidenceState { return this.state }

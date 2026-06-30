@@ -86,4 +86,49 @@ describe('EvidenceTracker delivery status', () => {
     assert.equal(tracker.getState().deliveryStatus, 'unverified')
     assert.equal(tracker.getState().verifications.length, 0)
   })
+
+  // ── TDD gate: non-code files don't increment the edit counter ──
+
+  it('does not increment editsSinceLastTest for non-code files', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('docs/design/some-plan.md')
+    tracker.trackFileModified('README.md')
+    tracker.trackFileModified('.rivet/config.json')
+
+    const gate = tracker.getGateState()
+    assert.equal(gate.editsSinceLastTest, 0)
+    assert.equal(gate.hasCodeEdits, false)
+    assert.equal(gate.filesModified, 3) // filesModified still counts all
+  })
+
+  it('increments editsSinceLastTest for code files', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('src/agent/loop.ts')
+    tracker.trackFileModified('src/config/paths.ts')
+
+    const gate = tracker.getGateState()
+    assert.equal(gate.editsSinceLastTest, 2)
+    assert.equal(gate.hasCodeEdits, true)
+  })
+
+  it('tracks hasCodeEdits correctly for mixed file types', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('docs/design/plan.md')
+    tracker.trackFileModified('src/agent/tdd-gate.ts')
+
+    const gate = tracker.getGateState()
+    assert.equal(gate.hasCodeEdits, true)
+    assert.equal(gate.editsSinceLastTest, 1) // only the .ts file counts
+  })
+
+  it('resets hasCodeEdits and editsSinceLastTest on reset()', () => {
+    const tracker = new EvidenceTracker()
+    tracker.trackFileModified('src/a.ts')
+    tracker.trackFileModified('src/b.ts')
+    tracker.reset()
+
+    const gate = tracker.getGateState()
+    assert.equal(gate.editsSinceLastTest, 0)
+    assert.equal(gate.hasCodeEdits, false)
+  })
 })

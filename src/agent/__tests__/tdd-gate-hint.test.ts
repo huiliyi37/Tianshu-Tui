@@ -10,6 +10,7 @@ describe('buildTddGateHint', () => {
     verifications: 0,
     editsSinceLastTest: 0,
     hasFailedTests: false,
+    hasCodeEdits: false,
     ...overrides,
   })
 
@@ -34,7 +35,7 @@ describe('buildTddGateHint', () => {
 
   it('returns hint for zero-verification edits with edit count', () => {
     const hint = buildTddGateHint(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 2 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 2, hasCodeEdits: true }),
       enforce,
     )
     assert.ok(hint, 'should produce a hint')
@@ -45,7 +46,7 @@ describe('buildTddGateHint', () => {
 
   it('returns hint in suggest mode too', () => {
     const hint = buildTddGateHint(
-      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 1 }),
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 1, hasCodeEdits: true }),
       suggest,
     )
     assert.ok(hint)
@@ -55,14 +56,14 @@ describe('buildTddGateHint', () => {
   it('returns null when zero edits but zero verifications (filesModified was set externally)', () => {
     // e.g. files were modified before this session, editsSinceLastTest hasn't started yet
     assert.equal(
-      buildTddGateHint(state({ filesModified: 1, verifications: 0, editsSinceLastTest: 0 }), enforce),
+      buildTddGateHint(state({ filesModified: 1, verifications: 0, editsSinceLastTest: 0, hasCodeEdits: true }), enforce),
       null,
     )
   })
 
   it('returns hint when tests failed', () => {
     const hint = buildTddGateHint(
-      state({ filesModified: 2, verifications: 3, hasFailedTests: true }),
+      state({ filesModified: 2, verifications: 3, hasFailedTests: true, hasCodeEdits: true }),
       enforce,
     )
     assert.ok(hint)
