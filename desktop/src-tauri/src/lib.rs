@@ -4,8 +4,9 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
 use serde::Serialize;
@@ -15,6 +16,40 @@ use tauri::{
     tray::{TrayIconBuilder, TrayIconEvent},
     Manager, State,
 };
+
+/// 进程级退出标志。托盘「退出」触发后置 true，退出过程中所有可见性切换
+/// （托盘点击 toggle、CloseRequested→hide）都让它先让路，避免退出清理
+/// （cleanup 在 Windows 上是 window.hide 而非 destroy）与可见性切换打架，
+/// 表现为窗口/托盘"一闪一闪"且进程退不干净。
+static EXITING: AtomicBool = AtomicBool::new(false);
+
+/// 轻量退出诊断日志：追加写 ~/.rivet/desktop/exit-debug.log。失败静默
+/// （绝不影响退出流程）。便于远程协助用户定位"退不掉/闪烁"根因。
+fn exit_debug(msg: &str) {
+    let _ = (|| {
+        // Tauri 2 没有 tauri::api::path::home_dir；用环境变量取 home，零依赖。
+        let home = std::env::var_os(if cfg!(target_os = "windows") {
+            "USERPROFILE"
+        } else {
+            "HOME"
+        })?;
+        let dir = PathBuf::from(home).join(".rivet").join("desktop");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("exit-debug.log");
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let line = format!("[{secs}] {msg}\n");
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()?;
+        f.write_all(line.as_bytes()).ok()
+    })();
+}
 
 /// Live coordinates of the rivet sidecar, handed to the frontend so it can talk
 /// to 127.0.0.1:<port> with the per-launch Bearer token.
@@ -432,7 +467,11 @@ fn kill_sidecar(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<Sidecar>() {
         if let Ok(mut guard) = state.child.lock() {
             if let Some(mut c) = guard.take() {
+                exit_debug("kill_sidecar: take() got child, calling kill()");
                 let _ = c.kill();
+                exit_debug("kill_sidecar: kill() returned");
+            } else {
+                exit_debug("kill_sidecar: take() got None (already killed)");
             }
         }
     }
@@ -443,6 +482,16 @@ pub fn run() {
     let tray_icon_bytes = include_bytes!("../icons/32x32.png");
 
     tauri::Builder::default()
+        // 单例保护：必须是第一个 plugin。第二个实例启动直接退出并唤起已有窗口，
+        // 杜绝多实例争抢同一 ~/.rivet/desktop/registry.db。仅桌面端生效。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            exit_debug("single_instance: second launch detected, focusing existing");
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
@@ -496,6 +545,18 @@ pub fn run() {
                 .menu(&tray_menu)
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     let id = event.id().as_ref();
+                    if id == "quit" {
+                        // 退出优先：先立 flag，让退出过程中所有可见性切换让路，
+                        // 再杀 sidecar、退 app。避免 hide/show 打架导致"一闪一闪"。
+                        exit_debug("tray quit: requested");
+                        EXITING.store(true, Ordering::SeqCst);
+                        kill_sidecar(app);
+                        app.exit(0);
+                        return;
+                    }
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     if let Some(w) = app.get_webview_window("main") {
                         match id {
                             "show" => {
@@ -508,12 +569,12 @@ pub fn run() {
                             _ => {}
                         }
                     }
-                    if id == "quit" {
-                        kill_sidecar(app);
-                        app.exit(0);
-                    }
                 })
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
+                    // 退出过程中忽略托盘点击 toggle，避免与 cleanup 的 window.hide 打架。
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     if let TrayIconEvent::Click { button: _, .. } = event {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
@@ -532,7 +593,12 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 关闭窗口 → 隐藏到托盘，不杀 sidecar
+                if EXITING.load(Ordering::SeqCst) {
+                    // 正在退出 → 不 prevent_close，让窗口正常关闭，避免挡住退出流程。
+                    exit_debug("CloseRequested during exit: allowing close");
+                    return;
+                }
+                // 用户点 X → 隐藏到托盘，不杀 sidecar
                 api.prevent_close();
                 let _ = window.hide();
             }
@@ -544,8 +610,19 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                kill_sidecar(app_handle);
+            match event {
+                tauri::RunEvent::ExitRequested { code, .. } => {
+                    exit_debug(&format!(
+                        "RunEvent::ExitRequested code={:?}",
+                        code
+                    ));
+                }
+                tauri::RunEvent::Exit => {
+                    exit_debug("RunEvent::Exit: kill_sidecar + process ending");
+                    kill_sidecar(app_handle);
+                    exit_debug("RunEvent::Exit: done");
+                }
+                _ => {}
             }
         });
 }
