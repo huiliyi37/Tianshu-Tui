@@ -13,6 +13,7 @@ import { ArtifactCard } from '../components/ArtifactCard'
 import { DelegationTree } from '../components/DelegationTree'
 import { TaskList } from '../components/TaskList'
 import { AutonomyControl } from '../components/AutonomyControl'
+import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
 import {
   AlertDialog,
@@ -661,6 +662,10 @@ export function ThreadView(props: {
           </button>
         )}
       </div>
+
+      {session.status === 'completed' && view.completionSummary && (
+        <CompletionCurtain summary={view.completionSummary} />
+      )}
 
       <TaskList items={view.todos} />
       <DelegationTree nodes={view.delegation} />

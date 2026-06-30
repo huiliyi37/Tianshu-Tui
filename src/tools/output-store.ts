@@ -116,7 +116,6 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
   const head = lines.slice(0, MODEL_HEAD_LINES)
   const tail = lines.slice(-MODEL_TAIL_LINES)
   const omitted = lines.length - MODEL_HEAD_LINES - MODEL_TAIL_LINES
-  const kept = MODEL_HEAD_LINES + MODEL_TAIL_LINES
   return `${header}\n${head.join('\n')}\n... (${omitted} lines omitted) ...\n${tail.join('\n')}\n[output truncated: head ${MODEL_HEAD_LINES} + tail ${MODEL_TAIL_LINES} of ${lines.length} lines shown — ${omitted} lines omitted${recovery}]`
 }
 

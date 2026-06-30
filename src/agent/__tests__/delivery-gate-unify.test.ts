@@ -2,7 +2,7 @@
  * Track 3: 交付门禁 v1/v2 合一。
  *
  * 契约：
- * - evidence.buildBadge(gateV2) 注入权威门禁 → badge 呈现 GREEN/YELLOW/RED，
+ * - evidence.buildBadge({ gateV2 }) 注入权威门禁 → badge 呈现 GREEN/YELLOW/RED，
  *   不再用 v1 的 EvidenceState 推导行
  * - 未注入 → v1 回退原样（badge 行为不变）
  * - buildGateConvergenceHint: GREEN→结束指引 / RED→阻断+最短下一步 / YELLOW→带条件交付
@@ -28,7 +28,7 @@ describe('buildBadge with authoritative v2 gate (Track 3)', () => {
   }
 
   it('GREEN renders the v2 state instead of v1 unverified-warning', () => {
-    const badge = trackerWithModified().buildBadge({ state: 'GREEN', reason: '1 owned file(s) verified.' })
+    const badge = trackerWithModified().buildBadge({ gateV2: { state: 'GREEN', reason: '1 owned file(s) verified.' } })
     assert.ok(badge)
     assert.match(badge, /Delivery gate.*GREEN/)
     assert.match(badge, /1 owned file\(s\) verified/)
@@ -37,10 +37,12 @@ describe('buildBadge with authoritative v2 gate (Track 3)', () => {
 
   it('RED renders blocking reason and next action', () => {
     const badge = trackerWithModified().buildBadge({
-      state: 'RED',
-      reason: '1 owned file(s) modified but unverified.',
-      blockingReason: 'Run verification before delivery.',
-      shortestNextStep: 'npm test -- src/__tests__/a.test.ts',
+      gateV2: {
+        state: 'RED',
+        reason: '1 owned file(s) modified but unverified.',
+        blockingReason: 'Run verification before delivery.',
+        shortestNextStep: 'npm test -- src/__tests__/a.test.ts',
+      },
     })
     assert.ok(badge)
     assert.match(badge, /Delivery gate.*RED/)
@@ -49,7 +51,7 @@ describe('buildBadge with authoritative v2 gate (Track 3)', () => {
   })
 
   it('YELLOW renders the caveat state', () => {
-    const badge = trackerWithModified().buildBadge({ state: 'YELLOW', reason: 'external verification blocked' })
+    const badge = trackerWithModified().buildBadge({ gateV2: { state: 'YELLOW', reason: 'external verification blocked' } })
     assert.ok(badge)
     assert.match(badge, /Delivery gate.*YELLOW/)
   })
@@ -118,12 +120,12 @@ describe('processTurnEnd gate integration (Track 3)', () => {
     }))
     assert.deepEqual(received, ['src/a.ts'])
     assert.ok(badge)
-    assert.match(badge, /Delivery gate.*GREEN/)
+    assert.match(badge, /交付门禁.*GREEN/)
   })
 
   it('a throwing gate falls back to v1 — badge still present', () => {
     const { badge } = processTurnEnd(makeDeps(() => { throw new Error('gate exploded') }))
     assert.ok(badge, 'badge survives gate failure')
-    assert.match(badge, /Unverified changes/, 'v1 fallback rendering')
+    assert.match(badge, /未验证|未经验证/, 'v1 fallback rendering')
   })
 })

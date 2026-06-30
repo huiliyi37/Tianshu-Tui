@@ -64,8 +64,8 @@ export function handlePromptSSE(deps: PromptRouteDeps, res: ServerResponse, prom
     onToolResult: (id, name, result, isError, _rawPath, uiContent) => {
       send('tool_result', { id, name, isError: !!isError, result: redactText(result).slice(0, 500), ...(uiContent ? { uiContent: redactText(uiContent).slice(0, 500) } : {}) })
     },
-    onTurnComplete: (usage, turnNumber, isFinal) => {
-      send('turn_complete', { usage, turnNumber, isFinal: !!isFinal })
+    onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
+      send('turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
     },
     onError: (err) => {
       send('error', { error: redactText(err.message) })

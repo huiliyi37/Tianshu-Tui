@@ -3,13 +3,13 @@ import type { AgentConfig } from './loop-types.js'
 import type { SessionContext } from './context.js'
 import type { TrajectoryRecorder } from './trajectory.js'
 import type { RoutingMetricsCollector } from '../model/routing-metrics.js'
-import type { EvidenceTracker } from './evidence.js'
+import type { EvidenceTracker, EvidenceSummary } from './evidence.js'
 import type { RewardInput, EffortShadowRecord } from './p3-integration.js'
 import { processTurnEnd } from './turn-end.js'
 
 export interface TurnCompletionCallbacks {
   onTextDelta: (text: string) => void
-  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean) => void
+  onTurnComplete: (usage: Partial<Usage>, turnNumber: number, isFinal?: boolean, evidenceSummary?: EvidenceSummary) => void
 }
 
 export interface TurnCompletionDeps {
@@ -58,10 +58,12 @@ export class TurnCompletionController {
     this.completeEffortReward()
     await this.deps.runPostTurn()
     if (input.isFinal) await this.deps.runBeforeComplete?.()
+    const evidenceSummary = input.isFinal ? this.deps.evidence.buildSummary(result.gateV2) : undefined
     input.callbacks.onTurnComplete(
       this.deps.session.getTotalUsage(),
       this.deps.session.getTurnCount(),
       input.isFinal,
+      evidenceSummary,
     )
   }
 

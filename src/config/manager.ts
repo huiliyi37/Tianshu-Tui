@@ -1,18 +1,16 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
-import { homedir } from 'os'
-import { join, resolve } from 'path'
+import { resolve, join } from 'path'
 import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
+import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
 
 const APPROVAL_MODES = ['auto-safe', 'manual', 'auto-accept', 'dangerously-skip-permissions'] as const
 type ApprovalModeConfig = typeof APPROVAL_MODES[number]
 
-const DEFAULT_CONFIG_PATH = join(homedir(), '.rivet', 'config.json')
-
 export function getUserConfigPath(): string {
-  return process.env.RIVET_CONFIG_PATH ?? DEFAULT_CONFIG_PATH
+  return userConfigPath()
 }
 
 /** Project-level config file name (checked in cwd and parent dirs) */

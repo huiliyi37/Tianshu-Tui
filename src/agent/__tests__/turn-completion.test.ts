@@ -30,7 +30,7 @@ describe('TurnCompletionController', () => {
     let diagnosticTurn = -1
     let postTurn = 0
     let beforeComplete = 0
-    const completions: Array<{ turn: number; isFinal?: boolean }> = []
+    const completions: Array<{ turn: number; isFinal?: boolean; evidence?: boolean }> = []
     const texts: string[] = []
 
     const controller = new TurnCompletionController({
@@ -54,7 +54,7 @@ describe('TurnCompletionController', () => {
       emitBadge: true,
       callbacks: {
         onTextDelta: text => { texts.push(text) },
-        onTurnComplete: (_usage, turn, isFinal) => { completions.push({ turn, isFinal }) },
+        onTurnComplete: (_usage, turn, isFinal, evidence) => { completions.push({ turn, isFinal, evidence: !!evidence }) },
       },
     })
 
@@ -63,7 +63,7 @@ describe('TurnCompletionController', () => {
     assert.equal(diagnosticTurn, 7)
     assert.equal(postTurn, 1)
     assert.equal(beforeComplete, 1)
-    assert.deepEqual(completions, [{ turn: 1, isFinal: true }])
+    assert.deepEqual(completions, [{ turn: 1, isFinal: true, evidence: true }])
     assert.deepEqual(texts, [])
   })
 })

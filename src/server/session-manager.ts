@@ -1695,8 +1695,8 @@ export class RuntimeSessionManager {
         }
         this.scanArtifacts(session)
       },
-      onTurnComplete: (usage, turnNumber, isFinal) =>
-        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal }),
+      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) =>
+        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) }),
       onError: (err) => this.append(session, 'error', { error: redactText(err.message) }),
       onAbort: () => {
         if (session.record.status === 'running') session.record.status = 'aborted'

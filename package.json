@@ -46,7 +46,7 @@
     "test:unit": "tsx scripts/run-node-tests.ts --unit",
     "test:integration": "tsx scripts/run-node-tests.ts --integration",
     "test:fast": "tsx scripts/run-node-tests.ts --exclude-tui",
-    "test:desktop": "node --import tsx --test-force-exit --test 'desktop/src/**/__tests__/*.test.ts'",
+    "test:desktop": "node --import ./desktop/scripts/test-alias-register.mjs --import tsx --test-force-exit --test 'desktop/src/**/__tests__/*.test.ts'",
     "test:incremental": "tsx scripts/test-incremental.ts",
     "cache:audit": "tsx src/cache/cache-audit-cli.ts",
     "tokens:audit": "tsx scripts/analyze-output-tokens.ts",

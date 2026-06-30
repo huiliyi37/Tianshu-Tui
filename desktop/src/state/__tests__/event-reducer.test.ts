@@ -221,6 +221,43 @@ test('intermediate turn_complete (isFinal=false) draws no divider', () => {
   assert.equal(s.blocks.filter((b) => b.kind === 'turn').length, 0)
 })
 
+test('final turn_complete with evidence stores completionSummary', () => {
+  seq = 0
+  const evidence = {
+    filesRead: [],
+    filesModified: ['src/a.ts'],
+    verificationStatus: 'verified',
+    verifications: [{ command: 'npm test', status: 'passed', scope: 'full', exitCode: 0, passed: 3, failed: 0, skipped: 0, durationMs: 100 }],
+    gate: { state: 'GREEN', label: 'GREEN' },
+    impactedFiles: [],
+    impactedTests: [],
+  }
+  const s = fold([
+    ev('text_delta', { text: 'done' }),
+    ev('turn_complete', { turnNumber: 1, isFinal: true, usage: {}, evidence }),
+  ])
+  assert.deepEqual(s.completionSummary, evidence)
+})
+
+test('final turn_complete strips inline evidence markdown from assistant text', () => {
+  seq = 0
+  const evidence = {
+    filesRead: [],
+    filesModified: ['src/a.ts'],
+    verificationStatus: 'verified',
+    verifications: [],
+    gate: { state: 'GREEN', label: 'GREEN' },
+    impactedFiles: [],
+    impactedTests: [],
+  }
+  const s = fold([
+    ev('text_delta', { text: 'Here is the result.\n---\n## 任务完成总结\n- 改动文件：1\n  - src/a.ts' }),
+    ev('turn_complete', { turnNumber: 1, isFinal: true, usage: {}, evidence }),
+  ])
+  const assistant = s.blocks.find((b) => b.kind === 'assistant')
+  assert.equal(assistant?.text, 'Here is the result.')
+})
+
 test('T1: checkpoint adds an anchor block; empty hash is ignored', () => {
   seq = 0
   const s = fold([ev('checkpoint', { hash: 'abc123' }), ev('checkpoint', { hash: '' })])

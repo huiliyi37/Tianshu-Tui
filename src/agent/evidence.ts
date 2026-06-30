@@ -1,6 +1,5 @@
 import type { VerificationMetadata } from '../tools/types.js'
 import { buildDeliveryGate } from './delivery-gate.js'
-import type { VerificationState } from './verification.js'
 
 export type DeliveryVerificationStatus = 'verified' | 'failed' | 'blocked' | 'unverified'
 export type VerificationLevel = 'tested' | 'typed' | 'linted' | 'pending'
