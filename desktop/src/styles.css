@@ -2307,6 +2307,97 @@ body {
 .task-item.st-completed .task-text { color: var(--muted); text-decoration: line-through; }
 .task-item.st-in_progress .task-check { color: var(--warning); }
 .task-item.st-completed .task-check { color: var(--success); }
+
+/* 常驻 To-dos 抽屉(右栏底部,跨 tab) */
+.todo-dock {
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-2);
+  overflow: hidden;
+}
+.todo-dock.open { display: flex; flex-direction: column; max-height: 38%; }
+.todo-dock-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  flex: none;
+}
+.todo-dock-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-xs);
+}
+.todo-dock-toggle:disabled { cursor: default; opacity: 0.8; }
+.todo-dock-head .tdh-title { font-weight: var(--weight-medium); color: var(--text-strong); }
+.todo-dock-head .tdh-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel-3);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+}
+.todo-dock-head .tdh-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--warning);
+  font-size: 11px;
+}
+.todo-dock-open {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.todo-dock-open:hover { color: var(--text-strong); background: var(--panel-3); }
+.todo-dock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 6px;
+  overflow-y: auto;
+}
+
+/* 右栏收起时的 todo 进度浮动小胶囊 */
+.todo-mini-capsule {
+  position: fixed;
+  right: 0;
+  top: 92px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--success);
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.todo-mini-capsule:hover { opacity: 1; background: var(--panel-3); box-shadow: var(--shadow-md); }
+.todo-mini-capsule .tmc-glyph { color: var(--success); }
+.todo-mini-capsule .tmc-count { font-variant-numeric: tabular-nums; }
 .source-item { display: flex; align-items: center; gap: var(--space-2); padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); cursor: pointer; transition: background var(--dur) var(--ease); }
 .source-item:last-child { border-bottom: none; }
 .source-item:hover { background: var(--panel-2); }

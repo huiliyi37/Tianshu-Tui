@@ -332,6 +332,24 @@ export function WorkspaceSurface() {
         </Panel>
       </Group>
 
+      {!ui.reviewVisible && view.todos.length > 0 && (() => {
+        const done = view.todos.filter((t) => t.status === 'completed').length
+        return (
+          <button
+            className="todo-mini-capsule"
+            title="展开任务清单（审查面板）"
+            onClick={() => {
+              dispatch({ type: 'setReview', visible: true })
+              dispatch({ type: 'setReviewManual', on: true })
+            }}
+            aria-label="展开任务清单"
+          >
+            <span className="tmc-glyph" aria-hidden>☑</span>
+            <span className="tmc-count">{done}/{view.todos.length}</span>
+          </button>
+        )
+      })()}
+
       {!ui.reviewVisible && (
         <button
           className="review-expand-capsule"
