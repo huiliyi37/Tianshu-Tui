@@ -231,8 +231,8 @@ export function captureGitBaseline(cwd: string): BaselineSnapshot {
     return {
       branch,
       head,
-      preExistingDirty: dirty ? dirty.split('\n') : [],
-      preExistingUntracked: untracked ? untracked.split('\n') : [],
+      preExistingDirty: dirty ? dirty.split(/\r?\n/) : [],
+      preExistingUntracked: untracked ? untracked.split(/\r?\n/) : [],
       capturedAt: Date.now(),
     }
   } catch {

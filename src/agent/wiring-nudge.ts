@@ -45,7 +45,7 @@ function gitAddedLines(cwd: string, file: string): string[] {
     const diff = spawnSync('git', ['diff', 'HEAD', '--', file], { cwd, encoding: 'utf-8', timeout: 10_000 })
     if (diff.status === 0 && diff.stdout.trim()) {
       return diff.stdout
-        .split('\n')
+        .split(/\r?\n/)
         .filter(l => l.startsWith('+') && !l.startsWith('+++'))
         .map(l => l.slice(1))
     }
@@ -55,7 +55,7 @@ function gitAddedLines(cwd: string, file: string): string[] {
       // Read directly instead of spawning `cat`, which doesn't exist on native
       // Windows (the symbol scan silently returned nothing there).
       try {
-        return readFileSync(resolve(cwd, file), 'utf-8').split('\n')
+        return readFileSync(resolve(cwd, file), 'utf-8').split(/\r?\n/)
       } catch {
         return []
       }

@@ -38,7 +38,7 @@ export function getCompletions(partial: string, cwd: string, limit: number): str
     const lower = partial.toLowerCase()
     return output
       .trim()
-      .split('\n')
+      .split(/\r?\n/)
       .filter(Boolean)
       .filter(f => f.toLowerCase().includes(lower))
       .sort((a, b) => {
