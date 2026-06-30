@@ -118,9 +118,20 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let src_path = entry.path();
+
+        // Skip symlinks — they can point outside the data tree or create cycles.
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
+
         let dst_path = dst.join(entry.file_name());
-        let file_type = entry.file_type()?;
-        if file_type.is_dir() {
+
+        // Merge, don't overwrite — the design contract says "不覆盖同名文件".
+        if dst_path.exists() {
+            continue;
+        }
+
+        if entry.file_type()?.is_dir() {
             copy_dir_all(&src_path, &dst_path)?;
         } else {
             std::fs::copy(&src_path, &dst_path)?;
@@ -151,7 +162,14 @@ async fn apply_storage_location(
         let old_data = old_home.join(".rivet");
         let new_data = new_home.join(".rivet");
         if old_data.exists() {
-            match copy_dir_all(&old_data, &new_data) {
+            // Run the recursive copy on a blocking thread — session data can
+            // be hundreds of MB and must not freeze the UI.
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                copy_dir_all(&old_data, &new_data)
+            })
+            .await
+            .map_err(|e| format!("迁移线程异常: {}", e))?;
+            match result {
                 Ok(()) => migrated = true,
                 Err(e) => {
                     return Ok(StorageApplyResult {

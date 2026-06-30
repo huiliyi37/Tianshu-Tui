@@ -44,7 +44,11 @@ export function App() {
   useEffect(() => {
     isStorageConfigured()
       .then((configured) => setStorageConfigured(configured))
-      .catch(() => setStorageConfigured(true))
+      .catch(() => {
+        // Sidecar not ready yet or check failed — keep null (loading) so we
+        // don't silently skip the first-run dialog. The dialog gate checks
+        // `storageConfigured === false`, so null means "still deciding".
+      })
   }, [])
 
   const activeProjectCwd = useMemo(() => {
