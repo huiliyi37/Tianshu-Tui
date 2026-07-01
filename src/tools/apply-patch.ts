@@ -93,10 +93,14 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: `Patch failed: ${result.error}`, isError: true }
     }
 
+    // uiContent (display-only): echo the applied diff so the TUI/desktop card
+    // renders a colored +/- inline diff. Model-facing `content` stays a short
+    // summary (unchanged) → no prefix-cache/context cost.
     return {
       content: params.input.check_only === true
         ? 'Patch applies cleanly (check-only; no files modified).'
         : 'Patch applied successfully.',
+      uiContent: diff.trim(),
     }
   },
 

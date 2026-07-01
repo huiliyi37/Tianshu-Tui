@@ -57,6 +57,21 @@ index 2e65efe..a2005b8 100644
     )
   })
 
+  it('successful apply echoes the diff into uiContent (display-only)', async () => {
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: validDiff },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.ok(!result.isError, result.content)
+    // model-facing content stays a short summary
+    assert.equal(result.content, 'Patch applied successfully.')
+    // display-only uiContent carries the diff for colored rendering
+    assert.ok(result.uiContent && /^@@/m.test(result.uiContent), 'uiContent has hunk header')
+    assert.ok(/^-original$/m.test(result.uiContent!))
+    assert.ok(/^\+patched$/m.test(result.uiContent!))
+  })
+
   it('tool validates non-empty diff input', async () => {
     const result = await APPLY_PATCH_TOOL.execute({
       input: { diff: '' },

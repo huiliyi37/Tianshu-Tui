@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatToolCardLive } from '../tool-card.js'
+import { formatToolCardLive, formatToolCard } from '../tool-card.js'
 import { getTheme } from '../../theme.js'
+import { buildFileDiff } from '../../../tools/edit-diff.js'
 
 const theme = getTheme()
 function stripAnsi(s: string): string {
@@ -57,5 +58,32 @@ describe('formatToolCardLive', () => {
     const header = stripAnsi(lines[0]!)
     assert.ok(header.includes('Run(sleep 1)') || header.includes('bash'), 'title present')
     assert.equal(lines.length, 1 + 3, 'fixed height with spinner')
+  })
+})
+
+describe('formatToolCard — inline edit diff (write family + isDiffContent)', () => {
+  it('colors an edit_file uiContent diff and shows the +N −M summary', () => {
+    const diff = buildFileDiff('src/foo.ts', 'alpha\nbeta\ngamma\n', 'alpha\nBETA\ngamma\n')
+    const lines = formatToolCard({
+      toolName: 'edit_file',
+      content: diff,
+      toolInput: { file_path: 'src/foo.ts' },
+      elapsedMs: 12,
+    }, theme)
+    const plain = lines.map(stripAnsi).join('\n')
+    assert.match(plain, /diff: \+1 −1/, 'diff stat summary present')
+    assert.ok(plain.includes('-beta'), 'removal line rendered')
+    assert.ok(plain.includes('+BETA'), 'addition line rendered')
+  })
+
+  it('routes apply_patch output through the diff renderer', () => {
+    const diff = 'diff --git a/x.txt b/x.txt\n--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new\n'
+    const lines = formatToolCard({
+      toolName: 'apply_patch',
+      content: diff,
+      elapsedMs: 5,
+    }, theme)
+    const plain = lines.map(stripAnsi).join('\n')
+    assert.match(plain, /diff: \+1 −1/)
   })
 })

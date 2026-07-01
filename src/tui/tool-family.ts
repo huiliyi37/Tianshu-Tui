@@ -17,6 +17,7 @@ const TOOL_MAP: Record<string, ToolFamilyInfo> = {
   bash:            { family: 'run',   verb: 'run'      },
   edit_file:       { family: 'write', verb: 'patch'    },
   write_file:      { family: 'write', verb: 'write'    },
+  apply_patch:     { family: 'write', verb: 'patch'    },
   run_tests:       { family: 'run',   verb: 'test'     },
   delegate_task:   { family: 'run',   verb: 'delegate' },
   delegate_batch:  { family: 'run',   verb: 'batch'    },

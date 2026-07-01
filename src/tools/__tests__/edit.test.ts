@@ -32,6 +32,39 @@ describe('edit_file tool', () => {
     assert.ok(result.content.includes('Applied edit'))
   })
 
+  it('emits a colored-ready unified diff in uiContent, keeps content short', async () => {
+    const file = join(TEST_DIR, 'diff.txt')
+    writeFileSync(file, 'alpha\nbeta\ngamma\n')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'beta',
+      new_string: 'BETA',
+    }))
+    assert.ok(!result.isError)
+    // model-facing content stays a short confirmation (prefix-cache friendly)
+    assert.ok(result.content.startsWith('Applied edit to'))
+    assert.ok(!result.content.includes('@@'), 'diff must not leak into model content')
+    // display-only uiContent carries the unified diff
+    assert.ok(result.uiContent, 'uiContent present')
+    assert.ok(/^@@/m.test(result.uiContent!), 'uiContent has hunk header')
+    assert.ok(/^-beta$/m.test(result.uiContent!), 'removal line')
+    assert.ok(/^\+BETA$/m.test(result.uiContent!), 'addition line')
+  })
+
+  it('replace_all also produces a uiContent diff', async () => {
+    const file = join(TEST_DIR, 'diff-all.txt')
+    writeFileSync(file, 'x\ny\nx\n')
+    const result = await EDIT_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      old_string: 'x',
+      new_string: 'z',
+      replace_all: true,
+    }))
+    assert.ok(!result.isError)
+    assert.ok(result.uiContent && /^@@/m.test(result.uiContent), 'uiContent has diff')
+    assert.ok(/^\+z$/m.test(result.uiContent!))
+  })
+
   it('rejects non-unique old_string', async () => {
     const file = join(TEST_DIR, 'dup.txt')
     writeFileSync(file, 'abc abc')

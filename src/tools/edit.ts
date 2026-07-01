@@ -1,6 +1,8 @@
 import { readFile, stat } from 'node:fs/promises'
+import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
+import { buildFileDiff } from './edit-diff.js'
 import { hashLine } from './hash-edit.js'
 import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
@@ -93,11 +95,12 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
             const warn = syntaxCheck(filePath, newContent)
+            const ui = editUiContent(params.cwd, filePath, freshContent, newContent, warn)
             if (expectedCount !== undefined && occurrences !== expectedCount) {
               const base = `File was modified externally but old_string still matched. Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. Use grep to verify no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-              return { content: base + (warn ? '\n\n' + warn : '') }
+              return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui }
             }
-            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}` }
+            return { content: `File was modified externally but old_string still matched. Re-applied ${occurrences} replacement(s) in ${filePath}${warn ? '\n\n' + warn : ''}`, uiContent: ui }
           }
           const firstIdx = freshContent.indexOf(oldString)
           const secondIdx = freshContent.indexOf(oldString, firstIdx + oldString.length)
@@ -109,7 +112,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
           markSessionFileEdit(filePath)
           const warn = syntaxCheck(filePath, recovered)
-          return { content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}` }
+          return {
+            content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
+            uiContent: editUiContent(params.cwd, filePath, freshContent, recovered, warn),
+          }
         }
 
         // old_string not found — show what the file actually looks like near the best guess
@@ -184,11 +190,12 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = syntaxCheck(filePath, newContent)
+      const ui = editUiContent(params.cwd, filePath, content, newContent, warn)
       if (expectedCount !== undefined && occurrences !== expectedCount) {
         const base = `Warning: expected ${expectedCount} replacements but only replaced ${occurrences} in ${filePath}. The file has been modified. Use grep to verify that no instances were missed — different indentation or whitespace can cause partial matches with replace_all.`
-        return { content: base + (warn ? '\n\n' + warn : '') }
+        return { content: base + (warn ? '\n\n' + warn : ''), uiContent: ui }
       }
-      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : '') }
+      return { content: `Replaced all ${occurrences} occurrences in ${filePath}` + (warn ? '\n\n' + warn : ''), uiContent: ui }
     }
 
     const firstIndex = content.indexOf(oldString)
@@ -211,7 +218,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           `[fuzzy] your old_string had whitespace/indentation drift from the file:`,
           `[fuzzy] diff:\n${diff}`,
         ].join('\n')
-        return { content: fuzzyReport + (warn ? '\n\n' + warn : '') }
+        return {
+          content: fuzzyReport + (warn ? '\n\n' + warn : ''),
+          uiContent: editUiContent(params.cwd, filePath, content, recovered, warn),
+        }
       }
       return {
         content: buildNotFoundError(filePath, oldString, content),
@@ -230,7 +240,10 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
     markSessionFileEdit(filePath)
     const warn = syntaxCheck(filePath, newContent)
-    return { content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : '') }
+    return {
+      content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),
+      uiContent: editUiContent(params.cwd, filePath, content, newContent, warn),
+    }
   },
 
   requiresApproval: () => true,
@@ -240,6 +253,18 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
 
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Assemble the display-only uiContent for a successful edit: a colored inline
+ * diff (rendered by the TUI/desktop tool card) plus any syntax-check warning.
+ * Returns undefined when there is nothing extra to show (card falls back to
+ * the model-facing `content`).
+ */
+function editUiContent(cwd: string, filePath: string, before: string, after: string, warn: string | null): string | undefined {
+  const diff = buildFileDiff(relative(cwd, filePath), before, after)
+  if (!diff) return warn ? warn : undefined
+  return warn ? `${diff}\n\n${warn}` : diff
 }
 
 /**
