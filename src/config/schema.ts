@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { mcpConfigSchema, type McpConfig } from '../mcp/config.js'
+import { THEME_NAMES } from '../tui/theme.js'
 
 export const modelConfigSchema = z.object({
   id: z.string(),
@@ -366,6 +367,11 @@ export const envSchema = z.object({
   extraVars: z.record(z.string(), z.string()).default({}),
 }).default({})
 
+export const uiSchema = z.object({
+  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted. */
+  theme: z.enum(THEME_NAMES).optional(),
+}).default({})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -380,6 +386,7 @@ export const configSchema = z.object({
   skills: skillsSchema,
   mirrors: mirrorsSchema,
   env: envSchema,
+  ui: uiSchema,
 })
 
 export type Config = {
@@ -393,6 +400,7 @@ export type Config = {
   skills: SkillsConfig
   mirrors: MirrorsConfig
   env: EnvConfig
+  ui: UiConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
@@ -409,3 +417,4 @@ export type WorkersConfig = z.infer<typeof workersSchema>
 export type SkillsConfig = z.infer<typeof skillsSchema>
 export type MirrorsConfig = z.infer<typeof mirrorsSchema>
 export type EnvConfig = z.infer<typeof envSchema>
+export type UiConfig = z.infer<typeof uiSchema>

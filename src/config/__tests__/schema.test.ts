@@ -29,6 +29,25 @@ describe('config permissions schema', () => {
     const parsed = configSchema.parse(DEFAULT_CONFIG)
 
     assert.deepEqual(parsed.agent.permissions.allow, [])
+    assert.deepEqual(parsed.ui, {})
+  })
+
+  it('parses valid ui.theme values', () => {
+    const parsed = configSchema.parse({
+      ...DEFAULT_CONFIG,
+      ui: { theme: 'ziwei' },
+    })
+
+    assert.equal(parsed.ui.theme, 'ziwei')
+  })
+
+  it('rejects invalid ui.theme values', () => {
+    assert.throws(() =>
+      configSchema.parse({
+        ...DEFAULT_CONFIG,
+        ui: { theme: 'neon-pink' },
+      })
+    )
   })
 
   it('parses dangerously-skip-permissions approval mode', () => {

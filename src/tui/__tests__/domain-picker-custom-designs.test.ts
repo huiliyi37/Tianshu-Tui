@@ -23,7 +23,7 @@ describe('renderTabBar UI Integration', () => {
       selectedIndex: 0,
     }
     const tData: ThemePickerData = {
-      entries: [{ name: 'cobalt', current: true, description: '钴蓝' }],
+      entries: [{ name: 'cobalt', current: true, isDefault: false, description: '钴蓝' }],
       selectedIndex: 0,
     }
 

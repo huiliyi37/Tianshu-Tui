@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { getTheme, setTheme, getActiveThemeName } from '../theme.js'
+import { getTheme, setTheme, getActiveThemeName, THEMES, THEME_NAMES } from '../theme.js'
 
 afterEach(() => { setTheme('cobalt') })
 
@@ -118,5 +118,17 @@ describe('theme switching', () => {
     assert.equal(getActiveThemeName(), 'ziwei')
     const theme = getTheme(3)
     assert.equal(theme.primary, '#c9b8ff')
+  })
+})
+
+describe('THEME_NAMES', () => {
+  it('lists every registered theme', () => {
+    assert.deepEqual(new Set(THEME_NAMES), new Set(Object.keys(THEMES)))
+  })
+
+  it('can be used to validate config theme values', () => {
+    assert.ok(THEME_NAMES.includes('cobalt'))
+    assert.ok(THEME_NAMES.includes('tianshu'))
+    assert.ok(!(THEME_NAMES as readonly string[]).includes('not-a-theme'))
   })
 })

@@ -60,8 +60,8 @@ describe('renderThemePicker', () => {
   it('renders themes list', () => {
     const data: ThemePickerData = {
       entries: [
-        { name: 'cobalt', current: true, description: '钴蓝主题' },
-        { name: 'gemini', current: false, description: '双子星主题' },
+        { name: 'cobalt', current: true, isDefault: false, description: '钴蓝主题' },
+        { name: 'gemini', current: false, isDefault: true, description: '双子星主题' },
       ],
       selectedIndex: 1,
     }
@@ -77,7 +77,7 @@ describe('renderThemePicker', () => {
   it('renders theme details and primary/secondary color swatches', () => {
     const data: ThemePickerData = {
       entries: [
-        { name: 'gemini', current: true, description: '双子星独特微光渐变' },
+        { name: 'gemini', current: true, isDefault: false, description: '双子星独特微光渐变' },
       ],
       selectedIndex: 0,
     }

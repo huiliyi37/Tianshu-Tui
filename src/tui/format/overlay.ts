@@ -491,6 +491,7 @@ export interface ModelPickerData {
 export interface ThemePickerEntry {
   name: string
   current: boolean
+  isDefault: boolean
   description: string
 }
 
@@ -798,8 +799,9 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     const selected = i === sel
     const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
     const mark = e.current ? color(CURRENT_MARK, theme.primary) : ' '
+    const defaultMark = e.isDefault ? color('★', theme.warning, { bold: true }) : ' '
     const nameColor = selected ? color(e.name, theme.primary, { bold: true }) : color(e.name, theme.secondary)
-    lines.push(padLine(`${cursor} ${mark} ${nameColor}`, width, theme))
+    lines.push(padLine(`${cursor} ${mark} ${defaultMark} ${nameColor}`, width, theme))
   }
   for (let i = visible.length; i < listRows; i++) {
     lines.push(padLine('', width, theme))
@@ -833,7 +835,7 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme))
+  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['S', '设为默认'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }

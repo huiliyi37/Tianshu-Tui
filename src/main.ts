@@ -17,7 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -383,9 +383,9 @@ async function main() {
   }
 
   // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
-  if (getActiveThemeName() === 'cobalt') {
-    setTheme('tianshu')
-  }
+  // 优先使用用户配置的默认主题；未配置时保持向后兼容的 tianshu。
+  const themeName = ctx.config.ui?.theme ?? 'tianshu'
+  setTheme(themeName)
   const theme = getTheme()
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
@@ -601,6 +601,7 @@ async function main() {
     },
     themePickerData: () => {
       const currentTheme = getActiveThemeName()
+      const defaultTheme = ctx?.config.ui?.theme
       const validThemes = Object.keys(THEMES) as ThemeName[]
       const themeDescriptions: Record<string, string> = {
         cobalt: '钴蓝·冷调中性 (默认风格)。oklch 调和，明度梯度清晰，视觉极度舒适。',
@@ -613,12 +614,14 @@ async function main() {
         pastel: '温和粉彩。二次元风格启发，高对比、低饱和度多色卡。',
         cyberpunk: '赛博朋克。霓虹极高对比，酷炫亮眼。',
         observatory: '五色星辰。传统五行配色体系，天玑星君玄灰底色。',
-        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。'
+        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。',
+        starfield: '星空星座。Rivet 原生星图美学，天蓝主星与星云紫辅色。'
       }
       return {
         entries: validThemes.map(t => ({
           name: t,
           current: t === currentTheme,
+          isDefault: t === defaultTheme,
           description: themeDescriptions[t] ?? 'Custom color theme'
         })),
         selectedIndex: 0,
@@ -712,6 +715,14 @@ async function main() {
     setTheme(themeName as ThemeName)
     tuiApp.forceRedraw()
     tuiApp.commitStatic(`Theme switched to: ${themeName}`)
+  }, /* themePickerSaveDefaultExec: */ (themeName: string) => {
+    // Theme Picker S 键回调：设为默认主题并持久化。
+    try {
+      setUiConfig({ theme: themeName })
+      tuiApp.commitStatic(`已设置默认主题为: ${themeName}（下次启动生效）`)
+    } catch (err) {
+      tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
+    }
   }, /* choicePanelExec: */ undefined, /* connectExec: */ (commit, summary) => {
     // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
     try {

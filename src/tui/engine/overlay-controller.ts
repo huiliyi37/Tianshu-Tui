@@ -58,6 +58,7 @@ export class OverlayController {
   private domainPickerExec?: (key: string) => void
   private modelPickerExec?: (key: string) => void
   private themePickerExec?: (key: string) => void
+  private themePickerSaveDefaultExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
   private connectExec?: (commit: ConnectCommit, summary: string) => void
   private cockpitPanel: Panel = 'summary'
@@ -130,6 +131,8 @@ export class OverlayController {
   setModelPickerExec(fn: ((key: string) => void) | undefined): void { this.modelPickerExec = fn }
   getThemePickerExec(): ((key: string) => void) | undefined { return this.themePickerExec }
   setThemePickerExec(fn: ((key: string) => void) | undefined): void { this.themePickerExec = fn }
+  getThemePickerSaveDefaultExec(): ((key: string) => void) | undefined { return this.themePickerSaveDefaultExec }
+  setThemePickerSaveDefaultExec(fn: ((key: string) => void) | undefined): void { this.themePickerSaveDefaultExec = fn }
   getChoicePanelExec(): ((id: string) => void) | undefined { return this.choicePanelExec }
   setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
   getConnectExec(): ((commit: ConnectCommit, summary: string) => void) | undefined { return this.connectExec }

@@ -18,7 +18,12 @@ export interface RivetTheme {
   contextColor: (pct: number) => string
 }
 
-export type ThemeName = 'pastel' | 'cyberpunk' | 'observatory' | 'midnight' | 'starfield' | 'tianshu' | 'claude' | 'ziwei' | 'slate' | 'antigravity' | 'cobalt' | 'gemini'
+export const THEME_NAMES = [
+  'pastel', 'cyberpunk', 'observatory', 'midnight', 'starfield', 'tianshu',
+  'claude', 'ziwei', 'slate', 'antigravity', 'cobalt', 'gemini',
+] as const
+
+export type ThemeName = typeof THEME_NAMES[number]
 
 interface ColorSet {
   primary: string

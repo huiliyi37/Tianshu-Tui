@@ -210,4 +210,5 @@ export const DEFAULT_CONFIG: Config = {
     extraPath: [],
     extraVars: {},
   },
+  ui: {},
 }
