@@ -6,7 +6,7 @@
 #       再用 tauri signer sign 手动签(这步 env 正常)。
 
 param(
-    [string]$KeyPath = (Join-Path $env:USERPROFILE ".tauri" "tianshu.key"),
+    [string]$KeyPath = (Join-Path (Join-Path $env:USERPROFILE ".tauri") "tianshu.key"),
     [string]$KeyPassword = "",
     [string]$RepoSlug = "huiliyi37/Tianshu-Tui"
 )
