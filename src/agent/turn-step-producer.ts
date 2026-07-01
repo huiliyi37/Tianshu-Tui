@@ -30,14 +30,6 @@ import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhase
 import { formatImmuneContext } from './immune-context.js'
 
 /**
- * Cross-session loading check — prefers config over env var.
- *
- * - Env RIVET_NO_CROSS_SESSION=1/true → force-off (disabled=true)
- * - Env RIVET_NO_CROSS_SESSION=0/false → force-on (disabled=false)
- * - No env → uses config.crossSessionEnabled (default true = enabled = NOT disabled)
- * - No config and no env → disabled (backward compat for callers without config)
- */
-/**
  * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
  * reasoning config. Reverse-cause fix for reasoning models being falsely熔断:
  *
@@ -61,6 +53,14 @@ export function resolveHardStallMs(config: { providerName?: string; reasoningEff
   return deepReasoning ? 480_000 : 240_000
 }
 
+/**
+ * Cross-session loading check — prefers config over env var.
+ *
+ * - Env RIVET_NO_CROSS_SESSION=1/true → force-off (disabled=true)
+ * - Env RIVET_NO_CROSS_SESSION=0/false → force-on (disabled=false)
+ * - No env → uses config.crossSessionEnabled (default true = enabled = NOT disabled)
+ * - No config and no env → disabled (backward compat for callers without config)
+ */
 export function crossSessionDisabled(configEnabled?: boolean): boolean {
   const v = process.env.RIVET_NO_CROSS_SESSION
   if (v === '1' || v === 'true') return true
