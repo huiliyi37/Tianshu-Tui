@@ -32,7 +32,7 @@
     "completions/"
   ],
   "bin": {
-    "rivet": "./dist/main.js"
+    "rivet": "dist/main.js"
   },
   "scripts": {
     "postinstall": "patch-package || node -e 1",
