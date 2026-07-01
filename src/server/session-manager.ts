@@ -228,6 +228,10 @@ export interface ManagedAgent {
   replaceMessages(msgs: OaiMessage[]): void
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
   rewindToMessages(msgs: OaiMessage[]): void
+  /** Precise rewind: the session's per-edit FileHistory (write_file/edit_file
+   *  backups keyed by tool_use id). Absent on lightweight doubles / when no
+   *  history is wired. */
+  getFileHistory?(): import('../agent/file-history.js').FileHistory | undefined
   /**
    * Reset the prompt engine's delta appendix baseline after any history rewrite
    * (compaction, rewind, /compact). Optional so lightweight test doubles need
@@ -1882,6 +1886,66 @@ export class RuntimeSessionManager {
     } catch {
       // checkpoint rollback is best-effort; rewind still succeeds on messages
     }
+  }
+
+  /** Collect the write_file/edit_file tool_use ids whose calls occurred at or
+   *  after `messageIndex` — i.e. edits made after the selected conversation
+   *  boundary. These key the FileHistory snapshots a precise rewind undoes. */
+  private collectPostBoundaryEditIds(msgs: OaiMessage[], messageIndex: number): Set<string> {
+    const ids = new Set<string>()
+    for (let i = messageIndex; i < msgs.length; i++) {
+      const m = msgs[i]!
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          const name = tc.function?.name
+          if (name === 'write_file' || name === 'edit_file') ids.add(tc.id)
+        }
+      }
+    }
+    return ids
+  }
+
+  /**
+   * Preview the files a precise (per-message) code rewind would touch. Returns
+   * `available: false` when the session has no live agent / FileHistory or no
+   * tracked edits after the boundary — the caller can then fall back to the
+   * coarse checkpoint rollback (which also covers bash-driven changes).
+   */
+  previewFilesPrecise(
+    id: string,
+    messageIndex: number,
+  ): { available: boolean; files: { path: string; action: 'restore' | 'delete' }[] } | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    const fh = s.agent?.getFileHistory?.()
+    if (!s.agent || !fh) return { available: false, files: [] }
+    const msgs = s.agent.getMessages()
+    if (messageIndex < 0 || messageIndex >= msgs.length) return { available: false, files: [] }
+    const ids = this.collectPostBoundaryEditIds(msgs, messageIndex)
+    const files = fh.getBoundaryFiles(ids)
+    return { available: files.length > 0, files }
+  }
+
+  /**
+   * Precise (per-message) code rewind: restore every agent-edited file to its
+   * content as of the selected message; delete files created after it. Does NOT
+   * truncate the conversation (that's the separate rewind() path). Rejects while
+   * running (unsafe to restore files under an active writer).
+   */
+  async rewindFilesPrecise(
+    id: string,
+    messageIndex: number,
+  ): Promise<{ success: boolean; filesChanged: string[] } | undefined> {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    if (s.running) return { success: false, filesChanged: [] }
+    const fh = s.agent?.getFileHistory?.()
+    if (!s.agent || !fh) return { success: false, filesChanged: [] }
+    const msgs = s.agent.getMessages()
+    if (messageIndex < 0 || messageIndex >= msgs.length) return { success: false, filesChanged: [] }
+    const ids = this.collectPostBoundaryEditIds(msgs, messageIndex)
+    const filesChanged = await fh.rewindToBoundary(ids)
+    return { success: true, filesChanged }
   }
 
   // ── internals ─────────────────────────────────────────────────

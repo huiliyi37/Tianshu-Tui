@@ -490,6 +490,48 @@ export function rewindSession(id: string, messageIndex: number, rollbackFiles?: 
   return apiPost<SessionRecord>(`/sessions/${id}/rewind`, { messageIndex, rollbackFiles })
 }
 
+// ── Precise (per-message) code rewind via FileHistory ───────────────
+
+export interface PreciseFileEntry {
+  path: string
+  action: 'restore' | 'delete'
+}
+
+export interface PreciseFilePreview {
+  /** false → no per-edit history for this boundary; fall back to coarse rollback. */
+  available: boolean
+  files: PreciseFileEntry[]
+}
+
+export interface PreciseRewindResult {
+  success: boolean
+  filesChanged: string[]
+  error?: string
+}
+
+/** Preview the agent-edited files a precise rewind to `messageIndex` would touch. */
+export function getPreciseFilePreview(id: string, messageIndex: number): Promise<PreciseFilePreview> {
+  return apiPost<PreciseFilePreview>(`/sessions/${id}/rewind/file-preview`, { messageIndex })
+}
+
+/**
+ * Restore agent-edited files to their state at `messageIndex` (no conversation
+ * truncation). Reads the body on 200 and 409 alike so the caller can surface
+ * the reason on rejection.
+ */
+export async function rewindFilesPrecise(id: string, messageIndex: number): Promise<PreciseRewindResult> {
+  const res = await rivetFetch(`/sessions/${id}/rewind/files`, {
+    method: 'POST',
+    body: JSON.stringify({ messageIndex }),
+  })
+  const json = (await res.json().catch(() => ({}))) as Partial<PreciseRewindResult>
+  return {
+    success: json.success ?? false,
+    filesChanged: json.filesChanged ?? [],
+    error: json.error,
+  }
+}
+
 // ── Rollback (R3) ───────────────────────────────────────────────────
 
 export interface RollbackPreview {

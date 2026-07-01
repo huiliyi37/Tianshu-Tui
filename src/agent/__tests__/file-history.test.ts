@@ -79,6 +79,61 @@ describe('FileHistory', () => {
     assert.equal(history.hasSnapshot('msg_1'), true)
   })
 
+  it('rewindToBoundary restores multiple files to their pre-boundary content', async () => {
+    const a = join(TMP, 'a.txt')
+    const b = join(TMP, 'b.txt')
+    writeFileSync(a, 'a@boundary')
+    writeFileSync(b, 'b@boundary')
+    // Post-boundary edits (ids belong to the "after" set).
+    await history.trackEdit(a, 'edit_1')
+    writeFileSync(a, 'a-new')
+    await history.trackEdit(b, 'edit_2')
+    writeFileSync(b, 'b-new')
+    // A second edit to a — must NOT override the earliest post-boundary backup.
+    await history.trackEdit(a, 'edit_3')
+    writeFileSync(a, 'a-newest')
+
+    const changed = await history.rewindToBoundary(new Set(['edit_1', 'edit_2', 'edit_3']))
+    assert.deepEqual(new Set(changed), new Set([a, b]))
+    assert.equal(readFileSync(a, 'utf-8'), 'a@boundary')
+    assert.equal(readFileSync(b, 'utf-8'), 'b@boundary')
+  })
+
+  it('rewindToBoundary deletes files first created after the boundary', async () => {
+    const created = join(TMP, 'created.txt')
+    await history.trackEdit(created, 'edit_1') // captured null backup (did not exist)
+    writeFileSync(created, 'created after boundary')
+
+    const changed = await history.rewindToBoundary(new Set(['edit_1']))
+    assert.deepEqual(changed, [created])
+    assert.equal(existsSync(created), false)
+  })
+
+  it('rewindToBoundary leaves pre-boundary-only files untouched', async () => {
+    const kept = join(TMP, 'kept.txt')
+    writeFileSync(kept, 'v1')
+    await history.trackEdit(kept, 'pre_edit') // this edit is NOT in the post-boundary set
+    writeFileSync(kept, 'v2')
+
+    const changed = await history.rewindToBoundary(new Set(['some_other_id']))
+    assert.deepEqual(changed, [])
+    assert.equal(readFileSync(kept, 'utf-8'), 'v2')
+  })
+
+  it('getBoundaryFiles reports restore vs delete actions', async () => {
+    const restore = join(TMP, 'restore.txt')
+    const del = join(TMP, 'del.txt')
+    writeFileSync(restore, 'orig')
+    await history.trackEdit(restore, 'edit_1')
+    await history.trackEdit(del, 'edit_2') // null backup → delete
+    writeFileSync(del, 'created')
+
+    const files = history.getBoundaryFiles(new Set(['edit_1', 'edit_2']))
+    const byPath = new Map(files.map(f => [f.path, f.action]))
+    assert.equal(byPath.get(restore), 'restore')
+    assert.equal(byPath.get(del), 'delete')
+  })
+
   it('cleanupOrphans removes unreferenced backup files', async () => {
     const file = join(TMP, 'a.txt')
     writeFileSync(file, 'v1')

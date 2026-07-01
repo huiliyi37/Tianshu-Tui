@@ -118,6 +118,63 @@ export class FileHistory {
     return filesChanged
   }
 
+  /**
+   * Precise rewind to a conversation boundary: restore every tracked file that
+   * was edited AFTER the boundary back to its content as of that boundary, and
+   * delete files first created after it.
+   *
+   * `postBoundaryIds` = the set of edit tool_use ids (write_file / edit_file)
+   * whose calls occurred after the boundary, in message order. For each file the
+   * EARLIEST post-boundary snapshot that touched it holds the file's pre-edit
+   * content — which is exactly its state at the boundary (no edits happened
+   * between the boundary and that first post-boundary edit). Restoring that
+   * backup (or deleting it when the backup is null, i.e. the file did not yet
+   * exist at the boundary) rewinds the file precisely to the boundary while
+   * preserving any edits made before it.
+   */
+  async rewindToBoundary(postBoundaryIds: Set<string>): Promise<string[]> {
+    const targets = this.firstBackupPerFile(postBoundaryIds)
+    const filesChanged: string[] = []
+    for (const [filePath, backup] of targets) {
+      if (backup.backupFileName === null) {
+        try {
+          await unlink(filePath)
+          filesChanged.push(filePath)
+        } catch { /* already gone */ }
+        continue
+      }
+      const backupPath = join(this.backupDir, this.sessionId, backup.backupFileName)
+      try {
+        const content = await readFile(backupPath, 'utf-8')
+        await mkdir(dirname(filePath), { recursive: true })
+        await writeFile(filePath, content, 'utf-8')
+        filesChanged.push(filePath)
+      } catch { /* backup missing, skip */ }
+    }
+    return filesChanged
+  }
+
+  /** Files a boundary rewind would touch, for a pre-confirm preview. */
+  getBoundaryFiles(postBoundaryIds: Set<string>): { path: string; action: 'restore' | 'delete' }[] {
+    return [...this.firstBackupPerFile(postBoundaryIds)].map(([path, b]) => ({
+      path,
+      action: b.backupFileName === null ? 'delete' : 'restore',
+    }))
+  }
+
+  /** For each file, the backup captured by its earliest post-boundary edit. */
+  private firstBackupPerFile(postBoundaryIds: Set<string>): Map<string, FileBackup> {
+    const firstPer = new Map<string, FileBackup>()
+    // snapshots are held in chronological push order
+    for (const snap of this.snapshots) {
+      if (!postBoundaryIds.has(snap.messageId)) continue
+      for (const [filePath, backup] of Object.entries(snap.trackedFileBackups)) {
+        if (!firstPer.has(filePath)) firstPer.set(filePath, backup)
+      }
+    }
+    return firstPer
+  }
+
   async getDiffStats(targetMessageId: string): Promise<DiffStats | undefined> {
     let targetSnapshot: FileSnapshot | undefined
     for (let i = this.snapshots.length - 1; i >= 0; i--) {

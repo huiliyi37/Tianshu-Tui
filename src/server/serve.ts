@@ -523,6 +523,7 @@ function buildManagedAgent(
     getMessages: () => agent.session.getMessages(),
     replaceMessages: (msgs) => { agent.session.replaceMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
     rewindToMessages: (msgs) => { agent.session.rewindToMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
+    getFileHistory: () => agent.getFileHistory(),
     // PlusMenu — star domain (delegate to the live agent).
     setSessionDomain: (domain) => agent.setSessionDomain(domain),
     resetSessionDomain: () => agent.resetSessionDomain(),

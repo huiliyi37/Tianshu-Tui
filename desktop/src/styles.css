@@ -3079,6 +3079,75 @@ body {
 .rewind-error { color: var(--error); padding: 8px 0; font-size: 13px; }
 .rewind-hint { color: var(--muted); font-size: 12px; padding-top: 4px; }
 
+/* Rewind — action chooser layer (仅对话 / 仅代码 / 对话+代码) */
+.rewind-choose { display: flex; flex-direction: column; gap: 10px; }
+.rewind-chosen-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--panel-2, var(--hover));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rewind-actions { display: flex; flex-direction: column; gap: 6px; }
+.rewind-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.rewind-action:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+.rewind-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.rewind-action-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.rewind-action-desc { font-size: 12px; color: var(--muted); }
+
+/* Rewind — precise file preview (which files restore/delete) */
+.rewind-preview-tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.rewind-file-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rewind-file { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rewind-file-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+}
+.rewind-file-restore .rewind-file-badge { color: var(--accent); }
+.rewind-file-delete .rewind-file-badge { color: var(--error); border-color: var(--error); }
+.rewind-file-path {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* React error boundary fallback */
 .error-boundary {
   margin: var(--space-3);
