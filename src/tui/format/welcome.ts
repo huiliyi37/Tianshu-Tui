@@ -64,29 +64,31 @@ function centerLine(text: string, width: number): string {
   return ' '.repeat(left) + text + ' '.repeat(right)
 }
 
-// 北斗七星 — 真实勺形布局
-const DIPPER_STARS: ReadonlyArray<{ x: number; y: number; lead?: boolean }> = [
-  { x: 4, y: 0, lead: true }, // 天枢 — 勺口·上 (Dubhe)
-  { x: 4, y: 2 },             // 天璇 — 勺口·下 (Merak)
-  { x: 10, y: 3 },            // 天玑 — 勺底·下 (Phecda)
-  { x: 11, y: 1 },            // 天权 — 勺底·上 (Megrez)
-  { x: 16, y: 1 },            // 玉衡 — 柄 (Alioth)
-  { x: 21, y: 1 },            // 开阳 — 柄 (Mizar)
-  { x: 25, y: 0 },            // 摇光 — 柄端 (Alkaid)
+// 极简天枢主星与星芒光晕 (宽度 20)
+const STAR_TEMPLATE = [
+  "         .",
+  "       \\ | /",
+  "     - - ✦ - -",
+  "       / | \\",
+  "         ."
 ]
-const DIPPER_WIDTH = 26
-const DIPPER_ROWS = 4
+const STAR_ROWS = 5
 
-function renderDipperRow(rowIdx: number, theme: RivetTheme): string {
+function renderStarRow(rowIdx: number, theme: RivetTheme): string {
+  const line = STAR_TEMPLATE[rowIdx]
+  if (!line) return ''
   let out = ''
-  for (let colIdx = 0; colIdx < DIPPER_WIDTH; colIdx++) {
-    const star = DIPPER_STARS.find(s => s.y === rowIdx && s.x === colIdx)
-    if (star) {
-      if (star.lead) {
-        out += color('●', theme.pulseAlert || theme.userColor, { bold: true })
-      } else {
-        out += color('·', theme.dim)
-      }
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '✦') {
+      // 天枢星心 — 极亮且带闪烁/高亮
+      out += color('✦', theme.pulseAlert || theme.userColor, { bold: true })
+    } else if (char === '.') {
+      // 边缘散发光晕的点 — 极暗色
+      out += color('.', theme.dim)
+    } else if (char !== ' ') {
+      // 放射星芒线 — 使用主色高亮
+      out += color(char, theme.primary)
     } else {
       out += ' '
     }
@@ -96,12 +98,11 @@ function renderDipperRow(rowIdx: number, theme: RivetTheme): string {
 
 // TIANSHU 大字 Block ASCII 标识 (6行高，55列宽)
 const BRAND_LOGO = [
-  '████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗██╗   ██╗',
-  '╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║',
-  '   ██║   ██║███████║██╔██╗ ██║███████╗███████║██║   ██║',
-  '   ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██║   ██║',
-  '   ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║╚██████╔╝',
-  '   ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝'
+  "  ______ _                 _",
+  " /_  __/(_)___ _____  ____| |__  __  __",
+  "  / /  / / __ `/ __ \\/ ___/ __ \\/ / / /",
+  " / /  / / /_/ / / / (__  ) / / / /_/ /",
+  "/_/  /_/\\__,_/_/ /_/____/_/ /_/\\__,_/"
 ]
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
@@ -135,9 +136,9 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     out.push(borderCol('┌' + '─'.repeat(boxWidth - 2) + '┐'))
     out.push(wrapLine(''))
 
-    // 1. 北斗星图
-    for (let r = 0; r < DIPPER_ROWS; r++) {
-      out.push(wrapLine(renderDipperRow(r, theme)))
+    // 1. 天枢主星与星芒光晕
+    for (let r = 0; r < STAR_ROWS; r++) {
+      out.push(wrapLine(renderStarRow(r, theme)))
     }
     out.push(wrapLine(''))
 

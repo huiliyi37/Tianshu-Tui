@@ -180,19 +180,19 @@ const STARFIELD_FALLBACK: ColorSet = {
 // Tianshu theme — 玄夜墨色 (Ink-Night). Design: 95% 墨灰 + 紫微紫 accent + 朱砂用户标记.
 // 功能态全部降饱和：归航青/星金/朱砂赤。工具按类别弱分色。
 const TIANSHU_TRUECOLOR: ColorSet = {
-  primary: '#d4a574',   // 星金 accent — 五行符号/流式指示。面积已限制到极少位置
-  secondary: '#9a90c2', // 墨紫灰 — edit/write headers (soft violet, design --tc-edit)
-  success: '#6f9b91',   // 归航青 — tests/done (design --qing, desaturated)
-  warning: '#b09155',   // 星金 — delegation/attention (design --jin, desaturated)
-  error: '#c1655c',     // 朱砂赤 — errors (design --chi, desaturated)
-  dim: '#666a78',       // 暗墨 — separators/shortcuts (design --dim, +slight for terminal)
+  primary: '#dfb282',   // 星金 accent — 提亮优化，更有光泽
+  secondary: '#a49ac7', // 墨紫灰 — 柔和星云紫 (soft violet)
+  success: '#75a399',   // 归航青 — tests/done松石绿
+  warning: '#b09155',   // 星金 — delegation/attention
+  error: '#c1655c',     // 朱砂赤 — errors
+  dim: '#666a78',       // 暗墨 — separators/shortcuts
   pulseQuiet: '#3a3d4a', // 墨线 — quiet pulse
-  pulseActive: '#d4a574', // 星金 — active pulse (matches primary)
+  pulseActive: '#dfb282', // 星金 — active pulse (matches primary)
   pulseAlert: '#d4453a',  // 朱砂印 — alert pulse
-  toolShell: '#a0a3b0',   // shell grey — bash/grep/glob (design --tc-shell, brightened)
-  toolEdit: '#9a90c2',    // 墨紫灰 — edit_file/write_file (design --tc-edit)
-  toolTest: '#9c8a63',    // 金褐 — run_tests (design --tc-test)
-  toolDelegate: '#b09155', // 星金 — delegate (design --tc-delegate = warning)
+  toolShell: '#a0a3b0',   // shell grey — bash/grep/glob
+  toolEdit: '#a49ac7',    // 墨紫灰 — edit_file/write_file (matches secondary)
+  toolTest: '#9c8a63',    // 金褐 — run_tests
+  toolDelegate: '#b09155', // 星金 — delegate
 }
 
 const TIANSHU_FALLBACK: ColorSet = {

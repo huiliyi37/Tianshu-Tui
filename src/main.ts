@@ -380,6 +380,10 @@ async function main() {
     }
   }
 
+  // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
+  if (getActiveThemeName() === 'cobalt') {
+    setTheme('tianshu')
+  }
   const theme = getTheme()
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
