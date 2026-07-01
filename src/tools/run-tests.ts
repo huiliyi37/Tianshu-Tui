@@ -1,5 +1,6 @@
 import { readFile, stat, glob } from 'node:fs/promises'
-import { join, delimiter } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join, delimiter, win32 as winPath } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
 import { WinStreamDecoder } from '../platform.js'
@@ -27,6 +28,69 @@ interface BlockedTestCommand {
 }
 
 type TestCommand = RunnableTestCommand | BlockedTestCommand
+
+/** A spawn descriptor normalized for the host OS (see {@link resolveTestSpawn}). */
+export interface ResolvedTestSpawn {
+  command: string
+  args: string[]
+  /** True when the command must run through a shell (Windows `.cmd` shims). */
+  shell: boolean
+}
+
+/** Injectable IO for {@link resolveTestSpawn} so it's unit-testable on any host. */
+export interface TestSpawnDeps {
+  isWindows: boolean
+  exists: (p: string) => boolean
+}
+
+/**
+ * Normalize a test-runner spawn for the host OS.
+ *
+ * On Windows the runners `npm` / `npx` / `tsx` (and vitest/jest, which we invoke
+ * via `npx`) are `.cmd` shims, not `.exe`. Modern Node refuses to spawn a
+ * `.cmd`/`.bat` without `shell: true` (throws EINVAL), so spawning them directly
+ * silently breaks the whole verification gate on Windows. This mirrors the
+ * established pattern in `theta-check.ts::resolveTscCommand` and
+ * `lsp/client.ts::runTscSubprocess`: on win32, route `.cmd` runners through a
+ * shell and quote any path/arg containing spaces (e.g. `C:\Users\My Name`).
+ *
+ * `node` / `pytest` are real executables → spawned directly (no shell). On
+ * non-Windows hosts everything is spawned directly.
+ */
+export function resolveTestSpawn(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  deps: TestSpawnDeps = { isWindows: process.platform === 'win32', exists: existsSync },
+): ResolvedTestSpawn {
+  if (!deps.isWindows) return { command, args: [...args], shell: false }
+
+  // Quote only when needed: shell:true makes Node join argv into one cmd.exe
+  // command line, so spaces would otherwise split a single token into two.
+  const quote = (s: string): string =>
+    /\s/.test(s) && !(s.startsWith('"') && s.endsWith('"')) ? `"${s}"` : s
+
+  if (command === 'tsx') {
+    // Prefer the project-local shim so targeted tsx runs work without a global tsx.
+    // win32 path math keeps this deterministic when unit-tested on POSIX hosts.
+    const localShim = winPath.join(cwd, 'node_modules', '.bin', 'tsx.cmd')
+    if (deps.exists(localShim)) {
+      // Always quote the resolved path — cwd may contain spaces (C:\Users\My Name).
+      // Mirrors lsp/client.ts::runTscSubprocess + theta-check.ts::resolveTscCommand.
+      return { command: `"${localShim}"`, args: args.map(quote), shell: true }
+    }
+    // Fallback: npx tsx — npx.cmd resolves tsx from node_modules under a shell.
+    return { command: 'npx', args: ['tsx', ...args].map(quote), shell: true }
+  }
+
+  if (command === 'npm' || command === 'npx') {
+    // Bare command name; cmd.exe resolves npm.cmd/npx.cmd from PATH under shell.
+    return { command, args: args.map(quote), shell: true }
+  }
+
+  // node / pytest / other real executables: spawn directly.
+  return { command, args: [...args], shell: false }
+}
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -504,11 +568,15 @@ function runTestCommandIn(
   timeout: number,
 ): Promise<ToolResult> {
   const startTime = Date.now()
+  // Normalize for the host OS: on Windows npm/npx/tsx are `.cmd` shims that need
+  // a shell (else modern Node throws EINVAL); node/pytest spawn directly.
+  const spawnSpec = resolveTestSpawn(testCommand.command, testCommand.args, cwd)
   return new Promise<ToolResult>((resolve) => {
-      const child = track(spawnHidden(testCommand.command, testCommand.args, {
+      const child = track(spawnHidden(spawnSpec.command, spawnSpec.args, {
         cwd,
         env: buildExecutionEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: spawnSpec.shell,
         // Own process group on POSIX so killProcessTree can reap the whole test
         // tree (node → tsx → workers); Windows uses taskkill /T and must not be
         // detached (breaks stdio pipes). Mirrors bash.ts/git.ts.
