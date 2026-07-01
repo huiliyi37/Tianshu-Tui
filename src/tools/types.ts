@@ -220,6 +220,13 @@ export interface ToolResult {
    *  needs the user's next message as the answer). When true, the orchestrator
    *  completes the turn as final instead of continuing the tool loop. */
   endTurn?: boolean
+  /** Write-family tools (edit_file/write_file) report the AFTER-file line ranges
+   *  they touched (1-based, inclusive). The tool-pipeline uses this to narrow the
+   *  whole-file LSP diagnostics it appends to the model: in-region diagnostics are
+   *  surfaced fully, out-of-region errors collapse to a one-line nudge, and
+   *  out-of-region warnings are dropped. Absent → append site keeps whole-file
+   *  behavior. See computeChangedLineRanges / filterDiagnosticsForEdit. */
+  changedRanges?: Array<{ start: number; end: number }>
 }
 
 export interface Tool {

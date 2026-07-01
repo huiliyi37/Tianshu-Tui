@@ -49,6 +49,9 @@ describe('edit_file tool', () => {
     assert.ok(/^@@/m.test(result.uiContent!), 'uiContent has hunk header')
     assert.ok(/^-beta$/m.test(result.uiContent!), 'removal line')
     assert.ok(/^\+BETA$/m.test(result.uiContent!), 'addition line')
+    // changedRanges localizes the edit for LSP diagnostics narrowing
+    assert.ok(Array.isArray(result.changedRanges) && result.changedRanges.length === 1, 'one changed range')
+    assert.deepEqual(result.changedRanges![0], { start: 2, end: 2 }, 'line 2 (beta) changed')
   })
 
   it('replace_all also produces a uiContent diff', async () => {

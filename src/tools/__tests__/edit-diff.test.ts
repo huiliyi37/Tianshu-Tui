@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildFileDiff } from '../edit-diff.js'
+import { buildFileDiff, computeChangedLineRanges } from '../edit-diff.js'
 
 describe('buildFileDiff', () => {
   it('emits a unified diff with ---/+++/@@ and +/- lines', () => {
@@ -42,5 +42,48 @@ describe('buildFileDiff', () => {
     const lines = diff.split('\n')
     assert.equal(lines.length, 51, '50 diff lines + 1 hint line')
     assert.match(lines[lines.length - 1]!, /more diff lines, Ctrl\+O/)
+  })
+})
+
+describe('computeChangedLineRanges', () => {
+  it('returns [] when content is identical', () => {
+    const s = 'a\nb\nc\n'
+    assert.deepEqual(computeChangedLineRanges(s, s), [])
+  })
+
+  it('maps a single-line change to that after-file line', () => {
+    const before = 'one\ntwo\nthree\nfour\n'
+    const after = 'one\nTWO\nthree\nfour\n'
+    const ranges = computeChangedLineRanges(before, after)
+    assert.equal(ranges.length, 1)
+    assert.deepEqual(ranges[0], { start: 2, end: 2 })
+  })
+
+  it('covers the whole file for a brand-new file (empty before)', () => {
+    const after = 'alpha\nbeta\ngamma\n'
+    const ranges = computeChangedLineRanges('', after)
+    assert.equal(ranges.length, 1)
+    assert.equal(ranges[0]!.start, 1)
+    assert.ok(ranges[0]!.end >= 3, 'covers all new lines')
+  })
+
+  it('produces multiple ranges for edits in separate regions', () => {
+    const before = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n') + '\n'
+    const after = before
+      .replace('line 2', 'LINE 2')
+      .replace('line 18', 'LINE 18')
+    const ranges = computeChangedLineRanges(before, after)
+    assert.equal(ranges.length, 2, 'two disjoint hunks')
+    assert.ok(ranges[0]!.start <= 2 && ranges[0]!.end >= 2)
+    assert.ok(ranges[1]!.start <= 18 && ranges[1]!.end >= 18)
+  })
+
+  it('represents a pure deletion as a single-line point', () => {
+    const before = 'keep1\ndrop\nkeep2\n'
+    const after = 'keep1\nkeep2\n'
+    const ranges = computeChangedLineRanges(before, after)
+    assert.equal(ranges.length, 1)
+    assert.equal(ranges[0]!.start, ranges[0]!.end, 'deletion collapses to a point')
+    assert.ok(ranges[0]!.start >= 1)
   })
 })

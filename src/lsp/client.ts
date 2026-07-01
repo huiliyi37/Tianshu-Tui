@@ -2,6 +2,7 @@ import { formatDiagnostics, parseDiagnosticOutput, type Diagnostic } from './dia
 import { isAbsolute, relative, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import type { LspDiagnostic } from './manager.js'
 
 export interface LspCheckResult {
   diagnostics: Diagnostic[]
@@ -229,4 +230,89 @@ export function shouldRunDiagnostics(toolName: string, filePath?: string): boole
   if (toolName !== 'write_file' && toolName !== 'edit_file') return false
   if (!filePath) return false
   return /\.(ts|tsx|js|jsx)$/.test(filePath)
+}
+
+/** ±context lines added around each changed range when deciding "in-region". */
+const DIAGNOSTIC_CONTEXT_LINES = 3
+/** Cap on full in-region diagnostics surfaced to the model. */
+const MODEL_INREGION_CAP = 10
+/** Cap on line numbers listed in the collapsed out-of-region error nudge. */
+const MODEL_OUTREGION_LINE_CAP = 5
+/** Cap on the full diagnostics list surfaced to the UI (tool card). */
+const UI_DIAGNOSTIC_CAP = 20
+
+export interface EditDiagnosticsResult {
+  /** Narrowed text for the model-facing tool_result (may be empty). */
+  modelText: string
+  /** Full (errors + warnings) list for the UI tool card (may be empty). */
+  uiText: string
+}
+
+function formatDiagnosticLine(d: LspDiagnostic): string {
+  const kind = d.severity === 1 ? 'ERROR' : 'WARNING'
+  return `${kind} L${d.range.start.line + 1}: ${d.message}`
+}
+
+/**
+ * 作用域收敛: split whole-file LSP diagnostics into what the model should see
+ * versus what the human should see, using the edit's changed line ranges.
+ *
+ * Model-facing (returned as `modelText`):
+ *   - in-region errors + warnings (line within any range ±context): full messages
+ *   - out-of-region errors: collapsed to one nudge line with line numbers
+ *   - out-of-region warnings: dropped
+ * When `changedRanges` is absent/empty we cannot localize, so the model gets the
+ * whole-file list (today's behavior) — a safe fallback.
+ *
+ * UI-facing (`uiText`): the full errors+warnings list regardless of region, so
+ * the TUI/desktop tool card still shows everything the human might want.
+ *
+ * Rationale: whole-file and cross-file type errors are comprehensively caught by
+ * the post-commit typecheck-gate (real tsc on all changed files) at delivery, so
+ * the per-edit LSP only needs to give the model fast, local, actionable signal.
+ */
+export function filterDiagnosticsForEdit(
+  diagnostics: LspDiagnostic[],
+  changedRanges: Array<{ start: number; end: number }> | undefined,
+  context = DIAGNOSTIC_CONTEXT_LINES,
+): EditDiagnosticsResult {
+  const relevant = diagnostics.filter(d => d.severity <= 2) // errors + warnings only
+  if (relevant.length === 0) return { modelText: '', uiText: '' }
+
+  const uiText = relevant.slice(0, UI_DIAGNOSTIC_CAP).map(formatDiagnosticLine).join('\n')
+
+  // No localization available → whole-file model output (safe fallback).
+  if (!changedRanges || changedRanges.length === 0) {
+    const modelText = relevant.slice(0, MODEL_INREGION_CAP).map(formatDiagnosticLine).join('\n')
+    return { modelText, uiText }
+  }
+
+  const inRegion = (line1: number): boolean =>
+    changedRanges.some(r => line1 >= r.start - context && line1 <= r.end + context)
+
+  const inside: LspDiagnostic[] = []
+  const outsideErrors: LspDiagnostic[] = []
+  for (const d of relevant) {
+    const line1 = d.range.start.line + 1
+    if (inRegion(line1)) inside.push(d)
+    else if (d.severity === 1) outsideErrors.push(d)
+    // out-of-region warnings are dropped
+  }
+
+  const parts: string[] = []
+  if (inside.length > 0) {
+    parts.push(inside.slice(0, MODEL_INREGION_CAP).map(formatDiagnosticLine).join('\n'))
+  }
+  if (outsideErrors.length > 0) {
+    const lines = outsideErrors
+      .slice(0, MODEL_OUTREGION_LINE_CAP)
+      .map(d => `L${d.range.start.line + 1}`)
+      .join(', ')
+    const more = outsideErrors.length > MODEL_OUTREGION_LINE_CAP ? ', …' : ''
+    parts.push(
+      `+${outsideErrors.length} error(s) elsewhere in file (${lines}${more}) — run typecheck before delivery`,
+    )
+  }
+
+  return { modelText: parts.join('\n'), uiText }
 }

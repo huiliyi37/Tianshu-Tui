@@ -45,6 +45,30 @@ describe('write_file tool — uiContent diff', () => {
     assert.ok(/^\+new line$/m.test(result.uiContent!), 'addition line')
   })
 
+  it('overwrite → changedRanges localizes the changed line (for LSP narrowing)', async () => {
+    const file = join(TEST_DIR, 'ranges.txt')
+    writeFileSync(file, 'keep\nold line\ntail\n')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'keep\nnew line\ntail\n',
+    }))
+    assert.ok(!result.isError)
+    assert.ok(Array.isArray(result.changedRanges) && result.changedRanges.length === 1, 'one changed range')
+    assert.deepEqual(result.changedRanges![0], { start: 2, end: 2 }, 'line 2 changed')
+  })
+
+  it('new file → changedRanges covers the whole file', async () => {
+    const file = join(TEST_DIR, 'brand-new.txt')
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'a\nb\nc\n',
+    }))
+    assert.ok(!result.isError)
+    assert.ok(Array.isArray(result.changedRanges) && result.changedRanges.length === 1)
+    assert.equal(result.changedRanges![0]!.start, 1)
+    assert.ok(result.changedRanges![0]!.end >= 3)
+  })
+
   it('rewriting identical content yields no diff (uiContent undefined)', async () => {
     const file = join(TEST_DIR, 'same.txt')
     writeFileSync(file, 'unchanged\n')

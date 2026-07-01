@@ -1,4 +1,4 @@
-import { createTwoFilesPatch } from 'diff'
+import { createTwoFilesPatch, structuredPatch } from 'diff'
 
 /**
  * Display-only unified diff for write-family tools (edit_file/write_file/…).
@@ -43,4 +43,33 @@ export function buildFileDiff(relPath: string, before: string, after: string, op
   }
 
   return body.join('\n')
+}
+
+/** A 1-based, inclusive line range in the AFTER file. */
+export interface LineRange {
+  start: number
+  end: number
+}
+
+/**
+ * Compute the line ranges (in the AFTER file, 1-based inclusive) touched by an
+ * edit. Used by the LSP diagnostics narrowing at the tool-pipeline append site
+ * to decide which whole-file diagnostics fall inside the "改动波及区".
+ *
+ * Uses a zero-context structured patch so each hunk maps to exactly the changed
+ * after-lines. Pure deletions (newLines === 0) collapse to a single-line point
+ * at the deletion boundary — the ±context in filterDiagnosticsForEdit widens it
+ * enough to catch adjacent errors. A brand-new file (before === '') yields one
+ * range covering the whole file. No change yields [].
+ */
+export function computeChangedLineRanges(before: string, after: string): LineRange[] {
+  if (before === after) return []
+  const patch = structuredPatch('a', 'a', before, after, '', '', { context: 0 })
+  const ranges: LineRange[] = []
+  for (const hunk of patch.hunks) {
+    const start = Math.max(1, hunk.newStart)
+    const end = hunk.newLines > 0 ? start + hunk.newLines - 1 : start
+    ranges.push({ start, end })
+  }
+  return ranges
 }

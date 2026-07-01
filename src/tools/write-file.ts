@@ -8,7 +8,7 @@ import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
 import { getTargetEol } from '../platform.js'
-import { buildFileDiff } from './edit-diff.js'
+import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
 
 const MAX_WRITE_FILE_BYTES = 10 * 1024 * 1024 // 10MB — safety ceiling for single write_file call
 
@@ -105,11 +105,13 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     markSessionFileEdit(filePath)
     const lines = finalContent.split('\n').length
     const warn = syntaxCheck(filePath, finalContent)
-    const diff = buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, toLf(content))
+    const afterForDiff = toLf(content)
+    const diff = buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
     return {
       content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : ''),
       uiContent,
+      changedRanges: computeChangedLineRanges(oldContentForDiff, afterForDiff),
     }
   },
 

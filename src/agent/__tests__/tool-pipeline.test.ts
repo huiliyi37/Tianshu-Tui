@@ -490,6 +490,94 @@ describe('executeToolUse', () => {
     })
   })
 
+  it('LSP narrowing: in-region errors surface fully, out-of-region errors collapse, warnings drop', async () => {
+    const base = makeDeps()
+    const lspCwd = mkdtempSync(join(testTmp(), 'lsp-narrow-'))
+    const deps = makeDeps({
+      cwd: lspCwd,
+      lspManager: {
+        isReady: () => true,
+        changeFile: () => {},
+        getFileDiagnostics: async () => [
+          { range: { start: { line: 9, character: 0 }, end: { line: 9, character: 1 } }, severity: 1, message: 'in-region type error' },
+          { range: { start: { line: 199, character: 0 }, end: { line: 199, character: 1 } }, severity: 1, message: 'far away error' },
+          { range: { start: { line: 249, character: 0 }, end: { line: 249, character: 1 } }, severity: 2, message: 'far away warning' },
+        ],
+      } as any,
+      config: {
+        ...base.config,
+        toolRegistry: {
+          execute: async () => ({
+            content: 'Applied edit to src/foo.ts',
+            isError: false,
+            uiContent: 'diff-body',
+            changedRanges: [{ start: 10, end: 10 }],
+          }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    let uiContent: string | undefined
+    const cb = {
+      ...noopCallbacks,
+      onToolResult: (_id: string, _n: string, _c: string, _e?: boolean, _rp?: string, ui?: string) => { uiContent = ui },
+    }
+
+    const result = await executeToolUse(
+      { id: 'tu-lsp-narrow', name: 'edit_file', input: { file_path: 'src/foo.ts' } },
+      deps, cb as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.includes('[LSP Diagnostics]'), 'appends an LSP block')
+    assert.ok(content.includes('ERROR L10: in-region type error'), 'in-region error surfaced fully')
+    assert.ok(!content.includes('far away error'), 'out-of-region error message not dumped to model')
+    assert.ok(content.includes('+1 error(s) elsewhere in file (L200)'), 'out-of-region error collapsed to nudge')
+    assert.ok(!content.includes('far away warning'), 'out-of-region warning dropped from model')
+    // UI gets the full list (errors + warnings), whole file.
+    assert.ok(uiContent && uiContent.includes('ERROR L200: far away error'), 'UI shows out-of-region error')
+    assert.ok(uiContent!.includes('WARNING L250: far away warning'), 'UI shows out-of-region warning')
+    assert.ok(uiContent!.startsWith('diff-body'), 'UI keeps the original diff, then appends diagnostics')
+    rmSync(lspCwd, { recursive: true, force: true })
+  })
+
+  it('LSP narrowing: falls back to whole-file model output when changedRanges is absent', async () => {
+    const base = makeDeps()
+    const lspCwd = mkdtempSync(join(testTmp(), 'lsp-fallback-'))
+    const deps = makeDeps({
+      cwd: lspCwd,
+      lspManager: {
+        isReady: () => true,
+        changeFile: () => {},
+        getFileDiagnostics: async () => [
+          { range: { start: { line: 9, character: 0 }, end: { line: 9, character: 1 } }, severity: 1, message: 'err a' },
+          { range: { start: { line: 199, character: 0 }, end: { line: 199, character: 1 } }, severity: 1, message: 'err b' },
+        ],
+      } as any,
+      config: {
+        ...base.config,
+        toolRegistry: {
+          execute: async () => ({ content: 'Applied edit to src/foo.ts', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+    })
+
+    const result = await executeToolUse(
+      { id: 'tu-lsp-fallback', name: 'edit_file', input: { file_path: 'src/foo.ts' } },
+      deps, noopCallbacks as any, 1, false,
+    )
+
+    const content = (result.toolResult as any).content as string
+    assert.ok(content.includes('ERROR L10: err a'), 'both errors surfaced when unlocalized')
+    assert.ok(content.includes('ERROR L200: err b'), 'both errors surfaced when unlocalized')
+    assert.ok(!content.includes('elsewhere in file'), 'no collapse without ranges')
+    rmSync(lspCwd, { recursive: true, force: true })
+  })
+
   it('records failed bash typecheck as failed verification', async () => {
     const events: any[] = []
     const deps = makeDeps({
