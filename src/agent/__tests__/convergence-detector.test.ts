@@ -939,6 +939,91 @@ describe('evaluateConvergence', () => {
     })
   })
 
+  // ── Fix 2: read-heavy review/audit tasks that produce a text report ──
+  // The incident: user asked 天枢 to review existing code. 天枢 correctly
+  // read/grep-ed extensively (the deliverable is a text report, never edits),
+  // but got flagged as read-only "stagnation" every turn and spammed with the
+  // 星域·改道 "去编辑/测试" nudge. A substantial, non-repetitive text output
+  // must be recognized as report production, not stagnation.
+
+  describe('review/report production (read-heavy, not stagnation)', () => {
+    // Long, unique review-report turns (>= REPORT_TEXT_MIN_LEN chars each),
+    // mirroring the incident's 代码审查结果 output. Three distinct long
+    // fingerprints keep textRepetitionPenalty high (non-repetitive).
+    const reportFingerprints = [
+      '代码审查结果 严重问题 1 测试套件无法运行 conftest 缺失 测试文件 test_scoring 导入了 make_flat_kline make_uptrend_kline make_limit_up_streaks 三个工厂函数以及 flat_df limit_up_df 两个 pytest fixture 但项目根目录与 tests 目录下都没有 conftest 定义它们 运行 pytest 会在 collection 阶段直接报 fixture not found 整个测试套件无法启动 需要新增 conftest 补齐这些 fixture 与工厂函数的定义和导入 否则任何回归验证都无法进行',
+      '中等问题 config 模块中 SCREENING 字段在第 18 行定义但通篇没有任何模块 import 或引用它 ZONE_MIN_VOLUME 常量同样在配置里定义却没有任何消费方 grep 全仓零命中 属于典型的死配置 updater 模块顶部还存在一处从 legacy_utils 的死导入 引入后从未使用 建议统一清理这些未使用符号 并为确需保留的字段补充真实消费方 避免配置与代码之间形成死接线',
+      'updater 起算日逻辑反转 update_daily_kline 函数中有两处计算起始日期 sd 都写成了 min(date.today() minus timedelta 与已有最早日期) 取 min 会永远选中更早的那个日期 导致每次增量更新都从很久以前重新拉取 既浪费带宽也可能覆盖已修正数据 正确做法应该是按最近一个交易日向前回溯固定窗口 用 max 锚定到最新边界 否则增量窗口计算方向完全错误 需要尽快修正这两处边界条件',
+    ]
+
+    it('does NOT flag read-only review as stagnation when producing a report (turn 24, plan)', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'conftest.py' },
+        { tool: 'grep', target: 'SCREENING' },
+        { tool: 'read_file', target: 'config.py' },
+        { tool: 'read_file', target: 'updater.py' },
+        { tool: 'grep', target: 'update_daily_kline' },
+        { tool: 'read_file', target: 'test_scoring.py' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 24, // deep into the session, like the incident
+        phaseClass: 'plan',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        textFingerprints: reportFingerprints,
+      }))
+      assert.equal(result.level, 0,
+        `read-heavy review producing a report must not escalate, got level ${result.level} (score=${result.score.toFixed(2)})`)
+      assert.equal(result.injectedMessage, null,
+        'a review producing a report must not inject a 改道 nudge')
+    })
+
+    it('control: same read-only pattern WITHOUT a report still flags stagnation', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'conftest.py' },
+        { tool: 'grep', target: 'SCREENING' },
+        { tool: 'read_file', target: 'config.py' },
+        { tool: 'read_file', target: 'updater.py' },
+        { tool: 'grep', target: 'update_daily_kline' },
+        { tool: 'read_file', target: 'test_scoring.py' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 24,
+        phaseClass: 'plan',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        // no textFingerprints → no report → read-only penalty applies
+      }))
+      assert.ok(result.level >= 2,
+        `read-only with no report should still flag, got level ${result.level} (score=${result.score.toFixed(2)})`)
+    })
+
+    it('repetitive text (stuck loop) is NOT treated as report production', () => {
+      // Same long text repeated across turns → high repetition → still stagnation.
+      const repeated = reportFingerprints[0]!
+      const history = makeHistory([
+        { tool: 'read_file', target: 'a.ts' },
+        { tool: 'read_file', target: 'b.ts' },
+        { tool: 'read_file', target: 'c.ts' },
+        { tool: 'read_file', target: 'd.ts' },
+        { tool: 'read_file', target: 'e.ts' },
+        { tool: 'read_file', target: 'f.ts' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 24,
+        phaseClass: 'plan',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        textFingerprints: [repeated, repeated, repeated],
+      }))
+      assert.ok(result.level >= 2,
+        `repetitive read loop must still flag, got level ${result.level} (score=${result.score.toFixed(2)})`)
+    })
+  })
+
   // ── targetNovelty formula + editRatio novelty-gating regression ────────
   // Regression for the "原地打转 (editing the same file) scored as progress"
   // doom-loop misjudgment. Before the fix: targetNovelty used distinct/total

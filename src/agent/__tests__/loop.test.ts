@@ -1477,6 +1477,70 @@ describe('AgentLoop — no-tool forced abort', () => {
   })
 })
 
+// ── Fix 1/3: convergence "改道" emission cooldown + user-interaction reset ──
+// Regression for the 星域·改道 spam incident: a persistent read-only stuck
+// state used to re-emit the same 改道 card / phase-change / advisory every
+// single turn. It must now be throttled, and reset when the user intervenes.
+describe('AgentLoop — convergence emission cooldown', () => {
+  function stuckLoop() {
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const agent = new AgentLoop(
+      {
+        client: mockClient([makeTextBlock('x')]), promptEngine: makeEngine(), toolRegistry: registry,
+        maxTurns: 40, contextWindow: 200_000,
+        compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      },
+      new SessionContext(),
+      TEST_CWD,
+    )
+    // Read-only history (single tool, distinct targets) → productive stagnation.
+    const history = [
+      { tool: 'read_file', status: 'success', target: 'a.ts' },
+      { tool: 'read_file', status: 'success', target: 'b.ts' },
+      { tool: 'read_file', status: 'success', target: 'c.ts' },
+      { tool: 'read_file', status: 'success', target: 'd.ts' },
+      { tool: 'read_file', status: 'success', target: 'e.ts' },
+      { tool: 'read_file', status: 'success', target: 'f.ts' },
+    ]
+    agent.recentToolHistory = history as unknown as typeof agent.recentToolHistory
+    return agent
+  }
+
+  it('throttles the 改道 emission instead of firing every turn', async () => {
+    const agent = stuckLoop()
+    let shifts = 0
+    const cb = { ...makeCallbacks(), onDecisionShift: () => { shifts++ } }
+
+    // Same persistent stuck state across 6 turns (14..19), all level 2.
+    for (let turn = 14; turn <= 19; turn++) {
+      await agent.runConvergenceCheck(turn, 'plan', true, false, cb)
+    }
+
+    assert.ok(shifts >= 1, 'expected at least one 改道 emission')
+    assert.ok(shifts < 6, `expected throttled emissions over 6 turns, got ${shifts}`)
+    assert.ok(shifts <= 2, `cooldown=3 should cap emissions at 2 over turns 14..19, got ${shifts}`)
+  })
+
+  it('user intervention resets the cooldown and skips that turn', async () => {
+    const agent = stuckLoop()
+    let shifts = 0
+    const cb = { ...makeCallbacks(), onDecisionShift: () => { shifts++ } }
+
+    await agent.runConvergenceCheck(14, 'plan', true, false, cb) // emit (cooldown start)
+    assert.equal(shifts, 1, 'first turn should emit')
+
+    await agent.runConvergenceCheck(15, 'plan', true, false, cb) // within cooldown → skip
+    assert.equal(shifts, 1, 'within cooldown should not emit')
+
+    await agent.runConvergenceCheck(15, 'plan', true, true, cb) // user intervened → skip + reset
+    assert.equal(shifts, 1, 'user-intervention turn must not emit a nudge')
+
+    await agent.runConvergenceCheck(16, 'plan', true, false, cb) // reset → emit despite <3 turns since last
+    assert.equal(shifts, 2, 'cooldown should have been reset by user intervention, allowing an immediate re-emit')
+  })
+})
+
 describe('formatActivePlanPointer', () => {
   it('emits a slug/title/path pointer without the plan body', () => {
     const out = formatActivePlanPointer({ slug: 'my-plan', title: 'My Plan' })
