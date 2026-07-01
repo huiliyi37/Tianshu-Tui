@@ -418,7 +418,23 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         // no stdout, so this hit constantly). Pass empty through so buildModelOutput
         // emits the explicit "confirmed empty" marker instead. Failures/timeouts
         // keep a synthetic body so the reason is never blank.
-        const modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
+        // environment 类失败（127/126/9009 = 命令缺失/不可执行）：给模型标准化简洁体，
+        // 不把整墙红字灌进上下文（会污染前缀缓存、误导模型自判"代码出错"）。完整原文仍走
+        // uiContent（buildUiOutput(filtered)），用户在 TUI 能看到全部。
+        let modelBody: string
+        if (errorClass === 'environment') {
+          const missing = extractMissingCommand(filtered, rawCommand)
+          const notFound = exitCode === 127 || exitCode === 9009
+          const reason = notFound
+            ? `command not found${missing ? `: ${missing}` : ''}`
+            : exitCode === 126
+              ? 'command found but not executable (permission denied)'
+              : `environment error (exit ${exitCode})`
+          const hint = buildNotFoundHint(missing, process.platform)
+          modelBody = `环境/配置问题：${reason}。属环境/依赖缺失，非代码缺陷——请修复环境后重试，勿反复重跑相同命令。${hint}`
+        } else {
+          modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
+        }
 
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,

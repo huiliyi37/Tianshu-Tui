@@ -81,6 +81,25 @@ describe('output-store', () => {
       assert.ok(result.startsWith('[npm test] exit=1'))
     })
 
+    it('error-aware: failed output over threshold surfaces error lines to the model', () => {
+      const lines: string[] = []
+      for (let i = 1; i <= 45; i++) lines.push(`info: noise line ${i}`)
+      lines.push('error TS2345: type mismatch at src/foo.ts:42')
+      lines.push('  expected string, got number')
+      const result = buildModelOutput(lines.join('\n'), { ...meta, exitCode: 1 })
+      assert.ok(result.includes('error TS2345') || result.includes('expected string'),
+        'model output should surface the diagnostic line, not just head/tail noise')
+      assert.ok(result.includes('error-aware'), 'should mark error-aware truncation')
+      assert.ok(result.includes('lines omitted'), 'should report omitted noise lines')
+    })
+
+    it('small failed output under threshold passes through complete (no error-aware)', () => {
+      const lines = Array.from({ length: 10 }, (_, i) => `fail line ${i}`).join('\n')
+      const result = buildModelOutput(lines, { ...meta, exitCode: 1 })
+      assert.ok(result.includes('fail line 0') && result.includes('fail line 9'))
+      assert.ok(!result.includes('error-aware'), 'small failures stay complete')
+    })
+
     it('handles empty output', () => {
       const result = buildModelOutput('', meta)
       assert.ok(result.includes('lines=0'))

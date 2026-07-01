@@ -3002,7 +3002,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       setAutoSafe: (v: boolean) => { autoSafeRef.current = v },
       rollbackTokenRef,
       setCockpitPanel: () => {},
-      pushStatic: (entry) => { app.commitStatic(entry.content) },
+      pushStatic: (entry) => { app.commitStatic(entry.content, { isError: entry.isError }) },
       setIsStreaming: (v: boolean) => { app.setStreamingState(v) },
       setCacheHitRate: (v: number) => { cacheHitRate = v },
       setSummaryState: () => {},

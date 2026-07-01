@@ -92,6 +92,39 @@ describe('createMcpToolWrapper', () => {
     assert.ok(result.content.includes('Connection lost'))
   })
 
+  it('MCP tool error: model content is concise (first line), full text in uiContent', async () => {
+    const mcpDef = {
+      name: 'fail',
+      description: 'Always fails',
+      inputSchema: { type: 'object' as const, properties: {} },
+    }
+    const bigError = 'Server error: root cause here\n' + Array.from({ length: 50 }, (_, i) => `stack frame ${i}`).join('\n')
+    const callTool = async () => ({ content: [{ type: 'text' as const, text: bigError }], isError: true })
+    const tool = createMcpToolWrapper('test', mcpDef, callTool)
+    const result = await tool.execute({ input: {}, toolUseId: 'tu_1', cwd: '/tmp' })
+
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('root cause here'), 'model sees the first-line reason')
+    assert.ok(!result.content.includes('stack frame 40'), 'model does NOT get the full stack dump')
+    assert.ok(result.uiContent && result.uiContent.includes('stack frame 49'), 'uiContent keeps full text for TUI')
+  })
+
+  it('MCP exception: model content concise, full message in uiContent', async () => {
+    const mcpDef = {
+      name: 'crash',
+      description: 'Crashes',
+      inputSchema: { type: 'object' as const, properties: {} },
+    }
+    const callTool = async () => { throw new Error('Connection lost\nverbose detail line') }
+    const tool = createMcpToolWrapper('test', mcpDef, callTool)
+    const result = await tool.execute({ input: {}, toolUseId: 'tu_1', cwd: '/tmp' })
+
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('Connection lost'))
+    assert.ok(!result.content.includes('verbose detail line'), 'model content omits the verbose tail')
+    assert.ok(result.uiContent && result.uiContent.includes('verbose detail line'), 'uiContent keeps full message')
+  })
+
   it('converts MCP inputSchema to Rivet input_schema', () => {
     const mcpDef = {
       name: 'write',

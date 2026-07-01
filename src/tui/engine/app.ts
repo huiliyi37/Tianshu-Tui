@@ -1551,9 +1551,13 @@ export class TuiApp {
   }
 
   /** 将静态文本提交到 scrollback（slash command 输出等） */
-  commitStatic(text: string): void {
+  commitStatic(text: string, opts?: { isError?: boolean }): void {
+    // isError：错误类系统消息以 ✗ + error 色高亮，避免与普通输出混为一谈。
+    const out = opts?.isError
+      ? text.split('\n').map((l, i) => color(i === 0 ? `✗ ${l}` : l, this.theme.error)).join('\n')
+      : text
     this.commitAbove(() => {
-      this.commit.write({ text, trailingNewline: true })
+      this.commit.write({ text: out, trailingNewline: true })
     })
   }
 
@@ -2371,7 +2375,7 @@ export class TuiApp {
     this.resetRunLocalState()
     this.commitAbove(() => {
       this.commit.write({
-        text: `Error: ${error.message}`,
+        text: color(`✗ Error: ${error.message}`, this.theme.error),
         trailingNewline: true,
       })
     })

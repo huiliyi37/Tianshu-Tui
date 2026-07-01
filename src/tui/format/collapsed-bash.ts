@@ -150,16 +150,19 @@ export function formatCollapsedBashGroup(input: FormatCollapsedBashGroupInput): 
       const childPrefix = isLast ? '│     ' : '│  │  '
       const failedMarker = entry.isError ? color(' ✗', theme.error) : ''
       lines.push(`${connector} ${color(entry.command, theme.muted)}${failedMarker}`)
-      if (entry.content && !entry.isError) {
+      if (entry.content) {
         const maxWidth = Math.max(10, (input.columns ?? 80) - childPrefix.length)
-        const previewLines = entry.content.replace(/\n+$/, '').split('\n').slice(0, 3)
+        const allLines = entry.content.replace(/\n+$/, '').split('\n')
+        // 失败：取尾部 3 行（报错原因通常在末尾）并以 error 色高亮；成功：取头部 3 行、muted。
+        const previewLines = entry.isError ? allLines.slice(-3) : allLines.slice(0, 3)
+        const previewColor = entry.isError ? theme.error : theme.muted
         for (const pl of previewLines) {
           const trimmed = displayWidth(pl) > maxWidth ? truncateToDisplayWidth(pl, maxWidth - 2) + '…' : pl
-          lines.push(`${childPrefix}${color(trimmed, theme.muted)}`)
+          lines.push(`${childPrefix}${color(trimmed, previewColor)}`)
         }
-        const totalLines = entry.content.split('\n').length
-        if (totalLines > 3) {
-          lines.push(color(`${childPrefix}… +${totalLines - 3} more lines`, theme.muted))
+        if (allLines.length > 3) {
+          const moreNote = entry.isError ? `… +${allLines.length - 3} earlier lines` : `… +${allLines.length - 3} more lines`
+          lines.push(color(`${childPrefix}${moreNote}`, theme.muted))
         }
       }
     }

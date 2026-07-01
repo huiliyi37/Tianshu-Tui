@@ -171,7 +171,7 @@ describe('formatCollapsedBashGroup', () => {
       { id: '2', command: 'ls', completed: true, content: 'a\nb' },
     ])
     const lines = formatCollapsedBashGroup({ group, theme })
-    assert.ok(lines[0]!.includes('●'))
+    assert.ok(lines[0]!.includes('▶'))
     assert.ok(lines[0]!.includes('Ran 2 shell commands'))
   })
 

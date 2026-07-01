@@ -53,6 +53,24 @@ describe('formatCollapsedBashGroup', () => {
     const lines = formatCollapsedBashGroup({ group, expanded: true, theme, columns: 80 }).map(stripAnsi)
     assert.ok(lines.some(l => l.includes('✗')), 'error marker')
   })
+
+  it('shows tail stderr preview for failed entries (not just the marker)', () => {
+    const group = makeGroup([
+      {
+        id: '1',
+        command: 'npm run build',
+        completed: true,
+        isError: true,
+        content: 'compiling...\nsome noise\nError: build failed at step 3',
+        startMs: Date.now() - 1000,
+      },
+    ])
+    const lines = formatCollapsedBashGroup({ group, expanded: true, theme, columns: 80 }).map(stripAnsi)
+    assert.ok(
+      lines.some(l => l.includes('Error: build failed at step 3')),
+      'failed command shows its tail stderr, not a silent card',
+    )
+  })
 })
 
 describe('formatCollapsedBashGroupLive', () => {

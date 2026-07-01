@@ -181,6 +181,24 @@ describe('BASH_TOOL 空 stdout 的成功命令 → confirmed empty(不是 "Exit 
       rmSync(dir, { recursive: true, force: true })
     }
   })
+
+  it('environment 类失败给模型标准化简洁 body，完整原文入 uiContent', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-bash-env-'))
+    try {
+      const result = await BASH_TOOL.execute({
+        input: { command: 'this_command_surely_does_not_exist_xyz_123' },
+        toolUseId: 'bash-env-test',
+        cwd: dir,
+      })
+      assert.equal(result.isError, true)
+      assert.equal(result.errorClass, 'environment')
+      assert.match(result.content, /环境\/配置问题/, 'model 正文为标准化简洁体')
+      assert.match(result.content, /command not found/, '含具体原因')
+      assert.ok(result.uiContent && result.uiContent.length > 0, '完整原文保留在 uiContent 供 TUI 展示')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('rtkRewrite cache behavior', () => {

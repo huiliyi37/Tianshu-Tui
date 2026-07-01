@@ -104,6 +104,25 @@ describe('TurnHarness', () => {
     assert.equal(trajectory.getEntries()[0]!.status, 'retried-failed')
   })
 
+  it('caps oversized failure content before the retries-failed suffix', async () => {
+    const trajectory = new TrajectoryRecorder()
+    const harness = new TurnHarness(makeConfig({ maxRetries: 1, retryableClasses: ['timeout'] }), trajectory)
+    const huge = 'ECONNRESET ' + 'x'.repeat(5000)
+    const result = await harness.executeTool({
+      id: 'tu_cap',
+      name: 'bash',
+      input: { command: 'curl api' },
+      turn: 1,
+      execute: async () => ({ content: huge, isError: true }),
+      classify: () => 'timeout',
+      isConcurrencySafe: true,
+    })
+    assert.equal(result.isError, true)
+    assert.ok(result.content.includes('[All 1 retries failed.'), 'keeps the failure suffix')
+    assert.ok(result.content.includes('chars truncated'), 'oversized content is head-capped')
+    assert.ok(result.content.length < huge.length, 'total content shrunk vs raw stderr')
+  })
+
   it('retries up to maxRetries attempts', async () => {
     const trajectory = new TrajectoryRecorder()
     const harness = new TurnHarness(makeConfig({ maxRetries: 3, retryableClasses: ['timeout'] }), trajectory)
