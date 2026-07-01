@@ -3303,6 +3303,36 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  // /yes needs the same TUI state sync as /auto so worker pills / glance bar
+  // reflect the real approval mode.
+  register("/yes", {
+    description: "YOLO 模式 — 一键跳过所有审批（再次输入关闭）",
+    immediate: true,
+    handler: ({ trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      const sub = parts[1]?.toLowerCase()
+      const currentlyYolo = (ctx.agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
+      let enable: boolean
+      if (sub === 'on') enable = true
+      else if (sub === 'off') enable = false
+      else enable = !currentlyYolo
+
+      if (enable) {
+        ctx.agent.setApprovalMode('dangerously-skip-permissions')
+        autoSafeRef.current = false
+        app.setApprovalMode('dangerously-skip-permissions')
+        app.commitStatic('YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。')
+      } else {
+        ctx.agent.setApprovalMode('auto-safe')
+        autoSafeRef.current = true
+        app.setApprovalMode('auto-safe')
+        app.commitStatic('YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。')
+      }
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
   // Ecosystem workflow commands: resolve to agent prompt and submit directly.
   // When the resolver has no mapping (e.g. empty /team or /plan), fall back to
   // the shared handler so usage hints are shown instead of being rejected.
