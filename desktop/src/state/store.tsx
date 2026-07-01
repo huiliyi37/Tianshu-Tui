@@ -46,6 +46,8 @@ export interface UiState {
    *  Resets when the workspace width recovers above the responsive threshold. */
   reviewManuallyToggled: boolean
   newSessionPrompt: string | null
+  /** Provider-connect wizard open state (guided model/provider setup). */
+  connectOpen: boolean
 }
 
 type UiAction =
@@ -64,6 +66,7 @@ type UiAction =
   | { type: 'toggleZen' }
   | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
+  | { type: 'openConnect'; open: boolean }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -125,6 +128,8 @@ function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, splitMode: action.mode }
     case 'setReviewManual':
       return { ...state, reviewManuallyToggled: action.on }
+    case 'openConnect':
+      return { ...state, connectOpen: action.open }
     default:
       return state
   }
@@ -150,6 +155,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     openTabs: loadOpenTabs(),
     splitMode: loadSplitMode(),
     reviewManuallyToggled: false,
+    connectOpen: false,
   }))
 
   useEffect(() => {

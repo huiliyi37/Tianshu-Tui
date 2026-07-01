@@ -28,6 +28,7 @@ import {
   CommandItem,
 } from '@/components/ui/command'
 import { CheckIcon } from 'lucide-react'
+import { useUiDispatch } from '../state/store'
 
 // Cursor 3.0-style "+" menu. Root DropdownMenu consolidates mode / image / slash
 // commands; Models / Skills / 星域 / MCP open a Command-dialog sub-panel
@@ -68,6 +69,7 @@ export function PlusMenu(props: {
   } = props
   const planning = planMode === 'planning'
   const [panel, setPanel] = useState<Panel | null>(null)
+  const dispatch = useUiDispatch()
 
   const closeSub = () => setPanel(null)
   const openSub = (p: Panel) => setPanel(p)
@@ -129,6 +131,11 @@ export function PlusMenu(props: {
           )}
 
           <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={pick(() => dispatch({ type: 'openConnect', open: true }))}>
+            <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>◈</span>
+            <span>连接模型服务商</span>
+            <span className="ml-auto text-xs text-muted-foreground">配 Key / 加服务商</span>
+          </DropdownMenuItem>
           {([
             { glyph: '◇', label: 'Models', panel: 'models' as const },
             { glyph: '✦', label: 'Skills', panel: 'skills' as const },
