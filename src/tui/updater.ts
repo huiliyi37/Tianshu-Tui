@@ -23,7 +23,9 @@ import { WinStreamDecoder } from '../platform.js'
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org'
 const GITHUB_API_URL = 'https://api.github.com/repos'
 const UPDATE_CHECK_TIMEOUT_MS = 5_000
-const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
+// 旧值 24h 会导致用户安装新版本后一整天都看不到更新横幅。
+// npm 发布频率下 1h 足够及时，又不会过度请求 registry。
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000
 
 interface UpdateCache {
   timestamp: number
