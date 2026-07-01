@@ -676,12 +676,51 @@ export interface PrDetail extends PrSummary {
   files: { path: string; additions: number; deletions: number; status: string }[]
 }
 
+/** Pending inline review comment (mirrors gh-cli PrReviewComment). */
+export interface PrReviewComment {
+  path: string
+  oldLine?: number
+  newLine?: number
+  body: string
+}
+
+/** Review submission payload (mirrors gh-cli PrReviewInput — keep in sync). */
+export interface PrReviewInput {
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+  body: string
+  comments: PrReviewComment[]
+}
+
 export async function listGithubPrs(): Promise<{ prs: PrSummary[]; ghAvailable: boolean }> {
   return apiGet<{ prs: PrSummary[]; ghAvailable: boolean }>('/github/prs')
 }
 
 export async function getGithubPr(number: number): Promise<PrDetail> {
   return apiGet<PrDetail>(`/github/prs/${number}`)
+}
+
+export async function getGithubPrDiff(number: number): Promise<string> {
+  const { diff } = await apiGet<{ diff: string }>(`/github/prs/${number}/diff`)
+  return diff
+}
+
+/**
+ * Submit a PR review. On failure, surfaces gh's stderr from the JSON error body
+ * (apiPost would discard it) so the caller can show what actually went wrong.
+ */
+export async function submitGithubPrReview(number: number, input: PrReviewInput): Promise<void> {
+  const res = await rivetFetch(`/github/prs/${number}/review`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    let message = `POST /github/prs/${number}/review -> ${res.status}`
+    try {
+      const err = (await res.json()) as { error?: string }
+      if (err?.error) message = err.error
+    } catch { /* body not JSON — keep the status message */ }
+    throw new Error(message)
+  }
 }
 
 // ── Config: Provider Management ─────────────────────────────────────

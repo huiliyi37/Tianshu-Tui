@@ -41,21 +41,73 @@ export interface PrFile {
   status: string
 }
 
+/** A pending inline review comment anchored to a diff line. */
+export interface PrReviewComment {
+  path: string
+  /** Diff line number to anchor on. RIGHT → new-side line; LEFT → old-side line. */
+  oldLine?: number
+  newLine?: number
+  body: string
+}
+
+/** Input for submitting a PR review (verdict + summary + inline comments). */
+export interface PrReviewInput {
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+  body: string
+  comments: PrReviewComment[]
+}
+
+/** GitHub reviews API payload shape (POST /pulls/:n/reviews). */
+export interface GithubReviewPayload {
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+  body?: string
+  comments?: { path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string }[]
+}
+
+/** Result of a write-capable gh invocation (stderr surfaced for the UI). */
+export interface GhResult {
+  ok: boolean
+  stdout: string
+  stderr: string
+  code: number | null
+}
+
 const TIMEOUT_MS = 15_000
 
 async function runGh(args: string[], cwd: string): Promise<string | null> {
+  const res = await runGhCapture(args, cwd)
+  return res.ok ? res.stdout : null
+}
+
+/**
+ * Run `gh` capturing stdout+stderr+exit code, with optional stdin input.
+ * Unlike {@link runGh} (which drops stderr and collapses failures to null),
+ * this surfaces gh's error message so write operations can report why they
+ * failed. `input` is piped to stdin then closed (for `gh api --input -`).
+ */
+export async function runGhCapture(args: string[], cwd: string, input?: string): Promise<GhResult> {
   return new Promise((resolve) => {
     const child = spawnHidden('gh', args, {
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       timeout: TIMEOUT_MS,
     })
-    const chunks: Buffer[] = []
-    child.stdout?.on('data', (d: Buffer) => chunks.push(d))
-    child.on('error', () => resolve(null))
+    const out: Buffer[] = []
+    const err: Buffer[] = []
+    child.stdout?.on('data', (d: Buffer) => out.push(d))
+    child.stderr?.on('data', (d: Buffer) => err.push(d))
+    child.on('error', (e) => resolve({ ok: false, stdout: '', stderr: String(e), code: null }))
     child.on('close', (code) => {
-      resolve(code === 0 ? Buffer.concat(chunks).toString('utf-8') : null)
+      resolve({
+        ok: code === 0,
+        stdout: Buffer.concat(out).toString('utf-8'),
+        stderr: Buffer.concat(err).toString('utf-8'),
+        code,
+      })
     })
+    if (input !== undefined) {
+      child.stdin?.end(input)
+    }
   })
 }
 
@@ -115,28 +167,112 @@ export async function getPrDetail(cwd: string, number: number): Promise<PrDetail
         const comments = Array.isArray(cd.comments) ? cd.comments : []
         const reviews = Array.isArray(cd.reviews) ? cd.reviews : []
         for (const c of [...comments, ...reviews] as Record<string, unknown>[]) {
+          // Skip empty review shells (e.g. an APPROVE with no summary body).
+          const body = String(c.body ?? '')
+          if (!body) continue
           summary.comments.push({
             author: typeof c.author === 'object' && c.author ? String((c.author as Record<string, unknown>).login ?? '') : '',
-            body: String(c.body ?? ''),
+            body,
             createdAt: String(c.createdAt ?? ''),
           })
         }
       } catch { /* ignore */ }
     }
 
-    const filesRaw = await runGh(['pr', 'diff', String(number), '--name-only'], cwd)
+    // Inline review comments (path/line) are not exposed by `gh pr view --json`,
+    // so pull them from the review-comments API endpoint and merge in.
+    const inline = await getPrReviewComments(cwd, number)
+    if (inline) summary.comments.push(...inline)
+
+    // Accurate per-file counts + status from the files API (name-only dropped them).
+    const filesRaw = await runGh(['pr', 'view', String(number), '--json', 'files'], cwd)
     if (filesRaw) {
-      for (const line of filesRaw.trim().split('\n')) {
-        if (line.trim()) {
-          summary.files.push({ path: line.trim(), additions: 0, deletions: 0, status: 'modified' })
+      try {
+        const fd = JSON.parse(filesRaw) as Record<string, unknown>
+        const files = Array.isArray(fd.files) ? (fd.files as Record<string, unknown>[]) : []
+        for (const f of files) {
+          const path = String(f.path ?? '')
+          if (!path) continue
+          summary.files.push({
+            path,
+            additions: Number(f.additions ?? 0),
+            deletions: Number(f.deletions ?? 0),
+            status: String(f.status ?? 'modified'),
+          })
         }
-      }
+      } catch { /* ignore */ }
     }
 
     return summary
   } catch {
     return null
   }
+}
+
+/** Full unified diff for a PR (`gh pr diff <n>`). Null when gh unavailable. */
+export async function getPrDiff(cwd: string, number: number): Promise<string | null> {
+  return runGh(['pr', 'diff', String(number)], cwd)
+}
+
+/**
+ * Inline review comments (path + line) via the review-comments API endpoint.
+ * `gh pr view --json` only exposes top-level comment/review bodies, so this
+ * recovers the per-line threads that would otherwise be dropped.
+ */
+export async function getPrReviewComments(cwd: string, number: number): Promise<PrComment[] | null> {
+  const raw = await runGh(['api', `repos/{owner}/{repo}/pulls/${number}/comments`, '--paginate'], cwd)
+  if (!raw) return null
+  try {
+    const arr = JSON.parse(raw) as Record<string, unknown>[]
+    if (!Array.isArray(arr)) return []
+    return arr.map(c => ({
+      author: typeof c.user === 'object' && c.user ? String((c.user as Record<string, unknown>).login ?? '') : '',
+      body: String(c.body ?? ''),
+      createdAt: String(c.created_at ?? ''),
+      path: c.path ? String(c.path) : undefined,
+      // `line` is the new-side line; fall back to original_line for outdated threads.
+      line: c.line != null ? Number(c.line) : (c.original_line != null ? Number(c.original_line) : undefined),
+    })).filter(c => c.body)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Map a review verdict + inline comments to the GitHub reviews API payload.
+ * Pure (no IO) so it can be unit-tested. Comments without any usable line
+ * anchor are dropped (the API rejects comments missing path+line). New-side
+ * lines map to RIGHT, deletions (old-side only) map to LEFT.
+ */
+export function buildReviewPayload(input: PrReviewInput): GithubReviewPayload {
+  const payload: GithubReviewPayload = { event: input.event }
+  const body = input.body?.trim()
+  if (body) payload.body = body
+  const comments = (input.comments ?? [])
+    .map((c) => {
+      const side: 'LEFT' | 'RIGHT' = c.newLine != null ? 'RIGHT' : 'LEFT'
+      const line = c.newLine != null ? c.newLine : c.oldLine
+      if (!c.path || line == null || !c.body?.trim()) return null
+      return { path: c.path, line, side, body: c.body.trim() }
+    })
+    .filter((c): c is NonNullable<typeof c> => c !== null)
+  if (comments.length > 0) payload.comments = comments
+  return payload
+}
+
+/**
+ * Submit a PR review (verdict + summary + inline comments) as one GitHub review
+ * via `gh api --method POST .../reviews --input -` (JSON piped over stdin;
+ * gh fills {owner}/{repo} from the cwd repo). Returns gh's result so the caller
+ * can surface stderr on failure.
+ */
+export async function submitPrReview(cwd: string, number: number, input: PrReviewInput): Promise<GhResult> {
+  const payload = buildReviewPayload(input)
+  return runGhCapture(
+    ['api', '--method', 'POST', `repos/{owner}/{repo}/pulls/${number}/reviews`, '--input', '-'],
+    cwd,
+    JSON.stringify(payload),
+  )
 }
 
 export async function isGhAvailable(cwd: string): Promise<boolean> {

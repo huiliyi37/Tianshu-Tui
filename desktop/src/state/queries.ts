@@ -12,6 +12,8 @@ import {
   getEnvironment,
   getHealth,
   getGithubPr,
+  getGithubPrDiff,
+  submitGithubPrReview,
   getHooks,
   getPlan,
   getFileDiff,
@@ -32,6 +34,7 @@ import {
   setHooks,
   setPlanMode,
   unarchiveSession,
+  type PrReviewInput,
 } from '../runtime/client'
 import type { HookEntry, PlanModeState } from '../runtime/types'
 
@@ -51,6 +54,7 @@ export const qk = {
   schedule: ['schedule'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
+  githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
   configProviders: ['config', 'providers'] as const,
   workingTree: ['git', 'working-tree'] as const,
   fileDiff: (path: string) => ['git', 'diff', path] as const,
@@ -320,6 +324,31 @@ export function useGithubPr(number: number | null) {
     queryKey: qk.githubPr(number ?? 0),
     queryFn: () => (number ? getGithubPr(number) : Promise.reject()),
     enabled: !!number,
+  })
+}
+
+/** Fetch a PR's full unified diff on demand (when a PR is selected). */
+export function useGithubPrDiff(number: number | null) {
+  return useQuery({
+    queryKey: qk.githubPrDiff(number ?? 0),
+    queryFn: () => (number ? getGithubPrDiff(number) : Promise.reject()),
+    enabled: !!number,
+    staleTime: 30_000,
+  })
+}
+
+/** Submit a PR review; refresh PR detail + list so the new verdict/comments show. */
+export function useSubmitPrReview(number: number | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: PrReviewInput) => {
+      if (!number) return Promise.reject(new Error('No PR selected'))
+      return submitGithubPrReview(number, input)
+    },
+    onSuccess: () => {
+      if (number) qc.invalidateQueries({ queryKey: qk.githubPr(number) })
+      qc.invalidateQueries({ queryKey: qk.githubPrs })
+    },
   })
 }
 

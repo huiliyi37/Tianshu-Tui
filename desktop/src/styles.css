@@ -2695,6 +2695,26 @@ body {
 .gh-comment { margin-bottom: 12px; padding: 10px; background: var(--panel-2); border-radius: var(--radius-md); }
 .gh-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
 .gh-comment-body { font-size: 13px; }
+.gh-files-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.gh-files-head h5 { margin: 0; }
+
+/* PR review action bar */
+.gh-review-bar { position: sticky; bottom: 0; margin-top: 16px; padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px; }
+.gh-review-verdicts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gh-verdict { padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: none; color: var(--text); cursor: pointer; font-size: 12px; }
+.gh-verdict:hover { background: var(--panel); }
+.gh-verdict.active.v-approve { background: var(--success); border-color: var(--success); color: #fff; }
+.gh-verdict.active.v-request_changes { background: var(--error); border-color: var(--error); color: #fff; }
+.gh-verdict.active.v-comment { background: var(--accent); border-color: var(--accent); color: #fff; }
+.gh-review-count { margin-left: auto; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.gh-review-summary { width: 100%; resize: vertical; padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: inherit; }
+.gh-review-error { font-size: 12px; color: var(--error); }
+.gh-review-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.gh-review-clear { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.gh-review-clear:disabled { opacity: 0.5; cursor: default; }
+.gh-review-submit { padding: 5px 16px; border: none; border-radius: var(--radius-sm); background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; }
+.gh-review-submit:disabled { opacity: 0.5; cursor: default; }
+.file-diff-comment-badge { margin-left: 6px; font-size: 11px; color: var(--muted); }
 
 /* Clickable file paths */
 .file-path-link {
