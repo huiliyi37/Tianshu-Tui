@@ -41,10 +41,20 @@ function shortHash(s: string): string {
   return h.toString(36).slice(0, 6)
 }
 
+/** Normalize a path for identity/dedup: unify separators to '/', strip trailing
+ *  slashes, and case-fold Windows paths (drive-letter or backslash present)
+ *  since Windows filesystems are case-insensitive. POSIX paths keep their case. */
+export function normalizePath(p: string): string {
+  if (!p) return p
+  let out = p.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (/^[a-zA-Z]:/.test(out) || p.includes('\\')) out = out.toLowerCase()
+  return out
+}
+
 /** Derive a stable id from a root path (slug + short hash). */
 export function projectId(root: string): string {
   const b = basename(root) || root
-  const normalized = root.replace(/[/\\]+$/, '')
+  const normalized = normalizePath(root)
   const slug = `${b}-${shortHash(normalized)}`
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -174,7 +184,7 @@ export function deriveProjects(sessions: SessionLike[], known: StoredProject[]):
   // resolves to that project (not a new one keyed by the leaf dir).
   const cwdToProjectId = new Map<string, string>()
   for (const k of known) {
-    for (const root of k.roots) cwdToProjectId.set(root, k.id)
+    for (const root of k.roots) cwdToProjectId.set(normalizePath(root), k.id)
     map.set(k.id, {
       id: k.id, roots: k.roots.slice(), name: k.name || basename(k.roots[0] ?? ''),
       threadCount: 0, lastActivity: 0,
@@ -182,7 +192,7 @@ export function deriveProjects(sessions: SessionLike[], known: StoredProject[]):
   }
   const ensure = (cwd: string): Project => {
     // a known multi-root project may list this cwd as a root → use its id
-    const knownId = cwdToProjectId.get(cwd)
+    const knownId = cwdToProjectId.get(normalizePath(cwd))
     const id = knownId ?? projectId(cwd)
     let p = map.get(id)
     if (!p) {

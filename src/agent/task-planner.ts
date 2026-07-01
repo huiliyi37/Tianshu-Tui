@@ -6,7 +6,6 @@
  */
 
 import { classifyTaskDepth, type TaskContract, type TaskDepthLayer } from '../context/task-contract.js'
-import type { WorkOrderKind, WorkerProfile } from './work-order.js'
 import {
   groupIntoWaves,
   renderTaskGraphSummary,
@@ -22,11 +21,42 @@ export interface PlanDecomposeInput {
   taskKinds?: string[]
 }
 
-const TEST_PATTERN = /\btest|TDD|测试|spec|coverage|单测|集成测试/i
-const REVIEW_PATTERN = /review|审查|验收|verify|验证|check/i
 const REFACTOR_PATTERN = /refactor|重构|rename|extract|move|迁移/i
-const DOC_PATTERN = /doc|文档|readme|jsdoc|comment/i
-const LINT_PATTERN = /lint|format|eslint|prettier|import.*sort|类型|type.*error|tsc/i
+
+/** Self-containment directive appended to every shard. Each capable worker runs
+ *  the FULL loop (implement + tsc/lint/tests) inside its own context, instead of
+ *  leaving cleanup to separate role workers — that is what kills the old vertical
+ *  pipeline (explore→patch→import→test→lint→type→verify). */
+const SHARD_SELF_VERIFY =
+  '\n\n本分片自包含:实现改动后,在本分片范围内自行运行 tsc / lint / 相关测试至通过,'
+  + '不要把整理 import、修类型、修 lint、补测试拆给其他分片或留给后续。'
+
+/** Top-level module path of a file (first two path segments, e.g. `src/tui`).
+ *  Used to group scope files into orthogonal shards that touch disjoint files. */
+function moduleKey(file: string): string {
+  const parts = file.split('/').filter(Boolean)
+  if (parts.length >= 2) return `${parts[0]}/${parts[1]}`
+  return parts[0] ?? file
+}
+
+/** Group files into orthogonal module shards. Different modules → parallelizable
+ *  shards; same module → one shard. Preserves first-seen order. */
+function groupFilesByModule(files: string[]): Array<{ label: string; files: string[] }> {
+  const map = new Map<string, string[]>()
+  for (const f of files) {
+    const key = moduleKey(f)
+    const arr = map.get(key) ?? []
+    arr.push(f)
+    map.set(key, arr)
+  }
+  return [...map.entries()].map(([label, groupFiles]) => ({ label, files: groupFiles }))
+}
+
+function shardRisk(depth: TaskDepthLayer, fileCount: number): 'low' | 'medium' | 'high' {
+  if (depth === 'system') return 'high'
+  if (depth === 'wiring' || fileCount >= 2) return 'medium'
+  return 'low'
+}
 
 function inferDepth(input: PlanDecomposeInput): TaskDepthLayer {
   if (input.depthLayer) return input.depthLayer
@@ -49,7 +79,20 @@ function nextId(prefix: string, index: number): string {
 }
 
 /**
- * Decompose an objective into a TaskGraph using verb/heuristic rules.
+ * Decompose an objective into a TaskGraph of HORIZONTAL, orthogonal shards.
+ *
+ * Each shard is a self-contained unit of work — one capable worker owns it
+ * end-to-end (implement + run tsc/lint/tests to green in its own context). This
+ * replaces the old VERTICAL role pipeline (explore→patch→import→test→lint→type
+ * →verify), which fragmented one coherent change across many weak role workers
+ * running serially.
+ *
+ * Splitting is by module boundary so shards touch disjoint files and run in
+ * parallel; an optional upfront explore shard is added only for broad/structural
+ * work that needs shared global context. Disjoint shards carry no cross-deps;
+ * overlap-with-ordering is the main controller's job (and is enforced downstream
+ * by groupTeamTasks same-file serialization + the file-claim registry).
+ *
  * Does not call LLM — deterministic and fast for plan-then-execute bootstrap.
  */
 export function decomposeObjective(input: PlanDecomposeInput): TaskGraph {
@@ -65,132 +108,55 @@ export function decomposeObjective(input: PlanDecomposeInput): TaskGraph {
     return id
   }
 
-  const exploreId = add({
-    title: 'Explore codebase',
-    objective: `Explore and map relevant code for: ${objective}`,
-    profile: 'code_scout',
-    kind: 'code_search',
-    files,
-    dependsOn: [],
-    riskTier: 'low',
-  })
-
-  let lastWriteId = exploreId
-
-  if (REFACTOR_PATTERN.test(objective) || files.length >= 3) {
-    const archId = add({
-      title: 'Architecture analysis',
-      objective: `Analyze module boundaries and impact for: ${objective}`,
-      profile: 'architect',
+  // Optional upfront exploration — only when shards need shared global context
+  // (structural / cross-module / refactor / many-file work). Small single-module
+  // work skips it: the shard worker explores its own area inline.
+  const needsExplore = depth === 'system' || depth === 'wiring'
+    || REFACTOR_PATTERN.test(objective) || files.length >= 4
+  const baseDeps: string[] = []
+  if (needsExplore) {
+    const exploreObjective = depth === 'system'
+      ? `Explore and map module boundaries, dependencies and blast radius for: ${objective}`
+      : `Explore and map relevant code for: ${objective}`
+    baseDeps.push(add({
+      title: 'Explore codebase',
+      objective: exploreObjective,
+      profile: 'code_scout',
       kind: 'code_search',
       files,
-      dependsOn: [exploreId],
-      riskTier: depth === 'system' ? 'high' : 'medium',
-    })
-    lastWriteId = archId
+      dependsOn: [],
+      riskTier: 'low',
+    }))
   }
 
-  if (!REVIEW_PATTERN.test(objective) && !LINT_PATTERN.test(objective)) {
-    const patchId = add({
-      title: 'Implement changes',
-      objective,
+  const groups = groupFilesByModule(files)
+  if (groups.length <= 1) {
+    // One self-contained shard — the worker handles the whole objective
+    // (implement + verify) end-to-end in its own context.
+    add({
+      title: objective.length > 80 ? `${objective.slice(0, 77)}...` : objective,
+      objective: objective + SHARD_SELF_VERIFY,
       profile: 'patcher',
       kind: 'patch_proposal',
       files,
-      dependsOn: [lastWriteId],
-      riskTier: depth === 'system' ? 'high' : files.length >= 2 ? 'medium' : 'low',
+      dependsOn: [...baseDeps],
+      riskTier: shardRisk(depth, files.length),
     })
-    lastWriteId = patchId
-
-    if (depth !== 'unit' || files.length >= 2) {
+  } else {
+    // Horizontal orthogonal shards — one self-contained worker per module,
+    // touching disjoint files so they run in parallel.
+    for (const group of groups) {
       add({
-        title: 'Organize imports',
-        objective: `Sort and clean imports for changed files: ${files.join(', ') || 'scope files'}`,
-        profile: 'import_organizer',
+        title: `${group.label}: ${objective}`.slice(0, 80),
+        objective: `${objective}\n\n本分片只负责模块 ${group.label} 的改动(文件:${group.files.join(', ')}),`
+          + `与其他分片并行执行,不要改动本分片范围外的文件。${SHARD_SELF_VERIFY}`,
+        profile: 'patcher',
         kind: 'patch_proposal',
-        files,
-        dependsOn: [patchId],
-        riskTier: 'low',
+        files: group.files,
+        dependsOn: [...baseDeps],
+        riskTier: shardRisk(depth, group.files.length),
       })
     }
-  }
-
-  if (TEST_PATTERN.test(objective) || depth !== 'unit') {
-    add({
-      title: 'Scaffold tests',
-      objective: `Generate test skeletons for: ${files.join(', ') || objective}`,
-      profile: 'test_scaffolder',
-      kind: 'patch_proposal',
-      files,
-      dependsOn: [lastWriteId],
-      riskTier: 'low',
-    })
-  }
-
-  if (LINT_PATTERN.test(objective) || !REVIEW_PATTERN.test(objective)) {
-    add({
-      title: 'Fix lint issues',
-      objective: `Run linter and fix violations in: ${files.join(', ') || 'changed files'}`,
-      profile: 'lint_fixer',
-      kind: 'patch_proposal',
-      files,
-      dependsOn: [lastWriteId],
-      riskTier: 'low',
-    })
-    add({
-      title: 'Fix type errors',
-      objective: `Run tsc and fix type errors in: ${files.join(', ') || 'changed files'}`,
-      profile: 'type_fixer',
-      kind: 'patch_proposal',
-      files,
-      dependsOn: [lastWriteId],
-      riskTier: 'low',
-    })
-  }
-
-  if (DOC_PATTERN.test(objective)) {
-    add({
-      title: 'Sync documentation',
-      objective: `Update docs and JSDoc to match code for: ${objective}`,
-      profile: 'doc_syncer',
-      kind: 'patch_proposal',
-      files,
-      dependsOn: [lastWriteId],
-      riskTier: 'low',
-    })
-  }
-
-  const verifyProfile: WorkerProfile = depth === 'system' ? 'adversarial_verifier' : 'verifier'
-  add({
-    title: 'Verify changes',
-    objective: `Verify implementation for: ${objective}`,
-    profile: verifyProfile,
-    kind: 'verify',
-    files,
-    dependsOn: nodes.filter(n => n.profile !== 'code_scout' && n.profile !== 'architect').map(n => n.id),
-    riskTier: depth === 'system' ? 'high' : 'medium',
-  })
-
-  if (REVIEW_PATTERN.test(objective)) {
-    add({
-      title: 'Code review',
-      objective: `Review changes for: ${objective}`,
-      profile: 'reviewer',
-      kind: 'review',
-      files,
-      dependsOn: [exploreId],
-      riskTier: 'medium',
-    })
-  }
-
-  // Deduplicate verify deps — only depend on leaf write tasks
-  const writeNodes = nodes.filter(n =>
-    n.profile === 'patcher' || n.profile === 'lint_fixer' || n.profile === 'type_fixer'
-    || n.profile === 'test_scaffolder' || n.profile === 'import_organizer' || n.profile === 'doc_syncer',
-  )
-  const verifyNode = nodes.find(n => n.kind === 'verify')
-  if (verifyNode && writeNodes.length > 0) {
-    verifyNode.dependsOn = [...new Set(writeNodes.map(n => n.id))]
   }
 
   const graph: TaskGraph = {

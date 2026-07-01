@@ -21,6 +21,8 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  InstallableSkillsResponse,
+  SkillInstallResult,
   StorageApplyResult,
   StorageOptions,
   WorkingTreeResponse,
@@ -191,6 +193,11 @@ export async function openFile(path: string): Promise<void> {
   await apiPost('/open-file', { path })
 }
 
+/** Open an external URL in the system browser via the sidecar. */
+export async function openExternal(url: string): Promise<void> {
+  await apiPost('/open-external', { url })
+}
+
 export async function listAllSessions(): Promise<SessionRecord[]> {
   const { sessions } = await apiGet<{ sessions: SessionRecord[] }>('/sessions?includeArchived=true')
   return sessions
@@ -202,6 +209,23 @@ export function getSession(id: string): Promise<SessionRecord> {
 
 export function sendPrompt(id: string, prompt: string, images?: string[]): Promise<SessionRecord> {
   return apiPost<SessionRecord>(`/sessions/${id}/prompt`, { prompt, ...(images?.length ? { images } : {}) })
+}
+
+/** User-dispatched background subagent. Returns the worker id; progress arrives
+ *  via the session's delegation SSE events. Does not block the main turn. */
+export interface DelegateWorkerInput {
+  objective: string
+  profile?: string
+  authority?: string
+  files?: string[]
+}
+export function delegateWorker(id: string, input: DelegateWorkerInput): Promise<{ workerId: string }> {
+  return apiPost<{ workerId: string }>(`/sessions/${id}/delegate`, input)
+}
+
+/** Cancel a user-dispatched background subagent. */
+export function abortDelegateWorker(id: string, workerId: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/delegate/${workerId}/abort`)
 }
 
 /**
@@ -396,6 +420,19 @@ export function setSkillEnabled(
   enabled: boolean,
 ): Promise<{ id: string; name: string; enabled: boolean }> {
   return apiPost<{ id: string; name: string; enabled: boolean }>(`/sessions/${id}/skills`, { name, enabled })
+}
+
+/** List skills installable from .claude/skills (project + global) + install-cap context. */
+export function listInstallableSkills(id: string): Promise<InstallableSkillsResponse> {
+  return apiGet<InstallableSkillsResponse>(`/sessions/${id}/skills/installable`)
+}
+
+/**
+ * Copy the named skills into .rivet/skills. No hot-load: the installed skills
+ * take effect on the next session.
+ */
+export function installSkills(id: string, names: string[]): Promise<SkillInstallResult> {
+  return apiPost<SkillInstallResult>(`/sessions/${id}/skills/install`, { names })
 }
 
 // ── Plan mode ───────────────────────────────────────────────────────

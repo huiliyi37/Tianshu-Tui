@@ -8,7 +8,7 @@
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { starDomainRegistry } from '../../agent/star-domain-registry.js'
 import { color } from '../engine/ansi.js'
-import { displayWidth } from '../width.js'
+import { displayWidth, truncateToDisplayWidth } from '../width.js'
 import { getActiveThemeName, type RivetTheme } from '../theme.js'
 
 /** 星域名称 → 主题语义色键（用于 input border / prompt accent 着色）。 */
@@ -56,7 +56,12 @@ export interface TodoSummary {
   total: number
   done: number
   inProgress: number
+  /** 当前 in_progress 任务的 content（用于状态栏显示"正在做哪条"）。 */
+  current?: string
 }
+
+/** 状态栏当前任务名最大显示列宽（CJK 口径），超出截断为 …。 */
+const CURRENT_TASK_MAX_WIDTH = 24
 
 export interface GlanceBarInput {
   /** 终端宽度 */
@@ -131,12 +136,21 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     parts.push(color(goalText, goalColor))
   }
 
-  // Todo 摘要
+  // Todo 摘要。宽屏时把"正在做哪条"也显示出来（用当前 in_progress 任务的 content，
+  // 而非仅 ◐ 计数）——同一时刻通常只有一个 in_progress，任务名比数字更有信息量。
   if (input.todoSummary && input.todoSummary.total > 0) {
     const t = input.todoSummary
-    const todoText = narrow
-      ? `☐${t.done}/${t.total}`
-      : `☐ ${t.done}/${t.total}${t.inProgress > 0 ? ` · ◐ ${t.inProgress}` : ''}`
+    let todoText: string
+    if (narrow) {
+      todoText = `☐${t.done}/${t.total}`
+    } else if (t.current) {
+      const name = displayWidth(t.current, { ambiguousAsWide: true }) > CURRENT_TASK_MAX_WIDTH
+        ? `${truncateToDisplayWidth(t.current, CURRENT_TASK_MAX_WIDTH - 1, { ambiguousAsWide: true })}…`
+        : t.current
+      todoText = `☐ ${t.done}/${t.total} · ◐ ${name}`
+    } else {
+      todoText = `☐ ${t.done}/${t.total}${t.inProgress > 0 ? ` · ◐ ${t.inProgress}` : ''}`
+    }
     parts.push(color(todoText, theme.primary))
   }
 

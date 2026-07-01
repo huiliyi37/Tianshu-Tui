@@ -8,6 +8,8 @@
 import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { win32 as winPath } from 'node:path'
 import type { EditorPlatform, EditorEol } from './config/schema.js'
 import { TextDecoder } from 'node:util'
 
@@ -16,6 +18,12 @@ export interface ShellCommand {
   cmd: string
   /** Args to pass to the shell, WITHOUT the user command appended. */
   args: string[]
+  /**
+   * Shell family — lets callers pick the correct command wrapping/encoding
+   * (e.g. Git Bash needs no chcp; cmd needs `chcp 65001`) by semantics instead
+   * of fragile string matching on `cmd`.
+   */
+  kind: 'bash' | 'powershell' | 'cmd' | 'sh'
 }
 
 /** Build the full shell args by appending the user's command. */
@@ -71,34 +79,169 @@ export function getTargetEol(): 'crlf' | 'lf' {
 /** Cached shell command to avoid repeated spawnSync on every tool call. */
 let _cachedShell: ShellCommand | null = null
 
+/** Cached Git Bash path (string = found, null = absent). undefined = not probed. */
+let _cachedGitBash: string | null | undefined
+
+/** Injectable dependencies for {@link resolveGitBashPath} (pure, unit-testable). */
+export interface GitBashProbeDeps {
+  isWindows: boolean
+  env: NodeJS.ProcessEnv
+  /** Absolute path to git.exe if on PATH, otherwise undefined. */
+  whichGit: () => string | undefined
+  exists: (p: string) => boolean
+}
+
 /**
- * Detect the best available shell on the current platform.
+ * Pure resolution of the Git Bash (`bash.exe`) path on Windows. Mirrors
+ * claude code's probe order so behavior is predictable across environments:
+ *   1. `RIVET_GIT_BASH_PATH` override
+ *   2. derive from `where git` (…\Git\cmd\git.exe → …\Git\bin\bash.exe)
+ *   3. common install locations (Program Files / LocalAppData)
+ * All path math uses win32 semantics so it's deterministic when unit-tested on
+ * POSIX hosts. Returns null when not on Windows or not found.
+ */
+export function resolveGitBashPath(deps: GitBashProbeDeps): string | null {
+  if (!deps.isWindows) return null
+
+  const override = deps.env['RIVET_GIT_BASH_PATH']
+  if (override && deps.exists(override)) return override
+
+  const gitPath = deps.whichGit()
+  if (gitPath) {
+    // git.exe usually lives in …\Git\cmd\ or …\Git\bin\; bash.exe is …\Git\bin\.
+    const gitRoot = winPath.dirname(winPath.dirname(gitPath))
+    const bashPath = winPath.join(gitRoot, 'bin', 'bash.exe')
+    if (deps.exists(bashPath)) return bashPath
+  }
+
+  const candidates = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ]
+  const localApp = deps.env['LOCALAPPDATA']
+  if (localApp) candidates.push(winPath.join(localApp, 'Programs', 'Git', 'bin', 'bash.exe'))
+  for (const c of candidates) {
+    if (deps.exists(c)) return c
+  }
+  return null
+}
+
+/** Locate git.exe on PATH via `where` (Windows). Returns first hit or undefined. */
+function whichGitWindows(): string | undefined {
+  try {
+    const result = spawnSync('where', ['git'], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 })
+    if (result.status === 0) {
+      const first = result.stdout.toString().split('\n')[0]?.trim()
+      return first && first.length > 0 ? first : undefined
+    }
+  } catch { /* best-effort */ }
+  return undefined
+}
+
+/** Cached, real-IO Git Bash path probe. */
+export function findGitBashPath(): string | null {
+  if (_cachedGitBash !== undefined) return _cachedGitBash
+  _cachedGitBash = resolveGitBashPath({
+    isWindows: isWin,
+    env: process.env,
+    whichGit: whichGitWindows,
+    exists: existsSync,
+  })
+  return _cachedGitBash
+}
+
+/** Injectable dependencies for {@link resolveShellCommand} (pure, unit-testable). */
+export interface ShellProbeDeps {
+  isWindows: boolean
+  env: NodeJS.ProcessEnv
+  /** Resolved Git Bash path, or null when absent. */
+  gitBashPath: string | null
+  /** True if the named PowerShell executable is on PATH. */
+  hasPwsh: (cmd: string) => boolean
+}
+
+/**
+ * Pure shell selection. On Windows the priority is Git Bash → PowerShell → cmd:
+ * Git Bash gives reliable POSIX execution (claude code's approach) and avoids the
+ * `powershell -Command` argument-mangling that silently swallowed commands
+ * (exit=0, empty stdout). PowerShell fallback uses -NonInteractive so it can't
+ * hang waiting on input. On Unix, plain `sh -c`.
+ */
+export function resolveShellCommand(deps: ShellProbeDeps): ShellCommand {
+  if (deps.isWindows) {
+    // Opt-in: force PowerShell even when Git Bash is present (parity with
+    // CLAUDE_CODE_USE_POWERSHELL_TOOL). Default stays Git-Bash-first since our
+    // model is bash-biased; power users who want native cmdlets set this.
+    const forcePwsh = /^(1|true|yes)$/i.test(deps.env['RIVET_USE_POWERSHELL'] ?? '')
+    if (!forcePwsh && deps.gitBashPath) {
+      // -l (login) so /etc/profile puts Git's usr/bin on PATH → coreutils
+      // (ls/cat/grep) work, not just bash builtins.
+      return { cmd: deps.gitBashPath, args: ['-l', '-c'], kind: 'bash' }
+    }
+    for (const cmd of ['pwsh.exe', 'powershell.exe']) {
+      if (deps.hasPwsh(cmd)) {
+        return { cmd, args: ['-NoProfile', '-NonInteractive', '-Command'], kind: 'powershell' }
+      }
+    }
+    const comSpec = deps.env['ComSpec'] || 'cmd.exe'
+    return { cmd: comSpec, args: ['/c'], kind: 'cmd' }
+  }
+  return { cmd: 'sh', args: ['-c'], kind: 'sh' }
+}
+
+/** True if the named PowerShell executable resolves on PATH (Windows). */
+function hasPwshWindows(cmd: string): boolean {
+  try {
+    const result = spawnSync('where', [cmd], { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 })
+    return result.status === 0 && result.stdout.toString().trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Detect the best available shell on the current platform (cached).
  *
- * On Windows, prefers PowerShell (pwsh > powershell) for better
- * cross-platform command compatibility, falls back to cmd.exe (ComSpec).
- * On Unix, uses 'sh' (the POSIX shell).
+ * On Windows: Git Bash (preferred) → PowerShell (pwsh > powershell) → cmd.exe.
+ * On Unix: 'sh' (the POSIX shell).
  */
 export function getShellCommand(): ShellCommand {
   if (_cachedShell) return _cachedShell
-
-  if (isWin) {
-    for (const cmd of ['pwsh.exe', 'powershell.exe']) {
-      const result = spawnSync('where', [cmd], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-        timeout: 3000,
-      })
-      if (result.status === 0 && result.stdout.toString().trim()) {
-        _cachedShell = { cmd, args: ['-NoProfile', '-Command'] }
-        return _cachedShell
-      }
-    }
-    const comSpec = process.env['ComSpec'] || 'cmd.exe'
-    _cachedShell = { cmd: comSpec, args: ['/c'] }
-    return _cachedShell
-  }
-
-  _cachedShell = { cmd: 'sh', args: ['-c'] }
+  _cachedShell = resolveShellCommand({
+    isWindows: isWin,
+    env: process.env,
+    gitBashPath: findGitBashPath(),
+    hasPwsh: hasPwshWindows,
+  })
   return _cachedShell
+}
+
+/**
+ * Rewrite Windows CMD-style null redirects (`2>nul`, `>nul`) to POSIX
+ * (`2>/dev/null`, `>/dev/null`). Under Git Bash a literal `nul` would create a
+ * real file named `nul`, which breaks git and pollutes the workspace. Only meant
+ * for the `kind: 'bash'` path. Leaves `2>&1` and other redirects untouched.
+ */
+export function rewriteWindowsNullRedirect(command: string): string {
+  return command.replace(
+    /(^|\s)(\d?)>\s*nul(?=\s|$|;|&|\|)/gi,
+    (_m, pre: string, fd: string) => `${pre}${fd}>/dev/null`,
+  )
+}
+
+/**
+ * Normalize null-device redirects to the PowerShell form `$null`. The model,
+ * being bash/cmd-biased, often emits `2>nul` (cmd) or `2>/dev/null` (POSIX) under
+ * PowerShell — both create a literal file named `nul`/`null` or just fail. Rewrite
+ * either to `2>$null`. Only meant for the `kind: 'powershell'` path. Leaves
+ * `2>&1` and other redirects untouched. Safe normalization only — NOT a general
+ * bash→PowerShell translator (that fragile path is deliberately avoided).
+ */
+export function rewritePowershellNullRedirect(command: string): string {
+  return command.replace(
+    /(^|\s)(\d?)>\s*(?:nul|\/dev\/null)(?=\s|$|;|&|\|)/gi,
+    (_m, pre: string, fd: string) => `${pre}${fd}>$null`,
+  )
 }
 
 // ─── Process Termination ─────────────────────────────────────────────────────

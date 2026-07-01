@@ -1,321 +1,115 @@
-# Tianshu (天枢)
+<p align="center">
+  <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="Tianshu Banner" width="100%">
+</p>
 
-> 📖 [English](README.md) · 🇨🇳 [中文](README.zh-CN.md) · 📚 [User Guide](docs/user-guide.md) · 🛡️ [Sandbox Permissions](docs/user-guide-sandbox-permissions.md) · ⚙️ [Provider Config](docs/user-guide-provider-config.md)
+<p align="center">
+  <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
+</p>
 
-[![GitHub release](https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?logo=github&style=flat-square)](https://github.com/huiliyi37/Tianshu-Tui/releases)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
+<p align="center">
+  🇨🇳 <b>中文</b> · 
+  <a href="README.en.md">📖 English</a> · 
+  <a href="docs/user-guide.md">📚 用户手册</a> · 
+  <a href="docs/user-guide-sandbox-permissions.md">🛡️ 沙箱权限</a> · 
+  <a href="docs/user-guide-provider-config.md">⚙️ 模型配置</a>
+</p>
 
-Terminal coding agent with prefix-cache optimization, multi-provider support, subagent orchestration, and a streaming TUI. 2700+ tests, typecheck clean.
+<p align="center">
+  <img src="https://img.shields.io/github/v/release/huiliyi37/Tianshu-Tui?color=8B5CF6&label=Release&logo=github&style=for-the-badge" alt="GitHub release">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-3B5BDB?style=for-the-badge&logo=apache" alt="License">
+  <img src="https://img.shields.io/badge/TypeScript-Strict-blue?style=for-the-badge&logo=typescript" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Tests-2700%2B%20Passed-green?style=for-the-badge&logo=testinglibrary" alt="Tests">
+</p>
 
-> The project was originally codenamed **Rivet**; the installed CLI binary is still
-> named `rivet` for backward compatibility.
+---
 
-## Download Desktop App
+**天枢 (Tianshu)** 是一个全功能、高性能的终端编程智能体运行时（TUI）。它跳出了传统 AI 编程助手把大模型仅当成“工具”的局限，基于**认知虚拟机 (CVM)**、**自感知层**和**信息素（Stigmergy）自衰减记忆**构建，让 AI 成为有独立判断与认知防护的“开发伙伴”。同时针对 DeepSeek V4 做了前缀缓存工程优化（长会话实测稳态**命中率 95–99%**）。
 
-Get the desktop build from GitHub Releases:
+> [!NOTE]
+> 本项目最初的开发代号为 **Rivet**；为保持向后兼容，已安装的 CLI 命令名仍为 `rivet`。
 
-- **[macOS (.dmg)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
-- **[Windows (.msi)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
-- **[Linux (.AppImage)](https://github.com/huiliyi37/Tianshu-Tui/releases/latest)**
+## 🚀 快速开始
 
-Or build from source (see **Quick Start** below).
+### 1. 环境要求
 
-## Prerequisites
+- **Node.js 24.1.0**（推荐；22+ 通常可用）—— 用 `node --version` 检查。
+- **Git**（强烈建议）—— 可选。没有它天枢仍可运行（就地修改），但 git 能解锁：委派 worktree 隔离、检查点回滚、`commit`/`diff` 审查、每个 worker 的 diff 审查。安装：<https://git-scm.com/downloads>。
 
-- **Node.js 24.1.0** (recommended; 22+ may work) — required to run Tianshu. Verify with `node --version`.
-- **Git (recommended)** — optional but strongly recommended. Tianshu runs without it
-  (agents work in-place), but git unlocks: delegated worktree isolation, checkpoint
-  rollback, `commit`/`diff` review, and per-worker diff审查. First-run setup will
-  detect git and advise if it's missing.
-  - Install: <https://git-scm.com/downloads>
-  - No git? Tianshu still works — delegation degrades to in-place execution.
+### 2. 安装（任选其一）
 
-## Quick Start
+**方式 A：桌面端（开箱即用）** —— 从 [GitHub Releases](https://github.com/huiliyi37/Tianshu-Tui/releases/latest) 下载：macOS `.dmg` · Windows `.msi` · Linux `.AppImage`。
 
-### 1. Prerequisites
-
-- **Node.js 24.1.0** (recommended; 22+ may work) — verify with `node --version`.
-- **Git** — optional but strongly recommended. Without it Tianshu still runs, but
-delegation/checkpoint/rollback features degrade. See [Prerequisites](#prerequisites).
-
-### 2. Clone & Build
-
-```bash
-git clone https://github.com/huiliyi37/Tianshu-Tui.git
-cd Tianshu-Tui
-npm install
-npm run build
-```
-
-This produces `dist/main.js`, the TUI entry point.
-
-### 3. Configure an API Key
-
-Pick one of the following. The key is read at startup.
-
-```bash
-# A. Environment variable (simplest for first try)
-export DEEPSEEK_API_KEY=sk-xxx
-
-# B. Persisted CLI config (saved to ~/.rivet/config.json)
-node dist/main.js config set-key deepseek sk-xxx
-```
-
-> Other providers (Claude, GLM, Codex, MiniMax, MiMo) use the same pattern.
-> Run `node dist/main.js config set-key <provider> <key>` or see
-> [Provider Config](docs/user-guide-provider-config.md).
-
-### 4. Launch
-
-```bash
-npm start
-# or directly: node dist/main.js
-```
-
-You should see the TUI with a `〉` prompt. Type your request and press Enter.
-
-> The installed CLI command is `rivet` (the package's original codename). The repo
-> and project are named **Tianshu**; the binary name remains `rivet` for backward
-> compatibility.
-
-### Optional: Global Install
-
-After building, you can install the `rivet` command globally so it is available
-from any directory:
-
-```bash
-npm install -g .
-rivet
-```
-
-> Global install from the repo requires `dist/main.js` to exist. Run `npm run build` first.
-
-### npm Registry Install (Recommended)
-
-The package is published to the npm registry as `tianshu-tui`. This is the
-recommended install method — no local build needed, and you get automatic
-update checks on every startup.
+**方式 B：npm 全局安装（推荐，使用命令行）** —— 已发布为 `tianshu-tui`，无需本地构建，且每次启动自动检查更新：
 
 ```bash
 npm install -g tianshu-tui
 rivet
 ```
 
-When a newer version is published, Tianshu shows an update banner at startup
-and `/update` upgrades in-place. Set `RIVET_NO_UPDATE_CHECK=1` to suppress
-the startup check.
+**方式 C：从源码构建**：
 
-## Core Features
+```bash
+git clone https://github.com/huiliyi37/Tianshu-Tui.git
+cd Tianshu-Tui
+npm install
+npm run build      # 生成 dist/main.js
+npm start          # 或：node dist/main.js
+```
 
-### Prefix Cache Engine
+### 3. 配置 API Key（首次必做）
 
-DeepSeek charges 50× more for cache misses. Rivet's prompt engine is built around prefix-cache friendliness:
+```bash
+# A. 环境变量（首次试用最简单）
+export DEEPSEEK_API_KEY=sk-xxx
 
-- **Frozen prefix** — System prompt + tool definitions + stable context are frozen at session start and never rewritten. DeepSeek's exact-prefix cache hits on every subsequent request.
-- **Delta appendix** — Dynamic context (progress, advisories, signals) is injected as a cross-turn diff append-only block, never rewriting prior messages. Turn-to-turn delta is ~200 bytes vs ~5KB full rewrite.
-- **Read-ref dedup** — Repeated reads of unchanged files return a compact reference instead of re-emitting full content, saving context tokens.
-- **Cache-aware compaction** — Compaction preserves the first 2 messages as cache anchor, and rounds are selected to maintain API invariants.
-- **Diagnostics** — `/debug cache` shows hit rate (green ≥80%, yellow ≥40%, red <40%), miss reason analysis, and per-turn cache history.
+# B. 持久化 CLI 配置（保存到 ~/.rivet/config.json）
+rivet config set-key deepseek sk-xxx
+```
 
-Real-world hit rate: 95–99% steady state on long sessions.
+> 其他提供商（Claude、GLM、Codex、MiniMax、MiMo）用法相同，详见 [模型配置](docs/user-guide-provider-config.md)。
 
-### Multi-Provider with Adaptive Routing
+### 4. 启动
 
-| Provider | Auth | Notable Models |
-|----------|------|----------------|
+```bash
+rivet            # 或：npm start / node dist/main.js
+```
+
+你会看到带有 `〉` 提示符的 TUI。输入需求后按回车即可。
+
+### 无界面模式（脚本集成）
+
+```bash
+rivet -p "解释 src/agent/loop.ts"       # 单次提示，文本输出，无 TUI
+rivet -p "列出所有 TODO 注释" --json    # JSON 输出，便于脚本处理
+```
+
+### 自动更新
+
+通过 npm 安装时，天枢每 24 小时在启动时检查新版本并弹出提示。`/update` 会执行 `npm install -g tianshu-tui@latest` 并重启；源码安装则用 `git pull && npm install && npm run build`。用 `RIVET_NO_UPDATE_CHECK=1` 可关闭检查。
+
+## ⚙️ 模型配置
+
+### 多提供商 + 自适应路由
+
+| 提供商 | 认证方式 | 旗舰模型 |
+|--------|----------|----------|
 | DeepSeek | API key | deepseek-v4-pro (1M ctx), deepseek-v4-flash |
-| Claude | API key (via `cc-switch` proxy) | opus-4-7, opus-4-6, sonnet-4-5 |
-| GLM (Zhipu) | API key | glm-5.2 |
-| Codex (GPT-5.5) | OAuth PKCE (ChatGPT subscription) | gpt-5.5 |
+| Claude | API key（通过 `cc-switch` 代理） | opus-4-7, opus-4-6, sonnet-4-5 |
+| GLM（智谱） | API key | glm-5.2 |
+| Codex (GPT-5.5) | OAuth PKCE（ChatGPT 订阅） | gpt-5.5 |
 | MiniMax | API key | MiniMax-M2.7 |
 | MiMo | API key | mimo-v2.5-pro |
 
-Switch providers inside a session with `/model <name>`. Configure different models for main agent vs sub-agents (see [Provider Config](docs/user-guide-provider-config.md)).
-
-### Subagent Orchestration
-
-Delegate sub-tasks to independent headless worker sessions:
-
-- **Typed work orders** — code_search, review, verify, patch_proposal, plan
-- **Tool isolation** — read-only workers (scout) vs write workers (patcher)
-- **Adaptive model routing** — Per-profile pass-rate + latency scoring auto-selects the best model for each task type
-- **Batch dispatch** — Multiple work orders run concurrently with 5 aggregation policies (primary_decides, all_required, first_success, majority, weighted_confidence)
-- **Team orchestration** — Plan → wave-based parallel execution with file-conflict-aware scheduling
-
-### Goal-Driven Auto-Continue
-
-Set a high-level goal and Rivet runs autonomously across multiple turns:
-
-```
-/goal Refactor the authentication module to use async/await throughout
-/cancel-goal   # stop early
-```
-
-GoalTracker integrates with the turn loop, doom-loop detection, and delivery gates. Doom-loop thresholds are relaxed in goal mode to allow deeper exploration.
-
-### Rewind
-
-Double-tap **ESC** at any time to open the message history. Select any past user message to rewind the conversation to that point — the agent state, tool history, and session metadata are all rolled back cleanly. Available in both TUI and desktop.
-
-### Council (Multi-Perspective Review)
-
-```
-/council <objective>
-/council <objective> --rounds 2   # enable rebuttal round
-```
-
-Convenes multiple expert seats to review a plan or design, with optional second-round rebuttal when conflicts surface. Produces an auditable Markdown plan with seat contributions and convergence state.
-
-### Skills System
-
-Reusable workflow playbooks loaded from `.rivet/skills/*.md`. Two-layer progressive disclosure: only name + description enters context; full instructions load on demand via the `skill` tool or the `/skill` slash command. Import specific Claude Code skills by name in config.
-
-**Built-in skills** ship in `.rivet/skills/`:
-
-| Skill | Description |
-|-------|-------------|
-| `writing-plans` | Structured plan writing with Mermaid diagrams, spec sections, verification plan |
-| `executing-plans` | Task graph decomposition, wave-by-wave execution, verification at each wave |
-| `subagent-driven-development` | Delegate complex tasks with typed profiles, batch dispatch, parallel workers |
-| `agent-harness-testing` | TDD feasibility probes, test scaffolding, red-green-refactor workflow |
-| `research-spec` | Research + spec workflow: exploration → condition matrix → counterexample table |
-
-**Using a skill**:
-
-```
-/skill writing-plans                # load and immediately run the skill protocol
-/skill writing-plans <your task>    # load skill and pass an initial task
-/skill off writing-plans            # stop re-injecting the skill instructions
-```
-
-When a skill is invoked, its full instructions become the current prompt and the agent responds immediately. The instructions are then re-injected into each subsequent turn as a protected `<invoked-skills>` appendix block, so they survive context compaction. The model releases a skill by calling `skill(name="writing-plans", complete=true)` when the workflow is finished, or you can release it manually with `/skill off <name>`.
-
-Or the agent auto-loads skills when the task matches their trigger patterns.
-
-**Creating a custom skill** — drop a `.md` file in `.rivet/skills/` with YAML frontmatter:
-
-```markdown
----
-name: my-workflow
-description: Describe what this skill does in one line.
-triggers:
-  - keyword or pattern that suggests this skill
----
-
-# My Workflow
-
-Step-by-step instructions the agent follows when this skill is loaded...
-```
-
-Skills are shareable: copy `.rivet/skills/` between projects, or reference a central skills directory via config.
-
-### Cross-Session Knowledge
-
-Distilled knowledge persists across sessions (enabled by default):
-
-| Source | Content |
-|--------|---------|
-| `.rivet/knowledge/memory.jsonl` | Project rules, debugging heuristics, architecture conventions |
-| `.rivet/sessions/<id>/pheromones.json` | Cross-session signals |
-| `.rivet/presence.json` | Companion agent awareness |
-
-Toggle via `agent.crossSessionEnabled` in config. Force-off: `RIVET_NO_CROSS_SESSION=1`.
-
-### MCP (Model Context Protocol)
-
-Connect external tool servers — documentation search, databases, APIs — directly into the agent's tool pipeline. MCP servers auto-discover at startup; their tools appear as `mcp__<serverId>__<toolName>`.
-
-**Prerequisites**: Node.js 22+ with `npx` available (for stdio transport). SSE servers are network-based and need no local runtime.
-
-**Adding an MCP server**:
+会话内用 `/model <name>` 随时切换提供商。
 
 ```bash
-# stdio transport (local process)
-rivet config mcp add-stdio <server-id> npx -y <package> [args...]
-
-# SSE transport (remote/network server)  
-rivet config mcp add-sse <server-id> http://localhost:3001/sse
-
-# Streamable HTTP transport (2025 spec)
-rivet config mcp add-http <server-id> http://localhost:3001/mcp
-```
-
-**Built-in presets** — one-command setup for popular servers:
-
-```bash
-rivet config mcp add-preset context7    # @upstash/context7-mcp — up-to-date library docs
-```
-
-**Listing and managing**:
-
-```bash
-rivet config mcp list                   # show all registered servers + status
-rivet config mcp remove <server-id>     # remove a server
-rivet config mcp set-timeout <server-id> 30000  # override default 60s timeout
-```
-
-**Inside a session**:
-
-```
-/mcp                          # show MCP connection status for all servers
-/debug mcp                    # detailed diagnostics (startup errors, tool discovery)
-```
-
-MCP tools respect the same approval mode as built-in tools (`auto-safe` / `manual` / `dangerously-skip-permissions`).
-
-**Troubleshooting**: If `npx` install hangs on first run, increase the timeout (`rivet config mcp set-timeout <id> 120000`). For SSE servers that fail to connect, verify the server is running and the URL is reachable from the agent process.
-
-### Approval Modes
-
-| Mode | Behavior |
-|------|----------|
-| `auto-safe` (default) | Low-risk actions auto-approve; high-risk still asks |
-| `manual` | Ask whenever a tool declares approval required |
-| `dangerously-skip-permissions` | Skip all interactive prompts — trusted workspaces only |
-
-```bash
-rivet config set-approval dangerously-skip-permissions
-rivet --dangerously-skip-permissions   # one-session override
-```
-
-Skipping prompts does **not** disable tool validation, path safety, evidence tracking, checkpoints, or delivery gates.
-
-### Auto-Update
-
-When installed via `npm install -g tianshu-tui`, Tianshu checks for newer versions
-at startup (once per 24h). If an update is available, a banner appears:
-
-```
-⬆️  Update available: 2.9.0 → 2.9.1. Run /update to upgrade.
-```
-
-`/update` runs `npm install -g tianshu-tui@latest` and restarts the process.
-Source installs (git clone) use `git pull && npm install && npm run build` instead.
-
-Suppress the startup check: `RIVET_NO_UPDATE_CHECK=1`.
-
-## Configuration
-
-### Provider Setup
-
-```bash
-# Interactive setup (TTY)
-rivet config
-
-# DeepSeek via env var
+rivet config                                              # 交互式设置（TTY）
 rivet config setup deepseek --key-env DEEPSEEK_API_KEY --default
-
-# GLM
-rivet config setup glm --key-env ZHIPU_API_KEY
-
-# Codex OAuth (browser login on first run)
-rivet config setup codex --default
-
-# Full config
-rivet config show
+rivet config setup codex --default                       # OAuth（首次浏览器登录）
+rivet config show                                         # 查看完整配置
 ```
 
-Or edit `~/.rivet/config.json` directly (only overrides needed, defaults are deep-merged):
+也可直接编辑 `~/.rivet/config.json`（只写需要覆盖的字段，默认值会深度合并）：
 
 ```json
 {
@@ -330,18 +124,12 @@ Or edit `~/.rivet/config.json` directly (only overrides needed, defaults are dee
       }
     }
   },
-  "agent": {
-    "maxTurns": 50,
-    "approval": "auto-safe",
-    "crossSessionEnabled": true
-  },
+  "agent": { "maxTurns": 50, "approval": "auto-safe", "crossSessionEnabled": true },
   "compact": { "enabled": true, "autoThreshold": 800000 }
 }
 ```
 
-### Worker Routing
-
-Use different providers for sub-agents:
+### Worker 路由（子智能体用不同模型）
 
 ```json
 {
@@ -350,155 +138,260 @@ Use different providers for sub-agents:
       "capable": { "provider": "codex", "model": "gpt-5.5" },
       "cheap":   { "provider": "minimax", "model": "MiniMax-M2.7" }
     },
-    "routing": {
-      "code_edit": "capable",
-      "repo_summarization": "cheap"
-    }
+    "routing": { "code_edit": "capable", "repo_summarization": "cheap" }
   }
 }
 ```
 
-### MCP Servers
+完整说明见 [模型配置指南](docs/user-guide-provider-config.md)。
 
-Connect external tool servers via Model Context Protocol:
+## 🔐 审批与授权
 
-```bash
-rivet config mcp add-stdio fs npx -y @modelcontextprotocol/server-filesystem /tmp
-rivet config mcp add-sse ctx7 http://localhost:3001/sse
-rivet config mcp list
-```
-
-MCP tools appear as `mcp__<serverId>__<toolName>` and auto-discover at startup.
-
-## Slash Commands
-
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/model [name\|list]` | Show or switch model/provider |
-| `/goal <text>` | Set autonomous goal; runs until done |
-| `/cancel-goal` | Stop goal execution |
-| `/plan` | Enter plan mode (design-first, approval-gated) |
-| `/council <text>` | Convene multi-expert review |
-| `/compact` | Compact context now |
-| `/context` | Show context ledger: health, tokens, rounds, claims |
-| `/evidence` | Show evidence summary (files read/modified, tests) |
-| `/rollback` | Preview/restore git checkpoint (`confirm` to execute) |
-| `/undo` | Undo last file change (preview, `confirm` to restore) |
-| `/rewind` | Double-ESC: rewind to a past user message |
-| `/sessions` `/resume <n>` | List/restore saved sessions (restores side panel, todos, and active plan) |
-| `/effort [off\|low\|medium\|high\|max]` | Control reasoning depth |
-| `/theme [name\|list]` | Switch color theme |
-| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | Manage permission mode and tool/bash allow/deny rules |
-| `/skill <name>` | Load and immediately invoke a skill |
-| `/skill off <name>` | Stop re-injecting an invoked skill |
-| `/debug [prompt\|cache\|mcp]` | Debug prompt, cache stats, or MCP |
-| `/mcp` | MCP server connection status |
-| `/memory <text>` | Save session memory entry |
-| `/update` | Check for and install updates (npm) |
-| `/exit` `/quit` | Save session and exit |
-
-Double-tap **ESC** for rewind overlay. Press **Esc** to dismiss any overlay.
-
-> **Slash command completion** — the command palette supports multi-token slash commands such as `/skill <name>`, `/permission ...`, and `/model <name>`. Type `/skill ` and the palette fuzzy-matches the skill name, so you don't have to arrow-search.
-
-## For Developers
-
-### Tech Stack
-
-Node.js 22 · TypeScript strict (`noUncheckedIndexedAccess`) · T9 ANSI rendering engine · tsup bundle · node:test + assert/strict
-
-### Build & Test
+| 模式 | 行为 |
+|------|------|
+| `auto-safe`（默认） | 低风险操作自动批准，高风险仍询问 |
+| `manual` | 任何工具声明需要审批时都询问 |
+| `dangerously-skip-permissions` | 跳过所有交互提示 —— 仅限可信工作区 |
 
 ```bash
-npx tsc --noEmit                                    # typecheck
-npm exec -- tsx --test src/**/__tests__/*.test.ts   # all tests (2700+)
-npm run build                                        # tsup bundle
-npm run dev                                          # tsup --watch
-node dist/main.js                                    # launch TUI
-node dist/main.js -p "fix the typo"                  # headless mode
+rivet config set-approval dangerously-skip-permissions
+rivet --dangerously-skip-permissions   # 单次会话覆盖
 ```
 
-### Extending
+会话内用 `/permission` 管理权限模式与工具/bash 的允许-拒绝规则：
 
-**Add a tool** — implement `ToolDefinition` + executor in `src/tools/`, register in `src/main.tsx`, add test in `src/tools/__tests__/`. Tools return `ToolResult { content, isError?, rawPath?, uiContent? }`.
+```
+/permission status                  # 查看当前模式与生效规则
+/permission mode auto-safe          # 切换模式
+/permission allow <tool>            # 允许某工具，不再询问
+/permission deny <tool>             # 始终拦截某工具
+/permission bash <pattern>          # 配置某条 bash 命令的允许/拒绝
+/permission reset                   # 清空自定义规则
+```
 
-**Add a skill** — drop a `.md` file in `.rivet/skills/` with frontmatter (`name`, `description`, `triggers`). Full instructions load on demand.
+跳过提示**不会**禁用工具验证、路径安全、证据追踪、检查点和交付门禁。沙箱后端、路径授权、风险分级详见 [沙箱与权限](docs/user-guide-sandbox-permissions.md)。
 
-**Add a slash command** — project-local `.rivet/commands/*.md` with `$ARGUMENTS` interpolation.
+## 💡 为什么做天枢
 
-**Add a hook** — implement `PreToolUse | PostToolUse | UserPromptSubmit | PreCompact` handler, register via `HookRegistry`. Handlers are isolated — a broken hook never crashes the loop.
+大多数 AI 编程助手把上下文当作桶——装满就溢出，然后盲目压缩。天枢引入了围绕**认知虚拟机 (CVM)**与**前缀缓存友好 (Prefix-Cache-Friendly)**设计的结构化、高性能**认知运行时**。
 
-### Architecture
+```mermaid
+graph TD
+    LLM[大型语言模型] -->|原始动作 / 缺陷行为| CVM[认知虚拟机 CVM]
+    CVM -->|30+ Hooks / 5 大认知阶段| Engine[自我修正与认知镜映射]
+    Engine -->|被批准的物理动作| Tools[工具系统]
+    Tools -->|证据追踪与文件确权| Stigmergy[行为信息素记忆]
+    Stigmergy -->|信息素衰减 / 行为印记| LLM
+```
+
+### 三大核心架构支柱
+
+1. **认知虚拟机 (CVM)** —— 天枢在运行时建立了一个独立的虚拟层，横跨 `5 大运行时阶段`（preTurn 回合前、afterPerception 感知后、postTool 工具后、postTurn 回合后、postSession 会话后），并按需条件装配 `30+ 个生命周期 Hook`。CVM 在不改变模型权重的前提下，主动拦截并纠正大模型的服从性漂移、注意力衰减和重复工具调用的 Doom Loop。
+2. **生物启发式信息素记忆 (Stigmergy)** —— 区别于静态记忆文件（如 MEMORY.md），天枢基于生物学“化学信息素”机制，将行为足迹和认知标记直接映射在代码文件上，并随时间自动衰减。AI 在修改频繁的文件上会越用越熟。
+3. **前缀缓存优化** —— DeepSeek V4 对缓存未命中按命中的至多 50 倍计费。天枢的提示词引擎围绕前缀缓存友好（冰镜三区缓存锚点、冻结系统提示词等）重构，长会话稳态命中率 **95–99%**，显著降低 API 成本。
+
+### 天枢 vs. MiMo-Code vs. Claude Code
+
+> 下表反映各项目在撰写时**公开文档**所呈现的侧重点。「—」表示该能力不是其公开主打特性，并不必然代表完全没有。欢迎通过 issue/PR 指正。
+
+| 对标维度 | 天枢 (Tianshu) | MiMo-Code | Claude Code |
+| :--- | :--- | :--- | :--- |
+| **核心侧重** | 认知运行时 (CVM) | 产品生态与工作流封装 | 企业级编程 Agent |
+| **运行时 Hook 层** | 30+ 按需装配 Hook × 5 阶段 | 标准 Agent 循环 | 用户可配置 Hook |
+| **前缀缓存调优** | 深度适配 DeepSeek V4（稳态 95–99%） | 沿用供应商默认 | Anthropic 提示词缓存 |
+| **自感知** | 连续认知状态向量 | — | — |
+| **跨会话记忆** | 文件级信息素（自动衰减） | SQLite + MEMORY.md | 项目记忆 |
+| **多 Agent** | 多会话并发 + 冲突锁 | 后台独立执行 | 远程隔离沙箱 |
+| **验证门禁** | 内置交付门禁 | — | — |
+| **开源协议** | Apache 2.0 | MIT | 闭源 |
+
+## ✨ 核心特性
+
+### 前缀缓存引擎
+
+DeepSeek 对缓存未命中收取 50× 费用。天枢的提示词引擎围绕前缀缓存友好构建：
+
+- **冻结前缀** —— 系统提示词 + 工具定义 + 稳定上下文在会话开始时被冻结，永不重写，后续每次请求都命中缓存。
+- **增量附录** —— 动态上下文（进度、advisories、信号）以跨回合 diff 追加块注入，永不重写历史。回合间增量约 200 字节 vs ~5KB 全量重写。
+- **Read-ref 去重** —— 对未变化文件的重复读取返回紧凑引用，而非重发完整内容。
+- **缓存感知压缩** —— 压缩保留前 2 条消息作为缓存锚点。
+- **诊断** —— `/debug cache` 显示命中率、未命中原因分析、每回合缓存历史。
+
+实战命中率：长会话稳态 95–99%。
+
+### 子智能体编排
+
+将子任务委派给独立的无界面 worker 会话：
+
+- **类型化 work order** —— code_search、review、verify、patch_proposal、plan
+- **工具隔离** —— 只读 worker（scout）vs 写 worker（patcher）
+- **自适应模型路由** —— 按 profile 的通过率 + 延迟评分，自动为每类任务选最优模型
+- **批量调度** —— 多个 work order 并发执行，5 种聚合策略
+- **团队编排** —— Plan → 按 wave 并行执行，带文件冲突感知调度
+
+### 目标驱动的自动续跑
+
+```
+/goal 重构认证模块，全面使用 async/await
+/cancel-goal   # 提前停止
+```
+
+GoalTracker 与回合循环、doom-loop 检测、交付门禁集成；goal 模式下放宽 doom-loop 阈值以允许更深探索。
+
+### 倒带（Rewind）
+
+随时双击 **ESC** 打开消息历史，选择任一过往用户消息，将会话干净地倒带到该点——agent 状态、工具历史、会话元数据一并回滚。TUI 与桌面端均可用。
+
+### 委员会（多视角审查）
+
+```
+/council <目标>
+/council <目标> --rounds 2   # 启用反驳轮次
+```
+
+召集多个专家席位审查计划或设计，冲突时可选第二轮反驳，产出可审计的 Markdown 计划。
+
+### Skills 系统
+
+可复用的工作流剧本，从 `.rivet/skills/*.md` 加载。两层渐进披露：只有名称 + 描述进入上下文，完整指令按需通过 `skill` 工具或 `/skill` 加载。
+
+| Skill | 说明 |
+|-------|------|
+| `writing-plans` | 结构化计划写作，含 Mermaid 图、spec 段落、验证计划 |
+| `executing-plans` | 任务图分解，按 wave 执行，每 wave 验证 |
+| `subagent-driven-development` | 委派复杂任务，类型化 profile、批量调度、并行 worker |
+| `agent-harness-testing` | TDD 可行性探针、测试脚手架、red-green-refactor |
+| `research-spec` | 研究 + spec 工作流：探索 → 条件矩阵 → 反证表 |
+
+```
+/skill writing-plans                # 加载并立即执行该 skill
+/skill writing-plans <你的任务>     # 加载并传入初始任务
+/skill off writing-plans            # 停止重复注入该 skill
+```
+
+也可在 `.rivet/skills/` 放一个带 YAML frontmatter（`name`、`description`、`triggers`）的 `.md` 自定义 skill。
+
+### 跨会话知识
+
+| 来源 | 内容 |
+|------|------|
+| `.rivet/knowledge/memory.jsonl` | 项目规则、调试启发式、架构约定 |
+| `.rivet/sessions/<id>/pheromones.json` | 跨会话信号 |
+| `.rivet/presence.json` | 伴生 agent 感知 |
+
+通过 `agent.crossSessionEnabled` 切换，强制关闭：`RIVET_NO_CROSS_SESSION=1`。
+
+### MCP（Model Context Protocol）
+
+把外部工具服务器——文档搜索、数据库、API——直接接入 agent 的工具流水线，启动时自动发现，工具以 `mcp__<serverId>__<toolName>` 形式出现。
+
+```bash
+rivet config mcp add-stdio <server-id> npx -y <package> [args...]   # 本地进程
+rivet config mcp add-sse <server-id> http://localhost:3001/sse      # 远程/网络
+rivet config mcp add-preset context7                               # 常用预设
+rivet config mcp list                                              # 列出 + 状态
+```
+
+会话内：`/mcp`（状态）、`/debug mcp`（诊断）。MCP 工具与内置工具遵循同一审批模式。
+
+## ⌨️ 斜杠命令
+
+| 命令 | 说明 |
+|------|------|
+| `/help` | 显示可用命令 |
+| `/model [name\|list]` | 显示或切换模型/提供商 |
+| `/goal <text>` | 设置自主目标，运行到完成 |
+| `/cancel-goal` | 停止目标执行 |
+| `/plan` | 进入计划模式（设计优先，审批门禁） |
+| `/council <text>` | 召集多专家审查 |
+| `/compact` | 立即压缩上下文 |
+| `/context` | 显示上下文账本：健康度、tokens、回合、声明 |
+| `/evidence` | 显示证据摘要（读取/修改的文件、测试） |
+| `/rollback` | 预览/恢复 git 检查点（`confirm` 执行） |
+| `/undo` | 撤销上次文件变更（预览，`confirm` 恢复） |
+| `/rewind` | 双击 ESC：倒带到过往用户消息 |
+| `/sessions` `/resume <n>` | 列出/恢复已保存会话（恢复侧栏、待办、活动计划） |
+| `/effort [off\|low\|medium\|high\|max]` | 控制推理深度 |
+| `/theme [name\|list]` | 切换色彩主题 |
+| `/permission [status\|mode\|allow\|deny\|bash\|remove\|reset\|test]` | 管理权限模式与工具/bash 允许-拒绝规则 |
+| `/skill <name>` | 加载并立即执行一个 skill |
+| `/skill off <name>` | 停止重复注入某个 skill |
+| `/debug [prompt\|cache\|mcp]` | 调试 prompt、缓存统计或 MCP |
+| `/mcp` | MCP 服务器连接状态 |
+| `/memory <text>` | 保存会话记忆条目 |
+| `/update` | 检查并安装更新（npm） |
+| `/exit` `/quit` | 保存会话并退出 |
+
+双击 **ESC** 打开倒带覆盖层，按 **Esc** 关闭任意覆盖层。
+
+## 🛠️ 面向开发者
+
+### 技术栈
+
+Node.js 22 · TypeScript strict（`noUncheckedIndexedAccess`）· T9 ANSI 渲染引擎 · tsup 打包 · node:test + assert/strict
+
+### 构建与测试
+
+```bash
+npx tsc --noEmit                                    # 类型检查
+npm exec -- tsx --test src/**/__tests__/*.test.ts   # 所有测试（2700+）
+npm run build                                        # tsup 打包
+node dist/main.js                                    # 启动 TUI
+node dist/main.js -p "fix the typo"                  # 无界面模式
+```
+
+### 扩展
+
+- **添加工具** —— 在 `src/tools/` 实现 `ToolDefinition` + executor，在 `src/main.tsx` 注册，在 `src/tools/__tests__/` 加测试。
+- **添加 skill** —— 在 `.rivet/skills/` 放一个带 frontmatter（`name`、`description`、`triggers`）的 `.md`。
+- **添加斜杠命令** —— 项目级 `.rivet/commands/*.md`，支持 `$ARGUMENTS` 插值。
+- **添加 hook** —— 实现 `PreToolUse | PostToolUse | UserPromptSubmit | PreCompact` 处理器，通过 `HookRegistry` 注册；处理器相互隔离，单个坏 hook 不会让循环崩溃。
+- **项目指令** —— 在项目根放 `.rivet.md`，其内容会自动注入为项目上下文。
+
+### 架构
 
 ```
 src/
-├── agent/     Core loop (250+ modules): turn-orchestrator, tool pipeline, coordinator,
-│              advisory-bus, goal-tracker, plan-execution-trace, sensorium, immune system
-├── api/       Streaming API client — DeepSeek, GLM, Codex OAuth, multi-provider routing
-├── prompt/    Prompt engine — frozen prefix + delta appendix + volatile context layers
-├── tools/     30+ tools — bash, edit, read/write, grep, glob, run_tests, git, delegate,
-│              deliver_task, plan_submit, council_convene, web_fetch, lsp, undo, rewind
-├── tui/       Terminal UI (T9 ANSI engine: commit-engine scrollback, input controller, overlay system, stream renderer)
-│   ├── engine/   Commit-engine scrollback, input controller, overlay system, stream renderer
-│   └── cockpit/  Multi-panel cockpit: trace, verify, context, safety, model, MCP
-├── compact/   Three-layer semantic pruning + micro-compact + T7 request-time collapse
-├── context/   Context ledger, progressive compaction, claim system, anchor registry
-├── config/    Zod-validated config: defaults → ~/.rivet → project overlay
-├── server/    Desktop sidecar: session management, REST routes, SSE streaming
-├── mcp/       Model Context Protocol client (stdio + SSE)
-├── lsp/       Language Server Protocol integration
-└── search/    Semantic search (BM25 + embedding RRF fusion)
+├── agent/     核心循环：turn-orchestrator、tool pipeline、coordinator、
+│              advisory-bus、goal-tracker、sensorium、免疫系统
+├── api/       流式 API 客户端 —— DeepSeek、GLM、Codex OAuth、多提供商路由
+├── prompt/    提示词引擎 —— 冻结前缀 + 增量附录 + 易变上下文层
+├── tools/     工具 —— bash、edit、read/write、grep、glob、run_tests、git、delegate…
+├── tui/       终端 UI（T9 ANSI 引擎：scrollback、输入控制、覆盖层、流式渲染）
+├── compact/   三层语义修剪 + 微压缩 + 请求时坍缩
+├── context/   上下文账本、渐进式压缩、声明系统、锚点注册表
+├── config/    Zod 验证配置：默认值 → ~/.rivet → 项目覆盖
+├── server/    桌面端 sidecar：会话管理、REST 路由、SSE 流
+├── mcp/       Model Context Protocol 客户端（stdio + SSE）
+├── lsp/       Language Server Protocol 集成
+└── search/    语义搜索（BM25 + embedding RRF 融合）
 ```
 
-### Data Flow
+### 会话数据
 
-```
-User input → slash command router (built-in / custom / agent)
-           → AgentLoop:
-               PromptEngine.buildRequest()
-                 frozen system prompt (cache anchor)
-                 delta appendix (cross-turn diff, ~200 bytes)
-                 volatile context (git status, tool history, progress)
-               ApiClient.stream() → SSE → content blocks (text, thinking, tool_use)
-               Tool execution pipeline:
-                 PreToolUse hook → approval → execute → PostToolUse hook
-                 → evidence tracking → cache invalidation on writes
-               Loop until no tool_use or maxTurns
-```
+会话日志存储在项目外的 `~/.rivet/sessions/<project-slug>/`（slug = 目录名 + cwd 哈希前缀），避免被 `glob`/`grep` 扫到、也不污染工作区。可用 `RIVET_SESSION_DIR` 覆盖。全局配置在 `~/.rivet/config.json`。每次启动得到唯一会话 ID，多个实例可并行运行互不干扰。
 
-### Session Data
+## 🔒 安全
 
-Session logs are stored outside the project under `~/.rivet/sessions/<project-slug>/` (slug = dir name + cwd hash prefix). This keeps them invisible to `glob`/`grep` (which respect `.gitignore`) and avoids polluting the working tree. Override with `RIVET_SESSION_DIR`.
+- **路径边界强制** —— glob/grep/diff 拒绝 `..` 穿越；`validatePath` 阻止逃逸
+- **符号链接环保护** —— realpath + 访问集
+- **SSRF 保护** —— 逐跳 DNS + 私有 IP 拦截，作用于每次重定向
+- **敏感文件拒绝** —— `.env`、`credentials.*`、`*key*`、`*token*` 禁止读/commit
+- **破坏性命令门禁** —— `rm -rf`、force push、`DROP/TRUNCATE` 需显式确认
+- **检查点 + 回滚** —— 每回合首次修改文件前创建 Git 检查点
+- **文件级撤销** —— 每次写/编辑前版本化备份
+- **Worker 安全** —— AbortController 超时预算，工具白名单强制
 
-```
-~/.rivet/sessions/<slug>/
-├── <id>.jsonl                  Conversation log
-├── <id>.meta.json              Metadata: model, turn count, exit state
-├── <id>/cache-log.jsonl        Per-request cache telemetry
-├── knowledge/memory.jsonl      Cross-session distilled knowledge
-└── artifacts/                   Large output persistence
-```
+## 📚 文档
 
-Global config lives at `~/.rivet/config.json`.
+| 文档 | 说明 |
+|------|------|
+| [`docs/user-guide.md`](docs/user-guide.md) | 安装、配置与使用指南 |
+| [`docs/user-guide-provider-config.md`](docs/user-guide-provider-config.md) | 模型提供商配置指南 |
+| [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md) | 沙箱与权限模型完整指南 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 贡献指南 |
+| [`config.example.json`](config.example.json) | 示例配置（含子代理/审查模型路由） |
 
-### Multi-Session Isolation
+## 许可证
 
-Each launch gets a unique session ID. Session files, checkpoints, and memory are scoped to this ID — multiple TUI instances run in parallel without interference. For maximum isolation, use git worktrees.
-
-## Safety
-
-- **Path boundary enforcement** — glob/grep/diff reject `..` traversal; `validatePath` blocks escapes
-- **Symlink cycle protection** — realpath + visited set
-- **SSRF protection** — Per-hop DNS + private IP blocking on every redirect
-- **Sensitive file rejection** — `.env`, `credentials.*`, `*key*`, `*token*` blocked from read/commit
-- **Destructive command gate** — `rm -rf`, force push, `DROP/TRUNCATE` require explicit confirmation
-- **Checkpoint + rollback** — Git checkpoint before first file modification each turn
-- **File-level undo** — Versioned backups before every write/edit
-- **Worker safety** — Timeout budget via AbortController, tool allowlist enforcement
-
-For details on the sandbox backends, approval modes, path grants, and risk classification, see [`docs/user-guide-sandbox-permissions.md`](docs/user-guide-sandbox-permissions.md).
-
-## License
-
-Licensed under the [Apache License, Version 2.0](LICENSE).
+本项目采用 [Apache License, Version 2.0](LICENSE) 开源许可。Copyright 2025-2026 Tianshu Contributors.

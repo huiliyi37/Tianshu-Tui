@@ -43,7 +43,10 @@ function truncateBody(text: string): string {
     : text
 }
 
-const FILE_PATH_RE = /^\/[\w./-]+/
+// Leading file-path token: POSIX absolute (/…), Windows drive (C:\… or C:/…),
+// or home-relative (~/…). Windows drive paths were previously unmatched, so
+// tool cards weren't clickable for the largest desktop user base.
+const FILE_PATH_RE = /^(?:[a-zA-Z]:[\\/]|\/|~\/)[\w.\\/-]*/
 
 function PreviewText({ text }: { text: string }) {
   const match = text.match(FILE_PATH_RE)

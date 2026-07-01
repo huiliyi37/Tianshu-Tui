@@ -157,6 +157,30 @@ export function recommendUvSetup(cwd: string): UvSetupResult {
   return { ok: false, message: '检测到 Python 项目标记，但未找到 pyproject.toml 或 requirements.txt。' }
 }
 
+/**
+ * Prominent startup banner shown when git is missing. On Windows this is now
+ * near-required: the bash tool prefers Git Bash for reliable command execution,
+ * so without git, shell commands fall back to PowerShell/cmd (degraded). Returns
+ * '' when git is present so the caller can skip emitting anything.
+ */
+export function formatGitMissingBanner(gitAvailable: boolean, platform: NodeJS.Platform): string {
+  if (gitAvailable) return ''
+  const guide = getInstallCommand('git', platform)
+  if (platform === 'win32') {
+    return [
+      '⚠ 未检测到 Git。',
+      'Windows 上 Git 自带的 Git Bash 是 bash 工具执行命令的首选 shell——缺少它会退回',
+      'PowerShell/cmd,部分命令可能行为异常或无输出。强烈建议安装:',
+      `  ${guide}`,
+      '装好后重启天枢即可自动启用 Git Bash(也可用 RIVET_GIT_BASH_PATH 手动指路)。',
+    ].join('\n')
+  }
+  return [
+    '⚠ 未检测到 Git。代码仓库操作(commit / diff / 检查点回滚)需要 Git:',
+    `  ${guide}`,
+  ].join('\n')
+}
+
 /** Build a one-line hint appended to bash not-found errors. */
 export function buildNotFoundHint(missingCommand: string, platform: NodeJS.Platform): string {
   if (missingCommand === 'python' || missingCommand === 'python3' || missingCommand === 'py') {

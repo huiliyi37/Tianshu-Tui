@@ -62,6 +62,10 @@ function formatPlanMerge(planMerge: NonNullable<TeamRunSummary['planMerge']>): s
     planMerge.conflicts.map(c => c.description),
   )
   section(
+    '已补入执行图的分片 (orthogonal shards folded in):',
+    planMerge.augmented.map(a => `${a.title} — ${a.reason}`),
+  )
+  section(
     'Deferred alternatives (not in base plan):',
     planMerge.deferred.map(d => `${d.title} — ${d.reason}`),
   )
@@ -87,6 +91,11 @@ export function formatTeamSummary(summary: TeamRunSummary, fromWave = 0): string
   if (summary.planMerge) {
     const mergeLines = formatPlanMerge(summary.planMerge)
     if (mergeLines.length > 0) lines.push('', ...mergeLines)
+  }
+  if (summary.advisories && summary.advisories.length > 0) {
+    lines.push('', '分片建议(不阻断):')
+    for (const a of summary.advisories.slice(0, 3)) lines.push(`  - ${a}`)
+    if (summary.advisories.length > 3) lines.push(`  … (+${summary.advisories.length - 3} more)`)
   }
   const nextWave = fromWave + 1
   if (summary.waves.length > nextWave) {
@@ -114,7 +123,7 @@ export function createTeamOrchestrateTool(
     definition: {
       name: 'team_orchestrate',
       description:
-        'Run the deterministic team orchestrator: parse a plan (standard), group tasks into waves respecting file conflicts and dependencies, and dispatch the first ready wave of workers. Returns the wave schedule and dispatch summary. Does NOT auto-commit — the main controller integrates worker diffs.\n\nPass planJson (UnifiedPlan from plan_task) to skip Markdown/planner fanout and execute directly.',
+        'Run the deterministic team orchestrator: parse a plan (standard), group tasks into waves respecting file conflicts and dependencies, and dispatch the first ready wave of workers. Returns the wave schedule and dispatch summary. Does NOT auto-commit.\n\nSHARDING: split the work HORIZONTALLY into orthogonal shards — each a complete, self-contained unit (implement + run tsc/lint/relevant tests) owned end-to-end by ONE capable flash. Do NOT split vertically by stage (no separate lint/type/import/test role tasks). Keep shards on disjoint files so they run in parallel; when two shards must touch the same file, set dependsOn to order them (the validator warns about overlap without ordering). Workers write directly into the controller\'s single shared workspace — there are no per-worker diffs to merge; review the aggregate with git diff.\n\nPass planJson (UnifiedPlan from plan_task) to skip Markdown/planner fanout and execute directly.',
       input_schema: {
         type: 'object',
         properties: {
@@ -151,6 +160,7 @@ export function createTeamOrchestrateTool(
 
       // Pre-parsed tasks from plan_task UnifiedPlan JSON
       let tasks: ReturnType<typeof unifiedPlanToTeamTasks> | undefined
+      let planAdvisoryNote = ''
       if (planJson) {
         const plan = deserializeUnifiedPlan(planJson)
         if (!plan) return { content: 'team_orchestrate blocked: planJson is not a valid UnifiedPlan', isError: true }
@@ -158,6 +168,9 @@ export function createTeamOrchestrateTool(
         if (!validation.valid) {
           const errors = [...validation.errors, ...validation.nodeErrors.map(ne => `[${ne.nodeId}] ${ne.error}`)]
           return { content: `team_orchestrate blocked: plan validation failed:\n${errors.map(e => `  - ${e}`).join('\n')}`, isError: true }
+        }
+        if (validation.warnings.length > 0) {
+          planAdvisoryNote = `\n\n分片建议(不阻断):\n${validation.warnings.map(w => `  - ${w}`).join('\n')}`
         }
         tasks = unifiedPlanToTeamTasks(plan)
         // Re-store for multi-wave: consumePlan cleared it, but subsequent
@@ -267,7 +280,7 @@ export function createTeamOrchestrateTool(
 
       const panelModel = buildTeamPanelModel(summary, effectiveFromWave, reviewVerdict)
       return {
-        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.deliverySynthesis,
+        content: formatTeamSummary(summary, effectiveFromWave) + notes.reviewNote + notes.scopeHealthNote + notes.impactNote + notes.deliverySynthesis + planAdvisoryNote,
         uiContent: encodeTeamPanelModel(panelModel),
         isError: false,
       }

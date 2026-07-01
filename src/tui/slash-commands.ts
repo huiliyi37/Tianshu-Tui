@@ -36,7 +36,7 @@ import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
-import { skillRegistry, listSkillFiles, importSkillsIntoRivet } from '../skills/skill-loader.js'
+import { skillRegistry, listSkillFiles, importSkillsIntoRivet, countInstalledSkills, RECOMMENDED_MAX_SKILLS, SKILL_RESTRAINT_NOTICE } from '../skills/skill-loader.js'
 import { listSkillDrafts, approveSkillDraft, rejectSkillDraft } from '../agent/skill-distill.js'
 import { formatReviewHealthLine } from '../agent/review-health.js'
 import {
@@ -61,6 +61,7 @@ import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDen
 import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
+import { getShellCommand } from '../platform.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
 import type { ChangeSet } from '../agent/review-discipline.js'
@@ -116,6 +117,7 @@ const HELP_TEXT = `Available commands:
 /status — Show agent status (model, domain, cache, tokens)
 /mirror [status|on|off|china|default] — Toggle domestic mirrors for GitHub/npm/pip/go/rust downloads
 /python [status|setup] — Check Python/uv/Git environment or auto-setup a Python project with uv
+/doctor — Environment health check (Node/Git/Python/uv) + which shell the bash tool uses
 /tools — Show available tools and their descriptions
 /compact — Compact context (summarize old messages)
 /workflow [list|<name>|replay <id>] — YAML workflow orchestration + trace replay
@@ -797,6 +799,36 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         const hasProject = isPythonProject(agent.cwd)
         pushStatic(createLogEntry({ type: 'system', content: `当前目录 ${hasProject ? '是' : '不像'} Python 项目。\n\nUsage: /python [status|setup]` }))
       }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
+    name: '/doctor',
+    immediate: true,
+    async handler(ctx) {
+      const { pushStatic, setIsStreaming, agent } = ctx
+      const env = await detectEnv(agent.cwd)
+      const shell = getShellCommand()
+      const lines = [
+        '环境体检 (/doctor)',
+        '═══════════════════════',
+        `平台: ${env.platform}`,
+        `Node: ${env.node.available ? `已安装 (${env.node.version ?? 'unknown'})` : '未安装'}`,
+        `Git:  ${env.git.available ? `已安装 (${env.git.version ?? 'unknown'})` : '未安装'}`,
+        `Python: ${env.python.available ? `${env.python.command} (${env.python.version ?? 'unknown'})` : '未安装'}`,
+        `uv:   ${env.uv.available ? `已安装 (${env.uv.version ?? 'unknown'})` : '未安装'}`,
+        '',
+        'Shell (bash 工具实际使用)',
+        '───────────────────────',
+        `kind: ${shell.kind}   cmd: ${shell.cmd}`,
+      ]
+      if (env.platform === 'win32' && shell.kind !== 'bash') {
+        lines.push('', '⚠ Windows 未使用 Git Bash — 命令执行已退回 ' + shell.kind + '。')
+        lines.push('  安装 Git for Windows 可获得更可靠的 POSIX 命令执行。')
+      }
+      const guidance = formatEnvGuidance(env)
+      pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') }))
       setIsStreaming(false)
       return true
     },
@@ -2576,8 +2608,10 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         }
         const res = approveSkillDraft(ctx.agent.cwd, name)
         if (res.ok && res.skill) {
-          skillRegistry.register(res.skill)
-          pushStatic(createLogEntry({ type: 'system', content: `✅ 已入库 skill: ${res.skill.name}\n已注册到本会话发现层,可用 /skill ${res.skill.name} 加载或由模型自动发现。` }))
+          // Do NOT hot-load into the live registry: changing the available-skill
+          // set mid-session shatters the prefix cache (cost can be tens of times
+          // higher). The draft is persisted to disk; it takes effect on next session.
+          pushStatic(createLogEntry({ type: 'system', content: `✅ 已入库 skill: ${res.skill.name} → .rivet/skills/\n⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。` }))
         } else {
           pushStatic(createLogEntry({ type: 'system', content: `❌ 入库失败: ${res.error ?? 'unknown error'}` }))
         }
@@ -2622,13 +2656,20 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           return true
         }
         const { copied, skipped, errors } = importSkillsIntoRivet(ctx.agent.cwd, names)
-        if (copied.length > 0) {
-          skillRegistry.loadFromDirectory(join(ctx.agent.cwd, '.rivet', 'skills'), 'rivet')
-        }
+        // Do NOT hot-load into the live registry: changing the available-skill set
+        // mid-session shatters the prefix cache (cost can be tens of times higher).
+        // Files are copied to disk; they take effect on next session.
         const lines: string[] = []
         if (copied.length > 0) lines.push(`✅ 已安装: ${copied.join(', ')}`)
         if (skipped.length > 0) lines.push(`⏭ 已存在/跳过: ${skipped.join(', ')}`)
         if (errors.length > 0) lines.push(`❌ 失败:\n${errors.map(e => `  • ${e}`).join('\n')}`)
+        if (copied.length > 0) {
+          lines.push('⚠ 需重开会话才生效:会话内热加载新技能会打碎前缀缓存,成本可达几十倍。')
+          const installed = countInstalledSkills(ctx.agent.cwd)
+          if (installed >= RECOMMENDED_MAX_SKILLS) {
+            lines.push(`⚠ 已安装 ${installed} 个,超过建议上限 ${RECOMMENDED_MAX_SKILLS}。${SKILL_RESTRAINT_NOTICE}`)
+          }
+        }
         pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') || '无变更。' }))
         setIsStreaming(false)
         return true

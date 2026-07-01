@@ -171,14 +171,35 @@ export function clearThetaCache(cwd?: string): void {
   }
 }
 
+/** Resolve a runnable tsc command, preferring the project-local binary so we
+ *  don't depend on `npx` (whose Windows form is npx.cmd and needs a shell) and
+ *  picking tsc.cmd on Windows where the extension-less script is unrunnable. */
+function resolveTscCommand(cwd: string): { command: string; args: string[]; useShell: boolean } {
+  const bin = join(cwd, 'node_modules', '.bin')
+  const candidates = process.platform === 'win32'
+    ? [join(bin, 'tsc.cmd'), join(bin, 'tsc')]
+    : [join(bin, 'tsc')]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      const useShell = process.platform === 'win32' && candidate.toLowerCase().endsWith('.cmd')
+      return { command: useShell ? `"${candidate}"` : candidate, args: ['--noEmit', '--skipLibCheck'], useShell }
+    }
+  }
+  // Fallback: npx resolves tsc from node_modules; Windows needs a shell for npx.cmd.
+  return { command: 'npx', args: ['tsc', '--noEmit', '--skipLibCheck'], useShell: process.platform === 'win32' }
+}
+
 function runThetaCheckInner(cwd: string, timeoutMs: number): Promise<ThetaCheckResult> {
   const start = Date.now()
 
   return new Promise(resolve => {
-    const child = track(spawn('npx', ['tsc', '--noEmit', '--skipLibCheck'], {
+    const tsc = resolveTscCommand(cwd)
+    const child = track(spawn(tsc.command, tsc.args, {
       cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: tsc.useShell,
     }))
 
     let stdout = ''

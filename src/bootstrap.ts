@@ -32,6 +32,8 @@ import { runResumePreflightOai } from './context/resume-preflight.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
+import { defaultStore as defaultTodoStore } from './tools/todo.js'
+import { TodoStore } from './tools/todo-store.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
 import { createUndoTool } from './tools/undo.js'
 import { maybeWarnNoSandbox } from './tools/sandbox-profile.js'
@@ -130,6 +132,11 @@ export interface RuntimeRefs {
   /** Mutable ref to the current GoalTracker. Set by slash-commands /goal,
    *  read by deliver_task B1Context for auto-review gating. */
   goalTrackerRef: { current: import('./agent/goal-tracker.js').GoalTracker | null }
+  /** 多会话隔离：本会话独立的 todo 清单 store。后端所有读/写（todo 工具、plan_task
+   *  回灌、turn-end 任务进度注入、todo-reminder 快照）统一走它。TUI 复用全局
+   *  defaultStore（保持 setTodoSession/loadTodos 持久化与会话切换语义），server 每会话 new。
+   *  缓存不变量：会话生命周期内复用同一实例，loop 重建时随 refs 复用，不可重 new。 */
+  todoStore: TodoStore
 }
 
 /** bootstrapInteractiveSession 的聚合返回值 */
@@ -224,8 +231,8 @@ export function captureGitBaseline(cwd: string): BaselineSnapshot {
     return {
       branch,
       head,
-      preExistingDirty: dirty ? dirty.split('\n') : [],
-      preExistingUntracked: untracked ? untracked.split('\n') : [],
+      preExistingDirty: dirty ? dirty.split(/\r?\n/) : [],
+      preExistingUntracked: untracked ? untracked.split(/\r?\n/) : [],
       capturedAt: Date.now(),
     }
   } catch {
@@ -358,7 +365,7 @@ export function createInteractiveToolRegistry(
   config: Config,
   cwd: string,
 ): { registry: ReturnType<typeof createDefaultToolRegistry> } {
-  const reg = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools })
+  const reg = createDefaultToolRegistry([], { desktopTools: config.agent.desktopTools, todoStore: refs.todoStore })
 
   // delegate_task
   reg.register(createDelegateTaskTool(
@@ -474,6 +481,8 @@ export function createInteractiveToolRegistry(
     getCoordinator: () => refs.coordinator,
     getExecutorDeps: () => planExecutorDeps,
     getSessionId: () => refs.sessionId ?? undefined,
+    // 多会话隔离：plan_task 写本会话 store（TUI 即 defaultStore，行为不变）。
+    writeTodos: todos => refs.todoStore.write(todos),
   }))
 
   // B1 deliver_task
@@ -945,6 +954,10 @@ export function createAgentRuntime(deps: {
       modelRoutingShadowModelCards: modelCards,
       domainKnowledgeStore,
       emitHookResult: deps.emitHookResult,
+      // 多会话隔离：turn-end 任务进度回灌与 todo-reminder 快照统一读本会话 store。
+      // TUI 下 refs.todoStore 即全局 defaultStore（行为不变）；server 下每会话独立。
+      // 闭包绑定 refs（switchModel 重建 loop 时复用同一 refs/todoStore）→ 守住缓存不变量。
+      getTodos: () => refs.todoStore.read(),
     },
     deps.session,
     cwd,
@@ -972,6 +985,12 @@ export function createAgentRuntime(deps: {
     resumeEnabled: true,
     reviewOverrideCards: reviewOverrideCards.size > 0 ? reviewOverrideCards : undefined,
     maxDelegationDepth: config.agent.maxDelegationDepth,
+    // Shared-worktree mode: write workers run directly in the controller's single
+    // shared cwd/branch (no per-worker git worktree, no diff回流/apply_patch merge).
+    // Orthogonal shards write disjoint files; the file-claim registry +
+    // groupTeamTasks same-file serialization prevent stomping. Mirrors the real
+    // "multiple sessions, one branch" workflow.
+    sharedWorktree: true,
   })
 
   return { agent }
@@ -1458,6 +1477,9 @@ export async function bootstrapInteractiveSession(opts: BootstrapOptions = {}): 
     banditState: null,
     promptEngine: null,
     goalTrackerRef: { current: null },
+    // TUI 单会话：复用全局 defaultStore，沿用其 setTodoSession/loadTodos 持久化与
+    // 会话切换语义（行为零变化），仅把后端读取入口统一到 refs.todoStore。
+    todoStore: defaultTodoStore,
   }
 
   // 10. Tool registry

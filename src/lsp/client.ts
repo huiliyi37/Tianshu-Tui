@@ -35,10 +35,18 @@ let _tscMissingWarned = false
 
 function resolveTscPath(cwd: string): string | null {
   if (_tscPath !== undefined) return _tscPath
-  const candidate = join(cwd, 'node_modules', '.bin', 'tsc')
-  if (existsSync(candidate)) {
-    _tscPath = candidate
-    return candidate
+  const bin = join(cwd, 'node_modules', '.bin')
+  // Windows: the runnable executable is tsc.cmd; the extension-less `tsc` is a
+  // POSIX shell script that spawn() cannot execute. Prefer the .cmd so the
+  // typecheck gate actually runs on Windows.
+  const candidates = process.platform === 'win32'
+    ? [join(bin, 'tsc.cmd'), join(bin, 'tsc')]
+    : [join(bin, 'tsc')]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      _tscPath = candidate
+      return candidate
+    }
   }
   _tscPath = null
   return null
@@ -94,10 +102,16 @@ export async function runTypeCheck(cwd: string, filePath: string): Promise<LspCh
  */
 function runTscSubprocess(tscPath: string, cwd: string): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(tscPath, ['--noEmit', '--pretty', 'false'], {
+    // Spawning a .cmd on modern Node requires a shell; quote the path so spaces
+    // in the project directory (e.g. C:\Users\My Name) survive cmd.exe parsing.
+    const useShell = process.platform === 'win32' && tscPath.toLowerCase().endsWith('.cmd')
+    const command = useShell ? `"${tscPath}"` : tscPath
+    const child = spawn(command, ['--noEmit', '--pretty', 'false'], {
       cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: useShell,
     })
 
     let stdout = ''

@@ -178,6 +178,9 @@ export interface AgentConfig {
    *  edits files without running tests. Parsed from RIVET_TDD_GATE env var.
    *  Default: enabled, enforce mode, threshold 3 edits. */
   tddGate?: import('./tdd-gate.js').TddGateConfig
+  /** 多会话隔离：读取本会话 TodoStore。turn-end 任务进度回灌与 todo-reminder 快照
+   *  统一经此读取，避免并发会话共用全局 defaultStore 串台。缺省回退全局 getTodos()。 */
+  getTodos?: () => import('../tools/todo-store.js').TodoItem[]
 }
 
 /**

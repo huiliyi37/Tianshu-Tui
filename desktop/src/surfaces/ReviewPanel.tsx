@@ -15,6 +15,7 @@ import { FilePath } from '../components/FilePath'
 import { FileViewer } from '../components/FileViewer'
 import { Markdown } from '../components/Markdown'
 import { PlanPanel } from './PlanPanel'
+import { TodoDock } from '../components/TodoDock'
 import { GithubPanel } from './GithubPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
@@ -275,7 +276,7 @@ export function ReviewPanel(props: {
 
   return (
     <div className="review flex flex-col h-full relative">
-      <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }}>
+      <Tabs value={tab} onValueChange={(v) => { if (v) setTab(v as ReviewTab) }} className="flex-1 min-h-0">
         <div className="flex items-center justify-between pr-2">
           <div className="relative flex items-center flex-1 min-w-0 overflow-hidden">
             {canScrollLeft && (
@@ -564,6 +565,8 @@ export function ReviewPanel(props: {
           )}
         </TabsContent>
       </Tabs>
+
+      <TodoDock items={todos} collapsedList={tab === 'task'} onOpenFull={() => setTab('task')} />
 
       {open && (
         <div className="modal-backdrop" onClick={() => setOpen(null)}>

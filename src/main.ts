@@ -24,7 +24,7 @@ import { wrapCallbacksWithTuiApp } from './tui/engine/bridge.js'
 import { getPaletteCommands, filterCommands } from './tui/command-palette.js'
 import type { PaletteCommand } from './tui/command-palette.js'
 import { buildCockpitSnapshot } from './tui/cockpit/state.js'
-import { getTodos, loadTodos, setTodoSession } from './tools/todo.js'
+import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
 import { loadHistory } from './tui/history.js'
@@ -43,6 +43,7 @@ import { join } from 'path'
 import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
 import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
+import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -724,8 +725,9 @@ async function main() {
   })
 
   // ── 常驻任务面板 provider（todo 列表）──────────────────────
-  // 读 TodoStore 单例（todo 工具的 canonical 源），T9 不直接 import 工具层单例。
-  app.setTodosProvider(() => getTodos())
+  // 统一读本会话 refs.todoStore（多会话隔离的 canonical 源）。TUI 下它就是全局
+  // defaultStore，故与旧的 getTodos() 行为一致；server/桌面下则各会话独立。
+  app.setTodosProvider(() => ctx!.refs.todoStore.read())
 
   // ── 当前已批准计划指针 provider ─────────────────────────────
   // 读 PromptEngine 中的 activePlanPointer，供右侧面板 lightweight 展示当前计划。
@@ -856,6 +858,18 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // 启动期主动环境体检：git 缺失时(尤其 Windows，Git Bash 是命令执行首选 shell)
+  // 醒目提示，而非等命令失败后被动提醒。异步、失败静默、不阻塞启动。
+  void (async () => {
+    try {
+      const env = await detectEnv(process.cwd())
+      const banner = formatGitMissingBanner(env.git.available, env.platform)
+      if (banner) app?.commitStatic(banner)
+    } catch {
+      // fail-open: 环境探测失败不打扰用户
+    }
+  })()
 
   // 异步检查更新：不阻塞启动，失败静默，有新版本时写入 scrollback 提示。
   if (!process.env.RIVET_NO_UPDATE_CHECK) {

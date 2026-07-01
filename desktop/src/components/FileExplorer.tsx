@@ -2,7 +2,10 @@ import { useState, useCallback, useEffect } from 'react'
 import { ChevronRight, ChevronDown, FileText, Folder, FolderOpen, Loader2 } from 'lucide-react'
 import { listDir, getFileContent } from '../runtime/client'
 import { FileViewer } from './FileViewer'
+import { Markdown } from './Markdown'
 import type { DirEntry, FileContent } from '../runtime/types'
+
+type ViewMode = 'preview' | 'source'
 
 function joinPath(base: string, part: string): string {
   if (!base) return part
@@ -26,6 +29,7 @@ export function FileExplorer({ sessionId }: { sessionId: string | null }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set([''])) // root expanded by default
   const [selectedFile, setSelectedFile] = useState<string | null>(null)
   const [fileContent, setFileContent] = useState<FileContent | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('source')
   const [loadingDir, setLoadingDir] = useState<string | null>(null)
   const [loadingFile, setLoadingFile] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -67,6 +71,8 @@ export function FileExplorer({ sessionId }: { sessionId: string | null }) {
     try {
       const content = await getFileContent(sessionId, filePath)
       setFileContent(content)
+      // Markdown opens rendered (Preview) like Cursor; code opens as Source.
+      setViewMode(content.language === 'markdown' ? 'preview' : 'source')
     } catch {
       setError('读取文件失败')
       setFileContent(null)
@@ -107,15 +113,61 @@ export function FileExplorer({ sessionId }: { sessionId: string | null }) {
         {selectedFile && loadingFile && <div className="empty sm">加载中…</div>}
         {selectedFile && !loadingFile && fileContent && (
           <>
-            <div className="fe-file-path">{fileContent.path}</div>
-            <FileViewer
-              content={fileContent.content}
-              language={fileContent.language}
-              startLine={fileContent.startLine}
-            />
+            <div className="fe-viewer-toolbar">
+              <Breadcrumb path={fileContent.path} />
+              {fileContent.language === 'markdown' && (
+                <div className="fe-segmented" role="tablist">
+                  <button
+                    className={`fe-seg-btn ${viewMode === 'preview' ? 'active' : ''}`}
+                    onClick={() => setViewMode('preview')}
+                    role="tab"
+                    aria-selected={viewMode === 'preview'}
+                  >
+                    预览
+                  </button>
+                  <button
+                    className={`fe-seg-btn ${viewMode === 'source' ? 'active' : ''}`}
+                    onClick={() => setViewMode('source')}
+                    role="tab"
+                    aria-selected={viewMode === 'source'}
+                  >
+                    源码
+                  </button>
+                </div>
+              )}
+            </div>
+            {viewMode === 'preview' && fileContent.language === 'markdown' ? (
+              <div className="fe-doc">
+                <Markdown source={fileContent.content} />
+              </div>
+            ) : (
+              <FileViewer
+                content={fileContent.content}
+                language={fileContent.language}
+                startLine={fileContent.startLine}
+              />
+            )}
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Cursor-style path breadcrumb: dir › dir › file, with the filename emphasized. */
+function Breadcrumb({ path }: { path: string }) {
+  const segments = path.split(/[/\\]/).filter(Boolean)
+  return (
+    <div className="fe-breadcrumb" title={path}>
+      {segments.map((seg, i) => {
+        const isLast = i === segments.length - 1
+        return (
+          <span key={i} className="fe-crumb-group">
+            {i > 0 && <span className="fe-crumb-sep" aria-hidden>›</span>}
+            <span className={`fe-crumb ${isLast ? 'current' : ''}`}>{seg}</span>
+          </span>
+        )
+      })}
     </div>
   )
 }

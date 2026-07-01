@@ -30,17 +30,22 @@ export function processTurnEnd(deps: TurnEndDeps): TurnEndResult {
   const { config, session, trajectory, streamedText, routingMetrics, evidence } = deps
   let decisions = [...deps.decisions]
 
-  if (session.getTurnCount() > 3) {
+  // The authoritative todo list is the model's own goal decomposition. Re-inject
+  // it from turn 0 whenever it exists, so the model keeps seeing its own progress
+  // early (not just after turn 3) — early visibility is what keeps it updating the
+  // list instead of "忘了在跟". The real list survives compaction (process
+  // singleton store), so re-injecting each turn also prevents post-compaction
+  // "todo 退回重做". (Thread 3)
+  // The trajectory heuristic is a weaker fallback and only kicks in after a few
+  // turns of activity, so it stays gated behind turn > 3 when no todo exists.
+  const todos = (config.getTodos ?? getTodos)()
+  if (todos.length > 0) {
+    // Decisions still come from the heuristic text pass (todos don't carry them).
     const heuristic = extractTaskState(trajectory.getEntries(), streamedText)
-    // Prefer the authoritative todo list when the model is actively using it;
-    // fall back to the trajectory heuristic otherwise. The real list survives
-    // compaction (the store is a process singleton), so re-injecting it each
-    // turn prevents post-compaction "todo 退回重做". (Thread 3)
-    const todos = getTodos()
-    const taskState = todos.length > 0
-      ? taskStateFromTodos(todos, heuristic.decisions)
-      : heuristic
-    config.promptEngine.setTaskProgress(taskState)
+    config.promptEngine.setTaskProgress(taskStateFromTodos(todos, heuristic.decisions))
+  } else if (session.getTurnCount() > 3) {
+    const heuristic = extractTaskState(trajectory.getEntries(), streamedText)
+    config.promptEngine.setTaskProgress(heuristic)
  }
 
   // behaviorMirror removed — computed but never rendered into prompt (dead plumbing)

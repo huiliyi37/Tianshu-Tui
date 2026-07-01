@@ -14,11 +14,12 @@
  * turn" model, whose 4000/8000-char budgets caused silent truncation.
  */
 
-import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-export type SkillSource = 'rivet' | 'project-claude' | 'global-claude'
+export type SkillSource = 'rivet' | 'project-claude' | 'global-claude' | 'builtin'
 
 export interface SkillDefinition {
   name: string
@@ -429,6 +430,13 @@ export const BUILTIN_SKILLS: SkillDefinition[] = [
     body: [
       '# Skill 装载机制（给 agent 自己看）',
       '',
+      '## 安装克制（默认立场）',
+      '默认**不建议盲目安装技能**。天枢已原生集成开发工作流，覆盖约 90% 真实任务',
+      '场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，',
+      '本体 70% 的代码即由此完成；**不装技能不影响真实任务的完成**。',
+      '用户让你"把 ~/.claude 的技能都装上"时，不要全量拷（常有 70+ 个）——',
+      '只装当前任务确需的那一两个，其余靠原生能力。',
+      '',
       '## 运行时单一来源',
       '本项目运行时**只从 `.rivet/skills/` 加载技能**（外加少量内置技能），',
       '**默认不扫描任何外部目录**（不读 `~/.claude/skills` 或项目 `.claude/skills`）。',
@@ -517,6 +525,167 @@ export function importSkillsIntoRivet(
   return { copied, skipped, errors }
 }
 
+/** A skill discoverable under .claude/skills that can be copied into .rivet/skills. */
+export interface InstallableSkill {
+  name: string
+  description: string
+  source: 'project-claude' | 'global-claude'
+  /** Already present in .rivet/skills (dir or flat .md) — nothing to copy. */
+  installed: boolean
+}
+
+/**
+ * Enumerate skills installable from .claude/skills (project first, then global
+ * ~/.claude). Mirrors the candidate set importSkillsIntoRivet can copy. Project
+ * entries take precedence on name collision. `installed` flags candidates that
+ * already exist under .rivet/skills so the UI can grey them out.
+ *
+ * Read-only: scanning .claude does NOT load anything into the live registry.
+ */
+export function listInstallableSkills(cwd: string): InstallableSkill[] {
+  const rivetDir = join(cwd, '.rivet', 'skills')
+  const isInstalled = (name: string): boolean =>
+    existsSync(join(rivetDir, name)) || existsSync(join(rivetDir, `${name}.md`))
+  const seen = new Set<string>()
+  const out: InstallableSkill[] = []
+  const scan = (dir: string, source: 'project-claude' | 'global-claude'): void => {
+    let entries: import('node:fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      let name: string | null = null
+      let skillMd: string | null = null
+      if (e.isDirectory()) {
+        const md = join(dir, e.name, 'SKILL.md')
+        if (existsSync(md)) { name = e.name; skillMd = md }
+      } else if (e.isFile() && e.name.endsWith('.md')) {
+        name = e.name.replace(/\.md$/, '')
+        skillMd = join(dir, e.name)
+      }
+      if (!name || !skillMd || seen.has(name)) continue
+      seen.add(name) // project scanned first → wins on collision
+      let description = ''
+      try {
+        description = parseSkillMarkdown(readFileSync(skillMd, 'utf8'), `${name}.md`).description
+      } catch {
+        // Malformed/frontmatter-less file: still listable, just without a description.
+      }
+      out.push({ name, description, source, installed: isInstalled(name) })
+    }
+  }
+  scan(join(cwd, '.claude', 'skills'), 'project-claude')
+  scan(join(homedir(), '.claude', 'skills'), 'global-claude')
+  return out
+}
+
+/**
+ * Recommended soft cap on installed project skills. Not a hard limit — UIs warn
+ * past it. The rationale: Rivet/天枢's native dev workflow already covers ~90% of
+ * real tasks; this repo itself shipped 70% of its own code with fewer than 5
+ * installed skills. Blindly importing a large skill library (e.g. 70+ from
+ * ~/.claude) just bloats the discovery block and the prefix cache.
+ */
+export const RECOMMENDED_MAX_SKILLS = 5
+
+/** One-line restraint guidance shared across CLI/desktop install surfaces. */
+export const SKILL_RESTRAINT_NOTICE =
+  '默认不建议盲目安装技能。天枢已原生集成开发工作流，覆盖约 90% 真实任务场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，本体 70% 的代码即由此完成；不装技能不影响真实任务的完成。'
+
+/**
+ * Count skills already installed under .rivet/skills (directory `<name>/SKILL.md`
+ * or flat `<name>.md`). Used to drive the soft install cap. Read-only.
+ */
+export function countInstalledSkills(cwd: string): number {
+  const dir = join(cwd, '.rivet', 'skills')
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return 0
+  }
+  let count = 0
+  for (const e of entries) {
+    if (e.isDirectory()) {
+      if (existsSync(join(dir, e.name, 'SKILL.md'))) count++
+    } else if (e.isFile() && e.name.endsWith('.md')) {
+      count++
+    }
+  }
+  return count
+}
+
+/**
+ * Locate the `bundled-skills/` directory shipped alongside the runtime bundle.
+ * In the packaged sidecar / CLI it sits next to the emitted JS (tsup copies
+ * `runtime-assets/` into `dist/` via publicDir; the desktop ships the whole
+ * `dist/` as `rivet-runtime/`). Resolved relative to this module's URL with a
+ * parent-dir fallback. Returns null in source/dev (tsx) where it isn't built —
+ * callers treat that as "nothing to seed".
+ */
+function bundledSkillsDir(): string | null {
+  let base: string
+  try {
+    base = dirname(fileURLToPath(import.meta.url))
+  } catch {
+    return null
+  }
+  for (const candidate of [join(base, 'bundled-skills'), join(base, '..', 'bundled-skills')]) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {
+      /* ignore */
+    }
+  }
+  return null
+}
+
+/**
+ * Seed app-bundled skills from `src` into `<cwd>/.rivet/skills`. Kept separate
+ * from path resolution so it is unit-testable. Idempotent per entry: an entry
+ * the project already has (dir or flat `.md`) is left untouched so project
+ * customizations win. Copying into `.rivet/skills` (inside the workspace) is
+ * deliberate — bundled skills must live where the read boundary allows the model
+ * to open their sub-files, otherwise directory skills like brainstorming would
+ * ship with unreadable references. Returns the names actually seeded.
+ */
+export function seedBundledSkillsFrom(src: string, cwd: string): string[] {
+  let entries: import('node:fs').Dirent[]
+  try {
+    entries = readdirSync(src, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const destDir = join(cwd, '.rivet', 'skills')
+  const seeded: string[] = []
+  for (const e of entries) {
+    try {
+      const isFlat = e.isFile() && e.name.endsWith('.md')
+      if (!e.isDirectory() && !isFlat) continue
+      const name = isFlat ? e.name.replace(/\.md$/, '') : e.name
+      if (existsSync(join(destDir, name)) || existsSync(join(destDir, `${name}.md`))) continue
+      mkdirSync(destDir, { recursive: true })
+      cpSync(join(src, e.name), join(destDir, e.name), { recursive: true })
+      seeded.push(name)
+    } catch {
+      /* best-effort per entry — a read-only cwd just skips */
+    }
+  }
+  return seeded
+}
+
+/**
+ * Seed the skills shipped with this install into the project. No-op in dev where
+ * the bundle isn't built. Best-effort. Returns the names actually seeded.
+ */
+export function seedBundledSkills(cwd: string): string[] {
+  const src = bundledSkillsDir()
+  if (!src) return []
+  return seedBundledSkillsFrom(src, cwd)
+}
+
 /**
  * Load skills into the shared registry.
  *
@@ -539,6 +708,13 @@ export function loadProjectSkills(
   const errors: string[] = []
   // Built-in skills first; .rivet/skills files may override by name.
   loaded.push(...registerBuiltinSkills())
+  // Seed app-bundled skills into .rivet/skills so they ship with every install
+  // and stay readable (inside the workspace). Idempotent; project copies win.
+  try {
+    seedBundledSkills(cwd)
+  } catch {
+    /* best-effort */
+  }
   const names = options?.importFromClaude
   if (names && names.length > 0) {
     errors.push(...importSkillsIntoRivet(cwd, names).errors)

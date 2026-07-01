@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useFileDiff, useWorkingTree } from '../state/queries'
 import { DiffView } from '../components/DiffView'
 import type { WorkingTreeFile } from '../runtime/types'
@@ -20,22 +20,39 @@ const STATUS_CLASS: Record<WorkingTreeFile['status'], string> = {
 }
 
 /**
- * Working-tree changes relative to HEAD — the desktop "Diff" tab.
+ * Working-tree changes relative to HEAD — the desktop "Changes" tab.
  *
- * Two-pane layout: file list (left) + per-file unified diff (right, on demand).
- * The file list is polled (5s); the diff is fetched only when a file is selected
- * to avoid pulling 50 files' worth of diff at once. Renders the existing DiffView
- * component — no new diff-rendering logic.
+ * Antigravity-2.0-style review: a single scrollable column with a sticky
+ * summary bar (file count, total +/-, global single/double-column toggle) and
+ * one collapsible card per changed file. Each card lazily fetches its own diff
+ * the first time it is expanded (reusing GET /git/diff?path=), so opening the
+ * tab never pulls 50 files' worth of diff at once. The first file is expanded by
+ * default for an immediate "what changed" view.
+ *
+ * Host-agnostic: the diff is pure local git, so this works the same for repos
+ * hosted on GitHub, gitee, self-hosted, or no remote at all.
  *
  * Degrades gracefully: non-git cwd shows "不是 git 仓库"; no changes shows the
- * empty state. This tab is read-only (no stage/commit) — per the "no IDE / edits
- * go through the agent" positioning.
+ * empty state. Read-only (no stage/commit) — edits go through the agent.
  */
 export function ChangesTab(props: { sessionId: string | null }) {
   const enabled = props.sessionId !== null
   const tree = useWorkingTree(enabled)
-  const [selected, setSelected] = useState<string | null>(null)
-  const diff = useFileDiff(selected)
+  const [sideBySide, setSideBySide] = useState(false)
+
+  const files = tree.data?.files ?? []
+  const totals = useMemo(
+    () =>
+      files.reduce(
+        (acc, f) => {
+          acc.add += f.additions
+          acc.del += f.deletions
+          return acc
+        },
+        { add: 0, del: 0 },
+      ),
+    [files],
+  )
 
   if (!enabled) {
     return <div className="empty sm">无活动会话</div>
@@ -46,60 +63,71 @@ export function ChangesTab(props: { sessionId: string | null }) {
   if (tree.isError) {
     return <div className="empty sm">读取工作树失败</div>
   }
-  const data = tree.data
-  if (data && !data.isRepo) {
+  if (tree.data && !tree.data.isRepo) {
     return <div className="empty sm">当前目录不是 git 仓库</div>
   }
-  const files = data?.files ?? []
   if (files.length === 0) {
     return <div className="empty sm">工作树无变更</div>
   }
 
   return (
-    <div className="changes-tab">
-      <div className="changes-file-list">
-        <div className="changes-file-count">{files.length} 个文件变更</div>
-        {files.map((f) => (
-          <button
-            key={f.path}
-            className={`changes-file ${selected === f.path ? 'selected' : ''}`}
-            onClick={() => setSelected(f.path)}
-            title={f.path}
-          >
-            <span className={`changes-status ${STATUS_CLASS[f.status]}`} aria-hidden>
-              {STATUS_LABEL[f.status]}
-            </span>
-            <span className="changes-path">{shortPath(f.path)}</span>
-            <span className="changes-delta">
-              {f.additions > 0 && <span className="add">+{f.additions}</span>}
-              {f.deletions > 0 && <span className="del">-{f.deletions}</span>}
-            </span>
-          </button>
-        ))}
+    <div className="changes-overview">
+      <div className="changes-summary">
+        <span className="changes-summary-count">{files.length} 个文件变更</span>
+        <span className="changes-summary-delta">
+          {totals.add > 0 && <span className="add">+{totals.add}</span>}
+          {totals.del > 0 && <span className="del">-{totals.del}</span>}
+        </span>
+        <button
+          className={`diff-toggle ${sideBySide ? 'active' : ''}`}
+          onClick={() => setSideBySide((v) => !v)}
+          title="切换单列 / 双列视图"
+        >
+          {sideBySide ? '双列' : '单列'}
+        </button>
       </div>
-      <div className="changes-diff-view">
-        {selected === null ? (
-          <div className="empty sm">选择左侧文件查看 diff</div>
-        ) : diff.isLoading ? (
-          <div className="empty sm">加载 diff…</div>
-        ) : diff.isError ? (
-          <div className="empty sm">读取 diff 失败</div>
-        ) : !diff.data?.diff ? (
-          <div className="empty sm">
-            <div>{shortPath(selected)}</div>
-            <div className="muted">无文本差异（二进制文件或未跟踪文件）</div>
-          </div>
-        ) : (
-          <DiffView raw={diff.data.diff} />
-        )}
+      <div className="changes-cards">
+        {files.map((f, i) => (
+          <FileDiffCard key={f.path} file={f} sideBySide={sideBySide} defaultOpen={i === 0} />
+        ))}
       </div>
     </div>
   )
 }
 
-/** Show the last 2 path segments so long paths fit the narrow list. */
-function shortPath(p: string): string {
-  const parts = p.split(/[/\\]/)
-  if (parts.length <= 2) return p
-  return '…/' + parts.slice(-2).join('/')
+/** One collapsible per-file diff card. Fetches its diff only once expanded. */
+function FileDiffCard(props: { file: WorkingTreeFile; sideBySide: boolean; defaultOpen: boolean }) {
+  const { file, sideBySide, defaultOpen } = props
+  const [open, setOpen] = useState(defaultOpen)
+  // null path → query disabled, so collapsed cards never fetch.
+  const diff = useFileDiff(open ? file.path : null)
+
+  return (
+    <div className={`file-diff-card ${open ? 'open' : ''}`}>
+      <button className="file-diff-card-head" onClick={() => setOpen((v) => !v)} title={file.path}>
+        <span className="file-diff-chevron" aria-hidden>{open ? '▾' : '▸'}</span>
+        <span className={`changes-status ${STATUS_CLASS[file.status]}`} aria-hidden>
+          {STATUS_LABEL[file.status]}
+        </span>
+        <span className="file-diff-path">{file.path}</span>
+        <span className="file-diff-delta">
+          {file.additions > 0 && <span className="add">+{file.additions}</span>}
+          {file.deletions > 0 && <span className="del">-{file.deletions}</span>}
+        </span>
+      </button>
+      {open && (
+        <div className="file-diff-card-body">
+          {diff.isLoading ? (
+            <div className="empty sm">加载 diff…</div>
+          ) : diff.isError ? (
+            <div className="empty sm">读取 diff 失败</div>
+          ) : !diff.data?.diff ? (
+            <div className="empty sm muted">无文本差异（二进制文件）</div>
+          ) : (
+            <DiffView raw={diff.data.diff} sideBySide={sideBySide} hideToolbar />
+          )}
+        </div>
+      )}
+    </div>
+  )
 }

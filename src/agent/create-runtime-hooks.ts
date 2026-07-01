@@ -31,6 +31,7 @@ import { createCompanionHeartbeatHook } from './hooks/companion-heartbeat-hook.j
 import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-router.js'
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
+import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
@@ -169,6 +170,9 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** 多会话隔离：读取本会话 TodoStore（透传给 todo-reminder 做快照/活跃度判断）。
+   *  缺省时 todo-reminder 回退全局 getTodos()。 */
+  getTodos?: () => import('../tools/todo-store.js').TodoItem[]
   /** CCR telemetry callback — invoked on each capsule router trigger for offline analysis. */
   onCcrTrigger?: (event: CcrTriggerEvent) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
@@ -422,6 +426,13 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Fires when TS files were edited + tests ran + no typecheck since.
   if (deps.advisoryBus) {
     hooks.push(createTypecheckReminderHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Todo-Reminder: postTurn hook — nudges the model to (a) create a todo list
+  // when a multi-step task is running without one, and (b) refresh a stale list.
+  // Soft by default, escalates wording when a long task still has no todo.
+  if (deps.advisoryBus) {
+    hooks.push(createTodoReminderHook({ advisoryBus: deps.advisoryBus, getTodos: deps.getTodos }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {

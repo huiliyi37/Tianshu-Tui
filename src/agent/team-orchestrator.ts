@@ -9,6 +9,7 @@ import { applyTeamSchedulerInfluence, evaluateTeamSchedulerGate } from './team-s
 import { buildTeamSchedulerShadowEvent, type TeamSchedulerShadowEvent } from './team-scheduler-shadow.js'
 import { buildGatedInfluenceAuditEvent, type GatedInfluenceAuditEvent } from './gated-influence-audit.js'
 import { buildPlannerObjective, foldVerificationIntoTasks, mergePerspectivesByRole, normalizePerspective, parsePerspectiveResult, type MergedPlan, type TeamPerspectivePlan } from './team-perspectives.js'
+import { detectOverlapWithoutOrder } from './unified-plan.js'
 import { selectExpertSet } from './expert-router.js'
 import { loadTeamPlanSkeleton, saveTeamPlanSkeleton, type TeamPlanCacheStore } from './team-plan-cache.js'
 
@@ -70,8 +71,12 @@ export interface TeamRunSummary {
   planCacheHit?: boolean
   /** Council merge output (max mode, first wave only — absent on cache hits and
    *  standard mode). Surfaces the perspective work that would otherwise be lost:
-   *  conflicts, risk ledger, deferred/rejected alternatives. Advisory only. */
-  planMerge?: Pick<MergedPlan, 'conflicts' | 'risks' | 'deferred' | 'rejected'>
+   *  conflicts, risk ledger, deferred/rejected alternatives, and the orthogonal
+   *  shards folded into the executable graph (augmented). Advisory only. */
+  planMerge?: Pick<MergedPlan, 'conflicts' | 'risks' | 'deferred' | 'rejected' | 'augmented'>
+  /** Non-blocking shard advisories on the merged task graph (max mode): shards
+   *  that touch the same file without an explicit dependsOn ordering. */
+  advisories?: string[]
 }
 
 function isFileScopedPatcher(task: TeamTaskDraft): boolean {
@@ -432,13 +437,17 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
     } else {
       // Dynamic council: route the mission to a complementary expert set
       // (base + constraint + challenger + any matched specialist) instead of a
-      // hardcoded trio. Flash (tierLock:'cheap') reviewer planners, one round.
+      // hardcoded trio. Planners use the dedicated `perspective_planner`
+      // profile (read-only, NOT tierLock:'cheap') so the planning model routes
+      // via workers.routing.planning and defaults to the strong tier — base
+      // planner output is the executable shard graph, so planning quality
+      // directly drives parallel-shard quality.
       const perspectives = selectExpertSet(input.objective)
       const plannerRequests: DelegationRequest[] = perspectives.map(perspective => ({
         parentTurnId: `team:planner-${perspective}`,
         objective: buildPlannerObjective(perspective, input.objective),
         kind: 'plan',
-        profile: 'reviewer',
+        profile: 'perspective_planner',
         scope: {},
         authority: perspective,
         onActivity: input.onActivity,
@@ -454,12 +463,16 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       // review focusHint (which reads TeamTask.verification) sees them on every
       // wave, including waves resumed from the cached skeleton.
       mergedTasks = foldVerificationIntoTasks(merged.tasks, merged.verification)
-      // Surface the council work that would otherwise be discarded.
-      planMerge = { conflicts: merged.conflicts, risks: merged.risks, deferred: merged.deferred, rejected: merged.rejected }
+      // Surface the council work that would otherwise be discarded — including
+      // the orthogonal shards augment folded into the executable graph.
+      planMerge = { conflicts: merged.conflicts, risks: merged.risks, deferred: merged.deferred, rejected: merged.rejected, augmented: merged.augmented }
       if (mergedTasks.length > 0) {
         saveTeamPlanSkeleton(deps.planCacheStore, { objective: input.objective, mode: 'max', tasks: mergedTasks })
       }
     }
+    // Non-blocking advisory on the final merged graph (covers cached + fresh):
+    // shards touching the same file without an explicit dependsOn ordering.
+    const advisories = detectOverlapWithoutOrder(mergedTasks)
     const waves = groupTeamTasks(mergedTasks)
     const taskMap = new Map(mergedTasks.map(t => [t.id, t]))
 
@@ -475,6 +488,7 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
         ...(plannerRun ? { run: plannerRun } : {}),
         ...(cached ? { planCacheHit: true } : {}),
         ...(planMerge ? { planMerge } : {}),
+        ...(advisories.length > 0 ? { advisories } : {}),
       }
     }
 
@@ -489,6 +503,7 @@ export async function runTeamSkeleton(input: TeamRunInput, deps: TeamOrchestrato
       ...summary,
       ...(cached ? { planCacheHit: true } : {}),
       ...(planMerge ? { planMerge } : {}),
+      ...(advisories.length > 0 ? { advisories } : {}),
     }
   }
 

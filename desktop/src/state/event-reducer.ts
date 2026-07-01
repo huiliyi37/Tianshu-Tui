@@ -6,6 +6,7 @@ import type {
   TodoStateItem,
 } from '../runtime/types'
 import type { EvidenceSummary } from '../../../src/agent/evidence.js'
+import { normalizePath } from '../lib/projects'
 
 const FILE_TOOLS = new Set([
   'edit_file', 'write_file', 'hash_edit', 'apply_patch', 'read_file', 'create_file',
@@ -255,7 +256,10 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       if (FILE_TOOLS.has(toolName)) {
         const input = (ev.data.input ?? {}) as Record<string, unknown>
         const filePath = String(input.path ?? input.file_path ?? input.target ?? '')
-        if (filePath && !next.sources.includes(filePath)) {
+        // Dedup on a normalized key so the same file referenced via different
+        // separators or casing (Windows) is not listed twice; display the
+        // original path as first seen.
+        if (filePath && !next.sources.some((s) => normalizePath(s) === normalizePath(filePath))) {
           next.sources = [...next.sources, filePath]
         }
       }
@@ -448,6 +452,8 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
         usage: ev.data.usage != null && typeof ev.data.usage === 'object' ? (ev.data.usage as DelegationNode['usage']) : prev?.usage,
         artifactId: ev.data.artifactId != null ? String(ev.data.artifactId) : prev?.artifactId,
         changedFiles: Array.isArray(ev.data.changedFiles) ? (ev.data.changedFiles as string[]) : prev?.changedFiles,
+        summary: ev.data.summary != null ? String(ev.data.summary) : prev?.summary,
+        origin: ev.data.origin === 'user' || ev.data.origin === 'agent' ? ev.data.origin : prev?.origin,
         updatedAt: ev.ts,
       }
       next.delegation = { ...next.delegation, [workerId]: node }

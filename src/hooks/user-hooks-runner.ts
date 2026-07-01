@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 export type HookEvent =
@@ -64,7 +64,7 @@ export function runHooksForEvent(cwd: string, ctx: HookContext): HookResult[] {
   const results: HookResult[] = []
 
   for (const entry of config.hooks.filter(h => h.event === ctx.event)) {
-    const scriptPath = entry.script.startsWith('/')
+    const scriptPath = isAbsolute(entry.script)
       ? entry.script
       : join(cwd, entry.script)
 

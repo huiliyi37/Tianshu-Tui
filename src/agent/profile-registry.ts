@@ -109,6 +109,21 @@ PlanItem (additions[]) = { id, title, detail, files?: string[] } — set files t
     builtIn: true,
   },
   {
+    // team max 三视角规划席 —— 独立于 reviewer 的「规划模型」身份。
+    // 关键：故意 NOT 设 tierLock（对齐 council_expert）。借用 reviewer 时
+    // 其 tierLock:'cheap' 会把规划锁死在 flash，规划质量直接拖累分片拆分；
+    // 这里放开，让 authority→tier 升级与 workers.routing.planning 路由生效，
+    // 默认落强档（capable）。产出契约由 buildPlannerObjective 驱动（perspective-plan），
+    // expertisePrompt 保持精简，避免与 council_expert 的 seat-contribution 冲突。
+    name: 'perspective_planner',
+    role: 'readonly',
+    allowedTools: [...READ_ONLY_TOOLS],
+    expertisePrompt: `You are a planning-council perspective planner. Read the real code with your read-only tools before opining, then return a single plan from your assigned perspective. Do NOT modify files or dispatch sub-work — planning only. The exact output contract is given in the task objective.`,
+    defaultKind: 'plan',
+    defaultTimeoutMs: 600_000, // 10min — 规划需充分读上下文 + 深度拆分
+    builtIn: true,
+  },
+  {
     name: 'verifier',
     role: 'hands',
     allowedTools: [...WRITE_TOOLS],
@@ -213,7 +228,11 @@ Use met:false for unmet, met:null for uncheckable. If overall is rejected, the s
     role: 'hands',
     allowedTools: [...WRITE_TOOLS, 'ast_edit'],
     expertisePrompt: `You are a patcher. Apply code changes precisely. Follow edit instructions exactly, preserving indentation and context.`,
-    defaultMaxTokens: 16384,
+    defaultMaxTokens: 24576,
+    // A self-contained shard implements changes AND runs tsc/lint/tests to green
+    // in one go — give it a generous (but sub-tool-cap) window so a long-program
+    // shard isn't killed before it finishes verifying its own work.
+    defaultTimeoutMs: 300_000,
     defaultKind: 'patch_proposal',
     builtIn: true,
   },

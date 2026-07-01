@@ -155,5 +155,6 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/enter', description: 'Resume a worker session (e.g. /enter wo_team:T1 continue)' },
     { name: '/exit', description: 'Save session and exit' },
     { name: '/update', description: 'Check and install the latest Rivet release' },
+    { name: '/doctor', description: 'Environment health check + which shell the bash tool uses' },
   ]
 }

@@ -13,6 +13,8 @@ import { desktopDir, desktopSessionsDir } from '../config/paths.js'
 import { serverLogger } from './logger.js'
 import { createRoutes, type ServerState } from './routes.js'
 import { RuntimeSessionManager } from './session-manager.js'
+import type { DelegateWorkerInput, DelegateActivityUpdate } from './session-manager.js'
+import { activityProgressLine } from '../tools/worker-activity-stream.js'
 import { FileSessionPersistence } from './session-persistence.js'
 import { buildSessionRoutes } from './session-routes.js'
 import { buildHealthRoute } from './health-route.js'
@@ -45,6 +47,7 @@ import { createTaskLedger } from '../agent/task-ledger.js'
 import { createOwnershipLedger } from '../agent/ownership-ledger.js'
 import { createWorktreeBaseline } from '../agent/worktree-baseline.js'
 import { captureGitBaseline, createInteractiveToolRegistry, createAgentRuntime, type RuntimeRefs } from '../bootstrap.js'
+import { TodoStore } from '../tools/todo-store.js'
 import { loadProjectSkills } from '../skills/skill-loader.js'
 import { createMemoryTool } from '../tools/memory.js'
 import { DomainKnowledgeStore } from '../agent/domain-knowledge-store.js'
@@ -339,6 +342,9 @@ function buildSessionStores(
       ? () => shared.sameCwdRunningCount?.(cwd, sessionId) ?? 0
       : undefined,
     goalTrackerRef: { current: null },
+    // 多会话隔离：每会话独立内存态 TodoStore，杜绝并发会话清单串台（提示词注入污染）。
+    // 不做磁盘持久化（按决策），展示与跨重启恢复靠事件日志重放。
+    todoStore: new TodoStore(),
   }
   const { registry: toolRegistry } = createInteractiveToolRegistry(refs, ctx.config, cwd)
 
@@ -558,6 +564,8 @@ function buildManagedAgent(
     },
     // I1: 桌面端议事会入口，直接评审 artifact 中的 council-plan-json。
     conveneCouncil: (input) => conveneCouncilOnCoordinator(agent, stores.refs.coordinator, stores.refs, input),
+    // 用户主动派后台子代理：独立 AbortSignal，跑在隔离子会话，不碰主历史。
+    delegateWorker: (input, opts) => delegateWorkerOnCoordinator(stores.refs.coordinator, input, opts),
   }
 }
 
@@ -684,6 +692,96 @@ function extractCouncilPlanJson(raw: string): UnifiedPlan | null {
   const match = raw.match(/```council-plan-json\n([\s\S]*?)\n```/)
   if (!match) return null
   return deserializeUnifiedPlan(match[1]!)
+}
+
+/** Map a friendly profile to a work-order kind so patch/review/verify workers
+ *  get the right execution mode (mirrors delegate_task's kind semantics). */
+function kindForProfile(profile: string): import('../agent/coordinator.js').DelegationRequest['kind'] {
+  switch (profile) {
+    case 'patcher': return 'patch_proposal'
+    case 'reviewer': return 'review'
+    case 'verifier':
+    case 'adversarial_verifier': return 'verify'
+    case 'planner':
+    case 'perspective_planner': return 'plan'
+    case 'doc_scout': return 'doc_research'
+    default: return 'code_search'
+  }
+}
+
+/** Build the terminal digest shown in the panel + adopted into the composer by
+ *  the "汇入主会话" button. Markdown: objective + outcome + changed files +
+ *  worker summary (truncated). Pure — easy to unit test. */
+export function buildDelegateSummary(
+  input: { objective: string },
+  run: import('../agent/coordinator.js').CoordinatorRun,
+): string {
+  const result = run.results[0]
+  const statusLabel = result?.status === 'passed' ? '完成'
+    : result?.status === 'blocked' ? '受阻'
+    : result?.status === 'escalated' ? '已升级'
+    : result?.status === 'failed' ? '失败'
+    : run.status === 'skipped' ? '已跳过' : '完成'
+  const lines: string[] = []
+  lines.push(`子代理任务「${input.objective}」${statusLabel}。`)
+  const changed = result?.changedFiles ?? []
+  if (changed.length > 0) {
+    lines.push('', '变更文件：')
+    for (const f of changed.slice(0, 20)) lines.push(`- ${f}`)
+    if (changed.length > 20) lines.push(`- …其余 ${changed.length - 20} 个`)
+  }
+  if (result?.summary) {
+    lines.push('', '子代理总结：', result.summary.slice(0, 1200))
+  }
+  lines.push('', '请审查以上结果，确认无误后继续。')
+  return lines.join('\n')
+}
+
+/** User-dispatched background subagent runner. Mirrors delegate_task's request
+ *  shaping but bridges activity to a plain callback (no tool pipeline) and
+ *  produces a terminal summary for the adopt-to-composer flow. */
+async function delegateWorkerOnCoordinator(
+  coordinator: import('../agent/coordinator.js').DelegationCoordinator | null,
+  input: DelegateWorkerInput,
+  opts: { workerId: string; signal: AbortSignal; onActivity: (a: DelegateActivityUpdate) => void },
+): Promise<void> {
+  if (!coordinator) throw new Error('DelegationCoordinator not initialized')
+  const profile = input.profile && input.profile.trim() ? input.profile.trim() : 'code_scout'
+  const request: import('../agent/coordinator.js').DelegationRequest = {
+    // Use the manager-owned workerId as the stable node key (parentTurnId derives
+    // the work order id), so every activity update merges into the same panel node.
+    parentTurnId: opts.workerId,
+    objective: input.objective,
+    kind: kindForProfile(profile),
+    profile: profile as import('../agent/work-order.js').WorkerProfile,
+    scope: input.files && input.files.length ? { files: input.files } : {},
+    delegationDepth: 0,
+    onActivity: (ev) => {
+      opts.onActivity({
+        workOrderId: opts.workerId,
+        profile: ev.profile ?? profile,
+        authority: ev.authority,
+        status: 'running',
+        progressLine: activityProgressLine(ev),
+      })
+    },
+  }
+  if (input.authority) request.authority = input.authority
+  const run = await coordinator.delegate(request, opts.signal)
+  const result = run.results[0]
+  const status: DelegateActivityUpdate['status'] = result?.status ?? (run.status === 'skipped' ? 'blocked' : 'passed')
+  opts.onActivity({
+    workOrderId: opts.workerId,
+    profile,
+    status,
+    progressLine: result?.summary ? result.summary.slice(0, 120) : undefined,
+    summary: buildDelegateSummary(input, run),
+    changedFiles: result?.changedFiles && result.changedFiles.length > 0 ? result.changedFiles : undefined,
+    artifactId: result?.diffArtifactId,
+    model: run.selectedModel ?? result?.model,
+    provider: result?.provider,
+    usage: result?.usage,
+  })
 }
 
 export interface RunServeOptions {
@@ -868,6 +966,26 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       execFile(opener, [filePath], () => {})
     })
     return { status: 200, body: { opened: filePath } }
+  }
+
+  // Open an external URL in the system browser. `start` is a cmd builtin (not an
+  // exe), so on Windows it must be invoked via `cmd /c start "" <url>`; the empty
+  // title arg keeps URLs parsed correctly. Used by the first-run Git install
+  // dialog's "open download page" button.
+  routes['POST /open-external'] = (body) => {
+    const url = (body as Record<string, unknown>)?.url
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
+      return { status: 400, body: { error: 'Missing or invalid url (must be http/https)' } }
+    }
+    import('node:child_process').then(({ execFile }) => {
+      if (process.platform === 'win32') {
+        execFile('cmd', ['/c', 'start', '', url], () => {})
+      } else {
+        const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
+        execFile(opener, [url], () => {})
+      }
+    })
+    return { status: 200, body: { opened: url } }
   }
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.

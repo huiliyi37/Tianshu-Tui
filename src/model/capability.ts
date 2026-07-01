@@ -1,4 +1,4 @@
-export type CapabilityTask = 'repo_summarization' | 'code_edit' | 'test_failure_diagnosis' | 'compaction' | 'risky_refactor'
+export type CapabilityTask = 'repo_summarization' | 'code_edit' | 'test_failure_diagnosis' | 'compaction' | 'risky_refactor' | 'planning'
 
 export interface ModelCapabilityCard {
   model: string
@@ -23,6 +23,9 @@ function score(task: CapabilityTask, card: ModelCapabilityCard): number {
       return (card.cacheEconomics === 'strong' ? 1 : 0.5) + card.jsonStability
     case 'risky_refactor':
       return card.toolUseReliability * 0.4 + card.editSuccessRate * 0.3 + card.testRepairRate * 0.3
+    case 'planning':
+      // 规划偏好强推理 + 大上下文 + 稳定 JSON 产出：favor strong-cache pro 模型
+      return card.toolUseReliability * 0.4 + card.jsonStability * 0.3 + (card.cacheEconomics === 'strong' ? 0.3 : 0) + card.contextWindow / 1_000_000
   }
 }
 

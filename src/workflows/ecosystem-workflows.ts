@@ -304,28 +304,31 @@ ${objective}
 Operating contract:
 - User explicitly triggered team mode; do not ask whether to use it.
 ${planInstruction}
-- Main controller (current session) owns integration, verification, and final deliver_task.
-- MVP safety boundary: workers do NOT auto-commit/auto-merge. Treat worker output as patchSummary/diff evidence; integrate deliberately.
-- patcher workers as 天梁 executors remain bounded helpers: objective must say "只执行本 task，不扩展范围，不重写计划".
+- Main controller (current session) owns the shared workspace, verification, and final deliver_task.
+- Sharding rule (CORE): split the task HORIZONTALLY into orthogonal shards — like the S1-S16 / C1-C4 batches — where each shard is a complete, self-contained unit of work that ONE capable 天梁 flash owns end-to-end (implement + run tsc/lint/relevant tests to green in its own context). Do NOT split vertically by stage (no separate explore→patch→import→test→lint→type→verify role workers); a strong flash does the whole shard.
+- Keep shards orthogonal: each shard touches a disjoint set of files/modules so they run in parallel. When two shards must touch the same file, set dependsOn so they serialize in order instead of racing. Aim for a few substantial shards, not many tiny工序碎片.
+- Shared-worktree model: all flash workers write directly into the controller's single shared workspace (no per-worker worktree, no diff-merge step). The file-claim registry + same-file wave serialization prevent stomping. You review the AGGREGATE result with git diff/git status — you do NOT apply per-worker patches.
+- patcher workers as 天梁 executors stay bounded: each shard objective must say "只执行本 task，不扩展范围，不重写计划".
 
 Execution flow — follow these exact steps:
 
 If the objective IS a Markdown plan file path (e.g. .rivet/knowledge/...md or docs/superpowers/plans/...md):
   1. Read the plan file and note its implementation checklist.
   2. Call plan_task with { objective, files: [planPath, plus the source files mentioned in the plan], execute: true }.
-     plan_task will auto-detect the plan file, parse the - [ ] checklist items, create one patcher worker per item,
-     and store the plan internally so team_orchestrate can pick it up automatically.
-  3. After plan_task dispatches the first wave, integrate the returned worker diffs into the working tree.
+     plan_task auto-detects the plan file, turns its - [ ] checklist into self-contained patcher shards,
+     and stores the plan so team_orchestrate can pick it up automatically.
+  3. Workers write into the shared workspace. Review the aggregate changes (git diff/git status) — there is nothing to manually merge.
   4. If the output shows remaining waves, call team_orchestrate with { mode: 'standard', objective, fromWave: <next wave index> }.
      (No need to pass planJson — team_orchestrate reads it from the internal plan store.)
 
 If the objective is a free-form task description (no plan file):
-  1. Call plan_task with { objective, execute: true } to decompose and dispatch the first wave.
-  2. Follow the same integrate-then-continue pattern as above (team_orchestrate without planJson).
+  1. Call plan_task with { objective, files: [the source files in scope], execute: true } to shard and dispatch the first wave.
+     Listing scope files lets the planner cut orthogonal per-module shards instead of one monolith.
+  2. Follow the same review-aggregate-then-continue pattern as above (team_orchestrate without planJson).
 
 After ALL waves complete:
   1. Run targeted tests + npx tsc --noEmit.
-  2. Call deliver_task with commit=true and a checklist covering each completed item.
+  2. Call deliver_task with commit=true and a checklist covering each completed shard.
 `
 }
 

@@ -16,6 +16,7 @@ import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { useSurfaceCommands } from './lib/use-surface-commands'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
+import { FirstRunGitDialog } from './components/FirstRunGitDialog'
 import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
 
@@ -37,6 +38,7 @@ export function App() {
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
   const [envDismissed, setEnvDismissed] = useState(false)
+  const [gitGateDismissed, setGitGateDismissed] = useState(false)
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
@@ -182,11 +184,10 @@ export function App() {
             </button>
           </div>
         )}
-        {env.data && !env.data.git.available && !envDismissed && (
+        {env.data && !env.data.git.available && !envDismissed && env.data.platform !== 'win32' && (
           <div className="banner warn">
             未检测到 Git。代码仓库操作需要 Git。
             {env.data.platform === 'darwin' && 'macOS 推荐：xcode-select --install 或 brew install git'}
-            {env.data.platform === 'win32' && 'Windows 推荐：从 git-scm.com/download/win 下载安装'}
             {env.data.platform === 'linux' && 'Linux 推荐：sudo apt install git'}
             <button
               className="banner-action"
@@ -250,6 +251,14 @@ export function App() {
       />
       {storageConfigured === false && (
         <FirstRunStorageDialog open />
+      )}
+      {storageConfigured === true
+        && !sidecarDown
+        && env.data
+        && env.data.platform === 'win32'
+        && !env.data.git.available
+        && !gitGateDismissed && (
+        <FirstRunGitDialog open onDismiss={() => setGitGateDismissed(true)} />
       )}
       <Toaster position="top-right" theme="dark" toastOptions={{ style: { background: 'var(--panel-2)', border: '1px solid var(--border)', color: 'var(--text)' } }} />
     </div>

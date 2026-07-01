@@ -53,6 +53,14 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
     return { tier: 'cheap', reason: 'verification work uses flash model for fast review throughput' }
   }
 
+  // 规划模型独立路由：team max 三视角规划席默认走强档。base planner 产出即
+  // 执行分片图，规划质量直接决定并行拆分好坏，故不当作便宜探索；hardFloor=strong
+  // 确保 routing(workers.routing.planning→capable) 命中强档而非被便宜档过滤掉。
+  // 想完全自定义 provider/tier 可配 review.profiles.perspective_planner（覆盖卡绕过档位过滤）。
+  if (input.profile === 'perspective_planner') {
+    return { tier: 'strong', hardFloor: 'strong', reason: 'planning model defaults to strong tier — base plan is the executable shard graph' }
+  }
+
   if (authority === 'tianfu' || authority === '天府') {
     if (riskTier === 'high') return { tier: 'strong', hardFloor: 'strong', reason: 'tianfu high-risk guardrail work uses strong tier' }
     return { tier: 'balanced', hardFloor: 'balanced', reason: 'tianfu guardrail work should not be cheap by default' }

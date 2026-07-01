@@ -1,9 +1,10 @@
-import { spawn } from 'child_process'
 import { readFile, stat, glob } from 'node:fs/promises'
 import { join, delimiter } from 'node:path'
 import type { Tool, ToolCallParams, ToolResult, VerificationMetadata } from './types.js'
 import { track } from './process-tracker.js'
-import { gracefulKill, forceKill, WinStreamDecoder } from '../platform.js'
+import { WinStreamDecoder } from '../platform.js'
+import { spawnHidden } from './spawn-hidden.js'
+import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
 
 interface RunnableTestCommand {
@@ -504,10 +505,14 @@ function runTestCommandIn(
 ): Promise<ToolResult> {
   const startTime = Date.now()
   return new Promise<ToolResult>((resolve) => {
-      const child = track(spawn(testCommand.command, testCommand.args, {
+      const child = track(spawnHidden(testCommand.command, testCommand.args, {
         cwd,
         env: buildExecutionEnv(cwd),
         stdio: ['ignore', 'pipe', 'pipe'],
+        // Own process group on POSIX so killProcessTree can reap the whole test
+        // tree (node → tsx → workers); Windows uses taskkill /T and must not be
+        // detached (breaks stdio pipes). Mirrors bash.ts/git.ts.
+        detached: process.platform !== 'win32',
       }))
 
       let stdout = ''
@@ -546,8 +551,8 @@ function runTestCommandIn(
       const blockedVerification = (): VerificationMetadata => buildBlockedVerification(testCommand, startTime)
 
       const timer = setTimeout(async () => {
-        gracefulKill(child)
-        setTimeout(() => forceKill(child), 3000)
+        killProcessTree(child, 'SIGTERM')
+        setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
         const finalStdout = stdout + stdoutDecoder.end()
         const finalStderr = stderr + stderrDecoder.end()
         const raw = finalStdout + (finalStderr ? '\n' + finalStderr : '')
@@ -568,8 +573,8 @@ function runTestCommandIn(
       const signal = params.abortSignal
       const onAbort = () => {
         clearTimeout(timer)
-        gracefulKill(child)
-        setTimeout(() => forceKill(child), 3000)
+        killProcessTree(child, 'SIGTERM')
+        setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
         resolve({ content: 'Tests aborted by user.', uiContent: '⏹ aborted', isError: false })
       }
       if (signal) {

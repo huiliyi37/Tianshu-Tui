@@ -33,11 +33,12 @@ export function getCompletions(partial: string, cwd: string, limit: number): str
       encoding: 'utf-8',
       timeout: GIT_LS_FILES_TIMEOUT_MS,
       stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
     })
     const lower = partial.toLowerCase()
     return output
       .trim()
-      .split('\n')
+      .split(/\r?\n/)
       .filter(Boolean)
       .filter(f => f.toLowerCase().includes(lower))
       .sort((a, b) => {

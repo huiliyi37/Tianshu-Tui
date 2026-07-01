@@ -8,13 +8,15 @@ export interface MentionReference {
   raw: string
 }
 
-const MENTION_RE = /@(file|folder|symbol|codebase):([^\s]+)/g
+// Quoted form `@file:"a b.ts"` carries paths with spaces (Windows: C:\Program
+// Files\…); the bare `[^\s]+` form stays supported for everything else.
+const MENTION_RE = /@(file|folder|symbol|codebase):(?:"([^"]+)"|([^\s]+))/g
 
 export function parseMentions(input: string): MentionReference[] {
   const refs: MentionReference[] = []
   for (const match of input.matchAll(MENTION_RE)) {
     const type = match[1] as MentionReference['type']
-    const value = match[2]!.trim()
+    const value = (match[2] ?? match[3] ?? '').trim()
     refs.push({ type, value, raw: match[0]! })
   }
   return refs

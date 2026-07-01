@@ -114,14 +114,16 @@ export function createPlanTaskTool(deps: {
   getExecutorDeps: () => PlanExecutorDeps
   getSessionTurn?: () => number | undefined
   getSessionId?: () => string | undefined
+  /** 多会话隔离：写入本会话的 TodoStore。缺省回退全局 setTodos（defaultStore）。 */
+  writeTodos?: (todos: TodoItem[]) => void
 }): Tool {
   return {
     definition: {
       name: 'plan_task',
-      description: `Decompose a high-level objective into a TaskGraph DAG and optionally execute it wave-by-wave.
+      description: `Decompose a high-level objective into a TaskGraph DAG of HORIZONTAL orthogonal shards and optionally execute it wave-by-wave.
 
-Use for multi-step work that benefits from structured planning (refactors, feature work, verification pipelines).
-Set execute: true to run the plan through the team orchestrator (same execution path as team_orchestrate).
+Use for multi-step work that benefits from structured planning (refactors, feature work). Each shard is a complete, self-contained unit (implement + run tsc/lint/relevant tests to green) owned end-to-end by ONE capable flash — NOT a vertical role pipeline (no separate lint/type/import/test/verify steps). Listing scope files lets the planner cut one orthogonal shard per module so they run in parallel; same-module files stay in one shard.
+Set execute: true to run the plan through the team orchestrator (same execution path as team_orchestrate). Workers write directly into the shared workspace — review the aggregate with git diff.
 
 Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson parameter for multi-wave continuation.`,
       input_schema: {
@@ -131,7 +133,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           files: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Optional scope files',
+            description: 'Scope files. List the files/modules in scope so the planner can cut orthogonal per-module shards instead of one monolith.',
           },
           execute: { type: 'boolean', description: 'Execute the plan after generation (default false)' },
         },
@@ -181,7 +183,7 @@ Output is a UnifiedPlan JSON — pass it to team_orchestrate's planJson paramete
           content: n.title,
           status: 'pending' as const,
         }))
-        setTodos(todoItems)
+        ;(deps.writeTodos ?? setTodos)(todoItems)
         params.onPlanSteps?.(todoItems.map(t => ({ id: t.id, content: t.content, status: t.status })))
       }
 

@@ -3,7 +3,7 @@ import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
-import { getShellCommand, WinStreamDecoder } from '../platform.js'
+import { getShellCommand, WinStreamDecoder, rewriteWindowsNullRedirect, rewritePowershellNullRedirect } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { applyCommandFilter } from './command-filters.js'
@@ -230,16 +230,22 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
 
     return new Promise((resolve) => {
       const shell = getShellCommand()
+      // Wrap by shell FAMILY (not fragile cmd-string matching): Git Bash needs
+      // no encoding prefix (UTF-8 native) but must not emit literal `nul` files;
+      // PowerShell needs UTF-8 console encoding; cmd needs `chcp 65001`.
       let commandToRun = command
-      if (process.platform === 'win32') {
-        if (shell.cmd.includes('powershell') || shell.cmd.includes('pwsh')) {
-          commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
-        } else if (shell.cmd.includes('cmd')) {
-          commandToRun = `chcp 65001 > nul && ${command}`
-        }
+      if (shell.kind === 'bash') {
+        commandToRun = rewriteWindowsNullRedirect(command)
+      } else if (shell.kind === 'powershell') {
+        // Normalize stray `2>nul`/`2>/dev/null` (bash/cmd habit) → `2>$null`
+        // before prefixing the UTF-8 encoding setup.
+        commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${rewritePowershellNullRedirect(command)}`
+      } else if (shell.kind === 'cmd') {
+        commandToRun = `chcp 65001 > nul && ${command}`
       }
 
       const mirrorEnv = buildMirrorEnv(mirrorConfig)
+      debugLog(`[bash-spawn] kind=${shell.kind} shell=${shell.cmd} args=${JSON.stringify(shell.args)} cwd=${params.cwd ?? process.cwd()}`)
       const child = track(spawn(shell.cmd, [...shell.args, commandToRun], {
         cwd: params.cwd,
         env: { ...sanitizeEnv(process.env), ...mirrorEnv },
@@ -248,6 +254,9 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         // console created in detached mode doesn't connect back to the parent's
         // pipes, causing all commands to return exit=0 with empty output.
         detached: process.platform !== 'win32',
+        // Hide the transient console window on Windows (no-op elsewhere) — also
+        // avoids stdio handoff quirks in some Windows environments.
+        windowsHide: true,
       }))
 
       let stdout = ''
@@ -299,6 +308,7 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
         const totalRawLines = raw.split('\n').length - (truncNote ? truncNote.split('\n').length - 1 : 0) - (stderrNote ? stderrNote.split('\n').length - 1 : 0)
         const durationMs = Date.now() - startTime
         const exitCode = isTimeout ? -1 : code
+        debugLog(`[bash-done] exit=${exitCode} stdoutBytes=${stdoutRawBytes} stderrBytes=${stderrRawBytes} durationMs=${durationMs}`)
         const meta = { command: rawCommand, exitCode, durationMs }
         const { isError, errorClass } = classifyBashOutcome(exitCode, stderr, process.platform === 'win32')
         // P1: Command-Aware filtering — apply before content construction so the

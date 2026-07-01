@@ -17,6 +17,7 @@
  *    across sessions (B4).
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
+import type { DelegationActivity } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
 import type { IntentPreview } from '../agent/intent-preview.js'
@@ -39,7 +40,7 @@ import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domai
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
 import type { StarDomainId } from '../agent/star-domain.js'
-import { skillRegistry, loadProjectSkills } from '../skills/skill-loader.js'
+import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
@@ -160,6 +161,35 @@ export interface SkillStatus {
 }
 
 /** Minimal agent surface the manager needs — decoupled from AgentLoop for tests. */
+/** User-dispatched background worker request (from POST /sessions/:id/delegate). */
+export interface DelegateWorkerInput {
+  objective: string
+  /** Worker role profile (code_scout / reviewer / patcher …). Defaults applied downstream. */
+  profile?: string
+  /** Optional star-domain authority injected into the worker. */
+  authority?: string
+  /** Optional files to scope the worker to. */
+  files?: string[]
+}
+
+/** Structured progress/terminal update emitted by a user-dispatched worker. */
+export interface DelegateActivityUpdate {
+  workOrderId: string
+  parentToolId?: string
+  profile?: string
+  authority?: string
+  objective?: string
+  status: string
+  progressLine?: string
+  model?: string
+  provider?: string
+  usage?: DelegationActivity['usage']
+  artifactId?: string
+  changedFiles?: string[]
+  /** Terminal digest text for the desktop "汇入主会话" adopt button. */
+  summary?: string
+}
+
 export interface ManagedAgent {
   run(prompt: string, callbacks: AgentCallbacks, images?: string[]): Promise<void>
   abort(): void
@@ -241,6 +271,17 @@ export interface ManagedAgent {
     seats?: { authority: string; charter?: string }[]
     rounds?: number
   }): Promise<{ planMarkdown: string; artifactId: string }>
+  /**
+   * User-dispatched background subagent. Runs a worker in its own isolated
+   * sub-session via the coordinator with an INDEPENDENT abort signal (so the
+   * main turn's abort / model switch does not kill it), streaming progress via
+   * the supplied onActivity callback. Does NOT touch the main SessionContext /
+   * prefix cache. Optional so lightweight test doubles need not implement it.
+   */
+  delegateWorker?(
+    input: DelegateWorkerInput,
+    opts: { workerId: string; signal: AbortSignal; onActivity: (a: DelegateActivityUpdate) => void },
+  ): Promise<void>
 }
 
 /**
@@ -410,6 +451,18 @@ interface InternalSession {
   domainState: ActiveStarDomain | null | undefined
   /** PlusMenu (skills) — per-session disabled skill names (in-memory). */
   disabledSkills: Set<string>
+  /**
+   * User-dispatched background worker abort controllers, keyed by workerId.
+   * Independent from the main turn's signal so a user-launched subagent is NOT
+   * killed by aborting the main conversation. Lazily created on first dispatch.
+   */
+  backgroundAborts?: Map<string, AbortController>
+  /**
+   * First-seen timestamps per workOrderId, for delegation elapsed reporting.
+   * Shared by the run-time callback path and the idle user-dispatch path so both
+   * report consistent elapsed. Lazily created.
+   */
+  delegationStartedAt?: Map<string, number>
 }
 
 const REDACTED = '[REDACTED]'
@@ -417,6 +470,15 @@ const SENSITIVE_KEY = /(?:api[_-]?key|token|secret|password|authorization)/i
 
 /** Tools that spawn worker agents — surfaced as delegation-tree nodes (N3). */
 const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate'])
+
+/** Cap on concurrent user-dispatched background workers per session (guards the
+ *  shared coordinator from being swamped). */
+const MAX_USER_BACKGROUND_WORKERS = 4
+
+/** Result of a user-dispatch request — lets the route map a precise status code. */
+export type DelegateResult =
+  | { ok: true; workerId: string }
+  | { ok: false; reason: 'not_found' | 'invalid' | 'unsupported' | 'limit' }
 
 function extractObjective(input: Record<string, unknown>): string {
   for (const key of ['objective', 'prompt', 'description', 'goal']) {
@@ -887,6 +949,69 @@ export class RuntimeSessionManager {
     return true
   }
 
+  /**
+   * User-dispatched background subagent. Unlike run(), this does NOT set
+   * session.running — the worker runs in its own isolated sub-session with an
+   * independent abort signal, so it coexists with the main turn and is not
+   * killed by aborting the main conversation. Progress streams through the same
+   * 'delegation' SSE channel (origin:'user') the viewer panel already consumes.
+   */
+  delegate(id: string, input: DelegateWorkerInput): DelegateResult {
+    const session = this.sessions.get(id)
+    if (!session) return { ok: false, reason: 'not_found' }
+    const objective = input.objective?.trim()
+    if (!objective) return { ok: false, reason: 'invalid' }
+    const agent = this.ensureAgent(session)
+    if (typeof agent.delegateWorker !== 'function') return { ok: false, reason: 'unsupported' }
+    const aborts = session.backgroundAborts ?? (session.backgroundAborts = new Map())
+    if (aborts.size >= MAX_USER_BACKGROUND_WORKERS) return { ok: false, reason: 'limit' }
+    // Materialize the on-disk log so a reconnecting viewer replays this node.
+    this.ensureEvents(session)
+    const workerId = `user:${Math.random().toString(36).slice(2, 8)}`
+    const controller = new AbortController()
+    aborts.set(workerId, controller)
+    this.touch(session)
+    // Seed the panel with a running node immediately (before the worker spins up).
+    this.emitDelegationActivity(session, {
+      workOrderId: workerId,
+      objective,
+      profile: input.profile,
+      authority: input.authority,
+      status: 'running',
+      origin: 'user',
+    })
+    void agent
+      .delegateWorker(
+        { ...input, objective },
+        {
+          workerId,
+          signal: controller.signal,
+          onActivity: (a) => this.emitDelegationActivity(session, { ...a, origin: 'user' }),
+        },
+      )
+      .catch((err: unknown) => {
+        this.emitDelegationActivity(session, {
+          workOrderId: workerId,
+          status: 'failed',
+          summary: redactText((err as Error)?.message ?? String(err)),
+          origin: 'user',
+        })
+      })
+      .finally(() => {
+        aborts.delete(workerId)
+        this.touch(session)
+      })
+    return { ok: true, workerId }
+  }
+
+  /** Cancel a user-dispatched background worker. Returns false if unknown. */
+  cancelDelegate(id: string, workerId: string): boolean {
+    const controller = this.sessions.get(id)?.backgroundAborts?.get(workerId)
+    if (!controller) return false
+    controller.abort()
+    return true
+  }
+
   private ensureAgent(session: InternalSession): ManagedAgent {
     if (!session.agent) {
       session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
@@ -1023,6 +1148,40 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.append(session, 'skills_changed', { name, enabled })
     return true
+  }
+
+  /**
+   * Skills install — list skills discoverable under .claude/skills that can be
+   * copied into this session's project .rivet/skills. Read-only; returns
+   * undefined when the session is missing.
+   */
+  listInstallableSkills(id: string): InstallableSkill[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return listInstallableSkills(session.record.cwd)
+  }
+
+  /**
+   * Skills install — count skills already installed under .rivet/skills. Drives
+   * the soft install cap in UIs. Returns undefined when the session is missing.
+   */
+  installedSkillCount(id: string): number | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return countInstalledSkills(session.record.cwd)
+  }
+
+  /**
+   * Skills install — copy the named skills from .claude/skills into the project
+   * .rivet/skills (idempotent; already-present ones are skipped). Intentionally
+   * does NOT hot-load into the live registry or emit skills_changed: changing
+   * the available-skill set mid-session shatters the prefix cache. The copied
+   * skills take effect on the next session. Returns undefined when missing.
+   */
+  installSkills(id: string, names: string[]): { copied: string[]; skipped: string[]; errors: string[] } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return importSkillsIntoRivet(session.record.cwd, names)
   }
 
   /**
@@ -1660,9 +1819,58 @@ export class RuntimeSessionManager {
 
   // ── internals ─────────────────────────────────────────────────
 
+  /**
+   * T4 — emit a structured per-worker delegation update to the subagent panel.
+   * Extracted from buildCallbacks so the idle user-dispatch path (delegate())
+   * can reuse the exact same mapping/elapsed logic. Carries two extra fields:
+   * `summary` (terminal digest for the "汇入主会话" adopt button) and `origin`
+   * ('user' marks a user-dispatched worker vs an agent auto-delegation).
+   */
+  private emitDelegationActivity(
+    session: InternalSession,
+    a: {
+      workOrderId: string
+      parentToolId?: string
+      profile?: string
+      authority?: string
+      objective?: string
+      status: string
+      progressLine?: string
+      model?: string
+      provider?: string
+      usage?: DelegationActivity['usage']
+      artifactId?: string
+      changedFiles?: string[]
+      summary?: string
+      origin?: 'user' | 'agent'
+    },
+  ): void {
+    const startedMap = session.delegationStartedAt ?? (session.delegationStartedAt = new Map())
+    let started = startedMap.get(a.workOrderId)
+    if (started === undefined) {
+      started = this.now()
+      startedMap.set(a.workOrderId, started)
+    }
+    this.append(session, 'delegation', {
+      workerId: a.workOrderId,
+      parentId: a.parentToolId,
+      profile: a.profile,
+      objective: a.objective,
+      status: a.status,
+      phase: a.status === 'running' ? 'running' : a.status,
+      progressLine: a.progressLine ? redactText(a.progressLine) : undefined,
+      elapsedMs: this.now() - started,
+      model: a.model,
+      provider: a.provider,
+      usage: a.usage,
+      artifactId: a.artifactId,
+      changedFiles: a.changedFiles,
+      summary: a.summary ? redactText(a.summary) : undefined,
+      origin: a.origin,
+    })
+  }
+
   private buildCallbacks(session: InternalSession): AgentCallbacks {
-    // T4 — per-worker start times for elapsed reporting (one map per run).
-    const workerStartedAt = new Map<string, number>()
     return {
       onTextDelta: (text) => this.append(session, 'text_delta', { text }),
       onThinkingDelta: (thinking) => this.append(session, 'thinking_delta', { text: thinking }),
@@ -1740,27 +1948,7 @@ export class RuntimeSessionManager {
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the
       // delegation-tree parent). Emitted alongside the existing text stream.
-      onDelegationActivity: (a) => {
-        let started = workerStartedAt.get(a.workOrderId)
-        if (started === undefined) {
-          started = this.now()
-          workerStartedAt.set(a.workOrderId, started)
-        }
-        this.append(session, 'delegation', {
-          workerId: a.workOrderId,
-          parentId: a.parentToolId,
-          profile: a.profile,
-          status: a.status,
-          phase: a.status === 'running' ? 'running' : a.status,
-          progressLine: a.progressLine ? redactText(a.progressLine) : undefined,
-          elapsedMs: this.now() - started,
-          model: a.model,
-          provider: a.provider,
-          usage: a.usage,
-          artifactId: a.artifactId,
-          changedFiles: a.changedFiles,
-        })
-      },
+      onDelegationActivity: (a) => this.emitDelegationActivity(session, a),
     }
   }
 

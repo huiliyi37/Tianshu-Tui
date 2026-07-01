@@ -36,6 +36,7 @@ import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '..
 import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
 import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
+import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs'
 import { extname, relative, join } from 'node:path'
@@ -276,6 +277,31 @@ export function buildSessionRoutes(
         return { status: 404, body: { error: 'Session not found' } }
       }
       return { status: 200, body: { id: params!.id!, name: data.name.trim(), enabled: data.enabled } }
+    }, apiToken),
+
+    // ── Skills install (from .claude/skills) ──
+    // Read — candidates installable from project/global .claude/skills.
+    'GET /sessions/:id/skills/installable': withAuth((_body, params) => {
+      const skills = manager.listInstallableSkills(params!.id!)
+      if (!skills) return { status: 404, body: { error: 'Session not found' } }
+      const installedCount = manager.installedSkillCount(params!.id!) ?? 0
+      return { status: 200, body: { skills, installedCount, recommendedMax: RECOMMENDED_MAX_SKILLS } }
+    }, apiToken),
+
+    // Write — copy the named skills into .rivet/skills (no hot-load; takes effect
+    // on next session). Returns { copied, skipped, errors }.
+    'POST /sessions/:id/skills/install': withAuth((body, params) => {
+      const data = (body ?? {}) as { names?: unknown }
+      if (!Array.isArray(data.names) || data.names.some((n) => typeof n !== 'string' || !n.trim())) {
+        return { status: 400, body: { error: 'Missing or invalid "names" (non-empty string array)' } }
+      }
+      const names = (data.names as string[]).map((n) => n.trim())
+      if (names.length === 0) {
+        return { status: 400, body: { error: 'Missing or invalid "names" (non-empty string array)' } }
+      }
+      const result = manager.installSkills(params!.id!, names)
+      if (!result) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: result }
     }, apiToken),
 
     'GET /sessions': withAuth((_body, params) => {
@@ -833,6 +859,44 @@ export function buildSessionRoutes(
         }
         return { status: 500, body: { error: (err as Error)?.message ?? 'Council failed' } }
       }
+    }, apiToken),
+
+    // 用户主动派后台子代理：在已有会话上、独立于主 turn 启动一个 worker。
+    // 不置 session.running，子代理跑在隔离子会话，进度走 delegation SSE。
+    'POST /sessions/:id/delegate': withAuth((body, params) => {
+      const data = (body ?? {}) as { objective?: unknown; profile?: unknown; authority?: unknown; files?: unknown }
+      if (typeof data.objective !== 'string' || !data.objective.trim()) {
+        return { status: 400, body: { error: 'Missing or empty "objective" field' } }
+      }
+      if (data.profile !== undefined && typeof data.profile !== 'string') {
+        return { status: 400, body: { error: 'Invalid "profile"' } }
+      }
+      if (data.authority !== undefined && typeof data.authority !== 'string') {
+        return { status: 400, body: { error: 'Invalid "authority"' } }
+      }
+      if (data.files !== undefined && (!Array.isArray(data.files) || data.files.some((f: unknown) => typeof f !== 'string'))) {
+        return { status: 400, body: { error: 'Invalid "files"' } }
+      }
+      const result = manager.delegate(params!.id!, {
+        objective: data.objective.trim(),
+        ...(data.profile ? { profile: data.profile } : {}),
+        ...(data.authority ? { authority: data.authority } : {}),
+        ...(data.files ? { files: data.files as string[] } : {}),
+      })
+      if (result.ok) return { status: 200, body: { workerId: result.workerId } }
+      switch (result.reason) {
+        case 'not_found': return { status: 404, body: { error: 'Session not found' } }
+        case 'invalid': return { status: 400, body: { error: 'Missing or empty "objective" field' } }
+        case 'unsupported': return { status: 503, body: { error: 'Agent not ready' } }
+        case 'limit': return { status: 429, body: { error: 'Too many concurrent background workers' } }
+      }
+    }, apiToken),
+
+    // 取消一个用户派的后台子代理。
+    'POST /sessions/:id/delegate/:workerId/abort': withAuth((_body, params) => {
+      const ok = manager.cancelDelegate(params!.id!, params!.workerId!)
+      if (!ok) return { status: 404, body: { error: 'Background worker not found' } }
+      return { status: 200, body: { ok: true } }
     }, apiToken),
 
     // I4 — read user-defined .rivet/hooks.json for this session.

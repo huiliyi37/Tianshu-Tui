@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useUiState } from '../state/store'
-import { listSkills, setSkillEnabled } from '../runtime/client'
-import type { SkillStatus } from '../runtime/types'
+import { listSkills, setSkillEnabled, listInstallableSkills, installSkills } from '../runtime/client'
+import type { SkillStatus, InstallableSkill } from '../runtime/types'
 
 /** source → 中文标签 + 样式类 */
 function sourceBadge(source: string): { label: string; cls: string } {
@@ -49,6 +49,69 @@ export function SkillsSurface() {
       setSkills((prev) => prev.map((s) => s.name === name ? { ...s, enabled: !enabled } : s))
     })
   }, [sessionId])
+
+  // ── Install (copy from .claude/skills into .rivet/skills) ──
+  const [showInstall, setShowInstall] = useState(false)
+  const [installable, setInstallable] = useState<InstallableSkill[]>([])
+  const [installedCount, setInstalledCount] = useState(0)
+  const [recommendedMax, setRecommendedMax] = useState(5)
+  const [installLoading, setInstallLoading] = useState(false)
+  const [installing, setInstalling] = useState<Set<string>>(new Set())
+  const [installNotice, setInstallNotice] = useState<string | null>(null)
+  // Name awaiting a second click when installing past the recommended cap.
+  const [confirmName, setConfirmName] = useState<string | null>(null)
+
+  const overCap = installedCount >= recommendedMax
+
+  const fetchInstallable = useCallback(() => {
+    if (!sessionId) return
+    setInstallLoading(true)
+    listInstallableSkills(sessionId)
+      .then((res) => {
+        setInstallable(res.skills)
+        setInstalledCount(res.installedCount)
+        setRecommendedMax(res.recommendedMax)
+      })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setInstallLoading(false))
+  }, [sessionId])
+
+  const toggleInstallPanel = useCallback(() => {
+    setShowInstall((prev) => {
+      const next = !prev
+      if (next) fetchInstallable()
+      return next
+    })
+  }, [fetchInstallable])
+
+  const doInstall = useCallback((name: string) => {
+    if (!sessionId) return
+    setConfirmName(null)
+    setInstalling((prev) => new Set(prev).add(name))
+    installSkills(sessionId, [name])
+      .then((res) => {
+        if (res.copied.includes(name)) {
+          setInstallable((prev) => prev.map((s) => s.name === name ? { ...s, installed: true } : s))
+          setInstalledCount((c) => c + 1)
+          setInstallNotice('已复制到 .rivet/skills/，需重开会话才生效——会话内热加载新技能会打碎前缀缓存，成本可达几十倍。')
+        } else if (res.skipped.includes(name)) {
+          setInstallable((prev) => prev.map((s) => s.name === name ? { ...s, installed: true } : s))
+        } else if (res.errors.length > 0) {
+          setError(res.errors.join('；'))
+        }
+      })
+      .catch((err) => setError((err as Error).message))
+      .finally(() => setInstalling((prev) => { const n = new Set(prev); n.delete(name); return n }))
+  }, [sessionId])
+
+  // Past the recommended cap, require a second click before installing.
+  const install = useCallback((name: string) => {
+    if (overCap && confirmName !== name) {
+      setConfirmName(name)
+      return
+    }
+    doInstall(name)
+  }, [overCap, confirmName, doInstall])
 
   const enabledCount = skills.filter((s) => s.enabled).length
 
@@ -121,7 +184,62 @@ export function SkillsSurface() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <button
+          className={`skills-install-btn${showInstall ? ' on' : ''}`}
+          onClick={toggleInstallPanel}
+          aria-pressed={showInstall}
+        >
+          {showInstall ? '收起' : '安装技能'}
+        </button>
       </div>
+
+      {showInstall && (
+        <div className="skills-install-panel">
+          <div className="skills-group-label">从 .claude/skills 安装</div>
+
+          <div className="skills-restraint">
+            默认不建议盲目安装技能。天枢已原生集成开发工作流，覆盖约 90% 真实任务场景——先用原生能力，确有需要再按需安装。整个项目安装的技能不超过 5 个，本体 70% 的代码即由此完成；不装技能不影响真实任务的完成。
+          </div>
+
+          <div className={`skills-cap-line${overCap ? ' over' : ''}`}>
+            已安装 {installedCount} 个 · 建议 ≤ {recommendedMax}
+            {overCap && '，已达上限，非必要不再安装（点两次确认）'}
+          </div>
+
+          {installNotice && <div className="meta warn">{installNotice}</div>}
+          {installLoading && (
+            <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>扫描中…</p></div>
+          )}
+          {!installLoading && installable.length === 0 && (
+            <div className="meta">.claude/skills 下没有可安装的技能。</div>
+          )}
+          <div className="skills-list">
+            {installable.map((s) => {
+              const badge = sourceBadge(s.source)
+              const busy = installing.has(s.name)
+              const confirming = confirmName === s.name
+              return (
+                <div key={`inst-${s.name}`} className="skill-card">
+                  <div className="skill-info">
+                    <div className="skill-title-row">
+                      <span className="skill-name">{s.name}</span>
+                      <span className={`skill-src-chip ${badge.cls}`}>{badge.label}</span>
+                    </div>
+                    <div className="skill-desc">{s.description || '（无描述）'}</div>
+                  </div>
+                  <button
+                    className={`skills-install-action${confirming ? ' confirm' : ''}`}
+                    disabled={s.installed || busy}
+                    onClick={() => install(s.name)}
+                  >
+                    {s.installed ? '已安装' : busy ? '安装中…' : confirming ? '确认安装?' : '安装'}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>加载中…</p></div>

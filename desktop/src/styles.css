@@ -380,13 +380,41 @@ body {
 .thread-tab.drag-over { border-bottom-color: var(--accent); opacity: 0.7; }
 
 /* Skills surface */
-.skills-toolbar { padding: var(--space-3) var(--space-4); }
+.skills-toolbar { padding: var(--space-3) var(--space-4); display: flex; gap: var(--space-2); align-items: center; }
 .skills-search {
-  width: 100%; padding: 6px 10px; border-radius: 6px;
+  flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--bg);
   color: var(--text); font-size: var(--text-sm); outline: none;
 }
 .skills-search:focus { border-color: var(--accent); }
+.skills-install-btn {
+  flex-shrink: 0; padding: 6px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: var(--text-sm); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.skills-install-btn:hover { border-color: var(--accent); }
+.skills-install-btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.skills-install-panel { border-bottom: 1px solid var(--border); padding-bottom: var(--space-2); }
+.skills-restraint {
+  margin: 0 var(--space-4) var(--space-2); padding: var(--space-2) var(--space-3);
+  border-radius: 6px; border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text-dim); font-size: var(--text-xs); line-height: 1.5;
+}
+.skills-cap-line {
+  margin: 0 var(--space-4) var(--space-2); font-size: var(--text-xs); color: var(--text-faint);
+}
+.skills-cap-line.over { color: var(--warning); font-weight: 600; }
+.skills-install-action.confirm { border-color: var(--warning); color: var(--warning); }
+.skills-install-action {
+  flex-shrink: 0; padding: 4px 12px; border-radius: 6px;
+  border: 1px solid var(--accent); background: transparent;
+  color: var(--accent); font-size: var(--text-xs); cursor: pointer;
+  transition: background var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+.skills-install-action:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.skills-install-action:disabled { border-color: var(--border); color: var(--text-faint); cursor: default; opacity: 0.7; }
 .skills-group-label {
   font-size: 11px; font-weight: 600; color: var(--text-faint);
   text-transform: uppercase; letter-spacing: 0.06em;
@@ -470,6 +498,25 @@ body {
 }
 .diff-sign { flex-shrink: 0; width: 14px; text-align: center; user-select: none; }
 .diff-text { flex: 1; min-width: 0; }
+/* Syntax-highlight token colors for diff rows and the file viewer (highlight.js
+ * emits .hljs-* spans). Mirrors the markdown palette but scoped here so code
+ * surfaces outside .md get colored too. */
+.diff-text .hljs-comment, .diff-text .hljs-quote,
+.file-line-content .hljs-comment, .file-line-content .hljs-quote { color: var(--faint); font-style: italic; }
+.diff-text .hljs-keyword, .diff-text .hljs-selector-tag, .diff-text .hljs-literal, .diff-text .hljs-type,
+.file-line-content .hljs-keyword, .file-line-content .hljs-selector-tag, .file-line-content .hljs-literal, .file-line-content .hljs-type { color: var(--accent); }
+.diff-text .hljs-string, .diff-text .hljs-meta .hljs-string,
+.file-line-content .hljs-string, .file-line-content .hljs-meta .hljs-string { color: var(--success); }
+.diff-text .hljs-number, .diff-text .hljs-symbol, .diff-text .hljs-bullet,
+.file-line-content .hljs-number, .file-line-content .hljs-symbol, .file-line-content .hljs-bullet { color: var(--warning); }
+.diff-text .hljs-title, .diff-text .hljs-section, .diff-text .hljs-name, .diff-text .hljs-built_in,
+.file-line-content .hljs-title, .file-line-content .hljs-section, .file-line-content .hljs-name, .file-line-content .hljs-built_in { color: var(--info); }
+.diff-text .hljs-attr, .diff-text .hljs-attribute, .diff-text .hljs-variable, .diff-text .hljs-template-variable,
+.file-line-content .hljs-attr, .file-line-content .hljs-attribute, .file-line-content .hljs-variable, .file-line-content .hljs-template-variable { color: var(--text-strong); }
+.diff-text .hljs-regexp, .diff-text .hljs-link,
+.file-line-content .hljs-regexp, .file-line-content .hljs-link { color: var(--success); }
+.diff-text .hljs-emphasis, .file-line-content .hljs-emphasis { font-style: italic; }
+.diff-text .hljs-strong, .file-line-content .hljs-strong { font-weight: var(--weight-semibold); }
 .diff-row.diff-add { background: color-mix(in srgb, #22c55e 10%, transparent); }
 .diff-row.diff-del { background: color-mix(in srgb, #ef4444 10%, transparent); }
 .diff-row.diff-hunk { color: var(--text-faint); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 2px 0; }
@@ -1406,6 +1453,104 @@ body {
 /* T4 — subagent fleet panel. Visual language ported from the 子代理流程 design
    prototype; colors strictly from design tokens so it tracks the active theme. */
 .delegation-tree { border-top: 1px solid var(--border); padding: 10px 14px; max-height: 260px; overflow-y: auto; }
+/* Inside the drawer there's plenty of room — drop the 260px cap, fill & scroll. */
+.delegation-overlay-body .delegation-tree { border-top: none; max-height: none; height: 100%; padding: 12px 16px; }
+
+/* ── Subagent collapsed pill (main conversation, ~28px) ── */
+.delegation-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-2) var(--space-2) 0;
+  padding: 4px 12px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--panel);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.delegation-pill:hover { background: var(--panel-2, var(--bg-elevated)); }
+.delegation-pill.open { border-color: var(--accent); color: var(--text); }
+.delegation-pill.attention { border-color: color-mix(in srgb, var(--warning) 50%, var(--border)); }
+.delegation-pill .dp-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); flex-shrink: 0;
+}
+.delegation-pill .dp-dot.pulse { animation: dp-pulse 1.4s ease-in-out infinite; }
+@keyframes dp-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.delegation-pill .dp-label { font-weight: 500; color: var(--text); }
+.delegation-pill .dp-progress { font-variant-numeric: tabular-nums; }
+.delegation-pill .dp-attention {
+  padding: 1px 6px; border-radius: var(--radius-pill);
+  background: var(--warning-soft); color: var(--warning); font-weight: 500;
+}
+.delegation-pill .dp-chevron { color: var(--text-secondary); }
+.delegation-pill .dp-origin,
+.deleg-origin {
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+}
+.deleg-origin { margin-left: 4px; }
+
+/* "汇入主会话" — adopt a finished worker's summary into the composer. */
+.deleg-adopt {
+  margin: 4px 0 2px 18px;
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.deleg-adopt:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+
+/* ── Subagent overlay drawer (right-side slide-in) ── */
+.delegation-overlay {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 480px;
+  max-width: 90vw;
+  background: var(--bg-elevated);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 32px color-mix(in srgb, var(--text) 12%, transparent);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  animation: do-slide-in 200ms ease-out;
+}
+@keyframes do-slide-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.delegation-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.delegation-overlay-header .do-title { font-weight: 600; color: var(--text-strong); }
+.delegation-overlay-header .do-counts {
+  font-size: var(--text-xs); color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.delegation-overlay-header .do-running { color: var(--accent); }
+.delegation-overlay-header .do-attention { color: var(--warning); }
+.delegation-overlay-header .do-close {
+  margin-left: auto;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary); font-size: 16px; line-height: 1;
+  padding: 4px 6px; border-radius: var(--radius-sm, 6px);
+}
+.delegation-overlay-header .do-close:hover { background: var(--panel); color: var(--text); }
+.delegation-overlay-body { flex: 1; overflow-y: auto; min-height: 0; }
 
 /* Summary header — title + done/total count + per-status chips. */
 .deleg-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -2307,6 +2452,97 @@ body {
 .task-item.st-completed .task-text { color: var(--muted); text-decoration: line-through; }
 .task-item.st-in_progress .task-check { color: var(--warning); }
 .task-item.st-completed .task-check { color: var(--success); }
+
+/* 常驻 To-dos 抽屉(右栏底部,跨 tab) */
+.todo-dock {
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  margin-top: var(--space-2);
+  overflow: hidden;
+}
+.todo-dock.open { display: flex; flex-direction: column; max-height: 38%; }
+.todo-dock-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 8px;
+  flex: none;
+}
+.todo-dock-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--text-xs);
+}
+.todo-dock-toggle:disabled { cursor: default; opacity: 0.8; }
+.todo-dock-head .tdh-title { font-weight: var(--weight-medium); color: var(--text-strong); }
+.todo-dock-head .tdh-count {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel-3);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+}
+.todo-dock-head .tdh-current {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--warning);
+  font-size: 11px;
+}
+.todo-dock-open {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+}
+.todo-dock-open:hover { color: var(--text-strong); background: var(--panel-3); }
+.todo-dock-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 6px;
+  overflow-y: auto;
+}
+
+/* 右栏收起时的 todo 进度浮动小胶囊 */
+.todo-mini-capsule {
+  position: fixed;
+  right: 0;
+  top: 92px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--success);
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--dur) var(--ease), background var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.todo-mini-capsule:hover { opacity: 1; background: var(--panel-3); box-shadow: var(--shadow-md); }
+.todo-mini-capsule .tmc-glyph { color: var(--success); }
+.todo-mini-capsule .tmc-count { font-variant-numeric: tabular-nums; }
 .source-item { display: flex; align-items: center; gap: var(--space-2); padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); cursor: pointer; transition: background var(--dur) var(--ease); }
 .source-item:last-child { border-bottom: none; }
 .source-item:hover { background: var(--panel-2); }
@@ -2842,22 +3078,34 @@ body {
 .git-page-info { padding: 0 var(--space-2); font-family: var(--font-mono); color: var(--text); }
 .git-page-size { display: flex; align-items: center; gap: var(--space-2); }
 
-/* Changes tab (working-tree diff) */
-.changes-tab { display: flex; height: 100%; min-height: 0; }
-.changes-file-list {
-  width: 280px; flex: none; border-right: 1px solid var(--border);
-  overflow-y: auto; background: var(--sidebar-surface-bg);
-  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
-  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
+/* Changes tab (working-tree diff) — Antigravity-style single-column overview */
+.changes-overview { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.changes-summary {
+  display: flex; align-items: center; gap: var(--space-3); flex: none;
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 1; background: var(--panel);
 }
-.changes-file-count { padding: var(--space-2) var(--space-3); font-size: var(--text-xs); color: var(--muted); border-bottom: 1px solid var(--border); position: sticky; top: 0; background: inherit; }
-.changes-file {
+.changes-summary-count { font-size: var(--text-xs); color: var(--muted); }
+.changes-summary-delta { display: flex; gap: 6px; font-family: var(--font-mono); font-size: var(--text-xs); }
+.changes-summary-delta .add { color: var(--success); }
+.changes-summary-delta .del { color: var(--error); }
+.changes-summary .diff-toggle { margin-left: auto; }
+.changes-cards { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+
+.file-diff-card { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--panel); }
+.file-diff-card-head {
   display: flex; align-items: center; gap: var(--space-2); width: 100%;
-  padding: var(--space-1) var(--space-3); cursor: pointer; border: none; background: none;
+  padding: var(--space-2) var(--space-3); cursor: pointer; border: none; background: none;
   text-align: left; transition: background var(--dur) var(--ease);
 }
-.changes-file:hover { background: var(--panel-2); }
-.changes-file.selected { background: var(--accent-soft, var(--panel-2)); }
+.file-diff-card-head:hover { background: var(--panel-2); }
+.file-diff-chevron { flex: none; color: var(--muted); font-size: var(--text-xs); width: 12px; }
+.file-diff-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary); }
+.file-diff-delta { flex: none; display: flex; gap: 4px; font-family: var(--font-mono); font-size: var(--text-xs); }
+.file-diff-delta .add { color: var(--success); }
+.file-diff-delta .del { color: var(--error); }
+.file-diff-card-body { border-top: 1px solid var(--border); overflow-x: auto; padding: var(--space-2) var(--space-3); }
+
 .changes-status {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; flex: none; border-radius: var(--radius-sm);
@@ -2869,11 +3117,6 @@ body {
 .st-deleted { color: var(--error); background: var(--error-soft, var(--panel-3)); }
 .st-renamed { color: var(--accent); background: var(--accent-soft, var(--panel-3)); }
 .st-untracked { color: var(--muted); }
-.changes-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-sm); color: var(--text-secondary); }
-.changes-delta { flex: none; display: flex; gap: 4px; font-family: var(--font-mono); font-size: var(--text-xs); }
-.changes-delta .add { color: var(--success); }
-.changes-delta .del { color: var(--error); }
-.changes-diff-view { flex: 1; min-width: 0; overflow: auto; padding: var(--space-3); }
 
 /* TerminalTabs — multi-tab terminal panel (Gap 4) */
 .terminal-tabs { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -2927,12 +3170,31 @@ body {
 .fe-file-icon { color: var(--muted); flex: none; }
 .fe-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fe-loading { display: flex; align-items: center; gap: 4px; padding: 3px var(--space-2); color: var(--muted); }
-.fe-viewer-panel { flex: 1; min-width: 0; overflow: auto; }
-.fe-file-path {
-  font-family: var(--font-mono); font-size: var(--text-xs); color: var(--muted);
+.fe-viewer-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Cursor-3.0-style viewer header: breadcrumb (left) + Preview/Source toggle (right) */
+.fe-viewer-toolbar {
+  flex: none; display: flex; align-items: center; gap: var(--space-3);
   padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; background: var(--main-surface-bg); z-index: 1;
+  background: var(--main-surface-bg);
 }
+.fe-breadcrumb { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden; font-family: var(--font-mono); font-size: var(--text-xs); }
+.fe-crumb-group { display: inline-flex; align-items: center; min-width: 0; }
+.fe-crumb { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-crumb.current { color: var(--text-strong); flex: none; }
+.fe-crumb-sep { color: var(--faint); margin: 0 4px; flex: none; }
+.fe-segmented { flex: none; display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.fe-seg-btn {
+  padding: 2px 12px; border: none; background: var(--panel); color: var(--text-dim);
+  font-size: 11px; cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.fe-seg-btn + .fe-seg-btn { border-left: 1px solid var(--border); }
+.fe-seg-btn:hover { color: var(--text-secondary); }
+.fe-seg-btn.active { background: var(--accent); color: white; }
+/* Markdown preview reads like a document; FileViewer (source) keeps its own scroll. */
+.fe-doc { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-4) var(--space-5); }
+.fe-doc .md { max-width: 820px; margin: 0 auto; }
+/* In the Files tab the source view should fill the pane, not the inline 500px box. */
+.fe-viewer-panel .file-viewer { flex: 1; min-height: 0; max-height: none; border: none; border-radius: 0; }
 .fe-error { color: var(--error); }
 /* Insights surface */
 .insights-surface { display: flex; flex-direction: column; gap: var(--space-5); padding: var(--space-4); height: 100%; }
@@ -3269,6 +3531,11 @@ html[data-theme="dark"] body {
 
 /* Storage location panel — first-run + system settings */
 .storage-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.git-install-panel { display: flex; flex-direction: column; gap: var(--space-4); }
+.git-install-steps { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: var(--space-2); line-height: 1.5; }
+.git-install-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.git-install-hint { margin: 0; font-size: 0.8rem; color: var(--text-dim, var(--text)); opacity: 0.8; }
 .storage-intro p { margin: 0; line-height: 1.5; }
 .storage-options { display: flex; flex-direction: column; gap: var(--space-2); }
 .storage-option {
@@ -4815,6 +5082,46 @@ html[data-theme="nebula"] .plan-panel {
 .cc-status-badge.warning { background: var(--warning-soft); color: var(--warning); }
 .cc-status-badge.error { background: var(--error-soft); color: var(--error); }
 .cc-status-badge.info { background: var(--accent-soft); color: var(--accent); }
+
+/* Collapsed delivery report: one clickable summary row, expands in place. */
+.completion-curtain.collapsed { padding: var(--space-2) var(--space-3); }
+.cc-summary-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.cc-summary-row .cc-icon { width: 24px; height: 24px; flex-shrink: 0; }
+.cc-summary-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.cc-summary-metric { display: inline-flex; align-items: center; gap: 3px; }
+.cc-summary-verify {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cc-expand-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.completion-curtain.collapsed .cc-expand-chevron { margin-left: var(--space-2); }
+.completion-curtain.expanded .cc-summary-row { margin-bottom: var(--space-3); }
+.completion-curtain.expanded .cc-expand-chevron { margin-left: auto; }
 
 .cc-metrics {
   display: flex;
