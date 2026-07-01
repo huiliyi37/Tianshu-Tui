@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
-import { isImageFile, isTextFile, isUnsupportedFile, formatUnsupportedFiles } from '../lib/file-types'
+import { isImageFile, isTextFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../lib/file-types'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -387,7 +387,7 @@ export function Composer(props: {
     }
   }
 
-  const onPaste = (e: React.ClipboardEvent) => {
+  const onPaste = async (e: React.ClipboardEvent) => {
     // Extract files from clipboard. Strategy:
     //  1. Scan DataTransferItemList (has MIME metadata; most reliable).
     //     - macOS screenshots: item.type="image/png" but File.type=""
@@ -419,12 +419,19 @@ export function Composer(props: {
       }
     }
 
-    const classify = (p: typeof pasted[0]) => {
-      const fileLike = { type: p.mimeHint || p.file.type, name: p.file.name }
+    const classify = async (p: typeof pasted[0]) => {
+      let type = p.mimeHint || p.file.type
+      // Last-resort byte-level detection for Windows clipboard images that
+      // report no MIME type and have no extension (e.g. "image").
+      if (!type && !p.file.name.includes('.')) {
+        const detected = await detectImageMimeByMagic(p.file)
+        if (detected) type = detected
+      }
+      const fileLike = { type, name: p.file.name }
       return { file: p.file, fileLike }
     }
 
-    const classified = pasted.map(classify)
+    const classified = await Promise.all(pasted.map(classify))
     const imageFiles = classified.filter(c => isImageFile(c.fileLike)).map(c => c.file)
     const textFiles = classified.filter(c => isTextFile(c.fileLike) && !isImageFile(c.fileLike)).map(c => c.file)
     const unsupportedFiles = classified.filter(c => isUnsupportedFile(c.fileLike)).map(c => c.file)

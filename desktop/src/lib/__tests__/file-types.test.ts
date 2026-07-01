@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { isImageFile, isTextFile, isArchiveFile, isUnsupportedFile, formatUnsupportedFiles } from '../file-types'
+import { isImageFile, isTextFile, isArchiveFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../file-types'
 
 function file(name: string, type = ''): File {
   return new File([], name, { type })
@@ -120,6 +120,52 @@ describe('file-types', () => {
         formatUnsupportedFiles([file('a.zip', ''), file('b.pdf', '')]),
         'a.zip 等 2 个文件暂不支持（压缩包请解压后上传）',
       )
+    })
+  })
+
+  describe('detectImageMimeByMagic', () => {
+    function bytesFile(name: string, bytes: number[]): File {
+      return new File([new Uint8Array(bytes)], name)
+    }
+
+    test('detects PNG without extension or MIME', async () => {
+      const f = bytesFile('image', [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+      assert.equal(await detectImageMimeByMagic(f), 'image/png')
+      assert.equal(isImageFile({ type: await detectImageMimeByMagic(f) ?? '', name: f.name }), true)
+    })
+
+    test('detects JPEG without extension or MIME', async () => {
+      const f = bytesFile('image', [0xFF, 0xD8, 0xFF, 0xE0])
+      assert.equal(await detectImageMimeByMagic(f), 'image/jpeg')
+    })
+
+    test('detects GIF without extension or MIME', async () => {
+      const f = bytesFile('image', [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+      assert.equal(await detectImageMimeByMagic(f), 'image/gif')
+    })
+
+    test('detects BMP without extension or MIME', async () => {
+      const f = bytesFile('image', [0x42, 0x4D, 0x00, 0x00])
+      assert.equal(await detectImageMimeByMagic(f), 'image/bmp')
+    })
+
+    test('detects WebP without extension or MIME', async () => {
+      // RIFF....WEBP
+      const f = bytesFile('image', [
+        0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00,
+        0x57, 0x45, 0x42, 0x50,
+      ])
+      assert.equal(await detectImageMimeByMagic(f), 'image/webp')
+    })
+
+    test('returns null for unknown bytes', async () => {
+      const f = bytesFile('image', [0x00, 0x01, 0x02, 0x03])
+      assert.equal(await detectImageMimeByMagic(f), null)
+    })
+
+    test('returns null for empty file', async () => {
+      const f = bytesFile('image', [])
+      assert.equal(await detectImageMimeByMagic(f), null)
     })
   })
 })
