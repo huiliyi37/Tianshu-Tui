@@ -63,18 +63,24 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     let fileExists = false
     // Old content (LF-normalized) as the diff base; '' → new file (all-additions).
     let oldContentForDiff = ''
+    // When an existing file could not be read (binary, unreadable, or too large),
+    // we intentionally skip the diff so the card falls back to the summary text
+    // instead of showing a misleading all-additions diff.
+    let haveOldContentForDiff = false
     try {
       const existingStat = await stat(filePath)
       fileExists = true
       if (existingStat.size <= MAX_WRITE_FILE_BYTES) {
         try {
           oldContentForDiff = toLf(await readFile(filePath, 'utf-8'))
+          haveOldContentForDiff = true
         } catch {
           // Binary/unreadable — skip diff base, card falls back to summary text.
         }
       }
     } catch {
-      // File doesn't exist yet — skip backup
+      // File doesn't exist yet — empty base is intentional; produce an all-additions diff.
+      haveOldContentForDiff = true
     }
     if (fileExists) {
       const relPath = relative(params.cwd, filePath)
@@ -106,12 +112,14 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     const lines = finalContent.split('\n').length
     const warn = syntaxCheck(filePath, finalContent)
     const afterForDiff = toLf(content)
-    const diff = buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
+    const diff = haveOldContentForDiff
+      ? buildFileDiff(relative(params.cwd, filePath), oldContentForDiff, afterForDiff)
+      : ''
     const uiContent = diff ? (warn ? `${diff}\n\n${warn}` : diff) : (warn ? warn : undefined)
     return {
       content: `Wrote ${finalContent.length} bytes (${lines} lines) to ${filePath}` + (warn ? '\n\n' + warn : ''),
       uiContent,
-      changedRanges: computeChangedLineRanges(oldContentForDiff, afterForDiff),
+      changedRanges: haveOldContentForDiff ? computeChangedLineRanges(oldContentForDiff, afterForDiff) : [],
     }
   },
 

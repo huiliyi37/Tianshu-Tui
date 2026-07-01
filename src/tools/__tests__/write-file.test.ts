@@ -79,4 +79,19 @@ describe('write_file tool — uiContent diff', () => {
     assert.ok(!result.isError)
     assert.equal(result.uiContent, undefined)
   })
+
+  it('overwriting an oversized existing file skips the diff base (no misleading diff)', async () => {
+    const file = join(TEST_DIR, 'huge.txt')
+    // 11 MB — above MAX_WRITE_FILE_BYTES, so the old content is intentionally
+    // not read and the card should fall back to the summary text.
+    writeFileSync(file, 'x'.repeat(11 * 1024 * 1024))
+    const result = await WRITE_FILE_TOOL.execute(makeParams({
+      file_path: file,
+      content: 'small replacement',
+    }))
+    assert.ok(!result.isError)
+    assert.ok(result.content.startsWith('Wrote '))
+    assert.equal(result.uiContent, undefined, 'uiContent should be undefined when old content is not loaded')
+    assert.deepEqual(result.changedRanges, [], 'changedRanges should be empty when old content is unknown')
+  })
 })
