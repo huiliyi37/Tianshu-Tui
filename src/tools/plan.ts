@@ -26,6 +26,43 @@ flowchart TD
     L --产出--> OUT([结果])
 \`\`\``
 
+// Placeholder detection — reject skeletal plans before they are persisted.
+const PLACEHOLDER_RE = /\b(TODO|FIXME|TBD|XXX|HACK|placeholder|占位符|待补充|待完善|待填写|待实现|稍后补充|略)\b/gi
+const EMPTY_SECTION_RE = /^#{2,6}\s+.+\n(?:\s*\n)+#{2,6}\s/m
+const ONLY_DOTS_RE = /^(\.{3,}|…+|-\s*\.{3,})\s*$/m
+
+interface PlaceholderCheckResult {
+  ok: boolean
+  reason?: string
+}
+
+function checkPlanForPlaceholders(content: string): PlaceholderCheckResult {
+  const placeholderHits = content.match(PLACEHOLDER_RE)
+  if (placeholderHits && placeholderHits.length >= 3) {
+    const unique = [...new Set(placeholderHits.map(s => s.toLowerCase()))]
+    return {
+      ok: false,
+      reason: `计划包含过多占位符：${unique.join(', ')}。请继续补充具体设计后再提交。`,
+    }
+  }
+
+  if (EMPTY_SECTION_RE.test(content)) {
+    return {
+      ok: false,
+      reason: '检测到只有标题、没有正文的空章节。请为每个章节补充具体分析和方案后再提交。',
+    }
+  }
+
+  if (ONLY_DOTS_RE.test(content)) {
+    return {
+      ok: false,
+      reason: '检测到仅含省略号的占位段落。请替换为具体设计内容后再提交。',
+    }
+  }
+
+  return { ok: true }
+}
+
 // ── plan_close helpers ──
 
 function isDeliveryState(value: unknown): value is PlanCloseOptions['deliveryState'] {
@@ -60,6 +97,8 @@ export const PLAN_TOOL: Tool = {
 
 ### Action: submit
 Submit a completed implementation plan for user approval. The plan is persisted to \`.rivet/plans/<slug>.md\`.
+
+The \`plan\` field must be a concrete, ready-to-implement design document. Do NOT submit outlines, skeletons, or placeholder text such as "TODO", "FIXME", "TBD", "待补充", or section headers with no content. Plans that are mostly placeholders will be rejected and you will be asked to continue planning.
 
 ### Action: close
 Preview or apply implementation plan closure updates. Defaults to preview mode (no writes). Set apply=true to update the plan file.
@@ -149,6 +188,18 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
   }
 
   const fullContent = `# ${title.trim()}\n\n${planContent.trim()}\n`
+
+  const placeholderCheck = checkPlanForPlaceholders(fullContent)
+  if (!placeholderCheck.ok) {
+    return {
+      content: [
+        `⚠️ Plan not yet saved — ${placeholderCheck.reason}`,
+        '',
+        '请继续完善计划：补充根因分析、每个文件的具体改动（diff 或伪代码）、设计决策对比表、验证步骤等。',
+      ].join('\n'),
+      isError: true,
+    }
+  }
 
   try {
     const relativePath = await writePlan(params.cwd, slug, fullContent)
