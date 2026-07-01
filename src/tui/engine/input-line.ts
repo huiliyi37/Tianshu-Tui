@@ -351,7 +351,8 @@ export class InputLine {
         }
         break // not vim → fall through to ignore
 
-      case 'backspace': return this.backspace()
+      case 'backspace':
+      case 'ctrl_h': return this.backspace()
       case 'delete': return this.deleteForward()
       case 'left': return this.moveLeft()
       case 'right': return this.moveRight()

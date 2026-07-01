@@ -44,7 +44,7 @@ describe('provider config wizard', () => {
     assert.equal(provider.apiKeyEnv, 'MY_MINIMAX_KEY')
     assert.equal(provider.baseUrl, 'https://proxy.example.com/v1')
     assert.equal(provider.models[0]?.id, 'MiniMax-M2.8')
-    assert.ok(prompts.includes('Auth mode [env|inline|keep]: '))
+    assert.ok(prompts.includes('Auth mode [inline|env|keep]: '))
     assert.ok(prompts.includes('API key env var: '))
   })
 

@@ -137,6 +137,13 @@ describe('InputLine', () => {
       assert.equal(result?.type, 'change')
     })
 
+    it('handles ctrl_h as backspace (Windows PowerShell sends 0x08)', () => {
+      const input = new InputLine({ value: 'hello' })
+      const result = input.handleKey('ctrl_h', '', true, false)
+      assert.equal(input.value, 'hell')
+      assert.equal(result?.type, 'change')
+    })
+
     it('handles delete forward', () => {
       const input = new InputLine({ value: 'hello' })
       input.handleKey('left', '', false, false) // cursor at 4, on 'o'
