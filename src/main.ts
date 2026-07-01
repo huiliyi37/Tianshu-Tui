@@ -572,14 +572,20 @@ async function main() {
     }),
     modelPickerData: () => {
       const activeModelId = ctx?.agent.config.promptEngine.getModel()
-      const models = ctx?.provider.models ?? []
+      const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number }[] = []
+      for (const [provName, prov] of Object.entries(ctx?.config.provider.providers ?? {})) {
+        for (const m of prov.models) {
+          entries.push({
+            id: m.id,
+            alias: m.alias ?? m.id,
+            provider: provName,
+            current: m.id === activeModelId,
+            contextWindow: m.contextWindow,
+          })
+        }
+      }
       return {
-        entries: models.map(m => ({
-          id: m.id,
-          alias: m.alias ?? m.id,
-          current: m.id === activeModelId,
-          contextWindow: m.contextWindow,
-        })),
+        entries,
         selectedIndex: 0,
       }
     },

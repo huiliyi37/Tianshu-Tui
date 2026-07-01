@@ -14,8 +14,8 @@ describe('renderModelPicker', () => {
   it('renders border and model list', () => {
     const data: ModelPickerData = {
       entries: [
-        { id: 'deepseek-chat', alias: 'deepseek-v4-pro', current: true, contextWindow: 64000 },
-        { id: 'gpt-5.5', alias: 'gpt-5.5', current: false, contextWindow: 128000 },
+        { id: 'deepseek-chat', alias: 'deepseek-v4-pro', provider: 'deepseek', current: true, contextWindow: 64000 },
+        { id: 'gpt-5.5', alias: 'gpt-5.5', provider: 'openai', current: false, contextWindow: 128000 },
       ],
       selectedIndex: 0,
     }
@@ -29,8 +29,8 @@ describe('renderModelPicker', () => {
   it('shows selected indicator and current mark', () => {
     const data: ModelPickerData = {
       entries: [
-        { id: 'model-a', alias: 'Model A', current: false },
-        { id: 'model-b', alias: 'Model B', current: true },
+        { id: 'model-a', alias: 'Model A', provider: 'provider-a', current: false },
+        { id: 'model-b', alias: 'Model B', provider: 'provider-b', current: true },
       ],
       selectedIndex: 0,
     }
@@ -46,7 +46,7 @@ describe('renderModelPicker', () => {
   it('shows model specs in bottom preview region', () => {
     const data: ModelPickerData = {
       entries: [
-        { id: 'deepseek-chat', alias: 'deepseek-v4-pro', current: true, contextWindow: 64000 },
+        { id: 'deepseek-chat', alias: 'deepseek-v4-pro', provider: 'deepseek', current: true, contextWindow: 64000 },
       ],
       selectedIndex: 0,
     }

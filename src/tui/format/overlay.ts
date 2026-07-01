@@ -511,6 +511,7 @@ function tasksProgressBar(done: number, total: number, width = 8): string {
 export interface ModelPickerEntry {
   id: string
   alias: string
+  provider: string
   current: boolean
   contextWindow?: number
 }
@@ -768,11 +769,12 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
     const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
     const mark = e.current ? color('●', theme.primary) : ' '
     const aliasColor = selected ? color(e.alias, theme.primary, { bold: true }) : color(e.alias, theme.secondary)
+    const providerColor = selected ? color(`[${e.provider}] `, theme.dim) : color(`[${e.provider}] `, theme.dim)
     const idText = ` [${e.id}]`
     const tokensText = e.contextWindow ? `  ${(e.contextWindow / 1000).toFixed(0)}k ctx` : ''
-    const head = `${cursor} ${mark} ${aliasColor}${color(idText, theme.dim)}`
-    
-    const plainHead = `  ${e.current ? '●' : ' '} ${e.alias}${idText}`
+    const head = `${cursor} ${mark} ${providerColor}${aliasColor}${color(idText, theme.dim)}`
+
+    const plainHead = `  ${e.current ? '●' : ' '} [${e.provider}] ${e.alias}${idText}`
     const metaRoom = Math.max(0, innerWidth - stringWidth(plainHead) - 2)
     const metaText = tokensText && metaRoom > 6 ? tokensText.slice(0, metaRoom) : ''
     lines.push(padLine(`${head}${color(metaText, theme.dim)}`, width, theme))
