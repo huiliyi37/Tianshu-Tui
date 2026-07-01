@@ -641,6 +641,8 @@ export function ThreadView(props: {
                             <PairedRow
                               key={tItem.entry.tool?.key ?? tItem.entry.result?.key ?? idx}
                               entry={tItem.entry}
+                              sessionId={session.id}
+                              onOpenImage={openImage}
                             />
                           )
                         }

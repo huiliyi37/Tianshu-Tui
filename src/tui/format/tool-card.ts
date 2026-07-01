@@ -13,6 +13,7 @@
  */
 
 import { color } from '../engine/ansi.js'
+import { classifyBrowserDebugLine } from '../../tools/browser-debug/log-capture.js'
 import type { RivetTheme } from '../theme.js'
 import { getToolFamily } from '../tool-family.js'
 import { toolArgSummary } from '../tool-label.js'
@@ -366,23 +367,20 @@ function truncatePreview(text: string, max: number): string {
 // with a status glyph (`→` pending, `←` done, `✗` failed). Colour by severity
 // so the user can eyeball errors and 4xx/5xx in the live/committed card.
 
-/** Colour one browser_debug output line by its console level / HTTP status. */
+/** Colour one browser_debug output line by its console level / HTTP status.
+ *  Severity comes from the shared `classifyBrowserDebugLine` so the TUI and the
+ *  desktop renderer stay in lockstep; this only maps a bucket to a theme colour. */
 export function colorBrowserDebugLine(line: string, theme: RivetTheme): string {
-  if (line.startsWith('[error]')) return color(line, theme.error)
-  if (line.startsWith('[warn]')) return color(line, theme.warning)
-  if (line.startsWith('[info]') || line.startsWith('[log]') || line.startsWith('[debug]')) {
-    return color(line, theme.muted)
+  switch (classifyBrowserDebugLine(line)) {
+    case 'error':
+      return color(line, theme.error)
+    case 'warn':
+      return color(line, theme.warning)
+    case 'ok':
+      return color(line, theme.success)
+    case 'pending':
+      return color(line, theme.dim)
+    default:
+      return color(line, theme.muted)
   }
-  if (line.startsWith('✗')) return color(line, theme.error)
-  if (line.startsWith('→')) return color(line, theme.dim)
-  if (line.startsWith('←')) {
-    const status = Number(line.slice(1).trim().split(/\s+/)[0])
-    if (Number.isFinite(status)) {
-      if (status >= 500) return color(line, theme.error)
-      if (status >= 400) return color(line, theme.warning)
-      if (status >= 200 && status < 300) return color(line, theme.success)
-    }
-    return color(line, theme.muted)
-  }
-  return color(line, theme.muted)
 }

@@ -79,6 +79,37 @@ export function formatNetworkLine(entry: NetworkEntry, includeBody = false): str
   return line
 }
 
+/** Severity bucket for a single browser_debug output line. */
+export type BrowserDebugLineKind = 'error' | 'warn' | 'ok' | 'pending' | 'muted'
+
+/**
+ * Classify one browser_debug output line by its console level / HTTP status,
+ * from the line prefix alone. Shared by the TUI (`colorBrowserDebugLine`) and
+ * the desktop renderer so both surfaces agree on severity.
+ *
+ * Console lines are prefixed `[error]/[warn]/[info]/[log]/[debug]`; network
+ * lines start with `✗` (failed), `→` (pending) or `← STATUS …` (completed).
+ */
+export function classifyBrowserDebugLine(line: string): BrowserDebugLineKind {
+  if (line.startsWith('[error]')) return 'error'
+  if (line.startsWith('[warn]')) return 'warn'
+  if (line.startsWith('[info]') || line.startsWith('[log]') || line.startsWith('[debug]')) {
+    return 'muted'
+  }
+  if (line.startsWith('✗')) return 'error'
+  if (line.startsWith('→')) return 'pending'
+  if (line.startsWith('←')) {
+    const status = Number(line.slice(1).trim().split(/\s+/)[0])
+    if (Number.isFinite(status)) {
+      if (status >= 500) return 'error'
+      if (status >= 400) return 'warn'
+      if (status >= 200 && status < 300) return 'ok'
+    }
+    return 'muted'
+  }
+  return 'muted'
+}
+
 /** Multi-line detail for network_detail action. */
 export function formatNetworkDetail(entry: NetworkEntry): string {
   const lines = [

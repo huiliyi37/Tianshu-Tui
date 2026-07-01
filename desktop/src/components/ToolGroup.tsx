@@ -3,6 +3,8 @@ import type { ConvoBlock } from '../state/event-reducer'
 import type { ToolDensity } from '../lib/persist'
 import { FilePath } from './FilePath'
 import { parseMcpToolName } from '../lib/approval-preview'
+import { classifyBrowserDebugLine } from '../../../src/tools/browser-debug/log-capture.js'
+import { getArtifact } from '../runtime/client'
 
 const TOOL_BODY_MAX = 10000
 
@@ -186,10 +188,15 @@ function McpBadge({ name }: { name: string }) {
   return <span className="mcp-badge" title={`MCP: ${parsed.serverId} · ${parsed.toolName}`}>[{parsed.serverId}]</span>
 }
 
-function PairedRowImpl({ entry }: { entry: PairedEntry }) {
+function PairedRowImpl({ entry, sessionId, onOpenImage }: {
+  entry: PairedEntry
+  sessionId?: string
+  onOpenImage?: (src: string) => void
+}) {
   const [open, setOpen] = useState(!!entry.result?.isError)
   const name = entry.name
   const status = entry.result?.isError ? 'err' : entry.result ? 'ok' : 'run'
+  const isBrowserDebug = name === 'browser_debug'
 
   // Build a smart preview for the tool row head.
   const previewText = useMemo(() => {
@@ -229,7 +236,11 @@ function PairedRowImpl({ entry }: { entry: PairedEntry }) {
             </div>
           )}
           {entry.result && (
-            <pre className="tool-output-section">{truncateBody(entry.result.text)}</pre>
+            isBrowserDebug ? (
+              <BrowserDebugBody result={entry.result} sessionId={sessionId} onOpenImage={onOpenImage} />
+            ) : (
+              <pre className="tool-output-section">{truncateBody(entry.result.text)}</pre>
+            )
           )}
         </div>
       )}
@@ -238,8 +249,64 @@ function PairedRowImpl({ entry }: { entry: PairedEntry }) {
 }
 
 export const PairedRow = memo(PairedRowImpl, (a, b) =>
-  a.entry.tool === b.entry.tool && a.entry.result === b.entry.result
+  a.entry.tool === b.entry.tool && a.entry.result === b.entry.result &&
+  a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage
 )
+
+// ── BrowserDebugBody: rich render of browser_debug output ──
+// console/network lines get a severity class from the shared classifier; a
+// screenshot result (`… → artifact <id>`) is fetched and inlined as an image.
+const SCREENSHOT_ARTIFACT_RE = /→ artifact (\S+)/
+
+function BrowserDebugBody({ result, sessionId, onOpenImage }: {
+  result: ConvoBlock
+  sessionId?: string
+  onOpenImage?: (src: string) => void
+}) {
+  const text = truncateBody(result.text)
+  const artifactId = useMemo(() => {
+    const m = result.text.match(SCREENSHOT_ARTIFACT_RE)
+    return m ? m[1]! : null
+  }, [result.text])
+
+  const [shotUrl, setShotUrl] = useState<string | null>(null)
+  const [shotFailed, setShotFailed] = useState(false)
+  useEffect(() => {
+    if (!artifactId || !sessionId) return
+    let cancelled = false
+    getArtifact(sessionId, artifactId)
+      .then(({ raw }) => { if (!cancelled && raw) setShotUrl(`data:image/png;base64,${raw}`) })
+      .catch(() => { if (!cancelled) setShotFailed(true) })
+    return () => { cancelled = true }
+  }, [artifactId, sessionId])
+
+  if (artifactId) {
+    return (
+      <div className="tool-output-section bd-output">
+        <div className="bd-line bd-muted">{result.text}</div>
+        {shotUrl && !shotFailed && (
+          <img
+            className="msg-thumb bd-shot"
+            src={shotUrl}
+            alt="screenshot"
+            loading="lazy"
+            onClick={() => onOpenImage?.(shotUrl)}
+            onError={() => setShotFailed(true)}
+          />
+        )}
+      </div>
+    )
+  }
+
+  const lines = text.split('\n')
+  return (
+    <div className="tool-output-section bd-output">
+      {lines.map((line, i) => (
+        <div key={i} className={`bd-line bd-${classifyBrowserDebugLine(line)}`}>{line || '\u00a0'}</div>
+      ))}
+    </div>
+  )
+}
 
 // ── ToolRow: single block row (used by ToolCard for action tools) ──
 

@@ -8,6 +8,7 @@ import {
   formatNetworkDetail,
   shouldCaptureResponseBody,
   truncateResponseBody,
+  classifyBrowserDebugLine,
 } from '../log-capture.js'
 
 test('normalizeConsoleLevel maps warning to warn', () => {
@@ -20,6 +21,24 @@ test('normalizeConsoleLevel maps warning to warn', () => {
 test('formatConsoleLine prefixes level for TUI colouring', () => {
   const line = formatConsoleLine({ level: 'error', text: 'boom', ts: 0 })
   assert.equal(line, '[error] boom')
+})
+
+test('classifyBrowserDebugLine buckets console levels', () => {
+  assert.equal(classifyBrowserDebugLine('[error] boom'), 'error')
+  assert.equal(classifyBrowserDebugLine('[warn] careful'), 'warn')
+  assert.equal(classifyBrowserDebugLine('[info] fyi'), 'muted')
+  assert.equal(classifyBrowserDebugLine('[log] noise'), 'muted')
+  assert.equal(classifyBrowserDebugLine('[debug] trace'), 'muted')
+})
+
+test('classifyBrowserDebugLine buckets network lines by glyph and status', () => {
+  assert.equal(classifyBrowserDebugLine('✗ GET /a (net::ERR)'), 'error')
+  assert.equal(classifyBrowserDebugLine('→ GET /a'), 'pending')
+  assert.equal(classifyBrowserDebugLine('← 200 GET /a (12ms)'), 'ok')
+  assert.equal(classifyBrowserDebugLine('← 404 GET /a'), 'warn')
+  assert.equal(classifyBrowserDebugLine('← 500 GET /a'), 'error')
+  assert.equal(classifyBrowserDebugLine('← 301 GET /a'), 'muted')
+  assert.equal(classifyBrowserDebugLine('plain text'), 'muted')
 })
 
 test('formatNetworkLine renders pending, success, and failure glyphs', () => {

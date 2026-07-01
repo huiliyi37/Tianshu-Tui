@@ -2170,6 +2170,21 @@ body {
   line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-all;
   max-height: 400px; overflow-y: auto;
 }
+/* browser_debug rich output — per-line severity colouring + inline screenshot. */
+.bd-output { display: flex; flex-direction: column; }
+.bd-line { white-space: pre-wrap; word-break: break-all; }
+.bd-line.bd-error { color: var(--error); }
+.bd-line.bd-warn { color: var(--warning); }
+.bd-line.bd-ok { color: var(--success); }
+.bd-line.bd-pending { color: var(--faint); }
+.bd-line.bd-muted { color: var(--muted); }
+.bd-shot {
+  max-width: 100%; max-height: 320px; object-fit: contain;
+  border-radius: 6px; border: 1px solid var(--border);
+  margin-top: var(--space-2); display: block; cursor: zoom-in;
+  transition: filter 0.12s ease;
+}
+.bd-shot:hover { filter: brightness(1.06); }
 
 /* ── Timeline Group Styling (Cursor 3.0) ────────────────────────────────── */
 .timeline-group {
