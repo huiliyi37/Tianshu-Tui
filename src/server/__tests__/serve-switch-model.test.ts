@@ -1,7 +1,19 @@
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { resolveModelSpecWithReload, listAllModelsWithReload, type ServeContext } from '../serve.js'
 import type { ProviderConfig } from '../../config/schema.js'
+
+// Regression shield: these tests assert behavior when a provider has no
+// configured key. The standard DEEPSEEK_API_KEY env var must not leak into
+// the test provider, otherwise resolveApiKey() finds a key and the snapshot
+// is wrongly treated as resolvable, masking the reload path.
+const ORIGINAL_DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY
+delete process.env.DEEPSEEK_API_KEY
+after(() => {
+  if (ORIGINAL_DEEPSEEK_API_KEY !== undefined) {
+    process.env.DEEPSEEK_API_KEY = ORIGINAL_DEEPSEEK_API_KEY
+  }
+})
 
 /**
  * Regression: first-install model switch. The server starts in setup mode
