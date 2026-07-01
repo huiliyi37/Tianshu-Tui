@@ -18,6 +18,7 @@ class FakeDriver implements BrowserDebugDriver {
   url = 'about:blank'
   closed = false
   waitAborted = false
+  calls: string[] = []
   private readonly events: DriverEvents
   constructor(events: DriverEvents) {
     this.events = events
@@ -27,8 +28,12 @@ class FakeDriver implements BrowserDebugDriver {
     this.url = url
     this.events.onRequestStart('r1', 'GET', url, 'document')
     this.events.onResponse('r1', 200, 'document')
-    this.events.onRequestStart('r2', 'POST', `${url.replace(/\/$/, '')}/api/data`, 'fetch')
-    this.events.onResponse('r2', 500, 'fetch')
+    this.events.onRequestStart(
+      'r2', 'POST', `${url.replace(/\/$/, '')}/api/data`, 'fetch',
+      { Authorization: 'Bearer tok-abcd1234', 'Content-Type': 'application/json' },
+      '{"q":"x"}',
+    )
+    this.events.onResponse('r2', 500, 'fetch', { 'x-request-id': 'req-7' })
     this.events.onResponseBody('r2', '{"error":"server"}', 'application/json')
     this.events.onConsole('error', 'Uncaught boom')
     this.events.onConsole('log', 'hello world')
@@ -43,7 +48,11 @@ class FakeDriver implements BrowserDebugDriver {
     return selector ? `snap:${selector}` : 'page body text'
   }
   async click() {}
-  async type() {}
+  async type() { this.calls.push('type') }
+  async press(selector: string | undefined, key: string) { this.calls.push(`press:${selector ?? '-'}:${key}`) }
+  async selectOption(selector: string, value: string) { this.calls.push(`select:${selector}:${value}`); return [value] }
+  async hover(selector: string) { this.calls.push(`hover:${selector}`) }
+  async scroll(selector: string | undefined, to: string) { this.calls.push(`scroll:${selector ?? '-'}:${to}`) }
   async waitForSelector(_selector: string, _timeoutMs?: number, signal?: AbortSignal) {
     if (signal) {
       await new Promise<void>((resolve, reject) => {
@@ -60,6 +69,10 @@ class FakeDriver implements BrowserDebugDriver {
       })
     }
   }
+  async waitForLoadState(state: string) { this.calls.push(`loadstate:${state}`) }
+  async reload() { this.calls.push('reload') }
+  async goBack() { this.calls.push('back'); return true }
+  async goForward() { this.calls.push('forward'); return false }
   currentUrl() {
     return this.url
   }
@@ -145,6 +158,79 @@ test('network_detail returns full entry', async () => {
   assert.match(res.content, /id: r2/)
   assert.match(res.content, /status: 500/)
   assert.match(res.content, /"error":"server"/)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('network_detail masks request/response headers and shows payload', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'network_detail', request_id: 'r2' }))
+  assert.match(res.content, /request headers:/)
+  assert.match(res.content, /Authorization: \*\*\*\(…1234\)/)
+  assert.match(res.content, /request body:/)
+  assert.match(res.content, /"q":"x"/)
+  assert.match(res.content, /response headers:/)
+  assert.doesNotMatch(res.content, /Bearer tok-abcd1234/)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('type with submit fills then presses Enter', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'type', selector: '#q', text: 'hi', submit: true }))
+  assert.match(res.content, /pressed Enter/)
+  assert.deepEqual(FakeDriver.last!.calls, ['type', 'press:#q:Enter'])
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('press / select / hover / scroll dispatch to driver', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  await tool.execute(params({ action: 'press', key: 'Escape' }))
+  await tool.execute(params({ action: 'select', selector: '#s', value: 'opt1' }))
+  await tool.execute(params({ action: 'hover', selector: '#menu' }))
+  await tool.execute(params({ action: 'scroll' }))
+  assert.deepEqual(FakeDriver.last!.calls, ['press:-:Escape', 'select:#s:opt1', 'hover:#menu', 'scroll:-:bottom'])
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('press requires key; select requires selector+value', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const p = await tool.execute(params({ action: 'press' }))
+  assert.equal(p.isError, true)
+  const s = await tool.execute(params({ action: 'select', selector: '#s' }))
+  assert.equal(s.isError, true)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('wait with state waits for load state', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'wait', state: 'networkidle' }))
+  assert.match(res.content, /load state "networkidle"/)
+  assert.ok(FakeDriver.last!.calls.includes('loadstate:networkidle'))
+  const none = await tool.execute(params({ action: 'wait' }))
+  assert.equal(none.isError, true)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('history reload/back/forward dispatch and report', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const reload = await tool.execute(params({ action: 'history', go: 'reload' }))
+  assert.match(reload.content, /Reloaded/)
+  const back = await tool.execute(params({ action: 'history', go: 'back' }))
+  assert.match(back.content, /Navigated back/)
+  const fwd = await tool.execute(params({ action: 'history', go: 'forward' }))
+  assert.match(fwd.content, /No forward history/)
+  assert.deepEqual(FakeDriver.last!.calls, ['reload', 'back', 'forward'])
   await tool.execute(params({ action: 'close' }))
 })
 

@@ -23,6 +23,13 @@ export interface NetworkEntry {
   contentType?: string
   responseBody?: string
   responseBodyTruncated?: boolean
+  /** Request headers captured at request start (for API联调). */
+  requestHeaders?: Record<string, string>
+  /** Request payload (POST body) captured at request start, truncated. */
+  requestBody?: string
+  requestBodyTruncated?: boolean
+  /** Response headers captured on response. */
+  responseHeaders?: Record<string, string>
 }
 
 export interface NetworkQuery {
@@ -110,6 +117,35 @@ export function classifyBrowserDebugLine(line: string): BrowserDebugLineKind {
   return 'muted'
 }
 
+/** Header names whose values must never be printed in full (tokens/cookies).
+ *  Security gate: no raw API keys / OAuth tokens / passwords in the transcript. */
+const SENSITIVE_HEADERS = new Set([
+  'authorization', 'proxy-authorization', 'cookie', 'set-cookie',
+  'x-api-key', 'api-key', 'x-auth-token', 'x-csrf-token',
+])
+
+/** Redact sensitive header values to `***(…last4)` while keeping the key visible,
+ *  so the user still sees the header is present without leaking the secret. */
+export function maskSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [rawKey, value] of Object.entries(headers)) {
+    if (SENSITIVE_HEADERS.has(rawKey.toLowerCase()) && value) {
+      const tail = value.length > 4 ? value.slice(-4) : ''
+      out[rawKey] = `***(…${tail})`
+    } else {
+      out[rawKey] = value
+    }
+  }
+  return out
+}
+
+function appendHeaderBlock(lines: string[], label: string, headers?: Record<string, string>): void {
+  if (!headers || Object.keys(headers).length === 0) return
+  lines.push(`${label}:`)
+  const masked = maskSensitiveHeaders(headers)
+  for (const [k, v] of Object.entries(masked)) lines.push(`  ${k}: ${v}`)
+}
+
 /** Multi-line detail for network_detail action. */
 export function formatNetworkDetail(entry: NetworkEntry): string {
   const lines = [
@@ -127,6 +163,13 @@ export function formatNetworkDetail(entry: NetworkEntry): string {
   }
   if (entry.durationMs !== undefined) lines.push(`duration: ${entry.durationMs}ms`)
   if (entry.contentType) lines.push(`content-type: ${entry.contentType}`)
+  appendHeaderBlock(lines, 'request headers', entry.requestHeaders)
+  if (entry.requestBody) {
+    lines.push('request body:')
+    lines.push(entry.requestBody)
+    if (entry.requestBodyTruncated) lines.push('… (request body truncated at 2048 chars)')
+  }
+  appendHeaderBlock(lines, 'response headers', entry.responseHeaders)
   if (entry.responseBody) {
     lines.push('body:')
     lines.push(entry.responseBody)
@@ -169,8 +212,17 @@ export class LogCapture {
     url: string,
     ts: number = Date.now(),
     resourceType?: string,
+    headers?: Record<string, string>,
+    postData?: string,
   ): NetworkEntry {
     const prev = this.network.get(requestId)
+    let requestBody = prev?.requestBody
+    let requestBodyTruncated = prev?.requestBodyTruncated
+    if (postData !== undefined) {
+      const { body, truncated } = truncateResponseBody(postData)
+      requestBody = body
+      requestBodyTruncated = truncated
+    }
     const entry: NetworkEntry = {
       requestId,
       method,
@@ -184,6 +236,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: headers ?? prev?.requestHeaders,
+      requestBody,
+      requestBodyTruncated,
+      responseHeaders: prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry
@@ -194,6 +250,7 @@ export class LogCapture {
     status: number,
     ts: number = Date.now(),
     resourceType?: string,
+    responseHeaders?: Record<string, string>,
   ): NetworkEntry {
     const prev = this.network.get(requestId)
     const entry: NetworkEntry = {
@@ -207,6 +264,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: prev?.requestHeaders,
+      requestBody: prev?.requestBody,
+      requestBodyTruncated: prev?.requestBodyTruncated,
+      responseHeaders: responseHeaders ?? prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry
@@ -233,6 +294,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: prev?.requestHeaders,
+      requestBody: prev?.requestBody,
+      requestBodyTruncated: prev?.requestBodyTruncated,
+      responseHeaders: prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry

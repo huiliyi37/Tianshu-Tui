@@ -84,6 +84,11 @@ type BrowserDebugAction =
   | 'snapshot'
   | 'click'
   | 'type'
+  | 'press'
+  | 'select'
+  | 'hover'
+  | 'scroll'
+  | 'history'
   | 'wait'
   | 'await_login'
   | 'status'
@@ -203,8 +208,14 @@ Actions:
 - open / navigate {url}
 - console {level?}
 - network {failed_only?, url_filter?, api_only?, include_body?}
-- network_detail {request_id}
-- snapshot / eval / screenshot / click / type / wait
+- network_detail {request_id} — status, timing, request headers + payload, response headers + body (secrets like Authorization/Cookie are masked).
+- snapshot / eval / screenshot / click
+- type {selector, text, submit?} — submit=true presses Enter after filling
+- press {selector?, key} — keyboard key, e.g. Enter/Tab/Escape/ArrowDown
+- select {selector, value} — pick a <select> option
+- hover {selector} / scroll {selector? | to?}
+- wait {selector? | state?} — selector visible, or load state (load/domcontentloaded/networkidle)
+- history {go: back|forward|reload}
 - status / clear_logs / await_login / close`,
       input_schema: {
         type: 'object',
@@ -213,7 +224,8 @@ Actions:
             type: 'string',
             enum: [
               'open', 'navigate', 'console', 'network', 'network_detail', 'eval', 'screenshot', 'snapshot',
-              'click', 'type', 'wait', 'await_login', 'status', 'clear_logs', 'close',
+              'click', 'type', 'press', 'select', 'hover', 'scroll', 'history',
+              'wait', 'await_login', 'status', 'clear_logs', 'close',
             ],
             description: 'What to do.',
           },
@@ -223,8 +235,14 @@ Actions:
           url_filter: { type: 'string', description: 'network: substring filter on request URL (e.g. /api/).' },
           api_only: { type: 'boolean', description: 'network: only xhr/fetch requests.' },
           include_body: { type: 'boolean', description: 'network: include captured response bodies (xhr/fetch and 4xx/5xx).' },
-          selector: { type: 'string', description: 'CSS selector for click/type/wait/snapshot.' },
+          selector: { type: 'string', description: 'CSS selector for click/type/press/select/hover/scroll/wait/snapshot.' },
           text: { type: 'string', description: 'Text to fill for type.' },
+          submit: { type: 'boolean', description: 'type: press Enter after filling (submit the form).' },
+          key: { type: 'string', description: 'press: keyboard key, e.g. Enter, Tab, Escape, ArrowDown.' },
+          value: { type: 'string', description: 'select: option value/label to choose.' },
+          state: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'wait: load state to wait for (when no selector).' },
+          to: { type: 'string', enum: ['top', 'bottom'], description: 'scroll: page target when no selector (default bottom).' },
+          go: { type: 'string', enum: ['back', 'forward', 'reload'], description: 'history: navigation direction.' },
           expression: { type: 'string', description: 'JavaScript expression for eval.' },
           level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], description: 'Console level filter.' },
           failed_only: { type: 'boolean', description: 'network: only failures and 4xx/5xx.' },
@@ -394,20 +412,81 @@ Actions:
             if (!selector || text === undefined) {
               return { content: 'type requires "selector" and "text".', isError: true }
             }
-            await withLiveLogs(session, params.onOutput, () => session.driver.type(selector, text))
-            return { content: `Typed into ${selector}.` }
+            const submit = params.input.submit === true
+            await withLiveLogs(session, params.onOutput, async () => {
+              await session.driver.type(selector, text)
+              if (submit) await session.driver.press(selector, 'Enter')
+            })
+            return { content: `Typed into ${selector}${submit ? ' and pressed Enter' : ''}.` }
+          }
+          case 'press': {
+            const selector = params.input.selector as string | undefined
+            const key = params.input.key as string | undefined
+            if (!key) return { content: 'press requires a "key" (e.g. Enter, Tab, Escape).', isError: true }
+            await withLiveLogs(session, params.onOutput, () => session.driver.press(selector, key))
+            return { content: selector ? `Pressed ${key} on ${selector}.` : `Pressed ${key}.` }
+          }
+          case 'select': {
+            const selector = params.input.selector as string | undefined
+            const value = params.input.value as string | undefined
+            if (!selector || value === undefined) {
+              return { content: 'select requires "selector" and "value".', isError: true }
+            }
+            const chosen = await withLiveLogs(session, params.onOutput, () =>
+              session.driver.selectOption(selector, value),
+            )
+            return { content: `Selected ${JSON.stringify(chosen)} in ${selector}.` }
+          }
+          case 'hover': {
+            const selector = params.input.selector as string | undefined
+            if (!selector) return { content: 'hover requires a "selector".', isError: true }
+            await withLiveLogs(session, params.onOutput, () => session.driver.hover(selector))
+            return { content: `Hovered ${selector}.` }
+          }
+          case 'scroll': {
+            const selector = params.input.selector as string | undefined
+            const to = params.input.to === 'top' ? 'top' : 'bottom'
+            await withLiveLogs(session, params.onOutput, () => session.driver.scroll(selector, to))
+            return { content: selector ? `Scrolled ${selector} into view.` : `Scrolled to ${to}.` }
+          }
+          case 'history': {
+            const go = params.input.go as string | undefined
+            if (go !== 'back' && go !== 'forward' && go !== 'reload') {
+              return { content: 'history requires "go": back | forward | reload.', isError: true }
+            }
+            if (go === 'reload') {
+              await withLiveLogs(session, params.onOutput, () => session.driver.reload(signal))
+              return { content: `Reloaded ${session.driver.currentUrl()}.` }
+            }
+            const moved = await withLiveLogs(session, params.onOutput, () =>
+              go === 'back' ? session.driver.goBack(signal) : session.driver.goForward(signal),
+            )
+            return {
+              content: moved
+                ? `Navigated ${go} to ${session.driver.currentUrl()}.`
+                : `No ${go} history to navigate to.`,
+            }
           }
           case 'wait': {
             const selector = params.input.selector as string | undefined
-            if (!selector) return { content: 'wait requires a "selector".', isError: true }
+            const state = params.input.state as 'load' | 'domcontentloaded' | 'networkidle' | undefined
             const timeoutMs =
               typeof params.input.timeout_ms === 'number' && params.input.timeout_ms > 0
                 ? params.input.timeout_ms
                 : 10_000
-            await withLiveLogs(session, params.onOutput, () =>
-              session.driver.waitForSelector(selector, timeoutMs, signal),
-            )
-            return { content: `Element "${selector}" is visible (${timeoutMs}ms timeout).` }
+            if (selector) {
+              await withLiveLogs(session, params.onOutput, () =>
+                session.driver.waitForSelector(selector, timeoutMs, signal),
+              )
+              return { content: `Element "${selector}" is visible (${timeoutMs}ms timeout).` }
+            }
+            if (state) {
+              await withLiveLogs(session, params.onOutput, () =>
+                session.driver.waitForLoadState(state, timeoutMs, signal),
+              )
+              return { content: `Reached load state "${state}" (${timeoutMs}ms timeout).` }
+            }
+            return { content: 'wait requires a "selector" or a "state" (load/domcontentloaded/networkidle).', isError: true }
           }
           case 'screenshot': {
             const png = await session.driver.screenshot()

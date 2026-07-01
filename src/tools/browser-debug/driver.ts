@@ -6,11 +6,21 @@ import { shouldCaptureResponseBody, truncateResponseBody } from './log-capture.j
 
 export interface DriverEvents {
   onConsole(level: string, text: string): void
-  onRequestStart(requestId: string, method: string, url: string, resourceType?: string): void
-  onResponse(requestId: string, status: number, resourceType?: string): void
+  onRequestStart(
+    requestId: string,
+    method: string,
+    url: string,
+    resourceType?: string,
+    headers?: Record<string, string>,
+    postData?: string,
+  ): void
+  onResponse(requestId: string, status: number, resourceType?: string, headers?: Record<string, string>): void
   onRequestFailed(requestId: string, method: string, url: string, errorText?: string, resourceType?: string): void
   onResponseBody(requestId: string, body: string, contentType?: string): void
 }
+
+export type LoadState = 'load' | 'domcontentloaded' | 'networkidle'
+export type ScrollTarget = 'top' | 'bottom'
 
 export interface BrowserDebugDriver {
   goto(url: string, signal?: AbortSignal): Promise<void>
@@ -19,7 +29,15 @@ export interface BrowserDebugDriver {
   snapshot(selector?: string): Promise<string>
   click(selector: string): Promise<void>
   type(selector: string, text: string): Promise<void>
+  press(selector: string | undefined, key: string): Promise<void>
+  selectOption(selector: string, value: string): Promise<string[]>
+  hover(selector: string): Promise<void>
+  scroll(selector: string | undefined, to: ScrollTarget): Promise<void>
   waitForSelector(selector: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>
+  waitForLoadState(state: LoadState, timeoutMs?: number, signal?: AbortSignal): Promise<void>
+  reload(signal?: AbortSignal): Promise<void>
+  goBack(signal?: AbortSignal): Promise<boolean>
+  goForward(signal?: AbortSignal): Promise<boolean>
   currentUrl(): string
   bringToFront(): Promise<void>
   close(): Promise<void>
@@ -39,6 +57,8 @@ interface PwRequest {
   url(): string
   resourceType(): string
   failure(): { errorText: string } | null
+  headers(): Record<string, string>
+  postData(): string | null
 }
 interface PwResponse {
   status(): number
@@ -50,14 +70,25 @@ interface PwConsoleMessage {
   type(): string
   text(): string
 }
+interface PwKeyboard {
+  press(key: string): Promise<void>
+}
 interface PwPage {
   goto(url: string, opts: Record<string, unknown>): Promise<unknown>
   evaluate(expr: string): Promise<unknown>
   screenshot(opts: Record<string, unknown>): Promise<Buffer>
   click(selector: string, opts: Record<string, unknown>): Promise<void>
   fill(selector: string, text: string, opts: Record<string, unknown>): Promise<void>
+  press(selector: string, key: string, opts: Record<string, unknown>): Promise<void>
+  selectOption(selector: string, value: string, opts: Record<string, unknown>): Promise<string[]>
+  hover(selector: string, opts: Record<string, unknown>): Promise<void>
   textContent(selector: string, opts?: Record<string, unknown>): Promise<string | null>
   waitForSelector(selector: string, opts: Record<string, unknown>): Promise<unknown>
+  waitForLoadState(state: string, opts: Record<string, unknown>): Promise<void>
+  reload(opts: Record<string, unknown>): Promise<unknown>
+  goBack(opts: Record<string, unknown>): Promise<unknown>
+  goForward(opts: Record<string, unknown>): Promise<unknown>
+  keyboard: PwKeyboard
   url(): string
   bringToFront(): Promise<void>
   on(event: string, handler: (arg: never) => void): void
@@ -153,7 +184,11 @@ function wireEvents(page: PwPage, events: DriverEvents): void {
 
   page.on('request', ((req: PwRequest) => {
     try {
-      events.onRequestStart(idFor(req), req.method(), req.url(), req.resourceType())
+      let headers: Record<string, string> | undefined
+      let postData: string | undefined
+      try { headers = req.headers() } catch { /* ignore */ }
+      try { postData = req.postData() ?? undefined } catch { /* ignore */ }
+      events.onRequestStart(idFor(req), req.method(), req.url(), req.resourceType(), headers, postData)
     } catch {
       /* ignore */
     }
@@ -165,7 +200,9 @@ function wireEvents(page: PwPage, events: DriverEvents): void {
       const id = idFor(req)
       const resourceType = req.resourceType()
       const status = res.status()
-      events.onResponse(id, status, resourceType)
+      let headers: Record<string, string> | undefined
+      try { headers = res.headers() } catch { /* ignore */ }
+      events.onResponse(id, status, resourceType, headers)
       if (shouldCaptureResponseBody(resourceType, status)) {
         void captureResponseBody(res, id, events)
       }
@@ -201,10 +238,62 @@ function buildDriver(page: PwPage, closeFn: () => Promise<void>): BrowserDebugDr
     },
     click: (selector) => page.click(selector, { timeout: 10_000 }),
     type: (selector, text) => page.fill(selector, text, { timeout: 10_000 }),
+    press: async (selector, key) => {
+      if (selector) await page.press(selector, key, { timeout: 10_000 })
+      else await page.keyboard.press(key)
+    },
+    selectOption: (selector, value) => page.selectOption(selector, value, { timeout: 10_000 }),
+    hover: (selector) => page.hover(selector, { timeout: 10_000 }),
+    scroll: async (selector, to) => {
+      if (selector) {
+        const sel = JSON.stringify(selector)
+        await page.evaluate(
+          `document.querySelector(${sel})?.scrollIntoView({ block: 'center', inline: 'nearest' })`,
+        )
+      } else if (to === 'top') {
+        await page.evaluate('window.scrollTo(0, 0)')
+      } else {
+        await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+      }
+    },
     waitForSelector: async (selector, timeoutMs = 10_000, signal) => {
       const merged = mergeAbortSignal(timeoutMs, signal)
       try {
         await page.waitForSelector(selector, { state: 'visible', timeout: timeoutMs, signal: merged.signal })
+      } finally {
+        merged.cleanup?.()
+      }
+    },
+    waitForLoadState: async (state, timeoutMs = 10_000, signal) => {
+      const merged = mergeAbortSignal(timeoutMs, signal)
+      try {
+        await page.waitForLoadState(state, { timeout: timeoutMs, signal: merged.signal })
+      } finally {
+        merged.cleanup?.()
+      }
+    },
+    reload: async (signal) => {
+      const merged = mergeAbortSignal(30_000, signal)
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000, signal: merged.signal })
+      } finally {
+        merged.cleanup?.()
+      }
+    },
+    goBack: async (signal) => {
+      const merged = mergeAbortSignal(30_000, signal)
+      try {
+        const res = await page.goBack({ waitUntil: 'domcontentloaded', timeout: 30_000, signal: merged.signal })
+        return res !== null
+      } finally {
+        merged.cleanup?.()
+      }
+    },
+    goForward: async (signal) => {
+      const merged = mergeAbortSignal(30_000, signal)
+      try {
+        const res = await page.goForward({ waitUntil: 'domcontentloaded', timeout: 30_000, signal: merged.signal })
+        return res !== null
       } finally {
         merged.cleanup?.()
       }

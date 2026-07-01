@@ -24,7 +24,15 @@ class FakeDriver implements BrowserDebugDriver {
   async snapshot() { return '' }
   async click() {}
   async type() {}
+  async press() {}
+  async selectOption() { return [] as string[] }
+  async hover() {}
+  async scroll() {}
   async waitForSelector() {}
+  async waitForLoadState() {}
+  async reload() {}
+  async goBack() { return true }
+  async goForward() { return true }
   currentUrl() { return 'about:blank' }
   async bringToFront() {}
   async close() { this.closed = true }

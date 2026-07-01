@@ -9,6 +9,7 @@ import {
   shouldCaptureResponseBody,
   truncateResponseBody,
   classifyBrowserDebugLine,
+  maskSensitiveHeaders,
 } from '../log-capture.js'
 
 test('normalizeConsoleLevel maps warning to warn', () => {
@@ -82,6 +83,55 @@ test('formatNetworkDetail includes body and metadata', () => {
   assert.match(detail, /status: 401/)
   assert.match(detail, /type: fetch/)
   assert.match(detail, /unauthorized/)
+})
+
+test('maskSensitiveHeaders redacts tokens/cookies, keeps others', () => {
+  const masked = maskSensitiveHeaders({
+    Authorization: 'Bearer secret-token-abcd',
+    Cookie: 'session=xyz9',
+    'Content-Type': 'application/json',
+    'X-Api-Key': 'k',
+  })
+  assert.equal(masked['Authorization'], '***(…abcd)')
+  assert.equal(masked['Cookie'], '***(…xyz9)')
+  assert.equal(masked['X-Api-Key'], '***(…)')
+  assert.equal(masked['Content-Type'], 'application/json')
+})
+
+test('LogCapture stores request headers/payload and preserves through completeRequest', () => {
+  const cap = new LogCapture()
+  cap.startRequest(
+    'r9', 'POST', 'http://localhost/api/login', Date.now(), 'fetch',
+    { Authorization: 'Bearer tok-1234', 'Content-Type': 'application/json' },
+    '{"user":"a","pass":"p"}',
+  )
+  cap.completeRequest('r9', 401, Date.now(), 'fetch', { 'x-request-id': 'req-42' })
+  const entry = cap.getByRequestId('r9')!
+  assert.equal(entry.requestHeaders?.['Authorization'], 'Bearer tok-1234')
+  assert.equal(entry.requestBody, '{"user":"a","pass":"p"}')
+  assert.equal(entry.responseHeaders?.['x-request-id'], 'req-42')
+})
+
+test('formatNetworkDetail shows masked request/response headers and payload', () => {
+  const detail = formatNetworkDetail({
+    requestId: 'r9',
+    method: 'POST',
+    url: 'http://localhost/api/login',
+    startedAt: 0,
+    status: 401,
+    resourceType: 'fetch',
+    requestHeaders: { Authorization: 'Bearer tok-1234', 'Content-Type': 'application/json' },
+    requestBody: '{"user":"a"}',
+    responseHeaders: { 'set-cookie': 'sess=abcd1234' },
+    responseBody: '{"message":"unauthorized"}',
+  })
+  assert.match(detail, /request headers:/)
+  assert.match(detail, /Authorization: \*\*\*\(…1234\)/)
+  assert.match(detail, /request body:/)
+  assert.match(detail, /"user":"a"/)
+  assert.match(detail, /response headers:/)
+  assert.match(detail, /set-cookie: \*\*\*\(…1234\)/)
+  assert.doesNotMatch(detail, /Bearer tok-1234/)
 })
 
 test('shouldCaptureResponseBody for xhr/fetch and 4xx+', () => {
