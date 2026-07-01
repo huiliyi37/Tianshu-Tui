@@ -69,10 +69,12 @@ export interface ConvergenceResult {
   abortCause?: 'no-tool' | 'score'
   /**
    * Whether the model was still emitting fresh, substantial, non-repetitive
-   * analysis (producingReport) when this was evaluated. When true, a no-tool /
-   * score escalation is downgraded from a hard abort to a kick — a deep-reasoning
-   * model narrating multi-turn analysis is thinking, not spinning. Surfaced so a
-   * near-miss (reasoning that almost got熔断) is diagnosable.
+   * analysis (producingReport) when this was evaluated. When true, a no-tool
+   * hard cap is downgraded from a hard abort to a kick — a deep-reasoning model
+   * narrating multi-turn analysis is thinking, not spinning. Score-based
+   * convergence aborts are unaffected (they measure orthogonal stagnation
+   * signals). Surfaced so a near-miss (reasoning that almost got熔断) is
+   * diagnosable.
    */
   reasoningActive: boolean
 }
@@ -757,16 +759,17 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   }
 
   const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD && !reasoningActive
-  // Never hard-abort or force-split a model that is visibly reasoning (emitting
-  // fresh substantial analysis) — only kick. A model producing new content each
-  // turn is making progress by definition; killing it is the false circuit-break
-  // we are eliminating. Genuine stalls (repetitive/thin text) have
-  // reasoningActive=false, so the guards below still bite.
+  // Reasoning-aware guard applies only to the no-tool hard cap. A model that
+  // keeps emitting fresh substantial analysis on no-tool turns is thinking, not
+  // spinning, so the hard cap is downgraded to a kick. Score-based convergence
+  // aborts are kept independent — they measure orthogonal stagnation signals
+  // (repetition, oscillation, token efficiency) and should still fire when the
+  // composite score says the session is stuck.
   const scoreAbort = level >= 3 && score < 0.1
-  const shouldAbort = !reasoningActive && (scoreAbort || noToolForceAbort)
+  const shouldAbort = scoreAbort || noToolForceAbort
   // Session split is pointless for no-tool stagnation — the problem is model
   // behavior, not context size.  Only split on score-based level 3.
-  const shouldForceSplit = !reasoningActive && level >= 3 && !noToolForceAbort
+  const shouldForceSplit = level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
     ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation)

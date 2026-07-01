@@ -818,6 +818,30 @@ describe('evaluateConvergence', () => {
       assert.equal(result.shouldAbort, true, 'no-content no-tool spin must still abort')
       assert.equal(result.abortCause, 'no-tool')
     })
+
+    it('STILL score-aborts at level 3 even when fresh reasoning text is present', () => {
+      const history = makeHistory([
+        { tool: 'grep', target: 'x', status: 'failed' },
+        { tool: 'grep', target: 'x', status: 'failed' },
+        { tool: 'grep', target: 'x', status: 'failed' },
+        { tool: 'grep', target: 'x', status: 'failed' },
+        { tool: 'grep', target: 'x', status: 'failed' },
+        { tool: 'grep', target: 'x', status: 'failed' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 25,
+        phaseClass: 'execute',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        textFingerprints: freshReasoning,
+      }))
+      assert.equal(result.reasoningActive, true, 'fresh substantial text → reasoningActive')
+      assert.equal(result.level, 3, `expected score-based level 3, got level=${result.level} score=${result.score.toFixed(2)}`)
+      assert.equal(result.shouldAbort, true, 'score-based abort must fire regardless of reasoning text')
+      assert.equal(result.abortCause, 'score')
+      assert.equal(result.shouldForceSplit, true, 'score-based level 3 still allows force split')
+    })
   })
 
   // ── Early-exit does not override no-tool stagnation ──
