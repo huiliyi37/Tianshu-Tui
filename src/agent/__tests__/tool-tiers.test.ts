@@ -12,18 +12,17 @@ import {
 
 describe('tool-tiers', () => {
   describe('CORE_TOOLS', () => {
-    it('stays within kernel budget (≤31)', () => {
-      // ≤31 is the adjusted limit after migrating BOTH web_search and web_fetch
-      // into CORE (was EXTENDED), merging recall+remember→memory and
-      // plan_submit+plan_close→plan, and adding `job` (background-task control,
-      // the required companion to bash run_in_background). The original ≤25 target
-      // was for the kernel default-registry only; interactive-layer additions
-      // (delegate, deliver, plan_task, etc.) plus web search + job push the main
-      // agent's CORE to 31 by design.
+    it('stays within kernel budget (≤26)', () => {
+      // ≤26 after the 2026-07-01 CORE trim: demoted read_section (read_file covers
+      // ranges), diff (git covers), inspect_project (one-shot orientation), related_tests,
+      // file_info (bash/read_file cover), leave_mark (constellation opt-in) → EXTENDED.
+      // They stay worker-available and main can /tools enable them; this only shrinks
+      // the main agent's default visible set to fight choice overload.
       assert.ok(
-        CORE_TOOLS.length <= 31,
-        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 31). ` +
-          `Beyond ~31, agents experience choice overload.`,
+        CORE_TOOLS.length <= 26,
+        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 26). ` +
+          `Beyond ~26, agents experience choice overload. ` +
+          `Before adding: can you merge two tools, or demote a low-use one to EXTENDED?`,
       )
     })
 
@@ -157,8 +156,10 @@ describe('tool-tiers', () => {
     it('EXTENDED tools are NOT in the default tier (would defeat gating)', () => {
       const tier = new Set(resolveMainToolTier(null, true))
       // web_search/web_fetch are CORE now — exclude only true EXTENDED tools.
+      // Includes the 2026-07-01 CORE→EXTENDED demotions (regression guard).
       const mustExclude = ['browser', 'browser_debug', 'council_convene',
-        'team_orchestrate', 'apply_patch', 'undo']
+        'team_orchestrate', 'apply_patch', 'undo',
+        'read_section', 'diff', 'inspect_project', 'related_tests', 'file_info', 'leave_mark']
       for (const name of mustExclude) {
         assert.ok(!tier.has(name), `"${name}" should NOT be in CORE tier`)
       }

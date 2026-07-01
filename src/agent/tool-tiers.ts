@@ -20,18 +20,13 @@ export const CORE_TOOLS = [
   'write_file',
   'edit_file',
   'hash_edit',
-  'read_section',
   // 搜索导航
   'grep',
   'glob',
-  'diff',
   'semantic_search',
   'web_search',
   'web_fetch',
-  'inspect_project',
   'repo_map',
-  'related_tests',
-  'file_info',
   // 执行
   'bash',
   'run_tests',
@@ -43,7 +38,6 @@ export const CORE_TOOLS = [
   'plan',
   'plan_task',
   'deliver_task',
-  'leave_mark',
   // 委派
   'delegate_task',
   'delegate_batch',
@@ -71,6 +65,14 @@ export const EXTENDED_TOOLS = [
   'import_resource',
   'apply_patch',
   'undo',
+  // 从 CORE 下放（2026-07-01）：低频或被现有工具覆盖的功能，
+  // 主控默认不占视野，worker 仍可用、主控可 /tools enable 挂回。
+  'read_section',    // read_file 的 offset/limit 已覆盖区间读取
+  'diff',            // git 工具覆盖「working tree diff」
+  'inspect_project', // 开局一次性定向，repo_map 已给结构；低频
+  'related_tests',   // run_tests/grep/repo_map 覆盖；低频
+  'file_info',       // bash(stat/ls/wc) 或 read_file 头部覆盖；低频
+  'leave_mark',      // 会话结束留痕，消费方 constellation 默认关(opt-in)
   // desktop tools (create_document, create_spreadsheet, etc.)
   'create_document',
   'create_spreadsheet',
