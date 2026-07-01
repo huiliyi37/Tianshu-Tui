@@ -126,6 +126,45 @@ Tauri 原生命令只有 5 个（`runtime_info` + 4 个 `pty_*`），其余全�
 | `src/components/FileViewer.tsx` | 只读文件查看（Gap 1 复用基础）|
 | `ROADMAP.md` | 迭代路线（缰绳 + I1/I7 未做）|
 
+## 九、2026-06-29 竞品对标设计优化落地记录
+
+在 2026-06-29，我们针对 **Codex 桌面版** 和 **Antigravity 2.0** 进行了两轮深度的 UI/UX 对标设计与优化落地，大幅提升了天枢桌面端的视觉质感与键盘优先的高密度效率。
+
+### 1. Codex 桌面端对标：极致的系统级毛玻璃深度与键盘优先的高密度效率
+
+#### 技术路线与实现细节
+- **Tauri 原生窗口活力（Native OS Vibrancy）**：
+  - 引入 `window-vibrancy` 库。在 `[desktop/src-tauri/Cargo.toml](desktop/src-tauri/Cargo.toml)` 中为 `tauri` 开启 `"macos-private-api"` 特性。
+  - 在 `[desktop/src-tauri/tauri.conf.json](desktop/src-tauri/tauri.conf.json)` 中将主窗口设为 `"transparent": true`，并开启 `"macOSPrivateApi": true`。
+  - 在 `[desktop/src-tauri/src/lib.rs](desktop/src-tauri/src/lib.rs)` 的 `setup` 钩子中，为 macOS 窗口应用 `NSVisualEffectMaterial::HudWindow` 活力效果，为 Windows 11 窗口应用原生 `Mica` 效果。
+  - 在 `[desktop/src/styles.css](desktop/src/styles.css)` 中，当 `html` 处于 `data-surface="glass"` 时，强制将 `body` 背景色设为 `transparent`，使系统原生毛玻璃无缝穿透。
+- **命令面板（Command Palette）链式调用与模糊搜索增强**：
+  - 在 `[desktop/src/lib/commands.ts](desktop/src/lib/commands.ts)` 的 `Command` 接口中增加 `subMode` 属性。
+  - 在 `[desktop/src/lib/use-surface-commands.ts](desktop/src/lib/use-surface-commands.ts)` 中注册“切换模型 (Switch Model)”与“打开文件 (Open File)”命令。
+  - 在 `[desktop/src/components/CommandPalette.tsx](desktop/src/components/CommandPalette.tsx)` 中实现状态机，支持在选中上述命令后进入子模式（`switch-model` 或 `open-file`），动态拉取并过滤模型或通过 `listFiles` 实时模糊搜索项目文件，回车直接调用 `switchModel` 或 `openFile`。支持按 `Backspace` 或点击返回按钮无缝回退。
+- **界面信息密度调节（Density Toggle）**：
+  - 创建 `[desktop/src/lib/ui-density.ts](desktop/src/lib/ui-density.ts)`，管理 `'compact' | 'cozy' | 'spacious'` 密度的读取、保存和应用（通过设置 `html` 的 `data-density` 属性）。
+  - 在 `[desktop/src/styles/tokens.css](desktop/src/styles/tokens.css)` 中定义针对 `html[data-density="compact"]` and `html[data-density="spacious"]` 的 CSS 变量覆盖，对字体大小、行高和间距比例（`--space-1` 至 `--space-8`）进行等比例缩放。
+  - 在 `[desktop/src/surfaces/SettingsSurface.tsx](desktop/src/surfaces/SettingsSurface.tsx)` 的“外观”分类下新增“界面信息密度”下拉选择器。
+
+### 2. Antigravity 2.0 对标：可视化执行沙箱与时间旅行（Time-Travel）
+
+#### 技术路线与实现细节
+- **集成交互式 Web 预览画布（Live Canvas Panel）**：
+  - 在 `[desktop/src/surfaces/ReviewPanel.tsx](desktop/src/surfaces/ReviewPanel.tsx)` 中新增 `Canvas` 选项卡，自动筛选所有 HTML、Markdown 和 CSS 类型的工件（Artifacts）。
+  - 支持在预览区上方提供 Desktop (100%)、Tablet (768px)、Mobile (375px) 三档响应式宽度切换。
+  - 提供一键刷新（Reload iframe）和在浏览器中打开（通过 Blob URL 形式导出）的控制按钮。
+- **SVG 级思维导图（Visual Reasoning Graph）**：
+  - 在 `[desktop/src/components/DelegationTree.tsx](desktop/src/components/DelegationTree.tsx)` 中增加“思维导图”与“列表”的视图切换。
+  - 实现了一套纯前端的树状布局算法，根据子代理的父子关系和同级索引，动态计算出每个代理节点在 SVG 画布上的 `(x, y)` 坐标。
+  - 使用 SVG `<path>` 绘制平滑的贝塞尔曲线连接父子节点。
+  - 对于当前处于 `running` 状态的子代理，利用 SVG `<animateMotion>` 机制在连线上渲染一颗不断流动的发光粒子，实时呈现数据流与代理委派。
+- **时间旅行时间轴滑块（Time-Travel Timeline Slider）**：
+  - 在 `[desktop/src/surfaces/ThreadView.tsx](desktop/src/surfaces/ThreadView.tsx)` 中，挂载时调用 `getRewindPoints` 拉取当前会话的所有历史回滚点。
+  - 在 Thread 头部下方渲染一个精致的水平滑块（Timeline Slider）。用户拖动滑块时，消息流（`view.blocks`）会自动过滤并只显示该轮次及以前的内容。
+  - 当处于历史状态时，在输入框上方弹出醒目的黄色警告横幅。用户可点击“返回最新”退出，或点击“在此分叉 (Fork)”回滚并截断后续历史。
+  - 支持智能分叉：用户在历史状态下直接发送新消息时，系统会自动先触发 `rewindSession` 分叉，再发送该消息。
+
 ## 来源
 
 - [Cursor 3 agent-first interface (InfoQ)](https://www.infoq.com/news/2026/04/cursor-3-agent-first-interface/)

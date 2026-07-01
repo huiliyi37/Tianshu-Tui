@@ -74,12 +74,24 @@ echo "=== 同步: .rivet/knowledge/ ==="
 rsync $RSYNC_FLAGS \
   "$DEV_DIR/.rivet/knowledge/" "$PUB_DIR/.rivet/knowledge/"
 
-echo "=== 同步: 中文 README ==="
-if [[ -f "$DEV_DIR/.rivet/Tianshu/README.zh-CN.md" ]]; then
-  rsync $RSYNC_FLAGS "$DEV_DIR/.rivet/Tianshu/README.zh-CN.md" "$PUB_DIR/README.zh-CN.md"
+echo "=== 同步: 品牌资产（README 横幅/Logo 等图片）==="
+if [[ -d "$DEV_DIR/docs/brand/assets" ]]; then
+  mkdir -p "$PUB_DIR/docs/brand/assets"
+  rsync $RSYNC_FLAGS "$DEV_DIR/docs/brand/assets/" "$PUB_DIR/docs/brand/assets/"
 fi
 
-echo "=== 同步: 配置文件 ==="
+echo "=== 同步: 英文 README ==="
+# 主页 README.md 现为中文（见下方配置文件循环），英文版作为 README.en.md 同步。
+if [[ -f "$DEV_DIR/README.en.md" ]]; then
+  rsync $RSYNC_FLAGS "$DEV_DIR/README.en.md" "$PUB_DIR/README.en.md"
+fi
+# 清理：旧的独立中文页已并入主页 README.md，移除公开仓库里残留的 README.zh-CN.md。
+if [[ "$DRY_RUN" != "--dry-run" && -f "$PUB_DIR/README.zh-CN.md" ]]; then
+  rm -f "$PUB_DIR/README.zh-CN.md"
+  echo "  已移除冗余 $PUB_DIR/README.zh-CN.md"
+fi
+
+echo "=== 同步: 配置文件（README.md 为中文主页）==="
 for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
     rsync $RSYNC_FLAGS "$DEV_DIR/$f" "$PUB_DIR/$f"
