@@ -64,31 +64,29 @@ function centerLine(text: string, width: number): string {
   return ' '.repeat(left) + text + ' '.repeat(right)
 }
 
-// 极简天枢主星与星芒光晕 (宽度 20)
-const STAR_TEMPLATE = [
-  "         .",
-  "       \\ | /",
-  "     - - ✦ - -",
-  "       / | \\",
-  "         ."
+// 北斗七星 — 真实勺形布局
+const DIPPER_STARS: ReadonlyArray<{ x: number; y: number; lead?: boolean }> = [
+  { x: 4, y: 0, lead: true }, // 天枢 — 勺口·上 (Dubhe)
+  { x: 4, y: 2 },             // 天璇 — 勺口·下 (Merak)
+  { x: 10, y: 3 },            // 天玑 — 勺底·下 (Phecda)
+  { x: 11, y: 1 },            // 天权 — 勺底·上 (Megrez)
+  { x: 16, y: 1 },            // 玉衡 — 柄 (Alioth)
+  { x: 21, y: 1 },            // 开阳 — 柄 (Mizar)
+  { x: 25, y: 0 },            // 摇光 — 柄端 (Alkaid)
 ]
-const STAR_ROWS = 5
+const DIPPER_WIDTH = 26
+const DIPPER_ROWS = 4
 
-function renderStarRow(rowIdx: number, theme: RivetTheme): string {
-  const line = STAR_TEMPLATE[rowIdx]
-  if (!line) return ''
+function renderDipperRow(rowIdx: number, theme: RivetTheme): string {
   let out = ''
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i]
-    if (char === '✦') {
-      // 天枢星心 — 极亮且带闪烁/高亮
-      out += color('✦', theme.pulseAlert || theme.userColor, { bold: true })
-    } else if (char === '.') {
-      // 边缘散发光晕的点 — 极暗色
-      out += color('.', theme.dim)
-    } else if (char !== ' ') {
-      // 放射星芒线 — 使用主色高亮
-      out += color(char, theme.primary)
+  for (let colIdx = 0; colIdx < DIPPER_WIDTH; colIdx++) {
+    const star = DIPPER_STARS.find(s => s.y === rowIdx && s.x === colIdx)
+    if (star) {
+      if (star.lead) {
+        out += color('●', theme.pulseAlert || theme.userColor, { bold: true })
+      } else {
+        out += color('·', theme.dim)
+      }
     } else {
       out += ' '
     }
@@ -98,12 +96,31 @@ function renderStarRow(rowIdx: number, theme: RivetTheme): string {
 
 // TIANSHU 大字 Block ASCII 标识 (6行高，55列宽)
 const BRAND_LOGO = [
-  "  ______ _                 _",
-  " /_  __/(_)___ _____  ____| |__  __  __",
-  "  / /  / / __ `/ __ \\/ ___/ __ \\/ / / /",
-  " / /  / / /_/ / / / (__  ) / / / /_/ /",
-  "/_/  /_/\\__,_/_/ /_/____/_/ /_/\\__,_/"
+  '████████╗██╗ █████╗ ███╗   ██╗███████╗██╗  ██╗██╗   ██╗',
+  '╚══██╔══╝██║██╔══██╗████╗  ██║██╔════╝██║  ██║██║   ██║',
+  '   ██║   ██║███████║██╔██╗ ██║███████╗███████║██║   ██║',
+  '   ██║   ██║██╔══██║██║╚██╗██║╚════██║██╔══██║██║   ██║',
+  '   ██║   ██║██║  ██║██║ ╚████║███████║██║  ██║╚██████╔╝',
+  '   ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝'
 ]
+
+// 渲染具有立体描边质感的大字 Logo 行
+function renderLogoLine(line: string, theme: RivetTheme): string {
+  let out = ''
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '█') {
+      // 实体笔画：高亮 primary 色
+      out += color('█', theme.primary, { bold: true })
+    } else if (char === ' ' || char === '\n') {
+      out += char
+    } else {
+      // 描边线框：使用 secondary/dim 色以形成双色霓虹立体感
+      out += color(char, theme.secondary || theme.dim)
+    }
+  }
+  return out
+}
 
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
@@ -136,15 +153,15 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     out.push(borderCol('┌' + '─'.repeat(boxWidth - 2) + '┐'))
     out.push(wrapLine(''))
 
-    // 1. 天枢主星与星芒光晕
-    for (let r = 0; r < STAR_ROWS; r++) {
-      out.push(wrapLine(renderStarRow(r, theme)))
+    // 1. 北斗星图
+    for (let r = 0; r < DIPPER_ROWS; r++) {
+      out.push(wrapLine(renderDipperRow(r, theme)))
     }
     out.push(wrapLine(''))
 
-    // 2. 大字品牌标识
+    // 2. 大字品牌标识 (采用 3D 双色描边效果)
     for (const line of BRAND_LOGO) {
-      out.push(wrapLine(color(line, theme.primary, { bold: true })))
+      out.push(wrapLine(renderLogoLine(line, theme)))
     }
     out.push(wrapLine(''))
 
