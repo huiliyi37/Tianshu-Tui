@@ -10,6 +10,7 @@ const KEY_TOOL_DENSITY = 'tianshu.toolDensity'
 const KEY_SIDEBAR = 'tianshu.sidebarVisible'
 const KEY_REVIEW = 'tianshu.reviewVisible.v2'
 const KEY_TERMINAL = 'tianshu.terminalVisible'
+const KEY_JOBS_DOCK = 'tianshu.jobsDockVisible'
 const KEY_TABS = 'tianshu.openTabs'
 const KEY_SPLIT_MODE = 'tianshu.splitMode'
 const KEY_NOTIF_PREF = 'tianshu.notifPref'
@@ -165,6 +166,9 @@ export function saveReviewVisible(v: boolean): void { saveBool(KEY_REVIEW, v) }
 
 export function loadTerminalVisible(): boolean { return loadBool(KEY_TERMINAL, false) }
 export function saveTerminalVisible(v: boolean): void { saveBool(KEY_TERMINAL, v) }
+
+export function loadJobsDockVisible(): boolean { return loadBool(KEY_JOBS_DOCK, true) }
+export function saveJobsDockVisible(v: boolean): void { saveBool(KEY_JOBS_DOCK, v) }
 
 // ── Open tabs ──
 

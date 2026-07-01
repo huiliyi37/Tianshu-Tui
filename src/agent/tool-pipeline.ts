@@ -234,6 +234,8 @@ export interface ToolPipelineDeps {
   turnBudget: TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Session-scoped background job registry — forwarded to bash / job tools. */
+  jobs?: import('../tools/job-store.js').JobRegistry
   /** Immune system hook for recording repair success (failed→passed transitions) */
   immuneHook?: ImmuneHook
   /** Optional cache advisor for adaptive artifact thresholds */
@@ -547,6 +549,7 @@ export async function executeToolUse(
     ownedFiles: deps.ownershipLedger?.getOwnedFiles(),
     baselineHead: deps.ownershipLedger?.getBaselineHead(),
     artifactStore: deps.artifactStore,
+    jobs: deps.jobs,
     prewarmCache: deps.prewarm,
     contextWindow: deps.config.contextWindow,
     providerProfile: deps.config.providerProfile,

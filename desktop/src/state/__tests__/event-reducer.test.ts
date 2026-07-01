@@ -55,6 +55,36 @@ test('tool_result falls back to result when uiContent is absent', () => {
   assert.equal(block!.text, 'ok')
 })
 
+test('job events populate and update the jobs map', () => {
+  seq = 0
+  const s = fold([
+    ev('job', { kind: 'started', id: 'j1', command: 'npm run dev', status: 'running', startedAt: 1000, lastLine: '' }),
+    ev('job', { kind: 'output', id: 'j1', command: 'npm run dev', status: 'running', startedAt: 1000, lastLine: 'compiled', chunk: 'compiled\n' }),
+  ])
+  assert.equal(Object.keys(s.jobs).length, 1)
+  assert.equal(s.jobs['j1']!.status, 'running')
+  assert.equal(s.jobs['j1']!.lastLine, 'compiled')
+  assert.ok(s.jobsRev >= 2)
+})
+
+test('job exit event records status + exit code, preserving command', () => {
+  seq = 0
+  const s = fold([
+    ev('job', { kind: 'started', id: 'j2', command: 'npm install', status: 'running', startedAt: 1000, lastLine: '' }),
+    ev('job', { kind: 'exit', id: 'j2', status: 'exited', exitCode: 0, startedAt: 1000, endedAt: 2000, lastLine: 'added 3 packages' }),
+  ])
+  assert.equal(s.jobs['j2']!.status, 'exited')
+  assert.equal(s.jobs['j2']!.exitCode, 0)
+  assert.equal(s.jobs['j2']!.command, 'npm install')
+  assert.equal(s.jobs['j2']!.endedAt, 2000)
+})
+
+test('job event without an id is ignored', () => {
+  seq = 0
+  const s = fold([ev('job', { kind: 'started', status: 'running' })])
+  assert.equal(Object.keys(s.jobs).length, 0)
+})
+
 test('sources dedup treats Windows separator/case variants as one file', () => {
   seq = 0
   const s = fold([

@@ -3,6 +3,7 @@ import type {
   ApprovalDecision,
   ApprovalMode,
   ArtifactSummary,
+  JobState,
   DomainEntry,
   EnvironmentInfo,
   FileContent,
@@ -542,6 +543,24 @@ export function getArtifact(id: string, artifactId: string): Promise<{ artifact:
   return apiGet<{ artifact: ArtifactSummary; raw: string }>(
     `/sessions/${id}/artifacts/${encodeURIComponent(artifactId)}`,
   )
+}
+
+// ── Background jobs (bash run_in_background) ─────────────────────────
+
+export async function getJobs(id: string): Promise<JobState[]> {
+  const { jobs } = await apiGet<{ jobs: JobState[] }>(`/sessions/${id}/jobs`)
+  return jobs
+}
+
+export async function getJobLogs(id: string, jobId: string): Promise<string> {
+  const { logs } = await apiGet<{ logs: string }>(
+    `/sessions/${id}/jobs/${encodeURIComponent(jobId)}/logs`,
+  )
+  return logs
+}
+
+export function killJob(id: string, jobId: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(`/sessions/${id}/jobs/${encodeURIComponent(jobId)}/kill`)
 }
 
 // ── Council (I1) ────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import {
   loadSidebarVisible,
   loadReviewVisible,
   loadTerminalVisible,
+  loadJobsDockVisible,
   loadToolDensity,
   loadSplitMode,
   saveActiveProject,
@@ -16,6 +17,7 @@ import {
   saveSidebarVisible,
   saveReviewVisible,
   saveTerminalVisible,
+  saveJobsDockVisible,
   saveToolDensity,
   saveSplitMode,
   type ToolDensity,
@@ -37,6 +39,8 @@ export interface UiState {
   sidebarVisible: boolean
   reviewVisible: boolean
   terminalVisible: boolean
+  /** Background jobs (bash run_in_background) bottom dock visibility. */
+  jobsDockVisible: boolean
   /** Zen mode: hides sidebar + review panel for distraction-free focus (Cmd+.). */
   zenMode: boolean
   openTabs: string[]
@@ -64,6 +68,7 @@ type UiAction =
   | { type: 'setSidebar'; visible: boolean }
   | { type: 'setReview'; visible: boolean }
   | { type: 'setTerminal'; visible: boolean }
+  | { type: 'setJobsDock'; visible: boolean }
   | { type: 'closeTab'; id: string }
   | { type: 'reorderTabs'; from: number; to: number }
   | { type: 'toggleZen' }
@@ -114,6 +119,8 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setTerminal':
       return { ...state, terminalVisible: action.visible }
+    case 'setJobsDock':
+      return { ...state, jobsDockVisible: action.visible }
     case 'closeTab': {
       const tabs = state.openTabs.filter((t) => t !== action.id)
       const activeId = state.activeSessionId === action.id
@@ -163,6 +170,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     sidebarVisible: loadSidebarVisible(),
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
+    jobsDockVisible: loadJobsDockVisible(),
     zenMode: false,
     openTabs: loadOpenTabs(),
     splitMode: loadSplitMode(),
@@ -198,6 +206,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveTerminalVisible(state.terminalVisible)
   }, [state.terminalVisible])
+
+  useEffect(() => {
+    saveJobsDockVisible(state.jobsDockVisible)
+  }, [state.jobsDockVisible])
 
   useEffect(() => {
     saveOpenTabs(state.openTabs)

@@ -36,7 +36,7 @@ describe('createDefaultToolRegistry', () => {
     assert.ok(names.includes('run_tests'))
   })
 
-  it('keeps desktop tools out of the default registry (kernel budget ≤25)', () => {
+  it('keeps desktop tools out of the default registry (kernel budget ≤26)', () => {
     const registry = createDefaultToolRegistry()
     const names = registry.getDefinitions().map(t => t.name)
     const desktop = ['export_file', 'open_path', 'create_document', 'create_spreadsheet', 'create_image', 'create_presentation', 'create_pdf']
@@ -44,7 +44,8 @@ describe('createDefaultToolRegistry', () => {
     for (const name of desktop) {
       assert.equal(names.includes(name), false, `${name} should be gated behind desktopTools`)
     }
-    assert.ok(registry.getAll().length <= 25, `registry has ${registry.getAll().length} tools (kernel budget: 25)`)
+    // kernel budget 25→26：为后台任务控制工具 `job` 让出一格（见 kernel-budget.test.ts 说明）。
+    assert.ok(registry.getAll().length <= 26, `registry has ${registry.getAll().length} tools (kernel budget: 26)`)
   })
 
   it('registers desktop tools when desktopTools option is enabled', () => {

@@ -2543,6 +2543,72 @@ body {
 .todo-mini-capsule:hover { opacity: 1; background: var(--panel-3); box-shadow: var(--shadow-md); }
 .todo-mini-capsule .tmc-glyph { color: var(--success); }
 .todo-mini-capsule .tmc-count { font-variant-numeric: tabular-nums; }
+
+/* Background jobs dock — bottom-right floating bar (bash run_in_background). */
+.jobs-dock {
+  position: fixed;
+  bottom: 10px;
+  right: 12px;
+  z-index: 31;
+  width: 480px;
+  max-width: calc(100vw - 320px);
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.jobs-dock-head { display: flex; align-items: center; gap: var(--space-2); padding: 6px 8px; }
+.jobs-dock.open .jobs-dock-head { border-bottom: 1px solid var(--border); }
+.jobs-dock-toggle {
+  display: flex; align-items: center; gap: 6px;
+  background: transparent; border: none; color: var(--text); cursor: pointer; padding: 2px 4px;
+}
+.jobs-dock-head .jdh-title { font-weight: var(--weight-medium); color: var(--text-strong); }
+.jobs-dock-head .jdh-count {
+  font-size: 11px; color: var(--muted); background: var(--panel-3);
+  border-radius: var(--radius-pill); padding: 1px 7px; font-variant-numeric: tabular-nums;
+}
+.jobs-dock-head .jdh-current {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-family: var(--font-mono); font-size: 12px;
+}
+.jobs-dock-list { list-style: none; margin: 0; padding: 4px 6px 6px; overflow-y: auto; max-height: 40vh; }
+.job-item { border-bottom: 1px solid var(--border); padding: 4px 2px; }
+.job-item:last-child { border-bottom: none; }
+.job-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.job-status-pill {
+  flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 1px 6px; border-radius: var(--radius-pill); background: var(--panel-3); color: var(--muted);
+}
+.job-status-pill.js-running { color: var(--accent); }
+.job-status-pill.js-killed { color: var(--warning); }
+.job-item.js-exited .job-status-pill { color: var(--success); }
+.job-elapsed { flex: none; font-variant-numeric: tabular-nums; font-size: 11px; color: var(--muted); }
+.job-cmd {
+  flex: none; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: transparent; border: none; color: var(--text-strong);
+  font-family: var(--font-mono); font-size: 12px; cursor: pointer; padding: 0; text-align: left;
+}
+.job-lastline {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-family: var(--font-mono); font-size: 11px;
+}
+.job-actions { flex: none; display: flex; align-items: center; gap: 2px; }
+.job-act {
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  background: transparent; border: none; color: var(--muted); cursor: pointer; border-radius: var(--radius-sm);
+}
+.job-act:hover { color: var(--text-strong); background: var(--panel-3); }
+.job-act.job-kill:hover { color: var(--error); }
+.job-logs {
+  margin: 6px 2px 2px; padding: 6px 8px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  max-height: 200px; overflow: auto; font-family: var(--font-mono); font-size: 11px;
+  white-space: pre-wrap; word-break: break-word; color: var(--text);
+}
 .source-item { display: flex; align-items: center; gap: var(--space-2); padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); cursor: pointer; transition: background var(--dur) var(--ease); }
 .source-item:last-child { border-bottom: none; }
 .source-item:hover { background: var(--panel-2); }

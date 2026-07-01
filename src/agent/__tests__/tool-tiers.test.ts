@@ -12,17 +12,18 @@ import {
 
 describe('tool-tiers', () => {
   describe('CORE_TOOLS', () => {
-    it('stays within kernel budget (≤30)', () => {
-      // ≤30 is the adjusted limit after migrating BOTH web_search and web_fetch
-      // into CORE (was EXTENDED) and merging recall+remember→memory,
-      // plan_submit+plan_close→plan. The original ≤25 target was for the kernel
-      // default-registry only; interactive-layer additions (delegate, deliver,
-      // plan_task, etc.) plus the web search tools push the main agent's CORE
-      // to 30 by design.
+    it('stays within kernel budget (≤31)', () => {
+      // ≤31 is the adjusted limit after migrating BOTH web_search and web_fetch
+      // into CORE (was EXTENDED), merging recall+remember→memory and
+      // plan_submit+plan_close→plan, and adding `job` (background-task control,
+      // the required companion to bash run_in_background). The original ≤25 target
+      // was for the kernel default-registry only; interactive-layer additions
+      // (delegate, deliver, plan_task, etc.) plus web search + job push the main
+      // agent's CORE to 31 by design.
       assert.ok(
-        CORE_TOOLS.length <= 30,
-        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 30). ` +
-          `Beyond ~30, agents experience choice overload.`,
+        CORE_TOOLS.length <= 31,
+        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 31). ` +
+          `Beyond ~31, agents experience choice overload.`,
       )
     })
 

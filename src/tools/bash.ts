@@ -207,6 +207,37 @@ export function checkBashReread(command: string, toolUseId: string): string | nu
 }
 setInterval(() => { for (const [k, v] of bashFileReads) { if (Date.now() - v.at > 600_000) bashFileReads.delete(k) } }, 300_000).unref()
 
+/**
+ * Conservative allowlist of commands that should auto-background when the model
+ * does not specify run_in_background. Two safe classes only:
+ *   1. Non-terminating processes (dev servers / watchers) — blocking them stalls
+ *      the whole loop until timeout for no benefit.
+ *   2. Long installs — terminate eventually but tie up a turn; the model can
+ *      `job(await)` when it actually needs them done.
+ * Deliberately EXCLUDES build/test: the model usually depends on their result
+ * synchronously, so silently backgrounding them would surprise it. It can still
+ * opt in explicitly with run_in_background=true.
+ */
+const LONG_RUNNER_PATTERNS: RegExp[] = [
+  // Package installs.
+  /\b(npm|pnpm|yarn|bun)\s+(install|ci|add)\b/i,
+  /\bnpm\s+i\b/i,
+  // Dev servers / start / watch / serve scripts.
+  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|watch|serve|storybook)\b/i,
+  // Common dev-server / watcher binaries.
+  /\b(vite|nodemon|ng\s+serve|webpack(-dev-server|\s+serve)|rollup\s+.*-w\b|esbuild\s+.*--watch)\b/i,
+  /\bnext\s+(dev|start)\b/i,
+  // TypeScript watch mode.
+  /\btsc\b[^&|;]*(--watch|\s-w\b)/i,
+  // Docker / compose up (non -d foreground brings up services and blocks).
+  /\bdocker(\s+compose|-compose)?\s+up\b/i,
+]
+
+/** True when the command matches a known long-running / non-terminating pattern. */
+export function isLongRunner(command: string): boolean {
+  return LONG_RUNNER_PATTERNS.some((p) => p.test(command))
+}
+
 export const BASH_TOOL: Tool = {
   definition: {
     name: 'bash',
@@ -214,13 +245,15 @@ export const BASH_TOOL: Tool = {
 
 Do NOT use for file reading/writing/searching — use dedicated tools (read_file, grep, glob, edit_file, write_file).
 
-Chain independent commands with &&. Use run_in_background for long operations.
-Timeout defaults to 120s; pass timeout parameter for longer commands.`,
+Chain independent commands with &&. Timeout defaults to 120s; pass timeout for longer commands.
+
+Long-running / non-terminating commands (dev servers, watchers, installs) run in the BACKGROUND so they never block the loop: pass run_in_background=true, or let auto-detection handle known long-runners. A backgrounded command returns a job id immediately — use the \`job\` tool to await(pattern), read logs, or kill it. Pass run_in_background=false to force a command to stay in the foreground.`,
     input_schema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'The shell command to execute' },
         timeout: { type: 'integer', description: 'Timeout in ms (default 120000)' },
+        run_in_background: { type: 'boolean', description: 'Run detached in the background and return a job id immediately (for dev servers, watchers, installs). Auto-enabled for known long-runners; set false to force foreground.' },
       },
       required: ['command'],
     },
@@ -235,6 +268,30 @@ Timeout defaults to 120s; pass timeout parameter for longer commands.`,
     const command = sandbox.command
     const timeout = (params.input.timeout as number) ?? 120_000
     const startTime = Date.now()
+
+    // Background path: explicit run_in_background=true, or auto-detected long-runner
+    // (unless explicitly disabled). Requires a session job registry (server / TUI
+    // with sessionId); otherwise falls through to normal foreground execution.
+    const explicitBg = params.input.run_in_background
+    const wantBackground = explicitBg === true || (explicitBg !== false && isLongRunner(rawCommand))
+    if (wantBackground && params.jobs) {
+      const mirrorEnv = buildMirrorEnv(mirrorConfig)
+      const env = { ...sanitizeEnv(process.env), ...mirrorEnv }
+      const snap = params.jobs.spawn({ command, rawCommand, cwd: params.cwd, env })
+      const auto = explicitBg !== true
+      const sandboxNote = sandbox.sandboxed && sandbox.note ? `\n${sandbox.note}` : ''
+      const content =
+        `[job:${snap.id}] ${auto ? '已自动转入后台' : '已在后台启动'}: ${rawCommand}\n` +
+        `不阻塞当前轮次。用 job(action="await", id="${snap.id}", pattern="Ready|listening|compiled") 等待就绪/退出，` +
+        `job(action="logs", id="${snap.id}") 看输出，job(action="kill", id="${snap.id}") 终止。${sandboxNote}`
+      const shortCmd = rawCommand.length > 80 ? rawCommand.slice(0, 80) + '…' : rawCommand
+      return Promise.resolve({
+        content,
+        uiContent: `▶ 后台任务 ${snap.id}: ${shortCmd}`,
+        isError: false,
+        command: rawCommand,
+      })
+    }
 
     return new Promise((resolve) => {
       const shell = getShellCommand()

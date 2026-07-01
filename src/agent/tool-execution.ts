@@ -70,6 +70,8 @@ export interface ToolExecutionDeps {
   getTurnBudget: () => TurnBudget
   /** Artifact store for persisting tool output — injected via params, no global setter */
   artifactStore?: import('../artifact/store.js').ArtifactStore
+  /** Late-bound background job registry getter (server replaces it post-construction). */
+  getJobs?: () => import('../tools/job-store.js').JobRegistry | undefined
   /** Session state manager for cross-turn awareness */
   sessionStateManager?: import('./session-state.js').SessionStateManager
   /** Cache advisor for adaptive thresholds */
@@ -221,6 +223,7 @@ export class ToolExecutionController {
       getReliabilityDecision: () => this.deps.getReliabilityDecision(),
       turnBudget: this.deps.getTurnBudget(),
       artifactStore: this.deps.artifactStore,
+      jobs: this.deps.getJobs?.(),
       cacheAdvisor: this.deps.cacheAdvisor,
       taskLedger: this.deps.config.taskLedger,
       ownershipLedger: this.deps.config.ownershipLedger,

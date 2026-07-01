@@ -18,6 +18,9 @@
  *   POST   /sessions/:id/interventions/:rid/answer     resolve approval (B2)
  *   GET    /sessions/:id/artifacts                     list (B4)
  *   GET    /sessions/:id/artifacts/:artifactId         read raw (B4)
+ *   GET    /sessions/:id/jobs                           list background jobs
+ *   GET    /sessions/:id/jobs/:jobId/logs              background job output
+ *   POST   /sessions/:id/jobs/:jobId/kill              terminate a background job
  *   GET    /worktrees                                  list git worktrees
  *   GET    /github/prs                                 list open PRs (via gh CLI)
  *   GET    /github/prs/:number                         PR detail with comments/files
@@ -818,6 +821,25 @@ export function buildSessionRoutes(
       if (!found) return { status: 404, body: { error: 'Artifact not found' } }
       const raw = await manager.readArtifact(id, artifactId)
       return { status: 200, body: { artifact: artifactSummary(found), raw: raw ?? '' } }
+    }, apiToken),
+
+    // Background jobs (bash run_in_background) — list / logs / kill.
+    'GET /sessions/:id/jobs': withAuth((_body, params) => {
+      const jobs = manager.listJobs(params!.id!)
+      if (!jobs) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: { jobs } }
+    }, apiToken),
+
+    'GET /sessions/:id/jobs/:jobId/logs': withAuth((_body, params) => {
+      const logs = manager.getJobLogs(params!.id!, params!.jobId!)
+      if (logs === undefined) return { status: 404, body: { error: 'Session or job not found' } }
+      return { status: 200, body: { logs } }
+    }, apiToken),
+
+    'POST /sessions/:id/jobs/:jobId/kill': withAuth((_body, params) => {
+      const ok = manager.killJob(params!.id!, params!.jobId!)
+      if (!ok) return { status: 404, body: { error: 'Session or job not found' } }
+      return { status: 200, body: { ok: true } }
     }, apiToken),
 
     // I1 — convene a star-domain council on a plan artifact.

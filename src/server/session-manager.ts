@@ -45,6 +45,7 @@ import { join, resolve } from 'node:path'
 import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
+import { SessionJobs, type JobEvent } from '../tools/job-store.js'
 
 export type SessionStatus = 'idle' | 'running' | 'completed' | 'failed' | 'aborted'
 
@@ -79,6 +80,8 @@ export type SessionEventType =
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'
+  // Background jobs (bash run_in_background) — started / output / exit.
+  | 'job'
   | 'done'
 
 export interface SessionEvent {
@@ -215,6 +218,10 @@ export interface ManagedAgent {
    * on disk). Mirrors AgentLoop.setActivePlan. Optional for lightweight doubles.
    */
   setActivePlan?(plan: { slug: string; title: string } | null): void
+  /** Inject the session-owned background job registry so bash(run_in_background)
+   *  and the `job` tool operate on an instance the server subscribes to. Optional
+   *  so lightweight test doubles need not implement it. */
+  setJobs?(jobs: import('../tools/job-store.js').SessionJobs): void
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
@@ -435,6 +442,12 @@ interface InternalSession {
   knownArtifacts: Set<string>
   /** T3 — mid-run user guidance, drained into the agent at the next tool boundary. */
   steer: SteerBuffer
+  /**
+   * Background job registry (bash run_in_background + `job` tool). Server-owned so
+   * it survives agent rebuilds (switchModel) and its lifecycle events can be
+   * forwarded to SSE. Lazily created on first ensureAgent, injected into the agent
+   * via setJobs, terminated on session close. */
+  jobs?: import('../tools/job-store.js').SessionJobs
   /**
    * Lazily built read-only view over the on-disk artifact log for sessions
    * without a live agent (rehydrated/idle). Lets the desktop still read artifact
@@ -800,6 +813,7 @@ export class RuntimeSessionManager {
     const s = this.sessions.get(id)
     if (!s) return false
     try { s.agent?.shutdown?.() } catch { /* best-effort */ }
+    try { s.jobs?.killAll() } catch { /* best-effort */ }
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch { /* best-effort */ }
     this.sessions.delete(id)
     const i = this.loadedOrder.indexOf(id)
@@ -1014,10 +1028,35 @@ export class RuntimeSessionManager {
 
   private ensureAgent(session: InternalSession): ManagedAgent {
     if (!session.agent) {
+      this.ensureJobs(session)
       session.agent = this.createAgent(session.record.cwd, session.record.id, session.approvalMode)
       this.applySelections(session)
     }
     return session.agent
+  }
+
+  /** Lazily create the server-owned background job registry for a session and
+   *  wire its lifecycle events into the SSE stream. Idempotent. */
+  private ensureJobs(session: InternalSession): SessionJobs {
+    if (!session.jobs) {
+      const jobs = new SessionJobs(join(session.record.cwd, '.rivet', 'artifacts', 'jobs'))
+      jobs.on('event', (ev: JobEvent) => {
+        this.append(session, 'job', {
+          id: ev.job.id,
+          command: ev.job.command,
+          status: ev.job.status,
+          exitCode: ev.job.exitCode,
+          startedAt: ev.job.startedAt,
+          endedAt: ev.job.endedAt,
+          lastLine: ev.job.lastLine,
+          pid: ev.job.pid,
+          kind: ev.kind,
+          ...(ev.chunk ? { chunk: ev.chunk } : {}),
+        })
+      })
+      session.jobs = jobs
+    }
+    return session.jobs
   }
 
   /**
@@ -1030,6 +1069,11 @@ export class RuntimeSessionManager {
   private applySelections(session: InternalSession): void {
     const agent = session.agent
     if (!agent) return
+    // Bind the server-owned job registry so background jobs + their SSE events
+    // survive agent rebuilds (switchModel builds a fresh AgentLoop).
+    try {
+      if (session.jobs) agent.setJobs?.(session.jobs)
+    } catch { /* non-fatal */ }
     try {
       if (session.domainState === null) agent.setSessionDomain?.(null)
       else if (session.domainState !== undefined) agent.setSessionDomain?.(session.domainState)
@@ -1546,6 +1590,8 @@ export class RuntimeSessionManager {
       // agent 在 rehydrated/idle session 上为 null（懒构造）；只对已建过 agent
       // 的 session 调 shutdown，节省 best-effort try 的无谓 catch。
       try { s.agent?.shutdown?.() } catch { /* best-effort */ }
+      // 终结性关闭：杀掉所有后台任务（dev server/watcher）避免孤儿进程。
+      try { s.jobs?.killAll() } catch { /* best-effort */ }
     }
   }
 
@@ -1663,6 +1709,27 @@ export class RuntimeSessionManager {
     this.touch(s)
     this.persistRecord(s)
     return true
+  }
+
+  /** List background jobs for a session. undefined = session missing. */
+  listJobs(id: string): import('../tools/job-store.js').JobSnapshot[] | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    return s.jobs?.list() ?? []
+  }
+
+  /** Full captured output of a background job. undefined = session/job missing. */
+  getJobLogs(id: string, jobId: string): string | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    return s.jobs?.logs(jobId) ?? undefined
+  }
+
+  /** Terminate a background job. Returns false when session/job is missing. */
+  killJob(id: string, jobId: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s || !s.jobs) return false
+    return s.jobs.kill(jobId)
   }
 
   listArtifacts(id: string): Artifact[] | undefined {
