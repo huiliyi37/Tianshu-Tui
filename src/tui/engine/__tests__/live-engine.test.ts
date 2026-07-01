@@ -266,6 +266,19 @@ test('阶段3: 增量帧用 CSI 2026 同步输出包裹（防撕裂）', () => {
   assert.ok(frame.endsWith('\x1B[?2026l'), '增量帧应以 END_SYNC (\\x1B[?2026l) 结尾')
 })
 
+test('阶段3: 首帧/退出重绘的 append 帧同样用 CSI 2026 包裹', () => {
+  const term = new MockTerminal(80, 24)
+  const engine = new LiveEngine({ stdout: asStdout(term), reservedRows: 0, maxRows: 20 })
+
+  // 首次渲染走 append 分支（!hasRendered）
+  engine.render(lines('A', 'B', 'C'))
+  const frame = term.flush()
+
+  assert.ok(frame.startsWith('\x1B[?2026h'), '首帧应以 BEGIN_SYNC 开头')
+  assert.ok(frame.endsWith('\x1B[?2026l'), '首帧应以 END_SYNC 结尾')
+  assert.ok(frame.includes('A') && frame.includes('C'), '首帧包含内容')
+})
+
 // ── 结构变化（行数变化）走全量重写，仍不滚屏/不用 SAVE/RESTORE ──
 
 test('结构变化（行数增减）安全重绘，不滚屏不用 SAVE/RESTORE', () => {

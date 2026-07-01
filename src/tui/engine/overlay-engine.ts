@@ -43,6 +43,10 @@ export class OverlayEngine {
   private active: OverlayId | null = null
   private renderers = new Map<OverlayId, OverlayRenderer>()
   private inAltScreen = false
+  /** 上一帧屏上每行内容（权威缓存），用于行级 diff。空 = 需全量重绘。 */
+  private lastFrame: string[] = []
+  private lastCols = 0
+  private lastRows = 0
 
   constructor(options: OverlayEngineOptions) {
     this.stdout = options.stdout
@@ -81,6 +85,8 @@ export class OverlayEngine {
 
     this.active = id
     this.enterAltScreen()
+    // 进入 alt screen 后缓存作废 → 首帧全量重绘。
+    this.resetFrameCache()
     renderer.onActivate?.()
     this.render()
     return true
@@ -129,7 +135,14 @@ export class OverlayEngine {
     const renderer = this.renderers.get(id)
     renderer?.onDeactivate?.()
     this.active = null
+    this.resetFrameCache()
     this.exitAltScreen()
+  }
+
+  private resetFrameCache(): void {
+    this.lastFrame = []
+    this.lastCols = 0
+    this.lastRows = 0
   }
 
   private render(): void {
@@ -139,15 +152,42 @@ export class OverlayEngine {
     const { cols, rows } = this.getSize()
     const lines = renderer.render(cols, rows)
 
-    // 全屏逐行渲染：从 (1,1) 开始，逐行擦除+写入
-    let out = cursorTo(1, 1)
+    // 目标帧：定长 rows，超出内容行的位置补空串（与全屏擦除语义一致）。
+    const desired: string[] = new Array<string>(rows)
     for (let i = 0; i < rows; i++) {
-      out += ANSI.ERASE_LINE
-      if (i < lines.length && lines[i] !== undefined) {
-        out += lines[i]
-      }
-      if (i < rows - 1) out += '\n'
+      desired[i] = i < lines.length && lines[i] !== undefined ? lines[i]! : ''
     }
-    this.stdout.write(out)
+
+    // 首帧 / 尺寸变化 / 缓存作废 → 全量重绘（从 (1,1) 逐行擦除+写入）。
+    const cacheValid =
+      this.lastFrame.length === rows && cols === this.lastCols && rows === this.lastRows
+    let body: string
+    if (!cacheValid) {
+      let out = cursorTo(1, 1)
+      for (let i = 0; i < rows; i++) {
+        out += ANSI.ERASE_LINE + desired[i]
+        if (i < rows - 1) out += '\n'
+      }
+      body = out
+    } else {
+      // 行级 diff：只重写变化的行。alt screen 是固定网格（不滚动），
+      // 绝对定位 cursorTo(row,1) 安全，未变行直接跳过 → 少擦写、少闪。
+      let out = ''
+      for (let i = 0; i < rows; i++) {
+        if (desired[i] === this.lastFrame[i]) continue
+        out += cursorTo(i + 1, 1) + ANSI.ERASE_LINE + desired[i]
+      }
+      body = out
+    }
+
+    this.lastFrame = desired
+    this.lastCols = cols
+    this.lastRows = rows
+
+    // 无变化短路：diff 为空则不写（idle/无操作时零输出）。
+    if (body.length === 0) return
+    // 整帧用 CSI 2026 同步输出包裹，原子刷新——overlay 导航（翻页/回溯）时
+    // 逐行擦写不再撕裂/闪烁。
+    this.stdout.write(ANSI.BEGIN_SYNC + body + ANSI.END_SYNC)
   }
 }
