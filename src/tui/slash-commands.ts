@@ -1160,6 +1160,31 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
+    name: '/yes',
+    immediate: true,
+    handler(ctx) {
+      const { parts, agent, pushStatic, setIsStreaming } = ctx
+      const sub = parts[1]?.toLowerCase()
+      const currentlyYolo = (agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
+      let enable: boolean
+      if (sub === 'on') enable = true
+      else if (sub === 'off') enable = false
+      else enable = !currentlyYolo // bare /yes toggles
+
+      if (enable) {
+        agent.setApprovalMode('dangerously-skip-permissions')
+        ctx.setAutoSafe(false)
+        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。' }))
+      } else {
+        agent.setApprovalMode('auto-safe')
+        ctx.setAutoSafe(true)
+        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。' }))
+      }
+      setIsStreaming(false)
+      return true
+    },
+  },
+  {
     name: '/permission',
     immediate: true,
     handler(ctx) {
