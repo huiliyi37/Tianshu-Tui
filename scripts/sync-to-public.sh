@@ -91,6 +91,11 @@ if [[ "$DRY_RUN" != "--dry-run" && -f "$PUB_DIR/README.zh-CN.md" ]]; then
   echo "  已移除冗余 $PUB_DIR/README.zh-CN.md"
 fi
 
+echo "=== 同步: 发布文档 ==="
+if [[ -f "$DEV_DIR/docs/publishing.md" ]]; then
+  rsync $RSYNC_FLAGS "$DEV_DIR/docs/publishing.md" "$PUB_DIR/docs/publishing.md"
+fi
+
 echo "=== 同步: 配置文件（README.md 为中文主页）==="
 for f in README.md CLAUDE.md .rivet.md AGENTS.md .rivet/SELF .rivet-config.json tsconfig.json tsup.config.ts package.json; do
   if [[ -f "$DEV_DIR/$f" ]]; then
