@@ -30,11 +30,11 @@ function fakeTool(name: string) {
 
 const NOOP_CLIENT = { stream: async () => {} } as unknown as StreamClient
 
-/** read_file = CORE, web_search = EXTENDED, mcp_foo = uncategorized (MCP-like). */
+/** read_file = CORE, browser = EXTENDED, mcp_foo = uncategorized (MCP-like). */
 function makeRegistry(): ToolRegistry {
   const r = new ToolRegistry()
   r.register(fakeTool('read_file') as never)
-  r.register(fakeTool('web_search') as never)
+  r.register(fakeTool('browser') as never)
   r.register(fakeTool('mcp_foo') as never)
   return r
 }
@@ -75,28 +75,36 @@ function engineToolNames(engine: PromptEngine): string[] {
 }
 
 describe('gateToolDefinitions', () => {
-  const all = [def('read_file'), def('web_search'), def('mcp_foo')]
+  const all = [def('read_file'), def('browser'), def('mcp_foo')]
 
   it('disabled → returns full set (no filtering)', () => {
     const out = gateToolDefinitions(all, { enabled: false }).map(d => d.name)
-    assert.deepEqual(out.sort(), ['mcp_foo', 'read_file', 'web_search'])
+    assert.deepEqual(out.sort(), ['browser', 'mcp_foo', 'read_file'])
   })
 
   it('deny-list default → removes EXTENDED, keeps CORE + uncategorized (MCP)', () => {
     const out = gateToolDefinitions(all, { enabled: true }).map(d => d.name)
     assert.ok(out.includes('read_file'), 'CORE kept')
     assert.ok(out.includes('mcp_foo'), 'uncategorized/MCP kept (regression guard)')
-    assert.ok(!out.includes('web_search'), 'EXTENDED removed')
+    assert.ok(!out.includes('browser'), 'EXTENDED removed')
+  })
+
+  it('CORE web_search survives gating (migrated from EXTENDED — regression guard)', () => {
+    // web_search/web_fetch moved from EXTENDED to CORE; the gate must NOT drop them.
+    const out = gateToolDefinitions([def('read_file'), def('web_search'), def('web_fetch')], { enabled: true }).map(d => d.name)
+    assert.ok(out.includes('web_search'), 'web_search is CORE now — must not be gated out')
+    assert.ok(out.includes('web_fetch'), 'web_fetch is CORE now — must not be gated out')
+    assert.ok(out.includes('read_file'))
   })
 
   it('extraCore exempts a named EXTENDED tool', () => {
-    const out = gateToolDefinitions(all, { enabled: true, extraCore: ['web_search'] }).map(d => d.name)
-    assert.ok(out.includes('web_search'))
+    const out = gateToolDefinitions(all, { enabled: true, extraCore: ['browser'] }).map(d => d.name)
+    assert.ok(out.includes('browser'))
   })
 
   it('mountedExtras exempts a runtime-mounted EXTENDED tool', () => {
-    const out = gateToolDefinitions(all, { enabled: true, mountedExtras: ['web_search'] }).map(d => d.name)
-    assert.ok(out.includes('web_search'))
+    const out = gateToolDefinitions(all, { enabled: true, mountedExtras: ['browser'] }).map(d => d.name)
+    assert.ok(out.includes('browser'))
   })
 
   it('coreOverride switches to allow-list (drops uncategorized)', () => {
@@ -120,40 +128,40 @@ describe('AgentLoop tool gating + escape hatch', () => {
     const names = agent.getActiveToolNames()
     assert.ok(names.includes('read_file'))
     assert.ok(names.includes('mcp_foo'))
-    assert.ok(!names.includes('web_search'))
+    assert.ok(!names.includes('browser'))
   })
 
   it('updateTools honors the gate — never re-adds EXTENDED (MCP/LSP revert bug)', () => {
     // engine seeded with FULL set (as the MCP/LSP path would), then updateTools re-gates.
     const { agent, engine } = makeAgent({ gatingEnabled: true, engineSeedFull: true })
-    assert.ok(engineToolNames(engine).includes('web_search'), 'precondition: engine started full')
+    assert.ok(engineToolNames(engine).includes('browser'), 'precondition: engine started full')
     agent.updateTools()
     const names = engineToolNames(engine)
-    assert.ok(!names.includes('web_search'), 'updateTools must NOT re-add EXTENDED')
+    assert.ok(!names.includes('browser'), 'updateTools must NOT re-add EXTENDED')
     assert.ok(names.includes('read_file') && names.includes('mcp_foo'))
   })
 
   it('enableTool mounts an EXTENDED tool and reports prefix-cache impact (deepseek)', () => {
     const { agent, engine } = makeAgent({ gatingEnabled: true, prefixCacheStrategy: 'deepseek-native' })
-    const res = agent.enableTool('web_search')
+    const res = agent.enableTool('browser')
     assert.equal(res.status, 'mounted')
     assert.equal(res.cacheImpact, 'prefix-invalidated')
     assert.equal(res.prefixCacheStrategy, 'deepseek-native')
-    assert.ok(agent.getActiveToolNames().includes('web_search'), 'now visible to main agent')
-    assert.ok(engineToolNames(engine).includes('web_search'), 'engine refreshed with mounted tool')
+    assert.ok(agent.getActiveToolNames().includes('browser'), 'now visible to main agent')
+    assert.ok(engineToolNames(engine).includes('browser'), 'engine refreshed with mounted tool')
   })
 
   it('enableTool reports no cache penalty for non-prefix-cache providers', () => {
     const { agent } = makeAgent({ gatingEnabled: true, prefixCacheStrategy: 'none' })
-    const res = agent.enableTool('web_search')
+    const res = agent.enableTool('browser')
     assert.equal(res.status, 'mounted')
     assert.equal(res.cacheImpact, 'none')
   })
 
   it('enableTool is idempotent (already-active on second call)', () => {
     const { agent } = makeAgent({ gatingEnabled: true })
-    assert.equal(agent.enableTool('web_search').status, 'mounted')
-    assert.equal(agent.enableTool('web_search').status, 'already-active')
+    assert.equal(agent.enableTool('browser').status, 'mounted')
+    assert.equal(agent.enableTool('browser').status, 'already-active')
   })
 
   it('enableTool rejects CORE tools as not-extended (already visible)', () => {
@@ -173,6 +181,6 @@ describe('AgentLoop tool gating + escape hatch', () => {
 
   it('enableTool reports gating-off when gating is disabled', () => {
     const { agent } = makeAgent({ gatingEnabled: false })
-    assert.equal(agent.enableTool('web_search').status, 'gating-off')
+    assert.equal(agent.enableTool('browser').status, 'gating-off')
   })
 })

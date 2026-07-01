@@ -12,16 +12,17 @@ import {
 
 describe('tool-tiers', () => {
   describe('CORE_TOOLS', () => {
-    it('stays within kernel budget (≤28)', () => {
-      // ≤28 is the adjusted limit after adding web_search to kernel and merging
-      // recall+remember→memory, plan_submit+plan_close→plan.
-      // The original ≤25 target was for the kernel default-registry only;
-      // interactive-layer additions (delegate, deliver, plan_task, etc.)
-      // push the main agent's CORE above 25 by design.
+    it('stays within kernel budget (≤30)', () => {
+      // ≤30 is the adjusted limit after migrating BOTH web_search and web_fetch
+      // into CORE (was EXTENDED) and merging recall+remember→memory,
+      // plan_submit+plan_close→plan. The original ≤25 target was for the kernel
+      // default-registry only; interactive-layer additions (delegate, deliver,
+      // plan_task, etc.) plus the web search tools push the main agent's CORE
+      // to 30 by design.
       assert.ok(
-        CORE_TOOLS.length <= 28,
-        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 28). ` +
-          `Beyond ~28, agents experience choice overload.`,
+        CORE_TOOLS.length <= 30,
+        `CORE_TOOLS has ${CORE_TOOLS.length} tools (limit: 30). ` +
+          `Beyond ~30, agents experience choice overload.`,
       )
     })
 
@@ -98,8 +99,10 @@ describe('tool-tiers', () => {
   describe('isCoreTool / isExtendedTool', () => {
     it('correctly classifies known tools', () => {
       assert.equal(isCoreTool('read_file'), true)
-      assert.equal(isCoreTool('web_search'), false)
-      assert.equal(isExtendedTool('web_search'), true)
+      // web_search/web_fetch migrated into CORE; use browser as the EXTENDED probe.
+      assert.equal(isCoreTool('web_search'), true)
+      assert.equal(isCoreTool('browser'), false)
+      assert.equal(isExtendedTool('browser'), true)
       assert.equal(isExtendedTool('read_file'), false)
     })
 
@@ -152,7 +155,8 @@ describe('tool-tiers', () => {
 
     it('EXTENDED tools are NOT in the default tier (would defeat gating)', () => {
       const tier = new Set(resolveMainToolTier(null, true))
-      const mustExclude = ['web_search', 'web_fetch', 'browser', 'council_convene',
+      // web_search/web_fetch are CORE now — exclude only true EXTENDED tools.
+      const mustExclude = ['browser', 'browser_debug', 'council_convene',
         'team_orchestrate', 'apply_patch', 'undo']
       for (const name of mustExclude) {
         assert.ok(!tier.has(name), `"${name}" should NOT be in CORE tier`)
