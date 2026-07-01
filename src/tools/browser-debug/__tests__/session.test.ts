@@ -33,7 +33,10 @@ class FakeDriver implements BrowserDebugDriver {
   async reload() {}
   async goBack() { return true }
   async goForward() { return true }
+  async cookies() { return [] }
+  async storage() { return {} }
   currentUrl() { return 'about:blank' }
+  pageUrls() { return ['about:blank'] }
   async bringToFront() {}
   async close() { this.closed = true }
 }

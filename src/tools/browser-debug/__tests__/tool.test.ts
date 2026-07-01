@@ -73,9 +73,25 @@ class FakeDriver implements BrowserDebugDriver {
   async reload() { this.calls.push('reload') }
   async goBack() { this.calls.push('back'); return true }
   async goForward() { this.calls.push('forward'); return false }
+  pages?: string[]
+  async cookies(urlFilter?: string) {
+    this.calls.push(`cookies:${urlFilter ?? '-'}`)
+    const all = [
+      { name: 'session', value: 'abcdef123456', domain: 'localhost', path: '/', httpOnly: true, secure: false, sameSite: 'Lax' },
+      { name: 'theme', value: 'dark', domain: 'localhost', path: '/' },
+    ]
+    return urlFilter ? all.filter((c) => c.name.includes(urlFilter)) : all
+  }
+  async storage(kind: 'local' | 'session'): Promise<Record<string, string>> {
+    this.calls.push(`storage:${kind}`)
+    return kind === 'session'
+      ? { flow: 'checkout' }
+      : { token: 'secretvalue1234', theme: 'dark' }
+  }
   currentUrl() {
     return this.url
   }
+  pageUrls() { return this.pages ?? [this.url] }
   async bringToFront() {}
   async close() {
     this.closed = true
@@ -231,6 +247,50 @@ test('history reload/back/forward dispatch and report', async () => {
   const fwd = await tool.execute(params({ action: 'history', go: 'forward' }))
   assert.match(fwd.content, /No forward history/)
   assert.deepEqual(FakeDriver.last!.calls, ['reload', 'back', 'forward'])
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('cookies action lists masked values and honours url_filter', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const all = await tool.execute(params({ action: 'cookies' }))
+  assert.match(all.content, /session=\*\*\*\(…3456\)/)
+  assert.match(all.content, /theme=\*\*\*\(…\)/)
+  assert.doesNotMatch(all.content, /abcdef123456/)
+  const filtered = await tool.execute(params({ action: 'cookies', url_filter: 'session' }))
+  assert.match(filtered.content, /session=/)
+  assert.doesNotMatch(filtered.content, /theme=/)
+  assert.ok(FakeDriver.last!.calls.includes('cookies:session'))
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('storage action dumps local/session with secret masking', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const local = await tool.execute(params({ action: 'storage' }))
+  assert.match(local.content, /localStorage:/)
+  assert.match(local.content, /token: \*\*\*\(…1234\)/)
+  assert.match(local.content, /theme: dark/)
+  assert.doesNotMatch(local.content, /secretvalue1234/)
+  const session = await tool.execute(params({ action: 'storage', kind: 'session' }))
+  assert.match(session.content, /sessionStorage:/)
+  assert.match(session.content, /flow: checkout/)
+  assert.deepEqual(FakeDriver.last!.calls, ['storage:local', 'storage:session'])
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('pages action lists open tabs with active marker; status shows count', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  FakeDriver.last!.pages = ['http://localhost:3000/', 'https://accounts.example/login']
+  const pages = await tool.execute(params({ action: 'pages' }))
+  assert.match(pages.content, /\[0\] http:\/\/localhost:3000\//)
+  assert.match(pages.content, /\* \[1\] https:\/\/accounts\.example\/login/)
+  const status = await tool.execute(params({ action: 'status' }))
+  assert.match(status.content, /pages: 2 open \(active last\)/)
   await tool.execute(params({ action: 'close' }))
 })
 

@@ -17,6 +17,8 @@ import {
   formatConsoleLine,
   formatNetworkLine,
   formatNetworkDetail,
+  formatCookies,
+  formatStorage,
   type ConsoleLevel,
   type NetworkQuery,
 } from './log-capture.js'
@@ -90,6 +92,9 @@ type BrowserDebugAction =
   | 'scroll'
   | 'history'
   | 'wait'
+  | 'cookies'
+  | 'storage'
+  | 'pages'
   | 'await_login'
   | 'status'
   | 'clear_logs'
@@ -134,16 +139,26 @@ async function withLiveLogs<T>(
   }
 }
 
+function safePageUrls(session: BrowserDebugSession): string[] {
+  try {
+    return session.driver.pageUrls()
+  } catch {
+    return [session.driver.currentUrl()]
+  }
+}
+
 function formatStatus(session: BrowserDebugSession): string {
   const net = session.log.getNetwork()
   const failed = session.log.getNetwork({ failedOnly: true }).length
   const consoleTotal = session.log.getConsole().length
   const errCount = session.log.getConsole('error').length
+  const urls = safePageUrls(session)
   const lines = [
     `session: ${session.sessionKey}`,
     `mode: ${session.mode}${session.connectUrl ? ` (${session.connectUrl})` : ''}`,
     `headless: ${session.headless}`,
     `url: ${session.driver.currentUrl()}`,
+    `pages: ${urls.length} open${urls.length > 1 ? ` (active last): ${urls.join(' | ')}` : ''}`,
     `console: ${consoleTotal} message(s) (${errCount} error(s))`,
     `network: ${net.length} request(s) (${failed} failed/4xx/5xx)`,
   ]
@@ -216,6 +231,9 @@ Actions:
 - hover {selector} / scroll {selector? | to?}
 - wait {selector? | state?} — selector visible, or load state (load/domcontentloaded/networkidle)
 - history {go: back|forward|reload}
+- cookies {url_filter?} — list cookies for the context (values masked)
+- storage {kind: local|session} — dump localStorage/sessionStorage (secret-looking values masked)
+- pages — list open tabs/popups (OAuth popups become the action target automatically)
 - status / clear_logs / await_login / close`,
       input_schema: {
         type: 'object',
@@ -225,7 +243,8 @@ Actions:
             enum: [
               'open', 'navigate', 'console', 'network', 'network_detail', 'eval', 'screenshot', 'snapshot',
               'click', 'type', 'press', 'select', 'hover', 'scroll', 'history',
-              'wait', 'await_login', 'status', 'clear_logs', 'close',
+              'wait', 'cookies', 'storage', 'pages',
+              'await_login', 'status', 'clear_logs', 'close',
             ],
             description: 'What to do.',
           },
@@ -243,6 +262,7 @@ Actions:
           state: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'wait: load state to wait for (when no selector).' },
           to: { type: 'string', enum: ['top', 'bottom'], description: 'scroll: page target when no selector (default bottom).' },
           go: { type: 'string', enum: ['back', 'forward', 'reload'], description: 'history: navigation direction.' },
+          kind: { type: 'string', enum: ['local', 'session'], description: 'storage: which web storage to dump (default local).' },
           expression: { type: 'string', description: 'JavaScript expression for eval.' },
           level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], description: 'Console level filter.' },
           failed_only: { type: 'boolean', description: 'network: only failures and 4xx/5xx.' },
@@ -297,7 +317,7 @@ Actions:
           'Complete login / manual steps in the browser window, then reply to continue.'
         return {
           content: '[Awaiting manual login — the user will reply once done.]',
-          uiContent: `${msg}\n\n(The persistent profile keeps your session for later browser_debug actions.)`,
+          uiContent: `${msg}\n\n(OAuth popups / new tabs are tracked automatically; the persistent profile keeps your session for later browser_debug actions.)`,
           endTurn: true,
         }
       }
@@ -487,6 +507,28 @@ Actions:
               return { content: `Reached load state "${state}" (${timeoutMs}ms timeout).` }
             }
             return { content: 'wait requires a "selector" or a "state" (load/domcontentloaded/networkidle).', isError: true }
+          }
+          case 'cookies': {
+            const urlFilter = typeof params.input.url_filter === 'string' && params.input.url_filter.trim()
+              ? params.input.url_filter.trim()
+              : undefined
+            const cookies = await withLiveLogs(session, params.onOutput, () => session.driver.cookies(urlFilter))
+            return { content: formatCookies(cookies) }
+          }
+          case 'storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            const record = await withLiveLogs(session, params.onOutput, () => session.driver.storage(kind))
+            return { content: `${kind}Storage:\n${formatStorage(record)}` }
+          }
+          case 'pages': {
+            const urls = safePageUrls(session)
+            if (urls.length === 0) return { content: '(no open pages)' }
+            const active = urls.length - 1
+            return {
+              content: urls
+                .map((u, i) => `${i === active ? '* ' : '  '}[${i}] ${u}`)
+                .join('\n'),
+            }
           }
           case 'screenshot': {
             const png = await session.driver.screenshot()

@@ -10,6 +10,9 @@ import {
   truncateResponseBody,
   classifyBrowserDebugLine,
   maskSensitiveHeaders,
+  maskSecretValue,
+  formatCookies,
+  formatStorage,
 } from '../log-capture.js'
 
 test('normalizeConsoleLevel maps warning to warn', () => {
@@ -193,4 +196,40 @@ test('LogCapture clear wipes buffers', () => {
   cap.clear()
   assert.equal(cap.getConsole().length, 0)
   assert.equal(cap.getNetwork().length, 0)
+})
+
+test('maskSecretValue keeps only the last 4 chars', () => {
+  assert.equal(maskSecretValue('abcdef123456'), '***(…3456)')
+  assert.equal(maskSecretValue('abc'), '***(…)')
+})
+
+test('formatCookies masks values and shows flags', () => {
+  const out = formatCookies([
+    { name: 'session', value: 'abcdef123456', domain: 'localhost', path: '/', httpOnly: true, secure: true, sameSite: 'Lax' },
+    { name: 'theme', value: 'dark' },
+  ])
+  const lines = out.split('\n')
+  assert.equal(lines[0], 'session=***(…3456)  [localhost/; httpOnly; secure; sameSite=Lax]')
+  assert.equal(lines[1], 'theme=***(…)')
+  assert.ok(!out.includes('abcdef123456'), 'raw cookie value must not leak')
+})
+
+test('formatCookies handles empty list', () => {
+  assert.equal(formatCookies([]), '(no cookies)')
+})
+
+test('formatStorage masks secret-looking keys, shows the rest', () => {
+  const out = formatStorage({ authToken: 'zzzzsecret9999', theme: 'dark' })
+  const lines = out.split('\n')
+  assert.ok(lines.some((l) => l === 'authToken: ***(…9999)'), 'sensitive key value masked')
+  assert.ok(lines.some((l) => l === 'theme: dark'), 'non-sensitive value shown')
+  assert.ok(!out.includes('zzzzsecret9999'), 'raw secret must not leak')
+})
+
+test('formatStorage truncates long non-sensitive values and reports empty', () => {
+  assert.equal(formatStorage({}), '(empty)')
+  const long = 'x'.repeat(300)
+  const out = formatStorage({ blob: long })
+  assert.ok(out.includes('… (truncated)'))
+  assert.ok(out.length < long.length + 30)
 })

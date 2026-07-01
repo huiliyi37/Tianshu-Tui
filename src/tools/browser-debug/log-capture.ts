@@ -129,14 +129,55 @@ const SENSITIVE_HEADERS = new Set([
 export function maskSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [rawKey, value] of Object.entries(headers)) {
-    if (SENSITIVE_HEADERS.has(rawKey.toLowerCase()) && value) {
-      const tail = value.length > 4 ? value.slice(-4) : ''
-      out[rawKey] = `***(…${tail})`
-    } else {
-      out[rawKey] = value
-    }
+    out[rawKey] = SENSITIVE_HEADERS.has(rawKey.toLowerCase()) && value ? maskSecretValue(value) : value
   }
   return out
+}
+
+/** Mask a secret value to `***(…last4)`, keeping the last 4 chars for diagnosis. */
+export function maskSecretValue(value: string): string {
+  const tail = value.length > 4 ? value.slice(-4) : ''
+  return `***(…${tail})`
+}
+
+/** Storage keys whose values likely hold secrets (masked in `storage` output). */
+const SENSITIVE_KEY_RE = /(token|secret|auth|session|jwt|password|passwd|api[-_]?key|credential|refresh|access)/i
+const STORAGE_VALUE_MAX = 200
+
+interface CookieLike {
+  name: string
+  value: string
+  domain?: string
+  path?: string
+  httpOnly?: boolean
+  secure?: boolean
+  sameSite?: string
+}
+
+/** Render cookies one per line with masked values (cookies carry session ids). */
+export function formatCookies(cookies: CookieLike[]): string {
+  if (cookies.length === 0) return '(no cookies)'
+  return cookies.map((c) => {
+    const flags = [
+      c.domain || c.path ? `${c.domain ?? ''}${c.path ?? ''}` : '',
+      c.httpOnly ? 'httpOnly' : '',
+      c.secure ? 'secure' : '',
+      c.sameSite ? `sameSite=${c.sameSite}` : '',
+    ].filter(Boolean).join('; ')
+    return `${c.name}=${maskSecretValue(c.value)}${flags ? `  [${flags}]` : ''}`
+  }).join('\n')
+}
+
+/** Render a storage snapshot; mask values whose key looks sensitive, else truncate. */
+export function formatStorage(record: Record<string, string>): string {
+  const keys = Object.keys(record)
+  if (keys.length === 0) return '(empty)'
+  return keys.map((k) => {
+    const v = record[k] ?? ''
+    if (SENSITIVE_KEY_RE.test(k)) return `${k}: ${maskSecretValue(v)}`
+    const shown = v.length > STORAGE_VALUE_MAX ? `${v.slice(0, STORAGE_VALUE_MAX)}… (truncated)` : v
+    return `${k}: ${shown}`
+  }).join('\n')
 }
 
 function appendHeaderBlock(lines: string[], label: string, headers?: Record<string, string>): void {
