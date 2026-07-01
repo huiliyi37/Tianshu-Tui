@@ -1,0 +1,19 @@
+{
+  "version": "0.0.5",
+  "notes": "0.0.5 release — new star icon + v2.11.0 sync",
+  "pub_date": "2026-07-01T07:09:27.550Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v0.0.5/Tianshu.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2VrblBCNlg0SWJUTkxWYVZZam84NENVaU8ybnRDQkFKWVJCRTFvdlNTUGZMVlB3Y2lJbStEK2FuZCtXTWtad0J4eEVUMGdXTU1xSnVQU05IZno5RlFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyODgzODk1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CldZcmtDOUY0UWx6L1hrWVpJKzluQjhuYkFEZ2h4cHBiOXZNOXpRMlhzb3ZZcU84U1Avam1rS1VZSEt3OFEycVIrVFBFSlAvTGEzblVGVVhTYVRTa0FBPT0K"
+    },
+    "darwin-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v0.0.5/Tianshu.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR2VrblBCNlg0SWJUTkxWYVZZam84NENVaU8ybnRDQkFKWVJCRTFvdlNTUGZMVlB3Y2lJbStEK2FuZCtXTWtad0J4eEVUMGdXTU1xSnVQU05IZno5RlFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyODgzODk1CWZpbGU6VGlhbnNodS5hcHAudGFyLmd6CldZcmtDOUY0UWx6L1hrWVpJKzluQjhuYkFEZ2h4cHBiOXZNOXpRMlhzb3ZZcU84U1Avam1rS1VZSEt3OFEycVIrVFBFSlAvTGEzblVGVVhTYVRTa0FBPT0K"
+    },
+    "windows-x86_64": {
+      "url": "https://github.com/huiliyi37/Tianshu-Tui/releases/download/v0.0.5/Tianshu_0.0.5_x64-setup.exe",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRaDZmcFdBUytLR1VoN3RrK1o3R3hERkZlNU1VTk9OR1d0Nmd2TGlPNFVlaWMvWjlpNzhTRjNOQ2ovc2hnc1lMeENTcVJLcmlac0Q0ZE1JMTNBaHJ0Y0prYi90Um1uTXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyODg5NzY1CWZpbGU6VGlhbnNodV8wLjAuNV94NjQtc2V0dXAuZXhlClorYmdqcUlPc09sUENvT1ZlQUJGYzlORDE3VWJObUYySnRxZWFhcUVPdEdYRzJqZUFMWElmYTlQNDJIcWJ5aXg3YnA0d2dxZDlHdE5QL2VjY0RjK0FnPT0K"
+    }
+  }
+}
