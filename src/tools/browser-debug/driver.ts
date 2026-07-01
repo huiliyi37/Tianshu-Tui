@@ -52,6 +52,10 @@ export interface BrowserDebugDriver {
   goForward(signal?: AbortSignal): Promise<boolean>
   cookies(urlFilter?: string): Promise<BrowserCookie[]>
   storage(kind: StorageKind): Promise<Record<string, string>>
+  addCookie(cookie: { name: string; value: string; url?: string; domain?: string; path?: string }): Promise<void>
+  clearCookies(): Promise<void>
+  setStorage(kind: StorageKind, key: string, value: string): Promise<void>
+  clearStorage(kind: StorageKind): Promise<void>
   currentUrl(): string
   /** URLs of all open pages/tabs in the context (active page last). */
   pageUrls(): string[]
@@ -114,6 +118,8 @@ interface PwContext {
   newPage(): Promise<PwPage>
   close(): Promise<void>
   cookies(urls?: string | string[]): Promise<BrowserCookie[]>
+  addCookies(cookies: unknown[]): Promise<void>
+  clearCookies(): Promise<void>
   on(event: string, handler: (arg: never) => void): void
 }
 interface PwBrowser {
@@ -375,6 +381,22 @@ function buildDriver(
       const expr = `(() => { const s = ${varName}; const o = {}; for (let i = 0; i < s.length; i++) { const k = s.key(i); if (k != null) o[k] = s.getItem(k); } return o; })()`
       const result = await getPage().evaluate(expr)
       return result && typeof result === 'object' ? (result as Record<string, string>) : {}
+    },
+    addCookie: async (cookie) => {
+      const c: Record<string, unknown> = { name: cookie.name, value: cookie.value }
+      if (cookie.url) c.url = cookie.url
+      if (cookie.domain) c.domain = cookie.domain
+      if (cookie.path) c.path = cookie.path
+      await context.addCookies([c])
+    },
+    clearCookies: () => context.clearCookies(),
+    setStorage: async (kind, key, value) => {
+      const varName = kind === 'session' ? 'sessionStorage' : 'localStorage'
+      await getPage().evaluate(`${varName}.setItem(${JSON.stringify(key)}, ${JSON.stringify(value)})`)
+    },
+    clearStorage: async (kind) => {
+      const varName = kind === 'session' ? 'sessionStorage' : 'localStorage'
+      await getPage().evaluate(`${varName}.clear()`)
     },
     currentUrl: () => getPage().url(),
     pageUrls,

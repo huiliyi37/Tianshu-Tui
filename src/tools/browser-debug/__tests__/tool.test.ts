@@ -88,6 +88,14 @@ class FakeDriver implements BrowserDebugDriver {
       ? { flow: 'checkout' }
       : { token: 'secretvalue1234', theme: 'dark' }
   }
+  async addCookie(cookie: { name: string; value: string; url?: string; domain?: string; path?: string }) {
+    this.calls.push(`addCookie:${cookie.name}:${cookie.url ?? cookie.domain ?? '-'}`)
+  }
+  async clearCookies() { this.calls.push('clearCookies') }
+  async setStorage(kind: 'local' | 'session', key: string, value: string) {
+    this.calls.push(`setStorage:${kind}:${key}:${value}`)
+  }
+  async clearStorage(kind: 'local' | 'session') { this.calls.push(`clearStorage:${kind}`) }
   currentUrl() {
     return this.url
   }
@@ -278,6 +286,37 @@ test('storage action dumps local/session with secret masking', async () => {
   assert.match(session.content, /sessionStorage:/)
   assert.match(session.content, /flow: checkout/)
   assert.deepEqual(FakeDriver.last!.calls, ['storage:local', 'storage:session'])
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('set_cookie / clear_cookies dispatch to driver', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const set = await tool.execute(params({ action: 'set_cookie', name: 'sid', value: 'abc' }))
+  assert.match(set.content, /Set cookie "sid"/)
+  // no url/domain given → falls back to current page origin
+  assert.ok(FakeDriver.last!.calls.includes('addCookie:sid:http://localhost:3000'))
+  const missing = await tool.execute(params({ action: 'set_cookie', name: 'sid' }))
+  assert.equal(missing.isError, true)
+  const clear = await tool.execute(params({ action: 'clear_cookies' }))
+  assert.match(clear.content, /All cookies cleared/)
+  assert.ok(FakeDriver.last!.calls.includes('clearCookies'))
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('set_storage / clear_storage write web storage', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const set = await tool.execute(params({ action: 'set_storage', key: 'flag', value: 'on', kind: 'session' }))
+  assert.match(set.content, /Set sessionStorage\["flag"\]/)
+  assert.ok(FakeDriver.last!.calls.includes('setStorage:session:flag:on'))
+  const missing = await tool.execute(params({ action: 'set_storage', key: 'flag' }))
+  assert.equal(missing.isError, true)
+  const clear = await tool.execute(params({ action: 'clear_storage' }))
+  assert.match(clear.content, /Cleared localStorage/)
+  assert.ok(FakeDriver.last!.calls.includes('clearStorage:local'))
   await tool.execute(params({ action: 'close' }))
 })
 

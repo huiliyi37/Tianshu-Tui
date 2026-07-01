@@ -86,6 +86,76 @@ export function formatNetworkLine(entry: NetworkEntry, includeBody = false): str
   return line
 }
 
+/** A network line parsed back into fields, for structured (desktop) rendering. */
+export interface ParsedNetworkRow {
+  dir: 'ok' | 'pending' | 'failed'
+  method: string
+  url: string
+  status?: number
+  durationMs?: number
+  resourceType?: string
+  errorText?: string
+}
+
+/**
+ * Inverse of {@link formatNetworkLine} for the primary (non-body) line. Returns
+ * null for anything that is not a network line (console/cookie/storage output,
+ * body continuation lines, placeholders). Kept next to the formatter so the two
+ * stay in sync; the desktop renders a table from these rows.
+ */
+export function parseNetworkLine(line: string): ParsedNetworkRow | null {
+  let rest = line.replace(/\s+$/, '')
+  let resourceType: string | undefined
+  const typeMatch = rest.match(/ \[(\w+)\]$/)
+  if (typeMatch) {
+    resourceType = typeMatch[1]
+    rest = rest.slice(0, rest.length - typeMatch[0].length)
+  }
+  if (rest.startsWith('✗ ')) {
+    rest = rest.slice(2)
+    let errorText: string | undefined
+    const errMatch = rest.match(/ \((.+)\)$/)
+    if (errMatch) {
+      errorText = errMatch[1]
+      rest = rest.slice(0, rest.length - errMatch[0].length)
+    }
+    const sp = rest.indexOf(' ')
+    if (sp < 0) return null
+    return { dir: 'failed', method: rest.slice(0, sp), url: rest.slice(sp + 1), errorText, resourceType }
+  }
+  if (rest.startsWith('→ ')) {
+    rest = rest.slice(2)
+    const sp = rest.indexOf(' ')
+    if (sp < 0) return null
+    return { dir: 'pending', method: rest.slice(0, sp), url: rest.slice(sp + 1), resourceType }
+  }
+  if (rest.startsWith('← ')) {
+    rest = rest.slice(2)
+    let durationMs: number | undefined
+    const durMatch = rest.match(/ \((\d+)ms\)$/)
+    if (durMatch) {
+      durationMs = Number(durMatch[1])
+      rest = rest.slice(0, rest.length - durMatch[0].length)
+    }
+    const firstSp = rest.indexOf(' ')
+    if (firstSp < 0) return null
+    const status = Number(rest.slice(0, firstSp))
+    if (!Number.isFinite(status)) return null
+    const afterStatus = rest.slice(firstSp + 1)
+    const secondSp = afterStatus.indexOf(' ')
+    if (secondSp < 0) return null
+    return {
+      dir: 'ok',
+      status,
+      method: afterStatus.slice(0, secondSp),
+      url: afterStatus.slice(secondSp + 1),
+      durationMs,
+      resourceType,
+    }
+  }
+  return null
+}
+
 /** Severity bucket for a single browser_debug output line. */
 export type BrowserDebugLineKind = 'error' | 'warn' | 'ok' | 'pending' | 'muted'
 

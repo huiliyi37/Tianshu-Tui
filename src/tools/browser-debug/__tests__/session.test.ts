@@ -35,6 +35,10 @@ class FakeDriver implements BrowserDebugDriver {
   async goForward() { return true }
   async cookies() { return [] }
   async storage() { return {} }
+  async addCookie() {}
+  async clearCookies() {}
+  async setStorage() {}
+  async clearStorage() {}
   currentUrl() { return 'about:blank' }
   pageUrls() { return ['about:blank'] }
   async bringToFront() {}

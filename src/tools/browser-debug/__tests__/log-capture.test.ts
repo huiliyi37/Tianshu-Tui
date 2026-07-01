@@ -13,6 +13,7 @@ import {
   maskSecretValue,
   formatCookies,
   formatStorage,
+  parseNetworkLine,
 } from '../log-capture.js'
 
 test('normalizeConsoleLevel maps warning to warn', () => {
@@ -224,6 +225,24 @@ test('formatStorage masks secret-looking keys, shows the rest', () => {
   assert.ok(lines.some((l) => l === 'authToken: ***(…9999)'), 'sensitive key value masked')
   assert.ok(lines.some((l) => l === 'theme: dark'), 'non-sensitive value shown')
   assert.ok(!out.includes('zzzzsecret9999'), 'raw secret must not leak')
+})
+
+test('parseNetworkLine round-trips completed/pending/failed lines', () => {
+  const ok = parseNetworkLine(formatNetworkLine({ requestId: 'r1', method: 'POST', url: 'http://localhost/api/x', status: 500, durationMs: 42, startedAt: 0, resourceType: 'fetch' }))
+  assert.deepEqual(ok, { dir: 'ok', status: 500, method: 'POST', url: 'http://localhost/api/x', durationMs: 42, resourceType: 'fetch' })
+
+  const pending = parseNetworkLine(formatNetworkLine({ requestId: 'r2', method: 'GET', url: 'http://localhost/', startedAt: 0, resourceType: 'document' }))
+  assert.deepEqual(pending, { dir: 'pending', method: 'GET', url: 'http://localhost/', resourceType: 'document' })
+
+  const failed = parseNetworkLine(formatNetworkLine({ requestId: 'r3', method: 'GET', url: 'http://localhost/down', failed: true, errorText: 'aborted', startedAt: 0 }))
+  assert.deepEqual(failed, { dir: 'failed', method: 'GET', url: 'http://localhost/down', errorText: 'aborted', resourceType: undefined })
+})
+
+test('parseNetworkLine returns null for non-network lines', () => {
+  assert.equal(parseNetworkLine('[error] boom'), null)
+  assert.equal(parseNetworkLine('  body: {"x":1}'), null)
+  assert.equal(parseNetworkLine('(no matching network activity)'), null)
+  assert.equal(parseNetworkLine('session=***(…3456)'), null)
 })
 
 test('formatStorage truncates long non-sensitive values and reports empty', () => {

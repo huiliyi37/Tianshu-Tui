@@ -94,6 +94,10 @@ type BrowserDebugAction =
   | 'wait'
   | 'cookies'
   | 'storage'
+  | 'set_cookie'
+  | 'clear_cookies'
+  | 'set_storage'
+  | 'clear_storage'
   | 'pages'
   | 'await_login'
   | 'status'
@@ -233,6 +237,9 @@ Actions:
 - history {go: back|forward|reload}
 - cookies {url_filter?} — list cookies for the context (values masked)
 - storage {kind: local|session} — dump localStorage/sessionStorage (secret-looking values masked)
+- set_cookie {name, value, url? | domain?+path?} — inject a cookie (restore a login)
+- clear_cookies — wipe all cookies (reset the session)
+- set_storage {kind, key, value} / clear_storage {kind} — write/reset web storage
 - pages — list open tabs/popups (OAuth popups become the action target automatically)
 - status / clear_logs / await_login / close`,
       input_schema: {
@@ -244,6 +251,7 @@ Actions:
               'open', 'navigate', 'console', 'network', 'network_detail', 'eval', 'screenshot', 'snapshot',
               'click', 'type', 'press', 'select', 'hover', 'scroll', 'history',
               'wait', 'cookies', 'storage', 'pages',
+              'set_cookie', 'clear_cookies', 'set_storage', 'clear_storage',
               'await_login', 'status', 'clear_logs', 'close',
             ],
             description: 'What to do.',
@@ -257,12 +265,15 @@ Actions:
           selector: { type: 'string', description: 'CSS selector for click/type/press/select/hover/scroll/wait/snapshot.' },
           text: { type: 'string', description: 'Text to fill for type.' },
           submit: { type: 'boolean', description: 'type: press Enter after filling (submit the form).' },
-          key: { type: 'string', description: 'press: keyboard key, e.g. Enter, Tab, Escape, ArrowDown.' },
-          value: { type: 'string', description: 'select: option value/label to choose.' },
+          key: { type: 'string', description: 'press: keyboard key (Enter/Tab/…); set_storage: storage key.' },
+          value: { type: 'string', description: 'select option / set_cookie value / set_storage value.' },
           state: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'wait: load state to wait for (when no selector).' },
           to: { type: 'string', enum: ['top', 'bottom'], description: 'scroll: page target when no selector (default bottom).' },
           go: { type: 'string', enum: ['back', 'forward', 'reload'], description: 'history: navigation direction.' },
-          kind: { type: 'string', enum: ['local', 'session'], description: 'storage: which web storage to dump (default local).' },
+          kind: { type: 'string', enum: ['local', 'session'], description: 'storage/set_storage/clear_storage: which web storage (default local).' },
+          name: { type: 'string', description: 'set_cookie: cookie name.' },
+          domain: { type: 'string', description: 'set_cookie: cookie domain (with path, when no url).' },
+          path: { type: 'string', description: 'set_cookie: cookie path (default /).' },
           expression: { type: 'string', description: 'JavaScript expression for eval.' },
           level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], description: 'Console level filter.' },
           failed_only: { type: 'boolean', description: 'network: only failures and 4xx/5xx.' },
@@ -519,6 +530,45 @@ Actions:
             const kind = params.input.kind === 'session' ? 'session' : 'local'
             const record = await withLiveLogs(session, params.onOutput, () => session.driver.storage(kind))
             return { content: `${kind}Storage:\n${formatStorage(record)}` }
+          }
+          case 'set_cookie': {
+            const name = params.input.name as string | undefined
+            const value = params.input.value as string | undefined
+            if (!name || value === undefined) {
+              return { content: 'set_cookie requires "name" and "value".', isError: true }
+            }
+            const url = typeof params.input.url === 'string' ? params.input.url : undefined
+            const domain = typeof params.input.domain === 'string' ? params.input.domain : undefined
+            const path = typeof params.input.path === 'string' ? params.input.path : undefined
+            if (!url && !domain) {
+              const current = (() => { try { return new URL(session.driver.currentUrl()).origin } catch { return undefined } })()
+              if (!current) return { content: 'set_cookie needs "url" or "domain" (page has no usable URL).', isError: true }
+              await withLiveLogs(session, params.onOutput, () => session.driver.addCookie({ name, value, url: current }))
+              return { content: `Set cookie "${name}" for ${current}.` }
+            }
+            await withLiveLogs(session, params.onOutput, () =>
+              session.driver.addCookie({ name, value, url, domain, path: path ?? (domain ? '/' : undefined) }),
+            )
+            return { content: `Set cookie "${name}" for ${url ?? `${domain}${path ?? '/'}`}.` }
+          }
+          case 'clear_cookies': {
+            await withLiveLogs(session, params.onOutput, () => session.driver.clearCookies())
+            return { content: 'All cookies cleared for this context.' }
+          }
+          case 'set_storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            const key = params.input.key as string | undefined
+            const value = params.input.value as string | undefined
+            if (!key || value === undefined) {
+              return { content: 'set_storage requires "key" and "value".', isError: true }
+            }
+            await withLiveLogs(session, params.onOutput, () => session.driver.setStorage(kind, key, value))
+            return { content: `Set ${kind}Storage["${key}"].` }
+          }
+          case 'clear_storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            await withLiveLogs(session, params.onOutput, () => session.driver.clearStorage(kind))
+            return { content: `Cleared ${kind}Storage.` }
           }
           case 'pages': {
             const urls = safePageUrls(session)

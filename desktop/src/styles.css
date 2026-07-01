@@ -2186,6 +2186,36 @@ body {
 }
 .bd-shot:hover { filter: brightness(1.06); }
 
+/* browser_debug network table */
+.bd-net { overflow-x: auto; }
+.bd-net-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.bd-net-table th, .bd-net-table td {
+  text-align: left; padding: 2px 8px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bd-net-table th { color: var(--muted); font-weight: 600; user-select: none; }
+.bd-net-sortable { cursor: pointer; }
+.bd-net-sortable:hover { color: var(--fg); }
+.bd-net-num { text-align: right; }
+.bd-net-status { font-weight: 700; }
+.bd-net-status.bd-error { color: var(--error); }
+.bd-net-status.bd-warn { color: var(--warning); }
+.bd-net-status.bd-ok { color: var(--success); }
+.bd-net-status.bd-pending { color: var(--faint); }
+.bd-net-status.bd-muted { color: var(--muted); }
+.bd-net-method { color: var(--muted); }
+.bd-net-url {
+  max-width: 480px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--font-mono, monospace);
+}
+.bd-net-type { color: var(--faint); }
+.bd-net-clickable { cursor: pointer; }
+.bd-net-clickable:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+.bd-net-body {
+  margin: 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-all;
+  color: var(--fg); background: var(--bg-subtle, rgba(127,127,127,0.06));
+}
+
 /* ── Timeline Group Styling (Cursor 3.0) ────────────────────────────────── */
 .timeline-group {
   margin: var(--space-2) 0;
