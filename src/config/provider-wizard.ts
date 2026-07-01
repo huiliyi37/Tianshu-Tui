@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import type { ModelConfig } from './schema.js'
 import { loadConfig, setupProvider } from './manager.js'
+import { userConfigPath } from './paths.js'
 import { findPresetModel, isProviderPresetKey, providerPresetKeys } from './provider-presets.js'
 
 export interface ProviderWizardIO {
@@ -59,10 +60,15 @@ export async function runProviderConfigWizard(io: ProviderWizardIO = {}): Promis
     let apiKeyEnv: string | undefined
     const isOAuth = providerName === 'codex' || current?.auth?.type === 'oauth'
     if (!isOAuth) {
-      const authMode = await ask(askIo, 'Auth mode [env|inline|keep]: ')
+      write('How to store the API key:')
+      write(`  inline - write it to ${userConfigPath()} (recommended for personal use)`)
+      write('  env    - read it from a shell environment variable (for shared/CI setups)')
+      write('  keep   - leave the existing key setting unchanged')
+      write('（个人使用直接回车选 inline，key 会写入上面的配置文件；env/keep 给进阶场景用）')
+      const authMode = await ask(askIo, 'Auth mode [inline|env|keep]: ')
       if (authMode === 'env') {
         apiKeyEnv = await ask(askIo, 'API key env var: ')
-      } else if (authMode === 'inline') {
+      } else if (authMode === 'inline' || authMode === '') {
         apiKey = await ask(askIo, 'API key: ')
       } else if (authMode && authMode !== 'keep') {
         throw new Error(`Unknown auth mode: ${authMode}`)

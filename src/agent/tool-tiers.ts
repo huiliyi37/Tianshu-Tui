@@ -62,6 +62,7 @@ export const CORE_TOOLS = [
  */
 export const EXTENDED_TOOLS = [
   'browser',
+  'browser_debug',
   'repo_graph',
   'council_convene',
   'team_orchestrate',

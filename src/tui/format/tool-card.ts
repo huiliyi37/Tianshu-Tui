@@ -160,6 +160,19 @@ export function formatToolCard(input: FormatToolCardInput, theme: RivetTheme): s
     return lines
   }
 
+  // ── browser_debug 分支：console/network 行按前缀分级着色 ───────
+  if (toolName === 'browser_debug') {
+    const allLines = trimmed.split('\n')
+    const maxLines = input.maxLines ?? getDefaultMaxLines(toolName)
+    const shown = expanded || allLines.length <= maxLines ? allLines : allLines.slice(0, maxLines)
+    const body = shown.map((l) => colorBrowserDebugLine(l, theme))
+    if (!expanded && allLines.length > maxLines) {
+      body.push(color(`… +${allLines.length - maxLines} lines [Ctrl+O]`, theme.secondary))
+    }
+    lines.push(...indentBody(body, indent, theme))
+    return lines
+  }
+
   // ── 普通输出分支 ─────────────────────────────────────────────
   const contentLines = trimmed.split('\n')
   const totalLines = contentLines.length
@@ -258,6 +271,7 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
   const maxWidth = Math.max(10, input.columns - 3)
 
   // 固定 tail 区域高度：内容不足时顶部补空行，避免卡片高度随输出变化而跳动。
+  const isBrowserDebug = input.toolName === 'browser_debug'
   const tailLines: string[] = []
   if (tail) {
     const shown = tail.split('\n').slice(-tailCount).map(l => {
@@ -266,7 +280,7 @@ export function formatToolCardLive(input: FormatToolCardLiveInput, theme: RivetT
       const clipped = displayWidth(l, WIDE) > maxWidth
         ? `${truncateToDisplayWidth(l, maxWidth - ellW, WIDE)}…`
         : l
-      return color(clipped, theme.muted)
+      return isBrowserDebug ? colorBrowserDebugLine(clipped, theme) : color(clipped, theme.muted)
     })
     tailLines.push(...indentBody(shown, '', theme))
   }
@@ -345,4 +359,30 @@ function renderDelegationPreview(
 
 function truncatePreview(text: string, max: number): string {
   return text.length > max ? text.slice(0, max - 1) + '…' : text
+}
+
+// ── browser_debug line colouring ───────────────────────────────
+// Console lines are prefixed `[error] / [warn] / [log]…`; network lines start
+// with a status glyph (`→` pending, `←` done, `✗` failed). Colour by severity
+// so the user can eyeball errors and 4xx/5xx in the live/committed card.
+
+/** Colour one browser_debug output line by its console level / HTTP status. */
+export function colorBrowserDebugLine(line: string, theme: RivetTheme): string {
+  if (line.startsWith('[error]')) return color(line, theme.error)
+  if (line.startsWith('[warn]')) return color(line, theme.warning)
+  if (line.startsWith('[info]') || line.startsWith('[log]') || line.startsWith('[debug]')) {
+    return color(line, theme.muted)
+  }
+  if (line.startsWith('✗')) return color(line, theme.error)
+  if (line.startsWith('→')) return color(line, theme.dim)
+  if (line.startsWith('←')) {
+    const status = Number(line.slice(1).trim().split(/\s+/)[0])
+    if (Number.isFinite(status)) {
+      if (status >= 500) return color(line, theme.error)
+      if (status >= 400) return color(line, theme.warning)
+      if (status >= 200 && status < 300) return color(line, theme.success)
+    }
+    return color(line, theme.muted)
+  }
+  return color(line, theme.muted)
 }
