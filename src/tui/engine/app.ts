@@ -1992,6 +1992,9 @@ export class TuiApp {
     this.markActivity()
     // Push through block writer (buffers text, emits in display-sized blocks)
     this.blockWriter.push(text)
+    // 逐 delta 触发（microtask 合并）重绘——live tail 拼接 blockWriter.peek() 后，
+    // 最新 token 无需等吐块即可逐字滑出（打字机节奏）。与 handleThinkingDelta 同口径。
+    this.writeBatcher.schedule()
   }
 
   private handleThinkingDelta(thinking: string): void {
@@ -2680,7 +2683,8 @@ export class TuiApp {
     }
 
     // 2. Streaming tail (尾部不完整 markdown block，display-width aware 截断)
-    for (const line of this.streamRenderer.getLiveTailLines(6)) {
+    //    额外拼接 blockWriter.peek()——尚未吐块的最新 token，逐字可见（打字机节奏）。
+    for (const line of this.streamRenderer.getLiveTailLines(6, this.blockWriter.peek())) {
       lines.push({ text: line })
     }
 

@@ -125,6 +125,43 @@ test('getLiveTailLines: 从代码块中间开始时补 synthetic fence', () => {
   assert.ok(tail[0]!.startsWith('```'), 'tail prepended with synthetic fence so prose is not boxed')
 })
 
+test('getLiveTailLines: extraTail 拼在 pending 之后（顺序）', () => {
+  const { renderer } = makeRenderer(80)
+  renderer.push('pending head') // 无边界 → 全部留在 pending
+  const tail = renderer.getLiveTailLines(6, ' newest peek')
+  const joined = tail.join('\n')
+  assert.match(joined, /pending head newest peek/)
+})
+
+test('getLiveTailLines: pending 为空时仅 extraTail 也逐字可见（打字机）', () => {
+  const { renderer } = makeRenderer(80)
+  // 模拟 blockWriter 尚未吐块：streamRenderer.pending 为空，最新 token 在 peek()
+  const tail = renderer.getLiveTailLines(6, 'typing before first block')
+  assert.equal(tail.length > 0, true)
+  assert.match(tail.join('\n'), /typing before first block/)
+})
+
+test('getLiveTailLines: extraTail 默认空 → 行为不变', () => {
+  const { renderer } = makeRenderer(80)
+  renderer.push('just pending')
+  assert.deepEqual(renderer.getLiveTailLines(6), renderer.getLiveTailLines(6, ''))
+})
+
+test('getLiveTailLines: pending+extraTail 均空返回空数组', () => {
+  const { renderer } = makeRenderer(80)
+  assert.deepEqual(renderer.getLiveTailLines(6, ''), [])
+})
+
+test('getLiveTailLines: 截断作用于 pending+extraTail 合并文本', () => {
+  const { renderer } = makeRenderer(20)
+  renderer.push(Array.from({ length: 6 }, (_, i) => `pline ${i}`).join('\n'))
+  const extra = '\n' + Array.from({ length: 6 }, (_, i) => `eline ${i}`).join('\n')
+  const tail = renderer.getLiveTailLines(3, extra)
+  assert.ok(tail.length <= 3, 'capped to maxRows over combined text')
+  // 最新（extraTail 末尾）应保留
+  assert.match(tail[tail.length - 1]!, /eline 5/)
+})
+
 test('reset 丢弃 pending 与 committed 状态', () => {
   const { renderer, commits } = makeRenderer()
   renderer.push('a\n\nb tail')

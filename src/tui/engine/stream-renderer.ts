@@ -122,10 +122,15 @@ export class StreamRenderer {
   /**
    * live 区尾部行：原始文本（不做 markdown 解析，防未闭合围栏闪烁），
    * display-width aware 截断到 maxRows 显示行。
+   *
+   * `extraTail` 为尚未吐块的最新缓冲（BlockStreamWriter.peek()）——拼在
+   * pending 之后一起截断，使最新 token 逐字可见（打字机节奏），无需等 blockWriter
+   * 吐块。截断对合并文本整体生效，保证不超视口 / CJK 宽度正确。
    */
-  getLiveTailLines(maxRows: number): string[] {
-    if (!this.pending) return []
-    const capped = capLiveTailMarkdownSafe(this.pending, this.options.getColumns(), maxRows)
+  getLiveTailLines(maxRows: number, extraTail = ''): string[] {
+    const tail = this.pending + extraTail
+    if (!tail) return []
+    const capped = capLiveTailMarkdownSafe(tail, this.options.getColumns(), maxRows)
     return capped ? capped.split('\n') : []
   }
 
