@@ -345,6 +345,56 @@ export function setupProvider(options: SetupProviderOptions): void {
   saveConfig(cfg)
 }
 
+export interface SetupCustomProviderOptions {
+  providerName: string
+  baseUrl: string
+  apiKey: string
+  model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
+  makeDefault?: boolean
+}
+
+/**
+ * Create (or overwrite) a brand-new OpenAI-compatible provider from the minimal
+ * inputs the in-TUI /connect DIY wizard collects. Unlike `setupProvider`, this
+ * does not require an existing entry or a built-in preset — it materializes a
+ * complete `ProviderConfig` with conservative capability defaults (no vendor
+ * prefix-cache assumptions, no param stripping) so any OpenAI-wire endpoint
+ * works out of the box.
+ */
+export function setupCustomProvider(options: SetupCustomProviderOptions): void {
+  assertValidUrl(options.baseUrl)
+  const contextWindow = Math.max(1, Math.floor(options.model.contextWindow))
+  const maxTokens = Math.max(1, Math.min(Math.floor(options.model.maxTokens), contextWindow))
+  const model: ModelConfig = {
+    id: options.model.id,
+    ...(options.model.alias ? { alias: options.model.alias } : {}),
+    contextWindow,
+    maxTokens,
+    ...(options.model.reasoningEffort ? { reasoningEffort: options.model.reasoningEffort } : {}),
+  }
+  const provider: ProviderConfig = {
+    name: options.providerName,
+    apiKey: options.apiKey,
+    baseUrl: options.baseUrl,
+    protocol: 'openai',
+    capabilities: {
+      cacheControl: false,
+      stripParams: [],
+      toolJsonBug: false,
+      prefixCache: 'none',
+      prefixCompletion: false,
+    },
+    thinking: 'enabled',
+    maxTokens,
+    models: [model],
+    unsupported: [],
+  }
+  const cfg = loadConfig()
+  cfg.provider.providers[options.providerName] = provider
+  if (options.makeDefault) cfg.provider.default = options.providerName
+  saveConfig(cfg)
+}
+
 // --- Model management ---
 
 export function addModel(providerName: string, model: ModelConfig): void {

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import {
   loadConfig,
   setupProvider,
+  setupCustomProvider,
   updateProviderBaseUrl,
   upsertProviderModel,
   setApiKey,
@@ -57,5 +58,35 @@ describe('provider config mutations', () => {
     const config = loadConfig()
     assert.equal(config.provider.default, 'codex')
     assert.deepEqual(config.provider.providers.codex!.auth, { type: 'oauth', provider: 'codex' })
+  })
+
+  it('setupCustomProvider materializes a full OpenAI-wire provider and makes it default', () => {
+    setupCustomProvider({
+      providerName: 'custom-my-model',
+      baseUrl: 'https://api.example.com/v1',
+      apiKey: 'sk-custom',
+      model: { id: 'my-model', alias: 'mine', contextWindow: 1_000_000, maxTokens: 2_000_000 },
+      makeDefault: true,
+    })
+    const config = loadConfig()
+    const provider = config.provider.providers['custom-my-model']!
+    assert.equal(config.provider.default, 'custom-my-model')
+    assert.equal(provider.baseUrl, 'https://api.example.com/v1')
+    assert.equal(provider.apiKey, 'sk-custom')
+    assert.equal(provider.protocol, 'openai')
+    assert.equal(provider.models[0]?.id, 'my-model')
+    assert.equal(provider.models[0]?.contextWindow, 1_000_000)
+    // Output tokens are capped to the context window.
+    assert.equal(provider.models[0]?.maxTokens, 1_000_000)
+    assert.equal(provider.capabilities.prefixCache, 'none')
+  })
+
+  it('setupCustomProvider rejects an invalid base URL', () => {
+    assert.throws(() => setupCustomProvider({
+      providerName: 'custom-bad',
+      baseUrl: 'not-a-url',
+      apiKey: 'sk',
+      model: { id: 'm', contextWindow: 1000, maxTokens: 500 },
+    }))
   })
 })

@@ -16,6 +16,7 @@ import { ANSI, color } from '../engine/ansi.js'
 import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import type { TranscriptMessage } from '../scrollback-transcript.js'
+import type { ConnectView } from '../connect-flow.js'
 
 
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
@@ -942,6 +943,87 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   }
 
   lines.push(formatFooter('↑↓ select  Enter confirm  Esc cancel', width, theme))
+  lines.push(formatBottomBorder(width, theme))
+  return lines
+}
+
+// ── Connect Wizard (/connect 服务商配置向导) ──────────────────────
+// Single stateful overlay driven by ConnectFlow: renders either a choice list
+// (provider pick) or a masked/plain text input (URL / model / key), plus a live
+// validation error line. Mirrors the polished scream-code connect experience.
+
+export interface ConnectOverlayData {
+  view: ConnectView
+  /** Live input buffer for input-kind steps. */
+  input: string
+  /** Validation error for the current step (shown in red). */
+  error?: string
+  /** Selected option index for choice-kind steps. */
+  selectedIndex: number
+}
+
+function maskSecret(value: string): string {
+  return '•'.repeat([...value].length)
+}
+
+export function renderConnect(data: ConnectOverlayData, width: number, height: number, theme: RivetTheme): string[] {
+  const { view } = data
+  const lines: string[] = []
+  lines.push(formatBorder(width, theme))
+  const titleBar = view.stepLabel ? `${view.title}   ${view.stepLabel}` : view.title
+  lines.push(formatTitleBar(titleBar, width, theme))
+  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+
+  const innerWidth = width - 6
+  const contentRows = Math.max(1, height - 5)
+  let rowsUsed = 0
+  const push = (s: string): void => { lines.push(padLine(s, width, theme)); rowsUsed++ }
+
+  if (view.subtitle && rowsUsed < contentRows) {
+    for (const d of wrapToWidth(view.subtitle, innerWidth, 1)) {
+      if (rowsUsed >= contentRows) break
+      push(` ${color(d, theme.muted)}`)
+    }
+    if (rowsUsed < contentRows) push('')
+  }
+
+  if (view.kind === 'choice') {
+    const options = view.options ?? []
+    for (let i = 0; i < options.length; i++) {
+      if (rowsUsed >= contentRows) break
+      const opt = options[i]!
+      const selected = i === data.selectedIndex
+      const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+      const star = opt.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
+      const labelColor = selected ? theme.primary : theme.secondary
+      const label = selected ? color(opt.label, labelColor, { bold: true }) : color(opt.label, labelColor)
+      push(` ${cursor} ${star} ${label}`)
+      if (opt.description && rowsUsed < contentRows) {
+        for (const d of wrapToWidth(opt.description, innerWidth, 2)) {
+          if (rowsUsed >= contentRows) break
+          push(`     ${color(d, theme.muted)}`)
+        }
+      }
+    }
+  } else {
+    const shown = view.masked ? maskSecret(data.input) : data.input
+    const cursor = color('▏', theme.primary, { bold: true })
+    const body = shown.length > 0 ? color(shown, theme.secondary) : color(view.placeholder ?? '', theme.dim)
+    push(` ${color('>', theme.primary, { bold: true })} ${body}${cursor}`)
+  }
+
+  if (data.error && rowsUsed < contentRows) {
+    push('')
+    for (const d of wrapToWidth(data.error, innerWidth, 1)) {
+      if (rowsUsed >= contentRows) break
+      push(` ${color(d, theme.error ?? theme.primary)}`)
+    }
+  }
+
+  while (rowsUsed < contentRows) push('')
+
+  const footer = view.kind === 'choice' ? '↑↓ 选择  Enter 确认  Esc 取消' : 'Enter 提交  Esc 取消'
+  lines.push(formatFooter(footer, width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }

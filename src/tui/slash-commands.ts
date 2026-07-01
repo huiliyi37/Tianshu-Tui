@@ -3159,6 +3159,15 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
+  register("/connect", {
+    description: "连接模型服务商（选内置或自定义，填写 API 密钥）",
+    immediate: true,
+    handler: ({ app }) => {
+      app.startConnect()
+      return true
+    },
+  })
+
   register("/theme", {
     description: "Show or switch color theme",
     immediate: true,
