@@ -62,8 +62,9 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderConnect } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ConnectOverlayData } from '../format/overlay.js'
+import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../connect-flow.js'
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
@@ -248,6 +249,10 @@ export class TuiApp {
   private toolGroupController = new ToolGroupController()
   /** W-B2: overlay navigation + data providers + exec callbacks */
   private overlayController = new OverlayController()
+  /** /connect provider-setup wizard: state machine + live input buffer + error. */
+  private connectFlow?: ConnectFlow
+  private connectInput = ''
+  private connectError?: string
   /** W-B4: approval + intent pending state manager */
   private approvalIntentController = new ApprovalIntentController()
   /** 并行子代理舰队读模型（由 onDelegationActivity 事件流驱动） */
@@ -880,6 +885,7 @@ export class TuiApp {
       case 'rewind':
       case 'history-search':
       case 'chronicle':
+      case 'connect':
       case 'tasks': {
         // 复位导航状态，避免上次的翻页/选中残留到新 overlay
         this.overlayController.resetNav()
@@ -925,6 +931,56 @@ export class TuiApp {
     this.stdout.write('\r\x1B[0J')
     this.live.reset()
     this.renderLive()
+  }
+
+  /** 打开 /connect 服务商配置向导（选内置服务商或自定义，填写密钥）。 */
+  startConnect(): void {
+    this.connectFlow = new ConnectFlow()
+    this.connectInput = ''
+    this.connectError = undefined
+    this.activateOverlay('connect')
+  }
+
+  /** connect overlay 渲染数据（由 registerOverlays 的 render 闭包读取）。 */
+  getConnectOverlayData(): ConnectOverlayData {
+    const view = this.connectFlow?.view() ?? { kind: 'choice' as const, title: '', options: [] }
+    return {
+      view,
+      input: this.connectInput,
+      error: this.connectError,
+      selectedIndex: this.overlayController.nav().connectIndex,
+    }
+  }
+
+  /** 推进 connect 向导：next 清空输入、error 显示提示、commit 落库并关闭。 */
+  private advanceConnect(result: ConnectStepResult): void {
+    if (result.kind === 'error') {
+      this.connectError = result.message
+      this.overlay.rerender()
+      return
+    }
+    if (result.kind === 'next') {
+      this.connectInput = ''
+      this.connectError = undefined
+      this.overlayController.nav().connectIndex = 0
+      this.overlay.rerender()
+      return
+    }
+    // commit — exec (commitStatic / model switch) MUST run before
+    // deactivateOverlay so the overlay-exit repaint is the last write; running
+    // it after leaves a ghost frame (see overlay-deactivate-regression).
+    const exec = this.overlayController.getConnectExec()
+    this.connectFlow = undefined
+    exec?.(result.commit, result.summary)
+    this.deactivateOverlay()
+  }
+
+  private cancelConnect(): void {
+    this.connectFlow = undefined
+    // Buffer the notice into scrollback before exiting the overlay, so the
+    // deactivate repaint paints a single clean frame (no ghost of the overlay).
+    this.commitStatic('已取消服务商配置。')
+    this.deactivateOverlay()
   }
 
   /** 返回 scrollback 完整文本（供 pager overlay 读取） */
@@ -1043,6 +1099,31 @@ export class TuiApp {
     const id = this.overlay.activeId()
     const c = key.char.toLowerCase()
     const isSearch = id === 'command-palette' || id === 'history-search'
+
+    // Connect wizard — a stateful choice/input overlay. Handled first so typed
+    // characters (incl. 'q') feed the input buffer instead of closing the overlay.
+    if (id === 'connect' && this.connectFlow) {
+      const view = this.connectFlow.view()
+      if (key.name === 'escape') { this.cancelConnect(); return true }
+      if (view.kind === 'choice') {
+        const options = view.options ?? []
+        const count = options.length
+        const nav = this.overlayController.nav()
+        if (key.name === 'down') { if (count > 0) { nav.connectIndex = (nav.connectIndex + 1) % count; this.overlay.rerender() } return true }
+        if (key.name === 'up') { if (count > 0) { nav.connectIndex = (nav.connectIndex - 1 + count) % count; this.overlay.rerender() } return true }
+        if (key.name === 'return') {
+          const opt = options[nav.connectIndex]
+          if (opt) this.advanceConnect(this.connectFlow.submitChoice(opt.id))
+          return true
+        }
+        return true
+      }
+      // input step
+      if (key.name === 'return') { this.advanceConnect(this.connectFlow.submitInput(this.connectInput)); return true }
+      if (key.name === 'backspace') { this.connectInput = this.connectInput.slice(0, -1); this.connectError = undefined; this.overlay.rerender(); return true }
+      if (this.isPrintableKey(key)) { this.connectInput += key.char; this.connectError = undefined; this.overlay.rerender(); return true }
+      return true
+    }
 
     // Tab switcher between domain-picker, model-picker, and theme-picker
     const tabs = ['domain-picker', 'model-picker', 'theme-picker']
@@ -1751,6 +1832,11 @@ export class TuiApp {
   /** 注册 agent 星域同步（streaming ticker ~1Hz 读取 getSessionDomain） */
   setDomainSyncProvider(provider: () => string | undefined): void {
     this.metricsGlanceController.domainSyncProvider = provider
+  }
+
+  /** 注册当前推理 effort 提供者（GlanceBar 每帧读取，显示实时思考强度） */
+  setReasoningEffortProvider(provider: () => string | undefined): void {
+    this.metricsGlanceController.reasoningEffortProvider = provider
   }
 
   private applyGlanceDomainDisplay(): void {
@@ -2742,6 +2828,7 @@ export class TuiApp {
       const rightStr = formatGlanceRight({
         width: cols,
         modelName: this.state.modelName,
+        reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
         conversationTokens: glanceConversationTokens,
@@ -2997,7 +3084,7 @@ export class TuiApp {
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -3006,6 +3093,7 @@ export class TuiApp {
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
     this.overlayController.setChoicePanelExec(choicePanelExec)
+    this.overlayController.setConnectExec(connectExec)
     // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -3114,6 +3202,11 @@ export class TuiApp {
         const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
         return renderChoicePanel({ ...data, selectedIndex: this.overlayController.nav().choicePanelIndex }, this.columns, this.rows, this.theme)
       },
+    })
+
+    // Connect Wizard — /connect 服务商配置向导；数据来自 app 持有的 ConnectFlow。
+    this.overlay.register('connect', {
+      render: (_w, _h) => renderConnect(this.getConnectOverlayData(), this.columns, this.rows, this.theme),
     })
   }
 }

@@ -4,11 +4,11 @@
  * Pure functions that translate the `review.profiles` config block into a
  * concrete provider+model lookup for review worker dispatch.
  *
- * Why this exists: GLM/Kimi/Codex (prefixCache:'none') caches are evicted
- * when a concurrent review worker (running with the same primary model +
- * API key) issues requests against a different prompt. Routing the review
- * worker to a different provider+model decouples its cache footprint from
- * the session's primary prefix cache.
+ * Why this exists: server-side prefix caches (GLM/Kimi implicit caches, Codex)
+ * are evicted when a concurrent review worker (running with the same primary
+ * model + API key) issues requests against a different prompt. Routing the
+ * review worker to a different provider+model decouples its cache footprint
+ * from the session's primary prefix cache.
  */
 
 import type { ProviderConfig } from '../config/schema.js'

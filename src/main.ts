@@ -17,6 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -379,6 +380,10 @@ async function main() {
     }
   }
 
+  // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
+  if (getActiveThemeName() === 'cobalt') {
+    setTheme('tianshu')
+  }
   const theme = getTheme()
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
@@ -428,6 +433,8 @@ async function main() {
     tuiApp.setSessionStarDomain(initialDomain)
   }
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
+  // 实时思考强度：优先 agent 当前生效 effort（auto-reasoning 动态调整），回退 config floor。
+  tuiApp.setReasoningEffortProvider(() => ctx!.agent.getReasoningEffort() ?? ctx!.agent.config.reasoningEffort)
 
   // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
   const initialMeta = ctx!.persist.loadMetadata()
@@ -679,6 +686,50 @@ async function main() {
     setTheme(themeName as ThemeName)
     tuiApp.forceRedraw()
     tuiApp.commitStatic(`Theme switched to: ${themeName}`)
+  }, /* choicePanelExec: */ undefined, /* connectExec: */ (commit, summary) => {
+    // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
+    try {
+      if (commit.mode === 'preset') {
+        setupProvider(commit.setup)
+      } else {
+        setupCustomProvider({
+          providerName: commit.providerName,
+          baseUrl: commit.baseUrl,
+          apiKey: commit.apiKey,
+          model: commit.model,
+          makeDefault: commit.makeDefault,
+        })
+      }
+    } catch (e) {
+      tuiApp.commitStatic(`⚠️ 配置保存失败: ${e instanceof Error ? e.message : String(e)}`)
+      return
+    }
+
+    // Reload from disk and hot-swap the in-memory provider table so
+    // switchAgentRuntime (which reads ctx.config) sees the new provider.
+    let liveApplied = false
+    try {
+      const fresh = loadRivetConfig()
+      if (ctx) {
+        ctx.config.provider = fresh.provider
+        const prov = fresh.provider.providers[fresh.provider.default]
+        const modelAlias = prov?.models[0]?.alias ?? prov?.models[0]?.id
+        if (modelAlias) {
+          try { ctx.agent.abort() } catch { /* idle */ }
+          const res = switchAgentRuntime(ctx, modelAlias)
+          if (res.ok && res.modelName) {
+            tuiApp.setModelInfo(res.modelName, res.contextWindow)
+            liveApplied = true
+          }
+        }
+      }
+    } catch { /* fall through to restart hint */ }
+
+    tuiApp.commitStatic(
+      liveApplied
+        ? `✅ ${summary}`
+        : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）`,
+    )
   })
 
   // ── SlashRouter ──────────────────────────────────────────────
@@ -858,6 +909,13 @@ async function main() {
   // 与 cursor-resident live region 的相对光标假设冲突，切换 model/theme/domain
   // 提交内容触发滚动时造成顶部残影/塌行。随交互增长终端原生滚动自然把输入框保持在视口底部。
   app.start()
+
+  // 首次启动引导：默认服务商没有可用密钥（且非 OAuth）→ 自动打开 /connect 向导，
+  // 让新用户点选内置服务商 + 粘贴密钥即可开跑，无需手改 config.json。
+  if (ctx && !ctx.auth && (!ctx.apiKey || ctx.apiKey.trim() === '') && existingMsgCount === 0) {
+    app.commitStatic('尚未配置模型服务商的 API 密钥 — 正在打开配置向导（/connect 可随时再次打开）。')
+    app.startConnect()
+  }
 
   // 启动期主动环境体检：git 缺失时(尤其 Windows，Git Bash 是命令执行首选 shell)
   // 醒目提示，而非等命令失败后被动提醒。异步、失败静默、不阻塞启动。

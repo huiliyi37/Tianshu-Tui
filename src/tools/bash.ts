@@ -88,12 +88,20 @@ export function classifyBashOutcome(
   isWindows: boolean,
 ): { isError: boolean; errorClass?: 'environment' | 'exec-failure' } {
   if (isWindows) {
-    const notFound =
+    // Windows-native not-found: cmd.exe 9009 / PowerShell "is not recognized".
+    const winNotFound =
       exitCode === WIN_NOT_FOUND_EXIT ||
       ((exitCode === 1 || exitCode > 128) && WIN_NOT_FOUND_PATTERNS.some(p => p.test(stderr)))
-    if (notFound) return { isError: true, errorClass: 'environment' }
-    // 9009 is the only Windows-specific exec-failure code; otherwise fall through
-    // to POSIX semantics so non-zero domain results (e.g. findstr no-match) stay benign.
+    // Git Bash is our PREFERRED Windows shell, so on Windows the common case is a
+    // POSIX-style not-found: exit 127 (`bash: py: command not found`) / 126 (not
+    // executable). Without this, Git Bash command-not-found was misclassified as
+    // 'exec-failure' → fed momentum/doom/approval as a competence failure → 低信念
+    // → 模型畏手畏脚、把命令甩给用户手动跑。Treat it as 'environment' like POSIX.
+    const posixNotFound = exitCode === 127 || exitCode === 126 || /command not found/i.test(stderr)
+    if (winNotFound || posixNotFound) return { isError: true, errorClass: 'environment' }
+    // Remaining exec-failure codes (signals / >128 without a not-found fingerprint);
+    // otherwise fall through to POSIX semantics so non-zero domain results
+    // (e.g. findstr no-match) stay benign.
     if (isExecFailure(exitCode)) return { isError: true, errorClass: 'exec-failure' }
     return { isError: false }
   }

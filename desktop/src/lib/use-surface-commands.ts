@@ -44,6 +44,12 @@ export function useSurfaceCommands(): Command[] {
         run: () => {},
       },
       {
+        id: 'connect-model',
+        label: '连接模型服务商 (Connect Provider)',
+        hint: '操作',
+        run: () => dispatch({ type: 'openConnect', open: true }),
+      },
+      {
         id: 'open-file',
         label: '打开文件 (Open File)',
         hint: '操作',

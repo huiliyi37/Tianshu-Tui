@@ -1,6 +1,6 @@
 import type { ModelConfig, ProviderConfig } from './schema.js'
 
-export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex'
+export type ProviderPresetKey = 'deepseek' | 'glm' | 'mimo' | 'mimo-api' | 'minimax' | 'codex' | 'siliconflow'
 
 export interface ProviderPreset {
   key: ProviderPresetKey
@@ -27,13 +27,15 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCompletion: true,
       },
       thinking: 'enabled',
-      maxTokens: 384_000,
+      // 官方 API(api.deepseek.com):上下文 100 万,单次输出上限 6.4 万 —
+      // 对齐真实可用值,避免误配触发过早压缩或撞 API 上限。
+      maxTokens: 64_000,
       models: [
         {
           id: 'deepseek-v4-pro',
           alias: 'v4-pro',
           contextWindow: 1_000_000,
-          maxTokens: 384_000,
+          maxTokens: 64_000,
           reasoningEffort: 'max',
           pricing: { input: 0.5, output: 2.0, cacheRead: 0.05, cacheWrite: 0.5 },
         },
@@ -41,7 +43,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           id: 'deepseek-v4-flash',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
-          maxTokens: 384_000,
+          maxTokens: 64_000,
           reasoningEffort: 'high',
           pricing: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
         },
@@ -79,7 +81,9 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 131072,
           reasoningEffort: 'max',
-          pricing: { input: 0.5, output: 4.0, cacheRead: 0.05, cacheWrite: 0.5 },
+          // GLM Coding Plan 是月度定额订阅,不按 token 计费 —— 单价清零,
+          // 避免界面显示误导性的"花费金额"(用量/缓存命中率等真实指标不受影响)。
+          pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         },
       ],
       unsupported: ['stream_options'],
@@ -177,6 +181,73 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 204_800,
           maxTokens: 64000,
           pricing: { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },
+        },
+      ],
+      unsupported: [],
+    },
+  },
+  siliconflow: {
+    key: 'siliconflow',
+    label: '硅基流动 (SiliconFlow)',
+    defaultModelId: 'deepseek-ai/DeepSeek-V4-Pro',
+    provider: {
+      name: 'siliconflow',
+      apiKeyEnv: 'SILICONFLOW_API_KEY',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      protocol: 'openai',
+      capabilities: {
+        cacheControl: false,
+        stripParams: [],
+        // 默认模型是 SiliconFlow 代理的 DeepSeek —— 沿用其"工具 JSON 混进正文"的
+        // 模型固有 bug 处理;换到聚合站里的其他模型时该开关无害(仅在检测到正文
+        // 内 tool JSON 时才生效)。
+        toolJsonBug: true,
+        // SiliconFlow 对 DeepSeek-V4 / GLM-5.2 计"Cached Input"价 → 存在服务端隐式
+        // 前缀缓存,按 deepseek-native 记账以保住前缀缓存优化;但前缀补全(beta 续写
+        // 端点)是 deepseek.com 专属,聚合网关没有 → 关。
+        prefixCache: 'deepseek-native',
+        prefixCompletion: false,
+      },
+      thinking: 'enabled',
+      maxTokens: 384_000,
+      models: [
+        {
+          id: 'deepseek-ai/DeepSeek-V4-Pro',
+          alias: 'sf-v4-pro',
+          contextWindow: 1_000_000,
+          maxTokens: 384_000,
+          reasoningEffort: 'max',
+          pricing: { input: 1.6, output: 3.135, cacheRead: 0.135 },
+        },
+        {
+          id: 'deepseek-ai/DeepSeek-V4-Flash',
+          alias: 'sf-v4-flash',
+          contextWindow: 1_000_000,
+          maxTokens: 384_000,
+          reasoningEffort: 'high',
+          pricing: { input: 0.13, output: 0.28 },
+        },
+        {
+          id: 'zai-org/GLM-5.2',
+          alias: 'sf-glm',
+          contextWindow: 1_000_000,
+          maxTokens: 131_072,
+          reasoningEffort: 'max',
+          pricing: { input: 1.4, output: 4.4 },
+        },
+        {
+          id: 'moonshotai/Kimi-K2.7-Code',
+          alias: 'sf-kimi',
+          contextWindow: 262_144,
+          maxTokens: 131_072,
+          pricing: { input: 0.94, output: 4.0 },
+        },
+        {
+          id: 'Qwen/Qwen3.6-27B',
+          alias: 'sf-qwen',
+          contextWindow: 262_144,
+          maxTokens: 131_072,
+          pricing: { input: 0.3, output: 3.2 },
         },
       ],
       unsupported: [],

@@ -104,6 +104,24 @@ const BRAND_LOGO = [
   '   ╚═╝   ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝'
 ]
 
+// 渲染具有立体描边质感的大字 Logo 行
+function renderLogoLine(line: string, theme: RivetTheme): string {
+  let out = ''
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '█') {
+      // 实体笔画：高亮 primary 色
+      out += color('█', theme.primary, { bold: true })
+    } else if (char === ' ' || char === '\n') {
+      out += char
+    } else {
+      // 描边线框：使用 secondary/dim 色以形成双色霓虹立体感
+      out += color(char, theme.secondary || theme.dim)
+    }
+  }
+  return out
+}
+
 export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): string[] {
   const cols = input.columns > 0 ? input.columns : 80
 
@@ -141,9 +159,9 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     }
     out.push(wrapLine(''))
 
-    // 2. 大字品牌标识
+    // 2. 大字品牌标识 (采用 3D 双色描边效果)
     for (const line of BRAND_LOGO) {
-      out.push(wrapLine(color(line, theme.primary, { bold: true })))
+      out.push(wrapLine(renderLogoLine(line, theme)))
     }
     out.push(wrapLine(''))
 

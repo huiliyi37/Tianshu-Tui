@@ -158,6 +158,17 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
     // 模型名属于最低层级元信息，用 dim 而不是 muted
     parts.push(color(narrow ? input.modelName.slice(0, 12) : input.modelName, theme.dim))
   }
+  // 推理 effort 强度：◎ + 档位。max 高亮(secondary)、high 主色、medium muted、
+  // low/off dim。让用户随时看到当前实际生效的思考强度（auto-reasoning 会动态调整）。
+  if (input.reasoningEffort) {
+    const eff = input.reasoningEffort
+    const effShort = eff === 'medium' ? 'med' : eff
+    const effColor = eff === 'max' ? theme.secondary
+      : eff === 'high' ? theme.primary
+      : eff === 'off' ? theme.dim
+      : theme.muted
+    parts.push(color(`◎${effShort}`, effColor))
+  }
   if (input.cacheHitRate !== undefined) {
     const cachePct = (input.cacheHitRate * 100).toFixed(0)
     const cacheColor = input.cacheHitRate < 0.5 ? theme.warning : theme.muted

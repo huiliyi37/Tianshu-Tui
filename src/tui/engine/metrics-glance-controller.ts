@@ -19,6 +19,8 @@ export class MetricsGlanceController {
   delegationDomainOverride?: { glyph: string; name: string }
   /** streaming 期间从 agent 同步星域（对齐 Ink 1Hz sync） */
   domainSyncProvider?: () => string | undefined
+  /** 当前生效的推理 effort 提供者（读 agent 实时 effort，回退 config floor） */
+  reasoningEffortProvider?: () => string | undefined
   /** 累计 usage（cost 估算） */
   totalUsage = { input: 0, output: 0, cacheRead: 0, cacheCreate: 0 }
   /** 最近一轮的 cache 命中率（0-1） */

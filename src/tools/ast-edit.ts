@@ -2,6 +2,8 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
+import { applyEol, chooseEol, detectEol } from './line-endings.js'
+import { getTargetEol } from '../platform.js'
 import {
   inferLang,
   resolveLang,
@@ -265,7 +267,10 @@ export const AST_EDIT_TOOL: Tool = {
           if (!dryRun) {
             try {
               params.onFileWrite?.(filePath)
-              await writeFileAtomicAsync(filePath, currentSource)
+              // Preserve the file's original line endings (CRLF on Windows-authored
+              // files); ast-grep edits operate on \n-normalized ranges internally.
+              const eol = chooseEol(filePath, detectEol(source), getTargetEol())
+              await writeFileAtomicAsync(filePath, applyEol(currentSource, eol))
             } catch {
               errors.push(`${filePath}: failed to write changes`)
             }

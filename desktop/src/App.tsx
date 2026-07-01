@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 
 import { NewSessionDialog } from './components/NewSessionDialog'
+import { ConnectWizard } from './components/ConnectWizard'
 import { CommandPalette } from './components/CommandPalette'
 import { Toaster } from 'sonner'
 import { WallpaperLayer } from './components/WallpaperLayer'
@@ -37,6 +38,7 @@ export function App() {
   const sidecarDown = health.isError
   const needsSetup = !sidecarDown && health.data?.configured === false
   const [setupDismissed, setSetupDismissed] = useState(false)
+  const connectAutoShown = useRef(false)
   const [envDismissed, setEnvDismissed] = useState(false)
   const [gitGateDismissed, setGitGateDismissed] = useState(false)
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
@@ -140,6 +142,14 @@ export function App() {
   }, [ui.error, dispatch])
   const dismissError = () => dispatch({ type: 'setError', error: null })
 
+  // 首次启动且尚未配置任何可用服务商时，自动弹出连接向导（每次启动只弹一次）。
+  useEffect(() => {
+    if (needsSetup && !connectAutoShown.current) {
+      connectAutoShown.current = true
+      dispatch({ type: 'openConnect', open: true })
+    }
+  }, [needsSetup, dispatch])
+
   return (
     <WallpaperProvider>
       <div className="shell">
@@ -155,7 +165,13 @@ export function App() {
         ) : null}
         {needsSetup && !setupDismissed && (
           <div className="banner warn">
-            未配置 DeepSeek API Key，无法开始对话或委派子代理。请在设置中填入 Key（子代理推荐使用 deepseek-v4-flash）。
+            未配置模型服务商的 API Key，无法开始对话或委派子代理。
+            <button
+              className="banner-action"
+              onClick={() => dispatch({ type: 'openConnect', open: true })}
+            >
+              连接模型
+            </button>
             <button
               className="banner-action"
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
@@ -220,6 +236,10 @@ export function App() {
 
       {paletteOpen && (
         <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
+      )}
+
+      {ui.connectOpen && (
+        <ConnectWizard onClose={() => dispatch({ type: 'openConnect', open: false })} />
       )}
 
       {ui.newSessionOpen && (

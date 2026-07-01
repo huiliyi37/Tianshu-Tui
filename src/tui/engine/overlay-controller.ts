@@ -2,6 +2,7 @@ import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, Tas
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
 import type { RewindData } from '../format/rewind.js'
 import type { HistorySearchData } from '../format/history-search.js'
+import type { ConnectCommit } from '../connect-flow.js'
 
 export interface OverlayNavState {
   pagerPage: number
@@ -19,6 +20,7 @@ export interface OverlayNavState {
   modelPickerIndex: number
   themePickerIndex: number
   choicePanelIndex: number
+  connectIndex: number
   query: string
 }
 
@@ -43,7 +45,7 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
   private rewindExec?: (content: string) => void
@@ -52,13 +54,14 @@ export class OverlayController {
   private modelPickerExec?: (key: string) => void
   private themePickerExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
+  private connectExec?: (commit: ConnectCommit, summary: string) => void
   private cockpitPanel: Panel = 'summary'
 
   // ── nav state ──
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
@@ -88,6 +91,8 @@ export class OverlayController {
   get modelPickerIndex(): number { return this.overlayNav.modelPickerIndex }
   get choicePanelIndex(): number { return this.overlayNav.choicePanelIndex }
   setChoicePanelIndex(v: number): void { this.overlayNav.choicePanelIndex = v }
+  get connectIndex(): number { return this.overlayNav.connectIndex }
+  setConnectIndex(v: number): void { this.overlayNav.connectIndex = v }
   get themePickerIndex(): number { return this.overlayNav.themePickerIndex }
   setThemePickerIndex(v: number): void { this.overlayNav.themePickerIndex = v }
 
@@ -122,6 +127,8 @@ export class OverlayController {
   setThemePickerExec(fn: ((key: string) => void) | undefined): void { this.themePickerExec = fn }
   getChoicePanelExec(): ((id: string) => void) | undefined { return this.choicePanelExec }
   setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
+  getConnectExec(): ((commit: ConnectCommit, summary: string) => void) | undefined { return this.connectExec }
+  setConnectExec(fn: ((commit: ConnectCommit, summary: string) => void) | undefined): void { this.connectExec = fn }
 
   // ── cockpit panel ──
   getCockpitPanel(): Panel { return this.cockpitPanel }
