@@ -27,13 +27,15 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
         prefixCompletion: true,
       },
       thinking: 'enabled',
-      maxTokens: 384_000,
+      // 官方 API(api.deepseek.com):上下文 100 万,单次输出上限 6.4 万 —
+      // 对齐真实可用值,避免误配触发过早压缩或撞 API 上限。
+      maxTokens: 64_000,
       models: [
         {
           id: 'deepseek-v4-pro',
           alias: 'v4-pro',
           contextWindow: 1_000_000,
-          maxTokens: 384_000,
+          maxTokens: 64_000,
           reasoningEffort: 'max',
           pricing: { input: 0.5, output: 2.0, cacheRead: 0.05, cacheWrite: 0.5 },
         },
@@ -41,7 +43,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           id: 'deepseek-v4-flash',
           alias: 'v4-flash',
           contextWindow: 1_000_000,
-          maxTokens: 384_000,
+          maxTokens: 64_000,
           reasoningEffort: 'high',
           pricing: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
         },
@@ -79,7 +81,9 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 131072,
           reasoningEffort: 'max',
-          pricing: { input: 0.5, output: 4.0, cacheRead: 0.05, cacheWrite: 0.5 },
+          // GLM Coding Plan 是月度定额订阅,不按 token 计费 —— 单价清零,
+          // 避免界面显示误导性的"花费金额"(用量/缓存命中率等真实指标不受影响)。
+          pricing: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         },
       ],
       unsupported: ['stream_options'],

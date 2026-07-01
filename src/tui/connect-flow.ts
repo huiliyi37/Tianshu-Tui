@@ -153,7 +153,9 @@ export class ConnectFlow {
         return {
           kind: 'input',
           title: '模型最大上下文长度 (tokens)',
-          subtitle: '直接回车用默认；DeepSeek V4 建议填 1000000',
+          // 上下文窗口驱动自动压缩阈值 —— 必须照模型服务商官方 API 的真实值填。
+          // 填小了会过早压缩(丢上下文、碎缓存);填大了会撞 API 上限来不及自救。
+          subtitle: '请照官方 API 文档的真实值填(它决定自动压缩点);DeepSeek V4 填 1000000,回车用默认',
           stepLabel: '步骤 3 / 4',
           placeholder: String(DEFAULT_CONTEXT_WINDOW),
           defaultValue: String(DEFAULT_CONTEXT_WINDOW),

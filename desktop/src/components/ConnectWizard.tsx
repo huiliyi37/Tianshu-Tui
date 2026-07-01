@@ -280,6 +280,7 @@ function CustomForm(props: {
     if (!Number.isInteger(cw) || cw <= 0) { setErr('上下文长度必须是正整数'); return }
     const mt = Number(maxTokens)
     if (!Number.isInteger(mt) || mt <= 0) { setErr('最大输出 Tokens 必须是正整数'); return }
+    if (mt > cw) { setErr('最大输出 Tokens 不能超过上下文长度（请照官方 API 的真实上限填写）'); return }
     setBusy(true)
     try {
       await setupConfigProvider({
@@ -328,6 +329,9 @@ function CustomForm(props: {
           <Input type="number" value={maxTokens} onChange={(e) => { setMaxTokens(e.target.value); setErr(null) }} placeholder="64000" disabled={busy} />
         </div>
       </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        请照该服务商<strong className="text-text">官方 API 文档</strong>的真实值填写：<strong className="text-text">上下文长度</strong>决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限）；<strong className="text-text">最大输出</strong>是单次回复上限，不能超过上下文长度。
+      </p>
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} disabled={busy} />
         <span>设为默认服务商</span>

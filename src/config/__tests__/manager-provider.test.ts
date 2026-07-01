@@ -42,6 +42,19 @@ describe('provider config mutations', () => {
     assert.equal(loadConfig().provider.providers.deepseek!.models[0]?.alias, 'custom2')
   })
 
+  it('clamps maxTokens to the context window on upsert (mis-config backstop)', () => {
+    upsertProviderModel('deepseek', { id: 'over-cfg', alias: 'over', contextWindow: 128000, maxTokens: 1000000 })
+    const model = loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'over-cfg')!
+    assert.equal(model.contextWindow, 128000)
+    assert.equal(model.maxTokens, 128000)
+  })
+
+  it('clamps maxTokens via setupProvider model option too', () => {
+    setupProvider({ providerName: 'deepseek', model: { id: 'over-setup', alias: 'over2', contextWindow: 64000, maxTokens: 500000 } })
+    const model = loadConfig().provider.providers.deepseek!.models.find(m => m.id === 'over-setup')!
+    assert.equal(model.maxTokens, 64000)
+  })
+
   it('sets apiKey and apiKeyEnv as mutually exclusive sources', () => {
     setApiKey('minimax', 'sk-inline')
     const inlineProvider = loadConfig().provider.providers.minimax!

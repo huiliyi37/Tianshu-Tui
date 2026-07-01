@@ -299,10 +299,24 @@ export function updateProviderBaseUrl(providerName: string, baseUrl: string): vo
   saveConfig(cfg)
 }
 
+/**
+ * Clamp a model's output ceiling to its context window. `maxTokens` is the
+ * single-response output cap and can never exceed the total window; letting a
+ * mis-typed value through (e.g. maxTokens=1M on a 128K model) skews compaction
+ * headroom and can trip provider 400s. This is the shared backstop for every
+ * config write path (wizard, desktop form, direct upsert).
+ */
+export function clampModelTokens<T extends { contextWindow: number; maxTokens: number }>(model: T): T {
+  const contextWindow = Math.max(1, Math.floor(model.contextWindow))
+  const maxTokens = Math.max(1, Math.min(Math.floor(model.maxTokens), contextWindow))
+  return { ...model, contextWindow, maxTokens }
+}
+
 export function upsertProviderModel(providerName: string, model: ModelConfig, options: UpsertProviderModelOptions = {}): void {
   const cfg = loadConfig()
   const provider = cfg.provider.providers[providerName]
   if (!provider) throw new Error(`Provider "${providerName}" not found`)
+  model = clampModelTokens(model)
   const existingIndex = provider.models.findIndex(item => item.id === model.id || (model.alias !== undefined && item.alias === model.alias))
   if (existingIndex >= 0) provider.models[existingIndex] = model
   else provider.models.push(model)
@@ -336,9 +350,10 @@ export function setupProvider(options: SetupProviderOptions): void {
     ;(next as unknown as { apiKey?: string | null }).apiKey = null
   }
   if (options.model) {
-    const existingIndex = next.models.findIndex(item => item.id === options.model!.id || (options.model!.alias !== undefined && item.alias === options.model!.alias))
-    if (existingIndex >= 0) next.models[existingIndex] = options.model
-    else next.models.unshift(options.model)
+    const model = clampModelTokens(options.model)
+    const existingIndex = next.models.findIndex(item => item.id === model.id || (model.alias !== undefined && item.alias === model.alias))
+    if (existingIndex >= 0) next.models[existingIndex] = model
+    else next.models.unshift(model)
   }
   cfg.provider.providers[options.providerName] = next
   if (options.makeDefault) cfg.provider.default = options.providerName

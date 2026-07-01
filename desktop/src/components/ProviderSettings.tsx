@@ -56,7 +56,11 @@ function validateModel(state: ModelFormState): { ok: true; model: { id: string; 
     if (!Number.isInteger(cw) || cw <= 0) return { ok: false, error: '上下文长度必须是正整数' }
     const mt = Number(state.maxTokens)
     if (!Number.isInteger(mt) || mt <= 0) return { ok: false, error: '最大 Tokens 必须是正整数' }
+    if (mt > cw) return { ok: false, error: '最大输出不能超过上下文长度（请照官方 API 的真实上限填写）' }
     return { ok: false, error: '模型信息无效' }
+  }
+  if (model.maxTokens > model.contextWindow) {
+    return { ok: false, error: '最大输出不能超过上下文长度（请照官方 API 的真实上限填写）' }
   }
   return { ok: true, model }
 }
@@ -123,7 +127,7 @@ function ModelForm({
         </label>
       </div>
       <div className="provider-form-hint">
-        上下文长度决定模型能记住多少对话内容；最大输出 Tokens 限制模型单次返回长度。
+        请照该服务商官方 API 文档的真实值填写。上下文长度决定天枢的自动压缩点（填小了会过早压缩、丢上下文；填大了会撞 API 上限），也决定模型能记住多少对话；最大输出 Tokens 是单次回复上限，不能超过上下文长度。
       </div>
       <div className="provider-form-actions">
         <button className="btn-sm" disabled={busy} onClick={onSubmit}>{submitLabel}</button>
@@ -165,6 +169,10 @@ function ModelManageList({
     }
     if (!Number.isInteger(maxTokens) || maxTokens <= 0) {
       setError('最大 Tokens 必须是正整数')
+      return
+    }
+    if (maxTokens > contextWindow) {
+      setError('最大输出不能超过上下文长度（请照官方 API 的真实上限填写）')
       return
     }
     setBusy(true)

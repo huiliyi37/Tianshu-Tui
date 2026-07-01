@@ -217,8 +217,8 @@ export interface DelegationCoordinatorConfig {
    *  'reviewer', 'verifier', 'patcher'). When a delegated work order's profile matches
    *  a key, the override card is used directly (bypasses tier filtering and worker
    *  routing). Lets review workers use a different provider/model from the session's
-   *  primary — key motivation: prevent prefixCache:'none' provider (GLM/Kimi/Codex)
-   *  review workers from evicting the main session's server-side cache. */
+   *  primary — key motivation: prevent server-side-cache providers (GLM/Kimi
+   *  implicit caches, Codex) review workers from evicting the main session's cache. */
   reviewOverrideCards?: Map<string, ModelCapabilityCard>
   /** V3 Component B: domain knowledge store for precipitate/recall lifecycle.
    *  When provided, coordinator auto-precipitates lessons from worker results. */
