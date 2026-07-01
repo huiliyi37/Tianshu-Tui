@@ -395,7 +395,7 @@ export function Composer(props: {
     //  2. Fallback to DataTransfer.files (some platforms only populate this).
     // Deduplicate by name:size since items and files overlap.
     const seen = new Set<string>()
-    const pasted: File[] = []
+    const pasted: { file: File; mimeHint?: string }[] = []
     const items = e.clipboardData.items
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!
@@ -405,7 +405,9 @@ export function Composer(props: {
       const key = `${f.name}:${f.size}:${f.lastModified}`
       if (!seen.has(key)) {
         seen.add(key)
-        pasted.push(f)
+        // item.type is the clipboard's declared MIME (most trustworthy).
+        // f.type may be empty on macOS/Windows clipboard images.
+        pasted.push({ file: f, mimeHint: item.type || undefined })
       }
     }
     // Fallback: platforms where .files is the sole source (e.g. drag-into-window).
@@ -413,13 +415,19 @@ export function Composer(props: {
       const key = `${f.name}:${f.size}:${f.lastModified}`
       if (!seen.has(key)) {
         seen.add(key)
-        pasted.push(f)
+        pasted.push({ file: f })
       }
     }
 
-    const imageFiles = pasted.filter(f => isImageFile(f))
-    const textFiles = pasted.filter(f => isTextFile(f) && !isImageFile(f))
-    const unsupportedFiles = pasted.filter(f => isUnsupportedFile(f))
+    const classify = (p: typeof pasted[0]) => {
+      const fileLike = { type: p.mimeHint || p.file.type, name: p.file.name }
+      return { file: p.file, fileLike }
+    }
+
+    const classified = pasted.map(classify)
+    const imageFiles = classified.filter(c => isImageFile(c.fileLike)).map(c => c.file)
+    const textFiles = classified.filter(c => isTextFile(c.fileLike) && !isImageFile(c.fileLike)).map(c => c.file)
+    const unsupportedFiles = classified.filter(c => isUnsupportedFile(c.fileLike)).map(c => c.file)
 
     if (imageFiles.length === 0 && textFiles.length === 0 && unsupportedFiles.length === 0) return
 
