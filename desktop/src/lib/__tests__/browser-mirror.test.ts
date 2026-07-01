@@ -75,6 +75,12 @@ test('keeps the latest non-screenshot text as extracted text', () => {
 
 test('localhost URLs are treated as navigable', () => {
   const s = deriveBrowserState([tool('tu-1', 'open localhost:3000/app')])
-  assert.equal(s.currentUrl, 'localhost:3000/app')
+  assert.equal(s.currentUrl, 'http://localhost:3000/app')
   assert.equal(s.timeline.length, 1)
+  assert.equal(s.timeline[0]!.url, 'http://localhost:3000/app')
+})
+
+test('127.0.0.1 URLs receive an implied http:// scheme', () => {
+  const s = deriveBrowserState([tool('tu-1', 'navigate 127.0.0.1:8080')])
+  assert.equal(s.currentUrl, 'http://127.0.0.1:8080')
 })

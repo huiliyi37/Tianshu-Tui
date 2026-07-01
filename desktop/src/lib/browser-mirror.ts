@@ -58,7 +58,16 @@ function cleanUrl(raw: string): string {
 }
 
 function isUrlish(s: string): boolean {
-  return /^https?:\/\//i.test(s) || /^localhost(:\d+)?/i.test(s) || /^127\.0\.0\.1(:\d+)?/.test(s)
+  return /^https?:\/\//i.test(s) || /^localhost(:\d+)?/i.test(s) || /^127\.0\.0\.1(:\d+)?/i.test(s)
+}
+
+/** Ensure localhost/loopback URLs carry a scheme so downstream consumers (e.g.
+ *  the "open in system browser" button) receive a valid http:// URL. */
+function normalizeUrl(raw: string): string {
+  const url = cleanUrl(raw)
+  if (/^https?:\/\//i.test(url)) return url
+  if (/^(localhost|127\.0\.0\.1)/i.test(url)) return `http://${url}`
+  return url
 }
 
 /**
@@ -80,7 +89,7 @@ export function deriveBrowserState(blocks: ReadonlyArray<ConvoBlock>): BrowserMi
       const action = (sp === -1 ? text : text.slice(0, sp)).trim()
       const detail = sp === -1 ? '' : text.slice(sp + 1).trim()
       if (NAV_ACTIONS.has(action) && detail && isUrlish(detail)) {
-        const url = cleanUrl(detail)
+        const url = normalizeUrl(detail)
         timeline.push({ action, url, key: b.key })
         currentUrl = url // intent; a following result may confirm/redirect
       }
@@ -93,7 +102,7 @@ export function deriveBrowserState(blocks: ReadonlyArray<ConvoBlock>): BrowserMi
       const shot = text.match(ARTIFACT_RE)
       if (shot) latestScreenshotArtifactId = shot[1]!
       const nav = text.match(NAVIGATED_RE) ?? text.match(SCREENSHOT_OF_RE)
-      if (nav) currentUrl = cleanUrl(nav[1]!)
+      if (nav) currentUrl = normalizeUrl(nav[1]!)
       // A textual extraction (snapshot/eval/console/network/status) — keep the
       // latest non-screenshot result so the panel can show what the agent read.
       if (!shot && text.trim()) latestText = text.trim()
