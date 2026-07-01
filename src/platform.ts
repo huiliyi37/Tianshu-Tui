@@ -174,9 +174,13 @@ export function resolveShellCommand(deps: ShellProbeDeps): ShellCommand {
     // model is bash-biased; power users who want native cmdlets set this.
     const forcePwsh = /^(1|true|yes)$/i.test(deps.env['RIVET_USE_POWERSHELL'] ?? '')
     if (!forcePwsh && deps.gitBashPath) {
-      // -l (login) so /etc/profile puts Git's usr/bin on PATH → coreutils
-      // (ls/cat/grep) work, not just bash builtins.
-      return { cmd: deps.gitBashPath, args: ['-l', '-c'], kind: 'bash' }
+      // Plain `-c` (对齐 Claude Code)，不走 `-l` 登录 shell。coreutils
+      // (ls/cat/grep) 已在 Git 的 usr/bin 内、随 bash.exe 自动上 PATH，无需 -l。
+      // `-l` 会源 /etc/profile 重建 PATH，在 MSYS2_PATH_TYPE 非 inherit 时会把
+      // 宿主 Windows PATH 洗掉 → 商店版 Python 的 py/python 等原生命令在 Git Bash
+      // 里调不动（PowerShell 能用、bash 工具不能用的元凶之一）。去掉 -l 后子进程
+      // 直接继承 spawn 传入的完整 Windows PATH，原生命令可正常调用；也更快。
+      return { cmd: deps.gitBashPath, args: ['-c'], kind: 'bash' }
     }
     for (const cmd of ['pwsh.exe', 'powershell.exe']) {
       if (deps.hasPwsh(cmd)) {

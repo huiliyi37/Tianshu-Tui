@@ -45,6 +45,16 @@ describe('classifyBashOutcome: Windows 感知的命令结果分类', () => {
     assert.equal(r.isError, true)
     assert.equal(r.errorClass, 'exec-failure')
   })
+  it('Windows + Git Bash 的 POSIX 未找到 (127 / command not found) → environment 类', () => {
+    // Git Bash 是 Windows 首选 shell，未找到是 POSIX 风格：exit 127 + "bash: py: command not found"
+    const r = classifyBashOutcome(127, 'bash: py: command not found', true)
+    assert.equal(r.isError, true)
+    assert.equal(r.errorClass, 'environment')
+    // 126 (not executable) 同样归 environment
+    assert.equal(classifyBashOutcome(126, '', true).errorClass, 'environment')
+    // 仅凭 stderr 文案也能识别（即便退出码非 127）
+    assert.equal(classifyBashOutcome(1, 'bash: foo: command not found', true).errorClass, 'environment')
+  })
   it('POSIX 127/126 → environment 类，信号 → exec-failure', () => {
     assert.equal(classifyBashOutcome(127, 'sh: foo: command not found', false).errorClass, 'environment')
     assert.equal(classifyBashOutcome(126, '', false).errorClass, 'environment')

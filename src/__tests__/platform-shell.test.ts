@@ -80,11 +80,11 @@ describe('resolveShellCommand — Windows priority Git Bash > PowerShell > cmd',
     ...over,
   })
 
-  it('prefers Git Bash with login shell args', () => {
+  it('prefers Git Bash with plain -c (no login shell, aligns with Claude Code)', () => {
     const shell = resolveShellCommand(winDeps({ gitBashPath: 'C:\\Git\\bin\\bash.exe' }))
     assert.equal(shell.kind, 'bash')
     assert.equal(shell.cmd, 'C:\\Git\\bin\\bash.exe')
-    assert.deepEqual(shell.args, ['-l', '-c'])
+    assert.deepEqual(shell.args, ['-c'])
   })
 
   it('falls back to PowerShell with -NonInteractive when Git Bash absent', () => {
