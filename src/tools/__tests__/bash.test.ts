@@ -243,4 +243,33 @@ describe('sanitizeEnv', () => {
     assert.equal(result.LANG, 'en_US.UTF-8')
     assert.equal(result.LC_ALL, 'en_US.UTF-8')
   })
+
+  it('preserves toolchain vars (JAVA_HOME/MAVEN_HOME/M2_HOME/GRADLE_HOME/GOPATH)', () => {
+    const env = {
+      ...process.env,
+      JAVA_HOME: '/opt/jdk',
+      MAVEN_HOME: '/opt/maven',
+      M2_HOME: '/opt/maven',
+      GRADLE_HOME: '/opt/gradle',
+      GOPATH: '/home/u/go',
+      ANDROID_HOME: '/opt/android',
+      NVM_DIR: '/home/u/.nvm',
+    }
+    const result = sanitizeEnv(env)
+    assert.equal(result.JAVA_HOME, '/opt/jdk')
+    assert.equal(result.MAVEN_HOME, '/opt/maven')
+    assert.equal(result.M2_HOME, '/opt/maven')
+    assert.equal(result.GRADLE_HOME, '/opt/gradle')
+    assert.equal(result.GOPATH, '/home/u/go')
+    assert.equal(result.ANDROID_HOME, '/opt/android')
+    assert.equal(result.NVM_DIR, '/home/u/.nvm')
+  })
+
+  it('still strips sensitive vars even when toolchain-adjacent (e.g. *_TOKEN)', () => {
+    const env = { ...process.env, JAVA_HOME: '/opt/jdk', MAVEN_TOKEN: 'shh', GRADLE_API_KEY: 'k' }
+    const result = sanitizeEnv(env)
+    assert.equal(result.JAVA_HOME, '/opt/jdk')
+    assert.equal(result.MAVEN_TOKEN, undefined)
+    assert.equal(result.GRADLE_API_KEY, undefined)
+  })
 })

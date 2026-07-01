@@ -18,6 +18,11 @@ export interface PythonEnvInfo {
   uv: ToolVersion
   git: ToolVersion
   node: ToolVersion
+  /** JVM toolchain — surfaced so /doctor can show whether GUI-launched PATH
+   *  resolution actually recovered them (the maven/java pain point). */
+  java: ToolVersion
+  maven: ToolVersion
+  gradle: ToolVersion
   platform: NodeJS.Platform
 }
 
@@ -46,10 +51,10 @@ function platformName(platform: NodeJS.Platform): string {
 }
 
 /** Try to locate a command on PATH and return its absolute path if found. */
-export async function which(command: string): Promise<string | undefined> {
+export async function which(command: string, env?: NodeJS.ProcessEnv): Promise<string | undefined> {
   try {
     const shell = process.platform === 'win32' ? 'where' : 'which'
-    const { stdout } = await execFileAsync(shell, [command], { timeout: 5000 })
+    const { stdout } = await execFileAsync(shell, [command], { timeout: 5000, env: env ?? process.env })
     const first = stdout.split('\n')[0]?.trim()
     return first && first.length > 0 ? first : undefined
   } catch {
@@ -57,10 +62,12 @@ export async function which(command: string): Promise<string | undefined> {
   }
 }
 
-async function getVersion(command: string, args: string[]): Promise<string | undefined> {
+async function getVersion(command: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync(command, args, { timeout: 5000 })
-    const line = stdout.split('\n')[0]?.trim()
+    // `java -version` / some tools print the version to stderr — fall back to it.
+    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 5000, env: env ?? process.env })
+    const source = (stdout && stdout.trim().length > 0) ? stdout : stderr
+    const line = source.split('\n')[0]?.trim()
     return line && line.length > 0 ? line : undefined
   } catch {
     return undefined
@@ -70,33 +77,44 @@ async function getVersion(command: string, args: string[]): Promise<string | und
 async function detectTool(
   commands: string[],
   versionArgs: string[],
+  env?: NodeJS.ProcessEnv,
 ): Promise<ToolVersion> {
   for (const command of commands) {
-    const path = await which(command)
+    const path = await which(command, env)
     if (path) {
-      const version = await getVersion(path, versionArgs)
+      const version = await getVersion(path, versionArgs, env)
       return { available: true, command, path, version }
     }
   }
   return { available: false, command: commands[0] ?? '' }
 }
 
-/** Detect Python, uv, git, node availability on the host. */
-export async function detectEnv(cwd?: string): Promise<PythonEnvInfo> {
+/**
+ * Detect Python, uv, git, node + JVM toolchain availability. Pass `env` to probe
+ * against the *resolved* PATH (see resolved-env.ts) instead of the raw process
+ * PATH — that's what `/doctor` does so it reflects what the agent can actually run.
+ */
+export async function detectEnv(cwd?: string, env?: NodeJS.ProcessEnv): Promise<PythonEnvInfo> {
   const pythonCommands = process.platform === 'win32'
     ? ['python', 'py', 'python3']
     : ['python3', 'python']
-  const [python, uv, git, node] = await Promise.all([
-    detectTool(pythonCommands, ['--version']),
-    detectTool(['uv'], ['--version']),
-    detectTool(['git'], ['--version']),
-    detectTool(['node'], ['--version']),
+  const [python, uv, git, node, java, maven, gradle] = await Promise.all([
+    detectTool(pythonCommands, ['--version'], env),
+    detectTool(['uv'], ['--version'], env),
+    detectTool(['git'], ['--version'], env),
+    detectTool(['node'], ['--version'], env),
+    detectTool(['java'], ['-version'], env),
+    detectTool(['mvn'], ['--version'], env),
+    detectTool(['gradle'], ['--version'], env),
   ])
   return {
     python,
     uv,
     git,
     node,
+    java,
+    maven,
+    gradle,
     platform: process.platform,
   }
 }

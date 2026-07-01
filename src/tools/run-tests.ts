@@ -7,6 +7,7 @@ import { WinStreamDecoder } from '../platform.js'
 import { spawnHidden } from './spawn-hidden.js'
 import { killProcessTree } from './process-kill.js'
 import { persistRawOutput, buildUiOutput } from './output-store.js'
+import { getResolvedEnv } from './resolved-env.js'
 
 interface RunnableTestCommand {
   type: 'run'
@@ -456,10 +457,15 @@ function truncateOutput(output: string): string {
 function buildExecutionEnv(cwd: string): NodeJS.ProcessEnv {
   const localBin = join(cwd, 'node_modules', '.bin')
   const repoBin = join(process.cwd(), 'node_modules', '.bin')
-  const currentPath = process.env.PATH ?? ''
+  // Base off the resolved env so test runners that shell out to toolchain
+  // commands (mvn/gradle/java) find them under a GUI-launched minimal PATH.
+  const base = getResolvedEnv(cwd)
+  // PATH may be spelled `Path` on Windows — look it up case-insensitively.
+  const pathKey = Object.keys(base).find(k => k.toLowerCase() === 'path') ?? 'PATH'
+  const currentPath = base[pathKey] ?? ''
   return {
-    ...process.env,
-    PATH: [localBin, repoBin, currentPath].filter(Boolean).join(delimiter),
+    ...base,
+    [pathKey]: [localBin, repoBin, currentPath].filter(Boolean).join(delimiter),
   }
 }
 

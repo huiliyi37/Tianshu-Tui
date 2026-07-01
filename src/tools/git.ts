@@ -6,6 +6,7 @@ import { auditCommitTagScope } from './commit-audit.js'
 import { createWorkspaceGuard } from '../agent/workspace-guard.js'
 import { killProcessTree } from './process-kill.js'
 import { WinStreamDecoder } from '../platform.js'
+import { getResolvedEnv } from './resolved-env.js'
 
 const ACTIONS = ['status', 'diff_summary', 'commit', 'log', 'log_graph', 'stash', 'stash_pop'] as const
 type GitAction = (typeof ACTIONS)[number]
@@ -25,6 +26,9 @@ async function runGit(args: string[], cwd: string, abortSignal?: AbortSignal): P
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, {
       cwd,
+      // Resolve the real PATH so `git` is found even under a GUI-launched minimal
+      // env (Explorer/Finder/Dock) — same fix the bash tool uses.
+      env: getResolvedEnv(cwd),
       stdio: ['ignore', 'pipe', 'pipe'],
       // detached: true breaks stdio pipes on Windows — see bash.ts fix for details.
       detached: process.platform !== 'win32',

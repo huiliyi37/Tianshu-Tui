@@ -76,6 +76,9 @@ describe('env-check', () => {
         uv: { available: false, command: 'uv' },
         git: { available: false, command: 'git' },
         node: { available: true, command: 'node', version: 'v20.0.0' },
+        java: { available: false, command: 'java' },
+        maven: { available: false, command: 'mvn' },
+        gradle: { available: false, command: 'gradle' },
         platform: 'darwin',
       })
       assert.ok(text.includes('brew install python'))
@@ -88,6 +91,9 @@ describe('env-check', () => {
         uv: { available: false, command: 'uv' },
         git: { available: true, command: 'git', version: '2.40.0' },
         node: { available: true, command: 'node', version: 'v20.0.0' },
+        java: { available: false, command: 'java' },
+        maven: { available: false, command: 'mvn' },
+        gradle: { available: false, command: 'gradle' },
         platform: 'linux',
       })
       assert.ok(text.includes('uv'))

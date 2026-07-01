@@ -61,6 +61,7 @@ import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDen
 import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
+import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
 import { getShellCommand } from '../platform.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
@@ -808,16 +809,24 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { pushStatic, setIsStreaming, agent } = ctx
-      const env = await detectEnv(agent.cwd)
+      // Probe against the RESOLVED env (not raw process env) so results reflect
+      // what the agent can actually run after GUI-launch PATH recovery.
+      const resolved = getResolvedEnv(agent.cwd)
+      const env = await detectEnv(agent.cwd, resolved)
       const shell = getShellCommand()
+      const toolLine = (label: string, t: { available: boolean; command?: string; version?: string }): string =>
+        `${label} ${t.available ? `已安装 (${t.version ?? t.command ?? 'unknown'})` : '未安装 / 未在 PATH'}`
       const lines = [
         '环境体检 (/doctor)',
         '═══════════════════════',
         `平台: ${env.platform}`,
-        `Node: ${env.node.available ? `已安装 (${env.node.version ?? 'unknown'})` : '未安装'}`,
-        `Git:  ${env.git.available ? `已安装 (${env.git.version ?? 'unknown'})` : '未安装'}`,
-        `Python: ${env.python.available ? `${env.python.command} (${env.python.version ?? 'unknown'})` : '未安装'}`,
-        `uv:   ${env.uv.available ? `已安装 (${env.uv.version ?? 'unknown'})` : '未安装'}`,
+        toolLine('Node:  ', env.node),
+        toolLine('Git:   ', env.git),
+        toolLine('Python:', env.python),
+        toolLine('uv:    ', env.uv),
+        toolLine('Java:  ', env.java),
+        toolLine('Maven: ', env.maven),
+        toolLine('Gradle:', env.gradle),
         '',
         'Shell (bash 工具实际使用)',
         '───────────────────────',
@@ -827,6 +836,31 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         lines.push('', '⚠ Windows 未使用 Git Bash — 命令执行已退回 ' + shell.kind + '。')
         lines.push('  安装 Git for Windows 可获得更可靠的 POSIX 命令执行。')
       }
+
+      // PATH recovery diff: show what the resolver added on top of the raw
+      // process PATH, so the user knows whether GUI-launch recovery kicked in and
+      // what to add to `env.extraPath` if a tool is still missing.
+      const diff = getResolvedPathDiff(agent.cwd)
+      lines.push('', 'PATH 解析 (GUI 启动兜底)', '───────────────────────')
+      lines.push(`process PATH 条目: ${diff.processPath.length}   resolved PATH 条目: ${diff.resolvedPath.length}`)
+      if (diff.added.length > 0) {
+        lines.push('已补全以下目录（进程 PATH 缺失）:')
+        for (const d of diff.added.slice(0, 20)) lines.push(`  + ${d}`)
+        if (diff.added.length > 20) lines.push(`  … 及另外 ${diff.added.length - 20} 项`)
+      } else {
+        lines.push('resolved PATH 与 process PATH 一致（无需补全）。')
+      }
+      const stillMissing = [
+        !env.git.available ? 'git' : null,
+        !env.java.available ? 'java' : null,
+        !env.maven.available ? 'mvn' : null,
+        !env.gradle.available ? 'gradle' : null,
+      ].filter(Boolean)
+      if (stillMissing.length > 0) {
+        lines.push('', `仍未找到: ${stillMissing.join(', ')}`)
+        lines.push('若已安装，请把其可执行目录加入配置 env.extraPath（数组），或设置对应的 *_HOME 变量后重启天枢。')
+      }
+
       const guidance = formatEnvGuidance(env)
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') }))
       setIsStreaming(false)
