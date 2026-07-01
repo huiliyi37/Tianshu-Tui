@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="Tianshu Banner" width="100%">
+  <img src="docs/brand/assets/tianshu-banner-dark.jpg" alt="天枢 Tianshu" width="100%">
 </p>
+
+<h1 align="center">天枢 <sub>Tianshu</sub></h1>
 
 <p align="center">
   <b>把星辰带给每一位开发者 · Models as partners, not tools.</b>
