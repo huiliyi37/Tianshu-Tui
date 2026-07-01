@@ -9,6 +9,7 @@
  * - preparing (loop.ts pre-stream chain)
  * - working (loop.ts stream start)
  * - tool-hint (loop.ts tool call hint)
+ * - stop-reason (loop.ts / turn-orchestrator — why the turn loop ended)
  */
 export function phaseStatusLabel(
   phase: string,
@@ -20,6 +21,7 @@ export function phaseStatusLabel(
     case 'preparing': return 'preparing…'
     case 'working': return detail?.reason ?? 'working…'
     case 'tool-hint': return detail?.tool ? `preparing ${detail.tool}…` : 'preparing…'
+    case 'stop-reason': return detail?.reason ?? null
     default: return null
   }
 }

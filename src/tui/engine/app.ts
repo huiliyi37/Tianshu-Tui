@@ -1478,6 +1478,14 @@ export class TuiApp {
         this.deactivateOverlay()
         return true
       }
+      if (c === 's') {
+        const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
+        if (entry && this.overlayController.getThemePickerSaveDefaultExec()) {
+          this.overlayController.getThemePickerSaveDefaultExec()?.(entry.name)
+        }
+        this.deactivateOverlay()
+        return true
+      }
       return false
     }
 
@@ -2419,6 +2427,10 @@ export class TuiApp {
     // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
     const isWatchdog = reason?.startsWith('watchdog')
     const isWatchdogGoal = reason === 'watchdog:goal'
+    // 收敛/连续无工具硬中断：这是守护开火，不是用户中断。以往走 onAbort() 无
+    // reason，显示成裸 "⏹ Interrupted"，与用户按 Esc 无法区分。给它一条带判据的
+    // 标注，并**不自动续跑**（模型可能在推理，注入 continue 反而扰乱；用户可自行键入）。
+    const isConvergence = reason?.startsWith('convergence')
     // Goal-mode auto-continue is bounded: a turn that re-stalls every
     // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
     // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
@@ -2426,13 +2438,18 @@ export class TuiApp {
     // plain interrupt so the user can intervene.
     const autoContinueExhausted = isWatchdogGoal
       && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
+    const convergenceLabel = reason === 'convergence:no-tool'
+      ? '⏹ 收敛守护中断：连续多轮未调用工具（如仍在推进，键入 continue 继续）'
+      : '⏹ 收敛守护中断：多轮未收敛（如仍在推进，键入 continue 继续）'
     this.commitAbove(() => {
       this.commit.write({
         text: isWatchdog && !autoContinueExhausted
           ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
           : autoContinueExhausted
             ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
-            : color('⏹ Interrupted', this.theme.muted),
+            : isConvergence
+              ? color(convergenceLabel, this.theme.muted)
+              : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
@@ -3105,7 +3122,7 @@ export class TuiApp {
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
-  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -3113,6 +3130,7 @@ export class TuiApp {
     this.overlayController.setDomainPickerExec(domainPickerExec)
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
+    this.overlayController.setThemePickerSaveDefaultExec(themePickerSaveDefaultExec)
     this.overlayController.setChoicePanelExec(choicePanelExec)
     this.overlayController.setConnectExec(connectExec)
     // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）

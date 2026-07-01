@@ -61,6 +61,20 @@ export interface ConvergenceResult {
   shouldForceSplit: boolean
   /** Individual signal values for diagnostics */
   signals: ConvergenceSignals
+  /**
+   * When shouldAbort is true, why. 'no-tool' = consecutive no-tool hard cap;
+   * 'score' = score-based level-3 abort. undefined when not aborting. Lets the
+   * loop tag the stop-reason accurately without re-deriving the cause.
+   */
+  abortCause?: 'no-tool' | 'score'
+  /**
+   * Whether the model was still emitting fresh, substantial, non-repetitive
+   * analysis (producingReport) when this was evaluated. When true, a no-tool /
+   * score escalation is downgraded from a hard abort to a kick — a deep-reasoning
+   * model narrating multi-turn analysis is thinking, not spinning. Surfaced so a
+   * near-miss (reasoning that almost got熔断) is diagnosable.
+   */
+  reasoningActive: boolean
 }
 
 export interface ConvergenceSignals {
@@ -701,10 +715,21 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     : 1.0
   const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4) && productiveRatio === 0 && !producingReport
 
+  // Reasoning-aware no-tool handling. A model that keeps emitting fresh,
+  // substantial, non-repetitive analysis on each no-tool turn is reasoning
+  // through the problem (deep-thinking models legitimately narrate multi-turn
+  // analysis before acting), NOT spinning in a text-only loop. `producingReport`
+  // is the established "legitimate text deliverable" discriminator (non-repetitive
+  // + substantial ≥200 chars); reuse it so such turns are nudged (kick) rather
+  // than hard-killed. Genuine spin (repetitive / thin text) keeps producingReport
+  // false → the hard abort still fires. This is the core fix for the "他在推理，
+  // 但我们以为他终端" false circuit-break.
+  const reasoningActive = producingReport
+
   if (noToolCount >= NO_TOOL_ABORT_THRESHOLD) {
-    level = 3 // force abort — model is clearly stuck in a text-only loop
+    level = reasoningActive ? 2 : 3 // fresh reasoning → kick, not kill
   } else if (noToolCount >= 2 && isGlm) {
-    level = 3 // GLM: 2 consecutive no-tool turns → hard abort (faster than kick)
+    level = reasoningActive ? 2 : 3 // GLM: 2 no-tool turns → abort unless reasoning
   } else if (noToolCount >= 3) {
     level = 2 // kick on 3+ consecutive no-tool turns
   } else if (noToolCount >= 2 && turn >= 4) {
@@ -731,11 +756,17 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     level = 1
   }
 
-  const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD
-  const shouldAbort = (level >= 3 && score < 0.1) || noToolForceAbort
+  const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD && !reasoningActive
+  // Never hard-abort or force-split a model that is visibly reasoning (emitting
+  // fresh substantial analysis) — only kick. A model producing new content each
+  // turn is making progress by definition; killing it is the false circuit-break
+  // we are eliminating. Genuine stalls (repetitive/thin text) have
+  // reasoningActive=false, so the guards below still bite.
+  const scoreAbort = level >= 3 && score < 0.1
+  const shouldAbort = !reasoningActive && (scoreAbort || noToolForceAbort)
   // Session split is pointless for no-tool stagnation — the problem is model
   // behavior, not context size.  Only split on score-based level 3.
-  const shouldForceSplit = level >= 3 && !noToolForceAbort
+  const shouldForceSplit = !reasoningActive && level >= 3 && !noToolForceAbort
   const shouldKick = level >= 2
   const injectedMessage = (level >= 2)
     ? buildInjectedMessage(level as 2 | 3, score, signals, input.phaseClass, tier, input.evidenceState.deliveryStatus, noToolCount, productiveStagnation)
@@ -749,5 +780,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     shouldKick,
     shouldForceSplit,
     signals,
+    abortCause: shouldAbort ? (noToolForceAbort ? 'no-tool' : 'score') : undefined,
+    reasoningActive,
   }
 }

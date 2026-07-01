@@ -34,6 +34,12 @@ describe('S3: phaseStatusLabel', () => {
   it('maps tool-hint without tool name', () => {
     assert.equal(phaseStatusLabel('tool-hint'), 'preparing…')
   })
+  it('maps stop-reason with reason', () => {
+    assert.equal(phaseStatusLabel('stop-reason', { reason: '✓ 任务完成（模型主动收尾）' }), '✓ 任务完成（模型主动收尾）')
+  })
+  it('returns null for stop-reason without a reason', () => {
+    assert.equal(phaseStatusLabel('stop-reason'), null)
+  })
 
   // --- 未知 phase → null（不覆盖 heartbeatStatus）---
   it('returns null for unmapped phases', () => {

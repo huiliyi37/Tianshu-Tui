@@ -757,6 +757,69 @@ describe('evaluateConvergence', () => {
     })
   })
 
+  // ── Reasoning-aware no-tool abort ──
+  // A deep-reasoning model can legitimately narrate multi-turn analysis (fresh,
+  // substantial, non-repetitive text) with no tool call before it acts. That is
+  // reasoning, not a text-only spin — it must NOT be hard-killed (the "他在推理，
+  // 但我们以为他终端" false circuit-break). Genuine spin (repetitive / thin text)
+  // still aborts.
+  describe('reasoning-aware no-tool abort', () => {
+    // Three distinct long analysis turns → producingReport=true (non-repetitive
+    // + ≥200 chars). Reuses the incident-shaped report fingerprints.
+    const freshReasoning = [
+      '代码审查结果 严重问题 1 测试套件无法运行 conftest 缺失 测试文件 test_scoring 导入了 make_flat_kline make_uptrend_kline make_limit_up_streaks 三个工厂函数以及 flat_df limit_up_df 两个 pytest fixture 但项目根目录与 tests 目录下都没有 conftest 定义它们 运行 pytest 会在 collection 阶段直接报 fixture not found 整个测试套件无法启动 需要新增 conftest 补齐这些 fixture 与工厂函数的定义和导入 否则任何回归验证都无法进行',
+      '中等问题 config 模块中 SCREENING 字段在第 18 行定义但通篇没有任何模块 import 或引用它 ZONE_MIN_VOLUME 常量同样在配置里定义却没有任何消费方 grep 全仓零命中 属于典型的死配置 updater 模块顶部还存在一处从 legacy_utils 的死导入 引入后从未使用 建议统一清理这些未使用符号 并为确需保留的字段补充真实消费方 避免配置与代码之间形成死接线',
+      'updater 起算日逻辑反转 update_daily_kline 函数中有两处计算起始日期 sd 都写成了 min date today minus timedelta 与已有最早日期 取 min 会永远选中更早的那个日期 导致每次增量更新都从很久以前重新拉取 既浪费带宽也可能覆盖已修正数据 正确做法应该是按最近一个交易日向前回溯固定窗口 用 max 锚定到最新边界 否则增量窗口计算方向完全错误 需要尽快修正这两处边界条件',
+    ]
+
+    it('does NOT hard-abort at 5 no-tool turns when reasoning is still fresh (kick instead)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 20,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: [],
+        noToolTurnCount: 5,
+        textFingerprints: freshReasoning,
+      }))
+      assert.equal(result.reasoningActive, true, 'fresh substantial text → reasoningActive')
+      assert.equal(result.shouldAbort, false, 'a reasoning model must NOT be hard-killed on the no-tool cap')
+      assert.equal(result.shouldForceSplit, false, 'reasoning model must not be force-split either')
+      assert.equal(result.abortCause, undefined, 'no abort → no abortCause')
+      assert.ok(result.shouldKick, 'still kick to nudge toward action')
+      assert.equal(result.level, 2, 'downgraded from hard-abort level 3 to kick level 2')
+    })
+
+    it('STILL hard-aborts at 5 no-tool turns when text is repetitive (genuine spin)', () => {
+      const repeated = freshReasoning[0]!
+      const result = evaluateConvergence(baseInput({
+        turn: 20,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: [],
+        noToolTurnCount: 5,
+        textFingerprints: [repeated, repeated, repeated, repeated, repeated],
+      }))
+      assert.equal(result.reasoningActive, false, 'repetitive text → not reasoning')
+      assert.equal(result.shouldAbort, true, 'genuine text-only spin must still abort')
+      assert.equal(result.abortCause, 'no-tool', 'abort cause is the no-tool hard cap')
+      assert.equal(result.level, 3, 'stays at hard-abort level 3')
+    })
+
+    it('STILL hard-aborts at 5 no-tool turns with no text at all (empty spin)', () => {
+      const result = evaluateConvergence(baseInput({
+        turn: 20,
+        phaseClass: 'explore',
+        contextWindow: 200_000,
+        recentToolHistory: [],
+        noToolTurnCount: 5,
+        // no textFingerprints → not producing a report → not reasoning
+      }))
+      assert.equal(result.reasoningActive, false)
+      assert.equal(result.shouldAbort, true, 'no-content no-tool spin must still abort')
+      assert.equal(result.abortCause, 'no-tool')
+    })
+  })
+
   // ── Early-exit does not override no-tool stagnation ──
 
   describe('early-exit vs no-tool stagnation', () => {

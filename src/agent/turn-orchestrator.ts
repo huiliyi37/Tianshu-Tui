@@ -21,6 +21,7 @@ import { classifyApiError } from '../api/error-classifier.js'
 import type { GoalContinuationController } from './goal-continuation.js'
 import type { PostTurnDecisionController } from './post-turn-decision.js'
 import type { TelemetryRecord } from './telemetry-writer.js'
+import { emitStopReason, type StopReason } from './stop-reason.js'
 import { debugLog } from '../utils/debug.js'
 
 // ── Types re-exported for deps interface ──
@@ -253,6 +254,20 @@ const MAX_RULE_RETRIES = 2
 
 export class TurnOrchestrator {
   constructor(private deps: TurnOrchestratorDeps) {}
+
+  /**
+   * Surface a structured stop-reason for a loop-terminating path (why the turn
+   * loop ended). Routes through debugLog + telemetry + onPhaseChange so a
+   * premature guard-forced stop is distinguishable from a voluntary finish. No
+   * history rewrite — prefix-cache safe.
+   */
+  private emitStop(reason: StopReason, callbacks: AgentCallbacks): void {
+    emitStopReason(reason, {
+      debug: debugLog,
+      telemetry: rec => this.deps.writeTelemetry(rec as TelemetryRecord),
+      onPhaseChange: callbacks.onPhaseChange,
+    })
+  }
 
   /**
    * Execute the full turn loop for a single run() invocation.
@@ -706,6 +721,7 @@ export class TurnOrchestrator {
           // endTurn signal: a tool (e.g. ask_user_question) requested turn termination.
           // Complete as final and break instead of continuing the tool loop.
           if (r.endTurn) {
+            this.emitStop({ source: 'end-turn', turn, voluntary: true }, callbacks)
             await rejectOnAbort(
               this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
               signal!,
@@ -771,6 +787,9 @@ export class TurnOrchestrator {
         if (phantomResult.shouldContinue) continue
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
+        // Voluntary finish — the model produced a final answer with no tool call
+        // and neither goal nor phantom continuation asked to keep going.
+        this.emitStop({ source: 'natural-finish', turn, voluntary: true }, callbacks)
         await rejectOnAbort(
           this.deps.completeTurn({
             turn,
@@ -791,7 +810,16 @@ export class TurnOrchestrator {
       // isStreaming) and the next user message starts a fresh run instead of
       // silently landing in the steer buffer.
       if (!finalTurnCompleted) {
-        debugLog(`[agent] maxTurns=${this.deps.getMaxTurns()} exhausted without a final turn — emitting final onTurnComplete`)
+        // maxTurns is a GUARD-forced stop, not a voluntary finish — surface it
+        // as such so a task cut off mid-work is distinguishable from a model
+        // that wrapped up on its own. (The onTurnComplete below still resets the
+        // TUI state machine.)
+        this.emitStop({
+          source: 'max-turns',
+          turn: this.deps.getMaxTurns(),
+          voluntary: false,
+          detail: 'exhausted without a final turn',
+        }, callbacks)
         callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
       }
     } catch (err) {

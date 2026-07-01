@@ -13,6 +13,7 @@ import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels, getDoomLoopThresholds } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
 import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
+import { emitStopReason, stopReasonAbortTag, type StopReason } from './stop-reason.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
@@ -199,6 +200,8 @@ export class AgentLoop {
   /** U6: most recent convergence-detector result — consumed by the replan loop's
    *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
   latestConvergenceResult: ConvergenceResult | null = null
+  /** Most recent structured stop-reason (why the last turn loop ended). */
+  latestStopReason: StopReason | null = null
   /** Fix 1 — convergence emission cooldown. The L2 side-effects (改道 card via
    *  onDecisionShift, convergence-warning phase change, and the advisory nudge)
    *  are throttled so a persistent stuck-state (e.g. a legitimately read-heavy
@@ -1500,13 +1503,28 @@ export class AgentLoop {
     }
 
     if (convergenceCheck.shouldAbort) {
-      const noToolInfo = this.consecutiveNoToolTurns >= 5 ? ` noToolTurns=${this.consecutiveNoToolTurns}` : ''
-      debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`)
-      callbacks.onPhaseChange?.('convergence-abort', {
-        reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`,
+      // Structured stop-reason: distinguish the no-tool hard cap from a
+      // score-based abort, and tag whether the model was still reasoning (a
+      // near-miss that would previously have been a silent false熔断). This is
+      // the "反面找被熔断的原因" observability — emitted via debugLog +
+      // onPhaseChange, and the onAbort tag lets the TUI render a labeled stop
+      // instead of a bare "⏹ Interrupted" (which looked like a user interrupt).
+      const stopReason: StopReason = {
+        source: convergenceCheck.abortCause === 'no-tool' ? 'no-tool-abort' : 'convergence-abort',
+        turn,
+        voluntary: false,
+        score: convergenceCheck.score,
+        level: convergenceCheck.level,
+        noToolTurnCount: this.consecutiveNoToolTurns,
+        reasoningActive: convergenceCheck.reasoningActive,
+      }
+      emitStopReason(stopReason, {
+        record: r => { this.latestStopReason = r },
+        debug: debugLog,
+        onPhaseChange: callbacks.onPhaseChange,
       })
       if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-      callbacks.onAbort()
+      callbacks.onAbort(stopReasonAbortTag(stopReason))
       return { action: 'abort' }
     }
 
