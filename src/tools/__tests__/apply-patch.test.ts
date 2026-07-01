@@ -82,4 +82,37 @@ index 2e65efe..a2005b8 100644
     assert.equal(result.isError, true)
     assert.match(result.content, /requires a non-empty/)
   })
+
+  it('normalizes Windows-style backslash paths in diff headers', async () => {
+    const windowsDiff = validDiff.replace(/a\/file\.txt/g, 'a\\file.txt').replace(/b\/file\.txt/g, 'b\\file.txt')
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: windowsDiff },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.ok(!result.isError, result.content)
+    assert.ok(result.uiContent!.includes('--- a/file.txt'), 'header path was normalized')
+    assert.ok(result.uiContent!.includes('+++ b/file.txt'), 'header path was normalized')
+    assert.equal(readFileSync(join(repoDir, 'file.txt'), 'utf-8').trim(), 'patched')
+  })
+
+  it('truncates oversized diffs in uiContent', async () => {
+    const bigFile = join(repoDir, 'big.txt')
+    const beforeLines = Array.from({ length: 1200 }, (_, i) => `line-${i}`)
+    writeFileSync(bigFile, beforeLines.join('\n') + '\n')
+    git(repoDir, ['add', 'big.txt'])
+    git(repoDir, ['commit', '-m', 'add big'])
+    const afterLines = beforeLines.map(l => `patched-${l}`)
+    const hunks = beforeLines.map((l, i) => `-${l}\n+${afterLines[i]}`).join('\n')
+    const bigDiff = `diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -1,1200 +1,1200 @@\n${hunks}\n`
+    const result = await APPLY_PATCH_TOOL.execute({
+      input: { diff: bigDiff },
+      toolUseId: 'toolu_test',
+      cwd: repoDir,
+    })
+    assert.ok(!result.isError, result.content)
+    const lines = result.uiContent!.split('\n')
+    assert.ok(lines.length <= 602, `expected truncation, got ${lines.length} lines`)
+    assert.ok(result.uiContent!.includes('more diff lines, Ctrl+O'))
+  })
 })
