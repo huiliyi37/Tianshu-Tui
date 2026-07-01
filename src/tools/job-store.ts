@@ -117,7 +117,10 @@ class BackgroundJob {
     } else if (shell.kind === 'powershell') {
       commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${rewritePowershellNullRedirect(this.opts.command)}`
     } else if (shell.kind === 'cmd') {
-      commandToRun = `chcp 65001 > nul && ${this.opts.command}`
+      // See bash.ts: `chcp 65001 > nul &&` prefix removed — the `nul` redirect
+      // fails in sandboxed/WSL Windows (exit=1, empty stdout). WinStreamDecoder
+      // auto-detects GBK vs UTF-8 on the first chunk, so chcp is unnecessary.
+      commandToRun = this.opts.command
     }
 
     debugLog(`[job-spawn] id=${this.id} kind=${shell.kind} cwd=${this.opts.cwd}`)

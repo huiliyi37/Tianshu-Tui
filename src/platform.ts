@@ -20,8 +20,8 @@ export interface ShellCommand {
   args: string[]
   /**
    * Shell family — lets callers pick the correct command wrapping/encoding
-   * (e.g. Git Bash needs no chcp; cmd needs `chcp 65001`) by semantics instead
-   * of fragile string matching on `cmd`.
+   * (e.g. Git Bash needs no encoding prefix; cmd uses WinStreamDecoder
+   * auto-detection) by semantics instead of fragile string matching on `cmd`.
    */
   kind: 'bash' | 'powershell' | 'cmd' | 'sh'
 }

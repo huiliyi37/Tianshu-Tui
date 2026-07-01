@@ -310,7 +310,8 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
       const shell = getShellCommand()
       // Wrap by shell FAMILY (not fragile cmd-string matching): Git Bash needs
       // no encoding prefix (UTF-8 native) but must not emit literal `nul` files;
-      // PowerShell needs UTF-8 console encoding; cmd needs `chcp 65001`.
+      // PowerShell needs UTF-8 console encoding; cmd needs no prefix (WinStreamDecoder
+      // auto-detects GBK vs UTF-8 on the first chunk).
       let commandToRun = command
       if (shell.kind === 'bash') {
         commandToRun = rewriteWindowsNullRedirect(command)
@@ -319,7 +320,11 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         // before prefixing the UTF-8 encoding setup.
         commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${rewritePowershellNullRedirect(command)}`
       } else if (shell.kind === 'cmd') {
-        commandToRun = `chcp 65001 > nul && ${command}`
+        // NOTE: removed `chcp 65001 > nul &&` prefix — the `nul` device redirect
+        // fails in sandboxed/WSL Windows environments (exit=1, empty stdout).
+        // WinStreamDecoder already auto-detects GBK vs UTF-8 on the first chunk,
+        // so the explicit chcp is unnecessary.
+        commandToRun = command
       }
 
       const mirrorEnv = buildMirrorEnv(mirrorConfig)
