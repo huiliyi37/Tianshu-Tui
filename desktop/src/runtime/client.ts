@@ -19,6 +19,7 @@ import type {
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
   ScheduledTask,
+  TaskRecord,
   SessionEvent,
   SessionRecord,
   SkillStatus,
@@ -640,6 +641,7 @@ export function createSchedule(input: {
   prompt: string
   trigger: { type: 'interval' | 'cron' | 'oneshot'; spec: string }
   allowedTools?: string[]
+  retry?: { maxAttempts: number; backoffMs: number }
 }): Promise<ScheduledTask> {
   return apiPost<ScheduledTask>('/schedule', input)
 }
@@ -651,6 +653,25 @@ export function pauseSchedule(id: string, enabled: boolean): Promise<{ id: strin
 export async function deleteSchedule(id: string): Promise<void> {
   const res = await rivetFetch(`/schedule/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`DELETE /schedule/${id} -> ${res.status}`)
+}
+
+// ── Tasks (execution history for automations) ───────────────────────
+
+/** List task execution records. The server returns all; callers filter by
+ *  scheduledTaskId client-side (the GET handler reads no query params). */
+export async function listTasks(): Promise<TaskRecord[]> {
+  const { tasks } = await apiGet<{ tasks: TaskRecord[] }>('/tasks')
+  return tasks
+}
+
+export async function getTask(id: string): Promise<TaskRecord> {
+  const { task } = await apiGet<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}`)
+  return task
+}
+
+export async function cancelTask(id: string): Promise<TaskRecord> {
+  const { task } = await apiPost<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}/cancel`)
+  return task
 }
 
 // ── GitHub PR Integration ───────────────────────────────────────────
@@ -860,10 +881,14 @@ export function setEditorConfig(
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
-import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse } from './types'
+import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse, McpPresetsResponse } from './types'
 
 export async function getMcpStatus(): Promise<McpStatusResponse> {
   return apiGet<McpStatusResponse>('/mcp/status')
+}
+
+export async function getMcpPresets(): Promise<McpPresetsResponse> {
+  return apiGet<McpPresetsResponse>('/mcp/presets')
 }
 
 export function addMcpServer(input: McpServerConfig): Promise<{ ok: boolean; serverId: string }> {

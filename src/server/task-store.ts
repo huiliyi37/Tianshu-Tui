@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSyn
 import { join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { errorContext, serverLogger } from './logger.js'
+import type { ScheduledTaskRetry } from './cron-scheduler.js'
 
 // ─── Task 类型 ────────────────────────────────────────────────
 
@@ -60,6 +61,16 @@ export interface TaskRecord {
   error?: string
   /** cron 任务的工具白名单 */
   allowedTools?: string[]
+  /** 关联的 ScheduledTask id（cron 触发时回填，用于看板按定义分组）。 */
+  scheduledTaskId?: string
+  /** 执行该任务的可见 session id（runtime 池创建后回填，用于跳转会话线程）。 */
+  sessionId?: string
+  /** 第几次尝试（首次=1）。 */
+  attempt?: number
+  /** 若本记录是重试，指向原始任务 id。 */
+  retryOf?: string
+  /** 失败重试策略（从 ScheduledTask 继承，随重试传递）。 */
+  retry?: ScheduledTaskRetry
 }
 
 export interface CreateTaskInput {
@@ -72,6 +83,14 @@ export interface CreateTaskInput {
   idempotencyKey?: string
   /** cron 任务的工具白名单（默认空 = 无工具限制） */
   allowedTools?: string[]
+  /** 关联的 ScheduledTask id。 */
+  scheduledTaskId?: string
+  /** 尝试序号（重试时 > 1）。 */
+  attempt?: number
+  /** 原始任务 id（重试链）。 */
+  retryOf?: string
+  /** 失败重试策略。 */
+  retry?: ScheduledTaskRetry
 }
 
 // ─── TaskStore 接口 ───────────────────────────────────────────
@@ -88,6 +107,8 @@ export interface TaskStore {
 export interface TaskFilter {
   status?: TaskStatus | TaskStatus[]
   source?: TaskSource
+  /** Filter to runs of a specific ScheduledTask (execution history). */
+  scheduledTaskId?: string
   limit?: number
 }
 
@@ -194,6 +215,7 @@ export class JsonTaskStore implements TaskStore {
       if (!statuses.includes(record.status)) return false
     }
     if (filter.source && record.source !== filter.source) return false
+    if (filter.scheduledTaskId && record.scheduledTaskId !== filter.scheduledTaskId) return false
     return true
   }
 
@@ -260,7 +282,14 @@ function isTaskRecord(value: unknown): value is TaskRecord {
     typeof record.callerId === 'string' &&
     typeof record.idempotencyKey === 'string' &&
     typeof record.force === 'boolean' &&
-    (record.allowedTools === undefined || (Array.isArray(record.allowedTools) && record.allowedTools.every(t => typeof t === 'string')))
+    (record.allowedTools === undefined || (Array.isArray(record.allowedTools) && record.allowedTools.every(t => typeof t === 'string'))) &&
+    (record.scheduledTaskId === undefined || typeof record.scheduledTaskId === 'string') &&
+    (record.sessionId === undefined || typeof record.sessionId === 'string') &&
+    (record.attempt === undefined || (typeof record.attempt === 'number' && Number.isFinite(record.attempt))) &&
+    (record.retryOf === undefined || typeof record.retryOf === 'string') &&
+    (record.retry === undefined || (typeof record.retry === 'object' && record.retry !== null &&
+      typeof (record.retry as ScheduledTaskRetry).maxAttempts === 'number' &&
+      typeof (record.retry as ScheduledTaskRetry).backoffMs === 'number'))
 }
 
 function cloneTask(task: TaskRecord): TaskRecord {
@@ -268,6 +297,7 @@ function cloneTask(task: TaskRecord): TaskRecord {
     ...task,
     allowedTools: task.allowedTools ? [...task.allowedTools] : undefined,
     result: task.result ? { ...task.result, changedFiles: [...task.result.changedFiles] } : undefined,
+    retry: task.retry ? { ...task.retry } : undefined,
   }
 }
 

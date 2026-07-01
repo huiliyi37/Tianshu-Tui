@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { McpStatusResponse, McpServerConfig, McpConnectionState } from '../runtime/types'
+import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset } from '../runtime/types'
 
 /**
  * 把单行参数字符串解析为 argv 数组，支持引号包裹含空格的参数。
@@ -44,37 +44,93 @@ export function parseArgs(input: string): string[] {
 }
 
 // ── MCP 预设 ──────────────────────────────────────────────────
-// 常用 MCP 服务器的一键添加配置。Context7 提供库文档查询能力，
-// 是编码 agent 最常用的外部知识源之一。
-
-interface McpPreset {
-  id: string
-  name: string
-  description: string
-  transport: 'stdio'
-  command: string
-  args: string[]
-  env?: Record<string, string>
-}
-
-const MCP_PRESETS: McpPreset[] = [
-  {
-    id: 'context7',
-    name: 'Context7',
-    description: '实时库文档查询 —— 为编码 agent 提供最新框架/库 API 参考，减少幻觉',
-    transport: 'stdio',
-    command: 'npx',
-    args: ['-y', '@upstash/context7-mcp'],
-  },
-]
+// 预设目录来自服务端 (`GET /mcp/presets`)，一键启用常用集成。带密钥的
+// 预设（GitHub/Slack/Notion/Linear）会展开内联密钥表单收集 requiredEnv。
 
 interface McpSettingsProps {
   status: McpStatusResponse | null
   statusLoading: boolean
   statusError: string | null
+  /** 服务端预设目录；null = 加载中。 */
+  presets: McpPreset[] | null
+  /** 已在 config 中配置的预设 id（用于标注"已添加"）。 */
+  configuredIds: string[]
   onAdd: (config: McpServerConfig) => void
   onRemove: (serverId: string) => void
   onRestart: (serverId: string) => void
+}
+
+/** A single discovery card. Keyed presets expand an inline secret form. */
+function PresetCard({
+  preset,
+  configured,
+  onAdd,
+}: {
+  preset: McpPreset
+  configured: boolean
+  onAdd: (config: McpServerConfig) => void
+}) {
+  const needsKeys = (preset.requiredEnv?.length ?? 0) > 0
+  const [expanded, setExpanded] = useState(false)
+  const [env, setEnv] = useState<Record<string, string>>({})
+
+  const buildConfig = (): McpServerConfig => ({
+    serverId: preset.id,
+    command: preset.command,
+    args: preset.args,
+    url: preset.url,
+    env: needsKeys ? env : undefined,
+  })
+
+  const allFilled = (preset.requiredEnv ?? []).every((f) => (env[f.key] ?? '').trim().length > 0)
+
+  const onCardClick = () => {
+    if (configured) return
+    if (needsKeys) setExpanded((v) => !v)
+    else onAdd(buildConfig())
+  }
+
+  return (
+    <div className={`mcp-preset-card${configured ? ' configured' : ''}`}>
+      <div onClick={onCardClick} style={{ cursor: configured ? 'default' : 'pointer' }}>
+        <div className="mcp-preset-name">
+          {configured ? '✓ ' : needsKeys ? '🔑 ' : '+ '}{preset.name}
+          {configured && <span className="meta" style={{ marginLeft: 6 }}>已添加</span>}
+        </div>
+        <div className="mcp-preset-desc">{preset.description}</div>
+        <div className="mcp-preset-cmd">
+          {preset.transport === 'stdio' ? `${preset.command ?? ''} ${(preset.args ?? []).join(' ')}` : preset.url}
+        </div>
+      </div>
+      {expanded && !configured && needsKeys && (
+        <div className="mcp-preset-keyform" onClick={(e) => e.stopPropagation()}>
+          {(preset.requiredEnv ?? []).map((f) => (
+            <div className="form-row" key={f.key}>
+              <label title={f.help}>{f.label}</label>
+              <input
+                type="password"
+                value={env[f.key] ?? ''}
+                placeholder={f.help}
+                onChange={(e) => setEnv((prev) => ({ ...prev, [f.key]: (e.target as HTMLInputElement).value }))}
+              />
+            </div>
+          ))}
+          <div className="form-actions">
+            <button
+              className="btn-mini"
+              disabled={!allFilled}
+              onClick={() => { onAdd(buildConfig()); setExpanded(false) }}
+            >
+              启用
+            </button>
+            {preset.docsUrl && (
+              <a className="btn-mini" href={preset.docsUrl} target="_blank" rel="noreferrer">文档</a>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 const STATUS_DOT: Record<string, string> = {
@@ -116,6 +172,8 @@ export function McpSettings({
   status,
   statusLoading,
   statusError,
+  presets,
+  configuredIds,
   onAdd,
   onRemove,
   onRestart,
@@ -205,40 +263,29 @@ export function McpSettings({
       {!showAdd && (
         <>
           <div className="mcp-presets">
-            <div className="mcp-presets-label">推荐添加</div>
-            <div className="mcp-presets-grid">
-              {MCP_PRESETS.map(p => (
-                <div
-                  key={p.id}
-                  className="mcp-preset-card"
-                  onClick={() => {
-                    const config: McpServerConfig = {
-                      serverId: p.id,
-                      command: p.command,
-                      args: p.args,
-                      env: p.env,
-                    }
-                    onAdd(config)
-                  }}
-                >
-                  <div className="mcp-preset-name">+ {p.name}</div>
-                  <div className="mcp-preset-desc">{p.description}</div>
-                  <div className="mcp-preset-cmd">
-                    {p.command} {p.args.join(' ')}
-                  </div>
-                </div>
-              ))}
+            <div className="mcp-presets-label">推荐集成</div>
+            {presets == null ? (
+              <div className="meta">加载预设中…</div>
+            ) : (
+              <div className="mcp-presets-grid">
+                {presets.map((p) => (
+                  <PresetCard
+                    key={p.id}
+                    preset={p}
+                    configured={configuredIds.includes(p.id)}
+                    onAdd={onAdd}
+                  />
+                ))}
+              </div>
+            )}
+            <div className="meta" style={{ marginTop: 6 }}>
+              新增的工具需重启会话才对已运行会话生效；密钥以明文存于 config.json（与 provider 密钥一致）。
             </div>
           </div>
           <button className="btn-mini" onClick={() => setShowAdd(true)}>
-            + 添加 MCP 服务器
+            + 添加自定义 MCP 服务器
           </button>
         </>
-      )}
-      {!showAdd && !MCP_PRESETS.length && (
-        <button className="btn-mini" onClick={() => setShowAdd(true)}>
-          + 添加 MCP 服务器
-        </button>
       )}
 
       {showAdd && (

@@ -25,6 +25,8 @@ import {
   listPlans,
   listSchedule,
   listSessions,
+  listTasks,
+  cancelTask,
   pauseSchedule,
   rejectPlan,
   renameSession,
@@ -52,6 +54,7 @@ export const qk = {
   domains: (id: string | null) => ['domains', id] as const,
   hooks: (id: string | null) => ['hooks', id] as const,
   schedule: ['schedule'] as const,
+  tasks: ['tasks'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
   githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
@@ -305,6 +308,20 @@ export function useDeleteSchedule() {
   return useMutation({
     mutationFn: (id: string) => deleteSchedule(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.schedule }),
+  })
+}
+
+/** All task execution records (polled). Automations dashboard filters by
+ *  scheduledTaskId client-side. */
+export function useTasks() {
+  return useQuery({ queryKey: qk.tasks, queryFn: listTasks, refetchInterval: 5000 })
+}
+
+export function useCancelTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => cancelTask(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.tasks }),
   })
 }
 

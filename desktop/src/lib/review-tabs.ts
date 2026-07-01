@@ -1,7 +1,7 @@
 // Right Panel (ReviewPanel) customizable tabs preference manager (P0).
 // Persisted to localStorage and broadcast via a custom event.
 
-export type ReviewTab = 'review' | 'plan' | 'task' | 'canvas' | 'wt' | 'files' | 'github'
+export type ReviewTab = 'review' | 'plan' | 'task' | 'canvas' | 'wt' | 'files' | 'github' | 'browser'
 
 const KEY = 'tianshu.enabledReviewTabs'
 const CHANGE_EVENT = 'tianshu:reviewtabschange'
@@ -14,6 +14,7 @@ export const ALL_TABS: { id: ReviewTab; label: string; glyph: string }[] = [
   { id: 'wt', label: 'Diff', glyph: '⟐' },
   { id: 'files', label: 'Files', glyph: '📁' },
   { id: 'github', label: 'PR', glyph: '🔀' },
+  { id: 'browser', label: 'Browser', glyph: '🌐' },
 ]
 
 export function loadEnabledTabs(): ReviewTab[] {
@@ -27,7 +28,7 @@ export function loadEnabledTabs(): ReviewTab[] {
   } catch {
     // non-fatal
   }
-  return ['review', 'plan', 'task', 'canvas', 'wt', 'files', 'github'] // Default: show all
+  return ['review', 'plan', 'task', 'canvas', 'wt', 'files', 'github', 'browser'] // Default: show all
 }
 
 export function saveEnabledTabs(tabs: ReviewTab[]): void {
