@@ -32,5 +32,17 @@
     "deleteSession": "Delete permanently",
     "confirmRemoveProject": "Remove project \"{name}\"? All its sessions will be archived.",
     "confirmDeleteSession": "Permanently delete session \"{title}\"? This cannot be undone."
+  },
+  "fileExplorer": {
+    "title": "File Explorer",
+    "openFile": "Open File",
+    "revealInFinder": "Reveal in Finder",
+    "revealInExplorer": "Reveal in File Explorer",
+    "copyRelativePath": "Copy Relative Path",
+    "copyAbsolutePath": "Copy Absolute Path",
+    "addToContext": "Add to Context",
+    "addNToContext": "Add {count} to Context",
+    "openFolder": "Open Folder",
+    "refresh": "Refresh"
   }
 }

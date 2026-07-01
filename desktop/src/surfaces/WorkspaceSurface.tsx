@@ -313,6 +313,7 @@ export function WorkspaceSurface() {
           {ui.reviewVisible ? (
             <ReviewPanel
               sessionId={activeId}
+              cwd={active?.cwd}
               artifacts={artifacts.data ?? []}
               pendingApproval={view.pendingApproval}
               approvalMode={active?.approvalMode}

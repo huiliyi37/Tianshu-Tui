@@ -189,8 +189,8 @@ export async function listSessions(): Promise<SessionRecord[]> {
   return sessions
 }
 
-export async function openFile(path: string): Promise<void> {
-  await apiPost('/open-file', { path })
+export async function openFile(path: string, reveal?: boolean): Promise<void> {
+  await apiPost('/open-file', { path, ...(reveal ? { reveal: true } : {}) })
 }
 
 /** Open an external URL in the system browser via the sidecar. */

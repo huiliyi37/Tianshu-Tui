@@ -31,6 +31,8 @@ import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
+import { formatFileMention } from '../lib/mention-input'
+import { useUiState, useUiDispatch } from '../state/store'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -75,6 +77,8 @@ export function ThreadView(props: {
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
   const [input, setInput] = useState('')
+  const ui = useUiState()
+  const dispatch = useUiDispatch()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
   const [showDelegateDialog, setShowDelegateDialog] = useState(false)
@@ -101,6 +105,19 @@ export function ThreadView(props: {
         .catch((err) => console.error(err))
     }
   }, [session.id])
+
+  // Append file attachments queued from the file explorer as @file mentions.
+  // Keep any existing text and preserve the trailing mention suffix pattern.
+  useEffect(() => {
+    if (ui.composerAttachments.length === 0) return
+    const suffix = ui.composerAttachments.map(formatFileMention).join(' ')
+    const next = input
+      ? `${input}${input.endsWith(' ') ? '' : ' '}${suffix}`
+      : suffix
+    setInput(next)
+    dispatch({ type: 'clearComposerAttachments' })
+  }, [ui.composerAttachments, input, dispatch])
+
   // 发消息失败时回填输入内容：useSendPrompt 的 onError 派发 'send-prompt-failed' 事件，
   // 此处监听并把失败的 prompt 塞回输入框，让用户能编辑后重发（而非因 submit 已清空而丢失）。
   // 仅当当前输入框为空时回填，避免覆盖用户失败后已手动输入的新内容。

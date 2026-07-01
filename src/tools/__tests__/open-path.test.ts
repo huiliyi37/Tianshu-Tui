@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOpenPathCommand, OPEN_PATH_TOOL } from '../open-path.js'
+import { buildOpenPathCommand, buildRevealCommand, OPEN_PATH_TOOL } from '../open-path.js'
 
 describe('open_path', () => {
   it('builds Windows opener via PowerShell Start-Process -LiteralPath (no cmd.exe metachar reinterpretation)', () => {
@@ -44,6 +44,43 @@ describe('open_path', () => {
 
     assert.equal(command.cmd, 'xdg-open')
     assert.deepEqual(command.args, [target])
+  })
+
+  it('builds Windows reveal command via explorer /select (PowerShell, no cmd metachar reinterpretation)', () => {
+    const target = 'C:\\Users\\Honglin   zhang\\Desktop\\天枢-logo.svg'
+    const command = buildRevealCommand(target, 'win32')
+
+    assert.equal(command.cmd, 'powershell.exe')
+    assert.deepEqual(command.args, [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `explorer /select,'${target}'`,
+    ])
+  })
+
+  it('neutralizes single quotes in Windows reveal paths', () => {
+    const target = "C:\\R&D\\o'brien.txt"
+    const command = buildRevealCommand(target, 'win32')
+
+    const literalArg = command.args[command.args.length - 1]
+    assert.equal(literalArg, "explorer /select,'C:\\R&D\\o''brien.txt'")
+  })
+
+  it('builds macOS reveal command with open -R', () => {
+    const target = '/Users/banxia/Desktop/天枢 logo.svg'
+    const command = buildRevealCommand(target, 'darwin')
+
+    assert.equal(command.cmd, 'open')
+    assert.deepEqual(command.args, ['-R', target])
+  })
+
+  it('builds Linux reveal command by opening the parent directory', () => {
+    const target = '/home/user/桌面/天枢 logo.svg'
+    const command = buildRevealCommand(target, 'linux')
+
+    assert.equal(command.cmd, 'xdg-open')
+    assert.deepEqual(command.args, ['/home/user/桌面'])
   })
 
   it('returns error instead of spawning when path does not exist', async () => {

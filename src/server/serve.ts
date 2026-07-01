@@ -38,6 +38,7 @@ import type { AuthProvider } from '../auth/types.js'
 import { SessionPersist } from '../agent/session-persist.js'
 import { FileHistory } from '../agent/file-history.js'
 import { loadProjectRules } from '../context/rules-loader.js'
+import { buildOpenPathCommand, buildRevealCommand } from '../tools/open-path.js'
 import { createDefaultToolRegistry } from '../tools/default-registry.js'
 import { AgentLoop } from '../agent/loop.js'
 import type { ApprovalMode } from '../agent/loop-types.js'
@@ -954,16 +955,20 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // MCP routes: server management + live status for the desktop MCP settings UI.
   Object.assign(routes, buildMcpRoutes(() => sharedRuntime.mcpManager, apiToken))
 
-  // Open file in system editor — thin wrapper so the Desktop webview can
-  // request the sidecar to open a local path without needing a Tauri plugin.
+  // Open file in system editor / reveal in file manager — thin wrapper so the
+  // Desktop webview can request the sidecar to open a local path without
+  // needing a Tauri plugin.
   routes['POST /open-file'] = (body) => {
     const filePath = (body as Record<string, unknown>)?.path
     if (typeof filePath !== 'string' || !filePath) {
       return { status: 400, body: { error: 'Missing path' } }
     }
-    import('node:child_process').then(({ execFile }) => {
-      const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
-      execFile(opener, [filePath], () => {})
+    const reveal = (body as Record<string, unknown>)?.reveal === true
+    import('node:child_process').then(({ spawn }) => {
+      const command = reveal ? buildRevealCommand(filePath) : buildOpenPathCommand(filePath)
+      const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' })
+      child.on('error', () => {})
+      child.on('spawn', () => child.unref())
     })
     return { status: 200, body: { opened: filePath } }
   }

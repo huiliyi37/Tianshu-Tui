@@ -48,6 +48,9 @@ export interface UiState {
   newSessionPrompt: string | null
   /** Provider-connect wizard open state (guided model/provider setup). */
   connectOpen: boolean
+  /** Transient file paths queued from the file explorer to be appended as
+   *  @file mentions in the composer. Not persisted across reloads. */
+  composerAttachments: string[]
 }
 
 type UiAction =
@@ -67,6 +70,8 @@ type UiAction =
   | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
   | { type: 'openConnect'; open: boolean }
+  | { type: 'addComposerAttachments'; paths: string[] }
+  | { type: 'clearComposerAttachments' }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -130,6 +135,13 @@ function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, reviewManuallyToggled: action.on }
     case 'openConnect':
       return { ...state, connectOpen: action.open }
+    case 'addComposerAttachments': {
+      if (action.paths.length === 0) return state
+      const merged = new Set([...state.composerAttachments, ...action.paths])
+      return { ...state, composerAttachments: [...merged] }
+    }
+    case 'clearComposerAttachments':
+      return { ...state, composerAttachments: [] }
     default:
       return state
   }
@@ -156,6 +168,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     splitMode: loadSplitMode(),
     reviewManuallyToggled: false,
     connectOpen: false,
+    composerAttachments: [],
   }))
 
   useEffect(() => {
