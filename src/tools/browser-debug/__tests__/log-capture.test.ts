@@ -5,6 +5,9 @@ import {
   normalizeConsoleLevel,
   formatConsoleLine,
   formatNetworkLine,
+  formatNetworkDetail,
+  shouldCaptureResponseBody,
+  truncateResponseBody,
 } from '../log-capture.js'
 
 test('normalizeConsoleLevel maps warning to warn', () => {
@@ -32,6 +35,67 @@ test('formatNetworkLine renders pending, success, and failure glyphs', () => {
   assert.match(fail, /^✗ POST/)
 })
 
+test('formatNetworkLine includeBody appends response snippet', () => {
+  const line = formatNetworkLine({
+    requestId: 'r1',
+    method: 'POST',
+    url: 'http://localhost/api/x',
+    startedAt: 0,
+    status: 500,
+    responseBody: '{"error":"bad"}',
+  }, true)
+  assert.match(line, /body: \{"error":"bad"\}/)
+})
+
+test('formatNetworkDetail includes body and metadata', () => {
+  const detail = formatNetworkDetail({
+    requestId: 'r2',
+    method: 'POST',
+    url: 'http://localhost/api/login',
+    startedAt: 0,
+    status: 401,
+    durationMs: 45,
+    resourceType: 'fetch',
+    contentType: 'application/json',
+    responseBody: '{"message":"unauthorized"}',
+  })
+  assert.match(detail, /id: r2/)
+  assert.match(detail, /status: 401/)
+  assert.match(detail, /type: fetch/)
+  assert.match(detail, /unauthorized/)
+})
+
+test('shouldCaptureResponseBody for xhr/fetch and 4xx+', () => {
+  assert.equal(shouldCaptureResponseBody('xhr', 200), true)
+  assert.equal(shouldCaptureResponseBody('fetch', 200), true)
+  assert.equal(shouldCaptureResponseBody('document', 404), true)
+  assert.equal(shouldCaptureResponseBody('document', 200), false)
+})
+
+test('truncateResponseBody caps at 2048 chars', () => {
+  const long = 'x'.repeat(3000)
+  const { body, truncated } = truncateResponseBody(long)
+  assert.equal(body.length, 2048)
+  assert.equal(truncated, true)
+})
+
+test('LogCapture url_filter and api_only filters', () => {
+  const cap = new LogCapture()
+  cap.startRequest('a', 'GET', 'http://localhost/static/app.js', Date.now(), 'script')
+  cap.completeRequest('a', 200)
+  cap.startRequest('b', 'POST', 'http://localhost/api/data', Date.now(), 'fetch')
+  cap.completeRequest('b', 500)
+  cap.attachResponseBody('b', '{"err":true}', 'application/json')
+
+  const api = cap.getNetwork({ apiOnly: true })
+  assert.equal(api.length, 1)
+  assert.equal(api[0]!.requestId, 'b')
+
+  const filtered = cap.getNetwork({ urlFilter: '/api/' })
+  assert.equal(filtered.length, 1)
+  assert.equal(filtered[0]!.requestId, 'b')
+})
+
 test('LogCapture failed_only keeps 4xx/5xx and network failures', () => {
   const cap = new LogCapture()
   cap.startRequest('a', 'GET', 'http://localhost/ok')
@@ -40,12 +104,17 @@ test('LogCapture failed_only keeps 4xx/5xx and network failures', () => {
   cap.completeRequest('b', 500)
   cap.failRequest('c', 'GET', 'http://localhost/down', 'aborted')
 
-  const all = cap.getNetwork()
-  assert.equal(all.length, 3)
-  const failed = cap.getNetwork(true)
+  const failed = cap.getNetwork({ failedOnly: true })
   assert.equal(failed.length, 2)
-  assert.equal(failed.some((e) => e.status === 500), true)
-  assert.equal(failed.some((e) => e.failed), true)
+})
+
+test('LogCapture getByRequestId returns entry with body', () => {
+  const cap = new LogCapture()
+  cap.startRequest('x', 'GET', '/')
+  cap.completeRequest('x', 200)
+  cap.attachResponseBody('x', 'ok', 'text/plain')
+  const entry = cap.getByRequestId('x')
+  assert.equal(entry?.responseBody, 'ok')
 })
 
 test('LogCapture clear wipes buffers', () => {

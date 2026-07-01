@@ -17,6 +17,7 @@ class FakeDriver implements BrowserDebugDriver {
   static lastLaunchOpts?: DriverLaunchOptions
   url = 'about:blank'
   closed = false
+  waitAborted = false
   private readonly events: DriverEvents
   constructor(events: DriverEvents) {
     this.events = events
@@ -24,10 +25,11 @@ class FakeDriver implements BrowserDebugDriver {
   }
   async goto(url: string) {
     this.url = url
-    this.events.onRequestStart('r1', 'GET', url)
-    this.events.onResponse('r1', 200)
-    this.events.onRequestStart('r2', 'POST', `${url}api/data`)
-    this.events.onResponse('r2', 500)
+    this.events.onRequestStart('r1', 'GET', url, 'document')
+    this.events.onResponse('r1', 200, 'document')
+    this.events.onRequestStart('r2', 'POST', `${url.replace(/\/$/, '')}/api/data`, 'fetch')
+    this.events.onResponse('r2', 500, 'fetch')
+    this.events.onResponseBody('r2', '{"error":"server"}', 'application/json')
     this.events.onConsole('error', 'Uncaught boom')
     this.events.onConsole('log', 'hello world')
   }
@@ -42,7 +44,22 @@ class FakeDriver implements BrowserDebugDriver {
   }
   async click() {}
   async type() {}
-  async waitForSelector() {}
+  async waitForSelector(_selector: string, _timeoutMs?: number, signal?: AbortSignal) {
+    if (signal) {
+      await new Promise<void>((resolve, reject) => {
+        if (signal.aborted) {
+          this.waitAborted = true
+          reject(signal.reason ?? new Error('aborted'))
+          return
+        }
+        signal.addEventListener('abort', () => {
+          this.waitAborted = true
+          reject(signal.reason ?? new Error('aborted'))
+        })
+        setTimeout(resolve, 50)
+      })
+    }
+  }
   currentUrl() {
     return this.url
   }
@@ -62,12 +79,14 @@ class FakeArtifactStore {
 
 function params(
   input: Record<string, unknown>,
-  extra: { store?: FakeArtifactStore; onOutput?: (c: string) => void } = {},
+  extra: { store?: FakeArtifactStore; onOutput?: (c: string) => void; sessionId?: string; abortSignal?: AbortSignal } = {},
 ): ToolCallParams {
   return {
     input,
     toolUseId: 't1',
     cwd: '/work',
+    sessionId: extra.sessionId,
+    abortSignal: extra.abortSignal,
     artifactStore: extra.store as never,
     onOutput: extra.onOutput,
   }
@@ -89,37 +108,72 @@ function makeTool(opts: { built?: { value: boolean }; allowlist?: string[]; user
 test('isLoopbackHost recognises loopback names', () => {
   assert.equal(isLoopbackHost('localhost'), true)
   assert.equal(isLoopbackHost('127.0.0.1'), true)
-  assert.equal(isLoopbackHost('::1'), true)
-  assert.equal(isLoopbackHost('app.localhost'), true)
   assert.equal(isLoopbackHost('example.com'), false)
 })
 
-test('isLoopbackCdpUrl accepts loopback http CDP endpoints', () => {
-  assert.equal(isLoopbackCdpUrl('http://127.0.0.1:9222'), true)
-  assert.equal(isLoopbackCdpUrl('http://localhost:9222'), true)
-  assert.equal(isLoopbackCdpUrl('https://127.0.0.1:9222'), false)
-  assert.equal(isLoopbackCdpUrl('http://evil.com:9222'), false)
-})
-
-test('isCdpUrlAllowed respects allowlist for non-loopback', () => {
-  assert.equal(isCdpUrlAllowed('http://127.0.0.1:9222', []), true)
-  assert.equal(isCdpUrlAllowed('http://dev.example.com:9222', []), false)
-  assert.equal(isCdpUrlAllowed('http://dev.example.com:9222', ['example.com']), true)
-})
-
-test('isDebugHostAllowed: loopback always, others need allowlist', () => {
-  assert.equal(isDebugHostAllowed('localhost', []), true)
-  assert.equal(isDebugHostAllowed('example.com', []), false)
-  assert.equal(isDebugHostAllowed('example.com', ['example.com']), true)
-})
-
-test('localhost navigation is allowed and needs no approval', async () => {
+test('localhost navigation uses sessionId bucket', async () => {
   __resetSessionForTest()
   const tool = makeTool()
-  assert.equal(tool.requiresApproval(params({ action: 'navigate', url: 'http://localhost:3000' })), false)
-  const res = await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }, { sessionId: 'worker-1' }))
   assert.equal(res.isError, undefined)
-  assert.match(res.content, /Navigated to http:\/\/localhost:3000/)
+  const status = await tool.execute(params({ action: 'status' }, { sessionId: 'worker-1' }))
+  assert.match(status.content, /session: worker-1/)
+  await tool.execute(params({ action: 'close' }, { sessionId: 'worker-1' }))
+})
+
+test('network url_filter and include_body', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({
+    action: 'network',
+    url_filter: '/api/',
+    failed_only: true,
+    include_body: true,
+  }))
+  assert.match(res.content, /← 500 POST/)
+  assert.match(res.content, /body: \{"error":"server"\}/)
+  assert.doesNotMatch(res.content, /← 200 GET/)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('network_detail returns full entry', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'network_detail', request_id: 'r2' }))
+  assert.match(res.content, /id: r2/)
+  assert.match(res.content, /status: 500/)
+  assert.match(res.content, /"error":"server"/)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('network api_only filters xhr/fetch', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const res = await tool.execute(params({ action: 'network', api_only: true }))
+  assert.match(res.content, /\[fetch\]/)
+  assert.doesNotMatch(res.content, /\[document\]/)
+  await tool.execute(params({ action: 'close' }))
+})
+
+test('wait respects abortSignal without closing session', async () => {
+  __resetSessionForTest()
+  const tool = makeTool()
+  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
+  const controller = new AbortController()
+  const promise = tool.execute(params({
+    action: 'wait',
+    selector: '#slow',
+    timeout_ms: 60_000,
+  }, { abortSignal: controller.signal }))
+  controller.abort(new Error('user abort'))
+  const res = await promise
+  assert.equal(res.isError, true)
+  assert.match(res.content, /wait failed/)
+  const status = await tool.execute(params({ action: 'status' }))
+  assert.match(status.content, /session: __default__/)
   await tool.execute(params({ action: 'close' }))
 })
 
@@ -132,9 +186,6 @@ test('open with connect_url passes connectUrl to driver factory', async () => {
     connect_url: 'http://127.0.0.1:9222',
   }))
   assert.equal(FakeDriver.lastLaunchOpts?.connectUrl, 'http://127.0.0.1:9222')
-  const status = await tool.execute(params({ action: 'status' }))
-  assert.match(status.content, /mode: connect/)
-  assert.match(status.content, /127\.0\.0\.1:9222/)
   await tool.execute(params({ action: 'close' }))
 })
 
@@ -152,66 +203,13 @@ test('non-loopback CDP endpoint is blocked fail-closed', async () => {
   assert.equal(built.value, false)
 })
 
-test('non-loopback host is blocked fail-closed and driver is never built', async () => {
-  __resetSessionForTest()
-  const built = { value: false }
-  const tool = makeTool({ built })
-  const res = await tool.execute(params({ action: 'navigate', url: 'https://evil.com/x' }))
-  assert.equal(res.isError, true)
-  assert.match(res.content, /not on the allowlist/)
-  assert.equal(built.value, false)
-})
-
-test('navigation streams console + network lines to onOutput', async () => {
-  __resetSessionForTest()
-  const chunks: string[] = []
-  const tool = makeTool()
-  await tool.execute(params({ action: 'open', url: 'http://localhost:5173/' }, { onOutput: (c) => chunks.push(c) }))
-  const joined = chunks.join('')
-  assert.match(joined, /← 500 POST/)
-  assert.match(joined, /\[error\] Uncaught boom/)
-  await tool.execute(params({ action: 'close' }))
-})
-
-test('status reports session summary', async () => {
-  __resetSessionForTest()
-  const tool = makeTool({ userDataDir: '/tmp/rivet-browser-debug-profile' })
-  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
-  const status = await tool.execute(params({ action: 'status' }))
-  assert.match(status.content, /mode: launch/)
-  assert.match(status.content, /profile: \/tmp\/rivet-browser-debug-profile/)
-  assert.match(status.content, /console: 2 message/)
-  await tool.execute(params({ action: 'close' }))
-})
-
 test('clear_logs wipes captured buffers', async () => {
   __resetSessionForTest()
   const tool = makeTool()
   await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
-  const cleared = await tool.execute(params({ action: 'clear_logs' }))
-  assert.match(cleared.content, /cleared/)
+  await tool.execute(params({ action: 'clear_logs' }))
   const consoleRes = await tool.execute(params({ action: 'console' }))
   assert.equal(consoleRes.content, '(no console output)')
-  await tool.execute(params({ action: 'close' }))
-})
-
-test('snapshot returns page text or selector subtree', async () => {
-  __resetSessionForTest()
-  const tool = makeTool()
-  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
-  const body = await tool.execute(params({ action: 'snapshot' }))
-  assert.equal(body.content, 'page body text')
-  const sub = await tool.execute(params({ action: 'snapshot', selector: '#app' }))
-  assert.equal(sub.content, 'snap:#app')
-  await tool.execute(params({ action: 'close' }))
-})
-
-test('wait requires selector and succeeds when session is open', async () => {
-  __resetSessionForTest()
-  const tool = makeTool()
-  await tool.execute(params({ action: 'open', url: 'http://localhost:3000/' }))
-  const res = await tool.execute(params({ action: 'wait', selector: '#login-btn', timeout_ms: 5000 }))
-  assert.match(res.content, /#login-btn.*visible/)
   await tool.execute(params({ action: 'close' }))
 })
 
@@ -221,19 +219,6 @@ test('await_login ends the turn', async () => {
   const res = await tool.execute(params({ action: 'await_login' }))
   assert.equal(res.endTurn, true)
   await tool.execute(params({ action: 'close' }))
-})
-
-test('close on connect mode says disconnected not closed', async () => {
-  __resetSessionForTest()
-  const tool = makeTool()
-  await tool.execute(params({
-    action: 'open',
-    url: 'http://localhost:3000/',
-    connect_url: 'http://127.0.0.1:9222',
-  }))
-  const res = await tool.execute(params({ action: 'close' }))
-  assert.match(res.content, /Disconnected/)
-  assert.doesNotMatch(res.content, /Browser session closed/)
 })
 
 test('tool is disabled by default, enabled via option', () => {

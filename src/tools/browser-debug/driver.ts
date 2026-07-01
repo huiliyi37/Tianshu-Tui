@@ -1,27 +1,25 @@
 /**
  * browser-debug/driver — Playwright-backed CDP driver (lazy, optional dep).
- *
- * Two connection modes (mirroring Codex CLI / chrome-devtools-mcp --browser-url):
- *  - **launch** — launchPersistentContext with a user-data-dir (login persists);
- *  - **connect** — connectOverCDP to an existing Chrome (--remote-debugging-port).
- *    close() only disconnects; it does NOT quit the user's browser.
  */
+
+import { shouldCaptureResponseBody, truncateResponseBody } from './log-capture.js'
 
 export interface DriverEvents {
   onConsole(level: string, text: string): void
-  onRequestStart(requestId: string, method: string, url: string): void
-  onResponse(requestId: string, status: number): void
-  onRequestFailed(requestId: string, method: string, url: string, errorText?: string): void
+  onRequestStart(requestId: string, method: string, url: string, resourceType?: string): void
+  onResponse(requestId: string, status: number, resourceType?: string): void
+  onRequestFailed(requestId: string, method: string, url: string, errorText?: string, resourceType?: string): void
+  onResponseBody(requestId: string, body: string, contentType?: string): void
 }
 
 export interface BrowserDebugDriver {
-  goto(url: string): Promise<void>
+  goto(url: string, signal?: AbortSignal): Promise<void>
   evaluate(expression: string): Promise<string>
   screenshot(): Promise<Buffer>
   snapshot(selector?: string): Promise<string>
   click(selector: string): Promise<void>
   type(selector: string, text: string): Promise<void>
-  waitForSelector(selector: string, timeoutMs?: number): Promise<void>
+  waitForSelector(selector: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>
   currentUrl(): string
   bringToFront(): Promise<void>
   close(): Promise<void>
@@ -31,22 +29,22 @@ export interface DriverLaunchOptions {
   headless: boolean
   userDataDir: string
   events: DriverEvents
-  /** When set, connect to an existing Chrome via CDP instead of launching. */
   connectUrl?: string
 }
 
 export type BrowserDebugDriverFactory = (opts: DriverLaunchOptions) => Promise<BrowserDebugDriver>
 
-// Minimal structural typings for the slice of Playwright we touch. Kept local
-// so tsc never needs the optional 'playwright' types at build time.
 interface PwRequest {
   method(): string
   url(): string
+  resourceType(): string
   failure(): { errorText: string } | null
 }
 interface PwResponse {
   status(): number
   request(): PwRequest
+  headers(): Record<string, string>
+  text(): Promise<string>
 }
 interface PwConsoleMessage {
   type(): string
@@ -100,6 +98,34 @@ function stringifyEvalResult(result: unknown): string {
   }
 }
 
+function mergeAbortSignal(timeoutMs: number, signal?: AbortSignal): { signal?: AbortSignal; cleanup?: () => void } {
+  if (!signal) return {}
+  if (signal.aborted) return { signal }
+  const controller = new AbortController()
+  const onAbort = () => controller.abort(signal.reason)
+  signal.addEventListener('abort', onAbort)
+  const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs)
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', onAbort)
+    },
+  }
+}
+
+async function captureResponseBody(res: PwResponse, requestId: string, events: DriverEvents): Promise<void> {
+  try {
+    const headers = res.headers()
+    const contentType = headers['content-type'] ?? headers['Content-Type']
+    const text = await res.text()
+    const { body } = truncateResponseBody(text)
+    events.onResponseBody(requestId, body, contentType)
+  } catch {
+    /* binary or unreadable body — skip */
+  }
+}
+
 /** Wire Playwright page events into our DriverEvents sink. */
 function wireEvents(page: PwPage, events: DriverEvents): void {
   let seq = 0
@@ -117,7 +143,7 @@ function wireEvents(page: PwPage, events: DriverEvents): void {
     try {
       events.onConsole(msg.type(), msg.text())
     } catch {
-      /* ignore malformed console events */
+      /* ignore */
     }
   }) as never)
 
@@ -126,26 +152,46 @@ function wireEvents(page: PwPage, events: DriverEvents): void {
   }) as never)
 
   page.on('request', ((req: PwRequest) => {
-    events.onRequestStart(idFor(req), req.method(), req.url())
+    try {
+      events.onRequestStart(idFor(req), req.method(), req.url(), req.resourceType())
+    } catch {
+      /* ignore */
+    }
   }) as never)
 
   page.on('response', ((res: PwResponse) => {
     try {
-      events.onResponse(idFor(res.request()), res.status())
+      const req = res.request()
+      const id = idFor(req)
+      const resourceType = req.resourceType()
+      const status = res.status()
+      events.onResponse(id, status, resourceType)
+      if (shouldCaptureResponseBody(resourceType, status)) {
+        void captureResponseBody(res, id, events)
+      }
     } catch {
       /* ignore */
     }
   }) as never)
 
   page.on('requestfailed', ((req: PwRequest) => {
-    events.onRequestFailed(idFor(req), req.method(), req.url(), req.failure()?.errorText)
+    try {
+      events.onRequestFailed(idFor(req), req.method(), req.url(), req.failure()?.errorText, req.resourceType())
+    } catch {
+      /* ignore */
+    }
   }) as never)
 }
 
 function buildDriver(page: PwPage, closeFn: () => Promise<void>): BrowserDebugDriver {
   return {
-    goto: async (url) => {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    goto: async (url, signal) => {
+      const merged = mergeAbortSignal(30_000, signal)
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000, signal: merged.signal })
+      } finally {
+        merged.cleanup?.()
+      }
     },
     evaluate: async (expression) => stringifyEvalResult(await page.evaluate(expression)),
     screenshot: () => page.screenshot({ fullPage: true }),
@@ -155,29 +201,32 @@ function buildDriver(page: PwPage, closeFn: () => Promise<void>): BrowserDebugDr
     },
     click: (selector) => page.click(selector, { timeout: 10_000 }),
     type: (selector, text) => page.fill(selector, text, { timeout: 10_000 }),
-    waitForSelector: (selector, timeoutMs = 10_000) =>
-      page.waitForSelector(selector, { state: 'visible', timeout: timeoutMs }).then(() => undefined),
+    waitForSelector: async (selector, timeoutMs = 10_000, signal) => {
+      const merged = mergeAbortSignal(timeoutMs, signal)
+      try {
+        await page.waitForSelector(selector, { state: 'visible', timeout: timeoutMs, signal: merged.signal })
+      } finally {
+        merged.cleanup?.()
+      }
+    },
     currentUrl: () => page.url(),
     bringToFront: () => page.bringToFront(),
     close: closeFn,
   }
 }
 
-/** Default driver: launch a persistent context (headed by default). */
 export const playwrightDriverFactory: BrowserDebugDriverFactory = async (opts) => {
   const mod = await loadPlaywright()
   const context = await mod.chromium.launchPersistentContext(opts.userDataDir, {
     headless: opts.headless,
     viewport: { width: 1280, height: 800 },
   })
-
   const existing = context.pages()
   const page = existing.length > 0 ? existing[0]! : await context.newPage()
   wireEvents(page, opts.events)
   return buildDriver(page, () => context.close())
 }
 
-/** Connect to an existing Chrome started with --remote-debugging-port. */
 export const playwrightConnectFactory: BrowserDebugDriverFactory = async (opts) => {
   if (!opts.connectUrl) {
     throw new Error('connectUrl is required for CDP connect mode')
@@ -192,10 +241,8 @@ export const playwrightConnectFactory: BrowserDebugDriverFactory = async (opts) 
   const existing = context.pages()
   const page = existing.length > 0 ? existing[0]! : await context.newPage()
   wireEvents(page, opts.events)
-  // disconnect only — do not quit the user's Chrome
   return buildDriver(page, () => browser.close())
 }
 
-/** Route to launch or connect based on opts.connectUrl. */
 export const defaultDriverFactory: BrowserDebugDriverFactory = async (opts) =>
   opts.connectUrl ? playwrightConnectFactory(opts) : playwrightDriverFactory(opts)

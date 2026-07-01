@@ -558,6 +558,11 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
       if (agent) return `派发 ${agent}`
       return '派发中…'
     }
+    case 'browser_debug': {
+      const act = String(input.action ?? '')
+      const detail = input.url ?? input.selector ?? input.request_id ?? input.url_filter ?? ''
+      return detail ? `${act} ${detail}` : act
+    }
     default:
       return safeJson(input)
   }
