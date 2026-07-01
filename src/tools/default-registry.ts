@@ -14,6 +14,7 @@ import { REQUEST_PATH_ACCESS_TOOL } from './request-path-access.js'
 import { SKILL_TOOL } from './skill.js'
 import { BROWSER_TOOL } from './browser.js'
 import { BASH_TOOL } from './bash.js'
+import { JOB_TOOL } from './job-tool.js'
 import { DIFF_TOOL } from './diff.js'
 import { EDIT_FILE_TOOL } from './edit.js'
 import { HASH_EDIT_TOOL } from './hash-edit.js'
@@ -38,8 +39,8 @@ import { WRITE_FILE_TOOL } from './write-file.js'
 
 export interface DefaultRegistryOptions {
   /** T8 桌面化办公工具（create_document/spreadsheet/image/presentation/pdf + export_file/open_path）。
-   *  默认关闭：工具数必须守住 kernel budget（≤25），超过会触发认知过载退化
-   *  （见 kernel-budget.test.ts / trained-mode-analysis.md 3.2.B）。 */
+   *  默认关闭：工具数必须守住 kernel budget（≤26，2026-07-01 因 `job` 工具由 25 抬到 26），
+   *  超过会触发认知过载退化（见 kernel-budget.test.ts / trained-mode-analysis.md 3.2.B）。 */
   desktopTools?: boolean
   /** N4 桌面浏览器验证工具。默认关闭：新攻击面 + 占 kernel budget，仅桌面 sidecar 开启。 */
   browserTool?: boolean
@@ -68,6 +69,7 @@ export function createDefaultToolRegistry(extraTools: Tool[] = [], options: Defa
   registry.register(PLAN_CLOSE_TOOL)
   registry.register(PLAN_SUBMIT_TOOL)
   registry.register(BASH_TOOL)
+  registry.register(JOB_TOOL)
   registry.register(EDIT_FILE_TOOL)
   registry.register(HASH_EDIT_TOOL)
   registry.register(GREP_TOOL)

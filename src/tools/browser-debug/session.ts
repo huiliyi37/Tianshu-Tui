@@ -1,9 +1,8 @@
 /**
- * browser-debug/session — process-level persistent browser session.
+ * browser-debug/session — per-sessionKey persistent browser sessions.
  *
- * Supports two modes:
- *  - launch — Playwright persistent context (profile dir under ~/.rivet);
- *  - connect — attach to existing Chrome via CDP (--remote-debugging-port).
+ * Desktop runs multiple agent sessions in parallel; each gets its own browser
+ * instance keyed by params.sessionId (TUI falls back to __default__).
  */
 
 import {
@@ -19,19 +18,22 @@ import {
   type DriverEvents,
 } from './driver.js'
 
+export const DEFAULT_SESSION_KEY = '__default__'
+
 export type BrowserSessionMode = 'launch' | 'connect'
 
 export interface OpenSessionOptions {
+  sessionKey: string
   headless: boolean
   userDataDir: string
   connectUrl?: string
   driverFactory?: BrowserDebugDriverFactory
 }
 
-/** Sink for live event lines (wired to the current tool call's params.onOutput). */
 export type OutputSink = (chunk: string) => void
 
 export class BrowserDebugSession {
+  readonly sessionKey: string
   readonly driver: BrowserDebugDriver
   readonly log = new LogCapture()
   readonly headless: boolean
@@ -41,11 +43,13 @@ export class BrowserDebugSession {
   private outputSink: OutputSink | null = null
 
   private constructor(
+    sessionKey: string,
     driver: BrowserDebugDriver,
     headless: boolean,
     mode: BrowserSessionMode,
     meta: { connectUrl?: string; userDataDir?: string },
   ) {
+    this.sessionKey = sessionKey
     this.driver = driver
     this.headless = headless
     this.mode = mode
@@ -53,7 +57,6 @@ export class BrowserDebugSession {
     this.userDataDir = meta.userDataDir
   }
 
-  /** Point live events at the current tool call's output stream. */
   setOutputSink(sink: OutputSink | null): void {
     this.outputSink = sink
   }
@@ -62,7 +65,7 @@ export class BrowserDebugSession {
     try {
       this.outputSink?.(line.endsWith('\n') ? line : line + '\n')
     } catch {
-      /* a broken sink must never crash the browser session */
+      /* ignore */
     }
   }
 
@@ -75,17 +78,20 @@ export class BrowserDebugSession {
         const entry = self!.log.addConsole(level, text)
         self!.emit(formatConsoleLine(entry))
       },
-      onRequestStart: (id, method, url) => {
-        const entry = self!.log.startRequest(id, method, url)
+      onRequestStart: (id, method, url, resourceType) => {
+        const entry = self!.log.startRequest(id, method, url, Date.now(), resourceType)
         self!.emit(formatNetworkLine(entry))
       },
-      onResponse: (id, status) => {
-        const entry = self!.log.completeRequest(id, status)
+      onResponse: (id, status, resourceType) => {
+        const entry = self!.log.completeRequest(id, status, Date.now(), resourceType)
         self!.emit(formatNetworkLine(entry))
       },
-      onRequestFailed: (id, method, url, errorText) => {
-        const entry = self!.log.failRequest(id, method, url, errorText)
+      onRequestFailed: (id, method, url, errorText, resourceType) => {
+        const entry = self!.log.failRequest(id, method, url, errorText, Date.now(), resourceType)
         self!.emit(formatNetworkLine(entry))
+      },
+      onResponseBody: (id, body, contentType) => {
+        self!.log.attachResponseBody(id, body, contentType)
       },
     }
     const factory = opts.driverFactory ?? defaultDriverFactory
@@ -95,7 +101,7 @@ export class BrowserDebugSession {
       connectUrl: opts.connectUrl,
       events,
     })
-    self = new BrowserDebugSession(driver, opts.headless, mode, {
+    self = new BrowserDebugSession(opts.sessionKey, driver, opts.headless, mode, {
       connectUrl: opts.connectUrl,
       userDataDir: mode === 'launch' ? opts.userDataDir : undefined,
     })
@@ -112,71 +118,82 @@ export class BrowserDebugSession {
   }
 }
 
-// ── Process-level singleton ────────────────────────────────────────────────
-
-let current: BrowserDebugSession | null = null
-let opening: Promise<BrowserDebugSession> | null = null
+const sessions = new Map<string, BrowserDebugSession>()
+const opening = new Map<string, Promise<BrowserDebugSession>>()
 let exitHookInstalled = false
 
 function installExitHook(): void {
   if (exitHookInstalled) return
   exitHookInstalled = true
   const cleanup = () => {
-    const s = current
-    current = null
-    if (s) void s.close().catch(() => {})
+    for (const s of sessions.values()) {
+      void s.close().catch(() => {})
+    }
+    sessions.clear()
+    opening.clear()
   }
   process.once('exit', cleanup)
   process.once('SIGINT', cleanup)
   process.once('SIGTERM', cleanup)
 }
 
-/**
- * Return the live session, launching one on first use. Concurrent callers share
- * the same in-flight launch.
- */
+export function resolveSessionKey(sessionId?: string): string {
+  return sessionId?.trim() ? sessionId.trim() : DEFAULT_SESSION_KEY
+}
+
 export async function getOrCreateSession(opts: {
+  sessionKey: string
   headless: boolean
   userDataDir: string
   connectUrl?: string
   driverFactory?: BrowserDebugDriverFactory
 }): Promise<BrowserDebugSession> {
-  if (current) return current
-  if (opening) return opening
+  const key = opts.sessionKey
+  const existing = sessions.get(key)
+  if (existing) return existing
+
+  const inflight = opening.get(key)
+  if (inflight) return inflight
+
   installExitHook()
-  opening = BrowserDebugSession.open({
+  const promise = BrowserDebugSession.open({
+    sessionKey: key,
     headless: opts.headless,
     userDataDir: opts.userDataDir,
     connectUrl: opts.connectUrl,
     driverFactory: opts.driverFactory,
   })
     .then((s) => {
-      current = s
-      opening = null
+      sessions.set(key, s)
+      opening.delete(key)
       return s
     })
     .catch((err) => {
-      opening = null
+      opening.delete(key)
       throw err
     })
-  return opening
+  opening.set(key, promise)
+  return promise
 }
 
-/** The current session, or null if none is open. */
-export function getSession(): BrowserDebugSession | null {
-  return current
+export function getSession(sessionKey: string = DEFAULT_SESSION_KEY): BrowserDebugSession | null {
+  return sessions.get(sessionKey) ?? null
 }
 
-/** Close and clear the singleton. Idempotent. */
-export async function closeSession(): Promise<void> {
-  const s = current
-  current = null
-  opening = null
+export async function closeSession(sessionKey: string = DEFAULT_SESSION_KEY): Promise<void> {
+  const s = sessions.get(sessionKey)
+  sessions.delete(sessionKey)
+  opening.delete(sessionKey)
   if (s) await s.close()
 }
 
-/** Test hook: drop the singleton without touching a real browser. */
+/** Test hook: drop all sessions without touching real browsers. */
 export function __resetSessionForTest(): void {
-  current = null
-  opening = null
+  sessions.clear()
+  opening.clear()
+}
+
+/** Test hook: count open sessions. */
+export function __sessionCountForTest(): number {
+  return sessions.size
 }

@@ -14,6 +14,7 @@ import zhCNDelegation from '../locales/zh-CN/delegation.json'
 import zhCNTaskList from '../locales/zh-CN/taskList.json'
 import zhCNNav from '../locales/zh-CN/nav.json'
 import zhCNError from '../locales/zh-CN/error.json'
+import zhCNJobs from '../locales/zh-CN/jobs.json'
 
 import enCommon from '../locales/en/common.json'
 import enComposer from '../locales/en/composer.json'
@@ -27,6 +28,7 @@ import enDelegation from '../locales/en/delegation.json'
 import enTaskList from '../locales/en/taskList.json'
 import enNav from '../locales/en/nav.json'
 import enError from '../locales/en/error.json'
+import enJobs from '../locales/en/jobs.json'
 
 const resources = {
   'zh-CN': {
@@ -42,6 +44,7 @@ const resources = {
     taskList: zhCNTaskList,
     nav: zhCNNav,
     error: zhCNError,
+    jobs: zhCNJobs,
   },
   en: {
     common: enCommon,
@@ -56,6 +59,7 @@ const resources = {
     taskList: enTaskList,
     nav: enNav,
     error: enError,
+    jobs: enJobs,
   },
 }
 

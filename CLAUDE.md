@@ -1,12 +1,12 @@
 # Rivet
 
-Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 22+ / TypeScript strict / Ink 6 / node:test.
+Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / Ink 6 / React 19 / node:test.
 
 ## Build & Test
 
 ```bash
 npm install && npm run build
-npm test          # 2340 tests, node:test + node:assert/strict
+npm test          # ~820 test files, node:test + node:assert/strict (runner: scripts/run-node-tests.ts)
 npm run typecheck # tsc --noEmit
 ```
 
@@ -23,12 +23,16 @@ main.tsx → AgentLoop (agent/loop.ts)
   │       postTurn                  → turn-completion.ts
   │       postSession               → loop.ts（经 turn-orchestrator 调度）
   │     hooks 由 createDefaultRuntimeHooks() 条件装配（create-runtime-hooks.ts），
-  │       约 25 个，按 deps/开关 gated。默认会话实际激活 ~12-15 个：
-  │       常驻 8：perception, signal-consumer, kick, vigor×2(afterPerception+postTool),
-  │               theta, stigmergy, radio
-  │       gated：courage/ccr(starSoul)、playbook-reflect、dream/skill-distill、
-  │               meridian、telemetry-flush、dedup-guard、self-verify、memory-learning…
-  │       默认关(opt-in)：songline、constellation、hearth-observe、companion、dispatcher(自动委派)
+  │       约 37 种（src/agent/hooks/ 有 39 文件），按 deps/开关 gated。默认会话实际激活 ~18+：
+  │       常驻 8（base 数组无条件）：perception, signal-consumer, kick,
+  │               vigor×2(afterPerception+postTool), theta, stigmergy, radio
+  │       advisoryBus 恒构造(loop.ts) → 这批默认全开：self-verify、edit-tool-advisory、
+  │               lossy-observation、spec-verify-gate、typecheck-reminder、todo-reminder、
+  │               context-pressure(需 token getter)、dedup-guard(需 streamedText getter)
+  │       deps-gated（默认多为真）：playbook-reflect、anchor-break-shadow、dream/skill-distill、
+  │               meridian、telemetry-flush、physarum-file-access、memory-learning、courage/ccr(starSoul)
+  │       默认关(opt-in)：songline、constellation、hearth-observe、companion、
+  │               dispatcher(自动委派)、anchor-break-scout、mcts-planning/blind-exploration(antiAnchoring)
   ├── AgentSession (messages, usage, turn count)
   ├── EvidenceTracker + FileHistory
   ├── Stores: claim-store, stigmergy-store, playbook-store, trace-store

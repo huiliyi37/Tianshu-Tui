@@ -2,12 +2,14 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
+import { useJobNotifications } from '../state/use-job-notifications'
 import { answerApproval, setApprovalMode, steerSession } from '../runtime/client'
 import type { ApprovalMode, PlanModeState, ApprovalRequest } from '../runtime/types'
 import { ProjectSidebar } from './ProjectSidebar'
 import { ThreadView } from './ThreadView'
 import { ReviewPanel } from './ReviewPanel'
 import { TerminalTabs } from '../components/TerminalTabs'
+import { JobsDock } from '../components/JobsDock'
 import { ThreadTabs } from '../components/ThreadTabs'
 import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
@@ -36,6 +38,7 @@ export function WorkspaceSurface() {
   const activeId = ui.activeSessionId
 
   const view = useSessionEvents(activeId)
+  useJobNotifications(activeId, view.jobs)
   const artifacts = useArtifacts(activeId, view.artifactRev)
   const sendPrompt = useSendPrompt()
   const abortSession = useAbortSession()
@@ -313,6 +316,7 @@ export function WorkspaceSurface() {
           {ui.reviewVisible ? (
             <ReviewPanel
               sessionId={activeId}
+              cwd={active?.cwd}
               artifacts={artifacts.data ?? []}
               pendingApproval={view.pendingApproval}
               approvalMode={active?.approvalMode}
@@ -331,6 +335,16 @@ export function WorkspaceSurface() {
           )}
         </Panel>
       </Group>
+
+      {activeId && Object.keys(view.jobs).length > 0 && (
+        <JobsDock
+          sessionId={activeId}
+          jobs={Object.values(view.jobs).sort((a, b) => b.startedAt - a.startedAt)}
+          visible={ui.jobsDockVisible}
+          onToggle={() => dispatch({ type: 'setJobsDock', visible: !ui.jobsDockVisible })}
+          onOpenTerminal={() => dispatch({ type: 'setTerminal', visible: true })}
+        />
+      )}
 
       {!ui.reviewVisible && view.todos.length > 0 && (() => {
         const done = view.todos.filter((t) => t.status === 'completed').length

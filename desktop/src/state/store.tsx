@@ -7,6 +7,7 @@ import {
   loadSidebarVisible,
   loadReviewVisible,
   loadTerminalVisible,
+  loadJobsDockVisible,
   loadToolDensity,
   loadSplitMode,
   saveActiveProject,
@@ -16,6 +17,7 @@ import {
   saveSidebarVisible,
   saveReviewVisible,
   saveTerminalVisible,
+  saveJobsDockVisible,
   saveToolDensity,
   saveSplitMode,
   type ToolDensity,
@@ -37,6 +39,8 @@ export interface UiState {
   sidebarVisible: boolean
   reviewVisible: boolean
   terminalVisible: boolean
+  /** Background jobs (bash run_in_background) bottom dock visibility. */
+  jobsDockVisible: boolean
   /** Zen mode: hides sidebar + review panel for distraction-free focus (Cmd+.). */
   zenMode: boolean
   openTabs: string[]
@@ -48,6 +52,9 @@ export interface UiState {
   newSessionPrompt: string | null
   /** Provider-connect wizard open state (guided model/provider setup). */
   connectOpen: boolean
+  /** Transient file paths queued from the file explorer to be appended as
+   *  @file mentions in the composer. Not persisted across reloads. */
+  composerAttachments: string[]
 }
 
 type UiAction =
@@ -61,12 +68,15 @@ type UiAction =
   | { type: 'setSidebar'; visible: boolean }
   | { type: 'setReview'; visible: boolean }
   | { type: 'setTerminal'; visible: boolean }
+  | { type: 'setJobsDock'; visible: boolean }
   | { type: 'closeTab'; id: string }
   | { type: 'reorderTabs'; from: number; to: number }
   | { type: 'toggleZen' }
   | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
   | { type: 'openConnect'; open: boolean }
+  | { type: 'addComposerAttachments'; paths: string[] }
+  | { type: 'clearComposerAttachments' }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -109,6 +119,8 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setTerminal':
       return { ...state, terminalVisible: action.visible }
+    case 'setJobsDock':
+      return { ...state, jobsDockVisible: action.visible }
     case 'closeTab': {
       const tabs = state.openTabs.filter((t) => t !== action.id)
       const activeId = state.activeSessionId === action.id
@@ -130,6 +142,13 @@ function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, reviewManuallyToggled: action.on }
     case 'openConnect':
       return { ...state, connectOpen: action.open }
+    case 'addComposerAttachments': {
+      if (action.paths.length === 0) return state
+      const merged = new Set([...state.composerAttachments, ...action.paths])
+      return { ...state, composerAttachments: [...merged] }
+    }
+    case 'clearComposerAttachments':
+      return { ...state, composerAttachments: [] }
     default:
       return state
   }
@@ -151,11 +170,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     sidebarVisible: loadSidebarVisible(),
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
+    jobsDockVisible: loadJobsDockVisible(),
     zenMode: false,
     openTabs: loadOpenTabs(),
     splitMode: loadSplitMode(),
     reviewManuallyToggled: false,
     connectOpen: false,
+    composerAttachments: [],
   }))
 
   useEffect(() => {
@@ -185,6 +206,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveTerminalVisible(state.terminalVisible)
   }, [state.terminalVisible])
+
+  useEffect(() => {
+    saveJobsDockVisible(state.jobsDockVisible)
+  }, [state.jobsDockVisible])
 
   useEffect(() => {
     saveOpenTabs(state.openTabs)

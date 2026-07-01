@@ -37,6 +37,8 @@ export const CORE_TOOLS = [
   'run_tests',
   'git',
   'todo',
+  // 后台任务控制（bash run_in_background 的配套 await/logs/kill）
+  'job',
   // 规划与交付
   'plan',
   'plan_task',

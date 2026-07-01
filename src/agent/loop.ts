@@ -40,6 +40,7 @@ import { mintNumericId, buildAgentMark, VOID_SYMBOL } from './void-identity.js'
 import { buildDepartureMilestone } from '../constellation/milestone.js'
 import { appendMilestone } from '../constellation/store.js'
 import { ArtifactStore } from '../artifact/store.js'
+import { SessionJobs } from '../tools/job-store.js'
 import { COMPACT_HISTORY_TOOL } from '../compact/recall-marker.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
@@ -281,6 +282,10 @@ export class AgentLoop {
   thetaRequestsThisTurn = 0
   thetaState: ThetaState = createThetaState(7)
   artifactStore: import('../artifact/store.js').ArtifactStore | undefined
+  /** Session-scoped background job registry (bash run_in_background + `job` tool).
+   *  Self-created for TUI; the server replaces it via setJobs() with an instance
+   *  it subscribes to for SSE + REST. */
+  private _jobs: import('../tools/job-store.js').SessionJobs | undefined
   sessionStateManager: SessionStateManager | undefined
   stigmergyStore: StigmergyStore
   loadedPheromones: Pheromone[] = []
@@ -368,6 +373,7 @@ export class AgentLoop {
       this.artifactStore = new ArtifactStore(artifactDir, this.config.sessionId)
       const stateManager = new SessionStateManager(this.config.sessionId)
       this.sessionStateManager = stateManager
+      this._jobs = new SessionJobs(join(artifactDir, 'jobs'))
     }
 
     this.cacheAdvisor = new CacheAdvisor({
@@ -1122,6 +1128,20 @@ export class AgentLoop {
   /** Estimated token count for the current conversation (live, for desktop ctx-bar). */
   getEstimatedTokens(): number {
     return this.session.getEstimatedTokens()
+  }
+
+  /** Session-scoped background job registry (undefined in anon/no-session mode). */
+  get jobs(): import('../tools/job-store.js').SessionJobs | undefined {
+    return this._jobs
+  }
+
+  /** Replace the background job registry. The server injects an instance it owns
+   *  (subscribed for SSE + REST). Any prior self-created jobs are terminated. */
+  setJobs(jobs: import('../tools/job-store.js').SessionJobs): void {
+    if (this._jobs && this._jobs !== jobs) {
+      try { this._jobs.killAll() } catch { /* best-effort */ }
+    }
+    this._jobs = jobs
   }
 
   /** Real context-window occupancy (anchor on last API prompt_tokens + tail

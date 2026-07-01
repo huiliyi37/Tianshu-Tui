@@ -1,6 +1,7 @@
 import type {
   ApprovalRequest,
   DelegationNode,
+  JobState,
   PlanModeState,
   SessionEvent,
   TodoStateItem,
@@ -107,6 +108,10 @@ export interface EventViewState {
   sources: string[]
   /** I4 — latest user hook results surfaced as raw hook_result events. */
   hookResults: SessionEvent[]
+  /** Background jobs (bash run_in_background), keyed by job id. */
+  jobs: Record<string, JobState>
+  /** Bumped on every job event so the JobsDock can re-render without deep compare. */
+  jobsRev: number
   /** Completion evidence summary surfaced from the final turn_complete event. */
   completionSummary?: EvidenceSummary
 }
@@ -130,6 +135,8 @@ export const initialEventState: EventViewState = {
   prevTotalTokens: 0,
   sources: [],
   hookResults: [],
+  jobs: {},
+  jobsRev: 0,
   completionSummary: undefined,
 }
 
@@ -506,6 +513,25 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.hookResults = [...next.hookResults, ev].slice(-50)
       return next
     }
+    case 'job': {
+      const id = String(ev.data.id ?? '')
+      if (!id) return next
+      const status = ev.data.status === 'exited' || ev.data.status === 'killed' ? ev.data.status : 'running'
+      const prev = next.jobs[id]
+      const job: JobState = {
+        id,
+        command: ev.data.command != null ? String(ev.data.command) : (prev?.command ?? ''),
+        status,
+        exitCode: ev.data.exitCode != null ? Number(ev.data.exitCode) : prev?.exitCode,
+        startedAt: ev.data.startedAt != null ? Number(ev.data.startedAt) : (prev?.startedAt ?? ev.ts),
+        endedAt: ev.data.endedAt != null ? Number(ev.data.endedAt) : prev?.endedAt,
+        lastLine: ev.data.lastLine != null ? String(ev.data.lastLine) : (prev?.lastLine ?? ''),
+        pid: ev.data.pid != null ? Number(ev.data.pid) : prev?.pid,
+      }
+      next.jobs = { ...next.jobs, [id]: job }
+      next.jobsRev = next.jobsRev + 1
+      return next
+    }
     default:
       return next
   }
@@ -557,6 +583,11 @@ export function humanizeToolInput(toolName: string, input: Record<string, unknow
       if (objective) return objective
       if (agent) return `派发 ${agent}`
       return '派发中…'
+    }
+    case 'browser_debug': {
+      const act = String(input.action ?? '')
+      const detail = input.url ?? input.selector ?? input.request_id ?? input.url_filter ?? ''
+      return detail ? `${act} ${detail}` : act
     }
     default:
       return safeJson(input)

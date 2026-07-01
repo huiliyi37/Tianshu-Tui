@@ -170,6 +170,8 @@ export type SessionEventType =
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'
+  // Background jobs (bash run_in_background) — started / output / exit.
+  | 'job'
   | 'done'
 
 export interface SessionEvent {
@@ -377,6 +379,21 @@ export interface TodoStateItem {
   id: string
   content: string
   status: 'pending' | 'in_progress' | 'completed'
+}
+
+/** A background job (bash run_in_background). Mirrors backend JobSnapshot. */
+export type JobStatus = 'running' | 'exited' | 'killed'
+
+export interface JobState {
+  id: string
+  command: string
+  status: JobStatus
+  exitCode?: number
+  startedAt: number
+  endedAt?: number
+  /** Last non-empty output line (dashboard preview). */
+  lastLine: string
+  pid?: number
 }
 
 export interface ArtifactSummary {

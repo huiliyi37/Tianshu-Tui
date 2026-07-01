@@ -1,0 +1,26 @@
+{
+  "title": "Background Jobs",
+  "empty": "No background jobs",
+  "running": "running",
+  "status": {
+    "running": "running",
+    "exited": "exited",
+    "killed": "killed"
+  },
+  "exitCode": "exit {{code}}",
+  "kill": "Kill",
+  "openTerminal": "Open in terminal",
+  "viewLogs": "View logs",
+  "hideLogs": "Hide logs",
+  "logsEmpty": "(no output)",
+  "logsLoading": "Loading logs…",
+  "logsError": "Failed to load logs",
+  "collapse": "Collapse",
+  "expand": "Expand",
+  "elapsed": "running {{time}}",
+  "notify": {
+    "exited": "Background job finished",
+    "failed": "Background job failed",
+    "body": "{{command}} (exit {{code}})"
+  }
+}

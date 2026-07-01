@@ -32,6 +32,7 @@ import { createCcrHook, type CcrTriggerEvent } from './hooks/cognitive-capsule-r
 import { createSelfVerifyHook } from './hooks/self-verify-hook.js'
 import { createTypecheckReminderHook } from './hooks/typecheck-reminder-hook.js'
 import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
+import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
@@ -170,6 +171,9 @@ export interface RuntimeHookDeps {
   userHooksBridge?: UserHooksBridgeDeps
   /** A1: unified advisory bus for noise-gated corrective signals */
   advisoryBus?: AdvisoryBus
+  /** Background job registry accessor — enables the preTurn background-jobs
+   *  awareness nudge. Absent → hook not installed. */
+  getJobs?: () => import('../tools/job-store.js').JobRegistry | undefined
   /** 多会话隔离：读取本会话 TodoStore（透传给 todo-reminder 做快照/活跃度判断）。
    *  缺省时 todo-reminder 回退全局 getTodos()。 */
   getTodos?: () => import('../tools/todo-store.js').TodoItem[]
@@ -433,6 +437,11 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Soft by default, escalates wording when a long task still has no todo.
   if (deps.advisoryBus) {
     hooks.push(createTodoReminderHook({ advisoryBus: deps.advisoryBus, getTodos: deps.getTodos }))
+  }
+
+  // Background-jobs awareness — preTurn nudge while jobs run (requires bus + registry).
+  if (deps.advisoryBus && deps.getJobs) {
+    hooks.push(createBackgroundJobsHook({ advisoryBus: deps.advisoryBus, getJobs: deps.getJobs }))
   }
 
   if (deps.companionPresenceEnabled && deps.companionPresenceCwd && deps.sessionId) {

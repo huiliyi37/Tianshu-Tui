@@ -106,6 +106,10 @@ export interface ToolCallParams {
   sessionModifiedFiles?: string[]
   /** Artifact store for persisting tool output — no global setter, always inject via params */
   artifactStore?: ArtifactStore
+  /** Session-scoped background job registry — enables bash run_in_background and
+   *  the `job` tool (list/logs/await/kill). Absent in TUI/non-server contexts →
+   *  bash degrades to foreground execution. */
+  jobs?: import('./job-store.js').JobRegistry
   /** Prewarm cache for speculative file reads — injected so read_file can hit
    *  warmed entries (mtime-verified) instead of a cold fs read. Per-session. */
   prewarmCache?: PrewarmCache

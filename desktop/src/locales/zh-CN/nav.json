@@ -32,5 +32,17 @@
     "deleteSession": "永久删除",
     "confirmRemoveProject": "确定移除项目「{name}」吗？其下的所有会话将被归档。",
     "confirmDeleteSession": "确定永久删除会话「{title}」吗？此操作不可恢复。"
+  },
+  "fileExplorer": {
+    "title": "文件浏览器",
+    "openFile": "打开文件",
+    "revealInFinder": "在 Finder 中显示",
+    "revealInExplorer": "在资源管理器中显示",
+    "copyRelativePath": "复制相对路径",
+    "copyAbsolutePath": "复制绝对路径",
+    "addToContext": "加入引用",
+    "addNToContext": "加入 {count} 个引用",
+    "openFolder": "打开文件夹",
+    "refresh": "刷新"
   }
 }

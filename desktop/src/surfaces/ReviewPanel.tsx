@@ -48,6 +48,7 @@ interface TabDef {
 // for future CVM council/sensorium views (not rendered yet).
 export function ReviewPanel(props: {
   sessionId: string | null
+  cwd?: string
   artifacts: ArtifactSummary[]
   pendingApproval: ApprovalRequest | null
   approvalMode?: ApprovalMode
@@ -61,7 +62,7 @@ export function ReviewPanel(props: {
   sources?: string[]
   onCollapse?: () => void
 }) {
-  const { sessionId, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse } = props
+  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
@@ -480,7 +481,7 @@ export function ReviewPanel(props: {
           <ChangesTab sessionId={sessionId} />
         </TabsContent>
         <TabsContent value="files" className="review-body">
-          <FileExplorer sessionId={sessionId} />
+          <FileExplorer sessionId={sessionId} cwd={cwd} />
         </TabsContent>
         <TabsContent value="plan" className="review-body">
           <PlanPanel sessionId={sessionId} planRev={planRev} latestPlanSlug={latestPlanSlug} />

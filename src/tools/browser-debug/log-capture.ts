@@ -1,16 +1,5 @@
 /**
  * browser-debug/log-capture — console + network event buffer.
- *
- * UI-agnostic: the driver feeds raw console/network events in, the tool reads
- * them back for `console` / `network` actions, and each event is also rendered
- * to a single line (with a machine-parsable prefix) so the TUI/desktop can
- * colour by severity without re-parsing structured objects.
- *
- * Line prefixes are intentionally stable so `src/tui/format/tool-card.ts` can
- * classify a streamed line:
- *   console → `[error] …` `[warn] …` `[log] …`
- *   network → `→ GET  /url`  (pending)   `← 200 GET /url (12ms)`  (done)
- *                                          `✗ GET /url (net::ERR…)` (failed)
  */
 
 export type ConsoleLevel = 'log' | 'info' | 'warn' | 'error' | 'debug'
@@ -30,10 +19,22 @@ export interface NetworkEntry {
   durationMs?: number
   failed?: boolean
   errorText?: string
+  resourceType?: string
+  contentType?: string
+  responseBody?: string
+  responseBodyTruncated?: boolean
 }
 
+export interface NetworkQuery {
+  failedOnly?: boolean
+  urlFilter?: string
+  apiOnly?: boolean
+}
+
+export const MAX_RESPONSE_BODY = 2048
 const MAX_CONSOLE = 500
 const MAX_NETWORK = 500
+const API_RESOURCE_TYPES = new Set(['xhr', 'fetch'])
 
 /** Normalise arbitrary console type strings to our small level set. */
 export function normalizeConsoleLevel(raw: string): ConsoleLevel {
@@ -60,15 +61,61 @@ export function formatConsoleLine(entry: ConsoleEntry): string {
 }
 
 /** Single-line network render with a status-aware leading glyph. */
-export function formatNetworkLine(entry: NetworkEntry): string {
+export function formatNetworkLine(entry: NetworkEntry, includeBody = false): string {
   const dur = entry.durationMs !== undefined ? ` (${entry.durationMs}ms)` : ''
+  let line: string
   if (entry.failed) {
-    return `✗ ${entry.method} ${entry.url}${entry.errorText ? ` (${entry.errorText})` : ''}`
+    line = `✗ ${entry.method} ${entry.url}${entry.errorText ? ` (${entry.errorText})` : ''}`
+  } else if (entry.status === undefined) {
+    line = `→ ${entry.method} ${entry.url}`
+  } else {
+    line = `← ${entry.status} ${entry.method} ${entry.url}${dur}`
   }
-  if (entry.status === undefined) {
-    return `→ ${entry.method} ${entry.url}`
+  if (entry.resourceType) line += ` [${entry.resourceType}]`
+  if (includeBody && entry.responseBody) {
+    const suffix = entry.responseBodyTruncated ? ' …(body truncated)' : ''
+    line += `\n  body: ${entry.responseBody}${suffix}`
   }
-  return `← ${entry.status} ${entry.method} ${entry.url}${dur}`
+  return line
+}
+
+/** Multi-line detail for network_detail action. */
+export function formatNetworkDetail(entry: NetworkEntry): string {
+  const lines = [
+    `id: ${entry.requestId}`,
+    `method: ${entry.method}`,
+    `url: ${entry.url}`,
+  ]
+  if (entry.resourceType) lines.push(`type: ${entry.resourceType}`)
+  if (entry.failed) {
+    lines.push(`status: failed${entry.errorText ? ` (${entry.errorText})` : ''}`)
+  } else if (entry.status !== undefined) {
+    lines.push(`status: ${entry.status}`)
+  } else {
+    lines.push('status: pending')
+  }
+  if (entry.durationMs !== undefined) lines.push(`duration: ${entry.durationMs}ms`)
+  if (entry.contentType) lines.push(`content-type: ${entry.contentType}`)
+  if (entry.responseBody) {
+    lines.push('body:')
+    lines.push(entry.responseBody)
+    if (entry.responseBodyTruncated) lines.push('… (body truncated at 2048 chars)')
+  } else {
+    lines.push('body: (not captured)')
+  }
+  return lines.join('\n')
+}
+
+/** Whether the driver should async-capture response body for this request. */
+export function shouldCaptureResponseBody(resourceType: string | undefined, status: number): boolean {
+  if (resourceType && API_RESOURCE_TYPES.has(resourceType)) return true
+  return status >= 400
+}
+
+/** Truncate response text for storage. */
+export function truncateResponseBody(text: string): { body: string; truncated: boolean } {
+  if (text.length <= MAX_RESPONSE_BODY) return { body: text, truncated: false }
+  return { body: text.slice(0, MAX_RESPONSE_BODY), truncated: true }
 }
 
 export class LogCapture {
@@ -85,15 +132,38 @@ export class LogCapture {
     return entry
   }
 
-  /** Record a request as it starts (status undefined = pending). */
-  startRequest(requestId: string, method: string, url: string, ts: number = Date.now()): NetworkEntry {
-    const entry: NetworkEntry = { requestId, method, url, startedAt: ts }
+  startRequest(
+    requestId: string,
+    method: string,
+    url: string,
+    ts: number = Date.now(),
+    resourceType?: string,
+  ): NetworkEntry {
+    const prev = this.network.get(requestId)
+    const entry: NetworkEntry = {
+      requestId,
+      method,
+      url,
+      startedAt: ts,
+      resourceType: resourceType ?? prev?.resourceType,
+      status: prev?.status,
+      durationMs: prev?.durationMs,
+      failed: prev?.failed,
+      errorText: prev?.errorText,
+      contentType: prev?.contentType,
+      responseBody: prev?.responseBody,
+      responseBodyTruncated: prev?.responseBodyTruncated,
+    }
     this.upsert(entry)
     return entry
   }
 
-  /** Complete a request with a response status; computes durationMs when possible. */
-  completeRequest(requestId: string, status: number, ts: number = Date.now()): NetworkEntry {
+  completeRequest(
+    requestId: string,
+    status: number,
+    ts: number = Date.now(),
+    resourceType?: string,
+  ): NetworkEntry {
     const prev = this.network.get(requestId)
     const entry: NetworkEntry = {
       requestId,
@@ -102,13 +172,23 @@ export class LogCapture {
       startedAt: prev?.startedAt ?? ts,
       status,
       durationMs: prev ? Math.max(0, ts - prev.startedAt) : undefined,
+      resourceType: resourceType ?? prev?.resourceType,
+      contentType: prev?.contentType,
+      responseBody: prev?.responseBody,
+      responseBodyTruncated: prev?.responseBodyTruncated,
     }
     this.upsert(entry)
     return entry
   }
 
-  /** Mark a request as failed (network error, not an HTTP error status). */
-  failRequest(requestId: string, method: string, url: string, errorText?: string, ts: number = Date.now()): NetworkEntry {
+  failRequest(
+    requestId: string,
+    method: string,
+    url: string,
+    errorText?: string,
+    ts: number = Date.now(),
+    resourceType?: string,
+  ): NetworkEntry {
     const prev = this.network.get(requestId)
     const entry: NetworkEntry = {
       requestId,
@@ -118,8 +198,26 @@ export class LogCapture {
       failed: true,
       errorText,
       durationMs: prev ? Math.max(0, ts - prev.startedAt) : undefined,
+      resourceType: resourceType ?? prev?.resourceType,
+      contentType: prev?.contentType,
+      responseBody: prev?.responseBody,
+      responseBodyTruncated: prev?.responseBodyTruncated,
     }
     this.upsert(entry)
+    return entry
+  }
+
+  attachResponseBody(requestId: string, body: string, contentType?: string): NetworkEntry | null {
+    const prev = this.network.get(requestId)
+    if (!prev) return null
+    const { body: trimmed, truncated } = truncateResponseBody(body)
+    const entry: NetworkEntry = {
+      ...prev,
+      contentType: contentType ?? prev.contentType,
+      responseBody: trimmed,
+      responseBodyTruncated: truncated,
+    }
+    this.network.set(requestId, entry)
     return entry
   }
 
@@ -134,19 +232,28 @@ export class LogCapture {
     this.network.set(entry.requestId, entry)
   }
 
-  /** Console entries, optionally filtered to a single level, most-recent-last. */
   getConsole(level?: ConsoleLevel): ConsoleEntry[] {
     return level ? this.consoleEntries.filter((e) => e.level === level) : [...this.consoleEntries]
   }
 
-  /**
-   * Network entries in start order. `failedOnly` keeps only failures and
-   * HTTP error statuses (>=400) — the common "what broke" filter for API联调.
-   */
-  getNetwork(failedOnly = false): NetworkEntry[] {
-    const all = this.networkOrder.map((id) => this.network.get(id)).filter((e): e is NetworkEntry => !!e)
-    if (!failedOnly) return all
-    return all.filter((e) => e.failed || (e.status !== undefined && e.status >= 400))
+  getNetwork(query: NetworkQuery | boolean = false): NetworkEntry[] {
+    const opts: NetworkQuery = typeof query === 'boolean' ? { failedOnly: query } : query
+    let all = this.networkOrder.map((id) => this.network.get(id)).filter((e): e is NetworkEntry => !!e)
+    if (opts.failedOnly) {
+      all = all.filter((e) => e.failed || (e.status !== undefined && e.status >= 400))
+    }
+    if (opts.urlFilter) {
+      const f = opts.urlFilter
+      all = all.filter((e) => e.url.includes(f))
+    }
+    if (opts.apiOnly) {
+      all = all.filter((e) => e.resourceType && API_RESOURCE_TYPES.has(e.resourceType))
+    }
+    return all
+  }
+
+  getByRequestId(requestId: string): NetworkEntry | undefined {
+    return this.network.get(requestId)
   }
 
   clear(): void {

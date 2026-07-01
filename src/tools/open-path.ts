@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { resolve } from 'path'
+import { dirname, resolve } from 'node:path'
 import type { Tool } from './types.js'
 import { expandHome } from '../platform.js'
 
@@ -35,6 +35,26 @@ export function buildOpenPathCommand(path: string, platform: NodeJS.Platform = p
     return { cmd: 'open', args: [target] }
   }
   return { cmd: 'xdg-open', args: [target] }
+}
+
+/** Build a command that reveals a file in the platform file manager. */
+export function buildRevealCommand(path: string, platform: NodeJS.Platform = process.platform): OpenPathCommand {
+  const target = normalizeOpenTarget(path, platform)
+  if (platform === 'win32') {
+    // explorer /select,"C:\path\to\file" — invoke through PowerShell so spaces
+    // and shell metacharacters are not re-interpreted. Single-quote escaping
+    // handles the rare embedded single quote.
+    const literal = `'${target.replace(/'/g, "''")}'`
+    return {
+      cmd: 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-Command', `explorer /select,${literal}`],
+    }
+  }
+  if (platform === 'darwin') {
+    return { cmd: 'open', args: ['-R', target] }
+  }
+  // Linux: no universal "select file" API; open the containing directory.
+  return { cmd: 'xdg-open', args: [dirname(target)] }
 }
 
 export const OPEN_PATH_TOOL: Tool = {
