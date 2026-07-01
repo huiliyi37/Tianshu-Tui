@@ -70,8 +70,9 @@ rsync $RSYNC_FLAGS \
 rsync $RSYNC_FLAGS \
   -r "$DEV_DIR/docs/stars/" "$PUB_DIR/docs/stars/"
 
-echo "=== 同步: .rivet/knowledge/ ==="
+echo "=== 同步: .rivet/knowledge/（排除本地专属记录）==="
 rsync $RSYNC_FLAGS \
+  --exclude='debug-windows-cmd-chcp-nul.md' \
   "$DEV_DIR/.rivet/knowledge/" "$PUB_DIR/.rivet/knowledge/"
 
 echo "=== 同步: 品牌资产（README 横幅/Logo 等图片）==="

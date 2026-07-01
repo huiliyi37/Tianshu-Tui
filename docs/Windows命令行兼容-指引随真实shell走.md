@@ -64,3 +64,7 @@ Claude Code v2.1.126 把 PS 提为主 shell,是因为 Claude 模型对 PS 语法
 ## 验证
 
 `npm run typecheck` + 跑 `src/__tests__/platform-shell.test.ts`、`src/prompt/__tests__/volatile.test.ts`、`src/tools/__tests__/bash.test.ts`。
+
+## 相关：cmd 分支的 `chcp 65001 > nul` 严重坑（已修复 `fae77cbc`）
+
+cmd 分支曾注入 `chcp 65001 > nul && <cmd>` 想切 UTF-8 代码页，但 `> nul` 在沙箱/WSL/受限 Windows 下重定向失败 → `&&` 短路 → 命令根本不执行（空 stdout / exit=1），凡 fallback 到 cmd 的机器全线静默失败。已移除该前缀，改由 `WinStreamDecoder` 首块自动探测 GBK/UTF-8。详见 `.rivet/knowledge/debug-windows-cmd-chcp-nul.md`。
