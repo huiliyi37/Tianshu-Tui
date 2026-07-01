@@ -68,7 +68,7 @@ import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../conn
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
-import { renderRewind, type RewindData } from '../format/rewind.js'
+import { renderRewind, type RewindData, type RewindFile, type RewindMode } from '../format/rewind.js'
 import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
 import { searchHistory, loadHistory } from '../history.js'
 
@@ -623,9 +623,12 @@ export class TuiApp {
               this.inputLine.setValue('')
               this.renderLive()
             } else if (now - this.inputController.lastEscAt < 400) {
-              // Double-ESC → rewind
+              // Double-ESC → rewind. Default-select the most recent message
+              // (the common rewind target), like Claude Code.
               this.inputController.lastEscAt = 0
               this.overlayController.resetNav()
+              const n = this.overlayController.getData()?.rewindEntries?.().entries.length ?? 0
+              this.overlayController.nav().rewindIndex = n > 0 ? n - 1 : 0
               this.overlay.activate('rewind')
               this.renderLive()
             } else {
@@ -1325,28 +1328,45 @@ export class TuiApp {
     }
 
     if (id === 'rewind') {
-      const count = this.overlayController.getData()?.rewindEntries?.().entries.length ?? 0
-      const cur = this.overlayController.nav().rewindIndex
+      const entries = this.overlayController.getData()?.rewindEntries?.().entries ?? []
+      const count = entries.length
+      const nav = this.overlayController.nav()
+
+      // ── Phase 2: restore-granularity chooser (仅对话 / 仅代码 / 对话+代码) ──
+      if (nav.rewindPhase === 'action') {
+        const ACTION_COUNT = 3
+        if (key.name === 'down') { nav.rewindActionIndex = Math.min(nav.rewindActionIndex + 1, ACTION_COUNT - 1); this.overlay.rerender(); return true }
+        if (key.name === 'up') { nav.rewindActionIndex = Math.max(nav.rewindActionIndex - 1, 0); this.overlay.rerender(); return true }
+        if (key.name === 'escape' || key.name === 'left') { nav.rewindPhase = 'list'; this.overlay.rerender(); return true }
+        if (key.name === 'return') {
+          const entry = entries[nav.rewindIndex]
+          const mode = (['convo', 'code', 'both'] as const)[nav.rewindActionIndex] ?? 'convo'
+          this.deactivateOverlay()
+          if (entry) {
+            const exec = this.overlayController.getRewindExec()
+            if (exec) exec(entry.messageIndex, mode)
+            else this.setInput(entry.content)
+          }
+          return true
+        }
+        return false
+      }
+
+      // ── Phase 1: message list ──
+      const cur = nav.rewindIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayController.nav().rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        if (count > 0) { nav.rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayController.nav().rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        if (count > 0) { nav.rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
         if (count > 0) {
-          const entry = this.overlayController.getData()?.rewindEntries?.().entries[cur]
-          this.deactivateOverlay()
-          if (entry) {
-            if (this.overlayController.getRewindExec()) {
-              this.overlayController.getRewindExec()?.(entry.content)
-            } else {
-              // Fallback: just populate input (old behavior)
-              this.setInput(entry.content)
-            }
-          }
+          nav.rewindPhase = 'action'
+          nav.rewindActionIndex = 0
+          this.overlay.rerender()
         } else {
           this.deactivateOverlay()
         }
@@ -3078,13 +3098,14 @@ export class TuiApp {
     chronicleEntries?: () => ChronicleData
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
+    rewindFilePreview?: (messageIndex: number) => RewindFile[]
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
     domainPickerData?: () => DomainPickerData
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -3140,11 +3161,22 @@ export class TuiApp {
       },
     })
 
-    // Rewind — selectedIndex 由 overlayNav 注入
+    // Rewind — selectedIndex/phase/action 由 overlayNav 注入；phase 2 附精确文件预览
     this.overlay.register('rewind', {
       render: (_w, _h) => {
-        const data = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
-        return renderRewind({ ...data, selectedIndex: this.overlayController.nav().rewindIndex }, this.columns, this.rows, this.theme)
+        const base = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
+        const nav = this.overlayController.nav()
+        const sel = base.entries[nav.rewindIndex]
+        const previewFiles = nav.rewindPhase === 'action' && sel && overlayData?.rewindFilePreview
+          ? overlayData.rewindFilePreview(sel.messageIndex)
+          : undefined
+        return renderRewind({
+          ...base,
+          selectedIndex: nav.rewindIndex,
+          phase: nav.rewindPhase,
+          actionIndex: nav.rewindActionIndex,
+          previewFiles,
+        }, this.columns, this.rows, this.theme)
       },
     })
 

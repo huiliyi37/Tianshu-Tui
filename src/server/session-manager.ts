@@ -17,6 +17,7 @@
  *    across sessions (B4).
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
+import { collectPostBoundaryEditIds } from '../agent/file-history.js'
 import type { DelegationActivity } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
@@ -1888,23 +1889,6 @@ export class RuntimeSessionManager {
     }
   }
 
-  /** Collect the write_file/edit_file tool_use ids whose calls occurred at or
-   *  after `messageIndex` — i.e. edits made after the selected conversation
-   *  boundary. These key the FileHistory snapshots a precise rewind undoes. */
-  private collectPostBoundaryEditIds(msgs: OaiMessage[], messageIndex: number): Set<string> {
-    const ids = new Set<string>()
-    for (let i = messageIndex; i < msgs.length; i++) {
-      const m = msgs[i]!
-      if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
-        for (const tc of m.tool_calls) {
-          const name = tc.function?.name
-          if (name === 'write_file' || name === 'edit_file') ids.add(tc.id)
-        }
-      }
-    }
-    return ids
-  }
-
   /**
    * Preview the files a precise (per-message) code rewind would touch. Returns
    * `available: false` when the session has no live agent / FileHistory or no
@@ -1921,7 +1905,7 @@ export class RuntimeSessionManager {
     if (!s.agent || !fh) return { available: false, files: [] }
     const msgs = s.agent.getMessages()
     if (messageIndex < 0 || messageIndex >= msgs.length) return { available: false, files: [] }
-    const ids = this.collectPostBoundaryEditIds(msgs, messageIndex)
+    const ids = collectPostBoundaryEditIds(msgs, messageIndex)
     const files = fh.getBoundaryFiles(ids)
     return { available: files.length > 0, files }
   }
@@ -1943,7 +1927,7 @@ export class RuntimeSessionManager {
     if (!s.agent || !fh) return { success: false, filesChanged: [] }
     const msgs = s.agent.getMessages()
     if (messageIndex < 0 || messageIndex >= msgs.length) return { success: false, filesChanged: [] }
-    const ids = this.collectPostBoundaryEditIds(msgs, messageIndex)
+    const ids = collectPostBoundaryEditIds(msgs, messageIndex)
     const filesChanged = await fh.rewindToBoundary(ids)
     return { success: true, filesChanged }
   }

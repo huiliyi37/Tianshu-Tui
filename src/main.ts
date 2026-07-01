@@ -28,6 +28,8 @@ import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
+import type { RewindMode } from './tui/format/rewind.js'
+import { collectPostBoundaryEditIds } from './agent/file-history.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
@@ -517,17 +519,25 @@ async function main() {
         mcpManager: ctx.refs.mcpManager,
       })
     },
-    // Rewind — 最近用户消息
+    // Rewind — 最近用户消息（携带真实 messageIndex 作为回溯边界）
     rewindEntries: () => {
       const messages = ctx?.session.getMessages() ?? []
-      const userMsgs = messages
-        .filter(m => m.role === 'user')
-        .slice(-30)
-        .map((m, i) => ({
-          index: i + 1,
-          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-        }))
-      return { entries: userMsgs, selectedIndex: 0 }
+      const all: { index: number; messageIndex: number; content: string }[] = []
+      let ord = 0
+      messages.forEach((m, i) => {
+        if (m.role === 'user' && typeof m.content === 'string') {
+          ord++
+          all.push({ index: ord, messageIndex: i, content: m.content })
+        }
+      })
+      return { entries: all.slice(-30), selectedIndex: 0 }
+    },
+    // Rewind phase 2 — 精确到选中消息的代码回滚会影响哪些文件
+    rewindFilePreview: (messageIndex: number) => {
+      const fh = ctx?.agent.getFileHistory()
+      if (!fh) return []
+      const messages = ctx?.session.getMessages() ?? []
+      return fh.getBoundaryFiles(collectPostBoundaryEditIds(messages, messageIndex))
     },
     // Chronicle
     chronicleEntries: () => {
@@ -638,23 +648,33 @@ async function main() {
         tuiApp.setInput(name + ' ')
       }
     }
-  }, /* rewindExec: */ (content: string) => {
-    // Rewind Enter 回调：截断消息到选中点 + 回填输入框
+  }, /* rewindExec: */ (messageIndex: number, mode: RewindMode) => {
+    // Rewind Enter 回调：按选择的粒度恢复（仅对话 / 仅代码 / 对话+代码）。
     const messages = ctx?.session.getMessages() ?? []
-    // Find the matching user message index
-    const matchIdx = messages
-      .map((m, i) => ({ m, i }))
-      .filter(({ m }) => m.role === 'user' && typeof m.content === 'string')
-      .filter(({ m }) => (m as { content: string }).content === content)
-      .pop()?.i
-    if (matchIdx !== undefined) {
-      ctx!.session.rewindToMessages(messages.slice(0, matchIdx))
-      ctx!.agent.config.promptEngine.resetAppendixBaseline()
-      // Commit a rewind marker to scrollback
-      tuiApp.commitStatic('⏪ Rewound — message restored to input.')
+    const target = messages[messageIndex]
+    const content = target && typeof target.content === 'string' ? target.content : ''
+    const doCode = mode === 'code' || mode === 'both'
+    const doConvo = mode === 'convo' || mode === 'both'
+
+    if (doCode) {
+      const fh = ctx?.agent.getFileHistory()
+      if (fh) {
+        const ids = collectPostBoundaryEditIds(messages, messageIndex)
+        fh.rewindToBoundary(ids).then(
+          changed => tuiApp.commitStatic(`⏪ 已把 ${changed.length} 个文件恢复到此消息${changed.length ? '' : '（无可恢复的编辑）'}`),
+          err => tuiApp.commitStatic(`回滚代码失败：${(err as Error).message}`),
+        )
+      } else {
+        tuiApp.commitStatic('无文件历史，无法恢复代码。')
+      }
     }
-    // Always populate input (even if match not found — user can still edit)
-    tuiApp.setInput(content)
+
+    if (doConvo && messageIndex >= 0) {
+      ctx!.session.rewindToMessages(messages.slice(0, messageIndex))
+      ctx!.agent.config.promptEngine.resetAppendixBaseline()
+      tuiApp.commitStatic('⏪ 已截断对话到此消息 — 已回填输入框。')
+      tuiApp.setInput(content)
+    }
   }, /* chronicleExec: */ (id: string) => {
     // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
     // 用完整 id 前 8 位作前缀(id = resume id 绑死),避免序号随排序漂移。

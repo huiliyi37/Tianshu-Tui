@@ -2,8 +2,30 @@ import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { diffLines } from 'diff'
 import { dirname, join } from 'node:path'
+import type { OaiMessage } from '../api/oai-types.js'
 
 const MAX_SNAPSHOTS = 100
+
+/**
+ * The write_file / edit_file tool_use ids whose calls occurred at or after
+ * `messageIndex` — i.e. edits made after a conversation boundary. These key the
+ * FileHistory snapshots a precise rewind to that boundary undoes. Shared by the
+ * server (session-manager) and the in-process TUI rewind flow so both compute
+ * the boundary identically.
+ */
+export function collectPostBoundaryEditIds(messages: OaiMessage[], messageIndex: number): Set<string> {
+  const ids = new Set<string>()
+  for (let i = messageIndex; i < messages.length; i++) {
+    const m = messages[i]
+    if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        const name = tc.function?.name
+        if (name === 'write_file' || name === 'edit_file') ids.add(tc.id)
+      }
+    }
+  }
+  return ids
+}
 
 export interface FileBackup {
   backupFileName: string | null
