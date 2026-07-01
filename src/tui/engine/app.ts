@@ -966,17 +966,21 @@ export class TuiApp {
       this.overlay.rerender()
       return
     }
-    // commit
+    // commit — exec (commitStatic / model switch) MUST run before
+    // deactivateOverlay so the overlay-exit repaint is the last write; running
+    // it after leaves a ghost frame (see overlay-deactivate-regression).
     const exec = this.overlayController.getConnectExec()
     this.connectFlow = undefined
-    this.deactivateOverlay()
     exec?.(result.commit, result.summary)
+    this.deactivateOverlay()
   }
 
   private cancelConnect(): void {
     this.connectFlow = undefined
-    this.deactivateOverlay()
+    // Buffer the notice into scrollback before exiting the overlay, so the
+    // deactivate repaint paints a single clean frame (no ghost of the overlay).
     this.commitStatic('已取消服务商配置。')
+    this.deactivateOverlay()
   }
 
   /** 返回 scrollback 完整文本（供 pager overlay 读取） */

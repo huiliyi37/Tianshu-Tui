@@ -73,6 +73,20 @@ describe('Overlay deactivate · picker exit regression', () => {
     assert.equal(topBorders.length, 1, `Expected 1 top border after 3 cycles, got ${topBorders.length} — ghost accumulation`)
   })
 
+  it('connect overlay: activate → deactivate leaves exactly one clean live frame', () => {
+    const { app, out } = makeApp()
+    app.start()
+    app.startConnect()
+    out.clear()
+    app.deactivateOverlay()
+
+    const output = out.chunks.join('')
+    const topBorders = output.match(/╭/g) ?? []
+    assert.equal(topBorders.length, 1, `Expected 1 top border after connect exit, got ${topBorders.length}`)
+    const plain = stripAnsi(output)
+    assert.ok(plain.includes('〉'), 'Input prompt symbol 〉 must be present after connect overlay exit')
+  })
+
   it('deactivateOverlay after deactivateOverlay is safe (no crash, renders live region)', () => {
     const { app, out } = makeApp()
     app.activateOverlay('domain-picker')
