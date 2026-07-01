@@ -1,9 +1,20 @@
 /**
  * T9 History Search overlay — Ctrl+R 反向历史搜索。
+ *
+ * 采用统一面板骨架（overlay-frame）：加框 + 居中标题 + 中文页脚。
  */
 
 import { color } from '../engine/ansi.js'
 import type { RivetTheme } from '../theme.js'
+import {
+  frameTop,
+  frameBottom,
+  frameTitle,
+  frameFooter,
+  frameLine,
+  CURSOR,
+  keyHints,
+} from './overlay-frame.js'
 
 export interface HistorySearchEntry {
   text: string
@@ -16,41 +27,35 @@ export interface HistorySearchData {
 }
 
 export function renderHistorySearch(data: HistorySearchData, width: number, height: number, theme: RivetTheme): string[] {
-  const lines: string[] = []
-  const w = width - 4
+  const w = Math.max(20, width - 4)
+  const contentRows = Math.max(3, height - 4) // top + title + footer + bottom
 
-  lines.push('')
-  lines.push(`  ${color('⌛ History Search', theme.primary, { bold: true })}  ${color('— Ctrl+R', theme.dim)}`)
-  lines.push(`  ${color('> ', theme.primary)}${data.query || color('type to search…', theme.dim)}`)
-  lines.push('')
+  const lines: string[] = [
+    frameTop(width, theme),
+    frameTitle('⌛ 历史搜索 · Ctrl+R', width, theme),
+  ]
+
+  const body: string[] = []
+  body.push(` ${color('> ', theme.primary)}${data.query || color('输入以搜索…', theme.dim)}`)
+  body.push('')
 
   if (data.entries.length === 0) {
-    if (data.query) {
-      lines.push(`  ${color('No matches found.', theme.muted)}`)
-    }
+    if (data.query) body.push(`  ${color('无匹配结果。', theme.muted)}`)
   } else {
-    const maxVisible = height - 7
+    const maxVisible = Math.max(1, contentRows - body.length)
+    const selected = Math.max(0, Math.min(data.selectedIndex, data.entries.length - 1))
     for (let i = 0; i < Math.min(data.entries.length, maxVisible); i++) {
       const entry = data.entries[i]!
-      const isSelected = i === data.selectedIndex
-      const prefix = isSelected ? color('▶', theme.primary, { bold: true }) : ' '
-      const preview = entry.length > w - 4
-        ? entry.slice(0, w - 7) + '…'
-        : entry
-      const text = isSelected
-        ? color(preview, theme.primary)
-        : color(preview, theme.muted)
-
-      lines.push(`  ${prefix} ${text}`)
+      const isSelected = i === selected
+      const prefix = isSelected ? color(CURSOR, theme.primary, { bold: true }) : ' '
+      const preview = entry.length > w - 4 ? entry.slice(0, w - 7) + '…' : entry
+      const text = isSelected ? color(preview, theme.primary, { bold: true }) : color(preview, theme.muted)
+      body.push(` ${prefix} ${text}`)
     }
   }
 
-  // Pad
-  const usedLines = lines.length
-  for (let i = usedLines; i < height - 2; i++) {
-    lines.push('')
-  }
-
-  lines.push(`  ${color('Esc cancel  ↑↓ select  Enter paste', theme.dim)}`)
+  for (let i = 0; i < contentRows; i++) lines.push(frameLine(body[i] ?? '', width, theme))
+  lines.push(frameFooter(keyHints([['↑↓', '选择'], ['Enter', '粘贴'], ['Esc', '取消']]), width, theme))
+  lines.push(frameBottom(width, theme))
   return lines
 }

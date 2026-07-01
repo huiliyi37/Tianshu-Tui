@@ -65,7 +65,7 @@ describe('overlay CJK/emoji width alignment (padLine / title / footer)', () => {
       theme,
     )
     const text = stripAnsi(lines.join('\n'))
-    assert.ok(text.includes('Search "ta" (1/2)'))
+    assert.ok(text.includes('搜索 "ta" (1/2)'))
     assert.ok(text.includes('alpha'))
     assert.ok(text.includes('beta'))
   })
@@ -93,7 +93,7 @@ describe('overlay CJK/emoji width alignment (padLine / title / footer)', () => {
       theme,
     )
     const text = stripAnsi(lines.join('\n'))
-    assert.ok(text.includes('Message 1/1'))
+    assert.ok(text.includes('消息 1/1'))
     assert.ok(text.includes('alpha'))
   })
 })
@@ -118,13 +118,13 @@ describe('renderTasks: per-worker 舰队', () => {
       completedCount: 0,
     }
     const text = stripAnsi(renderTasks(data, 60, 12, theme).join('\n'))
-    assert.ok(text.includes('Running Agents'))
+    assert.ok(text.includes('运行中的子代理'))
     assert.ok(text.includes('fleet'), '单组用 fleet 标题')
     assert.ok(text.includes('1/3 done'))
     assert.ok(text.includes('T1·code_scout'))
     assert.ok(text.includes('grep seams'))
-    assert.ok(text.includes('Enter detail'))
-    assert.ok(text.includes('Tab filter'))
+    assert.ok(text.includes('Enter 详情'))
+    assert.ok(text.includes('Tab 筛选'))
   })
 
   it('多组：序号化组标题 + failed 计数', () => {
@@ -140,13 +140,13 @@ describe('renderTasks: per-worker 舰队', () => {
     assert.ok(text.includes('group 1'))
     assert.ok(text.includes('group 2'))
     assert.ok(text.includes('1 failed'))
-    assert.ok(text.includes('Enter detail'))
+    assert.ok(text.includes('Enter 详情'))
   })
 
   it('空舰队：显示 no running workers', () => {
     const text = stripAnsi(renderTasks({ groups: [], filter: 'running', completedCount: 0 }, 50, 10, theme).join('\n'))
     assert.ok(text.includes('no running workers'))
-    assert.ok(text.includes('q/Esc close'))
+    assert.ok(text.includes('q/Esc 关闭'))
   })
 
   it('completed filter：显示标题与 completed 计数', () => {
@@ -163,7 +163,7 @@ describe('renderTasks: per-worker 舰队', () => {
       completedCount: 1,
     }
     const text = stripAnsi(renderTasks(data, 80, 12, theme).join('\n'))
-    assert.ok(text.includes('Completed Agents'))
+    assert.ok(text.includes('已完成的子代理'))
     assert.ok(text.includes('1 completed'))
   })
 
