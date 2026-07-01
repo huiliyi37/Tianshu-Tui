@@ -1834,6 +1834,11 @@ export class TuiApp {
     this.metricsGlanceController.domainSyncProvider = provider
   }
 
+  /** 注册当前推理 effort 提供者（GlanceBar 每帧读取，显示实时思考强度） */
+  setReasoningEffortProvider(provider: () => string | undefined): void {
+    this.metricsGlanceController.reasoningEffortProvider = provider
+  }
+
   private applyGlanceDomainDisplay(): void {
     if (this.metricsGlanceController.delegationDomainOverride) {
       this.state.domainGlyph = this.metricsGlanceController.delegationDomainOverride.glyph
@@ -2823,6 +2828,7 @@ export class TuiApp {
       const rightStr = formatGlanceRight({
         width: cols,
         modelName: this.state.modelName,
+        reasoningEffort: this.metricsGlanceController.reasoningEffortProvider?.(),
         cacheHitRate: glanceCacheHitRate,
         estimatedTokens: glanceEstimatedTokens,
         conversationTokens: glanceConversationTokens,

@@ -34,6 +34,15 @@ describe('formatGlanceBar', () => {
     assert.ok(stripAnsi(result).includes('2m5s'))
   })
 
+  it('renders reasoning effort badge (◎ + tier, medium abbreviated to med)', () => {
+    const maxBar = stripAnsi(formatGlanceBar({ width: 120, reasoningEffort: 'max' }, theme))
+    assert.ok(maxBar.includes('◎max'), `expected ◎max in: ${maxBar}`)
+    const medBar = stripAnsi(formatGlanceBar({ width: 120, reasoningEffort: 'medium' }, theme))
+    assert.ok(medBar.includes('◎med'), `expected ◎med in: ${medBar}`)
+    const noEffort = stripAnsi(formatGlanceBar({ width: 120 }, theme))
+    assert.ok(!noEffort.includes('◎'), 'no effort badge when undefined')
+  })
+
   it('cache hit rate always shown, colored by health (< 50% warning, ≥ 50% dim)', () => {
     const low = formatGlanceBar({ width: 80, cacheHitRate: 0.3 }, theme)
     assert.ok(stripAnsi(low).includes('30%'), 'cache < 50% should show')

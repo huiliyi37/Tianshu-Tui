@@ -433,6 +433,8 @@ async function main() {
     tuiApp.setSessionStarDomain(initialDomain)
   }
   tuiApp.setDomainSyncProvider(() => ctx!.agent.getSessionDomain()?.name ?? undefined)
+  // 实时思考强度：优先 agent 当前生效 effort（auto-reasoning 动态调整），回退 config floor。
+  tuiApp.setReasoningEffortProvider(() => ctx!.agent.getReasoningEffort() ?? ctx!.agent.config.reasoningEffort)
 
   // ── 会话级 UI 状态恢复（side panel / todo）─────────────────────
   const initialMeta = ctx!.persist.loadMetadata()
