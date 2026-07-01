@@ -29,6 +29,7 @@ const TOOL_MAP: Record<string, ToolFamilyInfo> = {
   todo:            { family: 'other', verb: 'todo'     },
   recall:          { family: 'find',  verb: 'recall'   },
   ask_user_question: { family: 'other', verb: 'ask'    },
+  browser_debug:   { family: 'other', verb: 'browse'   },
 }
 
 const DEFAULT: ToolFamilyInfo = { family: 'other', verb: 'tool' }

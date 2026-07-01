@@ -108,7 +108,7 @@ const BRAND_LOGO = [
 function renderLogoLine(line: string, theme: RivetTheme): string {
   let out = ''
   for (let i = 0; i < line.length; i++) {
-    const char = line[i]
+    const char = line[i]!
     if (char === '█') {
       // 实体笔画：高亮 primary 色
       out += color('█', theme.primary, { bold: true })

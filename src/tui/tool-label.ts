@@ -64,6 +64,11 @@ export function toolArgSummary(name: string, input: Record<string, unknown>): st
     case 'delegate_task': return truncate(String(input.objective ?? ''), 50)
     case 'delegate_batch': return `${Array.isArray(input.tasks) ? input.tasks.length : '?'} tasks`
     case 'web_fetch': return truncate(String(input.url ?? ''), 50)
+    case 'browser_debug': {
+      const action = String(input.action ?? '')
+      const detail = input.url ?? input.selector ?? input.expression ?? input.level ?? ''
+      return truncate(detail ? `${action} ${detail}` : action, 50)
+    }
     default: return ''
   }
 }

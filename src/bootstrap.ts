@@ -32,6 +32,7 @@ import { runResumePreflightOai } from './context/resume-preflight.js'
 import { FileHistory } from './agent/file-history.js'
 import { PromptEngine } from './prompt/engine.js'
 import { createDefaultToolRegistry } from './tools/default-registry.js'
+import { BROWSER_DEBUG_TOOL } from './tools/browser-debug/tool.js'
 import { defaultStore as defaultTodoStore } from './tools/todo.js'
 import { TodoStore } from './tools/todo-store.js'
 import { createDelegateTaskTool } from './tools/delegate-task.js'
@@ -463,6 +464,11 @@ export function createInteractiveToolRegistry(
 
   // ask_user_question
   reg.register(ASK_USER_QUESTION_TOOL)
+
+  // browser_debug — persistent browser for local frontend/backend联调 (CDP route).
+  // EXTENDED tier (gated from 主控 by default; opt-in via /tools enable or delegate).
+  // Shared here so both TUI and desktop sidecar get the same tool + data flow.
+  reg.register(BROWSER_DEBUG_TOOL)
 
   // repo_graph
   reg.register(createRepoGraphTool(() => refs.meridianIndexer))
