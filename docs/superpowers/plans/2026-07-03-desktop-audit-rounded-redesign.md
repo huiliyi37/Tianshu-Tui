@@ -1,0 +1,185 @@
+# 桌面端全面审计 + 圆角设计语言改造 计划
+
+> **面向 AI 代理的工作者：** 分三个批次交付（P0 接线修复 → P1 对标补齐 → P2 视觉改造）。每批次独立可合入。步骤使用复选框（`- [ ]`）跟踪进度。
+
+**目标：** 桌面端是用户主力入口（Windows 用户占比最高）。本计划解决三类问题：①功能接线缺口（TUI 有而桌面没有、或桌面双轨不一致）；②对标 Claude Desktop / Codex Desktop 的体验差距；③视觉升级为「浮岛式圆角」设计语言（自定义标题栏 + 卡片化面板 + 胶囊输入区）。
+
+**现状基座（摸底结论，2026-07-03）：** Tauri 2 + React 18 + Vite；已有 JSON 主题 ×7 + `tokens.css` design tokens + Tailwind 4 桥接 + shadcn/ui；三栏 `react-resizable-panels` 布局；SSE + rAF 批处理 + 虚拟列表的事件流管线成熟。**改造是升级而非重写。**
+
+**概念图：** `tianshu-desktop-rounded-mockup.png`（浮岛布局 / icon rail / 胶囊 composer / 上下文用量环）。
+
+---
+
+## 批次 P0 — 接线缺口修复（功能正确性，1-2 天粒度）
+
+### P0-1 Composer slash 双轨统一（最高优先级）
+
+**问题**（三层路径行为不一致）：
+- sidecar `POST /prompt` 已接 `resolveAppPromptInput` + `requiredTools` 挂载（`src/server/session-routes.ts:417-440`）——与 TUI 对齐,是**正确的权威层**；
+- 但 `Composer.tsx:285-294` 的客户端 guard 把「不在本地菜单里的 slash」直接 toast 拒绝,**根本不发给 server**——用户手打 `/write-plan`、`/plan-close` 永远到不了权威层；
+- `ThreadView.tsx:318-322` 一带的 ~40 条 `ComposerCommand` 多数 `run()` 发**硬编码英文 prompt**,不经 ecosystem-workflows 翻译——与 server 路径产出不同的 prompt,行为漂移。
+
+**修法**：
+- [x] Composer guard 改为「白名单命中走本地 run()；未命中但以 `/` 开头 → **透传给 server**,由 `resolveAppPromptInput` 决定翻译或拒绝」。server 返回 unknown 时才 toast（复用 `useSendPrompt.onError` 的 toast + 输入回填通道；`isKnownSlashCommand` 及其单测删除）。
+- [x] 逐条清理 `ComposerCommand`:`/review`、`/review max` 改发原始 slash 走 server 翻译；新增 `/write-plan`、`/plan-close` 菜单项（需参数,预填输入框而非直接发送）。`/team` `/council` 原本已发原始 slash。纯 UI 动作类保留本地。
+- [x] 删除 `composer-commands.ts:2-4` 过时注释（「agent prompt-template slashes out of scope」）。
+- [ ] 测试:e2e 冒烟 `/write-plan xxx` 在桌面可触发（待真机验证）。
+
+### P0-2 `watchdog_recovery` 桌面 UI 卡片
+
+reducer 与 ThreadView 已渲染（`event-reducer.ts:390-409`、`ThreadView.tsx:1087-1112`）——**已接线,无需动**。但上一批次审查确认的展示语义要补全:
+- [x] 卡片区分 `autoContinue: true`（「⟳ 已自动恢复」弱提示）与 `stopReason: session-total/consecutive`（「⏹ 多次停滞已停手——点击继续」强提示 + 继续按钮,点击发 `continue`）。
+- [x] `stopReason: 'suppressed'` 不渲染卡片（reducer 层直接不入 blocks,避免虚拟列表空行;带单测）。
+
+### P0-3 `done` 事件显式处理
+
+`event-reducer.ts:568-569` default 吞掉 `done`。当前靠 sessions 轮询兜底,但轮询间隔 2s 内 UI 状态是错的（流已结束仍显示 running）。
+- [x] reducer 补 `case 'done'`:置 `status = event.data.status`,清 streaming 标记（带单测）。
+
+### P0-4 ArtifactCard Review 按钮接线
+
+`ArtifactCard.tsx:52` 按钮无 onClick。
+- [x] 接线完成:store 新增 `requestReviewTab` action（置 `reviewVisible: true` + rev 递增的一次性 tab 请求）,ReviewPanel 消费请求切 tab,ArtifactCard 按 plan/task/其他 分别路由到 plan/task/review tab。
+
+### P0-5 Windows 专项体检
+
+- [x] **存储迁移 `.rivet` 双重拼接 bug(数据级,最急)**:修复完成——迁移源/目标改为 `old_home`/`new_home` 本身（RIVET_HOME 语义即数据根）,不再二次 join `.rivet`。Rust 侧回归测试未补（`apply_storage_location` 依赖 tauri AppHandle,单测成本高;cargo check 验证编译）。
+- [x] **LOCALAPPDATA 为空的兜底**:`default_rivet_home` 补 `home_dir\AppData\Local` → `USERPROFILE` 两级 fallback,对齐 Node 侧 `paths.ts`。
+- [ ] **代码签名缺失(SmartScreen)**:`tauri.conf.json:51-53` `certificateThumbprint: null`、`timestampUrl: ""` → 默认构建未签名,Windows 主用户群首次安装被 SmartScreen 拦截。接通 `build-signed.ps1` 流程进 release CI,或至少文档化绕行指引。（需证书/CI 权限,单独排期）
+- [x] **审批 modal 路径展示**:`WorkspaceSurface.tsx` `getApprovalIntent` 换 `split(/[\\/]/)`;agent 侧 `commit-nudge.ts`、`task-planner.ts`、`skill-distill.ts` 同步修复（三处各一行,未抽共享 helper——语义各异:top-dir/module-key/stem,强行统一反而失真）。
+- [x] **集成终端 shell + 编码**:`pty.rs` 默认 shell 改为 Git Bash 优先（探测链对齐 `src/platform.ts::resolveGitBashPath`:env 覆盖 → `where git` 推导 → 常见安装位置;`RIVET_USE_POWERSHELL` 可强制回 PowerShell）;PowerShell 启动注入 `[Console]::InputEncoding/OutputEncoding=UTF8`,cmd 注入 `chcp 65001`。未做独立 UI 选择器（`pty_spawn` 本就接受 shell 参数,后续设置页需要时再接）。
+- [ ] **字体**:`tokens.css:12` 已含 Microsoft YaHei 回退,但 Windows 下 Inter 数字与中文混排基线偏移常见 → 验证并考虑 `font-feature-settings` 或 Segoe UI Variable 优先。
+- [ ] **首启体验**:FirstRunGitDialog 已有(`App.tsx:275-281`,对标 Claude Desktop 的 Git for Windows 强制);补 Node runtime 探测失败时的友好引导(`lib.rs:369-410` 已探测,但失败 UI 待验证)。
+- [ ] **托盘关闭行为**:关闭=隐藏托盘(`lib.rs:818-823`)对 Windows 用户不直观 → 首次关闭时弹一次「最小化到托盘/直接退出」选择并记忆。
+
+### P0-6 已建未挂的接线尾巴(第二轮盘点补充)
+
+- [x] **`attention`(Inbox)Surface 无导航入口**:已加入 Sidebar `CORE_SURFACES` 与 `SURFACE_ORDER`（Cmd+5）。
+- [x] **委派 worker 无中止按钮**:DelegationSurface 详情侧栏对 running 节点显示「中止此 worker」,走 `abortDelegateWorker`,成败 toast。
+- [x] **MCP 设置不展示工具列表**:McpSettings 服务器行加「工具」展开按钮,懒加载 `listMcpServerTools`,展示 name + description。
+- [ ] 低优先:`GET /worktrees`、`GET /tasks/:id/events`、`GET /schedule/status` 有端点无 client/UI——随 P1 相关面板需要时再接,不单独立项。
+
+> 勘误:第二轮盘点称 `watchdog_recovery` 未渲染是误报——`event-reducer.ts:390-409` + `ThreadView.tsx:1087-1112` + 三个单测均在。P0-2 维持「展示语义打磨」定位不变。
+
+---
+
+## 批次 P1 — 对标 Claude Desktop 的体验补齐
+
+对标源:code.claude.com/docs/desktop（2026-06 版）。桌面已有且不落后的:会话并行 + worktree 隔离、diff 审查、内嵌浏览器预览（BrowserPanel）、集成终端、Mission Control 多会话监控、计划面板、委派树、@mention + 图片拖放、SSE 断线重连。**真正的差距按性价比排序:**
+
+### P1-1 Composer 状态芯片组（对标「送信ボタンの横」控件群）
+
+Claude Desktop 把模型、权限模式、上下文用量全部内联在输入框旁,这是它「可视化好于 Codex」口碑的核心。桌面端目前模型切换埋在菜单里,上下文用量不可见。
+- [ ] Composer 底部加芯片行:**模型芯片**（点击下拉,数据源 `model_switched` 事件已有）、**权限模式芯片**（auto-safe/manual/plan,接 `setApprovalMode` API 已有）、**上下文用量环**（`turn_complete` 事件的 usage 累计 / contextWindow;环形 SVG,>80% 变橙提示可 /compact）。
+- [ ] 上下文环点击展开明细 popover(input/output/cache 命中率)——这是我们对 DeepSeek 前缀缓存优化的独特可视化点,Claude 没有。
+
+### P1-2 视图模式（Normal / Verbose / Summary）
+
+对标 transcript view 三档。长会话里工具调用刷屏是主要抱怨源。
+- [ ] ThreadView 加视图模式切换（Ctrl+O 循环）:Normal=工具折叠成 chip 行（现有 toolGroup 折叠已是雏形）;Verbose=全展开;Summary=只看 assistant 终稿文本。存 localStorage。
+
+### P1-3 Diff 行内评论 → 回灌 prompt
+
+对标「diff 内任意行点击评论,Cmd/Ctrl+Enter 一次性送出,Claude 按评论修改」。这是评审闭环的杀手锏。
+- [ ] `DiffView` 行点击 → 评论输入框;多条评论汇总为结构化 prompt(`文件:行号 评论内容`)一键发送。复用现有 steer/send 通道。
+
+### P1-4 Side Chat（不污染主线程的旁路提问）
+
+对标 `/btw` + Cmd+;。天枢有现成的 delegate 基建,旁路问题可下沉为一个只读 worker 会话（共享主会话上下文快照,不写入主线程 history——保前缀缓存的架构本来就适合这个）。
+- [ ] MVP:右侧抽屉开独立轻会话,系统提示注入主会话最近 N 条摘要;明示「此对话不影响主任务」。
+
+### P1-5 会话列表强化
+
+- [ ] 按项目分组 + 状态筛选(running/idle/attention)——ProjectSidebar 已有项目树,补 group/filter 控件。
+- [ ] 会话完成/需审批时 OS 通知（Tauri notification plugin;对标「完了時に OS 通知」）。Mission Control 已有 attention 概念,接通知即可。
+
+### P1-6 快捷键体系
+
+- [ ] 对齐 Claude Desktop 键位习惯:Ctrl+N 新会话、Ctrl+Tab 切会话、Esc 停止、Ctrl+` 终端、Ctrl+O 视图模式、Ctrl+/ 快捷键面板。CommandPalette(⌘K)已有,补一张快捷键速查 overlay。
+
+### P1-7 i18n 收尾（中低优先）
+
+13 个 namespace 已建但仅 ~8 文件使用,App banner/ThreadView 状态标签/审批 modal 全硬编码中文。用户群以中文为主,不阻塞,但:
+- [ ] 至少把 `Composer.tsx:308` 语音识别硬编码 `zh-CN` 改为跟随 i18n locale;新增 UI 一律走 t()。
+
+---
+
+## 批次 P2 — 圆角设计语言改造(「浮岛」视觉体系)
+
+参考概念图。核心理念:**窗口即画布,面板即浮岛**——去原生标题栏,所有功能区变成圆角卡片悬浮在统一底色上,间隙呼吸,阴影分层。这是 Claude Desktop / Arc / Linear 一脉的气质来源。
+
+### P2-1 Design tokens 升级(`styles/tokens.css`)
+
+现值 radius 6/8/12,偏保守。改为:
+
+```css
+--radius-sm: 8px;    /* chip、小按钮 */
+--radius-md: 12px;   /* 输入框、列表项、消息卡 */
+--radius-lg: 16px;   /* 面板浮岛、modal */
+--radius-xl: 20px;   /* 窗口级容器、composer 胶囊 */
+--radius-pill: 999px;
+
+/* 浮岛体系新增 */
+--island-gap: 10px;            /* 浮岛间隙 */
+--island-bg: /* 面板面色,比画布浅一档 */;
+--canvas-bg: /* 窗口底色,最深 */;
+--shadow-island: 0 1px 2px rgb(0 0 0 / .2), 0 4px 16px rgb(0 0 0 / .15);
+--shadow-float: 0 8px 32px rgb(0 0 0 / .35);  /* modal/popover */
+```
+
+- [ ] 7 套 JSON 主题各补 `canvas-bg`/`island-bg`/阴影 token(暗色系拉开画布与浮岛的明度差;浅色系用描边 + 弱阴影替代)。
+- [ ] 动效:面板出现 `surface-in` 已有,补 160ms 的 radius/shadow 过渡统一手感。
+
+### P2-2 自定义标题栏(Windows 重点)
+
+现状 `tauri.conf.json` 用系统原生标题栏,与圆角浮岛气质割裂。
+- [ ] `decorations: false` + 自绘标题栏:左侧 logo + 会话标题(可点击重命名,对标 Claude Desktop),右侧自绘 最小化/最大化/关闭(Windows 风格 hover 红色关闭);`data-tauri-drag-region` 拖拽。
+- [ ] macOS 走 `titleBarStyle: overlay` 保留原生红绿灯,内容延伸到顶(双平台分支,Tauri 2 支持)。
+- [ ] Windows 注意:无边框窗口要自己处理边缘 resize(Tauri `startResizeDragging`)与 Win11 圆角(DWM 自动给,Win10 直角可接受);最大化时去圆角去间隙(全屏浮岛贴边)。
+- [ ] 已有的 Mica/vibrancy(`lib.rs:209-223`)与浮岛叠加验证:玻璃态下浮岛用半透明 `island-bg` + backdrop-blur,solid 模式用实色。
+
+### P2-3 布局改造(`WorkspaceSurface`)
+
+- [ ] **挂载 `Rail.tsx`**——组件已写好、带 i18n tooltip、CSS 都在(`styles.css:132`),就是没 import。作为最左侧 56px 浮岛,承载 surface 切换;ProjectSidebar 瘦身为纯项目/会话列表。这一步零新代码,纯接线。
+- [ ] 三栏 Panel 之间加 `--island-gap`,每栏包 `--radius-lg` 卡片 + `--shadow-island`;resize handle 藏进间隙(hover 显形)。
+- [ ] Composer 改胶囊浮层:脱离面板底边,悬浮在对话流之上(`--radius-xl` + `--shadow-float`),内嵌 P1-1 的芯片组。这是概念图的视觉锚点。
+- [ ] 消息区:user 消息右对齐圆角气泡(`--radius-md`,一侧收小),assistant 消息通栏软卡;工具调用 chip 化(现有折叠组样式升级为 pill)。
+- [ ] JobsDock / TodoDock / ApprovalModal 统一浮岛化(modal 用 `--radius-lg` + `--shadow-float`)。
+
+### P2-4 验收
+
+- [ ] 7 主题 × glass/solid × Win11/Win10/macOS 截图走查;
+- [ ] 虚拟列表滚动性能无回退(浮岛阴影用 GPU 合成层,避免逐项 box-shadow 重绘——阴影打在面板容器不打在列表项);
+- [ ] 窄窗(<1200px)折叠逻辑(`WorkspaceSurface.tsx:62-82`)与浮岛间隙适配。
+
+---
+
+## 交付顺序与依赖
+
+```
+P0-1 slash 统一 ──┐
+P0-2..5 独立并行 ─┼→ 可先合入(纯功能,不动视觉)
+                  │
+P2-1 tokens → P2-2 标题栏 → P2-3 布局(Rail 挂载可提前到 P0 一起做)
+                  │
+P1-1 芯片组 依赖 P2-3 的 composer 胶囊(或先做逻辑后套壳)
+P1-2..7 独立,穿插排期
+```
+
+## Windows 加固备忘(不阻塞本轮,择机排入)
+
+来自 Windows 兼容性专项调研的次级发现,基础已较厚(Git Bash 优先级链、GBK 流解码、EPERM 过滤、CRLF 编辑策略、`\\?\` 剥离、NTFS slug 消毒均已在):
+
+- `kill_sidecar()`(`lib.rs:701-708`)仅 `Child::kill()`,不像 Node 侧走 `taskkill /T` 清进程树——现靠 `RIVET_PARENT_PID` watchdog + process-tracker 双向兜底,强杀场景可能短暂残留 node.exe。
+- sidecar 崩溃后无自动重 spawn,前端进 fatal 态需重启应用。
+- git 未统一 `core.autocrlf` 策略,checkout CRLF + agent 写 LF 可能产生 mixed-EOL diff 噪音。
+- EPERM/bash smoke 测试在 Windows CI 上被 skip(`eperm-skip.test.ts:28-30`),生产路径无持续覆盖。
+- 无开机自启选项;无 per-monitor DPI 显式调优。
+- `eperm-filter.ts:47-52` 非 EPERM 的 unhandledRejection 未 re-emit,新型噪声可能静默。
+
+## 明确不做(本轮)
+
+- 云端会话 / SSH 会话(Claude Desktop 的 Remote/SSH 环境选择)——基建不在,独立立项
+- Computer Use / 屏幕控制——安全面完全不同
+- 拖拽任意面板布局(Claude 的 drag-pane)——`react-resizable-panels` 三栏够用,拖拽重排收益/复杂度比低
+- Electron 迁移——Tauri 2 现状健康,无理由动

@@ -18,9 +18,9 @@ export interface NudgeInput {
   ownedFiles: string[]
 }
 
-/** 提取文件的顶层目录（前两个路径段） */
+/** 提取文件的顶层目录（前两个路径段）。兼容 Windows 反斜杠输入。 */
 function extractTopDir(filePath: string): string {
-  const parts = filePath.split('/')
+  const parts = filePath.split(/[\\/]/)
   if (parts.length <= 1) return '.'
   return parts.slice(0, 2).join('/')
 }
