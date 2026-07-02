@@ -296,3 +296,40 @@ describe('ecosystem workflow helpers', () => {
     assert.equal(resolveEcosystemWorkflowInput('plain prompt'), null)
   })
 })
+
+describe('workflow requiredTools declaration', () => {
+  it('/council 声明 council_convene + team_orchestrate 为必需工具', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council 审查回滚方案')
+    assert.deepEqual(resolved?.requiredTools, ['council_convene', 'team_orchestrate'])
+  })
+
+  it('/council 用法提示（空参数）不声明工具——没有真实调用发生', () => {
+    const resolved = resolveEcosystemWorkflowInput('/council')
+    assert.equal(resolved?.requiredTools, undefined)
+  })
+
+  it('/team 声明 team_orchestrate 为必需工具', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team docs/superpowers/plans/x.md')
+    assert.deepEqual(resolved?.requiredTools, ['team_orchestrate'])
+  })
+
+  it('/team 用法提示（空参数）不声明工具', () => {
+    const resolved = resolveEcosystemWorkflowInput('/team')
+    assert.equal(resolved?.requiredTools, undefined)
+  })
+
+  it('/plan 等纯 prompt workflow 不声明工具', () => {
+    const resolved = resolveEcosystemWorkflowInput('/plan add feature', { date: new Date(2026, 6, 2) })
+    assert.equal(resolved?.requiredTools, undefined)
+  })
+
+  it('所有 workflow 声明的 requiredTools 必须真实存在于 EXTENDED 层', async () => {
+    const { isExtendedTool } = await import('../../agent/tool-tiers.js')
+    for (const input of ['/council 审查', '/team plan.md', '/team max 重构']) {
+      const r = resolveEcosystemWorkflowInput(input)
+      for (const t of r?.requiredTools ?? []) {
+        assert.ok(isExtendedTool(t), `${input} 声明的 ${t} 不在 EXTENDED_TOOLS——要么拼错要么该工具已改层`)
+      }
+    }
+  })
+})
