@@ -204,3 +204,80 @@ describe('aborted tool result is never empty', () => {
     assert.equal(result.is_error, false, 'user cancellation is not a tool failure')
   })
 })
+
+/**
+ * Regression guard for the orphaned tool_calls API error (user-reported):
+ * "An assistant message with 'tool_calls' must be followed by tool messages
+ * responding to each 'tool_call_id'." When the batch loop breaks early on abort,
+ * the tools past the break never run — but the assistant tool_calls message is
+ * already committed. executeBatch MUST backfill a synthetic tool_result for every
+ * tool_use so the count stays balanced and the next request is not rejected.
+ */
+describe('executeBatch backfills a result for every tool_use (no orphans)', () => {
+  it('emits one tool_result per tool_use even when aborted before any tool runs', async () => {
+    const collected: any[] = []
+    const deps = {
+      config: {
+        toolRegistry: {
+          execute: async () => ({ content: 'ok', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => true, timeoutMs: () => 5000 }),
+          needsApproval: () => false,
+        },
+        hooks: null,
+        lspEnabled: false,
+        sessionId: 'test-session',
+        contextWindow: 200_000,
+        promptEngine: {},
+      },
+      cwd: '/tmp/test',
+      harness: { executeTool: async ({ execute }: any) => { const r = await execute(); return { content: r.content, isError: r.isError ?? false, retried: false } } },
+      prewarm: { get: () => null, invalidate: () => {} },
+      evidence: { getState: () => ({ filesModified: new Set<string>() }), trackFileRead: () => {}, trackFileModified: () => {} },
+      repairHintTracker: { recordSuccess: () => {}, recordFailure: () => {} },
+      repairPipeline: { run: (input: any) => ({ output: input, telemetry: [] }) },
+      runtimeHooks: { runPostTool: async () => {} },
+      contextInjection: { setCerebellarHint: () => {}, clearCerebellarHint: () => {} },
+      buildRuntimeSnapshot: () => ({}),
+      requestThetaCheck: () => {},
+      getAutoReasoning: () => false,
+      getReasoningEffort: () => undefined,
+      setClientReasoningEffort: () => {},
+      getVigorState: () => ({}),
+      setVigorState: () => {},
+      trajectory: { getEntries: () => [] },
+      getPredictionAccumulator: () => createPredictionAccumulator(),
+      setPredictionAccumulator: () => {},
+      getDoomLoopLevel: () => 'none' as const,
+      getSessionTurnCount: () => 1,
+      getSessionId: () => 'test-session',
+      addToolResults: (results: any[]) => { collected.push(...results) },
+      recordToolHistory: () => {},
+      getSensorium: () => null,
+      getReliabilityDecision: () => null,
+      getTurnBudget: () => createTurnBudget(0),
+    } as unknown as ToolExecutionDeps
+    const controller = new ToolExecutionController(deps)
+    const ac = new AbortController()
+    ac.abort() // aborted before executeBatch → batch loop breaks immediately, no tool runs
+    await controller.executeBatch({
+      toolUses: [
+        { id: 'a1', name: 'grep', input: {} },
+        { id: 'a2', name: 'grep', input: {} },
+        { id: 'a3', name: 'grep', input: {} },
+      ],
+      callbacks: { onToolResult: () => {} } as any,
+      turn: 1,
+      checkpointCreatedThisTurn: false,
+      abortSignal: ac.signal,
+      traceStore: { events: [], toolFingerprints: [] } as any,
+      importGraph: null,
+      lastConflictCheckCount: 0,
+      latestRisk: { level: 'none', reasons: [], suggestedAction: '' } as any,
+    })
+    for (const id of ['a1', 'a2', 'a3']) {
+      const r = collected.find((x) => x.type === 'tool_result' && x.tool_use_id === id)
+      assert.ok(r, `every tool_use must have a matching tool_result (missing ${id})`)
+      assert.ok(typeof r.content === 'string' && r.content.length > 0, `backfilled result for ${id} must be non-empty`)
+    }
+  })
+})

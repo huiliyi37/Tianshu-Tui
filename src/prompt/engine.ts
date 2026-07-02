@@ -20,6 +20,7 @@ import {
 } from './fingerprint.js'
 import { FieldHabituationTracker } from './field-habituation.js'
 import { isSystemReminder } from './system-reminder.js'
+import { runResumePreflightOai } from '../context/resume-preflight.js'
 import { createContextLayer, createContextLayerReport, type ContextLayerReport } from './context-layer.js'
 import { debugLog } from '../utils/debug.js'
 import { skillRegistry } from '../skills/skill-loader.js'
@@ -234,10 +235,19 @@ export class PromptEngine {
     return arr[idx]
   }
 
-  buildOaiRequest(oaiMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number): OaiChatRequest {
+  buildOaiRequest(inputMessages: OaiMessage[], toolHistory?: ToolHistoryEntry[], contextWindow?: number): OaiChatRequest {
     const result: OaiMessage[] = []
     // Reset per-call fetch index — each call re-fetches frozen entries in order.
     this.frozenFetchIndex.clear()
+
+    // API safety net: an assistant message with tool_calls MUST be followed by a
+    // tool message for every tool_call_id, or the provider rejects the request
+    // ("insufficient tool messages following tool_calls"). Orphans arise when a
+    // tool batch is aborted/interrupted mid-flight (partial results committed) —
+    // repair by inserting synthetic tool results before the request is sent.
+    // No-op (same array reference) when there are no orphans, so the happy path
+    // and prefix cache are untouched.
+    const oaiMessages = runResumePreflightOai(inputMessages).messages
 
     // Compute GWT budget for dynamic appendix (context-update sub-blocks).
     // Track 4 预算审计：旧上限 200K chars（1M 窗口 5%≈50K token）是

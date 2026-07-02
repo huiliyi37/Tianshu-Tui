@@ -476,6 +476,25 @@ export class ToolExecutionController {
       }
     }
 
+    // Backfill: guarantee one tool_result per tool_use. When the batch loop
+    // breaks early on abort (see `if (input.abortSignal.aborted) break` above),
+    // the remaining tools never produce a result — leaving the already-committed
+    // assistant tool_calls message orphaned, which makes the NEXT request fail
+    // with "insufficient tool messages following tool_calls". Synthesize an error
+    // result for any tool_use missing from toolResults so history stays balanced.
+    for (const tu of input.toolUses) {
+      if (!toolResults.some(r => r.type === 'tool_result' && r.tool_use_id === tu.id)) {
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: input.abortSignal.aborted
+            ? '[aborted] Tool execution was interrupted before this call completed.'
+            : '[skipped] Tool produced no result.',
+          is_error: true,
+        })
+      }
+    }
+
     this.deps.addToolResults(toolResults)
 
     const level = getInterventionLevel(this.deps.getPredictionAccumulator())
