@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os'
 
 import { collectFiles } from '../ast-shared.js'
 import { GLOB_TOOL } from '../glob.js'
+import { GREP_TOOL } from '../grep.js'
+import { buildImportGraph } from '../../agent/import-graph.js'
 import type { ToolCallParams } from '../types.js'
 
 /**
@@ -47,12 +49,24 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
     const tryChmod = (d: string) => {
       try { chmodSync(d, 0o755) } catch { /* already gone or accessible */ }
     }
-    for (const sub of ['.Spotlight-V100', 'user-denied']) {
+    for (const sub of ['.Spotlight-V100', 'user-denied', 'AppData/Local/Packages']) {
       const p = join(tmpRoot, sub)
       if (existsSync(p)) tryChmod(p)
     }
     rmSync(tmpRoot, { recursive: true, force: true })
   })
+
+  /** Restricted dir that traversals actually descend into: `.Spotlight-V100` is
+   *  dot-prefixed and some walkers skip hidden dirs, so tools that filter by
+   *  name use `AppData/Local/Packages` (matches the Windows pattern by path
+   *  segment, works on POSIX, not dot-prefixed). */
+  function makeRestrictedAppData(): string {
+    const restricted = join(tmpRoot, 'AppData', 'Local', 'Packages')
+    mkdirSync(restricted, { recursive: true })
+    writeFileSync(join(restricted, 'hidden.ts'), 'const hidden = 1\n')
+    chmodSync(restricted, 0o000)
+    return restricted
+  }
 
   it('collectFiles silently skips restricted subdir (.Spotlight-V100 + chmod 000)', () => {
     // Layout: <tmp>/src/hit.ts, <tmp>/.Spotlight-V100/ (chmod 000)
@@ -107,5 +121,88 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
       cwd: restricted,
     } as unknown as ToolCallParams)
     assert.equal(result.isError, true, 'glob on restricted root must return isError')
+  })
+
+  it('glob silently skips restricted subdir and still returns other matches', async () => {
+    mkdirSync(join(tmpRoot, 'src'), { recursive: true })
+    writeFileSync(join(tmpRoot, 'src', 'a.ts'), 'const a = 1\n')
+    makeRestrictedAppData()
+
+    const result = await GLOB_TOOL.execute({
+      input: { pattern: '**/*.ts', path: '.' },
+      toolUseId: 'test',
+      cwd: tmpRoot,
+    } as unknown as ToolCallParams)
+
+    assert.ok(!result.isError, `glob must not error, got: ${result.content}`)
+    assert.ok(result.content.includes('a.ts'), 'should find src/a.ts')
+    assert.ok(!/EACCES|EPERM/.test(result.content), 'no permission noise in output')
+  })
+
+  // ── grep native fallback ──────────────────────────────────────
+  // grep prefers ripgrep; empty PATH makes the rg spawn fail (async 'error'
+  // event → tryRipgrep resolves null) so execute takes the nativeSearch path
+  // where the EPERM silent-skip fix lives.
+  describe('grep (native fallback, rg unavailable)', () => {
+    let savedPath: string | undefined
+
+    beforeEach(() => {
+      savedPath = process.env.PATH
+      process.env.PATH = join(tmpRoot, 'no-binaries-here')
+    })
+
+    afterEach(() => {
+      process.env.PATH = savedPath
+    })
+
+    const grep = (pattern: string, path: string) => GREP_TOOL.execute({
+      input: { pattern, path },
+      toolUseId: 'test',
+      cwd: tmpRoot,
+    } as unknown as ToolCallParams)
+
+    it('silently skips restricted subdir during recursion', async () => {
+      mkdirSync(join(tmpRoot, 'src'), { recursive: true })
+      writeFileSync(join(tmpRoot, 'src', 'hit.ts'), 'const needle = 1\n')
+      makeRestrictedAppData()
+
+      const result = await grep('needle', '.')
+      assert.ok(!result.isError, `grep must not error, got: ${result.content}`)
+      assert.ok(result.content.includes('hit.ts'), 'should find the match in src/hit.ts')
+      assert.ok(!/EACCES|EPERM/.test(result.content), 'no permission noise in output')
+    })
+
+    it('surfaces error when the search root itself is restricted', async () => {
+      makeRestrictedAppData()
+
+      const result = await grep('anything', 'AppData/Local/Packages')
+      assert.equal(result.isError, true, 'restricted root must be isError, not "No matches found."')
+      assert.ok(!result.content.includes('No matches found'), 'must not report empty result')
+    })
+
+    it('surfaces error on non-restricted permission-denied subdir', async () => {
+      mkdirSync(join(tmpRoot, 'src'), { recursive: true })
+      writeFileSync(join(tmpRoot, 'src', 'real.ts'), 'const needle = 1\n')
+      mkdirSync(join(tmpRoot, 'user-denied'))
+      chmodSync(join(tmpRoot, 'user-denied'), 0o000)
+
+      const result = await grep('needle', '.')
+      assert.equal(result.isError, true, 'non-restricted denied subdir must propagate as isError')
+    })
+  })
+
+  it('buildImportGraph tolerates a restricted non-dot subdir (best-effort, no throw)', () => {
+    writeFileSync(join(tmpRoot, 'main.ts'), `import { util } from './util'\n`)
+    writeFileSync(join(tmpRoot, 'util.ts'), 'export const util = 1\n')
+    makeRestrictedAppData()
+
+    // Must not throw despite EACCES inside AppData/Local/Packages, and must
+    // still index the readable files.
+    const graph = buildImportGraph(tmpRoot)
+    assert.ok(graph !== null, 'graph should build')
+    assert.ok(
+      [...graph!.forward.keys()].some(f => f.endsWith('main.ts')),
+      'readable files still indexed',
+    )
   })
 })
