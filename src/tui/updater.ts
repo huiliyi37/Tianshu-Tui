@@ -431,3 +431,69 @@ export function restartProcess(): void {
   child.unref()
   process.exit(0)
 }
+
+/**
+ * Windows 自更新脚本构造（纯函数，便于单测）。
+ *
+ * 背景：Windows 会锁定「正在运行的进程已加载的可执行文件与原生模块」
+ * （这里是 better_sqlite3.node）。在进程存活时执行 `npm install -g` 覆盖
+ * 全局包目录，会命中「另一个程序正在使用此文件」→ 安装失败/半装坏。
+ *
+ * 方案：spawn 一个分离的 PowerShell —— 先 `Wait-Process` 等当前进程退出、
+ * 释放文件锁，再 `npm install -g`，成功后（可选）`Start-Process` 重新拉起。
+ * 单引号包裹并把内嵌单引号翻倍（PowerShell 转义），避免路径含空格/引号被截断。
+ */
+export function buildWindowsSelfUpdateScript(opts: {
+  pid: number
+  packageName: string
+  channel: string
+  execPath: string
+  argv: string[]
+  cwd: string
+  relaunch: boolean
+}): string {
+  const q = (s: string): string => `'${s.replace(/'/g, "''")}'`
+  const argList = opts.argv.map(q).join(', ')
+  const parts = [
+    `$ErrorActionPreference='SilentlyContinue'`,
+    `try { Wait-Process -Id ${opts.pid} -Timeout 120 } catch {}`,
+    `Start-Sleep -Milliseconds 800`,
+    `npm install -g ${opts.packageName}@${opts.channel}`,
+  ]
+  if (opts.relaunch) {
+    const relaunchArgs = argList ? `-ArgumentList @(${argList}) ` : ''
+    parts.push(
+      `if ($LASTEXITCODE -eq 0) { Start-Process -FilePath ${q(opts.execPath)} ${relaunchArgs}-WorkingDirectory ${q(opts.cwd)} }`,
+    )
+  }
+  return parts.join('; ')
+}
+
+/**
+ * 安排 Windows 后台自更新：spawn 分离 PowerShell（等本进程退出→装→重启），
+ * 返回是否成功排程。调用方随后应主动退出当前进程释放文件锁。
+ */
+export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch = true): boolean {
+  const name = readPackageName(root)
+  if (!name) return false
+  const script = buildWindowsSelfUpdateScript({
+    pid: process.pid,
+    packageName: name,
+    channel,
+    execPath: process.execPath,
+    argv: process.argv.slice(1),
+    cwd: process.cwd(),
+    relaunch,
+  })
+  try {
+    const child = spawn(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { detached: true, stdio: 'ignore', windowsHide: true },
+    )
+    child.unref()
+    return true
+  } catch {
+    return false
+  }
+}

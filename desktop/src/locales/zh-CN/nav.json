@@ -42,7 +42,16 @@
     "copyAbsolutePath": "复制绝对路径",
     "addToContext": "加入引用",
     "addNToContext": "加入 {count} 个引用",
+    "addFolderToContext": "引用文件夹（@folder）",
     "openFolder": "打开文件夹",
-    "refresh": "刷新"
+    "refresh": "刷新",
+    "refreshAll": "刷新全部",
+    "collapseAll": "折叠全部",
+    "copyPath": "复制路径",
+    "atReference": "加入引用（@）",
+    "revealInSystem": "在系统中显示",
+    "copied": "已复制路径",
+    "copyFailed": "复制失败",
+    "addedToContext": "已加入引用"
   }
 }

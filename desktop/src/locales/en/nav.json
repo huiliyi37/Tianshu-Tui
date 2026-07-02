@@ -42,7 +42,16 @@
     "copyAbsolutePath": "Copy Absolute Path",
     "addToContext": "Add to Context",
     "addNToContext": "Add {count} to Context",
+    "addFolderToContext": "Reference Folder (@folder)",
     "openFolder": "Open Folder",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "refreshAll": "Refresh All",
+    "collapseAll": "Collapse All",
+    "copyPath": "Copy Path",
+    "atReference": "Reference (@)",
+    "revealInSystem": "Reveal in System",
+    "copied": "Path copied",
+    "copyFailed": "Copy failed",
+    "addedToContext": "Added to context"
   }
 }

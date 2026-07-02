@@ -16,6 +16,7 @@ import {
   formatUpdateBanner,
   restartProcess,
   runUpdate,
+  spawnWindowsSelfUpdate,
 } from './updater.js'
 import { PhaseTracker } from './phase-tracker.js'
 import { createLogEntry, type LogEntry } from './log-state.js'
@@ -3106,6 +3107,25 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
 
       app.commitStatic(formatUpdateBanner(check.current, check.latest))
       app.commitStatic(`Install source: ${check.installType}`)
+
+      // Windows 全局安装：进程存活时 npm 无法覆盖被占用的原生模块
+      // （better_sqlite3.node）→ "另一个程序正在使用此文件"。改为分离式更新器：
+      // 等本进程退出释放文件锁后再装、再拉起。
+      if (process.platform === 'win32' && check.installType === 'global') {
+        const scheduled = spawnWindowsSelfUpdate(root, 'latest', true)
+        if (!scheduled) {
+          app.commitStatic('❌ 无法启动后台更新器，请手动执行：npm install -g tianshu-tui@latest')
+          return true
+        }
+        app.commitStatic('✅ 更新已安排：天枢将退出以释放文件占用，安装完成后会自动重新打开。')
+        app.commitStatic('   （若未自动打开，请重新运行 rivet；安装约需数十秒）')
+        setTimeout(() => {
+          ctx.shutdown()
+          app.dispose()
+          process.exit(0)
+        }, 400)
+        return true
+      }
 
       const result = await runUpdate(root, 'latest', (line) => app.commitStatic(line))
       if (result.skipped) {

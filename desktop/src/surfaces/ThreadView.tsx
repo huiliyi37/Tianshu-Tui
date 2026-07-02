@@ -32,7 +32,7 @@ import { isAutonomous, levelToMode, modeToLevel } from '../lib/autonomy'
 import { loadThemePref, setThemePref } from '../lib/theme'
 import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
-import { formatFileMention } from '../lib/mention-input'
+import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
@@ -112,7 +112,7 @@ export function ThreadView(props: {
   // Keep any existing text and preserve the trailing mention suffix pattern.
   useEffect(() => {
     if (ui.composerAttachments.length === 0) return
-    const suffix = ui.composerAttachments.map(formatFileMention).join(' ')
+    const suffix = ui.composerAttachments.map((a) => formatMention(a.path, a.kind)).join(' ')
     const next = input
       ? `${input}${input.endsWith(' ') ? '' : ' '}${suffix}`
       : suffix

@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   ChevronRight,
   ChevronDown,
+  ChevronsDownUp,
   FileText,
   Folder,
   FolderOpen,
@@ -13,8 +14,10 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { listDir, getFileContent, openFile as openFileInSystem } from '../runtime/client'
 import { useUiDispatch } from '../state/store'
+import type { ComposerAttachment } from '../state/store'
 import { FileViewer } from './FileViewer'
 import { Markdown } from './Markdown'
 import {
@@ -57,8 +60,13 @@ function toAbsolute(relativePath: string, cwd: string): string {
  * Adds Cursor/Codex-style context menus and multi-selection:
  * - Right-click a file to open it, reveal it in the OS file manager, copy its
  *   path, or add it as an @file mention.
+ * - Right-click a directory to open it, copy its path, or add it as an @folder
+ *   mention (the agent resolves @folder: refs).
  * - Ctrl/Cmd-click files to multi-select; Shift-click to range-select.
- * - Right-click a directory to open it in the file manager or copy its path.
+ * - Cmd/Ctrl+C copies selected paths; Enter opens the last-selected file.
+ * - The viewer toolbar can copy the open file's path, @-reference it, or reveal
+ *   it in the OS; breadcrumb segments copy their cumulative path.
+ * - Tree header can refresh all expanded dirs or collapse the whole tree.
  *
  * This is deliberately READ-ONLY — no editing, no saving. Per the "no IDE"
  * positioning (ROADMAP.md), code changes go through the agent.
@@ -77,6 +85,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   const [loadingDir, setLoadingDir] = useState<string | null>(null)
   const [loadingFile, setLoadingFile] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const treePanelRef = useRef<HTMLDivElement>(null)
 
   // Load root on mount / sessionId change
   const loadDir = useCallback(async (dirPath: string) => {
@@ -149,6 +158,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [getSiblingFiles])
 
   const handleFileClick = useCallback((filePath: string, e: React.MouseEvent) => {
+    treePanelRef.current?.focus()
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       setSelectedFiles(prev => {
@@ -175,6 +185,7 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [lastSelectedFile, previewFileContent, selectRange])
 
   const handleFileContextMenu = useCallback((filePath: string) => {
+    treePanelRef.current?.focus()
     setSelectedFiles(prev => {
       if (prev.has(filePath)) return prev
       return new Set([filePath])
@@ -195,27 +206,70 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [])
 
   const copyToClipboard = useCallback((text: string) => {
-    void navigator.clipboard.writeText(text)
-  }, [])
+    navigator.clipboard.writeText(text).then(
+      () => toast.success(t('fileExplorer.copied')),
+      () => toast.error(t('fileExplorer.copyFailed')),
+    )
+  }, [t])
 
-  const addToContext = useCallback((paths: string[]) => {
-    dispatch({ type: 'addComposerAttachments', paths })
-  }, [dispatch])
+  const addToContext = useCallback((items: ComposerAttachment[]) => {
+    if (items.length === 0) return
+    dispatch({ type: 'addComposerAttachments', items })
+    toast.success(t('fileExplorer.addedToContext'))
+  }, [dispatch, t])
 
   const refreshDir = useCallback((dirPath: string) => {
     void loadDir(dirPath)
   }, [loadDir])
 
+  const refreshAll = useCallback(() => {
+    for (const dirPath of expanded) void loadDir(dirPath)
+  }, [expanded, loadDir])
+
+  const collapseAll = useCallback(() => {
+    setExpanded(new Set(['']))
+  }, [])
+
+  // Keyboard shortcuts scoped to the tree panel (avoids hijacking viewer text copy):
+  // Cmd/Ctrl+C copies the selected files' relative paths; Enter opens the last one.
+  const handleTreeKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+      if (selectedFiles.size > 0) {
+        e.preventDefault()
+        copyToClipboard([...selectedFiles].join('\n'))
+      }
+    } else if (e.key === 'Enter' && lastSelectedFile) {
+      e.preventDefault()
+      void previewFileContent(lastSelectedFile)
+    }
+  }, [selectedFiles, lastSelectedFile, copyToClipboard, previewFileContent])
+
   if (!sessionId) {
     return <div className="empty sm">无活动会话</div>
   }
 
+  const viewerRel = previewFile ?? ''
+  const viewerAbs = cwd ? toAbsolute(viewerRel, cwd) : viewerRel
+
   return (
     <div className="file-explorer">
-      <div className="fe-tree-panel">
+      <div
+        className="fe-tree-panel"
+        ref={treePanelRef}
+        tabIndex={0}
+        onKeyDown={handleTreeKeyDown}
+      >
         <div className="fe-tree-header">
           <span>{title}</span>
           {loadingDir !== null && <Loader2 className="fe-spinner" size={14} />}
+          <span className="fe-header-actions">
+            <button className="fe-header-btn" onClick={refreshAll} title={t('fileExplorer.refreshAll')} aria-label={t('fileExplorer.refreshAll')}>
+              <RefreshCw size={13} />
+            </button>
+            <button className="fe-header-btn" onClick={collapseAll} title={t('fileExplorer.collapseAll')} aria-label={t('fileExplorer.collapseAll')}>
+              <ChevronsDownUp size={13} />
+            </button>
+          </span>
         </div>
         <TreeNode
           dirPath=""
@@ -247,27 +301,38 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
         {previewFile && !loadingFile && fileContent && (
           <>
             <div className="fe-viewer-toolbar">
-              <Breadcrumb path={fileContent.path} />
-              {fileContent.language === 'markdown' && (
-                <div className="fe-segmented" role="tablist">
-                  <button
-                    className={`fe-seg-btn ${viewMode === 'preview' ? 'active' : ''}`}
-                    onClick={() => setViewMode('preview')}
-                    role="tab"
-                    aria-selected={viewMode === 'preview'}
-                  >
-                    预览
-                  </button>
-                  <button
-                    className={`fe-seg-btn ${viewMode === 'source' ? 'active' : ''}`}
-                    onClick={() => setViewMode('source')}
-                    role="tab"
-                    aria-selected={viewMode === 'source'}
-                  >
-                    源码
-                  </button>
-                </div>
-              )}
+              <Breadcrumb path={fileContent.path} onCopySegment={copyToClipboard} />
+              <div className="fe-viewer-actions">
+                {fileContent.language === 'markdown' && (
+                  <div className="fe-segmented" role="tablist">
+                    <button
+                      className={`fe-seg-btn ${viewMode === 'preview' ? 'active' : ''}`}
+                      onClick={() => setViewMode('preview')}
+                      role="tab"
+                      aria-selected={viewMode === 'preview'}
+                    >
+                      预览
+                    </button>
+                    <button
+                      className={`fe-seg-btn ${viewMode === 'source' ? 'active' : ''}`}
+                      onClick={() => setViewMode('source')}
+                      role="tab"
+                      aria-selected={viewMode === 'source'}
+                    >
+                      源码
+                    </button>
+                  </div>
+                )}
+                <button className="fe-tool-btn" onClick={() => copyToClipboard(viewerAbs)} title={t('fileExplorer.copyPath')} aria-label={t('fileExplorer.copyPath')}>
+                  <Copy size={14} />
+                </button>
+                <button className="fe-tool-btn" onClick={() => addToContext([{ path: viewerRel, kind: 'file' }])} title={t('fileExplorer.atReference')} aria-label={t('fileExplorer.atReference')}>
+                  <Quote size={14} />
+                </button>
+                <button className="fe-tool-btn" onClick={() => revealSelectedFile(viewerAbs)} title={t('fileExplorer.revealInSystem')} aria-label={t('fileExplorer.revealInSystem')}>
+                  <FolderOpenIcon size={14} />
+                </button>
+              </div>
             </div>
             {viewMode === 'preview' && fileContent.language === 'markdown' ? (
               <div className="fe-doc">
@@ -287,17 +352,28 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   )
 }
 
-/** Cursor-style path breadcrumb: dir › dir › file, with the filename emphasized. */
-function Breadcrumb({ path }: { path: string }) {
+/** Cursor-style path breadcrumb: dir › dir › file, with the filename emphasized.
+ *  Clicking a segment copies its cumulative path (dir1/dir2/…/seg). */
+function Breadcrumb({ path, onCopySegment }: { path: string; onCopySegment: (text: string) => void }) {
+  const separator = path.includes('\\') ? '\\' : '/'
+  const leadingSep = path.startsWith('/') ? '/' : ''
   const segments = path.split(/[/\\]/).filter(Boolean)
   return (
     <div className="fe-breadcrumb" title={path}>
       {segments.map((seg, i) => {
         const isLast = i === segments.length - 1
+        const cumulative = leadingSep + segments.slice(0, i + 1).join(separator)
         return (
           <span key={i} className="fe-crumb-group">
             {i > 0 && <span className="fe-crumb-sep" aria-hidden>›</span>}
-            <span className={`fe-crumb ${isLast ? 'current' : ''}`}>{seg}</span>
+            <button
+              type="button"
+              className={`fe-crumb ${isLast ? 'current' : ''}`}
+              onClick={() => onCopySegment(cumulative)}
+              title={cumulative}
+            >
+              {seg}
+            </button>
           </span>
         )
       })}
@@ -319,32 +395,37 @@ interface TreeNodeProps {
   onRevealFile: (path: string) => void
   onOpenFile: (path: string) => void
   onCopyPath: (text: string) => void
-  onAddToContext: (paths: string[]) => void
+  onAddToContext: (items: ComposerAttachment[]) => void
   onRefreshDir: (path: string) => void
   cwd?: string
   depth: number
   isRoot?: boolean
 }
 
-function TreeNode({
-  dirPath, name, tree, expanded, loadingDir, selectedFiles, onToggleDir, onFileClick,
-  onFileContextMenu, onOpenDirectory, onRevealFile, onOpenFile, onCopyPath, onAddToContext,
-  onRefreshDir, cwd, depth, isRoot,
-}: TreeNodeProps) {
+/** Shared directory context-menu items (root + subdirs stay in sync). */
+function DirMenuItems({
+  dirPath, cwd, onOpenDirectory, onCopyPath, onAddToContext, onRefreshDir,
+}: Pick<TreeNodeProps, 'dirPath' | 'cwd' | 'onOpenDirectory' | 'onCopyPath' | 'onAddToContext' | 'onRefreshDir'>) {
   const { t } = useTranslation('nav')
-  const isOpen = expanded.has(dirPath)
-  const entries = tree[dirPath]
-  const isLoadingThis = loadingDir === dirPath
-
-  const dirMenu = (
+  const relative = dirPath || '.'
+  return (
     <ContextMenuContent align="start" side="right" sideOffset={4}>
       <ContextMenuItem onClick={() => onOpenDirectory(dirPath)}>
         <FolderOpenIcon size={14} />
         {t('fileExplorer.openFolder')}
       </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => onCopyPath(relative)}>
+        <Copy size={14} />
+        {t('fileExplorer.copyRelativePath')}
+      </ContextMenuItem>
       <ContextMenuItem onClick={() => onCopyPath(cwd ? toAbsolute(dirPath, cwd) : dirPath || cwd || '.')}>
         <Copy size={14} />
         {t('fileExplorer.copyAbsolutePath')}
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => onAddToContext([{ path: relative, kind: 'folder' }])}>
+        <Quote size={14} />
+        {t('fileExplorer.addFolderToContext')}
       </ContextMenuItem>
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => onRefreshDir(dirPath)}>
@@ -353,6 +434,127 @@ function TreeNode({
       </ContextMenuItem>
     </ContextMenuContent>
   )
+}
+
+/** Shared file context-menu items (used by both TreeNode + DirRow file rows). */
+function FileMenuItems({
+  filePath, cwd, selectedFiles, onOpenFile, onRevealFile, onCopyPath, onAddToContext,
+}: {
+  filePath: string
+  cwd?: string
+  selectedFiles: Set<string>
+  onOpenFile: (path: string) => void
+  onRevealFile: (path: string) => void
+  onCopyPath: (text: string) => void
+  onAddToContext: (items: ComposerAttachment[]) => void
+}) {
+  const { t } = useTranslation('nav')
+  const targets = selectedFiles.size > 0 ? [...selectedFiles] : [filePath]
+  return (
+    <ContextMenuContent align="start" side="right" sideOffset={4}>
+      <ContextMenuItem onClick={() => onOpenFile(filePath)}>
+        <ExternalLink size={14} />
+        {t('fileExplorer.openFile')}
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => onRevealFile(cwd ? toAbsolute(filePath, cwd) : filePath)}>
+        <FolderOpenIcon size={14} />
+        {navigator.platform.startsWith('Win') ? t('fileExplorer.revealInExplorer') : t('fileExplorer.revealInFinder')}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => onCopyPath(filePath)}>
+        <Copy size={14} />
+        {t('fileExplorer.copyRelativePath')}
+      </ContextMenuItem>
+      <ContextMenuItem onClick={() => onCopyPath(cwd ? toAbsolute(filePath, cwd) : filePath)}>
+        <Copy size={14} />
+        {t('fileExplorer.copyAbsolutePath')}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem onClick={() => onAddToContext(targets.map((p) => ({ path: p, kind: 'file' as const })))}>
+        <Quote size={14} />
+        {selectedFiles.size > 1
+          ? t('fileExplorer.addNToContext', { count: selectedFiles.size })
+          : t('fileExplorer.addToContext')}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  )
+}
+
+/** A single file row with its context menu (shared by TreeNode + DirRow). */
+function FileRow({
+  childPath, name, selectedFiles, depth, cwd,
+  onFileClick, onFileContextMenu, onOpenFile, onRevealFile, onCopyPath, onAddToContext,
+}: {
+  childPath: string
+  name: string
+  selectedFiles: Set<string>
+  depth: number
+  cwd?: string
+  onFileClick: (path: string, e: React.MouseEvent) => void
+  onFileContextMenu: (path: string) => void
+  onOpenFile: (path: string) => void
+  onRevealFile: (path: string) => void
+  onCopyPath: (text: string) => void
+  onAddToContext: (items: ComposerAttachment[]) => void
+}) {
+  const isSelected = selectedFiles.has(childPath)
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger
+        render={
+          <div
+            className={`fe-file-row ${isSelected ? 'selected' : ''}`}
+            onClick={(e) => onFileClick(childPath, e)}
+            onContextMenu={() => onFileContextMenu(childPath)}
+            style={{ paddingLeft: `${8 + (depth + 1) * 14 + 16}px` }}
+            title={childPath}
+          >
+            <FileText size={13} className="fe-file-icon" />
+            <span className="fe-file-name">{name}</span>
+          </div>
+        }
+      />
+      <FileMenuItems
+        filePath={childPath}
+        cwd={cwd}
+        selectedFiles={selectedFiles}
+        onOpenFile={onOpenFile}
+        onRevealFile={onRevealFile}
+        onCopyPath={onCopyPath}
+        onAddToContext={onAddToContext}
+      />
+    </ContextMenu>
+  )
+}
+
+function renderChild(entry: DirEntry, dirPath: string, props: TreeNodeProps) {
+  const childPath = joinPath(dirPath, entry.name)
+  if (entry.isDirectory) {
+    return <DirRow key={childPath} {...props} dirPath={childPath} name={entry.name} depth={props.depth + 1} isRoot={undefined} />
+  }
+  return (
+    <FileRow
+      key={childPath}
+      childPath={childPath}
+      name={entry.name}
+      selectedFiles={props.selectedFiles}
+      depth={props.depth}
+      cwd={props.cwd}
+      onFileClick={props.onFileClick}
+      onFileContextMenu={props.onFileContextMenu}
+      onOpenFile={props.onOpenFile}
+      onRevealFile={props.onRevealFile}
+      onCopyPath={props.onCopyPath}
+      onAddToContext={props.onAddToContext}
+    />
+  )
+}
+
+function TreeNode(props: TreeNodeProps) {
+  const { dirPath, name, tree, expanded, loadingDir, onToggleDir, depth, isRoot } = props
+  const isOpen = expanded.has(dirPath)
+  const entries = tree[dirPath]
+  const isLoadingThis = loadingDir === dirPath
 
   return (
     <div className="fe-node-container">
@@ -371,7 +573,14 @@ function TreeNode({
               </div>
             }
           />
-          {dirMenu}
+          <DirMenuItems
+            dirPath={dirPath}
+            cwd={props.cwd}
+            onOpenDirectory={props.onOpenDirectory}
+            onCopyPath={props.onCopyPath}
+            onAddToContext={props.onAddToContext}
+            onRefreshDir={props.onRefreshDir}
+          />
         </ContextMenu>
       ) : null}
 
@@ -382,78 +591,7 @@ function TreeNode({
               <Loader2 className="fe-spinner" size={12} />
             </div>
           ) : null}
-          {entries?.map((entry) => {
-            const childPath = joinPath(dirPath, entry.name)
-            if (entry.isDirectory) {
-              return (
-                <DirRow
-                  key={childPath}
-                  dirPath={childPath}
-                  name={entry.name}
-                  tree={tree}
-                  expanded={expanded}
-                  loadingDir={loadingDir}
-                  selectedFiles={selectedFiles}
-                  onToggleDir={onToggleDir}
-                  onFileClick={onFileClick}
-                  onFileContextMenu={onFileContextMenu}
-                  onOpenDirectory={onOpenDirectory}
-                  onRevealFile={onRevealFile}
-                  onOpenFile={onOpenFile}
-                  onCopyPath={onCopyPath}
-                  onAddToContext={onAddToContext}
-                  onRefreshDir={onRefreshDir}
-                  cwd={cwd}
-                  depth={depth + 1}
-                />
-              )
-            }
-            const isSelected = selectedFiles.has(childPath)
-            return (
-              <ContextMenu key={childPath}>
-                <ContextMenuTrigger
-                  render={
-                    <div
-                      className={`fe-file-row ${isSelected ? 'selected' : ''}`}
-                      onClick={(e) => onFileClick(childPath, e)}
-                      onContextMenu={() => onFileContextMenu(childPath)}
-                      style={{ paddingLeft: `${8 + (depth + 1) * 14 + 16}px` }}
-                      title={childPath}
-                    >
-                      <FileText size={13} className="fe-file-icon" />
-                      <span className="fe-file-name">{entry.name}</span>
-                    </div>
-                  }
-                />
-                <ContextMenuContent align="start" side="right" sideOffset={4}>
-                  <ContextMenuItem onClick={() => onOpenFile(childPath)}>
-                    <ExternalLink size={14} />
-                    {t('fileExplorer.openFile')}
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onRevealFile(childPath)}>
-                    <FolderOpenIcon size={14} />
-                    {navigator.platform.startsWith('Win') ? t('fileExplorer.revealInExplorer') : t('fileExplorer.revealInFinder')}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onClick={() => onCopyPath(childPath)}>
-                    <Copy size={14} />
-                    {t('fileExplorer.copyRelativePath')}
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onCopyPath(cwd ? toAbsolute(childPath, cwd) : childPath)}>
-                    <Copy size={14} />
-                    {t('fileExplorer.copyAbsolutePath')}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onClick={() => onAddToContext([...selectedFiles].length > 0 ? [...selectedFiles] : [childPath])}>
-                    <Quote size={14} />
-                    {selectedFiles.size > 1
-                      ? t('fileExplorer.addNToContext', { count: selectedFiles.size })
-                      : t('fileExplorer.addToContext')}
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            )
-          })}
+          {entries?.map((entry) => renderChild(entry, dirPath, props))}
         </div>
       )}
     </div>
@@ -461,45 +599,31 @@ function TreeNode({
 }
 
 function DirRow(props: TreeNodeProps) {
-  const {
-    dirPath, name, tree, expanded, loadingDir, selectedFiles, onToggleDir, onFileClick,
-    onFileContextMenu, onOpenDirectory, onRevealFile, onOpenFile, onCopyPath, onAddToContext,
-    onRefreshDir, cwd, depth,
-  } = props
-  const { t } = useTranslation('nav')
+  const { dirPath, name, tree, expanded, loadingDir, onToggleDir, depth } = props
   const isOpen = expanded.has(dirPath)
   return (
     <ContextMenu>
       <ContextMenuTrigger
         render={
-          <>
-            <div
-              className={`fe-dir-row ${isOpen ? 'open' : ''}`}
-              onClick={() => onToggleDir(dirPath)}
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
-            >
-              {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              {isOpen ? <FolderOpen size={14} className="fe-dir-icon" /> : <Folder size={14} className="fe-dir-icon" />}
-              <span className="fe-dir-name">{name}</span>
-            </div>
-          </>
+          <div
+            className={`fe-dir-row ${isOpen ? 'open' : ''}`}
+            onClick={() => onToggleDir(dirPath)}
+            style={{ paddingLeft: `${8 + depth * 14}px` }}
+          >
+            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            {isOpen ? <FolderOpen size={14} className="fe-dir-icon" /> : <Folder size={14} className="fe-dir-icon" />}
+            <span className="fe-dir-name">{name}</span>
+          </div>
         }
       />
-      <ContextMenuContent align="start" side="right" sideOffset={4}>
-        <ContextMenuItem onClick={() => onOpenDirectory(dirPath)}>
-          <FolderOpenIcon size={14} />
-          {t('fileExplorer.openFolder')}
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => onCopyPath(cwd ? toAbsolute(dirPath, cwd) : dirPath || cwd || '.')}>
-          <Copy size={14} />
-          {t('fileExplorer.copyAbsolutePath')}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => onRefreshDir(dirPath)}>
-          <RefreshCw size={14} />
-          {t('fileExplorer.refresh')}
-        </ContextMenuItem>
-      </ContextMenuContent>
+      <DirMenuItems
+        dirPath={dirPath}
+        cwd={props.cwd}
+        onOpenDirectory={props.onOpenDirectory}
+        onCopyPath={props.onCopyPath}
+        onAddToContext={props.onAddToContext}
+        onRefreshDir={props.onRefreshDir}
+      />
       {isOpen && (
         <div className="fe-children">
           {loadingDir === dirPath && !tree[dirPath] ? (
@@ -507,78 +631,7 @@ function DirRow(props: TreeNodeProps) {
               <Loader2 className="fe-spinner" size={12} />
             </div>
           ) : null}
-          {tree[dirPath]?.map((entry) => {
-            const childPath = joinPath(dirPath, entry.name)
-            if (entry.isDirectory) {
-              return (
-                <DirRow
-                  key={childPath}
-                  dirPath={childPath}
-                  name={entry.name}
-                  tree={tree}
-                  expanded={expanded}
-                  loadingDir={loadingDir}
-                  selectedFiles={selectedFiles}
-                  onToggleDir={onToggleDir}
-                  onFileClick={onFileClick}
-                  onFileContextMenu={onFileContextMenu}
-                  onOpenDirectory={onOpenDirectory}
-                  onRevealFile={onRevealFile}
-                  onOpenFile={onOpenFile}
-                  onCopyPath={onCopyPath}
-                  onAddToContext={onAddToContext}
-                  onRefreshDir={onRefreshDir}
-                  cwd={cwd}
-                  depth={depth + 1}
-                />
-              )
-            }
-            const isSelected = selectedFiles.has(childPath)
-            return (
-              <ContextMenu key={childPath}>
-                <ContextMenuTrigger
-                  render={
-                    <div
-                      className={`fe-file-row ${isSelected ? 'selected' : ''}`}
-                      onClick={(e) => onFileClick(childPath, e)}
-                      onContextMenu={() => onFileContextMenu(childPath)}
-                      style={{ paddingLeft: `${8 + (depth + 1) * 14 + 16}px` }}
-                      title={childPath}
-                    >
-                      <FileText size={13} className="fe-file-icon" />
-                      <span className="fe-file-name">{entry.name}</span>
-                    </div>
-                  }
-                />
-                <ContextMenuContent align="start" side="right" sideOffset={4}>
-                  <ContextMenuItem onClick={() => onOpenFile(childPath)}>
-                    <ExternalLink size={14} />
-                    {t('fileExplorer.openFile')}
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onRevealFile(childPath)}>
-                    <FolderOpenIcon size={14} />
-                    {navigator.platform.startsWith('Win') ? t('fileExplorer.revealInExplorer') : t('fileExplorer.revealInFinder')}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onClick={() => onCopyPath(childPath)}>
-                    <Copy size={14} />
-                    {t('fileExplorer.copyRelativePath')}
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => onCopyPath(cwd ? toAbsolute(childPath, cwd) : childPath)}>
-                    <Copy size={14} />
-                    {t('fileExplorer.copyAbsolutePath')}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem onClick={() => onAddToContext(selectedFiles.size > 0 ? [...selectedFiles] : [childPath])}>
-                    <Quote size={14} />
-                    {selectedFiles.size > 1
-                      ? t('fileExplorer.addNToContext', { count: selectedFiles.size })
-                      : t('fileExplorer.addToContext')}
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            )
-          })}
+          {tree[dirPath]?.map((entry) => renderChild(entry, dirPath, props))}
         </div>
       )}
     </ContextMenu>
