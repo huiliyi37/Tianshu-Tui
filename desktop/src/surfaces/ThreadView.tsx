@@ -845,6 +845,7 @@ export function ThreadView(props: {
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
             onDelegate={() => setShowDelegateDialog(true)}
+            onWorkflow={(cmd) => onSend(cmd)}
             menuRev={view.menuRev}
           />
         </div>

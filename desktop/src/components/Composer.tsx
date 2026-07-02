@@ -115,6 +115,8 @@ export function Composer(props: {
   onSetPlanMode?: (state: PlanModeState) => void
   /** PlusMenu — open the "派子代理" dispatch dialog. */
   onDelegate?: () => void
+  /** PlusMenu — send a workflow slash command (/council, /team). */
+  onWorkflow?: (cmd: string) => void
   /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
   menuRev?: number
   /** True when the thread already has messages — used to warn before a
@@ -126,7 +128,7 @@ export function Composer(props: {
   /** P1-1 chip row — context usage ring (used/window + cache detail popover). */
   contextUsage?: ContextUsage
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -667,6 +669,7 @@ export function Composer(props: {
             commands={commands}
             onRunCommand={runCommand}
             onDelegate={onDelegate}
+            onWorkflow={onWorkflow}
             onClose={() => {}}
           />
         </div>
