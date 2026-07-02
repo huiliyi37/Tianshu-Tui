@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { listMcpServerTools } from '../runtime/client'
+import { listMcpServerTools, openExternal } from '../runtime/client'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
 
 /**
@@ -97,6 +97,11 @@ function PresetCard({
         <div className="mcp-preset-name">
           {configured ? '✓ ' : needsKeys ? '🔑 ' : '+ '}{preset.name}
           {configured && <span className="meta" style={{ marginLeft: 6 }}>已添加</span>}
+          {!configured && needsKeys && !expanded && (
+            <button className="btn-mini" onClick={(e) => { e.stopPropagation(); setExpanded(true) }} style={{ marginLeft: 'auto' }}>
+              启用
+            </button>
+          )}
         </div>
         <div className="mcp-preset-desc">{preset.description}</div>
         <div className="mcp-preset-cmd">
@@ -122,13 +127,28 @@ function PresetCard({
               disabled={!allFilled}
               onClick={() => { onAdd(buildConfig()); setExpanded(false) }}
             >
-              启用
+              确认启用
             </button>
+            <button className="btn-mini" onClick={() => setExpanded(false)}>取消</button>
             {preset.docsUrl && (
-              <a className="btn-mini" href={preset.docsUrl} target="_blank" rel="noreferrer">文档</a>
+              <button
+                className="btn-mini"
+                onClick={() => void openExternal(preset.docsUrl!)}
+              >
+                文档
+              </button>
             )}
           </div>
         </div>
+      )}
+      {!configured && !needsKeys && preset.docsUrl && (
+        <button
+          className="btn-mini"
+          style={{ marginTop: 4 }}
+          onClick={() => void openExternal(preset.docsUrl!)}
+        >
+          文档
+        </button>
       )}
     </div>
   )
