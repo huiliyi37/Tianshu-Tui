@@ -626,13 +626,31 @@ export function countInstalledSkills(cwd: string): number {
  * callers treat that as "nothing to seed".
  */
 function bundledSkillsDir(): string | null {
+  // Explicit override wins — lets the desktop shell / power users / diagnostics
+  // point at the shipped dir if the relative resolution ever drifts.
+  const override = process.env.RIVET_BUNDLED_SKILLS_DIR
+  if (override) {
+    try {
+      if (existsSync(override)) return override
+    } catch {
+      /* ignore — fall through to relative resolution */
+    }
+  }
   let base: string
   try {
     base = dirname(fileURLToPath(import.meta.url))
   } catch {
     return null
   }
-  for (const candidate of [join(base, 'bundled-skills'), join(base, '..', 'bundled-skills')]) {
+  // Candidate layouts:
+  //   dist/main.js          → dist/bundled-skills            (base/bundled-skills)
+  //   dist/chunks/x.js      → dist/bundled-skills            (base/../bundled-skills)
+  //   dist/main.js          → dist/../runtime-assets/...     (dev/tsx source fallback)
+  for (const candidate of [
+    join(base, 'bundled-skills'),
+    join(base, '..', 'bundled-skills'),
+    join(base, '..', 'runtime-assets', 'bundled-skills'),
+  ]) {
     try {
       if (existsSync(candidate)) return candidate
     } catch {
@@ -641,6 +659,9 @@ function bundledSkillsDir(): string | null {
   }
   return null
 }
+
+/** One-time diagnostic guard so the startup log fires at most once per process. */
+let bundledSkillsLogged = false
 
 /**
  * Seed app-bundled skills from `src` into `<cwd>/.rivet/skills`. Kept separate
@@ -682,8 +703,21 @@ export function seedBundledSkillsFrom(src: string, cwd: string): string[] {
  */
 export function seedBundledSkills(cwd: string): string[] {
   const src = bundledSkillsDir()
-  if (!src) return []
-  return seedBundledSkillsFrom(src, cwd)
+  if (!src) {
+    if (!bundledSkillsLogged) {
+      bundledSkillsLogged = true
+      // Dev/tsx (unbuilt) legitimately has no bundled dir; only worth noting for
+      // diagnosing a packaged app that unexpectedly ships without default skills.
+      console.warn('[skills] bundled-skills dir not found (dev/tsx or packaging drift) — no default skills seeded')
+    }
+    return []
+  }
+  const seeded = seedBundledSkillsFrom(src, cwd)
+  if (!bundledSkillsLogged) {
+    bundledSkillsLogged = true
+    console.log(`[skills] bundled-skills dir=${src}; seeded ${seeded.length} new into ${join(cwd, '.rivet', 'skills')}`)
+  }
+  return seeded
 }
 
 /**

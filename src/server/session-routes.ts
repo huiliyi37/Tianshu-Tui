@@ -264,7 +264,12 @@ export function buildSessionRoutes(
     'GET /sessions/:id/skills': withAuth((_body, params) => {
       const skills = manager.listSkills(params!.id!)
       if (!skills) return { status: 404, body: { error: 'Session not found' } }
-      return { status: 200, body: { skills } }
+      // loadErrors: skills that failed to parse from .rivet/skills at session
+      // create (e.g. a malformed installed Claude skill) — so the UI can show
+      // them instead of leaving the user wondering why an "installed" skill
+      // never appears in the list.
+      const loadErrors = manager.getSkillLoadErrors(params!.id!) ?? []
+      return { status: 200, body: { skills, loadErrors } }
     }, apiToken),
 
     // Write — enable/disable a skill for this session (affects discovery block).

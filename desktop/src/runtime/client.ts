@@ -23,6 +23,7 @@ import type {
   SessionEvent,
   SessionRecord,
   SkillStatus,
+  SkillsResponse,
   InstallableSkillsResponse,
   SkillInstallResult,
   StorageApplyResult,
@@ -411,8 +412,18 @@ export function setDomain(id: string, key: string): Promise<{ id: string; domain
 
 /** List every loaded skill with its per-session enablement status. */
 export async function listSkills(id: string): Promise<SkillStatus[]> {
-  const { skills } = await apiGet<{ skills: SkillStatus[] }>(`/sessions/${id}/skills`)
+  const { skills } = await apiGet<SkillsResponse>(`/sessions/${id}/skills`)
   return skills
+}
+
+/**
+ * Like listSkills but also returns loadErrors — skills that failed to parse from
+ * .rivet/skills (e.g. a malformed installed Claude skill). Used by the Skills
+ * surface so a silently-dropped skill becomes visible.
+ */
+export async function listSkillsDetailed(id: string): Promise<SkillsResponse> {
+  const res = await apiGet<SkillsResponse>(`/sessions/${id}/skills`)
+  return { skills: res.skills ?? [], loadErrors: res.loadErrors ?? [] }
 }
 
 /** Enable/disable a skill for a session (affects the discovery block). */

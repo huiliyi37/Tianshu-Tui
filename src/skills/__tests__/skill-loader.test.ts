@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom } from '../skill-loader.js'
+import { SkillRegistry, parseSkillMarkdown, listSkillFiles, importSkillsIntoRivet, listInstallableSkills, countInstalledSkills, seedBundledSkillsFrom, loadProjectSkills } from '../skill-loader.js'
 import { readFileSync } from 'node:fs'
 import { validatePathSafe } from '../../tools/path-validate.js'
 
@@ -21,6 +21,18 @@ Follow red-green-refactor.`
     assert.equal(skill.name, 'tdd')
     assert.equal(skill.triggers.length, 2)
     assert.ok(skill.triggers.some(t => t.test('use TDD here')))
+  })
+
+  it('loadProjectSkills reports errors for a malformed .rivet/skills entry', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-loadproj-'))
+    const broken = join(cwd, '.rivet', 'skills', 'broken')
+    mkdirSync(broken, { recursive: true })
+    // No YAML frontmatter → parseSkillMarkdown throws → captured in errors[].
+    writeFileSync(join(broken, 'SKILL.md'), 'Just prose, no frontmatter.')
+
+    const { loaded, errors } = loadProjectSkills(cwd)
+    assert.ok(errors.some((e) => e.includes('broken')), `errors should mention broken: ${JSON.stringify(errors)}`)
+    assert.ok(!loaded.includes('broken'), 'malformed skill must not be reported as loaded')
   })
 
   it('loads skills from directory', () => {

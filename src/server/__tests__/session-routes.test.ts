@@ -462,6 +462,30 @@ test('GET /skills/installable lists .claude candidates; POST /skills/install cop
   assert.equal(ghost.status, 404)
 })
 
+test('GET /skills surfaces loadErrors for a malformed installed skill', async () => {
+  const { router } = setupPlus()
+  const cwd = mkdtempSync(join(tmpdir(), 'skill-loaderr-route-'))
+  // A directory skill whose SKILL.md has no frontmatter → parse throws → it must
+  // NOT vanish silently; it should appear in loadErrors so the UI can show why.
+  const broken = join(cwd, '.rivet', 'skills', 'broken-skill')
+  mkdirSync(broken, { recursive: true })
+  writeFileSync(join(broken, 'SKILL.md'), 'No frontmatter here, just prose.')
+
+  const s = await router('POST', '/sessions', { cwd }, AUTH)
+  const id = (s.body as { id: string }).id
+
+  const res = await router('GET', `/sessions/${id}/skills`, {}, AUTH)
+  assert.equal(res.status, 200)
+  const body = res.body as { skills: Array<{ name: string }>; loadErrors: string[] }
+  assert.ok(Array.isArray(body.loadErrors), 'loadErrors is an array')
+  assert.ok(
+    body.loadErrors.some((e) => e.includes('broken-skill')),
+    `expected a loadError mentioning broken-skill, got: ${JSON.stringify(body.loadErrors)}`,
+  )
+  // The malformed skill must not appear as a loaded, toggleable skill.
+  assert.equal(body.skills.find((sk) => sk.name === 'broken-skill'), undefined)
+})
+
 test('classifyArtifact taxonomy mapping', () => {
   const base = { id: 'x', sessionId: 's', createdAt: 0, summary: '', sections: [], rawPath: '', charCount: 0, lineCount: 0, sha256: '' }
   assert.equal(classifyArtifact({ ...base, tool: 'write_plan', target: 'plan.md' }), 'plan')

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useUiState } from '../state/store'
-import { listSkills, setSkillEnabled, listInstallableSkills, installSkills } from '../runtime/client'
+import { useUiState, useUiDispatch } from '../state/store'
+import { listSkillsDetailed, setSkillEnabled, listInstallableSkills, installSkills } from '../runtime/client'
 import type { SkillStatus, InstallableSkill } from '../runtime/types'
 
 /** source → 中文标签 + 样式类 */
@@ -23,17 +23,22 @@ function sourceBadge(source: string): { label: string; cls: string } {
  */
 export function SkillsSurface() {
   const ui = useUiState()
+  const dispatch = useUiDispatch()
   const sessionId = ui.activeSessionId
   const [skills, setSkills] = useState<SkillStatus[]>([])
+  const [loadErrors, setLoadErrors] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Skills installed this session but not yet loaded (registry is intentionally
+  // not hot-loaded to protect the prefix cache). Shown as pending "重开线程生效".
+  const [pendingInstalled, setPendingInstalled] = useState<string[]>([])
 
   const fetchSkills = useCallback(() => {
     if (!sessionId) return
     setLoading(true)
-    listSkills(sessionId)
-      .then((list) => { setSkills(list); setError(null) })
+    listSkillsDetailed(sessionId)
+      .then((res) => { setSkills(res.skills); setLoadErrors(res.loadErrors); setError(null) })
       .catch((err) => setError((err as Error).message))
       .finally(() => setLoading(false))
   }, [sessionId])
@@ -93,7 +98,11 @@ export function SkillsSurface() {
         if (res.copied.includes(name)) {
           setInstallable((prev) => prev.map((s) => s.name === name ? { ...s, installed: true } : s))
           setInstalledCount((c) => c + 1)
-          setInstallNotice('已复制到 .rivet/skills/，需重开会话才生效——会话内热加载新技能会打碎前缀缓存，成本可达几十倍。')
+          setPendingInstalled((prev) => prev.includes(name) ? prev : [...prev, name])
+          setInstallNotice('已复制到 .rivet/skills/，需新开线程才生效——会话内热加载新技能会打碎前缀缓存，成本可达几十倍。')
+          // Refetch so any state that DID change is reflected; the just-installed
+          // skill stays "pending" until a new thread reloads the registry.
+          fetchSkills()
         } else if (res.skipped.includes(name)) {
           setInstallable((prev) => prev.map((s) => s.name === name ? { ...s, installed: true } : s))
         } else if (res.errors.length > 0) {
@@ -102,7 +111,18 @@ export function SkillsSurface() {
       })
       .catch((err) => setError((err as Error).message))
       .finally(() => setInstalling((prev) => { const n = new Set(prev); n.delete(name); return n }))
-  }, [sessionId])
+  }, [sessionId, fetchSkills])
+
+  // Skills already present in the loaded list don't need the "pending" chip.
+  const loadedNames = useMemo(() => new Set(skills.map((s) => s.name)), [skills])
+  const trulyPending = useMemo(
+    () => pendingInstalled.filter((n) => !loadedNames.has(n)),
+    [pendingInstalled, loadedNames],
+  )
+
+  const openNewThread = useCallback(() => {
+    dispatch({ type: 'openNew', open: true })
+  }, [dispatch])
 
   // Past the recommended cap, require a second click before installing.
   const install = useCallback((name: string) => {
@@ -206,7 +226,12 @@ export function SkillsSurface() {
             {overCap && '，已达上限，非必要不再安装（点两次确认）'}
           </div>
 
-          {installNotice && <div className="meta warn">{installNotice}</div>}
+          {installNotice && (
+            <div className="meta warn skills-install-notice">
+              <span>{installNotice}</span>
+              <button className="skills-newthread-btn" onClick={openNewThread}>新建线程以启用</button>
+            </div>
+          )}
           {installLoading && (
             <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>扫描中…</p></div>
           )}
@@ -245,6 +270,36 @@ export function SkillsSurface() {
         <div className="skills-empty-hero"><div className="skills-empty-glyph spin" aria-hidden>◌</div><p>加载中…</p></div>
       )}
       {error && <div className="meta warn">{error}</div>}
+
+      {loadErrors.length > 0 && (
+        <div className="skills-load-errors">
+          <div className="skills-group-label">加载失败（{loadErrors.length}）</div>
+          <div className="meta warn">这些技能已在 .rivet/skills/ 但无法解析（多为 frontmatter 缺失/格式错误），修正后重开线程即可生效：</div>
+          <ul className="skills-error-list">
+            {loadErrors.map((e, i) => <li key={`le-${i}`}>{e}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {!query.trim() && trulyPending.length > 0 && (
+        <>
+          <div className="skills-group-label">待生效（重开线程）</div>
+          <div className="skills-list">
+            {trulyPending.map((name) => (
+              <div key={`pending-${name}`} className="skill-card pending">
+                <div className="skill-info">
+                  <div className="skill-title-row">
+                    <span className="skill-name">{name}</span>
+                    <span className="skill-src-chip src-claude">Claude</span>
+                  </div>
+                  <div className="skill-desc">已安装，新开线程后可启用</div>
+                </div>
+                <button className="skills-newthread-btn" onClick={openNewThread}>新建线程</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {!loading && !hasResults && (
         <div className="skills-empty-hero">
