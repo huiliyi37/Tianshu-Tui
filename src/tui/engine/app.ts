@@ -13,7 +13,7 @@
 
 import type { WriteStream, ReadStream } from 'node:tty'
 import { CommitEngine } from './commit-engine.js'
-import { LiveEngine, type LiveRegionLine } from './live-engine.js'
+import { LiveEngine, padDynamicRegion, type LiveRegionLine } from './live-engine.js'
 import { OverlayEngine } from './overlay-engine.js'
 import { InputHandler, type KeyPress } from './input-handler.js'
 import { ResizeHandler } from './resize-handler.js'
@@ -60,7 +60,7 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
-import { truncateToDisplayWidth, displayWidth } from '../width.js'
+import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderConnect } from '../format/overlay.js'
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
@@ -81,6 +81,15 @@ export function formatElapsedShort(ms: number): string {
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return `${mins}m${secs}s`
+}
+
+/**
+ * live region 行上限：终端高度感知（`min(28, rows - 1)`）。
+ * 固定 28 在小终端上会让全量重写的 cursorUp 回顶量超出屏幕 → 错位/残影，
+ * 故上限随终端高度收缩；下限 4 保输入框 chrome 最低可用。
+ */
+export function liveMaxRowsFor(rows: number): number {
+  return Math.max(4, Math.min(28, (rows || 24) - 1))
 }
 
 /** Truncate a string (possibly containing ANSI) to fit within maxWidth display columns. */
@@ -360,7 +369,7 @@ export class TuiApp {
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
-    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: 28 })
+    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: liveMaxRowsFor(options.rows) })
     this.overlay = new OverlayEngine({
       stdout: options.stdout,
       getSize: () => ({ cols: this.columns, rows: this.rows }),
@@ -487,6 +496,7 @@ export class TuiApp {
     this.resize.onResize((cols, rows) => {
       this.columns = cols
       this.rows = rows
+      this.live.setMaxRows(liveMaxRowsFor(rows))
       this.rerender()
     })
 
@@ -2603,6 +2613,38 @@ export class TuiApp {
     return computed
   }
 
+  /** ambiguous 宽度模式缓存（与 LiveEngine.ambiguousWide 同口径，进程内基本不变）。 */
+  private ambiguousWideCache: boolean | null = null
+
+  /**
+   * 单行 display rows 度量（wrapping-aware），与 LiveEngine.rowsForLine 同口径——
+   * 定高视口的行数预算必须与引擎实际渲染行数一致，否则垫行后总高度仍会漂移。
+   */
+  private displayRowsFor(text: string, width: number): number {
+    this.ambiguousWideCache ??= ambiguousWideEnabled()
+    if (width <= 0) return 1
+    const dw = displayWidth(text, { ambiguousAsWide: this.ambiguousWideCache })
+    if (dw === 0) return 1
+    return Math.ceil(dw / width)
+  }
+
+  /**
+   * 活动期动态区高度预算（display rows）。
+   *
+   * 活动期（run 进行中，phase 非 idle——thinking/streaming/analyzing/waiting 均含）
+   * 返回固定预算：renderLive 会把动态段垫高/截断到恰好该值，live region 总高度
+   * 逐帧恒定 → 输入框屏幕坐标不随 thinking/streaming 字符数浮动。
+   * 空闲期返回 0，live region 自然塌回 chrome-only（每 turn 结束一次性收敛）。
+   *
+   * 预算 = rows - chromeRows - 2（留缝让 scrollback 最后输出可见），期望区间
+   * 6–16 行；小终端优先不超屏——可用空间不足 6 行时取实际可用值（可为 0）。
+   */
+  private getDynamicBudget(chromeRows: number): number {
+    if (this.state.phase === 'idle') return 0
+    const raw = (this.rows || 24) - chromeRows - 2
+    return Math.max(0, Math.min(16, raw))
+  }
+
   /**
    * 把「逻辑上应占单行」的动态 live 元素钳制到终端宽度内。
    *
@@ -2896,7 +2938,7 @@ export class TuiApp {
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
     //    恒可见的保留区，内容超屏时 LiveEngine 截断的是上方 dynamic 段，
     //    不会裁掉任务面板与输入框。
-    const chromeStart = lines.length
+    let chromeStart = lines.length
 
     // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
     if (!showSidePanel) {
@@ -3031,6 +3073,22 @@ export class TuiApp {
           lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
+      }
+    }
+
+    // ── 活动期定高视口：动态段恒定占位（不足垫空行、超出截最旧行），
+    //    live region 总高度逐帧不变 → 输入框在 thinking/streaming 全程钉在原位。
+    //    空闲期 budget=0 原样返回，塌回自然流。度量与 LiveEngine.rowsForLine 同口径。
+    {
+      let chromeRows = 0
+      for (let i = chromeStart; i < lines.length; i++) {
+        chromeRows += this.displayRowsFor(lines[i]!.text, cols)
+      }
+      const budget = this.getDynamicBudget(chromeRows)
+      if (budget > 0) {
+        const padded = padDynamicRegion(lines, chromeStart, budget, (text) => this.displayRowsFor(text, cols))
+        lines = padded.lines
+        chromeStart = padded.chromeStart
       }
     }
 
