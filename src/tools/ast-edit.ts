@@ -125,7 +125,12 @@ export const AST_EDIT_TOOL: Tool = {
     const allFiles: string[] = []
     for (const p of paths) {
       const resolved = resolve(params.cwd ?? process.cwd(), p)
-      allFiles.push(...collectFiles(resolved))
+      try {
+        allFiles.push(...collectFiles(resolved))
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return { content: `Error: ${message}`, isError: true }
+      }
     }
 
     const fileResults: Array<{ file: string; changes: FileChange[]; error?: string }> = []
