@@ -1,16 +1,62 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SlidersHorizontal, FolderOpen, Pencil, Trash2 } from 'lucide-react'
+import {
+  SlidersHorizontal, FolderOpen, Pencil, Trash2,
+  Home, Bell, LayoutGrid, Clock, Puzzle, GitBranch, BarChart3,
+  Network, Scale, Plug, Settings, Sun, Moon, Laptop, Sparkles, Flower2, Zap, Apple,
+  type LucideIcon,
+} from 'lucide-react'
 import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useUnarchiveSession } from '../state/queries'
-import { useUiDispatch, useUiState } from '../state/store'
+import { useUiDispatch, useUiState, type Surface } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
+import { loadThemePref, setThemePref, type ThemePref } from '../lib/theme'
 
 
-// P2-3a: surface navigation moved to the Rail (App shell). The sidebar is now a
-// pure project/session list — search, project tree, archived sessions.
+// Codex-style single sidebar: labeled navigation (core group + collapsible
+// tools group) above the project/session tree, settings + theme at the bottom.
+// The icon-only Rail was removed — unlabeled icons were unreadable.
+
+const CORE_SURFACES: Surface[] = ['home', 'attention', 'mission', 'automations', 'skills']
+const TOOL_SURFACES: Surface[] = ['git', 'insights', 'delegation', 'council', 'hooks']
+
+const NAV_ICONS: Partial<Record<Surface, LucideIcon>> = {
+  home: Home,
+  attention: Bell,
+  mission: LayoutGrid,
+  automations: Clock,
+  skills: Puzzle,
+  git: GitBranch,
+  insights: BarChart3,
+  delegation: Network,
+  council: Scale,
+  hooks: Plug,
+}
+
+function NavIcon({ surface }: { surface: Surface }) {
+  const Ic = NAV_ICONS[surface] ?? Home
+  return <Ic size={16} strokeWidth={1.7} aria-hidden />
+}
+
+// Theme cycling (moved from the removed Rail).
+const THEME_ICON: Partial<Record<ThemePref, LucideIcon>> = {
+  system: Laptop,
+  light: Sun,
+  dark: Moon,
+  nebula: Sparkles,
+  sakura: Flower2,
+  cyberpunk: Zap,
+  cupertino: Apple,
+}
+
+const THEME_CYCLE: ThemePref[] = ['system', 'light', 'dark', 'nebula', 'sakura', 'cyberpunk', 'cupertino']
+
+function nextTheme(p: ThemePref): ThemePref {
+  const i = THEME_CYCLE.indexOf(p)
+  return THEME_CYCLE[(i + 1) % THEME_CYCLE.length]!
+}
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp
@@ -28,6 +74,7 @@ function formatRelativeTime(timestamp: number): string {
 export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const { onCollapse } = props
   const { t } = useTranslation('nav')
+  const { t: tTheme } = useTranslation('theme')
   const ui = useUiState()
   const dispatch = useUiDispatch()
   const sessions = useSessions()
@@ -45,7 +92,23 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
+  const [toolsExpanded, setToolsExpanded] = useState(false)
+  const [theme, setTheme] = useState<ThemePref>(() => loadThemePref())
   const searchRef = useRef<HTMLInputElement>(null)
+
+  const cycleTheme = () => {
+    const next = nextTheme(theme)
+    setTheme(next)
+    setThemePref(next)
+  }
+
+  // Inbox badge — sessions blocked on approval or failed.
+  const attentionCount = useMemo(
+    () => (sessions.data ?? []).filter(
+      (s) => !s.archived && (s.pendingApprovals > 0 || s.status === 'failed'),
+    ).length,
+    [sessions.data],
+  )
 
   const loadArchived = async () => {
     const next = !showArchived
@@ -215,6 +278,46 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
             </button>
           )}
         </div>
+
+        <nav className="sidebar-nav" aria-label={t('sidebar.mainNav')} style={{ marginTop: '10px' }}>
+          {CORE_SURFACES.map((s) => (
+            <button
+              key={s}
+              className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
+              onClick={() => dispatch({ type: 'setSurface', surface: s })}
+            >
+              <span className="sni-icon"><NavIcon surface={s} /></span>
+              <span className="sni-label">{t(s)}</span>
+              {s === 'attention' && attentionCount > 0 && (
+                <span className="sidebar-nav-badge">{attentionCount > 9 ? '9+' : attentionCount}</span>
+              )}
+            </button>
+          ))}
+
+          <div
+            className="sidebar-section-head tools-toggle-head"
+            onClick={() => setToolsExpanded(!toolsExpanded)}
+            style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '6px 0 2px 0', padding: '4px 8px' }}
+          >
+            <span className="sidebar-section-title">{t('sidebar.tools')}</span>
+            <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
+          </div>
+
+          {toolsExpanded && (
+            <div className="sidebar-sub-nav">
+              {TOOL_SURFACES.map((s) => (
+                <button
+                  key={s}
+                  className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
+                  onClick={() => dispatch({ type: 'setSurface', surface: s })}
+                >
+                  <span className="sni-icon"><NavIcon surface={s} /></span>
+                  <span className="sni-label">{t(s)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </nav>
 
         <div className="sidebar-section-head" style={{ marginTop: '12px' }}>
           <span className="sidebar-section-title">{t('sidebar.projects')}</span>
@@ -478,6 +581,27 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
         >
           <FolderOpen size={16} />
           <span>{t('sidebar.archive')}</span>
+        </button>
+        {(() => {
+          const ThemeIcon = THEME_ICON[theme] ?? Laptop
+          return (
+            <button
+              className="sidebar-foot-btn"
+              onClick={cycleTheme}
+              title={`${tTheme('label')}：${tTheme(theme)}`}
+              aria-label={tTheme('label')}
+            >
+              <ThemeIcon size={16} strokeWidth={1.7} />
+            </button>
+          )
+        })()}
+        <button
+          className={`sidebar-foot-btn ${ui.surface === 'settings' ? 'active' : ''}`}
+          onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
+          title={t('settings')}
+          aria-label={t('settings')}
+        >
+          <Settings size={16} strokeWidth={1.7} />
         </button>
       </div>
     </div>

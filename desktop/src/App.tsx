@@ -6,7 +6,6 @@ import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
-import { Rail } from './components/Rail'
 import { TitleBar } from './components/TitleBar'
 
 import { toast } from 'sonner'
@@ -175,21 +174,11 @@ export function App() {
     }
   }, [needsSetup, dispatch])
 
-  // Rail attention badge — sessions blocked on approval or failed.
-  const attentionCount = (sessions.data ?? []).filter(
-    (s) => !s.archived && (s.pendingApprovals > 0 || s.status === 'failed'),
-  ).length
-
   return (
     <WallpaperProvider>
       <div className="shell">
         <TitleBar />
         <WallpaperLayer />
-      <Rail
-        surface={ui.surface}
-        onSurface={(s) => dispatch({ type: 'setSurface', surface: s })}
-        attentionCount={attentionCount}
-      />
       <div className="main">
         {sidecarFailed && sidecarDown ? (
           <div className="banner error">

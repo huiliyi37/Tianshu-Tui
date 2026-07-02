@@ -129,54 +129,6 @@ body {
 .shell { display: flex; flex-direction: row; height: 100vh; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* ── Rail (icon nav) ───────────────────────────────────────────── */
-.rail {
-  width: 48px; flex: none;
-  background: var(--sidebar-surface-bg);
-  backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
-  -webkit-backdrop-filter: blur(var(--sidebar-surface-blur)) saturate(var(--sidebar-surface-saturation));
-  border-right: 1px solid var(--border);
-  display: flex; flex-direction: column; align-items: center;
-  padding: var(--space-2) 0; gap: var(--space-1);
-}
-.rail-brand {
-  width: 28px; height: 28px; border-radius: var(--radius-md);
-  background: transparent; color: var(--text-strong);
-  border: 1px solid var(--border-strong);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: var(--weight-semibold); font-size: var(--text-sm);
-  margin-bottom: var(--space-1);
-}
-.rail-items { display: flex; flex-direction: column; gap: 1px; flex: 1; }
-.rail-foot { display: flex; flex-direction: column; }
-.rail-item {
-  position: relative; width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
-  background: transparent; color: var(--muted); border: none; cursor: pointer;
-  border-radius: var(--radius-sm); transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
-}
-.rail-item:hover { color: var(--text); background: var(--panel-2); }
-.rail-item.active {
-  color: var(--text);
-  background: transparent;
-}
-.rail-item.active::before {
-  content: '';
-  position: absolute; left: 0; top: 8px; bottom: 8px;
-  width: 2px; background: var(--accent); border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
-  animation: rail-indicator-in var(--dur) var(--ease);
-}
-@keyframes rail-indicator-in {
-  from { opacity: 0; transform: scaleY(0); transform-origin: center; }
-  to { opacity: 1; transform: scaleY(1); transform-origin: center; }
-}
-.rail-badge {
-  position: absolute; top: 4px; right: 4px; min-width: 15px; height: 15px;
-  padding: 0 3px; border-radius: var(--radius-pill);
-  background: var(--error); color: #fff; font-size: 9px; font-weight: var(--weight-semibold);
-  display: flex; align-items: center; justify-content: center; line-height: 1;
-}
-
 .surface { flex: 1; min-height: 0; animation: surface-in var(--dur) var(--ease); }
 @keyframes surface-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -1065,6 +1017,17 @@ body {
   border-radius: var(--radius-pill);
   display: flex; align-items: center; justify-content: center;
 }
+
+/* Sidebar footer icon buttons (theme cycle / settings). */
+.sidebar-foot-btn {
+  width: 32px; height: 32px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; cursor: pointer;
+  color: var(--muted); border-radius: var(--radius-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.sidebar-foot-btn:hover { color: var(--text); background: var(--hover); }
+.sidebar-foot-btn.active { color: var(--text); background: var(--panel-2); }
 
 /* Sub-navigation nested menus (Phase 5) */
 .sidebar-section-head.tools-toggle-head {
@@ -5638,16 +5601,6 @@ html[data-theme="nebula"] .plan-panel {
 /* Breathing room around the three-column group. */
 .workspace-resizable { padding: var(--island-gap); }
 
-/* Rail: leftmost floating island carrying surface navigation. */
-.rail {
-  width: 56px;
-  margin: var(--island-gap) 0 var(--island-gap) var(--island-gap);
-  border: 1px solid var(--border);
-  border-right: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-island);
-}
-
 /* The three columns become islands. */
 .project-sidebar,
 .conversation,
@@ -5751,16 +5704,21 @@ html[data-titlebar="custom"] .shell { padding-top: 36px; }
 .titlebar-btn:hover { background: var(--hover); color: var(--text); }
 .titlebar-btn.close:hover { background: #e81123; color: #fff; }
 
-/* macOS overlay: reserve space for the native traffic lights above the rail. */
-html[data-platform="mac"] .rail { padding-top: 34px; }
+/* macOS overlay: slim always-present drag strip that clears the native
+   traffic lights (the sidebar is collapsible, so no panel can be relied on). */
+html[data-titlebar="mac"] .shell { padding-top: 34px; }
+.titlebar-mac {
+  position: fixed; top: 0; left: 0; right: 0; height: 34px;
+  z-index: 100;
+  background: var(--canvas-bg);
+  user-select: none; -webkit-user-select: none;
+}
 
 /* Maximized: islands go edge-to-edge — no gaps, no rounding. */
 html[data-maximized] { --island-gap: 0px; }
-html[data-maximized] .rail,
 html[data-maximized] .project-sidebar,
 html[data-maximized] .conversation,
 html[data-maximized] .review {
   border-radius: 0;
   box-shadow: none;
 }
-html[data-maximized] .rail { border-width: 0 1px 0 0; }

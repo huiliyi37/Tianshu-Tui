@@ -18,8 +18,9 @@ export const HAS_CUSTOM_TITLEBAR = IS_TAURI && IS_WIN
  * - Windows (decorations: false): self-drawn bar — logo + renamable
  *   session title on the left, min/max/close on the right (Windows-style
  *   red-hover close). `data-tauri-drag-region` gives drag + dblclick-maximize.
- * - macOS (titleBarStyle: Overlay): no bar; we only tag <html> so CSS can
- *   reserve space for the native traffic lights above the rail.
+ * - macOS (titleBarStyle: Overlay): a slim always-present drag strip that also
+ *   clears the native traffic lights (the sidebar is collapsible, so no panel
+ *   can be relied on for clearance).
  * - Both: mirrors the maximized state onto `html[data-maximized]` so CSS can
  *   collapse island gaps/radii when the window fills the screen.
  */
@@ -28,6 +29,7 @@ export function TitleBar() {
     const root = document.documentElement
     root.dataset.platform = IS_MAC ? 'mac' : 'other'
     if (HAS_CUSTOM_TITLEBAR) root.dataset.titlebar = 'custom'
+    else if (IS_TAURI && IS_MAC) root.dataset.titlebar = 'mac'
   }, [])
 
   // Track maximized state → html[data-maximized] (islands go edge-to-edge).
@@ -49,8 +51,10 @@ export function TitleBar() {
     return () => { cancelled = true; unlisten?.() }
   }, [])
 
-  if (!HAS_CUSTOM_TITLEBAR) return null
-  return <WindowsTitleBar />
+  if (HAS_CUSTOM_TITLEBAR) return <WindowsTitleBar />
+  // macOS: slim drag strip under the native Overlay traffic lights.
+  if (IS_TAURI && IS_MAC) return <header className="titlebar-mac" data-tauri-drag-region />
+  return null
 }
 
 function WindowsTitleBar() {
@@ -75,7 +79,7 @@ function WindowsTitleBar() {
   return (
     <header className="titlebar" data-tauri-drag-region>
       <div className="titlebar-left" data-tauri-drag-region>
-        <span className="titlebar-logo" aria-hidden>枢</span>
+        <span className="titlebar-logo" aria-hidden>✦</span>
         {active && (
           editing ? (
             <input
