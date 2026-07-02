@@ -503,6 +503,10 @@ interface InternalSession {
   /** 标记下一次 run 是 watchdog 自动续跑（跳过 recordUserSubmit，与 TUI 的
    *  onSubmitCallback 直呼路径对齐——自动续跑不得重置 consecutive）。 */
   watchdogAutoResubmit?: boolean
+  /** 用户在 watchdog stall→setImmediate 续跑窗口内 abort → 置 true 抑制续跑。
+   *  abort() 对已停会话是空操作（status 已 aborted），不加此标记则窄窗口内
+   *  自动续跑会盖掉用户刚表达的「停」。run() 起跑时清。 */
+  watchdogRecoveryCancelled?: boolean
 }
 
 const REDACTED = '[REDACTED]'
@@ -946,6 +950,7 @@ export class RuntimeSessionManager {
     if (!session || session.running) return false
     const wasAutoResubmit = session.watchdogAutoResubmit === true
     session.watchdogAutoResubmit = false
+    session.watchdogRecoveryCancelled = false
     session.lastAbortReason = undefined
     session.abortWhileApprovalPending = false
     session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
@@ -1623,6 +1628,9 @@ export class RuntimeSessionManager {
     if (s.record.status === 'running') {
       s.record.status = 'aborted'
     }
+    // 窄窗口竞态修复：watchdog stall 后 finally → setImmediate 续跑之间，用户
+    // abort 对已停会话是空操作。设此标记让 setImmediate 守卫放弃续跑。
+    s.watchdogRecoveryCancelled = true
     s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
     this.touch(s)
@@ -2171,8 +2179,10 @@ export class RuntimeSessionManager {
       || (session.lastApprovalDeniedAt != null
           && this.now() - session.lastApprovalDeniedAt < WATCHDOG_APPROVAL_GRACE_MS)
     setImmediate(() => {
-      // 让位守卫：用户已重新驱动（running）、状态被改（非 aborted）或已归档 → 放弃。
+      // 让位守卫：用户已重新驱动（running）、状态被改（非 aborted）、已归档，
+      // 或用户在窄窗口内 abort 过 → 放弃续跑。
       if (session.running || session.record.status !== 'aborted' || session.record.archived) return
+      if (session.watchdogRecoveryCancelled) return
       const decision = policy.onStall({ suppressed })
       this.append(session, 'watchdog_recovery', {
         reason,

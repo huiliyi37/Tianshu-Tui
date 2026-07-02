@@ -904,3 +904,19 @@ test('abort 后用户抢先提交新 prompt：自动续跑让位', async () => {
   const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'watchdog_recovery')
   assert.equal(ev, undefined, '让位时不产生 recovery 事件')
 })
+
+test('watchdog stall 后、setImmediate 执行前用户 abort → 不续跑（窄窗口竞态）', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  a.watchdogAbort('watchdog:goal')
+  // 只排干微任务（run().finally），setImmediate 宏任务还没跑
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  // 用户在此窗口内 abort——abort() 对已停会话目前是空操作（status 已 aborted、
+  // agent 已停、pending 已空），但用户意图是"停"，不应被自动续跑盖掉
+  manager.abort(s.id)
+  await settle()
+  assert.deepEqual(a.prompts, ['go'], '用户 abort 后不得自动续跑')
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'watchdog_recovery')
+  assert.equal(ev, undefined, '用户 abort 抑制续跑，不产生 recovery 事件')
+})
