@@ -31,6 +31,8 @@ export type ConvoKind =
   | 'steer'
   // Watchdog stall auto-recovery — 续跑决策可观测（对齐 TUI v3）。
   | 'watchdog_recovery'
+  // C3 自治档检查点 — run 暂停等待用户确认。
+  | 'autonomy_checkpoint'
 
 export interface ConvoBlock {
   key: string
@@ -76,7 +78,17 @@ export interface ConvoBlock {
     consecutive: number
     sessionTotal: number
     progressUnits: number
+    /** C2 刹车 — 续跑处于可取消倒计时窗口（服务端 delayMs 后才真正 continue）。 */
+    pendingAutoContinue?: boolean
+    /** C2 — 倒计时时长（ms），驱动卡片倒计时展示。 */
+    delayMs?: number
+    /** C2 — 事件到达时刻（本地时钟），用于计算剩余秒数。 */
+    receivedAt?: number
+    /** C2 — 用户在窗口内取消了续跑。 */
+    cancelled?: boolean
   }
+  /** C3 自治档检查点 — 已连续执行的轮数。 */
+  checkpointTurns?: number
 }
 
 export interface EventViewState {
@@ -395,13 +407,30 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       // Suppressed stalls (approval modal in flight) — the modal already owns
       // the user's attention; a second card would be noise.
       if (ev.data.stopReason === 'suppressed') return next
+      // C2 — cancellation marker: the user aborted during the countdown window.
+      // Mark the pending card cancelled in place instead of appending a new one.
+      if (ev.data.cancelled === true) {
+        let marked = false
+        next.blocks = next.blocks.map((b) => {
+          if (!marked && b.kind === 'watchdog_recovery' && b.watchdog?.pendingAutoContinue && !b.watchdog.cancelled) {
+            marked = true
+            return { ...b, text: '续跑已取消', watchdog: { ...b.watchdog, cancelled: true } }
+          }
+          return b
+        })
+        if (marked) next.blocksRev = next.blocksRev + 1
+        return next
+      }
       next.private_textOpen = false
       next.private_thinkingOpen = false
       const autoContinue = ev.data.autoContinue === true
+      const pendingAutoContinue = ev.data.pendingAutoContinue === true
       next.blocks = [...next.blocks, {
         key: `wr-${ev.seq}`,
         kind: 'watchdog_recovery',
-        text: autoContinue ? '自动恢复中（边界停滞）' : '停滞停止',
+        text: autoContinue
+          ? (pendingAutoContinue ? '边界停滞 — 即将自动续跑' : '自动恢复中（边界停滞）')
+          : '停滞停止',
         watchdog: {
           reason: String(ev.data.reason ?? ''),
           autoContinue,
@@ -410,7 +439,25 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
           consecutive: Number(ev.data.consecutive ?? 0),
           sessionTotal: Number(ev.data.sessionTotal ?? 0),
           progressUnits: Number(ev.data.progressUnits ?? 0),
+          ...(pendingAutoContinue ? {
+            pendingAutoContinue: true,
+            delayMs: Number(ev.data.delayMs ?? 5000),
+            receivedAt: Date.now(),
+          } : {}),
         },
+      }]
+      next.blocksRev = next.blocksRev + 1
+      return next
+    }
+    case 'autonomy_checkpoint': {
+      // C3 — the autonomous run paused after N turns for user confirmation.
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      next.blocks = [...next.blocks, {
+        key: `acp-${ev.seq}`,
+        kind: 'autonomy_checkpoint',
+        text: '自治检查点',
+        checkpointTurns: Number(ev.data.turns ?? 0),
       }]
       next.blocksRev = next.blocksRev + 1
       return next

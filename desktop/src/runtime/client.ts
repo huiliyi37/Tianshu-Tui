@@ -927,6 +927,19 @@ export function setEditorConfig(
   return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
 }
 
+// ── Autonomy brakes (C3) ─────────────────────────────────────────────
+export interface AutonomyConfig { checkpointEveryTurns: number }
+
+export function getAutonomyConfig(): Promise<AutonomyConfig> {
+  return apiGet<AutonomyConfig>('/config/autonomy')
+}
+
+export function setAutonomyConfig(
+  input: { checkpointEveryTurns: number },
+): Promise<{ ok: boolean } & AutonomyConfig> {
+  return apiPut<{ ok: boolean } & AutonomyConfig>('/config/autonomy', input)
+}
+
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
 import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse, McpPresetsResponse } from './types'

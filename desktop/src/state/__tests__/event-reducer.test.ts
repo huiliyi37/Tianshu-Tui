@@ -560,6 +560,37 @@ test('done updates status and closes streaming affordances', () => {
   assert.equal(s.blocks.length, 1)
 })
 
+test('watchdog_recovery (pendingAutoContinue) captures countdown payload (C2)', () => {
+  seq = 0
+  const s = fold([ev('watchdog_recovery', {
+    reason: 'watchdog:goal',
+    autoContinue: true,
+    pendingAutoContinue: true,
+    delayMs: 5000,
+    consecutive: 1,
+    sessionTotal: 1,
+    progressUnits: 0,
+  })])
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'watchdog_recovery')
+  assert.equal(b.watchdog?.pendingAutoContinue, true)
+  assert.equal(b.watchdog?.delayMs, 5000)
+  assert.ok((b.watchdog?.receivedAt ?? 0) > 0, 'receivedAt must be stamped for countdown math')
+})
+
+test('watchdog_recovery (cancelled) marks the pending card instead of appending (C2)', () => {
+  seq = 0
+  const s = fold([
+    ev('watchdog_recovery', {
+      reason: 'watchdog:goal', autoContinue: true, pendingAutoContinue: true, delayMs: 5000,
+      consecutive: 1, sessionTotal: 1, progressUnits: 0,
+    }),
+    ev('watchdog_recovery', { cancelled: true }),
+  ])
+  assert.equal(s.blocks.length, 1, 'cancel must not append a second card')
+  assert.equal(s.blocks[0]!.watchdog?.cancelled, true)
+})
+
 test('watchdog_recovery (suppressed) renders no card — approval modal owns attention', () => {
   seq = 0
   const s = fold([ev('watchdog_recovery', {

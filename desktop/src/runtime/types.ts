@@ -182,6 +182,8 @@ export type SessionEventType =
   | 'done'
   // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
   | 'watchdog_recovery'
+  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
+  | 'autonomy_checkpoint'
 
 export interface SessionEvent {
   seq: number
