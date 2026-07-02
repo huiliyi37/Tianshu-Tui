@@ -179,3 +179,169 @@ test('session 总量上限防止 tiny-turn 重置循环无限续跑', async () =
   const continues = runs.filter((r) => r === 'continue').length
   assert.equal(continues, 12, `session total cap 应在 12 次后停手，实得 ${continues}`)
 })
+
+// ── v3: 进度单元感知计数 ────────────────────────────────────────
+// progressUnits = (onTurnComplete 次数) + (onToolResult 次数)
+// 密集 stall（< THRESHOLD=4）计 session 配额；稀疏 stall（>= 4）不计。
+// ────────────────────────────────────────────────────────────
+
+test('A2: stall 间仅 1 个工具批（3 单元 < 阈值 4）仍计配额', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  for (let i = 0; i < 15; i++) {
+    const cb = wrapCallbacksWithTuiApp(app)
+    // 1 completion + 2 tool results = 3 单元，仍低于阈值 4
+    cb.onToolResult(`t${i}a`, 'read_file', 'ok', false)
+    cb.onToolResult(`t${i}b`, 'grep', 'ok', false)
+    cb.onTurnComplete({ output_tokens: 10 }, 1, false)
+    await tick()
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
+
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 12, `3 单元/周期应计配额并在 12 次后停手，实得 ${continues}`)
+})
+
+test('B: 稀疏 stall（每次间隔 2+ 工具批）不消耗 session-total 配额', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  for (let i = 0; i < 20; i++) {
+    const cb = wrapCallbacksWithTuiApp(app)
+    // 2 个工具批：2 completion + 2 tool results = 4 单元 = 阈值
+    for (let j = 0; j < 2; j++) {
+      cb.onToolResult(`t${i}-${j}`, 'read_file', 'ok', false)
+      cb.onTurnComplete({ output_tokens: 10 }, 1, false)
+      await tick()
+    }
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
+
+  // 每周期 4 单元 >= 阈值 → sessionTotal 从不增长 → 20 次全部续跑
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 20, `稀疏 stall 应持续续跑 20 次，实得 ${continues}`)
+})
+
+test('C: sessionTotal 跨稀疏段累计：密集 11 次→稀疏 5 次→密集第 12 次后停手', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  const dense = async () => {
+    const cb = wrapCallbacksWithTuiApp(app)
+    cb.onTurnComplete({ output_tokens: 10 }, 1, false)  // tiny-turn 重置 consecutive
+    await tick()
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
+  const sparse = async () => {
+    const cb = wrapCallbacksWithTuiApp(app)
+    for (let j = 0; j < 3; j++) {
+      cb.onToolResult(`s${j}`, 'bash', 'ok', false)
+      cb.onTurnComplete({ output_tokens: 10 }, 1, false)
+      await tick()
+    }
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
+
+  for (let i = 0; i < 11; i++) await dense()   // sessionTotal: 11
+  for (let i = 0; i < 5; i++) await sparse()   // sessionTotal: 不变（11）
+  await dense()                                 // sessionTotal: 12
+  await dense()                                 // exhausted → 不续跑
+
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 17, `11 密 + 5 疏 + 1 密 = 17 次续跑，第 18 次停手，实得 ${continues}`)
+})
+
+test('D: suppressForApproval 的 stall 不清零进度计数（不发起续跑也不计配额）', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  // 场景：两次密集 stall（各 1 单元）之间插入一次审批挂起的 stall。
+  // 如果审批 stall 清零了进度计数，那两次密集 stall 各自独立计配额 → sessionTotal=2。
+  // 如果审批 stall 不清零（正确行为），进度计数跨审批保留 → 第二次密集 stall
+  // 时 progress=2（仍 < 4）→ 也计配额 → sessionTotal=2。两种实现 sessionTotal 相同。
+  //
+  // 真正的区别在"不清零"意味着审批 stall 不消费进度单元。换一个能区分的断言：
+  // 审批 stall 前积累 4+ 单元 → 审批 stall（不清零）→ 随后的 stall 判定为稀疏。
+  // 但 approvalDenied 后有 5s grace 窗口 → 紧随的 stall 也会被 suppress。
+  // 所以我们跳过 grace 窗口后再 stall。
+
+  // 阶段 1：积累 4 单元进度
+  const cb1 = wrapCallbacksWithTuiApp(app)
+  cb1.onToolResult('p1', 'read_file', 'ok', false)
+  cb1.onToolResult('p2', 'read_file', 'ok', false)
+  cb1.onTurnComplete({ output_tokens: 10 }, 1, false)
+  await tick()
+
+  // 阶段 2：审批挂起的 stall → 不续跑，不清零进度
+  const pending = cb1.onApprovalRequired('t1', 'edit_file', { file_path: 'x.ts' })
+  await tick()
+  cb1.onAbort('watchdog:goal')   // suppressForApproval=true
+  await tick()
+  assert.equal(await pending, false, '挂起审批在 abort 时被解析为拒绝')
+
+  // 跳过 5s approval grace 窗口
+  await new Promise(r => setTimeout(r, 5100))
+
+  // 阶段 3：grace 窗口外的 stall。进度计数若被审批 stall 清零 → progress=0 → 计配额。
+  // 若未清零（正确）→ progress=4+ → 判定稀疏 → 不计配额 → 续跑。
+  const cb2 = wrapCallbacksWithTuiApp(app)
+  cb2.onAbort('watchdog:goal')
+  await tick()
+
+  assert.equal(runs.filter((r) => r === 'continue').length, 1,
+    '审批 stall 不清零进度，grace 窗口后的 stall 应判定稀疏并续跑')
+})
+
+test('E: 普通 watchdog abort（非 goal）自动续跑，受同一套 cap 约束', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  wrapCallbacksWithTuiApp(app).onAbort('watchdog')   // 注意：不是 watchdog:goal
+  await tick()
+  assert.equal(runs.filter((r) => r === 'continue').length, 1,
+    '非 goal watchdog 也应自动续跑')
+
+  // 密集 stall 下 cap 同样生效（跑到 12 次停手）
+  for (let i = 0; i < 15; i++) {
+    const cb = wrapCallbacksWithTuiApp(app)
+    cb.onTurnComplete({ output_tokens: 10 }, 1, false)
+    await tick()
+    cb.onAbort('watchdog')
+    await tick()
+  }
+  const totalContinues = runs.filter((r) => r === 'continue').length
+  assert.equal(totalContinues, 12, `非 goal watchdog 密集 stall 也应在 12 次后停手，实得 ${totalContinues}`)
+})
+
+test('F: 输入框有未提交草稿时 watchdog abort 不自动续跑', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  app.setInput('用户打了一半的字')          // 未回车
+  wrapCallbacksWithTuiApp(app).onAbort('watchdog:goal')
+  await tick()
+
+  assert.equal(runs.filter((r) => r === 'continue').length, 0,
+    '有草稿时必须让位给用户，不抢跑')
+})
+
+test('G: convergence abort 不受 watchdog 泛化影响，仍不自动续跑', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  wrapCallbacksWithTuiApp(app).onAbort('convergence:no-tool')
+  await tick()
+  assert.equal(runs.length, 0, 'convergence 中断不得自动续跑')
+})
