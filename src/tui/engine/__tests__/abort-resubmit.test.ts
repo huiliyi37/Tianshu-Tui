@@ -205,6 +205,33 @@ test('A2: stall 间仅 1 个工具批（3 单元 < 阈值 4）仍计配额', asy
   assert.equal(continues, 12, `3 单元/周期应计配额并在 12 次后停手，实得 ${continues}`)
 })
 
+test('A3: 流式 chunk（isError=undefined）不计进度单元，只有终态结果才算', async () => {
+  // 回归：进度计数曾在 handleToolResult 入口自增，长输出工具（bash/test）
+  // 每个流式 chunk 都被算作一个"进度单元"——单次工具调用喷 4+ chunk 就能
+  // 凑满阈值 4，把每个密集 stall 都伪装成稀疏，session 配额永远不消耗。
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  for (let i = 0; i < 15; i++) {
+    const cb = wrapCallbacksWithTuiApp(app)
+    // 单次工具调用：4 个流式 chunk + 1 个终态 → 正确计 1 单元（chunk 不算）
+    for (let j = 0; j < 4; j++) {
+      cb.onToolResult(`t${i}`, 'bash', `chunk ${j}\n`)   // isError=undefined
+    }
+    cb.onToolResult(`t${i}`, 'bash', 'done', false)       // 终态
+    cb.onTurnComplete({ output_tokens: 10 }, 1, false)
+    await tick()
+    // 每周期 2 单元（1 终态 + 1 completion）< 阈值 4 → 密集，计配额
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
+
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 12,
+    `流式 chunk 若被误计为进度，密集 stall 会被伪装成稀疏而无限续跑；应 12 次后停手，实得 ${continues}`)
+})
+
 test('B: 稀疏 stall（每次间隔 2+ 工具批）不消耗 session-total 配额', async () => {
   const { app } = makeApp()
   const runs: string[] = []
@@ -264,41 +291,48 @@ test('D: suppressForApproval 的 stall 不清零进度计数（不发起续跑�
   const runs: string[] = []
   app.onSubmit((t) => { runs.push(t) })
 
-  // 场景：两次密集 stall（各 1 单元）之间插入一次审批挂起的 stall。
-  // 如果审批 stall 清零了进度计数，那两次密集 stall 各自独立计配额 → sessionTotal=2。
-  // 如果审批 stall 不清零（正确行为），进度计数跨审批保留 → 第二次密集 stall
-  // 时 progress=2（仍 < 4）→ 也计配额 → sessionTotal=2。两种实现 sessionTotal 相同。
-  //
-  // 真正的区别在"不清零"意味着审批 stall 不消费进度单元。换一个能区分的断言：
-  // 审批 stall 前积累 4+ 单元 → 审批 stall（不清零）→ 随后的 stall 判定为稀疏。
-  // 但 approvalDenied 后有 5s grace 窗口 → 紧随的 stall 也会被 suppress。
-  // 所以我们跳过 grace 窗口后再 stall。
+  // 判别原理：单看"审批后第一次 stall 是否续跑"无法区分对错实现——dense/sparse
+  // 只影响私有的 sessionTotal，配额未耗尽时两种实现都会续跑。可观测的判别量是
+  // **配额耗尽前的总续跑次数**：
+  //   正确实现（审批 stall 保留进度）：审批前积累的 4 单元让审批后第一次 stall
+  //   判定稀疏（免费），随后 13 个密集周期消耗配额 1..12 → 总续跑 13 次。
+  //   错误实现（审批 stall 清零进度）：第一次 stall 就是密集（计配额），
+  //   12 次耗尽 → 总续跑 12 次。
 
-  // 阶段 1：积累 4 单元进度
+  // 阶段 1：积累 4 单元进度（3 tool results + 1 completion）
   const cb1 = wrapCallbacksWithTuiApp(app)
   cb1.onToolResult('p1', 'read_file', 'ok', false)
   cb1.onToolResult('p2', 'read_file', 'ok', false)
+  cb1.onToolResult('p3', 'grep', 'ok', false)
   cb1.onTurnComplete({ output_tokens: 10 }, 1, false)
   await tick()
 
-  // 阶段 2：审批挂起的 stall → 不续跑，不清零进度
+  // 阶段 2：审批挂起的 stall → suppressForApproval，不续跑、不得清零进度
   const pending = cb1.onApprovalRequired('t1', 'edit_file', { file_path: 'x.ts' })
   await tick()
-  cb1.onAbort('watchdog:goal')   // suppressForApproval=true
+  cb1.onAbort('watchdog:goal')
   await tick()
   assert.equal(await pending, false, '挂起审批在 abort 时被解析为拒绝')
+  assert.equal(runs.filter((r) => r === 'continue').length, 0, '审批挂起的 stall 不得续跑')
 
-  // 跳过 5s approval grace 窗口
-  await new Promise(r => setTimeout(r, 5100))
+  // 跳过 5s approval grace 窗口：回拨拒绝时间戳（真实 setTimeout 会拖慢套件）。
+  // private 仅 TS 层生效，运行时可直接写。
+  ;(app as unknown as { _lastApprovalDeniedAt: number })._lastApprovalDeniedAt = 0
 
-  // 阶段 3：grace 窗口外的 stall。进度计数若被审批 stall 清零 → progress=0 → 计配额。
-  // 若未清零（正确）→ progress=4+ → 判定稀疏 → 不计配额 → 续跑。
-  const cb2 = wrapCallbacksWithTuiApp(app)
-  cb2.onAbort('watchdog:goal')
-  await tick()
+  // 阶段 3：14 个密集周期（tiny-turn + stall）。第一个周期的 stall 时进度应为
+  // 审批前的 4 单元 + 本周期 tiny-turn 1 单元 = 5（稀疏，免费）；此后每周期 1 单元
+  // （密集，计配额 1..12）。
+  for (let i = 0; i < 14; i++) {
+    const cb = wrapCallbacksWithTuiApp(app)
+    cb.onTurnComplete({ output_tokens: 10 }, 1, false)   // tiny-turn：重置 consecutive
+    await tick()
+    cb.onAbort('watchdog:goal')
+    await tick()
+  }
 
-  assert.equal(runs.filter((r) => r === 'continue').length, 1,
-    '审批 stall 不清零进度，grace 窗口后的 stall 应判定稀疏并续跑')
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 13,
+    `审批 stall 保留进度 → 首个后续 stall 免费 + 12 次配额 = 13 次续跑（清零则只有 12），实得 ${continues}`)
 })
 
 test('E: 普通 watchdog abort（非 goal）自动续跑，受同一套 cap 约束', async () => {

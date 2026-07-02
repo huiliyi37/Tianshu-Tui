@@ -2126,7 +2126,6 @@ export class TuiApp {
   }
 
   private handleToolResult(id: string, name: string, result: string, isError?: boolean, rawPath?: string, uiContent?: string): void {
-    this._progressSinceLastStall++
     const displayContent = uiContent ?? result
 
     // Streaming chunk mode: isError === undefined means intermediate update
@@ -2155,7 +2154,13 @@ export class TuiApp {
       return
     }
 
-    // Terminal result: commit to scrollback
+    // Terminal result: commit to scrollback.
+    // Progress unit counted HERE (after the streaming-chunk early return), not
+    // at method entry: onOutput streams one callback per chunk with isError
+    // undefined, and counting chunks would let a single chatty tool call (4+
+    // chunks) satisfy WATCHDOG_PROGRESS_THRESHOLD — diluting the dense-stall
+    // detector the threshold was calibrated for (>= 2 full tool batches).
+    this._progressSinceLastStall++
     const toolAcc = this.toolGroupController.getAccumulated(id)
     this.toolGroupController.deleteAccumulated(id)
     const meta = this.toolGroupController.getPending(id)
