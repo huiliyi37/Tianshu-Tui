@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import os from 'node:os'
 import {
   loadAllCapsules,
+  collectCapsules,
   renderAllCapsulesBlock,
   renderCapsuleIndexBlock,
   renderResidentCapsuleBlock,
@@ -161,6 +162,47 @@ describe('seed-capsule-store', () => {
 
     cleanup()
     try { rmSync(tmpDir2, { recursive: true }) } catch { /* ignore */ }
+  })
+
+  // ── 多来源合并（内置 dist/seed-capsules + 项目 docs/）──────────
+  // collectCapsules 是 loadAllCapsules 的纯函数内核：靠后目录按文件名覆盖靠前。
+
+  it('collectCapsules merges dirs; later dir overrides same-named file', () => {
+    const bundled = mkdtempSync(join(os.tmpdir(), 'capsule-bundled-'))
+    const project = mkdtempSync(join(os.tmpdir(), 'capsule-project-'))
+    // 内置：两条胶囊
+    writeFileSync(join(bundled, 'seed-capsule-tianxuan.md'), [
+      '<seed-capsule star="天璇" sealed="2026-05-21">', '  内置天璇 v1.', '</seed-capsule>',
+    ].join('\n'))
+    writeFileSync(join(bundled, 'seed-capsule-tianfu.md'), [
+      '<seed-capsule star="天府" sealed="2026-06-02">', '  内置天府.', '</seed-capsule>',
+    ].join('\n'))
+    // 项目：覆盖同名 tianxuan，另加一条独有
+    writeFileSync(join(project, 'seed-capsule-tianxuan.md'), [
+      '<seed-capsule star="天璇" sealed="2026-05-21">', '  项目天璇 v2.', '</seed-capsule>',
+    ].join('\n'))
+    writeFileSync(join(project, 'seed-capsule-yaoguang.md'), [
+      '<seed-capsule star="瑶光" sealed="2026-06-07">', '  项目瑶光.', '</seed-capsule>',
+    ].join('\n'))
+
+    const merged = collectCapsules([bundled, project])
+    // 3 条：天璇(项目覆盖内置) + 天府(内置独有) + 瑶光(项目独有)
+    assert.equal(merged.length, 3)
+    const tx = merged.find(c => c.star === '天璇')!
+    assert.equal(tx.raw, '项目天璇 v2.', '项目同名文件覆盖内置')
+    assert.ok(merged.some(c => c.star === '天府'), '内置独有胶囊保留')
+    assert.ok(merged.some(c => c.star === '瑶光'), '项目独有胶囊保留')
+    // sealedAt 排序：天璇(05-21) < 天府(06-02) < 瑶光(06-07)
+    assert.deepEqual(merged.map(c => c.star), ['天璇', '天府', '瑶光'])
+
+    try { rmSync(bundled, { recursive: true }) } catch { /* ignore */ }
+    try { rmSync(project, { recursive: true }) } catch { /* ignore */ }
+  })
+
+  it('collectCapsules skips missing dirs', () => {
+    const merged = collectCapsules([join(tmpDir, 'nope'), join(tmpDir, 'also-nope')])
+    assert.deepEqual(merged, [])
+    cleanup()
   })
 
   it('clearCapsuleCache forces reload', () => {

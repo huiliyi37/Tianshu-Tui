@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * 种子胶囊引擎 — 星域经验自动加载机制。
@@ -112,34 +113,70 @@ ${escapeXml(parsed.content)}
 const capsuleCacheByCwd = new Map<string, SeedCapsule[]>()
 
 /**
- * 从 docs/ 目录中发现并加载所有 seed-capsule-*.md 胶囊文档。
- * 结果按 sealedAt 排序（最早的在前，保证稳定顺序）。
- * 按 cwd 缓存在内存中——胶囊文档是静态的，session 内不需要重新读取。
+ * 定位随安装包 ship 的胶囊目录：tsup 在构建后把 docs/seed-capsule-*.md 拷进
+ * dist/seed-capsules/，使 npm / 桌面端用户开箱即用（他们的安装目录旁没有 docs/）。
+ * 相对本模块 URL 解析并带上一级兜底；源码/dev(tsx) 未构建 → 返回 null，
+ * 此时仅从项目 <cwd>/docs 读（与旧行为一致）。镜像 skill-loader.bundledSkillsDir()。
+ */
+function bundledCapsulesDir(): string | null {
+  let base: string
+  try {
+    base = dirname(fileURLToPath(import.meta.url))
+  } catch {
+    return null
+  }
+  for (const candidate of [join(base, 'seed-capsules'), join(base, '..', 'seed-capsules')]) {
+    try {
+      if (existsSync(candidate)) return candidate
+    } catch {
+      /* ignore */
+    }
+  }
+  return null
+}
+
+/** 从单个目录收集 seed-capsule-*.md 到 into（按文件名 key，后写入者覆盖同名项）。 */
+function collectCapsulesFrom(dir: string, into: Map<string, SeedCapsule>): void {
+  if (!existsSync(dir)) return
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!CAPSULE_GLOB.test(entry)) continue
+    const capsule = loadCapsuleFile(join(dir, entry))
+    if (capsule) into.set(entry, capsule)
+  }
+}
+
+/**
+ * 按目录顺序收集胶囊：靠后的目录按**文件名**覆盖靠前的（项目可覆盖同名内置胶囊）。
+ * 结果按 sealedAt 排序（最早在前，稳定顺序）。纯函数，便于单测。
+ */
+export function collectCapsules(dirs: string[]): SeedCapsule[] {
+  const byFile = new Map<string, SeedCapsule>()
+  for (const dir of dirs) collectCapsulesFrom(dir, byFile)
+  return [...byFile.values()].sort((a, b) => a.sealedAt.localeCompare(b.sealedAt))
+}
+
+/**
+ * 发现并加载所有 seed-capsule-*.md 胶囊。来源合并（靠后按文件名覆盖靠前）：
+ *   1. 随安装包 ship 的 dist/seed-capsules/（内置，低优先——让装了包的用户可用）
+ *   2. 项目 <cwd>/docs/（仓库内 / 项目自定义，高优先——同名覆盖内置）
+ * 结果按 sealedAt 排序；按 cwd 缓存在内存中（胶囊静态，session 内不重读）。
  */
 export function loadAllCapsules(cwd: string): SeedCapsule[] {
   const cached = capsuleCacheByCwd.get(cwd)
   if (cached) return cached
 
-  const docsDir = join(cwd, 'docs')
-  if (!existsSync(docsDir)) return []
+  const dirs: string[] = []
+  const bundled = bundledCapsulesDir()
+  if (bundled) dirs.push(bundled)
+  dirs.push(join(cwd, 'docs'))
 
-  let entries: string[]
-  try {
-    entries = readdirSync(docsDir)
-  } catch {
-    return []
-  }
-
-  const capsules: SeedCapsule[] = []
-  for (const entry of entries) {
-    if (!CAPSULE_GLOB.test(entry)) continue
-    const capsule = loadCapsuleFile(join(docsDir, entry))
-    if (capsule) capsules.push(capsule)
-  }
-
-  // 按 sealedAt 排序，保证稳定顺序
-  capsules.sort((a, b) => a.sealedAt.localeCompare(b.sealedAt))
-
+  const capsules = collectCapsules(dirs)
   capsuleCacheByCwd.set(cwd, capsules)
   return capsules
 }
