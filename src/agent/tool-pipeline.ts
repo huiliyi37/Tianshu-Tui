@@ -26,7 +26,7 @@ import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
@@ -753,11 +753,19 @@ export async function executeToolUse(
     // in-workspace bash write is safe-by-construction (writes can't escape the
     // workspace, and B2 rollback makes them reversible), so it must NOT
     // interrupt an unattended run for approval. When no sandbox is available we
-    // stay fail-closed and keep requiring approval for write commands.
+    // stay fail-closed for risky writes, but auto-safe mode auto-approves safe
+    // writes (mkdir/touch/cp/echo>file) to avoid approval fatigue on Windows.
+    const noSandbox = !isSandboxActive()
+    const bashCommand = tu.name === 'bash' && typeof tu.input.command === 'string' ? tu.input.command : ''
+    const safeWriteInNoSandbox = noSandbox
+      && approvalMode === 'auto-safe'
+      && bashCommand.length > 0
+      && isSafeWriteOnly(bashCommand)
     const bashWriteRequiresApproval =
       requiresBashWriteApproval(tu.name, tu.input)
       && !allowlisted && !bashAllowlisted
-      && !isSandboxActive()
+      && !safeWriteInNoSandbox
+      && noSandbox
 
     // Protection mode: during doom-loop, destructive git actions always require
     // approval. warn is the live window (blocked is short-circuited earlier).
@@ -816,8 +824,11 @@ export async function executeToolUse(
         // its merits — it needs explicit user approval the model cannot self-grant.
         // Re-emitting the identical call only re-hits the same gate, so tell the
         // model to stop and hand control back to the user instead of retrying.
+        const noSandboxReason = bashWriteRequiresApproval && noSandbox
+          ? '\n根因：当前环境无文件系统沙箱（Windows 原生 / 沙箱未启用），写命令需人工审批。这不是命令本身的问题——审批后即可执行。要减少审批频率，可切换到 auto-safe 模式（低风险写命令自动放行）或使用 WSL（Linux 子系统下有沙箱）。'
+          : ''
         const denyMsg = [
-          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.`,
+          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
           'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
           'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
         ].join('\n')

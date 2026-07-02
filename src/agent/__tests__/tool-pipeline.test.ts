@@ -911,9 +911,9 @@ describe('executeToolUse', () => {
     assert.equal((result.toolResult as any).is_error, false)
   })
 
-  it('requires approval for bash writes when NO sandbox boundary is active (fail-closed)', async () => {
-    // Without a kernel sandbox the write could escape the workspace, so the
-    // approval gate must stay closed even at high confidence.
+  it('requires approval for risky bash writes (rm) when NO sandbox boundary is active (fail-closed)', async () => {
+    // Without a kernel sandbox risky writes (rm/mv/git) could escape the workspace,
+    // so the approval gate must stay closed even at high confidence.
     _setSandboxBackendForTest('none')
     let approvalCalls = 0
     let executed = false
@@ -923,7 +923,7 @@ describe('executeToolUse', () => {
         approvalMode: 'auto-safe',
         permissions: { allow: [] },
         toolRegistry: {
-          execute: async () => { executed = true; return { content: 'wrote', isError: false } },
+          execute: async () => { executed = true; return { content: 'removed', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
         },
@@ -934,7 +934,7 @@ describe('executeToolUse', () => {
 
     try {
       const result = await executeToolUse(
-        { id: 'tu-bash-write', name: 'bash', input: { command: 'echo hello > out.txt' } },
+        { id: 'tu-bash-rm', name: 'bash', input: { command: 'rm out.txt' } },
         deps, callbacks as any, 1, false,
       )
 
@@ -942,6 +942,39 @@ describe('executeToolUse', () => {
       assert.equal(executed, false)
       assert.equal((result.toolResult as any).is_error, true)
       assert.match((result.toolResult as any).content, /requires explicit user approval/)
+    } finally {
+      _resetSandboxBackendCache()
+    }
+  })
+
+  it('auto-approves safe bash writes (mkdir/touch/echo>) with NO sandbox in auto-safe mode', async () => {
+    // Safe writes (mkdir/touch/cp/echo>file) auto-approve without sandbox in
+    // auto-safe mode to avoid approval fatigue on Windows.
+    _setSandboxBackendForTest('none')
+    let approvalCalls = 0
+    let executed = false
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'auto-safe',
+        permissions: { allow: [] },
+        toolRegistry: {
+          execute: async () => { executed = true; return { content: 'ok', isError: false } },
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => false,
+        },
+      } as any,
+      getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return false } }
+
+    try {
+      await executeToolUse(
+        { id: 'tu-bash-mkdir', name: 'bash', input: { command: 'mkdir newdir' } },
+        deps, callbacks as any, 1, false,
+      )
+      assert.equal(approvalCalls, 0, 'mkdir is a safe write — must not prompt in auto-safe')
+      assert.equal(executed, true)
     } finally {
       _resetSandboxBackendCache()
     }

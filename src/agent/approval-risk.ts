@@ -50,16 +50,39 @@ export const DANGEROUS_BASH_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
  * Phase-1 safety base: deny bash writes by default, then allow explicit
  * user/project/session permission rules to re-enable trusted command shapes.
  */
-export const BASH_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
-  /(^|[^<])>>?\s*[^&\s]/,                         // shell output redirection: echo hi > file
-  /\|\s*tee\b/,                                    // pipe writes via tee
-  /\b(?:rm|mv|cp|mkdir|touch|truncate|dd)\b/,       // filesystem mutations
-  /\bsed\b[^\n]*\s-i(?:\b|\s|['"])/,              // sed -i
-  /\bperl\b[^\n]*\s-pi(?:\b|\s|['"])/,            // perl -pi
-  /\b(?:chmod|chown|chgrp)\b/,                      // permission/ownership mutations
-  /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
-  /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|remove|rm|update|upgrade|dedupe)\b/,
+/**
+ * 低风险写命令——在无沙箱环境（Windows 原生）下，auto-safe 模式可自动放行，
+ * 避免每次 mkdir/touch/echo>file 都打断用户审批。这些命令的写目标通常是项目内
+ * 文件（tool-pipeline 会校验路径在工作区内）。
+ */
+export const SAFE_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /\b(?:mkdir|touch|cp)\b/,                          // create/copy — non-destructive
+  /(^|[^<])>>?\s*[^&\s]/,                           // output redirection: echo hi > file
+  /\|\s*tee\b/,                                      // pipe writes via tee
+  /\bsed\b[^\n]*\s-i(?:\b|\s|['"])/,               // sed -i (in-place edit of existing file)
+  /\bperl\b[^\n]*\s-pi(?:\b|\s|['"])/,             // perl -pi
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|add)\b/, // package install — non-destructive
   /<<[-']?\w*['"]?/,                                // heredoc start (cat > file <<'EOF')
+]
+
+/**
+ * 风险写命令——即使无沙箱也需审批（可能丢数据 / 改权限 / 影响版本库）。
+ */
+export const RISKY_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  /\b(?:rm|mv|truncate|dd)\b/,                       // delete/move — may lose data
+  /\b(?:chmod|chown|chgrp)\b/,                       // permission/ownership mutations
+  /\bgit\s+(?:add|commit|checkout|switch|restore|reset|clean|merge|rebase|cherry-pick|push|pull)\b/,
+  /\b(?:npm|pnpm|yarn|bun)\s+(?:remove|rm|update|upgrade|dedupe)\b/,
+]
+
+/**
+ * All write patterns (safe + risky). Used by {@link bashCommandMayWrite} for the
+ * "is this a write command at all" check. Kept for backward compat with callers
+ * that just need the union (e.g. doom-loop write detection).
+ */
+export const BASH_WRITE_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
+  ...SAFE_WRITE_PATTERNS,
+  ...RISKY_WRITE_PATTERNS,
 ]
 
 /** Command injection patterns — heredoc abuse, process substitution, shell exploits */
@@ -93,6 +116,16 @@ export const SED_BYPASS_PATTERNS: ReadonlyArray<Readonly<RegExp>> = [
 
 export function bashCommandMayWrite(command: string): boolean {
   return BASH_WRITE_PATTERNS.some(pattern => pattern.test(command))
+}
+
+/**
+ * 命令是否只包含安全写（无沙箱时 auto-safe 模式可自动放行）。
+ * 命中 RISKY_WRITE_PATTERNS 或 DANGEROUS_BASH_PATTERNS 则返回 false。
+ */
+export function isSafeWriteOnly(command: string): boolean {
+  if (RISKY_WRITE_PATTERNS.some(p => p.test(command))) return false
+  if (DANGEROUS_BASH_PATTERNS.some(p => p.test(command))) return false
+  return SAFE_WRITE_PATTERNS.some(p => p.test(command))
 }
 
 /** Detect scope-bypassing bash git commands (unscoped add/commit/stash). */
