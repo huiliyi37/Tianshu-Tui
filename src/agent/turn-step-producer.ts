@@ -284,7 +284,9 @@ export class TurnStepProducer {
       turnMode === 'task' ? renderPlanCacheAdvisory(this.self.p3.planCacheSuggest(userInput)) : null,
     )
 
-    if (this.self.config.autoReasoning && turnMode === 'task') {
+    if (this.self.config.autoReasoning && turnMode === 'task' && !this.self.userReasoningOverride) {
+      // autoReasoning 自动按输入复杂度选 effort——但用户显式 /effort <档位> 后
+      // （userReasoningOverride=true）不再覆盖，尊重用户选择直到 /effort auto 交还。
       const ruleEffort = selectReasoningEffort(userInput, this.self.config.reasoningFloor)
       const banditAdjusted = this.self.applyEffortDelta(ruleEffort) as import('./auto-reasoning.js').ReasoningEffort
       this.self.config.reasoningEffort = banditAdjusted

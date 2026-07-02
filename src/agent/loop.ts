@@ -270,6 +270,9 @@ export class AgentLoop {
   private turnOrchestrator: TurnOrchestrator
   turnStepProducer: TurnStepProducer
   private reasoningEffort: ReasoningEffortController
+  /** 用户是否手动设置了 reasoning effort（/effort max 等）。
+   *  true 时 autoReasoning 不得覆盖；/effort auto 清为 false 交还 autoReasoning。 */
+  userReasoningOverride = false
   intentRoute: IntentRetrievalRouteController
   antiAnchoring: AntiAnchoringController
   private modelRoutingShadow: ModelRoutingShadowController
@@ -794,7 +797,13 @@ export class AgentLoop {
     this.config.promptEngine.setPlanModeState(this.planModeState)
   }
 
-  setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort): void {
+  setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {
+    if (effort === 'auto') {
+      // 用户显式选 auto → autoReasoning 接管后续每轮 effort，清除 override 标志。
+      this.userReasoningOverride = false
+      return
+    }
+    this.userReasoningOverride = true
     this.reasoningEffort.set(effort)
   }
 

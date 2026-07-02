@@ -183,7 +183,7 @@ export interface SlashHandlerContext {
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
   mcpManagerRef: MutableRefLike<import('../mcp/manager.js').McpManager | null>
   claimStoreRef: MutableRefLike<ContextClaimStore | null>
-  setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
+  setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort | 'auto') => void
   reasoningEffort?: string
   onDomainChange?: (domainName: string | undefined) => void
   /** T5: bandit promotion state for /status observability. */
@@ -2582,14 +2582,16 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
-      const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | undefined
-      const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max'> = ['off', 'low', 'medium', 'high', 'max']
+      const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined
+      const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max' | 'auto'> = ['off', 'low', 'medium', 'high', 'max', 'auto']
       if (!level || !(valid as string[]).includes(level)) {
         const current = ctx.reasoningEffort ?? 'high'
-        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort: ${current}\nUsage: /effort [off|low|medium|high|max]\n\nSet max for full reasoning on every turn.` }))
+        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort: ${current}\nUsage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
       } else {
         ctx.setReasoningEffort?.(level)
-        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort set to: ${level}` }))
+        pushStatic(createLogEntry({ type: 'system', content: level === 'auto'
+          ? 'Reasoning effort: auto (autoReasoning picks per task)'
+          : `Reasoning effort set to: ${level}` }))
       }
       setIsStreaming(false)
       return true
