@@ -63,6 +63,9 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const [renamingProject, setRenamingProject] = useState<string | null>(null)
   const [renamingSession, setRenamingSession] = useState<string | null>(null)
   const [filter, setFilter] = useState('')
+  // P1-5 — status filter over the session tree: all / running / attention / idle.
+  const [statusFilter, setStatusFilter] = useState<'all' | 'running' | 'attention' | 'idle'>('all')
+  const [filterRowOpen, setFilterRowOpen] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
@@ -85,7 +88,7 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
     [sessions.data, known],
   )
 
-  // All non-archived sessions, optionally filtered by search query.
+  // All non-archived sessions, optionally filtered by search query + status.
   const visibleSessions = useMemo(() => {
     let list = (sessions.data ?? []).filter((s) => !s.archived)
     const q = filter.trim().toLowerCase()
@@ -97,8 +100,17 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
         s.cwd.toLowerCase().includes(q),
       )
     }
+    if (statusFilter !== 'all') {
+      list = list.filter((s) => {
+        const attention = s.pendingApprovals > 0 || s.status === 'failed'
+        if (statusFilter === 'attention') return attention
+        if (statusFilter === 'running') return s.status === 'running'
+        // idle — everything not running and not needing attention
+        return s.status !== 'running' && !attention
+      })
+    }
     return list.sort((a, b) => b.updatedAt - a.updatedAt)
-  }, [sessions.data, filter])
+  }, [sessions.data, filter, statusFilter])
 
   // Group sessions by project id (slug of primary root). A multi-root project
   // stays a single group even if sessions land in different roots.
@@ -271,15 +283,41 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
         <div className="sidebar-section-head" style={{ marginTop: '12px' }}>
           <span className="sidebar-section-title">{t('sidebar.projects')}</span>
           <div className="sidebar-section-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center', opacity: 0.6 }}>
-            <SlidersHorizontal size={13} style={{ cursor: 'pointer' }} />
+            <SlidersHorizontal
+              size={13}
+              style={{ cursor: 'pointer', color: statusFilter !== 'all' ? 'var(--accent)' : undefined, opacity: 1 }}
+              onClick={() => setFilterRowOpen((v) => !v)}
+              aria-label={t('sidebar.filterByStatus', { defaultValue: '按状态筛选' })}
+            />
             <FolderOpen size={13} style={{ cursor: 'pointer' }} onClick={openFolder} />
           </div>
         </div>
 
-        {visibleSessions.length === 0 && !filter && (
+        {filterRowOpen && (
+          <div className="sidebar-status-filter" role="radiogroup" aria-label="会话状态筛选">
+            {([
+              ['all', '全部'],
+              ['running', '运行中'],
+              ['attention', '待处理'],
+              ['idle', '空闲'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                role="radio"
+                aria-checked={statusFilter === key}
+                className={`status-filter-chip ${statusFilter === key ? 'active' : ''}`}
+                onClick={() => setStatusFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {visibleSessions.length === 0 && !filter && statusFilter === 'all' && (
           <div className="sidebar-empty">{t('sidebar.noSessions')}</div>
         )}
-        {filter && visibleSessions.length === 0 && (
+        {(filter || statusFilter !== 'all') && visibleSessions.length === 0 && (
           <div className="sidebar-empty">{t('sidebar.noMatches')}</div>
         )}
       </div>

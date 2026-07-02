@@ -63,8 +63,10 @@ export function ReviewPanel(props: {
   /** Source files touched by file-editing tools. */
   sources?: string[]
   onCollapse?: () => void
+  /** P1-3 — Changes tab line comments send through the thread's prompt channel. */
+  onSendPrompt?: (text: string) => void
 }) {
-  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse } = props
+  const { sessionId, cwd, artifacts, pendingApproval, approvalMode, planMode, planRev = 0, latestPlanSlug, onFeedbackSent, todos = [], sources = [], onCollapse, onSendPrompt } = props
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
@@ -496,7 +498,7 @@ export function ReviewPanel(props: {
           </div>
         </TabsContent>
         <TabsContent value="wt" className="review-body">
-          <ChangesTab sessionId={sessionId} />
+          <ChangesTab sessionId={sessionId} onSendPrompt={onSendPrompt} />
         </TabsContent>
         <TabsContent value="files" className="review-body">
           <FileExplorer sessionId={sessionId} cwd={cwd} />

@@ -1,4 +1,4 @@
-import { memo, useState, useMemo, Children } from 'react'
+import { memo, useState, useMemo, useEffect, Children } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 
@@ -10,9 +10,15 @@ import { ChevronRight, ChevronDown } from 'lucide-react'
 // reveals the rest on demand.
 const TIMELINE_WINDOW = 30
 
-export function TimelineGroupImpl({ blocks, children }: { blocks: ConvoBlock[], children: React.ReactNode }) {
-  const [collapsed, setCollapsed] = useState(true)
+export function TimelineGroupImpl({ blocks, children, forceOpen }: { blocks: ConvoBlock[], children: React.ReactNode, forceOpen?: boolean }) {
+  const [collapsed, setCollapsed] = useState(!forceOpen)
   const [showAll, setShowAll] = useState(false)
+
+  // P1-2 verbose view mode expands all runs; leaving it re-collapses them.
+  // Manual toggles still work in between (this only fires on mode change).
+  useEffect(() => {
+    if (forceOpen !== undefined) setCollapsed(!forceOpen)
+  }, [forceOpen])
 
   const summary = useMemo(() => {
     // just a simple count
@@ -52,6 +58,6 @@ export function TimelineGroupImpl({ blocks, children }: { blocks: ConvoBlock[], 
   )
 }
 
-export const TimelineGroup = memo(TimelineGroupImpl, (a, b) => 
-  a.blocks.length === b.blocks.length && a.blocks.every((x, i) => x === b.blocks[i])
+export const TimelineGroup = memo(TimelineGroupImpl, (a, b) =>
+  a.forceOpen === b.forceOpen && a.blocks.length === b.blocks.length && a.blocks.every((x, i) => x === b.blocks[i])
 )

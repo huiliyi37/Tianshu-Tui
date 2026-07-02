@@ -18,7 +18,10 @@ export const SURFACE_ORDER: Surface[] = [
 
 /** Global keyboard shortcuts. Registers a single window keydown listener
  *  so components don't each add their own. */
-export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) => boolean)) => void) {
+export function useGlobalShortcuts(
+  setPaletteOpen: (v: boolean | ((p: boolean) => boolean)) => void,
+  setShortcutsOpen?: (v: boolean | ((p: boolean) => boolean)) => void,
+) {
   const ui = useUiState()
   const dispatch = useUiDispatch()
 
@@ -40,13 +43,15 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
         return
       }
 
-      // Cmd+Shift+[ / ] → cycle tabs (previous / next)
-      if (mod && e.shiftKey && (e.key === '[' || e.key === ']')) {
+      // Cmd+Shift+[ / ] and Ctrl+Tab / Ctrl+Shift+Tab → cycle tabs (previous / next)
+      const bracketCycle = mod && e.shiftKey && (e.key === '[' || e.key === ']')
+      const tabCycle = e.ctrlKey && e.key === 'Tab'
+      if (bracketCycle || tabCycle) {
         e.preventDefault()
         const tabs = ui.openTabs
         if (tabs.length < 2) return
         const idx = ui.activeSessionId ? tabs.indexOf(ui.activeSessionId) : -1
-        const dir = e.key === '[' ? -1 : 1
+        const dir = e.key === '[' || (tabCycle && e.shiftKey) ? -1 : 1
         const next = tabs[(idx + dir + tabs.length) % tabs.length]
         if (next) dispatch({ type: 'setActive', id: next })
         return
@@ -67,10 +72,17 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
         return
       }
 
-      // Cmd+J → toggle terminal
-      if (mod && (e.key === 'j' || e.key === 'J')) {
+      // Cmd+J / Ctrl+` → toggle terminal (backquote matches VS Code / Claude Desktop)
+      if ((mod && (e.key === 'j' || e.key === 'J')) || (e.ctrlKey && e.key === '`')) {
         e.preventDefault()
         dispatch({ type: 'setTerminal', visible: !ui.terminalVisible })
+        return
+      }
+
+      // Cmd+O → cycle thread view mode (normal → verbose → summary)
+      if (mod && !e.shiftKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault()
+        dispatch({ type: 'cycleViewMode' })
         return
       }
 
@@ -88,10 +100,11 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
         return
       }
 
-      // Cmd+/ → shortcut cheatsheet (opens command palette)
+      // Cmd+/ → shortcut cheatsheet overlay (falls back to palette if not wired)
       if (mod && e.key === '/') {
         e.preventDefault()
-        setPaletteOpen(true)
+        if (setShortcutsOpen) setShortcutsOpen((o) => !o)
+        else setPaletteOpen(true)
         return
       }
 
@@ -113,6 +126,7 @@ export function useGlobalShortcuts(setPaletteOpen: (v: boolean | ((p: boolean) =
   }, [
     dispatch,
     setPaletteOpen,
+    setShortcutsOpen,
     ui.activeSessionId,
     ui.openTabs,
     ui.reviewVisible,

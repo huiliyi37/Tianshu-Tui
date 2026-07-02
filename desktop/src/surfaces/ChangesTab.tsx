@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useFileDiff, useWorkingTree } from '../state/queries'
 import { DiffView } from '../components/DiffView'
-import type { WorkingTreeFile } from '../runtime/types'
+import type { LineComment, WorkingTreeFile } from '../runtime/types'
 
 const STATUS_LABEL: Record<WorkingTreeFile['status'], string> = {
   modified: 'M',
@@ -35,10 +35,32 @@ const STATUS_CLASS: Record<WorkingTreeFile['status'], string> = {
  * Degrades gracefully: non-git cwd shows "不是 git 仓库"; no changes shows the
  * empty state. Read-only (no stage/commit) — edits go through the agent.
  */
-export function ChangesTab(props: { sessionId: string | null }) {
+export function ChangesTab(props: {
+  sessionId: string | null
+  /** P1-3 — line-comment feedback loop: comments across files collect here and
+   *  one click sends them as a structured prompt (running turn → steer). */
+  onSendPrompt?: (text: string) => void
+}) {
   const enabled = props.sessionId !== null
   const tree = useWorkingTree(enabled)
   const [sideBySide, setSideBySide] = useState(false)
+  const [lineComments, setLineComments] = useState<LineComment[]>([])
+
+  const addComment = (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => {
+    setLineComments((prev) => [
+      ...prev,
+      { file: anchor.file, oldLine: anchor.oldLine, newLine: anchor.newLine, comment: text },
+    ])
+  }
+
+  const sendComments = () => {
+    if (!props.onSendPrompt || lineComments.length === 0) return
+    const lines = lineComments.map(
+      (c) => `- ${c.file}:${c.newLine ?? c.oldLine ?? '?'} — ${c.comment}`,
+    )
+    props.onSendPrompt(`请根据以下针对工作树 diff 的行级评论修改代码：\n\n${lines.join('\n')}`)
+    setLineComments([])
+  }
 
   const files = tree.data?.files ?? []
   const totals = useMemo(
@@ -85,10 +107,26 @@ export function ChangesTab(props: { sessionId: string | null }) {
         >
           {sideBySide ? '双列' : '单列'}
         </button>
+        {props.onSendPrompt && lineComments.length > 0 && (
+          <button
+            className="btn sm changes-send-comments"
+            onClick={sendComments}
+            title="将行级评论汇总为一条 prompt 发送给智能体（运行中会作为引导插入）"
+          >
+            发送 {lineComments.length} 条评论
+          </button>
+        )}
       </div>
       <div className="changes-cards">
         {files.map((f, i) => (
-          <FileDiffCard key={f.path} file={f} sideBySide={sideBySide} defaultOpen={i === 0} />
+          <FileDiffCard
+            key={f.path}
+            file={f}
+            sideBySide={sideBySide}
+            defaultOpen={i === 0}
+            comments={props.onSendPrompt ? lineComments : undefined}
+            onLineComment={props.onSendPrompt ? addComment : undefined}
+          />
         ))}
       </div>
     </div>
@@ -96,8 +134,14 @@ export function ChangesTab(props: { sessionId: string | null }) {
 }
 
 /** One collapsible per-file diff card. Fetches its diff only once expanded. */
-function FileDiffCard(props: { file: WorkingTreeFile; sideBySide: boolean; defaultOpen: boolean }) {
-  const { file, sideBySide, defaultOpen } = props
+function FileDiffCard(props: {
+  file: WorkingTreeFile
+  sideBySide: boolean
+  defaultOpen: boolean
+  comments?: LineComment[]
+  onLineComment?: (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => void
+}) {
+  const { file, sideBySide, defaultOpen, comments, onLineComment } = props
   const [open, setOpen] = useState(defaultOpen)
   // null path → query disabled, so collapsed cards never fetch.
   const diff = useFileDiff(open ? file.path : null)
@@ -124,7 +168,13 @@ function FileDiffCard(props: { file: WorkingTreeFile; sideBySide: boolean; defau
           ) : !diff.data?.diff ? (
             <div className="empty sm muted">无文本差异（二进制文件）</div>
           ) : (
-            <DiffView raw={diff.data.diff} sideBySide={sideBySide} hideToolbar />
+            <DiffView
+              raw={diff.data.diff}
+              sideBySide={sideBySide}
+              hideToolbar
+              comments={comments}
+              onLineComment={onLineComment}
+            />
           )}
         </div>
       )}

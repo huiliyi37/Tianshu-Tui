@@ -342,6 +342,7 @@ export function WorkspaceSurface() {
               onFeedbackSent={() => sessions.refetch()}
               todos={view.todos}
               sources={view.sources}
+              onSendPrompt={handleSteer}
               onCollapse={() => {
                 dispatch({ type: 'setReview', visible: false })
               }}

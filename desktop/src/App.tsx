@@ -10,6 +10,7 @@ import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { ConnectWizard } from './components/ConnectWizard'
 import { CommandPalette } from './components/CommandPalette'
+import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { Toaster } from 'sonner'
 import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
@@ -31,7 +32,8 @@ export function App() {
   useGlobalNotifications()
 
   const [paletteOpen, setPaletteOpen] = useState(false)
-  useGlobalShortcuts(setPaletteOpen)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  useGlobalShortcuts(setPaletteOpen, setShortcutsOpen)
   const commands = useSurfaceCommands()
 
 
@@ -237,6 +239,8 @@ export function App() {
       {paletteOpen && (
         <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
       )}
+
+      <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {ui.connectOpen && (
         <ConnectWizard onClose={() => dispatch({ type: 'openConnect', open: false })} />

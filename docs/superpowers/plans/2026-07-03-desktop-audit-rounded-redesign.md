@@ -70,37 +70,37 @@ reducer 与 ThreadView 已渲染（`event-reducer.ts:390-409`、`ThreadView.tsx:
 ### P1-1 Composer 状态芯片组（对标「送信ボタンの横」控件群）
 
 Claude Desktop 把模型、权限模式、上下文用量全部内联在输入框旁,这是它「可视化好于 Codex」口碑的核心。桌面端目前模型切换埋在菜单里,上下文用量不可见。
-- [ ] Composer 底部加芯片行:**模型芯片**（点击下拉,数据源 `model_switched` 事件已有）、**权限模式芯片**（auto-safe/manual/plan,接 `setApprovalMode` API 已有）、**上下文用量环**（`turn_complete` 事件的 usage 累计 / contextWindow;环形 SVG,>80% 变橙提示可 /compact）。
-- [ ] 上下文环点击展开明细 popover(input/output/cache 命中率)——这是我们对 DeepSeek 前缀缓存优化的独特可视化点,Claude 没有。
+- [x] Composer 底部加芯片行:**模型芯片**（原有 ModelPicker 已内联）、**权限模式芯片**（AutonomyControl compact 从 header 移入 composer-actions,接 `setApprovalMode`）、**上下文用量环**（`ContextRing` SVG,contextTokens/contextWindow,>80% 变橙提示 /compact）。
+- [x] 上下文环点击展开明细 popover(上下文/本轮增量/缓存命中率/缓存读创建)——DeepSeek 前缀缓存独有可视化。
 
 ### P1-2 视图模式（Normal / Verbose / Summary）
 
 对标 transcript view 三档。长会话里工具调用刷屏是主要抱怨源。
-- [ ] ThreadView 加视图模式切换（Ctrl+O 循环）:Normal=工具折叠成 chip 行（现有 toolGroup 折叠已是雏形）;Verbose=全展开;Summary=只看 assistant 终稿文本。存 localStorage。
+- [x] ThreadView 加视图模式切换（⌘/Ctrl+O 循环,header 芯片可点击）:Normal=timeline 折叠(现状);Verbose=timeline 组强制展开;Summary=只保留 user/assistant/error/turn/steer 块。存 localStorage(`tianshu.viewMode`),状态在全局 store。
 
 ### P1-3 Diff 行内评论 → 回灌 prompt
 
 对标「diff 内任意行点击评论,Cmd/Ctrl+Enter 一次性送出,Claude 按评论修改」。这是评审闭环的杀手锏。
-- [ ] `DiffView` 行点击 → 评论输入框;多条评论汇总为结构化 prompt(`文件:行号 评论内容`)一键发送。复用现有 steer/send 通道。
+- [x] `DiffView` 行评论基建已存在（ReviewPanel artifact diff 已接 sendArtifactFeedback）;本次补 **ChangesTab（工作树 diff）** 行评论:跨文件累积,「发送 N 条评论」汇总为 `文件:行号 — 评论` 结构化 prompt,经 handleSteer 通道回灌（运行中 steer,空闲直发）。
 
 ### P1-4 Side Chat（不污染主线程的旁路提问）
 
 对标 `/btw` + Cmd+;。天枢有现成的 delegate 基建,旁路问题可下沉为一个只读 worker 会话（共享主会话上下文快照,不写入主线程 history——保前缀缓存的架构本来就适合这个）。
-- [ ] MVP:右侧抽屉开独立轻会话,系统提示注入主会话最近 N 条摘要;明示「此对话不影响主任务」。
+- [x] MVP:`SideChat` 右侧抽屉（⌘; 或 header 💬 切换),懒创建真实轻会话（标题「旁路 · …」),首条 prompt 前缀注入主会话最近 6 条 user/assistant 摘录(每条截 600 字);顶部明示「此对话不影响主任务」。复用 useSessionEvents 流。
 
 ### P1-5 会话列表强化
 
-- [ ] 按项目分组 + 状态筛选(running/idle/attention)——ProjectSidebar 已有项目树,补 group/filter 控件。
-- [ ] 会话完成/需审批时 OS 通知（Tauri notification plugin;对标「完了時に OS 通知」）。Mission Control 已有 attention 概念,接通知即可。
+- [x] 按项目分组已有;补状态筛选(全部/运行中/待处理/空闲)——SlidersHorizontal 图标展开筛选芯片行,attention = pendingApprovals>0 或 failed。
+- [x] OS 通知核实已完备:`use-global-notifications.ts` 已覆盖完成/失败/待审批,带点击跳转路由与 never/background/always 偏好——无需新增。
 
 ### P1-6 快捷键体系
 
-- [ ] 对齐 Claude Desktop 键位习惯:Ctrl+N 新会话、Ctrl+Tab 切会话、Esc 停止、Ctrl+` 终端、Ctrl+O 视图模式、Ctrl+/ 快捷键面板。CommandPalette(⌘K)已有,补一张快捷键速查 overlay。
+- [x] 对齐键位:Ctrl+Tab / Ctrl+Shift+Tab 切会话(保留 ⌘⇧[/])、Esc 空输入停止运行、Ctrl+` 终端(保留 ⌘J)、⌘O 视图模式、⌘/ 打开新的 `ShortcutOverlay` 快捷键速查(三组:全局/会话与布局/输入框)。
 
 ### P1-7 i18n 收尾（中低优先）
 
 13 个 namespace 已建但仅 ~8 文件使用,App banner/ThreadView 状态标签/审批 modal 全硬编码中文。用户群以中文为主,不阻塞,但:
-- [ ] 至少把 `Composer.tsx:308` 语音识别硬编码 `zh-CN` 改为跟随 i18n locale;新增 UI 一律走 t()。
+- [x] 语音识别 lang 跟随 i18n locale(en → en-US,默认 zh-CN)。全量 t() 覆盖仍为后续渐进项。
 
 ---
 

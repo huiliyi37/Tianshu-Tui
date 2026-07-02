@@ -14,7 +14,6 @@ import { ArtifactCard } from '../components/ArtifactCard'
 import { DelegationPill } from '../components/DelegationPill'
 import { DelegationOverlay } from '../components/DelegationOverlay'
 import { DelegateDialog } from '../components/DelegateDialog'
-import { AutonomyControl } from '../components/AutonomyControl'
 import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
 import {
@@ -34,6 +33,7 @@ import type { ThemePref } from '../lib/theme'
 import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../runtime/client'
 import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
+import { SideChat } from '../components/SideChat'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -85,6 +85,18 @@ export function ThreadView(props: {
   const [showDelegation, setShowDelegation] = useState(false)
   const [showDelegateDialog, setShowDelegateDialog] = useState(false)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  // P1-4 — Side Chat drawer (旁路提问): Cmd+; or the header button toggles.
+  const [sideChatOpen, setSideChatOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ';') {
+        e.preventDefault()
+        setSideChatOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
   const [composerHeight, setComposerHeight] = useState(0)
   const composerWrapRef = useRef<HTMLDivElement | null>(null)
   const composerObserverRef = useRef<ResizeObserver | null>(null)
@@ -184,7 +196,17 @@ export function ThreadView(props: {
     return view.blocks
   }, [view.blocks, selectedTurnIndex, rewindPoints])
 
-  const rendered = useMemo(() => groupBlocks(filteredBlocks), [filteredBlocks, view.blocksRev])
+  // P1-2 view mode: summary keeps only conversational text (user/assistant/
+  // error/turn separators) — tool runs and thinking are dropped before grouping.
+  const viewMode = ui.viewMode
+  const modeBlocks = useMemo(() => {
+    if (viewMode !== 'summary') return filteredBlocks
+    return filteredBlocks.filter((b) =>
+      b.kind === 'user' || b.kind === 'assistant' || b.kind === 'error' || b.kind === 'turn' || b.kind === 'steer',
+    )
+  }, [filteredBlocks, viewMode])
+
+  const rendered = useMemo(() => groupBlocks(modeBlocks), [modeBlocks, view.blocksRev])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
@@ -515,11 +537,7 @@ export function ThreadView(props: {
             <div className="thread-title">{session.title ?? session.id.slice(0, 8)}</div>
             <div className="thread-sub" title={session.cwd}>{basename(session.cwd) || session.cwd}</div>
           </div>
-          <AutonomyControl
-            compact
-            value={modeToLevel(session.approvalMode)}
-            onChange={(lvl) => onSetApprovalMode(levelToMode(lvl))}
-          />
+          {/* 权限档位芯片移到 Composer 旁（P1-1，对标 Claude Desktop 送信钮旁控件群）。 */}
           {autonomous && (
             <span className="autonomy-badge" title="自治模式 · 项目内操作自动执行；项目外写入仍被沙箱拦截，可随时回滚">
               <span className="ab-glyph" aria-hidden>✦</span>
@@ -528,6 +546,12 @@ export function ThreadView(props: {
           )}
           <span className={`status-dot status-${session.status}`} />
           <span className="status-text">{STATUS_LABEL[session.status] ?? session.status}</span>
+          <button
+            className={`icon-btn sidechat-toggle ${sideChatOpen ? 'active' : ''}`}
+            title="旁路提问 (⌘;) — 不影响主任务的独立轻会话"
+            aria-label="旁路提问"
+            onClick={() => setSideChatOpen((o) => !o)}
+          >💬</button>
           <button className="icon-btn thread-close" title="关闭会话" onClick={() => setShowCloseConfirm(true)} aria-label="关闭会话">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -575,6 +599,14 @@ export function ThreadView(props: {
           <span className={`mode-chip ${view.planMode === 'planning' ? 'plan' : 'agent'}`}>
             {view.planMode === 'planning' ? 'Plan' : 'Agent'}
           </span>
+          <button
+            className={`view-mode-chip ${viewMode}`}
+            onClick={() => dispatch({ type: 'cycleViewMode' })}
+            title="视图模式 (⌘O 循环)：标准 → 详尽 → 摘要"
+            aria-label="切换视图模式"
+          >
+            {viewMode === 'normal' ? '标准' : viewMode === 'verbose' ? '详尽' : '摘要'}
+          </button>
           {session.contextWindow && session.contextWindow > 0 ? (
             <div className="ctx-bar" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens`}>
               <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />
@@ -643,7 +675,7 @@ export function ThreadView(props: {
                   style={{ transform: `translateY(${vi.start}px)` }}
                 >
                   {item.kind === 'timeline' ? (
-                    <TimelineGroup blocks={item.items}>
+                    <TimelineGroup blocks={item.items} forceOpen={viewMode === 'verbose'}>
                       {groupTimelineItems(item.items).map((tItem, idx) => {
                         if (tItem.kind === 'thinking') {
                           const isStreaming = tItem.block.key === lastKey && view.private_thinkingOpen
@@ -763,6 +795,15 @@ export function ThreadView(props: {
             onChange={setInput}
             busy={busy}
             threadNonEmpty={view.blocks.length > 0}
+            approvalLevel={modeToLevel(session.approvalMode)}
+            onSetApprovalLevel={(lvl) => onSetApprovalMode(levelToMode(lvl))}
+            contextUsage={{
+              usedTokens: session.contextTokens ?? view.lastTotalTokens,
+              contextWindow: session.contextWindow,
+              cacheReadTokens: view.cacheReadTokens,
+              cacheCreationTokens: view.cacheCreationTokens,
+              deltaTokens: ctxDelta,
+            }}
             onSubmit={async (text, images) => {
               if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
                 const point = rewindPoints[selectedTurnIndex]
@@ -824,6 +865,14 @@ export function ThreadView(props: {
         />
       )}
       {lightbox && <ImageLightbox src={lightbox} onClose={() => setLightbox(null)} />}
+
+      <SideChat
+        open={sideChatOpen}
+        onClose={() => setSideChatOpen(false)}
+        mainTitle={session.title ?? session.id.slice(0, 8)}
+        cwd={session.cwd}
+        mainBlocks={view.blocks}
+      />
 
       <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
         <AlertDialogContent>

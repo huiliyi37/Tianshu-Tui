@@ -738,6 +738,17 @@ body {
   border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
 }
 .mode-chip.plan { color: var(--accent); border-color: var(--accent); background: transparent; }
+/* View mode chip (P1-2) — cycles 标准/详尽/摘要 on click or ⌘O. */
+.view-mode-chip {
+  display: inline-flex; align-items: center;
+  font-size: 11px; font-weight: var(--weight-medium); letter-spacing: 0.3px;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); color: var(--muted); background: var(--panel-2);
+  cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.view-mode-chip:hover { color: var(--text); border-color: var(--border-strong); }
+.view-mode-chip.verbose { color: var(--accent); border-color: var(--accent); background: transparent; }
+.view-mode-chip.summary { color: var(--warning, #f59e0b); border-color: var(--warning, #f59e0b); background: transparent; }
 .model-chip {
   font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary);
   padding: 2px 8px; border-radius: var(--radius-pill);
@@ -2457,6 +2468,124 @@ body {
   border-radius: var(--radius-md); box-shadow: var(--shadow-md);
   padding: var(--space-1); z-index: var(--z-modal);
   display: flex; flex-direction: column;
+}
+
+/* ── Context usage ring (P1-1, composer chip row) ── */
+.ctx-ring-wrap { position: relative; display: inline-flex; }
+.ctx-ring-trigger {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border: 1px solid transparent; border-radius: var(--radius-pill);
+  background: transparent; color: var(--muted); font-size: var(--text-xs);
+  cursor: pointer; transition: color var(--dur) var(--ease), background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.ctx-ring-trigger:hover { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+.ctx-ring-wrap.warn .ctx-ring-label { color: var(--warning, #f59e0b); }
+.ctx-ring-label { font-variant-numeric: tabular-nums; }
+.ctx-ring-popover {
+  position: absolute; right: 0; bottom: calc(100% + 6px);
+  min-width: 200px; background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+  padding: var(--space-2) var(--space-3); z-index: var(--z-modal);
+  display: flex; flex-direction: column; gap: 4px; font-size: var(--text-xs);
+}
+.ctx-ring-row { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--text); }
+.ctx-ring-row.sub { color: var(--muted); }
+.ctx-ring-hint { margin-top: 4px; color: var(--warning, #f59e0b); }
+
+/* ── Shortcut cheatsheet overlay (P1-6, Cmd+/) ── */
+.shortcut-overlay-backdrop {
+  position: fixed; inset: 0; z-index: var(--z-modal);
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.shortcut-overlay {
+  width: min(680px, calc(100vw - 48px)); max-height: min(72vh, 640px);
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg, 12px); box-shadow: var(--shadow-lg, var(--shadow-md));
+  overflow: hidden;
+}
+.shortcut-overlay-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);
+}
+.shortcut-overlay-head h3 { margin: 0; font-size: var(--text-md); }
+.shortcut-overlay-body {
+  overflow-y: auto; padding: var(--space-3) var(--space-4);
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: var(--space-4);
+}
+.shortcut-group h4 { margin: 0 0 var(--space-2); font-size: var(--text-xs); color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.shortcut-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+  padding: 3px 0; font-size: var(--text-xs);
+}
+.shortcut-keys { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.shortcut-keys kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-bottom-width: 2px; color: var(--text);
+}
+.shortcut-or { color: var(--muted); margin: 0 3px; font-size: 10px; }
+.shortcut-desc { color: var(--text-secondary, var(--text)); text-align: right; }
+
+/* ── Sidebar session status filter (P1-5) ── */
+.sidebar-status-filter {
+  display: flex; gap: 4px; padding: 4px 8px 2px; flex-wrap: wrap;
+}
+.status-filter-chip {
+  font-size: 10px; padding: 2px 8px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.status-filter-chip:hover { color: var(--text); }
+.status-filter-chip.active { color: var(--accent); border-color: var(--accent); }
+
+/* Send collected line comments (P1-3, Changes tab) */
+.changes-send-comments { margin-left: auto; }
+
+/* ── Side Chat drawer (P1-4, 旁路提问) ── */
+.sidechat-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(380px, 46%);
+  display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  z-index: calc(var(--z-modal) - 1);
+}
+.sidechat-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+}
+.sidechat-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.sidechat-toggle.active { color: var(--accent); }
+.sidechat-note {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs); color: var(--muted);
+  border-bottom: 1px dashed var(--border); background: var(--panel-2);
+}
+.sidechat-messages {
+  flex: 1; overflow-y: auto; padding: var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.sidechat-empty { color: var(--muted); font-size: var(--text-xs); padding: var(--space-3) 0; }
+.sidechat-msg { font-size: var(--text-sm); line-height: 1.55; border-radius: var(--radius-md); }
+.sidechat-msg.user {
+  align-self: flex-end; max-width: 88%;
+  background: var(--panel-2); border: 1px solid var(--border);
+  padding: var(--space-1) var(--space-2); white-space: pre-wrap;
+}
+.sidechat-msg.assistant { align-self: stretch; }
+.sidechat-typing { color: var(--muted); font-size: var(--text-xs); }
+.sidechat-input-row {
+  display: flex; gap: var(--space-2); align-items: flex-end;
+  padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border);
+}
+.sidechat-input-row textarea {
+  flex: 1; resize: none; font-size: var(--text-sm);
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: var(--space-1) var(--space-2);
+  color: var(--text);
 }
 .model-picker-item {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
