@@ -22,7 +22,7 @@ describe('getTheme', () => {
     assert.equal(theme.assistantColor, '#d2d5dd') // 亮灰正文 (提亮至 #d2d5dd)
     assert.equal(theme.muted, '#adb2bf')          // 元信息灰 (提亮 ~6.5:1)
     assert.equal(theme.systemColor, '#adb2bf')    // 与 muted 对齐
-    assert.equal(theme.pulseActive, '#d4a574')    // 星金 active pulse
+    assert.equal(theme.pulseActive, '#dfb282')    // 星金 active pulse（= primary）
   })
 
   it('cobalt still available via explicit switch', () => {

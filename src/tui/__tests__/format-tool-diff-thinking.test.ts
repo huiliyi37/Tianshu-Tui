@@ -193,9 +193,10 @@ describe('formatToolCardLive', () => {
     assert.ok(plain[3]!.includes('e'))
   })
 
-  it('no output tail renders title only', () => {
+  it('no output tail renders fixed-height skeleton (title + 3 行 tail 占位)', () => {
     const lines = formatToolCardLive({ toolName: 'grep', columns: 80 }, theme)
-    assert.equal(lines.length, 1)
+    // 固定高度卡片：无输出时补占位行，避免卡片高度随输出跳动（tool-card.ts 注释）
+    assert.equal(lines.length, 4)
   })
 })
 

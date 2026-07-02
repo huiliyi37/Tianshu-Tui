@@ -46,6 +46,40 @@ function makeApp() {
 }
 
 const stripAnsi = (s: string) => s.replace(/\x1B\[[0-9;?]*[a-zA-Z]/g, '')
+
+// OverlayEngine 用行级 diff 渲染（commit 76da3ee4）：只重写变化的行，未变行不再吐出。
+// MockOut 仅累积「写入」，无法表达「未变行仍留在屏上」。此函把 alt-screen 写入流
+// （cursorTo / ERASE_LINE / 文本 / 换行）回放到虚拟行网格，还原当前屏幕真实内容——
+// 用于需要断言「过滤后屏上还剩哪些行」的搜索型 overlay。
+function reconstructScreen(raw: string): string {
+  const grid: string[] = []
+  let row = 0 // 0-based
+  const ensure = (r: number) => { row = r; while (grid.length <= row) grid.push('') }
+  ensure(0)
+  let i = 0
+  while (i < raw.length) {
+    if (raw[i] === '\x1B' && raw[i + 1] === '[') {
+      const m = /^\x1B\[([0-9;?]*)([a-zA-Z])/.exec(raw.slice(i))
+      if (m) {
+        const cmd = m[2]
+        if (cmd === 'H') {
+          const r = parseInt((m[1] || '1').split(';')[0] || '1', 10)
+          ensure(Math.max(1, r) - 1)
+        } else if (cmd === 'K') {
+          grid[row] = '' // ERASE_LINE：清当前行；随后同行写入即新内容
+        }
+        // 其余控制序列（SGR 'm'、?h/?l 同步/alt-screen/隐藏光标）忽略
+        i += m[0].length
+        continue
+      }
+    }
+    const ch = raw[i]!
+    if (ch === '\n') ensure(row + 1)
+    else if (ch !== '\r') grid[row] += ch
+    i++
+  }
+  return grid.join('\n')
+}
 // rows=24 → pageSize = 24-4 = 20。100 行 → 5 页（0..4）。
 const longContent = Array.from({ length: 100 }, (_, i) => `LN${i}`).join('\n')
 
@@ -93,16 +127,17 @@ test('pager: / 进入搜索，n/N 跳转匹配，Esc 清除', () => {
     }),
   })
   app.activateOverlay('pager')
-  const press = (k: string) => { out.clear(); stdin.dataHandler!(SEQ[k] ?? k) }
-  const visible = () => stripAnsi(out.chunks.join(''))
+  // 行级 diff 渲染：跳转匹配仅重写高亮变化的行，故用屏幕重建读「当前屏」而非累积写入。
+  const press = (k: string) => stdin.dataHandler!(SEQ[k] ?? k)
+  const visible = () => reconstructScreen(out.chunks.join(''))
 
-  press('/'); assert.ok(visible().includes('Search'))
+  press('/'); assert.ok(visible().includes('搜索'))
   press('a'); assert.ok(visible().includes('"a"'))
   // beta 与 delta 都含 'a'；首次匹配 beta（索引 1）
   press('n'); assert.ok(visible().includes('beta'), 'n 跳转到下一处匹配')
   press('n'); assert.ok(visible().includes('delta'), 'n 循环到 delta')
   press('N'); assert.ok(visible().includes('beta'), 'N 回退到 beta')
-  press('escape'); assert.ok(!visible().includes('Search'), 'Esc 清除搜索回到 page 模式')
+  press('escape'); assert.ok(visible().includes('查看'), 'Esc 清除搜索回到 page 模式')
 })
 
 test('pager: m 进入消息视图，j/k 切换消息', () => {
@@ -121,10 +156,10 @@ test('pager: m 进入消息视图，j/k 切换消息', () => {
   const press = (k: string) => { out.clear(); stdin.dataHandler!(SEQ[k] ?? k) }
   const visible = () => stripAnsi(out.chunks.join(''))
 
-  press('m'); assert.ok(visible().includes('Message 1/2'))
-  press('down'); assert.ok(visible().includes('Message 2/2'))
-  press('up'); assert.ok(visible().includes('Message 1/2'))
-  press('escape'); assert.ok(!visible().includes('Message'), 'Esc 退出消息视图')
+  press('m'); assert.ok(visible().includes('消息 1/2'))
+  press('down'); assert.ok(visible().includes('消息 2/2'))
+  press('up'); assert.ok(visible().includes('消息 1/2'))
+  press('escape'); assert.ok(!visible().includes('返回'), 'Esc 退出消息视图（消息模式 footer 的「返回」消失）')
 })
 
 test('command-palette: ↑/↓ 循环选中，Enter 执行回调并关闭', () => {
@@ -245,14 +280,14 @@ test('history-search: 字符过滤渲染列表 + 查询回显 + Enter 回填输�
     },
   })
   app.activateOverlay('history-search')
-  const visible = () => stripAnsi(out.chunks.join(''))
+  // 行级 diff 渲染：过滤后未变的行（如首项 git status）不再吐出，故用屏幕重建读「当前屏」。
+  const screen = () => reconstructScreen(out.chunks.join(''))
 
-  out.clear()
   typeKey(stdin, 'g'); typeKey(stdin, 'i'); typeKey(stdin, 't')   // query 'git'
   assert.equal(app.getOverlayQuery(), 'git')
-  assert.ok(visible().includes('git status') && visible().includes('git log'), '过滤后列表含 git 项')
-  assert.ok(!visible().includes('npm test'), '过滤掉 npm test')
-  assert.ok(visible().includes('git'), '查询串回显')
+  assert.ok(screen().includes('git status') && screen().includes('git log'), '过滤后列表含 git 项')
+  assert.ok(!screen().includes('npm test'), '过滤掉 npm test')
+  assert.ok(screen().includes('git'), '查询串回显')
 
   stdin.dataHandler!('\r')         // Enter → 回填第 0 项
   assert.equal(app.getInputValue(), 'git status', 'Enter 回填过滤后第 0 项到输入框')
@@ -292,7 +327,7 @@ test('tasks overlay: register + activate 渲染 per-worker 舰队', () => {
   })
   assert.equal(app.activateOverlay('tasks'), true, 'tasks overlay 应成功激活')
   const visible = stripAnsi(out.chunks.join(''))
-  assert.ok(visible.includes('Running Agents'), '应显示 tasks 标题')
+  assert.ok(visible.includes('运行中的子代理'), '应显示 tasks 标题')
   assert.ok(visible.includes('code_scout'), '应显示 worker profile')
   assert.ok(visible.includes('T1'), '应显示 worker 短标签')
   assert.ok(visible.includes('1/2 done'), '应显示组进度')

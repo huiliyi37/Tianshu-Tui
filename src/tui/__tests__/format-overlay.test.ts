@@ -32,7 +32,7 @@ describe('renderPager', () => {
 
   it('has close hint in footer', () => {
     const lines = renderPager({ content: 'x', page: 0 }, 40, 20, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('q/Esc close')))
+    assert.ok(lines.some(l => stripAnsi(l).includes('关闭')))
   })
 })
 
@@ -63,7 +63,7 @@ describe('renderStarmap', () => {
   it('has activate hint in footer', () => {
     const data: StarmapData = { entries: [{ name: 'X', glyph: 'x', description: 'x', active: true }] }
     const lines = renderStarmap(data, 80, 20, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('activate')))
+    assert.ok(lines.some(l => stripAnsi(l).includes('激活')))
   })
 })
 
@@ -139,13 +139,13 @@ describe('renderChronicle', () => {
     const lines = renderChronicle(data, 80, 20, theme)
     const secondLine = lines.find(l => stripAnsi(l).includes('second'))
     const firstLine = lines.find(l => stripAnsi(l).includes('first'))
-    assert.ok(secondLine && stripAnsi(secondLine).includes('▸'), '选中行有 ▸ 游标')
-    assert.ok(firstLine && !stripAnsi(firstLine).includes('▸'), '未选中行无游标')
+    assert.ok(secondLine && stripAnsi(secondLine).includes('▶'), '选中行有 ▶ 游标')
+    assert.ok(firstLine && !stripAnsi(firstLine).includes('▶'), '未选中行无游标')
   })
 
   it('footer 引导 Enter → resume（G5 诚实文案）', () => {
     const data: ChronicleData = { entries: [{ index: 1, time: 'a', summary: 's', current: false, id: 'x' }] }
     const lines = renderChronicle(data, 80, 20, theme)
-    assert.ok(lines.some(l => stripAnsi(l).includes('resume')), 'footer 含 resume 提示')
+    assert.ok(lines.some(l => stripAnsi(l).includes('恢复')), 'footer 含恢复会话提示')
   })
 })

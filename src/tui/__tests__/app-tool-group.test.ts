@@ -153,7 +153,7 @@ test('G4 flush 后迟到 collapsible result → 自动开新组', () => {
   assert.ok(text.includes('Read 1 file'), 'first group should have 1 read')
   assert.ok(text.includes('content a'), 'r1 content should be present')
   assert.ok(text.includes('content b late'), 'late r2 content should be present')
-  const readCount = [...text.matchAll(/● (?:Read|Searched)/g)].length
+  const readCount = [...text.matchAll(/▶ (?:Read|Searched)/g)].length // 折叠组头 ●→▶
   assert.equal(readCount, 2, 'should have 2 groups (flush + late reopen)')
 })
 

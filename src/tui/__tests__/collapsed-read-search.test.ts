@@ -290,7 +290,7 @@ describe('formatCollapsedGroup', () => {
     ])
     const lines = formatCollapsedGroup({ group, theme })
     assert.ok(lines.length >= 1)
-    assert.ok(lines[0]!.includes('●'))
+    assert.ok(lines[0]!.includes('▶')) // 折叠组头用 ▶/▼ 展开指示器（原 ●）
   })
 
   it('expanded mode shows more entries', () => {
