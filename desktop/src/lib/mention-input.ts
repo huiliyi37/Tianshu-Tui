@@ -40,10 +40,19 @@ export function detectMention(text: string, caret: number): MentionToken | null 
  * (the form the sidecar AgentLoop parses). Returns the new text and the caret
  * position just after the inserted token (with a trailing space).
  */
-/** Canonical `@file:` reference, quoting paths that contain spaces (Windows
- *  `C:\Program Files\…`) so the mention parser keeps them whole. */
+/** Kind of an @-reference the composer can carry. Mirrors the sidecar mention
+ *  parser's `@file:` / `@folder:` prefixes (see src/tui/mention-parser.ts). */
+export type MentionKind = 'file' | 'folder'
+
+/** Canonical `@file:` / `@folder:` reference, quoting paths that contain spaces
+ *  (Windows `C:\Program Files\…`) so the mention parser keeps them whole. */
+export function formatMention(path: string, kind: MentionKind = 'file'): string {
+  return path.includes(' ') ? `@${kind}:"${path}"` : `@${kind}:${path}`
+}
+
+/** Back-compat thin wrapper — the composer autocomplete only mentions files. */
 export function formatFileMention(path: string): string {
-  return path.includes(' ') ? `@file:"${path}"` : `@file:${path}`
+  return formatMention(path, 'file')
 }
 
 export function applyMention(text: string, token: MentionToken, path: string): { text: string; caret: number } {

@@ -3361,6 +3361,14 @@ body {
 }
 .fe-spinner { animation: fe-spin 0.8s linear infinite; color: var(--muted); }
 @keyframes fe-spin { to { transform: rotate(360deg); } }
+.fe-tree-panel:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--accent); }
+.fe-header-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.fe-header-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 3px; border: none; background: transparent; color: var(--muted);
+  border-radius: var(--radius-sm); cursor: pointer; transition: all var(--dur) var(--ease);
+}
+.fe-header-btn:hover { background: var(--panel-2); color: var(--text-secondary); }
 .fe-dir-row {
   display: flex; align-items: center; gap: 4px; padding: 3px var(--space-2);
   cursor: pointer; font-size: var(--text-sm); color: var(--text-secondary);
@@ -3390,9 +3398,22 @@ body {
 }
 .fe-breadcrumb { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: nowrap; overflow: hidden; font-family: var(--font-mono); font-size: var(--text-xs); }
 .fe-crumb-group { display: inline-flex; align-items: center; min-width: 0; }
-.fe-crumb { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fe-crumb {
+  border: none; background: transparent; padding: 0; font: inherit; cursor: pointer;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color var(--dur) var(--ease);
+}
+.fe-crumb:hover { color: var(--accent); text-decoration: underline; }
 .fe-crumb.current { color: var(--text-strong); flex: none; }
 .fe-crumb-sep { color: var(--faint); margin: 0 4px; flex: none; }
+.fe-viewer-actions { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.fe-tool-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px; border: 1px solid var(--border); background: var(--panel);
+  color: var(--text-dim); border-radius: var(--radius-sm); cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.fe-tool-btn:hover { color: var(--accent); border-color: var(--accent); }
 .fe-segmented { flex: none; display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .fe-seg-btn {
   padding: 2px 12px; border: none; background: var(--panel); color: var(--text-dim);

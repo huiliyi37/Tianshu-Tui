@@ -23,6 +23,7 @@ import {
   type ToolDensity,
   type SplitMode,
 } from '../lib/persist'
+import type { MentionKind } from '../lib/mention-input'
 
 // Codex-style surfaces (P3 vocab): workspace = Project→Thread→Review,
 // automations (was schedule), attention (was inbox), settings, git.
@@ -52,9 +53,15 @@ export interface UiState {
   newSessionPrompt: string | null
   /** Provider-connect wizard open state (guided model/provider setup). */
   connectOpen: boolean
-  /** Transient file paths queued from the file explorer to be appended as
-   *  @file mentions in the composer. Not persisted across reloads. */
-  composerAttachments: string[]
+  /** Transient references queued from the file explorer to be appended as
+   *  @file / @folder mentions in the composer. Not persisted across reloads. */
+  composerAttachments: ComposerAttachment[]
+}
+
+/** A queued @-reference (file or folder) awaiting insertion into the composer. */
+export interface ComposerAttachment {
+  path: string
+  kind: MentionKind
 }
 
 type UiAction =
@@ -75,7 +82,7 @@ type UiAction =
   | { type: 'setSplitMode'; mode: SplitMode }
   | { type: 'setReviewManual'; on: boolean }
   | { type: 'openConnect'; open: boolean }
-  | { type: 'addComposerAttachments'; paths: string[] }
+  | { type: 'addComposerAttachments'; items: ComposerAttachment[] }
   | { type: 'clearComposerAttachments' }
 
 function reducer(state: UiState, action: UiAction): UiState {
@@ -143,9 +150,19 @@ function reducer(state: UiState, action: UiAction): UiState {
     case 'openConnect':
       return { ...state, connectOpen: action.open }
     case 'addComposerAttachments': {
-      if (action.paths.length === 0) return state
-      const merged = new Set([...state.composerAttachments, ...action.paths])
-      return { ...state, composerAttachments: [...merged] }
+      if (action.items.length === 0) return state
+      // Dedupe by `${kind}:${path}` so a file and folder of the same path can
+      // both be referenced, but repeats of the same reference collapse.
+      const seen = new Set(state.composerAttachments.map((a) => `${a.kind}:${a.path}`))
+      const merged = [...state.composerAttachments]
+      for (const item of action.items) {
+        const key = `${item.kind}:${item.path}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          merged.push(item)
+        }
+      }
+      return { ...state, composerAttachments: merged }
     }
     case 'clearComposerAttachments':
       return { ...state, composerAttachments: [] }
