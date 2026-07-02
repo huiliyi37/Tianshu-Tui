@@ -1371,7 +1371,13 @@ export async function executeToolUse(
         }
       } else {
         if (!importGraph) {
-          importGraph = buildImportGraph(deps.cwd)
+          try {
+            importGraph = buildImportGraph(deps.cwd)
+          } catch {
+            // Best-effort impact analysis — must never produce tool errors.
+            // collectTsFiles already catches per-dir errors; this is a belt
+            // for any remaining fs failure (e.g. root cwd itself unreadable).
+          }
         }
         if (importGraph) {
           importGraph = invalidateFile(importGraph, deps.cwd, filePath)
