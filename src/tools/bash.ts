@@ -99,7 +99,10 @@ export function classifyBashOutcome(
   exitCode: number,
   stderr: string,
   isWindows: boolean,
-): { isError: boolean; errorClass?: 'environment' | 'exec-failure' } {
+): { isError: boolean; errorClass?: 'environment' | 'exec-failure' | 'timeout' } {
+  // exitCode -1 is the sole product of the timeout path (isTimeout ? -1 : code).
+  // Classify it distinctly from exec-failure: a slow command is not a dead-end.
+  if (exitCode === -1) return { isError: true, errorClass: 'timeout' }
   if (isWindows) {
     // Windows-native not-found: cmd.exe 9009 / PowerShell "is not recognized".
     const winNotFound =

@@ -6,6 +6,7 @@ import { PrewarmCache } from './prewarm.js'
 import { validatePathSafe } from '../tools/path-validate.js'
 import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
+import type { ToolErrorClass } from '../tools/types.js'
 import { EvidenceTracker } from './evidence.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
@@ -626,7 +627,7 @@ export class AgentLoop {
     return this.planTraceCoordinator.buildStepResultFromTurn(turn)
   }
 
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string, errorClass?: 'environment' | 'exec-failure'): void {
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, result: string, errorClass?: ToolErrorClass): void {
       recordToolHistory(this, name, input, isError, result, errorClass);
       // F-fix (session 803d897d): field habituation moves discipline text out of
       // focus after ~4 turns while a heavy turn can run 20+ tool calls. Re-anchor

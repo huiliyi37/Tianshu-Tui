@@ -1,5 +1,6 @@
 import type { AgentLoop } from './loop.js'
 import type { HealthSignal } from './trajectory-health.js'
+import type { ToolErrorClass } from '../tools/types.js'
 import { createHash } from 'node:crypto'
 import { TYPECHECK_CMD_RE } from './typecheck-gate.js'
 import { toolTargetFromInput } from './tool-target.js'
@@ -14,7 +15,7 @@ export function recordToolHistory(
   input: Record<string, unknown>,
   isError: boolean,
   result: string,
-  errorClass?: 'environment' | 'exec-failure',
+  errorClass?: ToolErrorClass,
 ): void {
     // Environment-class failures (host lacks the command — common on Windows) are
     // not competence failures. The immune system must not amplify them into
@@ -33,6 +34,7 @@ export function recordToolHistory(
       status: isError ? 'failed' : 'success',
       argsHash,
       error: isError ? result.slice(0, 50) : undefined,
+      ...(isError && errorClass ? { errorClass } : {}),
     })
     if (self.recentToolHistory.length > 5) self.recentToolHistory.shift()
 

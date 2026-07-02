@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
-import type { ToolCallParams, VerificationMetadata } from '../tools/types.js'
+import type { ToolCallParams, VerificationMetadata, ToolErrorClass } from '../tools/types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
@@ -224,7 +224,7 @@ export interface ToolPipelineDeps {
   onSkillInvoked?: (name: string) => void
   /** Called when the model explicitly marks a skill as complete via the skill tool. */
   onSkillCompleted?: (name: string) => void
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure'): void
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
   /** Current sensorium snapshot — enables confidence-driven adaptive approval. */

@@ -1591,6 +1591,21 @@ describe('AgentLoop — convergence emission cooldown', () => {
   })
 })
 
+describe('AgentLoop — recordToolHistory errorClass threading', () => {
+  it('writes errorClass into recentToolHistory entry (loop-factory drop-param guard)', () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const client = mockClient([makeTextBlock('ok')])
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
+
+    agent.recordToolHistory('bash', { command: 'sleep 99' }, true, '[timeout]', 'timeout')
+    const entry = agent.recentToolHistory.at(-1)
+    assert.equal(entry?.errorClass, 'timeout', 'errorClass must survive into the history entry')
+    assert.equal(entry?.target, 'sleep 99', 'target should be stripped of cd boilerplate (none here)')
+  })
+})
+
 describe('formatActivePlanPointer', () => {
   it('emits a slug/title/path pointer without the plan body', () => {
     const out = formatActivePlanPointer({ slug: 'my-plan', title: 'My Plan' })

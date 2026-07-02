@@ -1,4 +1,5 @@
 import type { ContentBlock } from '../api/types.js'
+import type { ToolErrorClass } from '../tools/types.js'
 import type { TurnBudget } from './turn-budget.js'
 import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation, enforceToolTypeBudgets } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
@@ -60,7 +61,7 @@ export interface ToolExecutionDeps {
   getSessionTurnCount: () => number
   getSessionId: () => string | undefined
   addToolResults: (results: ContentBlock[]) => void
-  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure') => void
+  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass) => void
   buildRuntimeSnapshot: (extra?: Partial<RuntimeHookSnapshot>) => RuntimeHookSnapshot
   requestThetaCheck: (reason: string) => void
   getAutoReasoning: () => boolean

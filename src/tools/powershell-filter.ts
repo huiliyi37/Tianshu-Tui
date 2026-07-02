@@ -30,7 +30,7 @@ const NOISE_LINE_PATTERNS = [
 
 export interface WindowsErrorContext {
   exitCode: number
-  errorClass?: 'environment' | 'exec-failure'
+  errorClass?: import('./types.js').ToolErrorClass
   command: string
 }
 

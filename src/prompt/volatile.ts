@@ -120,6 +120,9 @@ export interface ToolHistoryEntry {
    *  edit_file(a.ts, "x", "y") and edit_file(a.ts, "y", "z") get different hashes. */
   argsHash?: string
   error?: string
+  /** Failure classification — dead-end pheromone deposition uses this to exclude
+   *  timeout/environment (non-semantic) failures from the dead-end signal. */
+  errorClass?: import('../tools/types.js').ToolErrorClass
 }
 
 export interface VolatileContext {

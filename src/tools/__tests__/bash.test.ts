@@ -64,6 +64,13 @@ describe('classifyBashOutcome: Windows 感知的命令结果分类', () => {
     assert.equal(classifyBashOutcome(1, '', false).isError, false)
     assert.equal(classifyBashOutcome(0, '', false).isError, false)
   })
+  it('timeout (exit=-1) → timeout 类，不再与 exec-failure 混同', () => {
+    const r = classifyBashOutcome(-1, '', false)
+    assert.equal(r.isError, true)
+    assert.equal(r.errorClass, 'timeout')
+    // Windows 路径同样
+    assert.equal(classifyBashOutcome(-1, '', true).errorClass, 'timeout')
+  })
 })
 
 function wait(ms: number): Promise<void> {
