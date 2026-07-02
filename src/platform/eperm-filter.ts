@@ -12,29 +12,25 @@
  *
  * Import this module as early as possible (first import in the entry point) so
  * the handler is registered before any native dependency triggers the error.
+ *
+ * Path patterns are shared with tool-layer traversal via `restricted-paths.ts`.
  */
 
-/** Windows system directories that commonly cause EPERM on scandir. */
-const WINDOWS_NOISY_PATTERNS: readonly RegExp[] = [
-  /ElevatedDiagnostics/i,
-  /AppData[\\/]Local[\\/](?!Temp)/i, // AppData\Local subdirs except Temp
-  /Windows[\\/]System32[\\/]config/i,
-  /System Volume Information/i,
-  /\$RECYCLE\.BIN/i,
-]
+import { isRestrictedPath } from './restricted-paths.js'
 
-/** True when the error is a Windows EPERM scandir on a known system directory. */
-function isWindowsScandirNoise(error: unknown): boolean {
+/** Windows system directories that commonly cause EPERM on scandir.
+ *  Exported for contract testing of the syscall/code gating logic. */
+export function isWindowsScandirNoise(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
   const err = error as Record<string, unknown>
-  // Node.js fs errors carry `code` and `syscall` properties.
-  if (err.code !== 'EPERM') return false
+  const code = err.code as string | undefined
+  if (code !== 'EPERM' && code !== 'EACCES') return false
   const syscall = err.syscall as string | undefined
   if (syscall !== 'scandir' && syscall !== 'stat') return false
   const path = typeof err.path === 'string'
     ? err.path
     : String(err.message ?? '')
-  return WINDOWS_NOISY_PATTERNS.some(re => re.test(path))
+  return isRestrictedPath(path, code)
 }
 
 /**

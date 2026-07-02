@@ -1,29 +1,14 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { installEpermFilter } from '../eperm-filter.js'
+import { installEpermFilter, isWindowsScandirNoise } from '../eperm-filter.js'
 
-/** Windows system-directory patterns used by the filter. */
-const WINDOWS_NOISY_PATTERNS: readonly RegExp[] = [
-  /ElevatedDiagnostics/i,
-  /AppData[\\/]Local[\\/](?!Temp)/i,
-  /Windows[\\/]System32[\\/]config/i,
-  /System Volume Information/i,
-  /\$RECYCLE\.BIN/i,
-]
-
-/** Replicate the filter predicate for contract testing. */
-function isWindowsScandirNoise(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false
-  const err = error as Record<string, unknown>
-  if (err.code !== 'EPERM') return false
-  const syscall = err.syscall as string | undefined
-  if (syscall !== 'scandir' && syscall !== 'stat') return false
-  const path = typeof err.path === 'string'
-    ? err.path
-    : String(err.message ?? '')
-  return WINDOWS_NOISY_PATTERNS.some(re => re.test(path))
-}
-
+/**
+ * Contract tests for the unhandledRejection EPERM filter.
+ *
+ * Path patterns are shared via `restricted-paths.ts`; these tests verify the
+ * filter layer's own semantics: syscall gating, code gating, and that tightened
+ * patterns (no carpet AppData match) work end-to-end through isWindowsScandirNoise.
+ */
 describe('EPERM filter', () => {
   it('installEpermFilter is idempotent (safe to call twice)', () => {
     assert.doesNotThrow(() => installEpermFilter())
@@ -41,49 +26,47 @@ describe('EPERM filter', () => {
     assert.equal(isWindowsScandirNoise(error), true)
   })
 
-  it('filters EPERM scandir on AppData\\Local subdirectory', () => {
-    const error = {
-      code: 'EPERM',
-      syscall: 'scandir',
-      path: 'C:\\Users\\test\\AppData\\Local\\SomeCacheDir',
-    }
-    assert.equal(isWindowsScandirNoise(error), true)
+  it('filters EACCES scandir on $RECYCLE.BIN (macOS/Linux patterns too)', () => {
+    assert.equal(isWindowsScandirNoise({
+      code: 'EACCES', syscall: 'scandir',
+      path: 'C:\\$RECYCLE.BIN',
+    }), true)
+  })
+
+  it('does NOT filter AppData\\Local\\.rivet — Rivet data directory', () => {
+    // Regression guard: old carpet pattern AppData\Local\(?!Temp) matched this.
+    assert.equal(isWindowsScandirNoise({
+      code: 'EPERM', syscall: 'scandir',
+      path: 'C:\\Users\\test\\AppData\\Local\\.rivet\\sessions\\abc.jsonl',
+    }), false)
   })
 
   it('does NOT filter AppData\\Local\\Temp (legitimate temp dir)', () => {
-    const error = {
-      code: 'EPERM',
-      syscall: 'scandir',
+    assert.equal(isWindowsScandirNoise({
+      code: 'EPERM', syscall: 'scandir',
       path: 'C:\\Users\\test\\AppData\\Local\\Temp\\my-project',
-    }
-    assert.equal(isWindowsScandirNoise(error), false)
+    }), false)
   })
 
-  it('does NOT filter non-EPERM errors (ENOENT)', () => {
-    const error = {
-      code: 'ENOENT',
-      syscall: 'scandir',
+  it('does NOT filter non-EPERM/EACCES errors (ENOENT)', () => {
+    assert.equal(isWindowsScandirNoise({
+      code: 'ENOENT', syscall: 'scandir',
       path: 'C:\\Users\\test\\AppData\\Local\\ElevatedDiagnostics',
-    }
-    assert.equal(isWindowsScandirNoise(error), false)
+    }), false)
   })
 
   it('does NOT filter EPERM on non-system project paths', () => {
-    const error = {
-      code: 'EPERM',
-      syscall: 'scandir',
+    assert.equal(isWindowsScandirNoise({
+      code: 'EPERM', syscall: 'scandir',
       path: 'C:\\Users\\test\\projects\\myapp\\src',
-    }
-    assert.equal(isWindowsScandirNoise(error), false)
+    }), false)
   })
 
-  it('does NOT filter EPERM stat on user project files', () => {
-    const error = {
-      code: 'EPERM',
-      syscall: 'stat',
-      path: 'C:\\Users\\test\\code\\app\\index.ts',
-    }
-    assert.equal(isWindowsScandirNoise(error), false)
+  it('does NOT filter when syscall is not scandir/stat', () => {
+    assert.equal(isWindowsScandirNoise({
+      code: 'EPERM', syscall: 'open',
+      path: 'C:\\Users\\test\\AppData\\Local\\ElevatedDiagnostics',
+    }), false)
   })
 
   it('does NOT filter non-error values (string, null, undefined)', () => {
