@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
-import { getArtifact } from '../runtime/client'
+import { abortDelegateWorker, getArtifact } from '../runtime/client'
 import { DiffView } from '../components/DiffView'
 import type { DelegationNode } from '../runtime/types'
 
@@ -170,7 +171,11 @@ function NodeRow({
   )
 }
 
-function DetailPanel({ n, onViewDiff }: { n: DelegationNode | null; onViewDiff?: (artifactId: string) => void }) {
+function DetailPanel({ n, onViewDiff, onAbort }: {
+  n: DelegationNode | null
+  onViewDiff?: (artifactId: string) => void
+  onAbort?: (workerId: string) => void
+}) {
   if (!n) {
     return <div className="empty sm">选择一个节点查看详情</div>
   }
@@ -215,6 +220,11 @@ function DetailPanel({ n, onViewDiff }: { n: DelegationNode | null; onViewDiff?:
           查看改动（diff）
         </button>
       )}
+      {n.status === 'running' && onAbort && (
+        <button className="deleg-diff-btn deleg-abort-btn" onClick={() => onAbort(n.workerId)}>
+          中止此 worker
+        </button>
+      )}
       {usage && (
         <div className="delegation-section" style={{ marginTop: '12px' }}>
           <div className="delegation-section-title">Token 用量</div>
@@ -254,6 +264,16 @@ export function DelegationSurface() {
       // 取 diff 失败（artifact 被清理/session 切换）— 静默，可重试
     } finally {
       setDiffLoading(false)
+    }
+  }
+
+  const abortWorker = async (workerId: string) => {
+    if (!activeSessionId) return
+    try {
+      await abortDelegateWorker(activeSessionId, workerId)
+      toast.success('已请求中止 worker')
+    } catch (err) {
+      toast.error(`中止失败：${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -350,7 +370,7 @@ export function DelegationSurface() {
               ))}
             </div>
             <div className="delegation-detail-pane">
-              <DetailPanel n={selected} onViewDiff={openDiff} />
+              <DetailPanel n={selected} onViewDiff={openDiff} onAbort={abortWorker} />
             </div>
           </div>
         )}

@@ -436,12 +436,14 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
   }
   
   const path = String(input.path ?? input.file_path ?? input.target ?? "")
+  // Windows tool inputs may use backslashes — split on both separators.
+  const base = path.split(/[\\/]/).pop()
   switch (toolName) {
     case 'write_file':
     case 'create_file':
       return {
         title: "创建/写入新文件",
-        desc: path ? `写入文件: ${path.split('/').pop()} (${path})` : "在工作区写入新文件",
+        desc: path ? `写入文件: ${base} (${path})` : "在工作区写入新文件",
         icon: "📝"
       }
     case 'edit_file':
@@ -449,13 +451,13 @@ function getApprovalIntent(toolName: string, input: Record<string, unknown>): { 
     case 'hash_edit':
       return {
         title: "修改现有文件",
-        desc: path ? `修改文件: ${path.split('/').pop()} (${path})` : "对工作区文件进行代码修改",
+        desc: path ? `修改文件: ${base} (${path})` : "对工作区文件进行代码修改",
         icon: "⚡"
       }
     case 'read_file':
       return {
         title: "读取文件内容",
-        desc: path ? `读取文件: ${path.split('/').pop()} (${path})` : "读取工作区文件",
+        desc: path ? `读取文件: ${base} (${path})` : "读取工作区文件",
         icon: "🔍"
       }
     case 'execute_bash':

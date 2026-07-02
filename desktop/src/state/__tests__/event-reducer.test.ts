@@ -545,6 +545,34 @@ test('watchdog_recovery (stopReason) surfaces the stop reason', () => {
   assert.equal(b.watchdog?.stopReason, 'session-total')
 })
 
+// ── done (run settled — status must land without waiting for the poll) ──────
+
+test('done updates status and closes streaming affordances', () => {
+  seq = 0
+  const s = fold([
+    ev('text_delta', { text: 'working…' }),
+    ev('done', { status: 'idle' }),
+  ])
+  assert.equal(s.status, 'idle')
+  assert.equal(s.private_textOpen, false)
+  assert.equal(s.private_thinkingOpen, false)
+  // No block appended — done is a status transition, not timeline content.
+  assert.equal(s.blocks.length, 1)
+})
+
+test('watchdog_recovery (suppressed) renders no card — approval modal owns attention', () => {
+  seq = 0
+  const s = fold([ev('watchdog_recovery', {
+    reason: 'watchdog',
+    autoContinue: false,
+    stopReason: 'suppressed',
+    consecutive: 0,
+    sessionTotal: 0,
+    progressUnits: 0,
+  })])
+  assert.equal(s.blocks.length, 0)
+})
+
 test('watchdog_recovery breaks an open text run', () => {
   seq = 0
   const s = fold([

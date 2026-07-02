@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
-import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
+import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
@@ -268,9 +268,10 @@ export function Composer(props: {
     if (suggest.mode === 'file') selectFile(suggest.token, suggest.items[suggest.index]!)
     else if (suggest.index >= 0 && suggest.matched) runCommand(suggest.items[suggest.index]!)
     else {
-      // No matching command — toast and keep the menu open briefly so the user sees the hint.
-      const firstToken = value.trim().split(/\s/)[0]
-      toast.error(`未知命令 "${firstToken}" — 输入 / 查看可用命令`)
+      // Not in the local menu — send through to the server slash resolver
+      // instead of rejecting client-side (the server knows more commands).
+      closeSuggest()
+      submit()
     }
   }
 
@@ -285,13 +286,10 @@ export function Composer(props: {
   const submit = () => {
     const text = value.trim()
     if (!text && images.length === 0) return
-    // Guard: reject unknown slash commands instead of sending them to the agent
-    // (which would misinterpret the /token as a literal request). Mirrors TUI
-    // resolveAppPromptInput returning null for unrecognized slashes.
-    if (commands && commands.length > 0 && !isKnownSlashCommand(text, commands)) {
-      toast.error(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
-      return
-    }
+    // Slash commands pass through to the server: POST /prompt runs the full
+    // resolveAppPromptInput translation (same as TUI), so commands missing from
+    // the local menu (e.g. /write-plan) still work. Truly unknown slashes get a
+    // 400 whose toast + input restore is handled by useSendPrompt.onError.
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
   }

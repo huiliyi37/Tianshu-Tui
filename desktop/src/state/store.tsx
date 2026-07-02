@@ -56,6 +56,9 @@ export interface UiState {
   /** Transient references queued from the file explorer to be appended as
    *  @file / @folder mentions in the composer. Not persisted across reloads. */
   composerAttachments: ComposerAttachment[]
+  /** One-shot request to focus a review-panel tab (e.g. ArtifactCard "Review").
+   *  `rev` bumps so repeated requests for the same tab still trigger. */
+  reviewTabRequest: { tab: string; rev: number } | null
 }
 
 /** A queued @-reference (file or folder) awaiting insertion into the composer. */
@@ -84,6 +87,7 @@ type UiAction =
   | { type: 'openConnect'; open: boolean }
   | { type: 'addComposerAttachments'; items: ComposerAttachment[] }
   | { type: 'clearComposerAttachments' }
+  | { type: 'requestReviewTab'; tab: string }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -166,6 +170,14 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'clearComposerAttachments':
       return { ...state, composerAttachments: [] }
+    case 'requestReviewTab':
+      return {
+        ...state,
+        reviewVisible: true,
+        zenMode: false,
+        reviewManuallyToggled: true,
+        reviewTabRequest: { tab: action.tab, rev: (state.reviewTabRequest?.rev ?? 0) + 1 },
+      }
     default:
       return state
   }
@@ -194,6 +206,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     reviewManuallyToggled: false,
     connectOpen: false,
     composerAttachments: [],
+    reviewTabRequest: null,
   }))
 
   useEffect(() => {

@@ -851,6 +851,20 @@ body {
 .mcp-server-error { font-size: var(--text-xs); color: var(--error); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-server-actions { display: flex; gap: var(--space-1); }
 
+/* Expanded per-server tools list (Settings → MCP → 工具). */
+.mcp-tools-list {
+  margin: 2px 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--panel);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.mcp-tool-row { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.mcp-tool-name { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-strong); flex-shrink: 0; }
+.mcp-tool-desc { font-size: var(--text-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .mcp-status-badge { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); }
 .mcp-status-badge .dot { font-size: 10px; }
 .mcp-status-badge .count { color: var(--muted); margin-left: 2px; }
@@ -4277,6 +4291,29 @@ html[data-theme="nebula"] .plan-panel {
   transition: all var(--dur) var(--ease);
 }
 .deleg-diff-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.deleg-abort-btn:hover {
+  border-color: var(--danger, #e5484d);
+  color: var(--danger, #e5484d);
+  background: transparent;
+}
+
+/* Watchdog stopped-card resume button (ThreadView watchdog_recovery block). */
+.watchdog-continue {
+  margin-top: 8px;
+  padding: 4px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--text);
+  cursor: pointer;
+  transition: all var(--dur) var(--ease);
+}
+.watchdog-continue:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset } from '../runtime/types'
+import { listMcpServerTools } from '../runtime/client'
+import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
 
 /**
  * 把单行参数字符串解析为 argv 数组，支持引号包裹含空格的参数。
@@ -185,6 +186,23 @@ export function McpSettings({
   const [args, setArgs] = useState('')
   const [url, setUrl] = useState('')
   const [adding, setAdding] = useState(false)
+  // Per-server expanded tools list (lazy-fetched on first expand).
+  const [toolsOpen, setToolsOpen] = useState<string | null>(null)
+  const [toolsCache, setToolsCache] = useState<Record<string, McpServerToolsResponse['tools'] | 'loading' | 'error'>>({})
+
+  const toggleTools = (id: string) => {
+    if (toolsOpen === id) {
+      setToolsOpen(null)
+      return
+    }
+    setToolsOpen(id)
+    if (!toolsCache[id] || toolsCache[id] === 'error') {
+      setToolsCache((prev) => ({ ...prev, [id]: 'loading' }))
+      listMcpServerTools(id)
+        .then((res) => setToolsCache((prev) => ({ ...prev, [id]: res.tools })))
+        .catch(() => setToolsCache((prev) => ({ ...prev, [id]: 'error' })))
+    }
+  }
 
   const handleAdd = async () => {
     if (!serverId.trim()) return
@@ -226,35 +244,60 @@ export function McpSettings({
       {status && status.servers.length > 0 && (
         <div className="mcp-server-list">
           {status.servers.map((s) => (
-            <div key={s.serverId} className="mcp-server-row">
-              <div className="mcp-server-info">
-                <span className="mcp-server-id">{s.serverId}</span>
-                <span className="mcp-server-transport">{s.transport ?? '—'}</span>
-                <StatusBadge state={s} />
-                {s.error && s.status === 'error' && (
-                  <span className="mcp-server-error" title={s.error}>
-                    {s.lastErrorClass ? `[${s.lastErrorClass}] ` : ''}{s.error.slice(0, 60)}
-                  </span>
-                )}
-              </div>
-              <div className="mcp-server-actions">
-                {(s.status === 'connected' || s.status === 'degraded' || s.status === 'error') && (
+            <div key={s.serverId}>
+              <div className="mcp-server-row">
+                <div className="mcp-server-info">
+                  <span className="mcp-server-id">{s.serverId}</span>
+                  <span className="mcp-server-transport">{s.transport ?? '—'}</span>
+                  <StatusBadge state={s} />
+                  {s.error && s.status === 'error' && (
+                    <span className="mcp-server-error" title={s.error}>
+                      {s.lastErrorClass ? `[${s.lastErrorClass}] ` : ''}{s.error.slice(0, 60)}
+                    </span>
+                  )}
+                </div>
+                <div className="mcp-server-actions">
+                  {s.toolCount > 0 && (
+                    <button
+                      className="btn-mini"
+                      onClick={() => toggleTools(s.serverId)}
+                      title="查看该服务器暴露的工具"
+                    >
+                      {toolsOpen === s.serverId ? '收起' : '工具'}
+                    </button>
+                  )}
+                  {(s.status === 'connected' || s.status === 'degraded' || s.status === 'error') && (
+                    <button
+                      className="btn-mini"
+                      onClick={() => onRestart(s.serverId)}
+                      title="重新连接"
+                    >
+                      重启
+                    </button>
+                  )}
                   <button
-                    className="btn-mini"
-                    onClick={() => onRestart(s.serverId)}
-                    title="重新连接"
+                    className="btn-mini danger"
+                    onClick={() => onRemove(s.serverId)}
+                    title="删除服务器"
                   >
-                    重启
+                    删除
                   </button>
-                )}
-                <button
-                  className="btn-mini danger"
-                  onClick={() => onRemove(s.serverId)}
-                  title="删除服务器"
-                >
-                  删除
-                </button>
+                </div>
               </div>
+              {toolsOpen === s.serverId && (
+                <div className="mcp-tools-list">
+                  {toolsCache[s.serverId] === 'loading' && <div className="meta">加载工具中…</div>}
+                  {toolsCache[s.serverId] === 'error' && <div className="meta warn">获取工具列表失败</div>}
+                  {Array.isArray(toolsCache[s.serverId]) && (
+                    (toolsCache[s.serverId] as McpServerToolsResponse['tools']).map((tool) => (
+                      <div key={tool.name} className="mcp-tool-row">
+                        <span className="mcp-tool-name">{tool.name}</span>
+                        <span className="mcp-tool-desc" title={tool.description}>{tool.description}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

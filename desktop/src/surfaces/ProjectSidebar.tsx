@@ -12,7 +12,7 @@ import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 
 
-const CORE_SURFACES: Surface[] = ['workspace', 'mission', 'automations']
+const CORE_SURFACES: Surface[] = ['workspace', 'mission', 'automations', 'attention']
 const TOOL_SURFACES: Surface[] = ['git', 'skills', 'insights', 'delegation', 'council', 'hooks']
 
 const NAV_ICONS: Record<Surface, LucideIcon> = {

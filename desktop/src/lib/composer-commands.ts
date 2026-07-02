@@ -1,8 +1,8 @@
-// Composer slash commands (D3). Only desktop-actionable commands live here —
-// agent prompt-template slashes (e.g. /goal) are intentionally out of scope so
-// the menu never promises behavior the shell can't execute. The command list
-// is built with action closures by the surface; filtering/detection are pure
-// (unit-tested under node:test).
+// Composer slash commands (D3). The local menu covers desktop-actionable
+// commands; anything else starting with '/' passes through to the server,
+// where POST /prompt runs the full resolveAppPromptInput translation (same
+// slash ecosystem as the TUI). The command list is built with action closures
+// by the surface; filtering/detection are pure (unit-tested under node:test).
 
 export interface ComposerCommand {
   /** Display name including the leading slash, e.g. '/rewind'. */
@@ -45,20 +45,3 @@ export function detectSlash(text: string, caret: number): SlashToken | null {
   return { query: text.slice(1, caret), start: 0, end: text.length }
 }
 
-/**
- * Guard: is `input` a recognized slash command (or non-slash text)?
- * Returns false only for inputs that START with '/' but don't match any known
- * command name (exact or prefix-with-args). Non-slash input returns true —
- * the guard only protects against accidentally sending unknown `/...` tokens
- * to the agent, which would be misinterpreted as a literal request.
- * Mirrors TUI's resolveAppPromptInput returning null for unknown slashes.
- * Pure.
- */
-export function isKnownSlashCommand(input: string, commands: ComposerCommand[]): boolean {
-  const trimmed = input.trim()
-  if (!trimmed.startsWith('/')) return true
-  // Only the command name (first token) participates in matching.
-  // Arguments such as "/rewind 5" or "/review max" are passed through.
-  const name = trimmed.split(/\s/)[0]!
-  return commands.some((c) => c.name === name || c.name.startsWith(`${name} `))
-}

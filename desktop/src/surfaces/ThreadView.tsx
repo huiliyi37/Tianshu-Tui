@@ -90,6 +90,8 @@ export function ThreadView(props: {
   const composerObserverRef = useRef<ResizeObserver | null>(null)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const openImage = useCallback((src: string) => setLightbox(src), [])
+  // Watchdog "继续执行" — resume a run the recovery quota stopped.
+  const handleWatchdogContinue = useCallback(() => onSend('continue'), [onSend])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
 
@@ -292,13 +294,14 @@ export function ThreadView(props: {
       name: '/review',
       desc: 'L2 审查 · 单审查员',
       example: '/review [关注点描述]',
-      run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L2". This triggers L2 adversarial verifier.'),
+      // Raw slash → server resolveAppPromptInput translates (single source of truth).
+      run: () => onSend('/review'),
     },
     {
       name: '/review max',
       desc: 'L3 审查 · 编队 5 审查员',
       example: '/review max [关注点描述]',
-      run: () => onSend('Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="L3". This triggers L3 Review Squadron (5 inspectors).'),
+      run: () => onSend('/review max'),
     },
     {
       name: '/theme',
@@ -314,6 +317,19 @@ export function ThreadView(props: {
       desc: '创建实施方案',
       example: '/plan <功能描述>',
       run: () => onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.'),
+    },
+    {
+      name: '/write-plan',
+      desc: '写实现计划文档 · 先调研后设计',
+      example: '/write-plan <功能描述>',
+      // Needs args — prefill the composer instead of firing a bare command.
+      run: () => setInput('/write-plan '),
+    },
+    {
+      name: '/plan-close',
+      desc: '关闭计划 · 归档并总结偏差',
+      example: '/plan-close <计划 slug>',
+      run: () => setInput('/plan-close '),
     },
     {
       name: '/team',
@@ -659,6 +675,7 @@ export function ThreadView(props: {
                       onOpenImage={openImage}
                       domainGlyph={domainGlyph}
                       domainName={activeDomain?.name}
+                      onContinue={handleWatchdogContinue}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -975,16 +992,19 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
-  a.domainGlyph === b.domainGlyph && a.domainName === b.domainName
+  a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
+  a.onContinue === b.onContinue
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName, onContinue }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
   onOpenImage?: (src: string) => void
   domainGlyph?: string
   domainName?: string
+  /** Resume a run stopped by the watchdog quota (sends "continue"). */
+  onContinue?: () => void
 }) {
   if (block.kind === 'user') {
     return (
@@ -1090,7 +1110,6 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
     const tag = stopped
       ? (w.stopReason === 'session-total' ? '配额耗尽'
         : w.stopReason === 'consecutive' ? '连续上限'
-        : w.stopReason === 'suppressed' ? '已抑制'
         : '已停止')
       : '自动恢复'
     const quota = `${w.sessionTotal}/12`
@@ -1108,6 +1127,9 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
           {' '}
           <span className="watchdog-quota">会话配额 {quota} · 连续 {w.consecutive}/3</span>
         </div>
+        {stopped && onContinue && (
+          <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
+        )}
       </div>
     )
   }

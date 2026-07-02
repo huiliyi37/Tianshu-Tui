@@ -21,6 +21,7 @@ import { BrowserPanel } from './BrowserPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
 import { isAutonomous } from '../lib/autonomy'
+import { useUiState } from '../state/store'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import {
   AlertDialog,
@@ -67,6 +68,18 @@ export function ReviewPanel(props: {
   const autonomous = isAutonomous(approvalMode)
   const [enabledTabs] = useEnabledTabs()
   const [tab, setTab] = useState<ReviewTab>('review')
+
+  // External tab-focus requests (e.g. ArtifactCard "Review" in the thread).
+  const { reviewTabRequest } = useUiState()
+  const seenTabReq = useRef(0)
+  useEffect(() => {
+    if (!reviewTabRequest || reviewTabRequest.rev === seenTabReq.current) return
+    seenTabReq.current = reviewTabRequest.rev
+    const requested = reviewTabRequest.tab as ReviewTab
+    if (['review', 'plan', 'task', 'github', 'wt', 'files', 'canvas', 'browser'].includes(requested)) {
+      setTab(requested)
+    }
+  }, [reviewTabRequest])
 
   // Tabs scroll & overflow detection
   const tabsListRef = useRef<HTMLDivElement>(null)

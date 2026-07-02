@@ -388,6 +388,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     }
     case 'watchdog_recovery': {
+      // Suppressed stalls (approval modal in flight) — the modal already owns
+      // the user's attention; a second card would be noise.
+      if (ev.data.stopReason === 'suppressed') return next
       next.private_textOpen = false
       next.private_thinkingOpen = false
       const autoContinue = ev.data.autoContinue === true
@@ -443,6 +446,13 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     case 'status':
       next.status = String(ev.data.status ?? next.status ?? '')
+      return next
+    case 'done':
+      // Run settled — reflect the final status immediately instead of waiting
+      // for the next sessions poll, and close any streaming affordances.
+      next.status = String(ev.data.status ?? next.status ?? '')
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
       return next
     case 'approval_required':
       next.pendingApproval = {

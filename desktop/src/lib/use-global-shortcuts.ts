@@ -6,6 +6,7 @@ export const SURFACE_ORDER: Surface[] = [
   'workspace',
   'mission',
   'automations',
+  'attention',
   'skills',
   'git',
   'insights',
