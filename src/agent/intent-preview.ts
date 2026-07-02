@@ -1,5 +1,6 @@
 import type { PheromoneRef, Sensorium, StrategyProfile } from './sensorium.js'
 import type { VigorState } from './vigor.js'
+import { matchesDeadEnd, normalizeDeadEndTarget } from './dead-end-match.js'
 
 export interface IntentPreview {
   summary: string
@@ -58,17 +59,11 @@ export interface BuildIntentPreviewInput {
 }
 
 /**
- * 兼容历史 dead-end path 的格式：旧数据存的是 `summarizeTarget` 生成的
- * `处理 ${target}` 摘要（带中文前缀与可能的 `...` 截断尾）；新数据直接存原始 target。
- * 提取出实际内容用于与 recentTargets 关联比对。
- *
- * 不依赖特定前缀常量做相等判断（开源项目文案可能本地化），用「剥离已知摘要前缀」
- * 兜底：能剥离则取剥离后内容，否则原样返回（新格式 / 自定义内容）。
+ * 提取 dead-end path 的实际内容用于显示与关联比对。
+ * 委托共享 normalizeDeadEndTarget（剥摘要前缀 + cd 样板 + 截断尾）。
  */
 function extractDeadEndPath(path: string): string {
-  // 兼容旧摘要格式 `处理 xxx` / `处理 xxx...`
-  if (path.startsWith('处理 ')) return path.slice(3).replace(/\.\.\.$/, '')
-  return path
+  return normalizeDeadEndTarget(path)
 }
 
 /**
@@ -97,14 +92,10 @@ function relevantDeadEnds(
     // 精确匹配命中 → 直接返回，不走模糊路径
   }
 
-  // P0 兼容路径：path 子串匹配（覆盖无 taskId 的历史数据）
+  // P0 兼容路径：path 子串匹配（覆盖无 taskId 的历史数据）——委托共享 matchesDeadEnd
   const targets = recentTargets?.filter(t => t && !t.startsWith('<')) ?? []
   if (targets.length === 0) return []
-  return deadEnds.filter(de => {
-    const extracted = extractDeadEndPath(de.path)
-    if (!extracted || extracted === '继续执行当前计划') return false
-    return targets.some(t => extracted.includes(t) || t.includes(extracted))
-  })
+  return deadEnds.filter(de => matchesDeadEnd(de.path, targets))
 }
 
 export function shouldShowIntent(input: BuildIntentPreviewInput): boolean {
