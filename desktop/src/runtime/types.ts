@@ -180,6 +180,8 @@ export type SessionEventType =
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'
+  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
+  | 'watchdog_recovery'
 
 export interface SessionEvent {
   seq: number

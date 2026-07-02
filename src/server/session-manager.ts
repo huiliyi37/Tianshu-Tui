@@ -37,6 +37,7 @@ import {
   type PlanDocument,
 } from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
+import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
@@ -84,6 +85,8 @@ export type SessionEventType =
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'
+  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
+  | 'watchdog_recovery'
 
 export interface SessionEvent {
   seq: number
@@ -489,6 +492,17 @@ interface InternalSession {
    * report consistent elapsed. Lazily created.
    */
   delegationStartedAt?: Map<string, number>
+  /** Watchdog stall 恢复状态机（与 TUI 共享实现），随 session 生命周期。 */
+  watchdogPolicy?: WatchdogRecoveryPolicy
+  /** 最近一次 onAbort 携带的 reason（watchdog 家族判定用）。每次 run 起跑清空。 */
+  lastAbortReason?: string
+  /** onAbort 时刻是否有审批挂起——必须在此捕获，run().finally 的 rejectAllPending 会清掉 pending map。 */
+  abortWhileApprovalPending?: boolean
+  /** 最近一次审批被拒的时刻（this.now() 读数），驱动 grace 窗口抑制。 */
+  lastApprovalDeniedAt?: number
+  /** 标记下一次 run 是 watchdog 自动续跑（跳过 recordUserSubmit，与 TUI 的
+   *  onSubmitCallback 直呼路径对齐——自动续跑不得重置 consecutive）。 */
+  watchdogAutoResubmit?: boolean
 }
 
 const REDACTED = '[REDACTED]'
@@ -496,6 +510,10 @@ const SENSITIVE_KEY = /(?:api[_-]?key|token|secret|password|authorization)/i
 
 /** Tools that spawn worker agents — surfaced as delegation-tree nodes (N3). */
 const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate'])
+
+/** 审批拒绝后的 watchdog 续跑抑制窗口——与 TuiApp.APPROVAL_STALL_GRACE_MS 对齐：
+ *  拒绝后立刻 stall 的自动 continue 只会重发同一个被拒调用（deny→continue→deny 环）。 */
+const WATCHDOG_APPROVAL_GRACE_MS = 5_000
 
 /** Cap on concurrent user-dispatched background workers per session (guards the
  *  shared coordinator from being swamped). */
@@ -926,6 +944,14 @@ export class RuntimeSessionManager {
   run(id: string, prompt: string, images?: string[]): boolean {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    const wasAutoResubmit = session.watchdogAutoResubmit === true
+    session.watchdogAutoResubmit = false
+    session.lastAbortReason = undefined
+    session.abortWhileApprovalPending = false
+    session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
+    // 用户主动提交恢复续跑预算；自动续跑注入的 'continue' 不算（与 TUI 的
+    // onSubmitCallback 直呼路径一致，否则 consecutive cap 形同虚设）。
+    if (!wasAutoResubmit) session.watchdogPolicy.recordUserSubmit()
     // Materialize the on-disk log before appending — otherwise a reconnecting
     // viewer (since=0) would replay only this run's events, not the history.
     this.ensureEvents(session)
@@ -976,6 +1002,7 @@ export class RuntimeSessionManager {
         this.touch(session)
         this.append(session, 'done', { status: session.record.status })
         this.persistRecord(session)
+        this.maybeWatchdogAutoContinue(session)
       })
     return true
   }
@@ -1729,6 +1756,7 @@ export class RuntimeSessionManager {
       result.editedInput = editedInput
     }
     pend.resolve(result)
+    if (!approved) s.lastApprovalDeniedAt = this.now()
     this.recountApprovals(s)
     this.append(s, 'approval_resolved', {
       requestId,
@@ -2033,6 +2061,9 @@ export class RuntimeSessionManager {
         }
       },
       onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {
+        // 终态才计进度单元；isError === undefined 是流式 chunk（TUI 侧同款过滤，
+        // 否则单次长输出工具就能伪装稀疏 stall）。
+        if (isError !== undefined) session.watchdogPolicy?.recordToolResult()
         this.append(session, 'tool_result', {
           id: toolId,
           name,
@@ -2055,10 +2086,16 @@ export class RuntimeSessionManager {
         }
         this.scanArtifacts(session)
       },
-      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) =>
-        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) }),
+      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
+        session.watchdogPolicy?.recordTurnComplete()
+        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
+      },
       onError: (err) => this.append(session, 'error', { error: redactText(err.message) }),
-      onAbort: () => {
+      onAbort: (reason) => {
+        session.lastAbortReason = reason
+        // 在 finally 的 rejectAllPending 清场之前捕获审批挂起态。
+        session.abortWhileApprovalPending =
+          [...session.pending.values()].some((p) => p.kind === 'approval')
         if (session.record.status === 'running') session.record.status = 'aborted'
       },
       onCheckpoint: (hash) => this.append(session, 'checkpoint', { hash }),
@@ -2108,6 +2145,7 @@ export class RuntimeSessionManager {
         pend.timer = setTimeout(() => {
           if (session.pending.delete(requestId)) {
             resolve({ approved: false })
+            session.lastApprovalDeniedAt = this.now()
             this.recountApprovals(session)
             this.append(session, 'approval_resolved', { requestId, decision: 'timeout' })
           }
@@ -2116,6 +2154,36 @@ export class RuntimeSessionManager {
       session.pending.set(requestId, pend)
       this.recountApprovals(session)
       this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+    })
+  }
+
+  /**
+   * Watchdog stall 自动恢复（桌面端对齐 TUI v3）：run settle 后判定是否注入
+   * 'continue'。必须经 setImmediate 延迟——给排队中的用户 HTTP 动作（run/archive）
+   * 让路，执行前复核会话仍处 aborted 且无人抢跑（TUI「让位守卫」的桌面对应物）。
+   */
+  private maybeWatchdogAutoContinue(session: InternalSession): void {
+    const reason = session.lastAbortReason
+    if (!reason?.startsWith('watchdog')) return
+    const policy = session.watchdogPolicy
+    if (!policy) return
+    const suppressed = session.abortWhileApprovalPending === true
+      || (session.lastApprovalDeniedAt != null
+          && this.now() - session.lastApprovalDeniedAt < WATCHDOG_APPROVAL_GRACE_MS)
+    setImmediate(() => {
+      // 让位守卫：用户已重新驱动（running）、状态被改（非 aborted）或已归档 → 放弃。
+      if (session.running || session.record.status !== 'aborted' || session.record.archived) return
+      const decision = policy.onStall({ suppressed })
+      this.append(session, 'watchdog_recovery', {
+        reason,
+        autoContinue: decision.autoContinue,
+        ...(decision.stopReason ? { stopReason: decision.stopReason } : {}),
+        ...(decision.autoContinue ? { dense: decision.dense === true } : {}),
+        ...policy.snapshot(),
+      })
+      if (!decision.autoContinue) return
+      session.watchdogAutoResubmit = true
+      if (!this.run(session.record.id, 'continue')) session.watchdogAutoResubmit = false
     })
   }
 
@@ -2138,6 +2206,7 @@ export class RuntimeSessionManager {
   }
 
   private rejectAllPending(session: InternalSession, reason: string): void {
+    if (session.pending.size > 0) session.lastApprovalDeniedAt = this.now()
     for (const [requestId, pend] of session.pending) {
       if (pend.timer) clearTimeout(pend.timer)
       pend.resolve({ approved: false })

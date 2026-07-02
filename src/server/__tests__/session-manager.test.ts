@@ -1,5 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+
+/** finally 是微任务、续跑决策在 setImmediate 宏任务——一个 setTimeout(5) 覆盖两者。 */
+const settle = () => new Promise((r) => setTimeout(r, 5))
 import { RuntimeSessionManager, type ManagedAgent, type ModelOption, type DelegateActivityUpdate } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'
@@ -15,9 +18,12 @@ class FakeAgent implements ManagedAgent {
   /** S — captures the mode this agent was built with + any live switches. */
   builtApprovalMode?: string
   liveApprovalMode?: string
+  /** 每次 run 收到的 prompt，按序记录（含自动续跑注入的 'continue'）。 */
+  prompts: string[] = []
   private resolveRun?: () => void
 
-  run(_prompt: string, cb: AgentCallbacks): Promise<void> {
+  run(prompt: string, cb: AgentCallbacks): Promise<void> {
+    this.prompts.push(prompt)
     this.callbacks = cb
     return new Promise<void>((res) => { this.resolveRun = res })
   }
@@ -25,6 +31,12 @@ class FakeAgent implements ManagedAgent {
   abort(): void {
     this.aborted = true
     this.callbacks?.onAbort()
+    this.resolveRun?.()
+  }
+  /** 模拟 agent 内部 watchdog 自中止：带 reason 的 onAbort + run settle。
+   *  与 abort()（用户中止，无 reason）区分——manager.abort 不走这条路。 */
+  watchdogAbort(reason = 'watchdog:goal'): void {
+    this.callbacks?.onAbort(reason)
     this.resolveRun?.()
   }
   setApprovalMode(mode: string): void { this.liveApprovalMode = mode }
@@ -751,4 +763,144 @@ test('delegate: coexists with a running main turn (anytime dispatch)', () => {
   // Background dispatch must succeed even while the main turn runs.
   const res = manager.delegate(s.id, { objective: 'side quest' })
   assert.equal(res.ok, true)
+})
+
+// ── Watchdog stall auto-recovery (桌面端对齐 TUI v3) ────────────────────────
+
+test('watchdog:goal 中止后自动续跑：agent 收到第二次 run(continue)，status 回到 running', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  agents[0]!.watchdogAbort('watchdog:goal')
+  await settle()
+
+  assert.deepEqual(agents[0]!.prompts, ['go', 'continue'])
+  assert.equal(manager.getSession(s.id)!.status, 'running', '续跑后不停留在 aborted')
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'watchdog_recovery')
+  assert.ok(ev, '必须追加 watchdog_recovery 事件')
+  assert.equal(ev!.data.autoContinue, true)
+})
+
+test('普通 watchdog（非 goal）同样自动续跑', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  agents[0]!.watchdogAbort('watchdog')
+  await settle()
+  assert.deepEqual(agents[0]!.prompts, ['go', 'continue'])
+  assert.equal(manager.getSession(s.id)!.status, 'running')
+})
+
+test('用户 abort（无 reason）与 convergence 中止不自动续跑', async () => {
+  const { manager, agents } = makeManager()
+  const a = manager.createSession({ prompt: 'a' })
+  manager.abort(a.id)                       // FakeAgent.abort → onAbort() 无 reason
+  await settle()
+  assert.deepEqual(agents[0]!.prompts, ['a'], '用户中止不得续跑')
+  assert.equal(manager.getSession(a.id)!.status, 'aborted')
+
+  const b = manager.createSession({ prompt: 'b' })
+  agents[1]!.callbacks!.onAbort('convergence:no-tool')
+  agents[1]!.finish()
+  await settle()
+  assert.deepEqual(agents[1]!.prompts, ['b'], 'convergence 中止不得续跑')
+})
+
+test('密集 stall（tiny-turn 循环）12 次后停手，事件含 stopReason=session-total', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  for (let i = 0; i < 15; i++) {
+    a.callbacks!.onTurnComplete({}, 1, false)   // tiny-turn：重置 consecutive
+    a.watchdogAbort('watchdog:goal')
+    await settle()
+  }
+  const continues = a.prompts.filter((p) => p === 'continue').length
+  assert.equal(continues, 12, `session-total cap 应在 12 次后停手，实得 ${continues}`)
+  assert.equal(manager.getSession(s.id)!.status, 'aborted', '停手后落 aborted 等用户')
+  const evs = manager.getEvents(s.id, 0)!.events.filter((e) => e.type === 'watchdog_recovery')
+  assert.equal(evs[evs.length - 1]!.data.stopReason, 'session-total')
+})
+
+test('稀疏 stall（每次间隔 2 个工具批）不消耗配额，15 次全续跑', async () => {
+  const { manager, agents } = makeManager()
+  manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  for (let i = 0; i < 15; i++) {
+    for (let j = 0; j < 2; j++) {
+      a.callbacks!.onToolResult(`t${i}-${j}`, 'read_file', 'ok', false)
+      a.callbacks!.onTurnComplete({}, 1, false)
+    }
+    a.watchdogAbort('watchdog:goal')
+    await settle()
+  }
+  assert.equal(a.prompts.filter((p) => p === 'continue').length, 15)
+})
+
+test('流式 chunk（isError=undefined）不计进度：密集 stall 仍 12 次停手', async () => {
+  const { manager, agents } = makeManager()
+  manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  for (let i = 0; i < 15; i++) {
+    for (let j = 0; j < 4; j++) a.callbacks!.onToolResult(`t${i}`, 'bash', `chunk${j}`)  // 无 isError
+    a.callbacks!.onToolResult(`t${i}`, 'bash', 'done', false)   // 终态
+    a.callbacks!.onTurnComplete({}, 1, false)
+    // 每周期真实进度 = 2 单元 < 4 → 密集
+    a.watchdogAbort('watchdog:goal')
+    await settle()
+  }
+  const continues = a.prompts.filter((p) => p === 'continue').length
+  assert.equal(continues, 12, `chunk 若被误计会伪装稀疏无限续跑，实得 ${continues}`)
+})
+
+test('审批挂起时 stall → suppressed：不续跑，事件可观测', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  void a.callbacks!.onApprovalRequired('t1', 'bash', { command: 'rm x' })  // 挂起不答复
+  a.watchdogAbort('watchdog:goal')
+  await settle()
+  assert.deepEqual(a.prompts, ['go'], '审批挂起的 stall 不得续跑')
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'watchdog_recovery')
+  assert.equal(ev!.data.stopReason, 'suppressed')
+})
+
+test('审批拒绝后 5s grace 窗口内的 stall 被抑制，窗口外恢复续跑（假时钟）', async () => {
+  let clock = 1_000_000
+  const agents: FakeAgent[] = []
+  const manager = new RuntimeSessionManager({
+    createAgent: () => { const a = new FakeAgent(); agents.push(a); return a },
+    defaultCwd: '/tmp/work',
+    now: () => clock,
+  })
+  const s = manager.createSession({ prompt: 'go' })
+  const sid = s.id
+  const a = agents[0]!
+  const pending = a.callbacks!.onApprovalRequired('t1', 'bash', { command: 'rm x' })
+  // requestApproval 用 toolId 作 requestId（session-manager.ts:2101 已核实）
+  manager.answerIntervention(sid, 't1', 'reject')
+  assert.deepEqual(await pending, { approved: false })
+
+  clock += 1_000                              // 拒绝后 1s——窗口内
+  a.watchdogAbort('watchdog:goal')
+  await settle()
+  assert.deepEqual(a.prompts, ['go'], 'grace 窗口内不得续跑')
+
+  clock += 10_000                             // 拒绝后 11s——窗口外
+  manager.run(sid, 'again')                   // 用户重新驱动
+  a.watchdogAbort('watchdog:goal')
+  await settle()
+  assert.equal(a.prompts.filter((p) => p === 'continue').length, 1, '窗口外恢复续跑')
+})
+
+test('abort 后用户抢先提交新 prompt：自动续跑让位', async () => {
+  const { manager, agents } = makeManager()
+  const s = manager.createSession({ prompt: 'go' })
+  const a = agents[0]!
+  a.watchdogAbort('watchdog:goal')
+  // 只排干微任务（run().finally 是 promise 回调），不让 setImmediate 宏任务先跑
+  for (let i = 0; i < 10; i++) await Promise.resolve()
+  assert.equal(manager.run(s.id, '用户新指令'), true, '此刻 running 已清，用户可提交')
+  await settle()
+  assert.deepEqual(a.prompts, ['go', '用户新指令'], '自动 continue 必须让位给用户')
+  const ev = manager.getEvents(s.id, 0)!.events.find((e) => e.type === 'watchdog_recovery')
+  assert.equal(ev, undefined, '让位时不产生 recovery 事件')
 })
