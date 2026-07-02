@@ -234,6 +234,12 @@ export interface EnvironmentInfo {
   platform: string
   /** Windows only: effective `git config core.autocrlf` ('true'|'input'|'false'), undefined when unset. */
   gitAutocrlf?: string
+  /** Shell info — Windows 上 Git Bash 可用性 + 当前降级状态。 */
+  shell?: {
+    kind: 'bash' | 'powershell' | 'cmd' | 'sh'
+    gitBashAvailable: boolean
+    fallbackReason?: string
+  }
 }
 
 export interface ProjectTemplatesStatus {

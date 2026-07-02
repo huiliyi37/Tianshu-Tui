@@ -19,7 +19,7 @@ export interface PythonEnvInfo {
   git: ToolVersion
   node: ToolVersion
   /** JVM toolchain — surfaced so /doctor can show whether GUI-launched PATH
-   *  resolution actually recovered them (the maven/java pain point). */
+   * resolution actually recovered them (the maven/java pain point). */
   java: ToolVersion
   maven: ToolVersion
   gradle: ToolVersion
@@ -28,6 +28,14 @@ export interface PythonEnvInfo {
    *  Windows only. Undefined when unset, git missing, or not Windows. `true` is a
    *  mixed-EOL hazard: checkouts get CRLF while the agent writes LF. */
   gitAutocrlf?: string
+  /** Shell info — Windows 上 Git Bash 是否可用、当前降级到什么 shell。
+   *  桌面端据此决定是否弹 Git 安装引导面板。 */
+  shell?: {
+    kind: 'bash' | 'powershell' | 'cmd' | 'sh'
+    gitBashAvailable: boolean
+    /** 降级原因（gitBashAvailable=false 时有值）。 */
+    fallbackReason?: string
+  }
 }
 
 const PYTHON_INSTALL_GUIDE: Record<string, string> = {
