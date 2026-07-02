@@ -5,7 +5,7 @@ import { createStigmergyRuntimeHook } from '../hooks/stigmergy-hook.js'
 import type { PheromoneDeposit, PheromoneQueryResult } from '../../context/stigmergy.js'
 import type { ToolHistoryEntry } from '../../prompt/volatile.js'
 
-function makeContext(history: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target'>> = []) {
+function makeContext(history: Array<Pick<ToolHistoryEntry, 'tool' | 'status' | 'target' | 'errorClass'>> = []) {
   return createRuntimeHookContext({
     cwd: '/tmp/project',
     turn: 3,
@@ -91,6 +91,45 @@ describe('createStigmergyRuntimeHook', () => {
     await hook.run(ctx, { name: 'bash', success: false, target: 'npm test' })
 
     assert.deepEqual(deposits, [{ path: 'npm test', signal: 'dead-end', strength: 0.9 }])
+  })
+
+  it('does NOT deposit dead-end when current bash succeeds (regression guard)', async () => {
+    const deposits: PheromoneDeposit[] = []
+    const hook = makeHook({ deposits })
+    const ctx = makeContext([
+      { tool: 'bash', status: 'failed', target: 'npm test' },
+      { tool: 'bash', status: 'failed', target: 'npm test' },
+    ])
+
+    await hook.run(ctx, { name: 'bash', success: true, target: 'npm test' })
+
+    assert.ok(!deposits.some(d => d.signal === 'dead-end'), 'current bash succeeded → no dead-end')
+  })
+
+  it('does NOT deposit dead-end for different targets (no cross-contamination)', async () => {
+    const deposits: PheromoneDeposit[] = []
+    const hook = makeHook({ deposits })
+    const ctx = makeContext([
+      { tool: 'bash', status: 'failed', target: 'npm test' },
+      { tool: 'bash', status: 'failed', target: 'npx tsc --noEmit' },
+    ])
+
+    await hook.run(ctx, { name: 'bash', success: false, target: 'ls' })
+
+    assert.ok(!deposits.some(d => d.signal === 'dead-end'), 'different targets must not accumulate')
+  })
+
+  it('does NOT deposit dead-end for timeout/environment-class failures', async () => {
+    const deposits: PheromoneDeposit[] = []
+    const hook = makeHook({ deposits })
+    const ctx = makeContext([
+      { tool: 'bash', status: 'failed', target: 'sleep 99', errorClass: 'timeout' },
+      { tool: 'bash', status: 'failed', target: 'sleep 99', errorClass: 'timeout' },
+    ])
+
+    await hook.run(ctx, { name: 'bash', success: false, target: 'sleep 99', failureClass: 'timeout' })
+
+    assert.ok(!deposits.some(d => d.signal === 'dead-end'), 'timeout is slow, not a dead-end')
   })
 
   it('refreshes loaded pheromones after processing', async () => {
