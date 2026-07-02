@@ -31,6 +31,7 @@ const GROUPS: Array<{ title: string; rows: ShortcutRow[] }> = [
       { keys: [`${MOD}+B`], desc: '侧栏开关' },
       { keys: [`${MOD}+Shift+B`], desc: '审查面板开关' },
       { keys: [`${MOD}+J`, 'Ctrl+`'], desc: '终端开关' },
+      { keys: [`${MOD}+;`], desc: '旁路提问（不影响主任务的轻会话）' },
       { keys: [`${MOD}+.`], desc: 'Zen 模式（隐藏侧栏与面板）' },
       { keys: [`${MOD}+O`], desc: '视图模式循环：标准 → 详尽 → 摘要' },
     ],
@@ -43,8 +44,19 @@ const GROUPS: Array<{ title: string; rows: ShortcutRow[] }> = [
       { keys: ['Shift+Tab'], desc: 'Plan / Agent 模式切换' },
       { keys: ['Esc'], desc: '清空输入；空输入且运行中 → 停止' },
       { keys: ['Esc Esc'], desc: '回滚菜单（空输入连按两次）' },
-      { keys: ['@'], desc: '文件引用补全' },
+      { keys: ['@'], desc: '文件引用补全（消息中的 @file 可点击预览）' },
       { keys: ['/'], desc: '斜杠命令菜单（行首）' },
+    ],
+  },
+  {
+    title: '功能速查',
+    rows: [
+      { keys: ['+ 菜单'], desc: '议事会 ♟ / 团队模式 ⬡ / 派子代理 / 模型切换 / 星域' },
+      { keys: ['/effort'], desc: '推理强度选择面板（Auto/Max/High/Medium/Low/Off）' },
+      { keys: ['点击 @file'], desc: '右侧抽屉预览文件内容（语法高亮）' },
+      { keys: ['Insights'], desc: '成本统计 + 缓存命中率 + DeepSeek 余额查询' },
+      { keys: ['/council'], desc: '多模型议事会（天权/天府/天璇三席评审）' },
+      { keys: ['/team'], desc: '团队模式（多 agent 并行执行计划）' },
     ],
   },
 ]
