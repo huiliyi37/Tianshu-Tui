@@ -395,12 +395,24 @@ export class TurnOrchestrator {
           // call trySessionSplit → llmCompact (a network call) whose internal
           // abort cooperation is exactly the unreliable mechanism this commit
           // backstops. Without the race, a watchdog abort can't free a wedge here.
-          const { action } = await rejectOnAbort(
-            this.deps.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
-            signal!,
-            'convergence',
-          )
-          if (action === 'abort') return
+          //
+          // Also disarm the hard-stall watchdog during convergence: llmCompact
+          // is a legitimate lengthy operation (30-60s on slow models), not a
+          // wedge. Informational heartbeats stay alive so the UI doesn't freeze.
+          const convHeartbeat = this.deps.getHeartbeat()
+          convHeartbeat?.disarmWatchdog()
+          let convAction: string
+          try {
+            const convResult = await rejectOnAbort(
+              this.deps.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
+              signal!,
+              'convergence',
+            )
+            convAction = convResult.action
+          } finally {
+            convHeartbeat?.rearmWatchdog()
+          }
+          if (convAction === 'abort') return
         }
 
         // Step 6e: U6 replan check — detect deviation from the plan trace and
@@ -554,6 +566,12 @@ export class TurnOrchestrator {
           }
         } finally {
           streamHeartbeat?.rearmWatchdog()
+
+        // Tick after stream settles: the last text/tool delta may have been
+        // tens of seconds ago (thinking phase, tool-call serialization). Reset
+        // the silence clock now so the downstream tool-execution / no-tool
+        // boundary steps start from a fresh baseline, not from mid-stream.
+        this.deps.getHeartbeat()?.tick('stream-done')
         }
 
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact
@@ -699,7 +717,17 @@ export class TurnOrchestrator {
           // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
           // 一旦卡住，仅靠 240s 心跳看门狗才能解锁 → run() 长时间不 settle、会话假死。
           // 这里把整批与 abort 信号竞速，Esc 后立即抛 AbortError → 下方 catch 走 onAbort。
-          const r = await rejectOnAbort(
+          //
+          // 同时 disarm 看门狗的 hardStall abort：工具执行期间（bash 编译/测试
+          // 可能超 120s），onToolUse→onToolResult 之间无 tick，看门狗会将正常耗时
+          // 误判为楔死。保留 informational heartbeat（UI 仍显示"still working"），
+          // 仅挂起 hardStall 熔断；工具完成后 rearm。工具级 timeout + rejectOnAbort
+          // 提供真正的 hang 保护。
+          const toolHeartbeat = this.deps.getHeartbeat()
+          toolHeartbeat?.disarmWatchdog()
+          let r: Awaited<ReturnType<typeof this.deps.executeBatch>>
+          try {
+            r = await rejectOnAbort(
             this.deps.executeBatch({
               toolUses, callbacks, turn, checkpointCreatedThisTurn,
               abortSignal: signal!,
@@ -790,6 +818,9 @@ export class TurnOrchestrator {
             'post-turn',
           )
           continue
+          } finally {
+            toolHeartbeat?.rearmWatchdog()
+          }
         }
 
         // Thinking-only turn detection: retry if model produced reasoning but no text/tools
@@ -819,24 +850,36 @@ export class TurnOrchestrator {
         // ── Goal continuation check ──
         // Delegated to GoalContinuationController — it handles tracker.check,
         // judge gating, saveGoalState, flushMeridianTurn, completeTurn, and
-        // continuation reminder injection internally.
-        const goalCheckResult = await this.deps.goalContinuation.handleGoalCheck({
-          streamedText: this.deps.state.streamedText,
-          estimatedTokens: this.deps.getEstimatedTokens(),
-          isAborted: signal?.aborted === true,
-          turn,
-          callbacks,
-          signal: signal!,
-        })
+        // continuation reminder injection internally. Wrapped in rejectOnAbort
+        // so a watchdog abort during judgeGoalCompletion (LLM call) immediately
+        // races instead of waiting for the next loop-iteration signal check.
+        const goalCheckResult = await rejectOnAbort(
+          this.deps.goalContinuation.handleGoalCheck({
+            streamedText: this.deps.state.streamedText,
+            estimatedTokens: this.deps.getEstimatedTokens(),
+            isAborted: signal?.aborted === true,
+            turn,
+            callbacks,
+            signal: signal!,
+          }),
+          signal!,
+          'goal-check',
+        )
         if (goalCheckResult.kind === 'continue') continue
 
         // ── Phantom continuation check ──
         // Only reached when goal check returned accept/finalize (goal not continuing).
-        const phantomResult = await this.deps.postTurnDecision.evaluatePhantomContinuation({
-          turn,
-          callbacks,
-          signal: signal!,
-        })
+        // Wrapped in rejectOnAbort for uniform abort cooperation across all
+        // turn-boundary steps.
+        const phantomResult = await rejectOnAbort(
+          this.deps.postTurnDecision.evaluatePhantomContinuation({
+            turn,
+            callbacks,
+            signal: signal!,
+          }),
+          signal!,
+          'phantom-check',
+        )
         if (phantomResult.shouldContinue) continue
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.

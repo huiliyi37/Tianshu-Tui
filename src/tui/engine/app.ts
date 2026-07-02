@@ -316,6 +316,13 @@ export class TuiApp {
    *  real turn completion or user submit. */
   private _watchdogAutoContinues = 0
   private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
+  /** Session-level total watchdog auto-continues — never resets. Backstops the
+   *  loophole where a tiny turn (thinking-retry / phantom-continue) resets the
+   *  consecutive counter, allowing a stall→recover→tiny-turn→reset→stall loop
+   *  to burn budget indefinitely. Capped at a higher threshold so legitimate
+   *  long goal runs don't get cut short, but runaway loops get stopped. */
+  private _watchdogSessionTotal = 0
+  private static readonly MAX_WATCHDOG_SESSION_TOTAL = 12
   /** Timestamp of the last approval denial. A watchdog abort that happens while
    *  (or just after) a tool is blocked on approval must NOT auto-continue: the
    *  resubmitted 'continue' just re-emits the same approval-blocked call, giving
@@ -2463,11 +2470,13 @@ export class TuiApp {
     const isConvergence = reason?.startsWith('convergence')
     // Goal-mode auto-continue is bounded: a turn that re-stalls every
     // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
-    // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
-    // aborts with no intervening progress, stop auto-continuing and surface a
-    // plain interrupt so the user can intervene.
+    // and burn budget. Two caps: consecutive (reset on progress) and session
+    // total (never resets). The session total backstops the loophole where a
+    // tiny turn (thinking-retry / phantom-continue) resets the consecutive
+    // counter, creating a stall→recover→tiny-turn→reset→stall loop.
+    const sessionTotalExhausted = this._watchdogSessionTotal >= TuiApp.MAX_WATCHDOG_SESSION_TOTAL
     const autoContinueExhausted = isWatchdogGoal
-      && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
+      && (this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES || sessionTotalExhausted)
     // Approval-blocked stall: never auto-continue. Re-driving 'continue' just
     // re-emits the approval-blocked tool and spins deny→continue→deny; the human
     // must approve (or redirect) instead. Show an actionable hint.
@@ -2491,10 +2500,11 @@ export class TuiApp {
       this.state.committedCount++
     })
     // Watchdog abort in goal mode: auto-resubmit so the agent continues
-    // without waiting for the user to type "continue" — but only while under
-    // the consecutive-stall cap AND not blocked on a pending/just-denied approval.
+    // without waiting for the user to type "continue" — but only while under both the consecutive-stall cap AND the session-total cap, AND not blocked
+    // on a pending/just-denied approval.
     if (isWatchdogGoal && !autoContinueExhausted && !suppressForApproval) {
       this._watchdogAutoContinues++
+      this._watchdogSessionTotal++
       this.onSubmitCallback?.('continue')
     }
     this.onAbortCallback?.()

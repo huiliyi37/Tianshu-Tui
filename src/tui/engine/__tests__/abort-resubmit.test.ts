@@ -154,3 +154,28 @@ test('挂起审批时 watchdog:goal abort 不自动续跑（等待用户批准�
   assert.equal(await pending, false, '挂起审批在 abort 时被解析为拒绝')
   assert.equal(runs.filter((r) => r === 'continue').length, 0, '审批挂起时不得自动续跑')
 })
+
+test('session 总量上限防止 tiny-turn 重置循环无限续跑', async () => {
+  // Bug: consecutive cap (3) 在任意 turn 完成时重置为 0。
+  // tiny-turn（thinking-retry / phantom-continue）只需产生微量输出
+  // 就能触发 handleTurnComplete → 重置计数器 → stall→recover→tiny-turn
+  // 循环永不停。session total cap 不重置，兜底阻止这个漏洞。
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  // 模拟 15 个 stall→recover→tiny-turn 循环
+  for (let i = 0; i < 15; i++) {
+    // watchdog:goal abort → 触发自动续跑
+    wrapCallbacksWithTuiApp(app).onAbort('watchdog:goal')
+    await tick()
+
+    // tiny-turn 完成 → 重置 consecutive cap（不重置 session total）
+    wrapCallbacksWithTuiApp(app).onTurnComplete({ output_tokens: 10 }, 1, false)
+    await tick()
+  }
+
+  // 前 12 次应自动续跑（session total cap = 12），之后停手
+  const continues = runs.filter((r) => r === 'continue').length
+  assert.equal(continues, 12, `session total cap 应在 12 次后停手，实得 ${continues}`)
+})
