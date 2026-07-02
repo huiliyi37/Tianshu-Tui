@@ -29,6 +29,8 @@ export type ConvoKind =
   | 'checkpoint'
   // T3 — mid-run user guidance echo.
   | 'steer'
+  // Watchdog stall auto-recovery — 续跑决策可观测（对齐 TUI v3）。
+  | 'watchdog_recovery'
 
 export interface ConvoBlock {
   key: string
@@ -65,6 +67,16 @@ export interface ConvoBlock {
   imageIds?: string[]
   /** Vision — legacy inline image data URLs (pre-imageIds events). */
   images?: string[]
+  /** Watchdog stall auto-recovery payload (对齐 TUI v3)。 */
+  watchdog?: {
+    reason: string
+    autoContinue: boolean
+    stopReason?: string
+    dense?: boolean
+    consecutive: number
+    sessionTotal: number
+    progressUnits: number
+  }
 }
 
 export interface EventViewState {
@@ -370,6 +382,27 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
           reason: String(ev.data.reason ?? ''),
           methods,
           severity,
+        },
+      }]
+      next.blocksRev = next.blocksRev + 1
+      return next
+    }
+    case 'watchdog_recovery': {
+      next.private_textOpen = false
+      next.private_thinkingOpen = false
+      const autoContinue = ev.data.autoContinue === true
+      next.blocks = [...next.blocks, {
+        key: `wr-${ev.seq}`,
+        kind: 'watchdog_recovery',
+        text: autoContinue ? '自动恢复中（边界停滞）' : '停滞停止',
+        watchdog: {
+          reason: String(ev.data.reason ?? ''),
+          autoContinue,
+          stopReason: ev.data.stopReason ? String(ev.data.stopReason) : undefined,
+          dense: ev.data.dense === true,
+          consecutive: Number(ev.data.consecutive ?? 0),
+          sessionTotal: Number(ev.data.sessionTotal ?? 0),
+          progressUnits: Number(ev.data.progressUnits ?? 0),
         },
       }]
       next.blocksRev = next.blocksRev + 1

@@ -933,6 +933,7 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
       b.kind === 'steer' ||
       b.kind === 'decision_shift' ||
       b.kind === 'intent_note' ||
+      b.kind === 'watchdog_recovery' ||
       isArtifactTool(b)
     ) {
       if (run) {
@@ -1080,6 +1081,33 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
         )}
         {n.action && <div className="ds-reason">{n.action}</div>}
         {n.steerHint && <div className="intent-note-steer">{n.steerHint}</div>}
+      </div>
+    )
+  }
+  if (block.kind === 'watchdog_recovery' && block.watchdog) {
+    const w = block.watchdog
+    const stopped = !w.autoContinue
+    const tag = stopped
+      ? (w.stopReason === 'session-total' ? '配额耗尽'
+        : w.stopReason === 'consecutive' ? '连续上限'
+        : w.stopReason === 'suppressed' ? '已抑制'
+        : '已停止')
+      : '自动恢复'
+    const quota = `${w.sessionTotal}/12`
+    return (
+      <div className={`decision-shift ${stopped ? 'warn' : 'info'}`}>
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>{stopped ? '⏹' : '⟳'}</span>
+          <span className="ds-domain">边界停滞恢复</span>
+          <span className="ds-tag">{tag}</span>
+        </div>
+        <div className="ds-reason">
+          {stopped
+            ? '停滞反复触发，已停止自动续跑——请检查方向或键入指令继续。'
+            : '检测到边界停滞，已自动注入 continue 恢复执行。'}
+          {' '}
+          <span className="watchdog-quota">会话配额 {quota} · 连续 {w.consecutive}/3</span>
+        </div>
       </div>
     )
   }

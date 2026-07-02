@@ -508,3 +508,53 @@ test('hook_result events accumulate and are capped at 50', () => {
   assert.equal(s.hookResults.length, 50)
   assert.equal((s.hookResults[0]!.data.results as { script: string }[])[0]!.script, './5.sh')
 })
+
+// ── watchdog_recovery (桌面端对齐 TUI v3 自动恢复可观测) ──────────────
+
+test('watchdog_recovery (autoContinue) produces a card block with snapshot', () => {
+  seq = 0
+  const s = fold([ev('watchdog_recovery', {
+    reason: 'watchdog:goal',
+    autoContinue: true,
+    dense: true,
+    consecutive: 1,
+    sessionTotal: 1,
+    progressUnits: 0,
+  })])
+  assert.equal(s.blocks.length, 1)
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'watchdog_recovery')
+  assert.equal(b.watchdog?.autoContinue, true)
+  assert.equal(b.watchdog?.reason, 'watchdog:goal')
+  assert.equal(b.watchdog?.sessionTotal, 1)
+})
+
+test('watchdog_recovery (stopReason) surfaces the stop reason', () => {
+  seq = 0
+  const s = fold([ev('watchdog_recovery', {
+    reason: 'watchdog',
+    autoContinue: false,
+    stopReason: 'session-total',
+    consecutive: 3,
+    sessionTotal: 12,
+    progressUnits: 0,
+  })])
+  const b = s.blocks[0]!
+  assert.equal(b.kind, 'watchdog_recovery')
+  assert.equal(b.watchdog?.autoContinue, false)
+  assert.equal(b.watchdog?.stopReason, 'session-total')
+})
+
+test('watchdog_recovery breaks an open text run', () => {
+  seq = 0
+  const s = fold([
+    ev('text_delta', { text: 'working' }),
+    ev('watchdog_recovery', { reason: 'watchdog:goal', autoContinue: true, consecutive: 1, sessionTotal: 1, progressUnits: 0 }),
+    ev('text_delta', { text: 'resumed' }),
+  ])
+  assert.equal(s.blocks.length, 3)
+  assert.equal(s.blocks[0]!.kind, 'assistant')
+  assert.equal(s.blocks[1]!.kind, 'watchdog_recovery')
+  assert.equal(s.blocks[2]!.kind, 'assistant')
+  assert.equal(s.blocks[2]!.text, 'resumed')
+})
