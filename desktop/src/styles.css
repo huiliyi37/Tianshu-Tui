@@ -2524,6 +2524,38 @@ body {
 }
 .sidechat-title { font-size: var(--text-sm); font-weight: var(--weight-medium); }
 .sidechat-toggle.active { color: var(--accent); }
+
+/* File viewer drawer — opened by clicking @file mentions in messages. */
+.file-viewer-drawer {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: min(520px, 52%);
+  display: flex; flex-direction: column;
+  background: var(--panel); border-left: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  z-index: calc(var(--z-modal) - 1);
+}
+.file-viewer-head {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+}
+.file-viewer-title {
+  flex: 1; font-size: var(--text-sm); font-weight: var(--weight-medium);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.file-viewer-body { flex: 1; overflow: auto; }
+.file-viewer-loading, .file-viewer-error {
+  padding: var(--space-4); color: var(--muted); font-size: var(--text-sm);
+}
+.file-viewer-error { color: var(--destructive); }
+
+/* @file mention links in messages — look like clickable tags, not web links. */
+a.mention-link {
+  color: var(--accent); text-decoration: none;
+  border-bottom: 1px dashed var(--accent);
+  cursor: pointer; font-family: var(--font-mono); font-size: 0.9em;
+}
+a.mention-link:hover { background: var(--accent-soft); }
 .sidechat-note {
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-xs); color: var(--muted);

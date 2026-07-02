@@ -16,6 +16,9 @@ import { DelegationOverlay } from '../components/DelegationOverlay'
 import { DelegateDialog } from '../components/DelegateDialog'
 import { CompletionCurtain } from '../components/CompletionCurtain'
 import { RewindOverlay } from '../components/RewindOverlay'
+import { FileViewer } from '../components/FileViewer'
+import { getFileContent, openFile } from '../runtime/client'
+import type { FileContent } from '../runtime/types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -96,6 +99,15 @@ export function ThreadView(props: {
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   // P1-4 — Side Chat drawer (旁路提问): Cmd+; or the header button toggles.
   const [sideChatOpen, setSideChatOpen] = useState(false)
+  // File viewer drawer: opened by clicking @file mentions in messages.
+  const [fileViewer, setFileViewer] = useState<{ path: string; content?: FileContent; loading?: boolean; error?: string } | null>(null)
+  useEffect(() => {
+    if (!fileViewer?.path || fileViewer.content || fileViewer.loading) return
+    setFileViewer({ path: fileViewer.path, loading: true })
+    getFileContent(session.id, fileViewer.path)
+      .then((content) => setFileViewer({ path: fileViewer.path, content }))
+      .catch((err) => setFileViewer({ path: fileViewer.path, error: (err as Error).message }))
+  }, [fileViewer, session.id])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === ';') {
@@ -433,17 +445,9 @@ export function ThreadView(props: {
       example: '/council <目标描述>',
       run: () => onSend('/council'),
     },
-    {
-      name: '/goal',
-      desc: '设定自主目标 · 跨 turn 执行',
-      example: '/goal <高层目标>',
-      run: () => onSend('Set an autonomous goal and execute across multiple turns until complete. Goal: the task I will describe next.'),
-    },
-    {
-      name: '/cancel-goal',
-      desc: '取消自主目标',
-      run: () => onSend('Cancel the current autonomous goal if one is active.'),
-    },
+    // C4 — /goal & /cancel-goal 已移除：sidecar 从不创建 GoalTracker，这两个
+    // 快捷命令只是把一段假承诺文案发给模型（「跨 turn 自主执行直到达成」不成立）。
+    // 真正的 sidecar goal 接线（含暂停/取消按钮）另立项。
     {
       name: '/effort',
       desc: '设置推理强度 (off/low/medium/high/max)',
@@ -707,6 +711,7 @@ export function ThreadView(props: {
                       block={item.block}
                       sessionId={session.id}
                       onOpenImage={openImage}
+                      onFileClick={(p) => setFileViewer({ path: p })}
                       domainGlyph={domainGlyph}
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
@@ -886,6 +891,39 @@ export function ThreadView(props: {
         mainBlocks={view.blocks}
       />
 
+      {fileViewer && (
+        <div className="file-viewer-drawer" role="complementary" aria-label="文件预览">
+          <div className="file-viewer-head">
+            <span className="file-viewer-title" title={fileViewer.path}>
+              {fileViewer.path.replace(/.*[/\\]/, '') || fileViewer.path}
+            </span>
+            <button
+              className="icon-btn"
+              title="在编辑器中打开"
+              aria-label="在编辑器中打开"
+              onClick={() => void openFile(fileViewer.path)}
+            >↗</button>
+            <button
+              className="icon-btn"
+              title="关闭"
+              aria-label="关闭"
+              onClick={() => setFileViewer(null)}
+            >✕</button>
+          </div>
+          <div className="file-viewer-body">
+            {fileViewer.loading && <div className="file-viewer-loading">加载中…</div>}
+            {fileViewer.error && <div className="file-viewer-error">加载失败：{fileViewer.error}</div>}
+            {fileViewer.content && (
+              <FileViewer
+                content={fileViewer.content.content}
+                language={fileViewer.content.language}
+                startLine={fileViewer.content.startLine}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1012,6 +1050,7 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
       b.kind === 'decision_shift' ||
       b.kind === 'intent_note' ||
       b.kind === 'watchdog_recovery' ||
+      b.kind === 'autonomy_checkpoint' ||
       isArtifactTool(b)
     ) {
       if (run) {
@@ -1053,15 +1092,17 @@ function groupBlocks(blocks: ConvoBlock[]): RenderItem[] {
 const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
+  a.onFileClick === b.onFileClick &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
   a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName, onContinue, onCancelContinue }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
   onOpenImage?: (src: string) => void
+  onFileClick?: (path: string) => void
   domainGlyph?: string
   domainName?: string
   /** Resume a run stopped by the watchdog quota (sends "continue"). */
@@ -1072,7 +1113,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
   if (block.kind === 'user') {
     return (
       <MsgBlock role="你" roleGlyph="user">
-        <Markdown source={block.text} />
+        <Markdown source={block.text} onFileClick={onFileClick} />
         {block.imageIds && block.imageIds.length > 0 && sessionId ? (
           <div className="msg-images">
             {block.imageIds.map((imgId, i) => (
@@ -1119,7 +1160,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
   if (block.kind === 'steer') {
     return (
       <MsgBlock role="引导" roleGlyph="steer">
-        <Markdown source={block.text} />
+        <Markdown source={block.text} onFileClick={onFileClick} />
       </MsgBlock>
     )
   }
@@ -1167,6 +1208,25 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
       </div>
     )
   }
+  if (block.kind === 'autonomy_checkpoint') {
+    // C3 刹车 — the autonomous run paused after N turns; the user resumes explicitly.
+    const turns = block.checkpointTurns ?? 0
+    return (
+      <div className="decision-shift info">
+        <div className="ds-head">
+          <span className="ds-glyph" aria-hidden>⏸</span>
+          <span className="ds-domain">自治检查点</span>
+          <span className="ds-tag">已暂停</span>
+        </div>
+        <div className="ds-reason">
+          已连续自主执行 {turns} 轮。停在这里核对方向——确认没跑偏再继续，或直接键入新指令改道。
+        </div>
+        {onContinue && (
+          <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
+        )}
+      </div>
+    )
+  }
   if (block.kind === 'watchdog_recovery' && block.watchdog) {
     const w = block.watchdog
     // C2 刹车 — pending auto-continue: cancellable countdown card.
@@ -1202,7 +1262,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
   }
   return (
     <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
-      <AssistantText text={block.text} isStreaming={!!isStreaming} />
+      <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} />
     </MsgBlock>
   )
 }
@@ -1308,14 +1368,14 @@ function useThrottledStreamingSource(text: string, isStreaming: boolean): string
 // Above this size, streaming Markdown would re-parse the whole string every
 // throttle window. Fall back to plain text mid-stream and parse once at the end.
 const STREAM_MARKDOWN_MAX = 16000
-function AssistantText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+function AssistantText({ text, isStreaming, onFileClick }: { text: string; isStreaming: boolean; onFileClick?: (path: string) => void }) {
   const heavy = isStreaming && text.length > STREAM_MARKDOWN_MAX
   const throttled = useThrottledStreamingSource(text, isStreaming && !heavy)
   if (heavy) return <StreamingText source={text} />
   // Streaming: render structure only (highlight=false); the async highlight pass
   // runs once on completion so mid-stream deltas stay cheap.
-  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} highlight={false} />
-  return <Markdown source={text} />
+  if (isStreaming) return <Markdown source={closeUnterminatedFence(throttled)} highlight={false} onFileClick={onFileClick} />
+  return <Markdown source={text} onFileClick={onFileClick} />
 }
 
 // Above this size the streaming tail is windowed (see below).
