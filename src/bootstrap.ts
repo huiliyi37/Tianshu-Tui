@@ -997,6 +997,7 @@ export function createAgentRuntime(deps: {
     // groupTeamTasks same-file serialization prevent stomping. Mirrors the real
     // "multiple sessions, one branch" workflow.
     sharedWorktree: true,
+    patcherTier: config.workers.patcherTier,
   })
 
   return { agent }

@@ -325,6 +325,11 @@ export const workerRoutingSchema = z.record(z.string(), z.string()).default({
 export const workersSchema = z.object({
   profiles: z.record(z.string(), workerProfileSchema).default({}),
   routing: workerRoutingSchema,
+  /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
+   *  flash 能力足以承担各级风险的执行任务，默认 'cheap'（不因 riskTier 预判降级
+   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。
+   *  连续失败 ≥2 次仍自动升 strong。 */
+  patcherTier: z.enum(['cheap', 'balanced', 'strong']).default('cheap'),
 }).default({})
 
 export const skillsSchema = z.object({

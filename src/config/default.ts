@@ -192,6 +192,7 @@ export const DEFAULT_CONFIG: Config = {
       risky_refactor: 'cheap-flash',
       planning: 'capable',
     },
+    patcherTier: 'cheap',
   },
   skills: {
     importFromClaude: [],

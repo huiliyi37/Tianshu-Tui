@@ -12,6 +12,9 @@ export interface ModelTierPolicyInput {
   riskTier?: ModelRiskTier
   objective: string
   consecutiveFailures?: number
+  /** Config override for worker tier (config.workers.patcherTier).
+   *  Bypasses riskTier-based routing — user explicitly picks the tier. */
+  workerTierOverride?: ModelTier
 }
 
 export interface ModelTierRecommendation {
@@ -76,9 +79,14 @@ export function recommendModelTier(input: ModelTierPolicyInput): ModelTierRecomm
   }
 
   if ((authority === 'tianliang' || authority === '天梁') && input.profile === 'patcher') {
-    if (riskTier === 'low') return { tier: 'cheap', reason: 'tianliang low-risk patcher can be observed as cheap tier' }
-    if (riskTier === 'high') return { tier: 'balanced', hardFloor: 'balanced', reason: 'high-risk patcher should not be recommended cheap' }
-    return { tier: 'balanced', reason: 'medium-risk patcher uses balanced tier' }
+    // flash 能力足以承担各级风险的天梁执行任务（会话 5158719d：原 riskTier 三档
+    // 路由把 medium/high 踢到 balanced/strong，浪费生产力）。默认 cheap，不因
+    // riskTier 预判降级；可经 agent.workers.patcherTier 配置覆盖（如设 'balanced'
+    // 或 'strong' 用 Pro）。真撑不住时由 consecutiveFailures≥2 自动升 strong。
+    if (input.workerTierOverride) {
+      return { tier: input.workerTierOverride, reason: `tianliang patcher tier overridden by config: ${input.workerTierOverride}` }
+    }
+    return { tier: 'cheap', reason: 'tianliang patcher defaults to flash — capable enough for execution; escalates only on repeated failure' }
   }
 
   if (riskTier === 'high') return { tier: 'strong', hardFloor: 'strong', reason: 'high-risk work uses strong tier by default' }

@@ -256,6 +256,9 @@ export interface DelegationCoordinatorConfig {
    *  stomping. Trades the per-worker isolated diff for a simpler "all changes
    *  land in one workspace, controller reads aggregate git diff" model. */
   sharedWorktree?: boolean
+  /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
+   *  传入 recommendModelTier 的 workerTierOverride——用户可自定义执行者用哪档模型。 */
+  patcherTier?: ModelTier
 }
 
 export function shouldDelegateObjective(objective: string, scope: WorkOrderScope): boolean {
@@ -826,6 +829,7 @@ export class DelegationCoordinator {
       riskTier: order.riskTier,
       objective: order.objective,
       consecutiveFailures: this.state.getSummary().failed,
+      ...(this.config.patcherTier ? { workerTierOverride: this.config.patcherTier } : {}),
     })
   }
 

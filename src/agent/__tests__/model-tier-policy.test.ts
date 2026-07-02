@@ -12,24 +12,31 @@ describe('model tier policy', () => {
     }).tier, 'cheap')
   })
 
-  it('allows low-risk tianliang patcher to be cheap but not high-risk patcher', () => {
-    assert.equal(recommendModelTier({
-      authority: 'tianliang',
-      profile: 'patcher',
-      kind: 'patch_proposal',
-      riskTier: 'low',
-      objective: 'small localized patch',
-    }).tier, 'cheap')
+  it('tianliang patcher defaults to cheap (flash) across all risk tiers', () => {
+    // flash 能力足以承担各级风险的执行任务——不因 riskTier 预判降级。
+    // 真撑不住时由 consecutiveFailures≥2 自动升 strong。
+    for (const riskTier of ['low', 'medium', 'high'] as const) {
+      assert.equal(recommendModelTier({
+        authority: 'tianliang',
+        profile: 'patcher',
+        kind: 'patch_proposal',
+        riskTier,
+        objective: 'patch task',
+      }).tier, 'cheap')
+    }
+  })
 
-    const highRisk = recommendModelTier({
-      authority: 'tianliang',
-      profile: 'patcher',
-      kind: 'patch_proposal',
-      riskTier: 'high',
-      objective: 'security-sensitive persistence patch',
-    })
-    assert.equal(highRisk.tier, 'balanced')
-    assert.equal(highRisk.hardFloor, 'balanced')
+  it('workerTierOverride lets config set patcher to balanced or strong', () => {
+    for (const tier of ['balanced', 'strong'] as const) {
+      assert.equal(recommendModelTier({
+        authority: 'tianliang',
+        profile: 'patcher',
+        kind: 'patch_proposal',
+        riskTier: 'high',
+        objective: 'patch task',
+        workerTierOverride: tier,
+      }).tier, tier)
+    }
   })
 
   it('escalates repeated failures to strong', () => {
