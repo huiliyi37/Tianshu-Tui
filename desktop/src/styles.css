@@ -2425,6 +2425,12 @@ body {
 .model-picker-item:hover { background: var(--panel-2); }
 .model-picker-item.active { background: var(--accent-soft); color: var(--accent); }
 .model-picker-desc { color: var(--muted); font-size: var(--text-xs); font-family: var(--font-mono); }
+.model-picker-hint {
+  padding: var(--space-1) var(--space-2); margin-bottom: var(--space-1);
+  border-radius: var(--radius-sm); background: var(--warning-soft, var(--panel-2));
+  color: var(--warning, var(--muted)); font-size: var(--text-xs); line-height: 1.4;
+  border: 1px solid var(--border);
+}
 
 /* 星域 picker reuses .model-picker but its desc is prose (meta/motto), not a
    token count — drop the mono font and bound the width so long Chinese text

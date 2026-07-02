@@ -7,14 +7,19 @@ test('Auto is current when selection is undefined', () => {
   const entries = buildDomainPickerEntries(undefined)
   assert.equal(entries[0]!.key, 'auto')
   assert.equal(entries[0]!.current, true)
-  assert.equal(entries[1]!.key, 'off')
-  assert.equal(entries[1]!.current, false)
+  // First domain entry follows Auto directly (Off removed).
+  assert.notEqual(entries[1]!.key, 'off')
 })
 
-test('Off is current when selection is null', () => {
+test('Off option is removed — no picker entry has key "off"', () => {
+  const entries = buildDomainPickerEntries(undefined)
+  assert.equal(entries.find((e) => e.key === 'off'), undefined)
+})
+
+test('null selection (env kill switch) reflects as Auto-current (no Off entry)', () => {
   const entries = buildDomainPickerEntries(null)
-  assert.equal(entries.find((e) => e.key === 'off')!.current, true)
-  assert.equal(entries.find((e) => e.key === 'auto')!.current, false)
+  assert.equal(entries.find((e) => e.key === 'off'), undefined)
+  assert.equal(entries.find((e) => e.key === 'auto')!.current, true)
 })
 
 test('a pinned domain is the only current entry', () => {

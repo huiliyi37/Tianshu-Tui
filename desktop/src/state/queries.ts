@@ -99,7 +99,7 @@ export function useArtifacts(sessionId: string | null, rev: number) {
   })
 }
 
-/** List the star-domain picker entries for a session (Auto / Off / built-in & custom). */
+/** List the star-domain picker entries for a session (Auto / built-in & custom). */
 export function useDomains(sessionId: string | null) {
   return useQuery({
     queryKey: qk.domains(sessionId),

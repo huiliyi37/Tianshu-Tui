@@ -398,13 +398,13 @@ export function switchModel(id: string, modelId: string): Promise<SessionRecord>
   return apiPost<SessionRecord>(`/sessions/${id}/model`, { modelId })
 }
 
-/** List the star-domain picker entries (Auto / Off / domains, current flagged). */
+/** List the star-domain picker entries (Auto / domains, current flagged). */
 export async function listDomains(id: string): Promise<DomainEntry[]> {
   const { entries } = await apiGet<{ entries: DomainEntry[] }>(`/sessions/${id}/domains`)
   return entries
 }
 
-/** Set a session's star domain by key ('auto' | 'off' | <domainId>). */
+/** Set a session's star domain by key ('auto' | <domainId>). */
 export function setDomain(id: string, key: string): Promise<{ id: string; domain: string }> {
   return apiPost<{ id: string; domain: string }>(`/sessions/${id}/domain`, { key })
 }

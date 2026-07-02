@@ -29,7 +29,7 @@ export interface SessionRecord {
   planMode?: PlanModeState
   /** PlusMenu — current provider model id (resolved id). Absent → global default. */
   model?: string
-  /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
+  /** PlusMenu — star-domain selection key ('auto' | <domainId>). */
   domain?: string
   /** Visual glyph for the current star-domain selection (for badges). */
   domainGlyph?: string
@@ -54,9 +54,9 @@ export interface ModelEntry {
   current: boolean
 }
 
-/** PlusMenu — a star-domain picker entry (Auto / Off / built-in & custom). */
+/** PlusMenu — a star-domain picker entry (Auto / built-in & custom). */
 export interface DomainEntry {
-  /** Selection key: 'auto' | 'off' | <domainId>. */
+  /** Selection key: 'auto' | <domainId>. */
   key: string
   name: string
   motto: string

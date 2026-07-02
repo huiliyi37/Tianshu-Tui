@@ -84,6 +84,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
     if (m.reasoningEffort) {
       body.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
     }
+    body.push(`    ✦ 星域: ${color(m.starDomain, theme.secondary)}`)
   }
 
   if (show('mcp') && snapshot.mcp.servers.length > 0) {

@@ -3,6 +3,7 @@ import type { SessionContext } from '../../agent/context.js'
 import { buildDeliveryGate } from '../../agent/delivery-gate.js'
 import type { McpManager } from '../../mcp/manager.js'
 import { emptyPhysarumShadowStats, type PhysarumShadowStats } from '../../repo/physarum-shadow-stats.js'
+import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import type { CockpitSnapshot, Panel, PanelStatus } from './types.js'
 
 export interface CockpitSnapshotSources {
@@ -14,6 +15,19 @@ export interface CockpitSnapshotSources {
   mcpManager?: McpManager | null
   claimCounts?: import('../../context/promotion.js').ClaimStatusCounts
   reasoningEffort?: string
+}
+
+/**
+ * Human-readable star-domain label for the cockpit Model panel.
+ *  - object    → pinned domain name (e.g. 破军)
+ *  - undefined → Auto with the keyword fallback in parens (Auto(天枢))
+ *  - null      → STAR_SOUL kill switch (no persona at all)
+ */
+function describeStarDomain(domain: import('../../agent/star-domain.js').ActiveStarDomain | null | undefined): string {
+  if (domain) return domain.name
+  if (domain === null) return '关闭(环境)'
+  const fallback = STAR_DOMAINS.tianshu?.name ?? '天枢'
+  return `Auto(${fallback})`
 }
 
 function computePanelStatuses(snapshot: Omit<CockpitSnapshot, 'panelStatuses'>): Record<Panel, PanelStatus> {
@@ -152,6 +166,7 @@ export function buildCockpitSnapshot(sources: CockpitSnapshotSources): CockpitSn
       physarumShadow: physarumShadowStats,
       cacheDiagnostic,
       reasoningEffort: agent.getReasoningEffort() || reasoningEffort || 'medium',
+      starDomain: describeStarDomain(agent.getSessionDomain()),
     },
     mcp: {
       servers: mcpStates.map(s => ({

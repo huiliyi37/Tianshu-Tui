@@ -503,9 +503,9 @@ export interface ThemePickerData {
 // ── Domain Picker ──────────────────────────────────────────────
 
 export interface DomainPickerEntry {
-  /** 选择键：'auto' | 'off' | domain id */
+  /** 选择键：'auto' | domain id */
   key: string
-  /** 展示名（中文星域名或 Auto/Off 标签） */
+  /** 展示名（中文星域名或 Auto 标签） */
   name: string
   /** 座右铭（可空） */
   motto: string

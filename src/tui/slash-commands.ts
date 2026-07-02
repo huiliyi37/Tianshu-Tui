@@ -4,6 +4,7 @@ import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
 import { forkSession, listBranches, countMessageLines } from '../agent/session-fork.js'
 import { type StarDomainId } from '../agent/star-domain.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
+import { DOMAIN_SWITCH_CACHE_WARNING } from '../agent/domain-picker-entries.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -1116,22 +1117,22 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         })
         pushStatic(createLogEntry({ type: 'system', content: `星域一览\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
       } else if (sub === 'auto') {
+        const midSession = ctx.agent.getSessionTurnCount() > 0
         ctx.agent.resetSessionDomain()
         ctx.onDomainChange?.(undefined)
         pushStatic(createLogEntry({ type: 'system', content: '星域已重置为自动检测模式。下一次对话将根据输入内容自动匹配星域。' }))
-      } else if (sub === 'off' || sub === 'none') {
-        ctx.agent.setSessionDomain(null)
-        ctx.onDomainChange?.(undefined)
-        pushStatic(createLogEntry({ type: 'system', content: '星域已关闭。本会话将不激活任何星域人格。' }))
+        if (midSession) pushStatic(createLogEntry({ type: 'system', content: DOMAIN_SWITCH_CACHE_WARNING }))
       } else {
         // Try to match by id or Chinese name
         const allDomains = starDomainRegistry.list()
         const matched = allDomains.find(d => d.id === sub || d.name === parts[1] || d.id === parts[1]?.toLowerCase())
         if (matched) {
+          const midSession = ctx.agent.getSessionTurnCount() > 0
           const domain = { id: matched.id, name: matched.name, volatileBlock: matched.volatileBlock, motto: matched.motto }
           ctx.agent.setSessionDomain(domain)
           ctx.onDomainChange?.(domain.name)
           pushStatic(createLogEntry({ type: 'system', content: `星域切换: ${domain.name} (${domain.id})\n${domain.motto}\n\n${domain.volatileBlock}` }))
+          if (midSession) pushStatic(createLogEntry({ type: 'system', content: DOMAIN_SWITCH_CACHE_WARNING }))
         } else {
           const validNames = allDomains.map(d => `${d.name}|${d.id}`).join(', ')
           pushStatic(createLogEntry({ type: 'system', content: `未知星域: "${parts[1]}"\n\n可用星域: ${validNames}\n\n使用 /domain list 查看所有星域。`, isError: true }))

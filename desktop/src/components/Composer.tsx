@@ -101,8 +101,11 @@ export function Composer(props: {
   onDelegate?: () => void
   /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
   menuRev?: number
+  /** True when the thread already has messages — used to warn before a
+   *  cache-invalidating mid-session star-domain switch. */
+  threadNonEmpty?: boolean
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev, threadNonEmpty } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -645,7 +648,7 @@ export function Composer(props: {
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
-        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
+        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -775,7 +778,10 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
 }
 
 /** Inline star-domain (星域) selector in the composer bar, beside the model picker. */
-function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
+const DOMAIN_SWITCH_CACHE_WARNING =
+  '会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。'
+
+function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessionId: string; disabled?: boolean; menuRev?: number; threadNonEmpty?: boolean }) {
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<DomainEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -815,6 +821,10 @@ function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; dis
 
   const select = async (e: DomainEntry) => {
     if (disabled || e.current) return
+    // Mid-session switch invalidates the prefix cache (~10x rebuild). Confirm first.
+    if (threadNonEmpty && !window.confirm(`⚠ ${DOMAIN_SWITCH_CACHE_WARNING}\n\n确定切换到「${e.name}」？`)) {
+      return
+    }
     setApplyingKey(e.key)
     try {
       await setDomain(sessionId, e.key)
@@ -843,6 +853,11 @@ function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; dis
       </button>
       {open && (
         <div className="model-picker-menu" role="listbox">
+          {threadNonEmpty && (
+            <div className="model-picker-hint" role="note">
+              ⚠ {DOMAIN_SWITCH_CACHE_WARNING}
+            </div>
+          )}
           {loading && (
             <div className="model-picker-item" role="status" aria-busy>
               <span className="model-picker-name">加载中…</span>

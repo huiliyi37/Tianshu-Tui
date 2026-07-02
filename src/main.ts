@@ -38,7 +38,8 @@ import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from '
 import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
-import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
+import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
+import { isStarSoulEnabled } from './agent/star-soul-gate.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
@@ -430,6 +431,16 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  // TUI 默认钉住天枢星域(与桌面端 auto 形成对比):在首个请求前设置,仅构建
+  // 初始 frozenBase,无缓存代价;setSessionDomain 后 bindSessionDomain 的
+  // `!== undefined` 守卫会跳过按任务的 auto 关键词绑定。尊重 STAR_SOUL 总开关;
+  // 若已有钉住的域(理论上不会,TUI 不持久化选择态)则沿用。
+  if (ctx!.agent.getSessionDomain() === undefined && isStarSoulEnabled()) {
+    const tianshu = starDomainRegistry.get('tianshu')
+    if (tianshu) {
+      ctx!.agent.setSessionDomain({ id: tianshu.id, name: tianshu.name, volatileBlock: tianshu.volatileBlock, motto: tianshu.motto })
+    }
+  }
   const initialDomain = ctx!.agent.getSessionDomain()?.name
   if (initialDomain) {
     tuiApp.setSessionStarDomain(initialDomain)
@@ -684,22 +695,22 @@ async function main() {
     tuiApp.setInput(`/resume ${id.slice(0, 8)}`)
   }, /* domainPickerExec: */ (key: string) => {
     // Domain Picker Enter 回调：应用选中星域，引擎照常注入方法论，scrollback 仅写单行确认。
+    const midSession = ctx!.agent.getSessionTurnCount() > 0
     if (key === 'auto') {
       ctx!.agent.resetSessionDomain()
       tuiApp.setSessionStarDomain(undefined)
       tuiApp.commitStatic('Domain → Auto（按任务匹配）')
-    } else if (key === 'off') {
-      ctx!.agent.setSessionDomain(null)
-      tuiApp.setSessionStarDomain(undefined)
-      tuiApp.commitStatic('Domain → Off（无星域）')
     } else {
       const d = starDomainRegistry.get(key)
       if (d) {
         ctx!.agent.setSessionDomain({ id: d.id, name: d.name, volatileBlock: d.volatileBlock, motto: d.motto })
         tuiApp.setSessionStarDomain(d.name)
         tuiApp.commitStatic(`Domain → ${d.name} (${d.decisionStyle})`)
+      } else {
+        return
       }
     }
+    if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
   }, /* modelPickerExec: */ (modelId: string) => {
     // Model Picker Enter 回调：执行模型切换。
     try { ctx!.agent.abort() } catch {}

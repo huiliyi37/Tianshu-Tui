@@ -47,6 +47,7 @@ function makeCtx(overrides?: Partial<SlashHandlerContext>): SlashHandlerContext 
       getEvidenceState: () => ({ filesRead: new Set(), filesModified: new Set(), verifications: [], deliveryStatus: 'unverified', impactedFiles: new Set(), impactedTests: new Set(), fileVerificationLevels: new Map() }),
       getLatestPheromones: () => [],
       getCognitiveSnapshot: () => undefined,
+      getSessionTurnCount: () => 0,
     } as any,
     session: null as any,
     persist: null as any,
@@ -520,7 +521,7 @@ describe('handleSlashCommand', () => {
       assert.ok(entries[0]!.includes('自动检测'))
     })
 
-    it('/domain off disables domain', async () => {
+    it('/domain off is removed — treated as unknown domain, never disables', async () => {
       const entries: string[] = []
       const setCalls: any[] = []
       const handled = await handleSlashCommand(makeCtx({
@@ -533,8 +534,8 @@ describe('handleSlashCommand', () => {
         pushStatic: (entry) => entries.push(entry.content),
       }))
       assert.equal(handled, true)
-      assert.deepEqual(setCalls, [null])
-      assert.ok(entries[0]!.includes('关闭'))
+      assert.deepEqual(setCalls, [], 'off no longer disables the domain')
+      assert.ok(entries[0]!.includes('未知星域'))
     })
 
     it('/domain <unknown> shows error with valid names', async () => {

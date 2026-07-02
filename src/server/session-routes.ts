@@ -240,7 +240,7 @@ export function buildSessionRoutes(
     }, apiToken),
 
     // ── PlusMenu: star-domain picker ──
-    // Read — Auto / Off / domains, current selection flagged (shared builder).
+    // Read — Auto / domains, current selection flagged (shared builder).
     'GET /sessions/:id/domains': withAuth((_body, params) => {
       const entries = manager.listDomains(params!.id!)
       if (!entries) return { status: 404, body: { error: 'Session not found' } }

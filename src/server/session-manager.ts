@@ -122,7 +122,8 @@ export interface SessionRecord {
    */
   model?: string
   /**
-   * PlusMenu — star-domain selection KEY ('auto' | 'off' | <domainId>). Stored
+   * PlusMenu — star-domain selection KEY ('auto' | <domainId>; legacy 'off'
+   * persists but resolves to auto). Stored
    * as the round-trippable key (not a display name) so rehydrate can restore the
    * live ActiveStarDomain. Absent → 'auto'.
    */
@@ -462,7 +463,8 @@ interface InternalSession {
   rehydratedArtifacts?: ArtifactStore
   /**
    * PlusMenu (domain) — live star-domain selection. Tri-state mirrors
-   * AgentLoop.getSessionDomain: undefined=Auto, null=Off, object=pinned. Applied
+   * AgentLoop.getSessionDomain: undefined=Auto, null=no-persona (env kill switch
+   * only), object=pinned. Applied
    * to the agent on ensureAgent (so lazy build is consistent) and after a model
    * rebuild (so the selection survives switchModel).
    */
@@ -1091,7 +1093,7 @@ export class RuntimeSessionManager {
   // ── PlusMenu: star domain ─────────────────────────────────────
 
   /**
-   * PlusMenu — list the domain picker entries for this session (Auto / Off /
+   * PlusMenu — list the domain picker entries for this session (Auto /
    * built-in + custom domains) with the session's current selection flagged.
    * Returns undefined when the session is missing.
    */
@@ -2254,7 +2256,7 @@ function parseImageDataUrl(url: string): { mime: string; base64: string } | null
  * Resolve a star-domain selection KEY into the live tri-state + canonical key +
  * display label. Mirrors AgentLoop.getSessionDomain semantics:
  *  - 'auto' → state undefined (per-message auto-detect)
- *  - 'off'  → state null (no persona)
+ *  - 'off'  → legacy alias, resolves to auto (state undefined)
  *  - <id>   → the ActiveStarDomain, when the id is a known domain
  * Returns null for an unknown key so callers can 400/return false.
  */
@@ -2262,7 +2264,9 @@ function resolveDomainState(
   key: string,
 ): { state: ActiveStarDomain | null | undefined; key: string; label: string } | null {
   if (key === 'auto') return { state: undefined, key: 'auto', label: 'Auto' }
-  if (key === 'off') return { state: null, key: 'off', label: 'Off' }
+  // Legacy: the 'off' selection was removed. Old persisted sessions with
+  // domain:'off' resolve to Auto instead of breaking (state undefined, not null).
+  if (key === 'off') return { state: undefined, key: 'auto', label: 'Auto' }
   const d = starDomainRegistry.get(key)
   if (!d) return null
   return {
@@ -2273,8 +2277,8 @@ function resolveDomainState(
 }
 
 function resolveDomainPersona(key: string | undefined): { glyph: string; accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim' } {
-  if (key === 'auto' || key === undefined) return { glyph: '⚙', accent: 'primary' }
-  if (key === 'off') return { glyph: '⊘', accent: 'dim' }
+  // 'off' removed; treat legacy value as Auto for persona rendering.
+  if (key === 'auto' || key === 'off' || key === undefined) return { glyph: '⚙', accent: 'primary' }
   const d = starDomainRegistry.get(key)
   if (!d) return { glyph: '⚙', accent: 'primary' }
   return { glyph: d.uiPersona.glyph, accent: d.uiPersona.accent }

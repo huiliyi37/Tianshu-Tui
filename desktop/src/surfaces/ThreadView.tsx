@@ -745,6 +745,7 @@ export function ThreadView(props: {
             value={input}
             onChange={setInput}
             busy={busy}
+            threadNonEmpty={view.blocks.length > 0}
             onSubmit={async (text, images) => {
               if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
                 const point = rewindPoints[selectedTurnIndex]

@@ -925,6 +925,15 @@ export class AgentLoop {
   }
 
   /**
+   * Completed-turn count for this session. Used to detect a mid-session
+   * star-domain switch (>0 → switching now invalidates the prefix cache and
+   * forces a full context rebuild at the next request, ~10x cost).
+   */
+  getSessionTurnCount(): number {
+    return this.session.getTurnCount()
+  }
+
+  /**
    * PlusMenu — per-session disabled skill names. Filters the skill discovery
    * block (turn-step-producer) so disabled skills are hidden from the model.
    * Empty set = all skills available (default).
