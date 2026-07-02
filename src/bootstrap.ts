@@ -941,6 +941,7 @@ export function createAgentRuntime(deps: {
       toolRegistry,
       maxTurns: config.agent.maxTurns,
       maxAutoContinue: config.agent.maxAutoContinue,
+      checkpointEveryTurns: config.agent.checkpointEveryTurns,
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,
       contextClaimStore: claimStore,

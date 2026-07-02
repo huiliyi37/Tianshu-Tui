@@ -19,6 +19,12 @@ describe('loadConfig — 3-layer resolution', () => {
       'DEFAULT_CONFIG.agent.maxTurns must match schema default — drift makes the schema value dead')
   })
 
+  it('DEFAULT_CONFIG.agent.checkpointEveryTurns matches schema default (drift guard, C3)', () => {
+    const schemaDefault = agentSchema.shape.checkpointEveryTurns._def.defaultValue()
+    assert.equal(DEFAULT_CONFIG.agent.checkpointEveryTurns, schemaDefault,
+      'DEFAULT_CONFIG.agent.checkpointEveryTurns must match schema default — drift makes the schema value dead')
+  })
+
   it('applies project config over defaults', () => {
     const projectDir = join(tempDir, 'my-project')
     mkdirSync(projectDir, { recursive: true })

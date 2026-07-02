@@ -212,6 +212,12 @@ export const agentSchema = z.object({
    * or an open task contract (phantom tool-call recovery). 0 disables. Clamped 0..3.
    */
   maxAutoContinue: z.number().int().min(0).max(3).default(1),
+  /**
+   * C3 自治档检查点 — in autonomous mode (dangerously-skip-permissions), pause
+   * the run for user confirmation after this many turns. 0 disables. Only the
+   * autonomous tier is affected; supervised modes brake via approvals.
+   */
+  checkpointEveryTurns: z.number().int().min(0).default(10),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */

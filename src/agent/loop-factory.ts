@@ -502,6 +502,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
+    // C3 — checkpoint brake applies only to the autonomous tier; supervised
+    // modes already stop at approvals. Read live (not captured) so a mid-session
+    // approval-mode switch takes effect on the next turn.
+    getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
+      ? (self.config.checkpointEveryTurns ?? 0)
+      : 0,
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,

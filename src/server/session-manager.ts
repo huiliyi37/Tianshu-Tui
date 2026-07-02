@@ -87,6 +87,8 @@ export type SessionEventType =
   | 'done'
   // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
   | 'watchdog_recovery'
+  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
+  | 'autonomy_checkpoint'
 
 export interface SessionEvent {
   seq: number
@@ -410,6 +412,8 @@ export interface RuntimeSessionManagerOptions {
   maxLoadedSessions?: number
   /** Auto-resolve a pending intervention after this many ms. 0 = never. Default 0. */
   approvalTimeoutMs?: number
+  /** C2 刹车 — watchdog 停滞续跑前的可取消倒计时窗口（ms）。Default 5000. */
+  watchdogContinueDelayMs?: number
   /** Optional durable store. When set, sessions survive sidecar restarts. */
   persistence?: SessionPersistenceAdapter
   /**
@@ -516,6 +520,8 @@ interface InternalSession {
    *  abort() 对已停会话是空操作（status 已 aborted），不加此标记则窄窗口内
    *  自动续跑会盖掉用户刚表达的「停」。run() 起跑时清。 */
   watchdogRecoveryCancelled?: boolean
+  /** C2 刹车 — watchdog 续跑倒计时定时器。窗口内用户 abort / 新 prompt 取消。 */
+  watchdogContinueTimer?: NodeJS.Timeout
 }
 
 const REDACTED = '[REDACTED]'
@@ -588,6 +594,7 @@ export class RuntimeSessionManager {
   /** LRU of session ids whose event log is currently resident (oldest first). */
   private readonly loadedOrder: string[] = []
   private readonly approvalTimeoutMs: number
+  private readonly watchdogContinueDelayMs: number
   private readonly persistence?: SessionPersistenceAdapter
   private readonly getRegistry?: () => SessionRegistry | undefined
   private readonly listModelsFn?: () => ModelOption[]
@@ -601,6 +608,7 @@ export class RuntimeSessionManager {
     this.maxEvents = opts.maxEvents ?? 5000
     this.maxLoadedSessions = opts.maxLoadedSessions ?? 16
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
+    this.watchdogContinueDelayMs = opts.watchdogContinueDelayMs ?? 5_000
     this.persistence = opts.persistence
     this.getRegistry = opts.getSessionRegistry
     this.listModelsFn = opts.listModels
@@ -960,6 +968,11 @@ export class RuntimeSessionManager {
     const wasAutoResubmit = session.watchdogAutoResubmit === true
     session.watchdogAutoResubmit = false
     session.watchdogRecoveryCancelled = false
+    // C2 — 任何新 run（用户 prompt 或倒计时自身触发的 continue）都终结待续跑窗口。
+    if (session.watchdogContinueTimer) {
+      clearTimeout(session.watchdogContinueTimer)
+      session.watchdogContinueTimer = undefined
+    }
     session.lastAbortReason = undefined
     session.abortWhileApprovalPending = false
     session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
@@ -1640,6 +1653,12 @@ export class RuntimeSessionManager {
     // 窄窗口竞态修复：watchdog stall 后 finally → setImmediate 续跑之间，用户
     // abort 对已停会话是空操作。设此标记让 setImmediate 守卫放弃续跑。
     s.watchdogRecoveryCancelled = true
+    // C2 — 取消进行中的续跑倒计时（用户点了「取消」或 Esc）。
+    if (s.watchdogContinueTimer) {
+      clearTimeout(s.watchdogContinueTimer)
+      s.watchdogContinueTimer = undefined
+      this.append(s, 'watchdog_recovery', { cancelled: true })
+    }
     s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
     this.touch(s)
@@ -2150,6 +2169,10 @@ export class RuntimeSessionManager {
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
       onSteerDrain: () => session.steer.drain(),
+      // C3 — 自治档检查点：run 在 N 轮后干净收尾，桌面渲染确认卡片。
+      onAutonomyCheckpoint: (turnsDone) => {
+        this.append(session, 'autonomy_checkpoint', { turns: turnsDone })
+      },
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the
       // delegation-tree parent). Emitted alongside the existing text stream.
@@ -2190,6 +2213,11 @@ export class RuntimeSessionManager {
    * Watchdog stall 自动恢复（桌面端对齐 TUI v3）：run settle 后判定是否注入
    * 'continue'。必须经 setImmediate 延迟——给排队中的用户 HTTP 动作（run/archive）
    * 让路，执行前复核会话仍处 aborted 且无人抢跑（TUI「让位守卫」的桌面对应物）。
+   *
+   * C2 刹车：决定续跑后不再立即重发——先追加带 pendingAutoContinue+delayMs 的
+   * watchdog_recovery 事件（桌面渲染倒计时卡片），倒计时结束复核守卫再续跑。
+   * 窗口内用户 abort（置 watchdogRecoveryCancelled）或发新 prompt（run() 清
+   * 定时器）都能取消——「Loop 续跑刹不住」的修复点。
    */
   private maybeWatchdogAutoContinue(session: InternalSession): void {
     const reason = session.lastAbortReason
@@ -2205,16 +2233,25 @@ export class RuntimeSessionManager {
       if (session.running || session.record.status !== 'aborted' || session.record.archived) return
       if (session.watchdogRecoveryCancelled) return
       const decision = policy.onStall({ suppressed })
+      const delayMs = this.watchdogContinueDelayMs
       this.append(session, 'watchdog_recovery', {
         reason,
         autoContinue: decision.autoContinue,
         ...(decision.stopReason ? { stopReason: decision.stopReason } : {}),
-        ...(decision.autoContinue ? { dense: decision.dense === true } : {}),
+        ...(decision.autoContinue ? { dense: decision.dense === true, pendingAutoContinue: true, delayMs } : {}),
         ...policy.snapshot(),
       })
       if (!decision.autoContinue) return
-      session.watchdogAutoResubmit = true
-      if (!this.run(session.record.id, 'continue')) session.watchdogAutoResubmit = false
+      const timer = setTimeout(() => {
+        session.watchdogContinueTimer = undefined
+        // 倒计时后复核同一组守卫——期间用户可能已 abort / 提交新 prompt / 归档。
+        if (session.running || session.record.status !== 'aborted' || session.record.archived) return
+        if (session.watchdogRecoveryCancelled) return
+        session.watchdogAutoResubmit = true
+        if (!this.run(session.record.id, 'continue')) session.watchdogAutoResubmit = false
+      }, delayMs)
+      timer.unref?.()
+      session.watchdogContinueTimer = timer
     })
   }
 

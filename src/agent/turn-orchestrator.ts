@@ -141,6 +141,8 @@ export interface TurnOrchestratorDeps {
 
   // === Config ===
   getMaxTurns: () => number
+  /** C3 自治档检查点 — pause after this many turns per run (0 = off). */
+  getCheckpointEveryTurns: () => number
   getTurnLevelThinking: () => boolean | undefined
   getPlanModeState: () => PlanModeState
   getStreamRules: () => StreamRule[] | undefined
@@ -340,6 +342,25 @@ export class TurnOrchestrator {
           if (!assistantResponded && !userMessageConsumed) this.deps.removeLastMessage()
           callbacks.onAbort(this.deps.getAbortReason())
           return
+        }
+
+        // ── C3 自治档检查点 ──
+        // Autonomous mode has no approval brakes; without a stop point a run
+        // barrels through up to maxTurns (200) turns. When configured, pause
+        // cleanly after N turns and hand control back — the user resumes with
+        // "continue" (desktop renders a checkpoint card).
+        const checkpointEvery = this.deps.getCheckpointEveryTurns()
+        if (checkpointEvery > 0 && turn >= checkpointEvery) {
+          this.emitStop({
+            source: 'checkpoint',
+            turn,
+            voluntary: false,
+            detail: `autonomy checkpoint every ${checkpointEvery} turns`,
+          }, callbacks)
+          callbacks.onAutonomyCheckpoint?.(turn)
+          callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
+          finalTurnCompleted = true
+          break
         }
 
         const estTokens = this.deps.getEstimatedTokens()
@@ -846,6 +867,24 @@ export class TurnOrchestrator {
 
         // No tool calls this turn — increment the counter for convergence detection
         this.deps.state.consecutiveNoToolTurns = this.deps.state.consecutiveNoToolTurns + 1
+
+        // ── User steer takes precedence over any auto-continuation ──
+        // Steer normally drains only at tool-result boundaries, so a no-tool
+        // continuation chain (goal/phantom) starves queued user guidance while
+        // injecting its own "keep going" reminder — the user feels unheard.
+        // Drain here FIRST: if the user said something, hand the next turn to
+        // their words alone and skip this round's continuation reminders.
+        const steerText = callbacks.onSteerDrain?.()
+        if (steerText) {
+          debugLog(`[steer-preempt] turn=${turn} user guidance preempted auto-continuation`)
+          await rejectOnAbort(
+            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+            signal!,
+            'steer-preempt-complete',
+          )
+          this.deps.appendSystemReminder(steerText)
+          continue
+        }
 
         // ── Goal continuation check ──
         // Delegated to GoalContinuationController — it handles tracker.check,

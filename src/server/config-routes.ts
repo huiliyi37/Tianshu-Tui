@@ -9,6 +9,8 @@
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
+ *   GET    /config/autonomy                 autonomy checkpoint interval (C3)
+ *   PUT    /config/autonomy                 set autonomy checkpoint interval (C3)
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -25,6 +27,8 @@ import {
   setRoutingConfig,
   getEditorConfig,
   setEditorConfig,
+  getAutonomyConfig,
+  setAutonomyConfig,
 } from '../config/manager.js'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
@@ -208,6 +212,23 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
       try {
         return { status: 200, body: { ok: true, ...setEditorConfig({ platform, eol }) } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // C3 — autonomy checkpoint interval (0 = off) for the desktop settings UI.
+    'GET /config/autonomy': withAuth(() => {
+      return { status: 200, body: getAutonomyConfig() }
+    }, apiToken),
+
+    'PUT /config/autonomy': withAuth((body) => {
+      const { checkpointEveryTurns } = (body ?? {}) as { checkpointEveryTurns?: unknown }
+      if (checkpointEveryTurns === undefined) {
+        return { status: 400, body: { error: 'checkpointEveryTurns is required' } }
+      }
+      try {
+        return { status: 200, body: { ok: true, ...setAutonomyConfig({ checkpointEveryTurns }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

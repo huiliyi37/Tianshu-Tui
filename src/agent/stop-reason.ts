@@ -33,6 +33,8 @@ export type StopReasonSource =
   | 'user-interrupt'
   /** Provider/stream error. Fault. */
   | 'stream-error'
+  /** C3 自治档检查点 — turn budget within a run reached, paused for user confirmation. */
+  | 'checkpoint'
 
 export interface StopReason {
   source: StopReasonSource
@@ -77,6 +79,8 @@ export function describeStopReason(r: StopReason): string {
       return '⏹ 用户中断'
     case 'stream-error':
       return '⏹ 流式错误中断'
+    case 'checkpoint':
+      return `⏸ 自治检查点（已连续执行 ${r.turn} 轮）— 等待确认后继续`
   }
 }
 

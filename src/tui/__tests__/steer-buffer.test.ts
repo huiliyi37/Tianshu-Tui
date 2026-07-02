@@ -11,7 +11,7 @@ describe('SteerBuffer', () => {
     assert.equal(buf.hasPending(), true)
 
     const drained = buf.drain()
-    assert.equal(drained, '[User guidance]: focus on performance')
+    assert.equal(drained, '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]: focus on performance')
     assert.equal(buf.hasPending(), false)
   })
 
@@ -24,7 +24,7 @@ describe('SteerBuffer', () => {
     const drained = buf.drain()
     assert.equal(
       drained,
-      '[User guidance]:\n1. first guidance\n2. second guidance\n3. third guidance',
+      '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]:\n1. first guidance\n2. second guidance\n3. third guidance',
     )
     assert.equal(buf.hasPending(), false)
   })
@@ -54,7 +54,7 @@ describe('SteerBuffer', () => {
 
     buf.push('hello')
     buf.push('world')
-    assert.equal(buf.drain(), '[User guidance]:\n1. hello\n2. world')
+    assert.equal(buf.drain(), '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]:\n1. hello\n2. world')
     buf.push('again')
     buf.clear()
 
@@ -87,11 +87,11 @@ describe('SteerBuffer', () => {
     const buf = new SteerBuffer()
     buf.push('first batch')
     const first = buf.drain()
-    assert.equal(first, '[User guidance]: first batch')
+    assert.equal(first, '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]: first batch')
 
     buf.push('second batch')
     const second = buf.drain()
-    assert.equal(second, '[User guidance]: second batch')
+    assert.equal(second, '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]: second batch')
   })
 
   it('drains by priority: now > next > later', () => {
@@ -105,7 +105,7 @@ describe('SteerBuffer', () => {
     const drained = buf.drain()
     assert.equal(
       drained,
-      '[User guidance]:\n1. now-1\n2. next-1\n3. next-2\n4. later-1\n5. later-2',
+      '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]:\n1. now-1\n2. next-1\n3. next-2\n4. later-1\n5. later-2',
     )
     assert.equal(buf.hasPending(), false)
   })
@@ -116,11 +116,11 @@ describe('SteerBuffer', () => {
     buf.pushNext('next-1')
     buf.push('later-1')
 
-    assert.equal(buf.drain('next'), '[User guidance]:\n1. now-1\n2. next-1')
+    assert.equal(buf.drain('next'), '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]:\n1. now-1\n2. next-1')
     assert.equal(buf.hasPending(), true)
     assert.deepEqual([...buf.getPending()], ['later-1'])
 
-    assert.equal(buf.drain('later'), '[User guidance]: later-1')
+    assert.equal(buf.drain('later'), '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]: later-1')
     assert.equal(buf.hasPending(), false)
   })
 
