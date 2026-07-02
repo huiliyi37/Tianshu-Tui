@@ -8,7 +8,8 @@
  *
  * This module installs a process-level `unhandledRejection` handler that silently
  * swallows EPERM scandir errors targeting known Windows system directories.
- * All other rejections propagate to Node.js's default warning handler normally.
+ * All other rejections are re-printed to stderr by the handler itself (having
+ * ANY listener suppresses Node's built-in warning, so we must stay audible).
  *
  * Import this module as early as possible (first import in the entry point) so
  * the handler is registered before any native dependency triggers the error.
@@ -34,6 +35,22 @@ export function isWindowsScandirNoise(error: unknown): boolean {
 }
 
 /**
+ * The unhandledRejection listener body. Exported so tests can exercise the
+ * suppress-vs-print contract directly (triggering real unhandled rejections
+ * under node:test is not possible — the runner intercepts them and fails
+ * the current test before userland listeners can matter).
+ */
+export function handleRejection(reason: unknown): void {
+  if (isWindowsScandirNoise(reason)) return // silently swallow noise
+  // Non-noise rejections MUST stay audible. Registering any listener disables
+  // Node's default unhandled-rejection warning entirely, so "defer to the
+  // default" is not an option — we have to print the warning ourselves or
+  // real programming errors become silent.
+  const detail = reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)
+  console.error(`[rivet] Unhandled promise rejection: ${detail}`)
+}
+
+/**
  * Install process-level filter for Windows EPERM scandir noise on
  * unhandledRejection. Safe to call multiple times — deduplicated via sentinel.
  *
@@ -44,10 +61,5 @@ export function installEpermFilter(): void {
   if ((process as any).__epermFilterInstalled) return
   ;(process as any).__epermFilterInstalled = true
 
-  process.on('unhandledRejection', (reason: unknown) => {
-    if (isWindowsScandirNoise(reason)) return // silently swallow noise
-    // Non-EPERM rejections: defer to Node.js default (prints warning to stderr).
-    // We must not fully suppress real programming errors — re-emit via
-    // a fresh emit so Node's MaxListeners + warning machinery still fires.
-  })
+  process.on('unhandledRejection', handleRejection)
 }

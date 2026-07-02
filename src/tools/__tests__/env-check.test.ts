@@ -7,6 +7,7 @@ import {
   formatGitMissingBanner,
   getInstallCommand,
   isPythonProject,
+  needsAutocrlfWarning,
   recommendUvSetup,
 } from '../env-check.js'
 
@@ -27,6 +28,23 @@ describe('env-check', () => {
       const banner = formatGitMissingBanner(false, 'darwin')
       assert.match(banner, /未检测到 Git/)
       assert.ok(!banner.includes('Git Bash'))
+    })
+  })
+
+  describe('needsAutocrlfWarning', () => {
+    it('warns only for autocrlf=true on Windows', () => {
+      assert.equal(needsAutocrlfWarning('true', 'win32'), true)
+    })
+
+    it('does not warn for input/false/unset on Windows', () => {
+      assert.equal(needsAutocrlfWarning('input', 'win32'), false)
+      assert.equal(needsAutocrlfWarning('false', 'win32'), false)
+      assert.equal(needsAutocrlfWarning(undefined, 'win32'), false)
+    })
+
+    it('does not warn off Windows regardless of value', () => {
+      assert.equal(needsAutocrlfWarning('true', 'darwin'), false)
+      assert.equal(needsAutocrlfWarning('true', 'linux'), false)
     })
   })
 

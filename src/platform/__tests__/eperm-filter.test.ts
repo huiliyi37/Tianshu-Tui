@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { installEpermFilter, isWindowsScandirNoise } from '../eperm-filter.js'
+import { handleRejection, installEpermFilter, isWindowsScandirNoise } from '../eperm-filter.js'
 
 /**
  * Contract tests for the unhandledRejection EPERM filter.
@@ -74,5 +74,54 @@ describe('EPERM filter', () => {
     assert.equal(isWindowsScandirNoise(null), false)
     assert.equal(isWindowsScandirNoise(undefined), false)
     assert.equal(isWindowsScandirNoise({}), false)
+  })
+
+  // W3 audibility contract: registering ANY unhandledRejection listener
+  // disables Node's built-in warning, so the handler must re-print non-noise
+  // rejections itself — otherwise real programming errors become silent.
+  // (Tested via handleRejection directly: real rejections under node:test are
+  // intercepted by the runner and fail the current test.)
+  it('prints non-noise rejections to stderr via console.error', () => {
+    const orig = console.error
+    const captured: string[] = []
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(' ')) }
+    try {
+      handleRejection(new Error('genuine-bug-marker'))
+      assert.ok(
+        captured.some((l) => l.includes('genuine-bug-marker')),
+        `expected the rejection to be printed, got: ${JSON.stringify(captured)}`,
+      )
+    } finally {
+      console.error = orig
+    }
+  })
+
+  it('prints non-Error rejection reasons (string) too', () => {
+    const orig = console.error
+    const captured: string[] = []
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(' ')) }
+    try {
+      handleRejection('plain-string-reason')
+      assert.ok(captured.some((l) => l.includes('plain-string-reason')))
+    } finally {
+      console.error = orig
+    }
+  })
+
+  it('stays silent for EPERM scandir noise rejections', () => {
+    const orig = console.error
+    const captured: string[] = []
+    console.error = (...args: unknown[]) => { captured.push(args.map(String).join(' ')) }
+    try {
+      handleRejection({
+        code: 'EPERM',
+        syscall: 'scandir',
+        path: 'C:\\Users\\test\\AppData\\Local\\ElevatedDiagnostics',
+        message: 'EPERM: operation not permitted, scandir',
+      })
+      assert.equal(captured.length, 0, `noise should stay silent, got: ${JSON.stringify(captured)}`)
+    } finally {
+      console.error = orig
+    }
   })
 })
