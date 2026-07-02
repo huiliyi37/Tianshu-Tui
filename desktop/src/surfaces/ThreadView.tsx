@@ -60,6 +60,15 @@ function domainGlyphForName(name: string): string {
   return '✹'
 }
 
+/** Format milliseconds as a short elapsed string: "3s", "1m 23s", "5m 00s". */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}m ${String(s).padStart(2, '0')}s`
+}
+
 // Thread view (P2/Q1) — the single-session working surface. Status header (with a
 // reserved slot for a future CVM domain glyph) + Codex-style message stream
 // (collapsible tools, streaming indicator, server-persisted user turns) + composer.
@@ -146,6 +155,18 @@ export function ThreadView(props: {
     return () => window.removeEventListener('send-prompt-failed', handler as EventListener)
   }, [input])
   const busy = session.status === 'running'
+  // Elapsed-time indicator: tick every second while running so users can tell
+  // if the agent is genuinely working or stuck (参考 Codex #24240 / Claude Code spinner).
+  const [, setElapsedTick] = useState(0)
+  useEffect(() => {
+    if (!busy || !view.runStartedAt) return
+    const id = setInterval(() => setElapsedTick((t) => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [busy, view.runStartedAt])
+  const elapsedMs = busy && view.runStartedAt ? Date.now() - view.runStartedAt : 0
+  const elapsedStr = elapsedMs > 0 ? formatElapsed(elapsedMs) : ''
+  const elapsedStalled = elapsedMs > 600_000 // >10min → 红色高亮提示可能卡住
+
   const autonomous = isAutonomous(session.approvalMode)
   const activeDomainId = useMemo(() => resolveActiveDomain(session, view), [session, view])
   const activeDomain = STAR_DOMAINS[activeDomainId]
@@ -625,7 +646,8 @@ export function ThreadView(props: {
               +{formatTokens(ctxDelta)}
             </span>
           ) : null}
-          {busy && view.phase && <span className="phase-chip">{view.phase}</span>}
+          {busy && view.phase && <span className="phase-chip">{view.phase}{elapsedStr && ` · ${elapsedStr}`}</span>}
+          {busy && !view.phase && elapsedStr && <span className={`phase-chip${elapsedStalled ? ' stalled' : ''}`}>{elapsedStr}</span>}
         </div>
       </header>
 
@@ -724,7 +746,10 @@ export function ThreadView(props: {
         {showThinking && (
           <div className="thinking">
             <span className="dot-pulse" /><span className="dot-pulse" /><span className="dot-pulse" />
-            <span className="thinking-label">{view.phase ? `思考中 · ${view.phase}` : '思考中…'}</span>
+            <span className="thinking-label">
+              {view.phase ? `思考中 · ${view.phase}` : '思考中…'}
+              {elapsedStr && <span className={`elapsed${elapsedStalled ? ' stalled' : ''}`}> · {elapsedStr}</span>}
+            </span>
           </div>
         )}
         {scrolledUp && (

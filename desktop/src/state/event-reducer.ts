@@ -126,6 +126,9 @@ export interface EventViewState {
   jobsRev: number
   /** Completion evidence summary surfaced from the final turn_complete event. */
   completionSummary?: EvidenceSummary
+  /** Timestamp (ms) when the current run started (status→running). Undefined when idle.
+   *  Drives the elapsed-time indicator so users can tell if the agent is stuck. */
+  runStartedAt?: number
 }
 
 export const initialEventState: EventViewState = {
@@ -150,6 +153,7 @@ export const initialEventState: EventViewState = {
   jobs: {},
   jobsRev: 0,
   completionSummary: undefined,
+  runStartedAt: undefined,
 }
 
 /** Strip the inline Evidence markdown section from assistant text so the desktop
@@ -446,6 +450,9 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
     }
     case 'status':
       next.status = String(ev.data.status ?? next.status ?? '')
+      // Track run start timestamp for the elapsed-time indicator.
+      if (next.status === 'running') next.runStartedAt = ev.ts
+      else next.runStartedAt = undefined
       return next
     case 'done':
       // Run settled — reflect the final status immediately instead of waiting
@@ -453,6 +460,7 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       next.status = String(ev.data.status ?? next.status ?? '')
       next.private_textOpen = false
       next.private_thinkingOpen = false
+      next.runStartedAt = undefined
       return next
     case 'approval_required':
       next.pendingApproval = {
