@@ -27,3 +27,4 @@ base64 = "0.22"
 window-vibrancy = "0.7.1"
 known-folders = "1.1"
 time = { version = "0.3", features = ["formatting"] }
+tauri-plugin-autostart = "2.5.1"

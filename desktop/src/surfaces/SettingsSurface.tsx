@@ -305,6 +305,7 @@ export function SettingsSurface() {
                 </dl>
               )}
             </section>
+            <AutostartSection />
             <PlatformSection />
             <StorageLocationSection />
             <StorageSection />
@@ -476,6 +477,57 @@ function formatBytes(n: number): string {
  * sidecar start (the target is resolved once at startup). Per-project overrides
  * still go through the project's .rivet-config.json `editor` block.
  */
+/** W5 — launch-at-login toggle (tauri-plugin-autostart). Windows: HKCU Run key;
+    macOS: LaunchAgent. Hidden entirely in browser-dev (no Tauri runtime). */
+function AutostartSection() {
+  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!isTauri) return
+    void import('@tauri-apps/plugin-autostart')
+      .then((m) => m.isEnabled())
+      .then(setEnabled)
+      .catch(() => setEnabled(null))
+  }, [isTauri])
+
+  const toggle = useCallback(async () => {
+    if (enabled === null || busy) return
+    setBusy(true)
+    try {
+      const m = await import('@tauri-apps/plugin-autostart')
+      if (enabled) await m.disable()
+      else await m.enable()
+      setEnabled(await m.isEnabled())
+    } catch (err) {
+      toast.error(`开机自启设置失败：${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [enabled, busy])
+
+  if (!isTauri || enabled === null) return null
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>开机自启</h4>
+        <p className="meta">登录系统时自动启动天枢（Windows 注册表 Run 键 / macOS LaunchAgent）。</p>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-text" style={{ cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={busy}
+          onChange={() => void toggle()}
+        />
+        <span>{enabled ? '已启用 — 登录时自动启动' : '未启用'}</span>
+      </label>
+    </section>
+  )
+}
+
 function PlatformSection() {
   const [cfg, setCfg] = useState<EditorConfig | null>(null)
   const [msg, setMsg] = useState<string | null>(null)

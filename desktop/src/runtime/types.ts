@@ -232,6 +232,8 @@ export interface EnvironmentInfo {
   git: ToolVersionInfo
   node: ToolVersionInfo
   platform: string
+  /** Windows only: effective `git config core.autocrlf` ('true'|'input'|'false'), undefined when unset. */
+  gitAutocrlf?: string
 }
 
 export interface ProjectTemplatesStatus {

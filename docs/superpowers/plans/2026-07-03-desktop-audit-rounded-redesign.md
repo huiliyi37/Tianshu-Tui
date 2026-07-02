@@ -170,12 +170,13 @@ P1-2..7 独立,穿插排期
 
 来自 Windows 兼容性专项调研的次级发现,基础已较厚(Git Bash 优先级链、GBK 流解码、EPERM 过滤、CRLF 编辑策略、`\\?\` 剥离、NTFS slug 消毒均已在):
 
-- `kill_sidecar()`(`lib.rs:701-708`)仅 `Child::kill()`,不像 Node 侧走 `taskkill /T` 清进程树——现靠 `RIVET_PARENT_PID` watchdog + process-tracker 双向兜底,强杀场景可能短暂残留 node.exe。
-- sidecar 崩溃后无自动重 spawn,前端进 fatal 态需重启应用。
-- git 未统一 `core.autocrlf` 策略,checkout CRLF + agent 写 LF 可能产生 mixed-EOL diff 噪音。
-- EPERM/bash smoke 测试在 Windows CI 上被 skip(`eperm-skip.test.ts:28-30`),生产路径无持续覆盖。
-- 无开机自启选项;无 per-monitor DPI 显式调优。
-- `eperm-filter.ts:47-52` 非 EPERM 的 unhandledRejection 未 re-emit,新型噪声可能静默。
+- [x] `kill_sidecar()` 仅 `Child::kill()` → 已改 `kill_child_tree()`:Windows 先 `taskkill /PID <pid> /T /F`(CREATE_NO_WINDOW),失败回落 `Child::kill()`;Unix 不变。Windows 实机行为待验证。
+- [x] sidecar 崩溃后无自动重 spawn → 已加 `start_sidecar_monitor()`:2s `try_wait()` 探活,意外退出用原 port+token 重拉(`SidecarLaunchSpec` setup 时解析一次),10 分钟窗口最多 3 次;`shutting_down: AtomicBool` 区分主动关闭;重拉健康后 `emit("sidecar-restarted")`,App.tsx 弹 toast「运行时进程已自动恢复」。Windows 实机行为待验证。
+- [x] git `core.autocrlf` 无检测 → `detectEnv` 新增 `gitAutocrlf`(win32 且 git 可用时探测),App.tsx 对 `true` 弹警告横幅并建议 `git config --global core.autocrlf input`(只提示不改配置)。
+- [ ] EPERM/bash smoke 测试在 Windows CI 上被 skip(`eperm-skip.test.ts:28-30`),生产路径无持续覆盖——需 Windows runner 基建,独立立项。
+- [x] 无开机自启选项 → `tauri-plugin-autostart`(macOS LaunchAgent / Windows HKCU Run),设置「系统」页新增开关,非 Tauri 环境隐藏。注册表自启实机行为待 Windows 验证。
+- [ ] per-monitor DPI 显式调优——WebView2 默认 PMv2 感知,无实测问题不动。
+- [x] `eperm-filter.ts` 非噪音 unhandledRejection 被完全静默(注册监听器即禁用 Node 默认警告)→ `handleRejection` 现对非噪音 rejection `console.error` 输出含 stack,补 3 条单测。
 
 ## 明确不做(本轮)
 

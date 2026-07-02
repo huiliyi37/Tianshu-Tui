@@ -875,6 +875,11 @@ pub fn run() {
     let tray_icon_bytes = include_bytes!("../icons/32x32.png");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_autostart::init(
+            // macOS: LaunchAgent plist (no deprecated AppleScript); Windows: HKCU Run key.
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())

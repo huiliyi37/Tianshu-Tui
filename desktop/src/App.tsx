@@ -9,6 +9,7 @@ import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { Rail } from './components/Rail'
 import { TitleBar } from './components/TitleBar'
 
+import { toast } from 'sonner'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { ConnectWizard } from './components/ConnectWizard'
 import { CommandPalette } from './components/CommandPalette'
@@ -48,6 +49,26 @@ export function App() {
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
+
+  // W2 — sidecar crash auto-recovery: the Rust shell respawns a crashed sidecar
+  // on the same port/token and emits this event once it passes /health again.
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    void import('@tauri-apps/api/event')
+      .then((m) => m.listen('sidecar-restarted', () => {
+        toast.success('运行时进程已自动恢复')
+        void health.refetch()
+      }))
+      .then((off) => {
+        if (cancelled) off()
+        else unlisten = off
+      })
+      .catch(() => {})
+    return () => { cancelled = true; unlisten?.() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     isStorageConfigured()
@@ -210,6 +231,15 @@ export function App() {
             >
               查看环境
             </button>
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
+        {env.data && env.data.platform === 'win32' && env.data.gitAutocrlf === 'true' && !envDismissed && (
+          <div className="banner warn">
+            检测到 git core.autocrlf=true：checkout 为 CRLF 而 agent 写入 LF，diff 会出现整文件换行噪音。
+            建议改为 input：<code>git config --global core.autocrlf input</code>
             <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
               ×
             </button>
