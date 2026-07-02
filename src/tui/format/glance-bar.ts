@@ -187,7 +187,7 @@ export function formatGlanceRight(input: GlanceBarInput, theme: RivetTheme): str
   }
   if (input.cost !== undefined && input.cost > 0) {
     // cost > 0 用 secondary 高亮，让用户感知到花费
-    parts.push(color(`${input.cost.toFixed(2)}`, theme.secondary))
+    parts.push(color(`¥${input.cost.toFixed(2)}`, theme.secondary))
   }
   const zone3 = parts.join('  ')
 

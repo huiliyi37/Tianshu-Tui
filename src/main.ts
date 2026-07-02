@@ -48,6 +48,7 @@ import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
 import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
+import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -800,10 +801,13 @@ async function main() {
     if (!ctx) return null
     const session = ctx.session
     const total = session.getTotalUsage()
-    const cacheRead = total.cache_read_input_tokens
-    const normalInput = Math.max(0, total.input_tokens - cacheRead)
-    // Ink 近似定价：normal $1/M · cacheRead $0.1/M · out $4/M（单次计算，不累加）
-    const cost = (normalInput * 1 + cacheRead * 0.1 + total.output_tokens * 4) / 1_000_000
+    // 真实定价：从 provider config 查当前模型的 pricing（CNY per 1M tokens），
+    // 按 input/output/cacheRead/cacheWrite/reasoning 五档精确计算。无 pricing 时回退 0。
+    const providers = ctx.agent.config.allProviders ?? {}
+    const providerName = ctx.agent.config.providerName
+    const modelId = ctx?.provider.models[0]?.id
+    const pricing = findModelPricing(providers, providerName, modelId)
+    const cost = pricing ? computeUsageCost(total, pricing).total : 0
     const maxTokens = ctx.agent.config.contextWindow ?? currentModel?.contextWindow ?? 0
     return {
       // Real occupancy: anchor on last API prompt_tokens + estimate the tail

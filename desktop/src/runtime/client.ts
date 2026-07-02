@@ -822,6 +822,21 @@ export function setupCustomProvider(
   return apiPost('/config/providers/custom', input)
 }
 
+export interface BalanceInfo {
+  currency: string
+  totalBalance: string
+}
+
+export interface BalanceResult {
+  isAvailable: boolean
+  balances: BalanceInfo[]
+}
+
+/** Query DeepSeek account balance (official API). Returns null for non-DeepSeek providers. */
+export function getBalance(): Promise<{ balance: BalanceResult | null }> {
+  return apiGet<{ balance: BalanceResult | null }>('/config/balance')
+}
+
 export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
   return rivetFetch(`/config/providers/${name}`, { method: 'DELETE' })
     .then(r => r.json() as Promise<{ ok: boolean }>)

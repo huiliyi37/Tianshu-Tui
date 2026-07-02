@@ -556,3 +556,13 @@ export interface StorageApplyResult {
   requiresRestart: boolean
   error?: string
 }
+
+export interface BalanceInfo {
+  currency: string
+  totalBalance: string
+}
+
+export interface BalanceResult {
+  isAvailable: boolean
+  balances: BalanceInfo[]
+}

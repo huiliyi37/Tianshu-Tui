@@ -2073,7 +2073,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       // 占用明细头：cache 命中率 + 本轮 cost（与 GlanceBar 同源），对齐 Claude Code /context。
       const usagePct = sections.maxTokens > 0 ? Math.round(sections.estimatedTokens / sections.maxTokens * 100) : 0
       const cacheStr = ctx.cacheHitRate !== undefined ? `${Math.round(ctx.cacheHitRate * 100)}%` : 'n/a'
-      const costStr = `$${(ctx.cost ?? 0).toFixed(2)}`
+      const costStr = `¥${(ctx.cost ?? 0).toFixed(2)}`
       const realTokens = ctx.session.getLastRealPromptTokens()
       const realStr = realTokens > 0 ? `\nAPI (last): ${realTokens.toLocaleString()} tokens` : ''
 

@@ -8,6 +8,7 @@
  *   DELETE /config/providers/:name          remove a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
+ *   GET    /config/balance                  query DeepSeek account balance (official API)
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -27,6 +28,7 @@ import {
 } from '../config/manager.js'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
+import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
   return async (body, params, headers, res) => {
@@ -209,6 +211,16 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
+    }, apiToken),
+
+    'GET /config/balance': withAuth(async () => {
+      // 查 DeepSeek 官方账户余额。仅 DeepSeek 官方端点支持（其他 provider 返回 null）。
+      const cfg = loadConfig()
+      const provider = cfg.provider.providers[cfg.provider.default]
+      if (!provider) return { status: 200, body: { balance: null as BalanceResult | null } }
+      const apiKey = provider.apiKey ?? (provider.apiKeyEnv ? process.env[provider.apiKeyEnv] : undefined)
+      const balance = await queryDeepSeekBalance(apiKey, provider.baseUrl)
+      return { status: 200, body: { balance } }
     }, apiToken),
   }
 }

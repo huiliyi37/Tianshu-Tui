@@ -2374,10 +2374,12 @@ export class TuiApp {
     }
   }
 
-  /** 估算累计费用（对齐 app.tsx 的近似定价：normal $1/M、cache $0.1/M、out $4/M） */
+  /** Fallback cost estimate when no metricsProvider is wired (tests / no-config).
+   *  Returns 0 — real cost comes from metricsProvider (main.ts wires findModelPricing
+   *  + computeUsageCost). Guessing a price without knowing the provider/model
+   *  produces misleading numbers, so we don't. */
   private estimateSessionCost(): number {
-    const normalInput = Math.max(0, this.metricsGlanceController.totalUsage.input - this.metricsGlanceController.totalUsage.cacheRead)
-    return (normalInput * 1 + this.metricsGlanceController.totalUsage.cacheRead * 0.1 + this.metricsGlanceController.totalUsage.output * 4) / 1_000_000
+    return 0
   }
 
   private handleError(error: Error): void {
