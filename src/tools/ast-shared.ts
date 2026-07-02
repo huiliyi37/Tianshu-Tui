@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, lstatSync } from 'node:fs'
 import { resolve, extname, join } from 'node:path'
+import type { Dirent } from 'node:fs'
+import { isRestrictedPath } from '../platform/restricted-paths.js'
 
 // ── language inference ────────────────────────────────────────────
 
@@ -128,7 +130,17 @@ export function collectFiles(searchPath: string): string[] {
   const files: string[] = []
   const walk = (dir: string, depth: number): void => {
     if (files.length >= MAX_FILES || depth > MAX_DEPTH) return
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      // Non-root + known restricted system path + permission error → silent skip.
+      // depth === 0 is the agent-specified search root — must propagate errors.
+      if (depth > 0 && isRestrictedPath(String(e.path ?? e.message ?? ''), e.code ?? '')) return
+      throw err
+    }
+    for (const entry of entries) {
       if (files.length >= MAX_FILES) return
       const full = join(dir, entry.name)
       if (entry.isDirectory()) {
