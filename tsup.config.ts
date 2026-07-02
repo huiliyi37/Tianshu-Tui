@@ -29,8 +29,34 @@ export default defineConfig({
   // resolves this relative to the emitted module. docs/ stays the single source of
   // truth (also synced to the public repo); this is a build-time copy, not a duplicate.
   async onSuccess() {
-    const { readdirSync, mkdirSync, copyFileSync } = await import('node:fs')
+    const { readdirSync, mkdirSync, copyFileSync, existsSync } = await import('node:fs')
     const { join } = await import('node:path')
+
+    // Hard gate: the bundled skills MUST reach dist/ or the packaged desktop app
+    // ships with only the 2 hardcoded built-ins. publicDir copies
+    // runtime-assets/bundled-skills → dist/bundled-skills; if that silently no-ops
+    // (renamed/missing source, publicDir change) we refuse to ship. Mirrors the
+    // better-sqlite3 zero-degrade assertion in stage-runtime-deps.js.
+    {
+      const bundledSrc = join('runtime-assets', 'bundled-skills')
+      const bundledDest = join('dist', 'bundled-skills')
+      const srcCount = existsSync(bundledSrc)
+        ? readdirSync(bundledSrc).filter(f => !f.startsWith('_')).length
+        : 0
+      const destCount = existsSync(bundledDest)
+        ? readdirSync(bundledDest).filter(f => !f.startsWith('_')).length
+        : 0
+      if (srcCount === 0) {
+        console.error('[tsup] ✗ runtime-assets/bundled-skills is missing or empty — the app would ship with no default skills.')
+        process.exit(1)
+      }
+      if (destCount < srcCount) {
+        console.error(`[tsup] ✗ dist/bundled-skills has ${destCount} entries but source has ${srcCount} — publicDir copy did not complete. Refusing to ship a skill-less bundle.`)
+        process.exit(1)
+      }
+      console.log(`[tsup] ✅ bundled ${destCount} default skill(s) → dist/bundled-skills/`)
+    }
+
     try {
       const files = readdirSync('docs').filter(f => /^seed-capsule-.+\.md$/.test(f))
       if (files.length === 0) return

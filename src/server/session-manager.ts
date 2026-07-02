@@ -472,6 +472,12 @@ interface InternalSession {
   /** PlusMenu (skills) — per-session disabled skill names (in-memory). */
   disabledSkills: Set<string>
   /**
+   * Skills that failed to load from .rivet/skills at session create (e.g. a
+   * malformed Claude SKILL.md with no/broken frontmatter). Surfaced to the UI so
+   * an installed-but-unparseable skill is visible instead of silently dropped.
+   */
+  skillLoadErrors: string[]
+  /**
    * User-dispatched background worker abort controllers, keyed by workerId.
    * Independent from the main turn's signal so a user-launched subagent is NOT
    * killed by aborting the main conversation. Lazily created on first dispatch.
@@ -608,6 +614,7 @@ export class RuntimeSessionManager {
           steer: new SteerBuffer(),
           domainState: resolveDomainState(rec.domain ?? 'auto')?.state,
           disabledSkills: new Set(),
+          skillLoadErrors: [],
         }
         this.sessions.set(session.record.id, session)
         if (wasRunning) {
@@ -662,6 +669,7 @@ export class RuntimeSessionManager {
         // agent re-applies it. Skills are in-memory only → start clean.
         domainState: resolveDomainState(ps.record.domain ?? 'auto')?.state,
         disabledSkills: new Set(),
+        skillLoadErrors: [],
       }
       this.sessions.set(session.record.id, session)
       if (wasRunning) {
@@ -893,6 +901,7 @@ export class RuntimeSessionManager {
       steer: new SteerBuffer(),
       domainState: undefined,
       disabledSkills: new Set(),
+      skillLoadErrors: [],
     }
     this.sessions.set(id, session)
     this.touchLoaded(session)
@@ -902,7 +911,8 @@ export class RuntimeSessionManager {
     // 在 agent 创建路径（buildSessionStores），新会话的技能面板会显示空（0/0）直到首次
     // 对话。这里在创建会话时即加载，幂等（registry 用 Map.set 覆盖）。
     // importFromClaude 的文件复制由后续 agent 创建时的 buildSessionStores 补全（幂等）。
-    try { loadProjectSkills(cwd) } catch { /* non-fatal: 技能加载失败不阻断会话 */ }
+    // 捕获 loadErrors：坏 frontmatter 的技能不再静默消失，UI 会显示原因。
+    try { session.skillLoadErrors = loadProjectSkills(cwd).errors } catch { /* non-fatal: 技能加载失败不阻断会话 */ }
     // R1 — announce the session to the shared registry so its file claims are
     // attributed and reaped on crash. Best-effort: registry may be disabled.
     try { this.getRegistry?.()?.register(id, cwd, 'standalone') } catch { /* non-fatal */ }
@@ -1183,6 +1193,18 @@ export class RuntimeSessionManager {
       source: s.source ?? (s.builtIn ? 'builtin' : 'rivet'),
       enabled: !session.disabledSkills.has(s.name),
     }))
+  }
+
+  /**
+   * Skills that failed to load from .rivet/skills for this session (malformed
+   * frontmatter, etc.). Surfaced by GET /skills so an installed-but-unparseable
+   * skill is visible rather than silently missing. Returns undefined when the
+   * session is missing.
+   */
+  getSkillLoadErrors(id: string): string[] | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    return [...session.skillLoadErrors]
   }
 
   /**

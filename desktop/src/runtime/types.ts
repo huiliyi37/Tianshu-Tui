@@ -82,6 +82,13 @@ export interface SkillStatus {
   enabled: boolean
 }
 
+/** GET /skills response: loaded skills + skills that failed to parse on load. */
+export interface SkillsResponse {
+  skills: SkillStatus[]
+  /** `<name>: <reason>` for skills under .rivet/skills that failed to load. */
+  loadErrors: string[]
+}
+
 /** A skill discoverable under .claude/skills that can be copied into .rivet/skills. */
 export interface InstallableSkill {
   name: string

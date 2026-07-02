@@ -792,6 +792,13 @@ export class TuiApp {
     // 启用 bracketed paste（DEC 2004）：粘贴被 200~/201~ 包裹，
     // 避免含 \r 的多行粘贴被逐行当作 Enter 提交、控制字符污染显示。
     this.stdout.write('\x1B[?2004h')
+    // 首帧前重置 LiveEngine 的屏上状态。构造后到 start() 之间的一批 setter
+    // （setApprovalMode / setSessionStarDomain / setSidePanelOpen …）可能已触发过
+    // renderLive 画出一版输入框；而 main.ts 随后 `\x1B[2J\x1B[H` 清屏 + 写欢迎屏，
+    // 把那版擦掉了，但 LiveEngine 仍记着 hasRendered/lastDisplayRows → 首次真正渲染
+    // 会 moveToTop 到错误位置、把输入框顶进欢迎屏中段并丢掉输入行/底边框。reset() 令
+    // 本帧当作全新首帧，在当前光标（欢迎屏正下方）干净 append。
+    this.live.reset()
     this.renderLive()
   }
 
