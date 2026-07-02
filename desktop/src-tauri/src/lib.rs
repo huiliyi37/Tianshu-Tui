@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -40,9 +41,26 @@ pub struct RuntimeInfo {
     pub rivet_home: String,
 }
 
+/// Everything needed to (re)spawn the sidecar. Resolved once at setup so the
+/// crash monitor can relaunch with identical coordinates — same port + token —
+/// letting the frontend's health polling recover without re-fetching RuntimeInfo.
+#[derive(Clone)]
+struct SidecarLaunchSpec {
+    node: String,
+    entry: PathBuf,
+    rivet_home: PathBuf,
+    cwd: Option<PathBuf>,
+    port: u16,
+    token: String,
+}
+
 struct Sidecar {
     info: RuntimeInfo,
     child: Mutex<Option<Child>>,
+    spec: SidecarLaunchSpec,
+    /// Set by kill_sidecar before killing so the crash monitor can tell an
+    /// intentional shutdown from a crash and skip the restart.
+    shutting_down: AtomicBool,
 }
 
 #[tauri::command]
@@ -447,6 +465,19 @@ fn sidecar_entry(app: &tauri::App) -> PathBuf {
         // with `EISDIR: lstat '<drive>:'` (no-op for ordinary paths / off Windows).
         return strip_verbatim_prefix(PathBuf::from(p));
     }
+    // Dev mode: always use the repo's dist/main.js so code changes take effect
+    // after `npm run build` without manually re-staging rivet-runtime/. The
+    // bundled resource (from a prior `tauri build`) would be a stale copy.
+    if cfg!(debug_assertions) {
+        let mut dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        // desktop/src-tauri -> desktop -> repo root
+        dir.pop();
+        dir.pop();
+        let repo_dist = dir.join("dist").join("main.js");
+        if repo_dist.exists() {
+            return repo_dist;
+        }
+    }
     let res = resource_dir_fallback(app);
     let bundled = res.join("rivet-runtime").join("main.js");
     if bundled.exists() {
@@ -632,17 +663,13 @@ fn is_portable_location(p: &std::path::Path) -> bool {
     true
 }
 
-fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
-    let port = pick_free_port();
-    let token = random_token();
-    let (node, node_source) = resolve_node_cmd(app);
-    let entry = sidecar_entry(app);
-    let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
-
+/// Spawn a sidecar process from a resolved launch spec. Used for both the
+/// initial launch (setup) and crash-monitor restarts.
+fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
     // Report spawn failures instead of swallowing them with `.ok()`: a missing
     // node / bad entry path otherwise leaves the UI with a valid-looking handle
     // pointing at nothing, surfacing only as opaque fetch failures later.
-    let mut cmd = Command::new(&node);
+    let mut cmd = Command::new(&spec.node);
     // Node runtime flags MUST precede the script path. The tsup banner bakes these
     // into dist/main.js's shebang, but `node main.js` ignores the shebang (Windows
     // ignores it entirely), so without passing them here the sidecar runs on V8's
@@ -651,12 +678,12 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     // set via NODE_OPTIONS (Node rejects it), so it has to be a direct arg.
     cmd.arg("--max-old-space-size=4096")
         .arg("--expose-gc")
-        .arg(&entry)
+        .arg(&spec.entry)
         .arg("serve")
         .arg("--port")
-        .arg(port.to_string())
-        .env("RIVET_SERVER_TOKEN", &token)
-        .env("RIVET_HOME", rivet_home.to_string_lossy().as_ref())
+        .arg(spec.port.to_string())
+        .env("RIVET_SERVER_TOKEN", &spec.token)
+        .env("RIVET_HOME", spec.rivet_home.to_string_lossy().as_ref())
         // Parent-death watchdog: the Node sidecar polls this PID and self-exits
         // when the shell process is gone, so a crash / force-quit / Task Manager
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
@@ -665,7 +692,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
     // resolved to absolute paths above, so the child's different cwd can't break
     // locating them). Leave it inherited only if home can't be resolved.
-    if let Some(dir) = sidecar_cwd(app) {
+    if let Some(dir) = &spec.cwd {
         cmd.current_dir(dir);
     }
     // Windows: `node` is a console-subsystem binary, so a GUI parent spawning it
@@ -676,16 +703,36 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = match cmd.spawn() {
+    match cmd.spawn() {
         Ok(c) => Some(c),
         Err(e) => {
             eprintln!(
-                "[rivet] failed to spawn sidecar (node='{}', source='{}', entry='{}'): {}",
-                node, node_source, entry.display(), e
+                "[rivet] failed to spawn sidecar (node='{}', entry='{}'): {}",
+                spec.node,
+                spec.entry.display(),
+                e
             );
             None
         }
+    }
+}
+
+fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunchSpec) {
+    let port = pick_free_port();
+    let token = random_token();
+    let (node, node_source) = resolve_node_cmd(app);
+    let entry = sidecar_entry(app);
+    let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
+    let spec = SidecarLaunchSpec {
+        node,
+        entry,
+        rivet_home: rivet_home.clone(),
+        cwd: sidecar_cwd(app),
+        port,
+        token: token.clone(),
     };
+
+    let mut child = spawn_from_spec(&spec);
 
     let ready = child.is_some() && wait_until_ready(port, &token, Duration::from_secs(15));
     if child.is_some() && !ready {
@@ -695,7 +742,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
         // Health never came up: reap the half-dead child so it can't linger
         // holding the port behind a UI that's about to show a fatal error.
         if let Some(mut c) = child.take() {
-            let _ = c.kill();
+            kill_child_tree(&mut c);
         }
     }
 
@@ -708,19 +755,119 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
             rivet_home: rivet_home.to_string_lossy().to_string(),
         },
         child,
+        spec,
     )
+}
+
+/// Kill a sidecar child *and its process tree*.
+///
+/// Windows: `Child::kill` only terminates node.exe itself — tool subprocesses
+/// (bash, git, workers) it spawned survive briefly until the RIVET_PARENT_PID
+/// watchdog notices. `taskkill /T /F` removes the whole tree synchronously.
+/// Unix: plain kill — the Node side's SIGTERM cleanup chain handles children.
+fn kill_child_tree(c: &mut Child) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let ok = Command::new("taskkill")
+            .args(["/PID", &c.id().to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            let _ = c.wait(); // reap the zombie handle
+            return;
+        }
+        // taskkill missing/failed — fall through to plain kill.
+    }
+    let _ = c.kill();
+    let _ = c.wait();
 }
 
 /// Kill the sidecar child if still tracked. Idempotent (take() empties the slot)
 /// so calling from both WindowEvent::Destroyed and RunEvent::Exit is safe.
+/// Marks the state as shutting down first so the crash monitor doesn't treat
+/// the kill as a crash and respawn.
 fn kill_sidecar(app_handle: &tauri::AppHandle) {
     if let Some(state) = app_handle.try_state::<Sidecar>() {
+        state.shutting_down.store(true, Ordering::SeqCst);
         if let Ok(mut guard) = state.child.lock() {
             if let Some(mut c) = guard.take() {
-                let _ = c.kill();
+                kill_child_tree(&mut c);
             }
         }
     }
+}
+
+/// Crash monitor (W2): polls the sidecar child every 2s; if it exited without
+/// kill_sidecar being the cause, respawns it with the SAME port + token so the
+/// frontend's health polling recovers in place. Capped at 3 restarts per 10min
+/// window — beyond that the existing fatal-banner path takes over.
+fn start_sidecar_monitor(handle: tauri::AppHandle) {
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        let mut restarts: Vec<Instant> = Vec::new();
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            let Some(state) = handle.try_state::<Sidecar>() else {
+                continue;
+            };
+            if state.shutting_down.load(Ordering::SeqCst) {
+                return;
+            }
+            let exited = {
+                let Ok(mut guard) = state.child.lock() else { continue };
+                match guard.as_mut() {
+                    Some(c) => match c.try_wait() {
+                        Ok(Some(_status)) => {
+                            guard.take();
+                            true
+                        }
+                        _ => false,
+                    },
+                    // None: never spawned (fatal path) or already killed — nothing to watch.
+                    None => false,
+                }
+            };
+            if !exited {
+                continue;
+            }
+            // Re-check: kill_sidecar may have raced between our try_wait and here.
+            if state.shutting_down.load(Ordering::SeqCst) {
+                return;
+            }
+            restarts.retain(|t| t.elapsed() < Duration::from_secs(600));
+            if restarts.len() >= 3 {
+                eprintln!("[rivet] sidecar crashed {} times within 10min — giving up auto-restart", restarts.len() + 1);
+                return;
+            }
+            restarts.push(Instant::now());
+            eprintln!(
+                "[rivet] sidecar exited unexpectedly — restarting on port {}",
+                state.spec.port
+            );
+            if let Some(mut child) = spawn_from_spec(&state.spec) {
+                let ready = wait_until_ready(
+                    state.spec.port,
+                    &state.spec.token,
+                    Duration::from_secs(15),
+                );
+                if ready {
+                    if let Ok(mut guard) = state.child.lock() {
+                        *guard = Some(child);
+                    }
+                    let _ = handle.emit("sidecar-restarted", ());
+                    eprintln!("[rivet] sidecar restarted and healthy");
+                } else {
+                    // Half-dead respawn: reap it; the attempt still counts
+                    // against the budget, and the next poll may retry.
+                    kill_child_tree(&mut child);
+                }
+            }
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -746,11 +893,14 @@ pub fn run() {
             pty::pty_kill
         ])
         .setup(|app| {
-            let (info, child) = spawn_sidecar(app);
+            let (info, child, spec) = spawn_sidecar(app);
             app.manage(Sidecar {
                 info,
                 child: Mutex::new(child),
+                spec,
+                shutting_down: AtomicBool::new(false),
             });
+            start_sidecar_monitor(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
