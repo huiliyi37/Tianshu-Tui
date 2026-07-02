@@ -80,6 +80,35 @@ test('shortcut hints match real keybindings (no Ctrl+K / Alt+Enter drift)', () =
   assert.ok(!joined.includes('Alt+Enter'), '不再写错误的 Alt+Enter multi-line')
 })
 
+test('height-aware: full banner only when terminal is tall enough', () => {
+  const base = { modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, numericId: 6174 }
+  const tall = formatWelcome({ ...base, rows: 40 }, theme)
+  assert.ok(tall.length >= 20, `tall terminal → full banner, got ${tall.length}`)
+  assert.ok(tall.join('\n').includes('┌'), 'full banner has bordered card')
+})
+
+test('height-aware: 24-row terminal degrades to compact medium (input box stays visible)', () => {
+  const lines = formatWelcome({
+    modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 24,
+  }, theme)
+  assert.ok(lines.length <= 7, `24-row terminal → medium banner ≤7 lines, got ${lines.length}`)
+  assert.ok(lines.join('\n').includes('T I A N S H U'), 'medium banner still branded')
+  assert.ok(!lines.join('\n').includes('┌'), 'medium banner drops the bordered card')
+})
+
+test('height-aware: very short terminal (<12 rows) collapses to single line', () => {
+  const lines = formatWelcome({
+    modelName: 'gpt-5.5', cwd: '/x', sessionId: 'abcdef012345', priorMsgCount: 0, columns: 100, rows: 10,
+  }, theme)
+  assert.equal(lines.length, 1, `<12-row terminal → single line, got ${lines.length}`)
+  assert.ok(lines[0]!.includes('天枢'), 'single line still branded')
+})
+
+test('no rows provided → full banner (back-compat for callers/tests not passing rows)', () => {
+  const lines = formatWelcome({ modelName: 'm', cwd: '/x', sessionId: 'abcdefgh', priorMsgCount: 0, columns: 100 }, theme)
+  assert.ok(lines.join('\n').includes('┌'), 'defaulting rows → full banner')
+})
+
 test('no line exceeds terminal width (display width ≤ columns)', () => {
   for (const cols of [20, 40, 80]) {
     const lines = formatWelcome({

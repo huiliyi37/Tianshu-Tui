@@ -944,6 +944,7 @@ async function main() {
       sessionId: ctx.sessionId,
       priorMsgCount: existingMsgCount,
       columns: stdout.columns || 80,
+      rows: stdout.rows || 24,
       numericId: ctx.agent.sessionNumericId,
       compact: existingMsgCount > 0,
     }, theme)

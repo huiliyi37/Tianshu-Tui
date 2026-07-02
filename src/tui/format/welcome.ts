@@ -46,7 +46,18 @@ export interface FormatWelcomeInput {
   numericId?: number
   /** 折叠为单行极简版（用于非首次启动/恢复会话）。 */
   compact?: boolean
+  /** 终端可视高度（行）。用于高度自适应降级：欢迎屏写入 scrollback，太高会把随后
+   *  渲染的输入框顶到视口底部（甚至被 Warp/iTerm 底部状态栏遮住半截）。未提供时按
+   *  "足够高"处理，保持全banner（兼容不传 rows 的调用点/测试）。 */
+  rows?: number
 }
+
+/** 全 banner（带边框卡片）实际行数：见文件顶部结构注释。 */
+const FULL_BANNER_ROWS = 24
+/** 中号（无边框）降级布局行数。 */
+const MEDIUM_BANNER_ROWS = 7
+/** 欢迎屏之外必须保持可见的行：输入框 3 行 + 终端底部状态栏/呼吸余量 ~2 行。 */
+const RESERVED_ROWS = 5
 
 function truncateToWidth(text: string, maxWidth: number): string {
   // … 自身按 2 列计，预留其宽度后截断剩余文本。
@@ -130,17 +141,30 @@ export function formatWelcome(input: FormatWelcomeInput, theme: RivetTheme): str
     ? `${input.sessionId.slice(0, 8)} (${input.priorMsgCount} prior)`
     : input.sessionId.slice(0, 8)
 
-  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
-  if (input.compact) {
+  const compactLine = (): string => {
     const numeric = input.numericId ? ` · #${input.numericId}` : ''
     const line = `${color('✦', theme.primary, { bold: true })} ${color('天枢', theme.primary, { bold: true })}${numeric}  ${color('·', theme.dim)}  ${color(input.modelName, theme.secondary)}  ${color('·', theme.dim)}  ${color(dir + '/', theme.dim)}  ${color('·', theme.dim)}  ${color(session, theme.dim)}  ${color('·', theme.dim)}  ${color('/help', theme.secondary)}`
-    return [truncateToWidth(line, cols)]
+    return truncateToWidth(line, cols)
+  }
+
+  // 折叠模式：单行极简提示，适合恢复会话或非首次启动
+  if (input.compact) {
+    return [compactLine()]
+  }
+
+  // 高度自适应：欢迎屏落进 scrollback，其后立即渲染的输入框需留在视口内。终端不够高
+  // 时逐级降级（full → medium → 单行），避免高 banner 把输入框顶到底部被状态栏吃掉。
+  const rows = input.rows && input.rows > 0 ? input.rows : Number.POSITIVE_INFINITY
+  const fitsFull = rows >= FULL_BANNER_ROWS + RESERVED_ROWS
+  const fitsMedium = rows >= MEDIUM_BANNER_ROWS + RESERVED_ROWS
+  if (!fitsMedium) {
+    return [compactLine()]
   }
 
   const boxWidth = Math.min(80, cols)
 
-  // 如果列宽足够，渲染精致的带边框卡片
-  if (boxWidth >= 60) {
+  // 如果列宽足够 且 终端够高，渲染精致的带边框卡片
+  if (boxWidth >= 60 && fitsFull) {
     const innerWidth = boxWidth - 4
     const borderCol = (text: string) => color(text, theme.dim)
     const out: string[] = []
