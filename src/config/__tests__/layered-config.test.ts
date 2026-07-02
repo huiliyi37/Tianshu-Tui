@@ -4,16 +4,19 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { loadConfig, loadConfigDefault, findProjectConfig } from '../manager.js'
+import { DEFAULT_CONFIG } from '../default.js'
+import { agentSchema } from '../schema.js'
 
 describe('loadConfig — 3-layer resolution', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'rivet-config-test-'))
 
-  it('returns valid config when no project/session config exists', () => {
-    const config = loadConfig({ cwd: tempDir })
-    assert.ok(config.provider)
-    assert.ok(config.agent)
-    // approval may be overridden by user's global config, just check it's valid
-    assert.ok(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions'].includes(config.agent.approval))
+  it('DEFAULT_CONFIG.agent.maxTurns matches schema default (drift guard)', () => {
+    // DEFAULT_CONFIG is deep-merged before schema.parse, so its explicit values
+    // shadow the Zod .default(). If these drift, the schema default is dead code
+    // (session 5158719d: schema said 200 but DEFAULT_CONFIG pinned 50 → no effect).
+    const schemaDefault = agentSchema.shape.maxTurns._def.defaultValue()
+    assert.equal(DEFAULT_CONFIG.agent.maxTurns, schemaDefault,
+      'DEFAULT_CONFIG.agent.maxTurns must match schema default — drift makes the schema value dead')
   })
 
   it('applies project config over defaults', () => {

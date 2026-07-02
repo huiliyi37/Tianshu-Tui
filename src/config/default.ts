@@ -89,7 +89,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   agent: {
     approval: 'suggest',
-    maxTurns: 50,
+    maxTurns: 200,
     mode: 'code',
     autoReasoning: true,
     songlineEnabled: false,
