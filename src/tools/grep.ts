@@ -4,6 +4,7 @@ import { createReadStream } from 'fs'
 import { lstat, readdir, realpath, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
 import { createInterface } from 'readline'
+import type { Dirent } from 'node:fs'
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { relativePosix } from '../path-format.js'
 import { truncateContent } from './truncation.js'
@@ -18,6 +19,7 @@ import { track } from './process-tracker.js'
 import { gracefulKill } from '../platform.js'
 import { hashLine } from './hash-edit.js'
 import { registerGrepFileAccess } from './read-file.js'
+import { isRestrictedPath } from '../platform/restricted-paths.js'
 
 const MAX_RESULTS_DEFAULT = 100
 const TIMEOUT_MS = 30_000
@@ -411,7 +413,7 @@ async function nativeSearch(
   const results: string[] = []
   const visited = new Set<string>()
 
-  async function walk(dir: string): Promise<void> {
+  async function walk(dir: string, isRoot: boolean): Promise<void> {
     if (results.length >= maxResults) return
 
     let real: string
@@ -423,7 +425,16 @@ async function nativeSearch(
     if (visited.has(real)) return
     visited.add(real)
 
-    const entries = await readdir(dir, { withFileTypes: true })
+    let entries: Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch (err) {
+      const e = err as NodeJS.ErrnoException
+      // Non-root + known restricted system path + permission error → silent skip.
+      // Root or other errors → propagate (outer catch → isError:true).
+      if (!isRoot && isRestrictedPath(String(e.path ?? e.message ?? ''), e.code ?? '')) return
+      throw err
+    }
     for (const entry of entries) {
       if (results.length >= maxResults) return
       const fullPath = join(dir, entry.name)
@@ -431,7 +442,7 @@ async function nativeSearch(
       if (!s || s.isSymbolicLink()) continue
 
       if (s.isDirectory()) {
-        await walk(fullPath)
+        await walk(fullPath, false)
       } else if (s.isFile()) {
         const relPath = relativePosix(cwd, fullPath)
         if (filter.isIgnored(cwd, fullPath)) continue
@@ -455,7 +466,7 @@ async function nativeSearch(
       if (results.length >= maxResults) return results
     }
   } else {
-    await walk(absPath)
+    await walk(absPath, true)
   }
 
   return results
