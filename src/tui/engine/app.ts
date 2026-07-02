@@ -178,6 +178,7 @@ import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import { FleetRegistry } from '../fleet-registry.js'
+import { WatchdogRecoveryPolicy } from '../../agent/watchdog-recovery-policy.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -310,27 +311,9 @@ export class TuiApp {
    * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
    */
   private _runGen = 0
-  /** Consecutive watchdog auto-continues without intervening progress. Caps the
-   *  goal-mode "⟳ Auto-recovering → continue" loop so a genuinely-wedged turn
-   *  can't re-abort every hardStallMs and burn budget forever. Reset on any
-   *  real turn completion or user submit. */
-  private _watchdogAutoContinues = 0
-  private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
-  /** Session-level total watchdog auto-continues — never resets. Backstops the
-   *  loophole where a tiny turn (thinking-retry / phantom-continue) resets the
-   *  consecutive counter, allowing a stall→recover→tiny-turn→reset→stall loop
-   *  to burn budget indefinitely. Capped at a higher threshold so legitimate
-   *  long goal runs don't get cut short, but runaway loops get stopped. */
-  private _watchdogSessionTotal = 0
-  private static readonly MAX_WATCHDOG_SESSION_TOTAL = 12
-  /** Progress units (turn completions + tool results) observed since the last
-   *  watchdog auto-continue. Distinguishes dense wedge stalls (0-2 units:
-   *  nothing or a toolless tiny-turn between stalls) from sparse legitimate
-   *  stalls (>= 2 full tool batches of real work). Dense stalls consume the
-   *  session-total quota; sparse ones don't. Model-agnostic: uses only TUI-
-   *  observable callback counts, not output_tokens or turnNumber. */
-  private _progressSinceLastStall = 0
-  private static readonly WATCHDOG_PROGRESS_THRESHOLD = 4
+  /** Watchdog stall 自动恢复状态机（consecutive/session-total/进度感知配额），
+   *  与桌面 sidecar 共享同一实现 — 见 src/agent/watchdog-recovery-policy.ts。 */
+  private readonly watchdogPolicy = new WatchdogRecoveryPolicy()
   /** Timestamp of the last approval denial. A watchdog abort that happens while
    *  (or just after) a tool is blocked on approval must NOT auto-continue: the
    *  resubmitted 'continue' just re-emits the same approval-blocked call, giving
@@ -396,7 +379,7 @@ export class TuiApp {
         // auto-continue counter so a later legitimate stall gets the full
         // recovery budget again. (The auto-continue path resubmits via
         // onSubmitCallback directly and does NOT pass through here.)
-        if (trimmed) this._watchdogAutoContinues = 0
+        if (trimmed) this.watchdogPolicy.recordUserSubmit()
 
         // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
         if (trimmed) {
@@ -2158,9 +2141,9 @@ export class TuiApp {
     // Progress unit counted HERE (after the streaming-chunk early return), not
     // at method entry: onOutput streams one callback per chunk with isError
     // undefined, and counting chunks would let a single chatty tool call (4+
-    // chunks) satisfy WATCHDOG_PROGRESS_THRESHOLD — diluting the dense-stall
-    // detector the threshold was calibrated for (>= 2 full tool batches).
-    this._progressSinceLastStall++
+    // chunks) satisfy the threshold — diluting the dense-stall detector
+    // calibrated for (>= 2 full tool batches).
+    this.watchdogPolicy.recordToolResult()
     const toolAcc = this.toolGroupController.getAccumulated(id)
     this.toolGroupController.deleteAccumulated(id)
     const meta = this.toolGroupController.getPending(id)
@@ -2314,10 +2297,8 @@ export class TuiApp {
     this.state.turnNumber = turnNumber
 
     // A completed turn (even intermediate) is forward progress: the stream
-    // produced output, so the prior boundary stall cleared. Reset the goal-mode
-    // watchdog auto-continue counter to restore the full recovery budget.
-    this._watchdogAutoContinues = 0
-    this._progressSinceLastStall++
+    // produced output, so the prior boundary stall cleared.
+    this.watchdogPolicy.recordTurnComplete()
 
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
@@ -2478,38 +2459,28 @@ export class TuiApp {
     this.live.clear()
     // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
     const isWatchdog = reason?.startsWith('watchdog')
-    const isWatchdogGoal = reason === 'watchdog:goal'
     // 收敛/连续无工具硬中断：这是守护开火，不是用户中断。以往走 onAbort() 无
     // reason，显示成裸 "⏹ Interrupted"，与用户按 Esc 无法区分。给它一条带判据的
     // 标注，并**不自动续跑**（模型可能在推理，注入 continue 反而扰乱；用户可自行键入）。
     const isConvergence = reason?.startsWith('convergence')
-    // Watchdog auto-continue is bounded: a turn that re-stalls every
-    // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
-    // and burn budget. Two caps: consecutive (reset on progress) and session
-    // total (never resets). The session total backstops the loophole where a
-    // tiny turn (thinking-retry / phantom-continue) resets the consecutive
-    // counter, creating a stall→recover→tiny-turn→reset→stall loop.
-    // v3: applies to the whole watchdog family ('watchdog' | 'watchdog:goal'),
-    // not just goal — non-goal aborts previously showed "Auto-recovering" but
-    // never actually recovered (UI lie: message used isWatchdog, action used
-    // isWatchdogGoal). Now both share the same recovery path.
-    const sessionTotalExhausted = this._watchdogSessionTotal >= TuiApp.MAX_WATCHDOG_SESSION_TOTAL
-    const autoContinueExhausted = isWatchdog
-      && (this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES || sessionTotalExhausted)
-    // Approval-blocked stall: never auto-continue. Re-driving 'continue' just
-    // re-emits the approval-blocked tool and spins deny→continue→deny; the human
-    // must approve (or redirect) instead. Show an actionable hint.
-    // v3: gate widened from isWatchdogGoal to isWatchdog — any watchdog stall
-    // during approval-block would self-loop, not just goal.
+    // Watchdog auto-continue is bounded by the shared WatchdogRecoveryPolicy
+    // (consecutive cap / session-total cap / progress-aware quota). Suppression
+    // conditions (approval-blocked, user draft) are caller-side here and passed
+    // into the single onStall() call so message and behavior share one decision.
     const suppressForApproval = isWatchdog && approvalBlocked
     // v3 yield-to-user guard: if the input line has an unsubmitted draft, the
     // user is present and about to act — don't inject 'continue' and race them.
     const yieldToUser = isWatchdog && this.inputLine.value.trim().length > 0
-    // Unified action guard: message and behavior branches must use the SAME
-    // boolean combination. The previous code had isWatchdog (message) vs
-    // isWatchdogGoal (action), causing the "shows Auto-recovering but never
-    // recovers" lie.
-    const shouldAutoContinue = isWatchdog && !autoContinueExhausted && !suppressForApproval && !yieldToUser
+    // Single decision point: the SAME StallDecision drives both the message and
+    // the behavior branch below — the v3 "shows Auto-recovering but never
+    // recovers" lie came from computing them separately. Suppressed/exhausted
+    // stalls consume no policy state (progress carries over to the next stall).
+    const decision = isWatchdog
+      ? this.watchdogPolicy.onStall({ suppressed: suppressForApproval || yieldToUser })
+      : null
+    const shouldAutoContinue = decision?.autoContinue === true
+    const sessionTotalExhausted = decision?.stopReason === 'session-total'
+    const autoContinueExhausted = sessionTotalExhausted || decision?.stopReason === 'consecutive'
     const convergenceLabel = reason === 'convergence:no-tool'
       ? '⏹ 收敛守护中断：连续多轮未调用工具（如仍在推进，键入 continue 继续）'
       : '⏹ 收敛守护中断：多轮未收敛（如仍在推进，键入 continue 继续）'
@@ -2534,16 +2505,9 @@ export class TuiApp {
       this.state.committedCount++
     })
     // Watchdog auto-resubmit so the agent continues without waiting for the
-    // user to type "continue" — but only while under both caps AND not blocked
-    // on approval AND user has no pending draft.
+    // user to type "continue". Cap/quota/progress bookkeeping all happened
+    // inside policy.onStall() above — here we only act on its verdict.
     if (shouldAutoContinue) {
-      this._watchdogAutoContinues++
-      // Progress-aware quota: dense stall (< THRESHOLD units since last stall)
-      // consumes the session-total budget; a stall after real work doesn't.
-      if (this._progressSinceLastStall < TuiApp.WATCHDOG_PROGRESS_THRESHOLD) {
-        this._watchdogSessionTotal++
-      }
-      this._progressSinceLastStall = 0
       this.onSubmitCallback?.('continue')
     }
     this.onAbortCallback?.()
