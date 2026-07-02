@@ -639,6 +639,20 @@ async function main() {
         selectedIndex: 0,
       }
     },
+    // Effort 选择面板——/effort 无参数时弹出，上下选择 + 回车确认。
+    choicePanelData: () => {
+      const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
+      const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
+      const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
+        { id: 'auto', label: 'Auto', description: '按任务复杂度自动选档（架构/安全/根因→max，重构/调试→high，查看→low）', recommended: isAuto, current: isAuto },
+        { id: 'max', label: 'Max', description: '完整推理链。最深度思考，适合架构设计、安全审查、根因排查', current: !isAuto && current === 'max' },
+        { id: 'high', label: 'High', description: '认真推理。复杂重构、bug 修复、功能实现', current: !isAuto && current === 'high' },
+        { id: 'medium', label: 'Medium', description: '标准编码。常规改动、添加测试', current: !isAuto && current === 'medium' },
+        { id: 'low', label: 'Low', description: '轻量推理。简单查询、读取文件', current: !isAuto && current === 'low' },
+        { id: 'off', label: 'Off', description: '关闭思考。最快响应，纯执行', current: !isAuto && current === 'off' },
+      ]
+      return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
+    },
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
@@ -735,7 +749,12 @@ async function main() {
     } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
-  }, /* choicePanelExec: */ undefined, /* connectExec: */ (commit, summary) => {
+  }, /* choicePanelExec: */ (id: string) => {
+    // Effort 选择面板回车回调。
+    ctx!.agent.setReasoningEffort(id as import('./agent/auto-reasoning.js').ReasoningEffort | 'auto')
+    const label = id === 'auto' ? 'Auto（按任务复杂度自动选档）' : id
+    tuiApp.commitStatic(`Reasoning effort → ${label}`)
+  }, /* connectExec: */ (commit, summary) => {
     // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
     try {
       if (commit.mode === 'preset') {

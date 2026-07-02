@@ -63,7 +63,7 @@ import stringWidth from 'string-width'
 import { truncateToDisplayWidth, displayWidth } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderConnect } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ConnectOverlayData } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
 import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../connect-flow.js'
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
@@ -930,6 +930,14 @@ export class TuiApp {
         if (curIdx >= 0) this.overlayController.nav().themePickerIndex = curIdx
         return this.overlay.activate(id)
       }
+      case 'choice-panel': {
+        this.overlayController.resetNav()
+        // 光标初始定位到当前 effort 档位（data 里标记了 current/recommended）。
+        const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
+        const curIdx = choices.findIndex(c => c.recommended || (c as ChoiceEntry & { current?: boolean }).current)
+        if (curIdx >= 0) this.overlayController.nav().choicePanelIndex = curIdx
+        return this.overlay.activate(id)
+      }
       default:
         return false
     }
@@ -1497,6 +1505,26 @@ export class TuiApp {
         if (entry && this.overlayController.getThemePickerSaveDefaultExec()) {
           this.overlayController.getThemePickerSaveDefaultExec()?.(entry.name)
         }
+        this.deactivateOverlay()
+        return true
+      }
+      return false
+    }
+
+    if (id === 'choice-panel') {
+      const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
+      const cur = this.overlayController.nav().choicePanelIndex
+      if (key.name === 'down') {
+        if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur + 1) % choices.length; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur - 1 + choices.length) % choices.length; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = choices[cur]
+        if (entry && this.overlayController.getChoicePanelExec()) this.overlayController.getChoicePanelExec()?.(entry.id)
         this.deactivateOverlay()
         return true
       }

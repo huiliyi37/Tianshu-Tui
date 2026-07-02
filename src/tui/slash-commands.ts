@@ -2580,18 +2580,23 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/effort',
     immediate: true,
     handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
+      const { parts, pushStatic, setIsStreaming, surfacePush } = ctx
       const cmd = parts[0]!.toLowerCase()
       const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined
       const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max' | 'auto'> = ['off', 'low', 'medium', 'high', 'max', 'auto']
-      if (!level || !(valid as string[]).includes(level)) {
-        const current = ctx.reasoningEffort ?? 'high'
-        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort: ${current}\nUsage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
-      } else {
+      if (!level) {
+        // 无参数 → 打开交互式选择面板（上下选、回车确认）。
+        surfacePush?.('choice-panel')
+        setIsStreaming(false)
+        return true
+      }
+      if ((valid as string[]).includes(level)) {
         ctx.setReasoningEffort?.(level)
         pushStatic(createLogEntry({ type: 'system', content: level === 'auto'
           ? 'Reasoning effort: auto (autoReasoning picks per task)'
           : `Reasoning effort set to: ${level}` }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
       }
       setIsStreaming(false)
       return true
@@ -3034,6 +3039,10 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         : undefined,
       submitToAgent: (prompt: string) => { app.submitText(prompt) },
       goalTrackerRef: ctx.refs.goalTrackerRef,
+      surfacePush: (id: string) => { app.activateOverlay(id) },
+      surfacePop: () => { app.deactivateOverlay() },
+      setReasoningEffort: (effort) => { ctx.agent.setReasoningEffort(effort) },
+      reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
     }
   }
 
