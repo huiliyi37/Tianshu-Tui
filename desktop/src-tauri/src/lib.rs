@@ -759,6 +759,9 @@ pub fn run() {
                 .icon(Image::from_bytes(tray_icon_bytes)?)
                 .tooltip("天枢 · Tianshu")
                 .menu(&tray_menu)
+                // 左键点击由 on_tray_icon_event 切换窗口显隐，右键才弹上下文菜单。
+                // 若保留默认(左键也弹菜单),左键会同时弹菜单+切窗口,行为冲突。
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     let id = event.id().as_ref();
                     if let Some(w) = app.get_webview_window("main") {
@@ -779,7 +782,16 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
-                    if let TrayIconEvent::Click { button: _, .. } = event {
+                    // 只在「左键抬起」时切换窗口显隐。之前用 `button: _` 会把右键点击
+                    // 也当成切窗口,而右键此刻正要弹出托盘上下文菜单——切窗口会抢走菜单
+                    // 焦点使其立即关闭,在 Windows 上表现为右键菜单闪来闪去、无法点退出。
+                    // 限定 Left+Up 后,右键完全交给系统弹菜单,不再受干扰。
+                    if let TrayIconEvent::Click {
+                        button: tauri::tray::MouseButton::Left,
+                        button_state: tauri::tray::MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
                         let app = tray.app_handle();
                         if let Some(w) = app.get_webview_window("main") {
                             if w.is_visible().unwrap_or(false) {
