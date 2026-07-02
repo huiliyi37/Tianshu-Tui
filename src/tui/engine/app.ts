@@ -39,7 +39,7 @@ import { formatCollapsedBashGroup, formatCollapsedBashGroupLive, isCollapsibleBa
 import { formatPermissionDiff } from '../format/permission-diff.js'
 import { formatApprovalPrompt } from '../format/approval-renderers.js'
 import { formatThinking } from '../format/thinking.js'
-import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight, stripAnsiLen } from '../format/glance-bar.js'
+import { formatGlanceBar, resolveStarDomainDisplay, resolveStarDomainAccent, formatGlanceLeft, formatGlanceRight } from '../format/glance-bar.js'
 import { STAR_DOMAINS } from '../../agent/star-domain.js'
 import { formatTaskList } from '../format/task-list.js'
 import type { TodoItem } from '../../tools/todo-store.js'
@@ -2887,8 +2887,13 @@ export class TuiApp {
         todoSummary,
       }, this.theme)
 
-      const plainLeft = stripAnsiLen(leftStr)
-      const plainRight = stripAnsiLen(rightStr)
+      // 用 wide 上界度量指标串宽度：CJK/Windows 终端把 East-Asian Ambiguous 符号
+      // （↑↓ · — … 等）按 2 列渲染。若按 narrow(string-width) 计算填充量，顶边框实际
+      // 渲染宽度会超过 cols → 终端折行成 2 显示行，而 LiveEngine.rowsForLine 按 narrow
+      // 数成 1 行 → 回顶欠擦（moveToTop/ERASE 少擦一行）→ 输入框重影/逐帧堆叠重复。
+      // 按 wide 定尺后顶边框恒 ≤ cols，任何终端都占 1 显示行，行数估算与实际一致。
+      const plainLeft = displayWidth(leftStr, { ambiguousAsWide: true })
+      const plainRight = displayWidth(rightStr, { ambiguousAsWide: true })
 
       // 4. 计算并拼接一体化顶部边框：╭─ leftStr ─┬─ rightStr ─╮
       const chars = boxCharsFor(uiSep)

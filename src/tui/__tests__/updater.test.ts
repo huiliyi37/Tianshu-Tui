@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareSemver, parseSemver, emitLines } from '../updater.js'
+import { compareSemver, parseSemver, emitLines, buildWindowsSelfUpdateScript } from '../updater.js'
 import { WinStreamDecoder } from '../../platform.js'
 
 describe('updater semver', () => {
@@ -31,6 +31,47 @@ describe('updater semver', () => {
   it('compares prereleases', () => {
     assert.equal(compareSemver('3.0.0-beta', '3.0.0-rc'), -1)
     assert.equal(compareSemver('3.0.0-beta.1', '3.0.0-beta.2'), -1)
+  })
+})
+
+describe('buildWindowsSelfUpdateScript', () => {
+  const base = {
+    pid: 4242,
+    packageName: 'tianshu-tui',
+    channel: 'latest',
+    execPath: 'C:\\Program Files\\nodejs\\node.exe',
+    argv: ['C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\tianshu-tui\\dist\\main.js'],
+    cwd: 'C:\\work\\proj',
+    relaunch: true,
+  }
+
+  it('waits for the current pid before installing (release file lock)', () => {
+    const script = buildWindowsSelfUpdateScript(base)
+    assert.match(script, /Wait-Process -Id 4242/)
+    // install must come after the wait so the process has exited
+    assert.ok(script.indexOf('Wait-Process') < script.indexOf('npm install -g'))
+    assert.match(script, /npm install -g tianshu-tui@latest/)
+  })
+
+  it('relaunches only on successful install and preserves argv', () => {
+    const script = buildWindowsSelfUpdateScript(base)
+    assert.match(script, /if \(\$LASTEXITCODE -eq 0\)/)
+    assert.match(script, /Start-Process -FilePath 'C:\\Program Files\\nodejs\\node\.exe'/)
+    assert.match(script, /dist\\main\.js/)
+  })
+
+  it('omits relaunch when relaunch=false', () => {
+    const script = buildWindowsSelfUpdateScript({ ...base, relaunch: false })
+    assert.ok(!script.includes('Start-Process'))
+    assert.match(script, /npm install -g/)
+  })
+
+  it('escapes embedded single quotes in paths (PowerShell doubling)', () => {
+    const script = buildWindowsSelfUpdateScript({
+      ...base,
+      execPath: "C:\\o'brien\\node.exe",
+    })
+    assert.match(script, /'C:\\o''brien\\node\.exe'/)
   })
 })
 
