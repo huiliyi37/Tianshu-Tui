@@ -15,10 +15,11 @@ describe('evaluateTddGate', () => {
     editsSinceLastTest: 0,
     hasFailedTests: false,
     hasCodeEdits: false,
+    hasReadTestFiles: true,
     ...overrides,
   })
 
-  const enforce = DEFAULT_TDD_GATE_CONFIG // { enabled, mode: "enforce", threshold: 3 }
+  const enforce = DEFAULT_TDD_GATE_CONFIG // { enabled, mode: "enforce", threshold: 3, skipIfNoTests: false }
 
   // No modifications → allow (the first edit must get through)
   it('allows edit when no files have been modified yet', () => {
@@ -69,7 +70,7 @@ describe('evaluateTddGate', () => {
 
   // Modified, no verification, at/over threshold, suggest mode → suggest only
   it('only suggests in suggest mode even past the threshold', () => {
-    const suggest = { enabled: true, mode: 'suggest' as const, threshold: 3 }
+    const suggest = { enabled: true, mode: 'suggest' as const, threshold: 3, skipIfNoTests: false }
     const decision = evaluateTddGate(
       state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true }),
       'edit_file',
@@ -78,9 +79,29 @@ describe('evaluateTddGate', () => {
     assert.equal(decision.action, 'suggest')
   })
 
+  // skipIfNoTests: no test files read → downgrade block to suggest
+  it('downgrades block to suggest when skipIfNoTests and no test files read', () => {
+    const decision = evaluateTddGate(
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true, hasReadTestFiles: false }),
+      'edit_file',
+      enforce, // default has skipIfNoTests: true
+    )
+    assert.equal(decision.action, 'suggest')
+  })
+
+  // skipIfNoTests: test files exist → still blocks
+  it('still blocks when skipIfNoTests but test files have been read', () => {
+    const decision = evaluateTddGate(
+      state({ filesModified: 1, verifications: 0, editsSinceLastTest: 5, hasCodeEdits: true, hasReadTestFiles: true }),
+      'edit_file',
+      enforce,
+    )
+    assert.equal(decision.action, 'block')
+  })
+
   // Gate disabled → always allow
   it('allows everything when the gate is disabled', () => {
-    const off = { enabled: false, mode: 'enforce' as const, threshold: 3 }
+    const off = { enabled: false, mode: 'enforce' as const, threshold: 3, skipIfNoTests: false }
     const decision = evaluateTddGate(
       state({ filesModified: 1, verifications: 0, editsSinceLastTest: 99 }),
       'edit_file',

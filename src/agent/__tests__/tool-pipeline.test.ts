@@ -37,6 +37,7 @@ const mockEvidence = {
     editsSinceLastTest: 0,
     hasFailedTests: false,
     hasCodeEdits: false,
+    hasReadTestFiles: false,
   }),
   buildSummary: () => ({
     filesRead: [],

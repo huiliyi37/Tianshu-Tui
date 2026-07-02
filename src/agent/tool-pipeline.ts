@@ -1204,7 +1204,16 @@ export async function executeToolUse(
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: 'full' } })
+          const testStatus = harnessResult.isError ? 'failed' : 'passed'
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full' } })
+          // bash 跑测试/typecheck/lint 也归零 TDD 门禁——否则 agent 用 bash npm test
+          // 而非 run_tests 工具时门禁计数器永远不重置，第 4 次编辑必误报拦截。
+          deps.evidence.trackVerification({
+            command: cmd.slice(0, 200),
+            status: testStatus === 'passed' ? 'passed' : 'failed',
+            scope: 'full',
+            exitCode: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0,
+          })
        } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        }

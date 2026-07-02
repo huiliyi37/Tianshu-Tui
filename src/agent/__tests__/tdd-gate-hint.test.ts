@@ -11,14 +11,15 @@ describe('buildTddGateHint', () => {
     editsSinceLastTest: 0,
     hasFailedTests: false,
     hasCodeEdits: false,
+    hasReadTestFiles: true,
     ...overrides,
   })
 
   const enforce: TddGateConfig = DEFAULT_TDD_GATE_CONFIG
-  const suggest: TddGateConfig = { enabled: true, mode: 'suggest', threshold: 3 }
+  const suggest: TddGateConfig = { enabled: true, mode: 'suggest', threshold: 3, skipIfNoTests: false }
 
   it('returns null when gate is disabled', () => {
-    const off: TddGateConfig = { enabled: false, mode: 'enforce', threshold: 3 }
+    const off: TddGateConfig = { enabled: false, mode: 'enforce', threshold: 3, skipIfNoTests: false }
     assert.equal(buildTddGateHint(state({ editsSinceLastTest: 5, verifications: 0 }), off), null)
   })
 
