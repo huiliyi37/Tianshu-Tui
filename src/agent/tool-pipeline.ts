@@ -21,7 +21,7 @@ import { createAntibodyProposal } from '../context/antibody.js'
 import { buildImportGraph, invalidateFile } from './import-graph.js'
 import { generateImpactHint } from './impact-hint.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
-import { shouldRunDiagnostics } from '../lsp/client.js'
+import { shouldRunDiagnostics, filterDiagnosticsForEdit } from '../lsp/client.js'
 import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
@@ -982,13 +982,19 @@ export async function executeToolUse(
       try {
         const diagnostics = await mgr.getFileDiagnostics(tu.input.file_path as string)
         if (diagnostics.length > 0) {
-          const formatted = diagnostics
-            .filter(d => d.severity <= 2) // errors and warnings only
-            .slice(0, 10) // cap at 10 diagnostics
-            .map(d => `${d.severity === 1 ? 'ERROR' : 'WARNING'} L${d.range.start.line + 1}: ${d.message}`)
-            .join('\n')
-          if (formatted) {
-            finalContent = finalContent + `\n\n[LSP Diagnostics]\n${formatted}`
+          // 作用域收敛: only surface diagnostics from the edit's changed region to
+          // the model — out-of-region errors collapse to a one-line nudge and
+          // out-of-region warnings are dropped. Whole-file / cross-file type
+          // errors are comprehensively caught by the post-commit typecheck-gate
+          // (real tsc on all changed files) at delivery. The full list still goes
+          // to uiContent so the human sees everything in the tool card.
+          const { modelText, uiText } = filterDiagnosticsForEdit(diagnostics, rawToolResult?.changedRanges)
+          const uiBase = rawToolResult?.uiContent ?? finalContent
+          if (modelText) {
+            finalContent = finalContent + `\n\n[LSP Diagnostics]\n${modelText}`
+          }
+          if (uiText && rawToolResult) {
+            rawToolResult.uiContent = `${uiBase}\n\n[LSP Diagnostics]\n${uiText}`
           }
         }
       } catch {

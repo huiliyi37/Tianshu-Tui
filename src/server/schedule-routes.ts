@@ -13,6 +13,7 @@ import { isAuthorizedRequest } from './auth.js'
 import {
   CronScheduler,
   createScheduledTask,
+  normalizeRetry,
   type CronTrigger,
   type CronTriggerType,
 } from './cron-scheduler.js'
@@ -31,6 +32,7 @@ const TRIGGER_TYPES: CronTriggerType[] = ['interval', 'cron', 'oneshot']
 export function buildScheduleRoutes(
   scheduler: CronScheduler,
   apiToken?: string,
+  getStatus?: () => Promise<unknown> | undefined,
 ): Record<string, RouteHandler> {
   return {
     'POST /schedule': withAuth((body) => {
@@ -39,6 +41,7 @@ export function buildScheduleRoutes(
         trigger?: { type?: string; spec?: string }
         allowedTools?: string[]
         agentId?: string
+        retry?: unknown
       }
       if (!data.prompt || !data.prompt.trim()) {
         return { status: 400, body: { error: 'Missing "prompt"' } }
@@ -49,11 +52,15 @@ export function buildScheduleRoutes(
       }
       const trigger: CronTrigger = { type: t.type as CronTriggerType, spec: String(t.spec) }
       try {
+        const retry = normalizeRetry(data.retry)
         const task = createScheduledTask(
           data.prompt.trim(),
           trigger,
           Array.isArray(data.allowedTools) ? data.allowedTools : [],
-          data.agentId ? { agentId: data.agentId } : undefined,
+          {
+            ...(data.agentId ? { agentId: data.agentId } : {}),
+            ...(retry ? { retry } : {}),
+          },
         )
         scheduler.add(task)
         return { status: 201, body: task }
@@ -66,6 +73,12 @@ export function buildScheduleRoutes(
       status: 200,
       body: { tasks: scheduler.list() },
     }), apiToken),
+
+    // Scheduler health (running? next-tick count) for the automations dashboard.
+    'GET /schedule/status': withAuth(async () => {
+      const status = getStatus ? await getStatus() : undefined
+      return { status: 200, body: { status: status ?? null } }
+    }, apiToken),
 
     'POST /schedule/:id/pause': withAuth((body, params) => {
       const data = (body ?? {}) as { enabled?: boolean }

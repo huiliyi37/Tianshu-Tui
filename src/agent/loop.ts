@@ -13,6 +13,7 @@ import { createTraceStore, type TraceStore } from './trace-store.js'
 import { getDoomLoopLevel, getClassDoomLoopLevel, combineDoomLoopLevels, getDoomLoopThresholds } from './trace-store.js'
 import { evaluateConvergence } from './convergence-detector.js'
 import type { PhaseClass, ConvergenceResult } from './convergence-detector.js'
+import { emitStopReason, stopReasonAbortTag, type StopReason } from './stop-reason.js'
 import type { PlanExecutionTrace, StepResult } from './plan-execution-trace.js'
 import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
@@ -199,6 +200,18 @@ export class AgentLoop {
   /** U6: most recent convergence-detector result — consumed by the replan loop's
    *  detectDeviation (blocked/stalled signals). Null until first convergence check. */
   latestConvergenceResult: ConvergenceResult | null = null
+  /** Most recent structured stop-reason (why the last turn loop ended). */
+  latestStopReason: StopReason | null = null
+  /** Fix 1 — convergence emission cooldown. The L2 side-effects (改道 card via
+   *  onDecisionShift, convergence-warning phase change, and the advisory nudge)
+   *  are throttled so a persistent stuck-state (e.g. a legitimately read-heavy
+   *  review task) does NOT re-emit the same "改道" card every single turn.
+   *  Re-emit only when the cooldown elapses, the level escalates, or the message
+   *  type changes. Mirrors the cooldown discipline in kick-hook.ts. */
+  private readonly convergenceEmitCooldownTurns = 3
+  private lastConvergenceEmitTurn = -Infinity
+  private lastConvergenceEmitLevel = 0
+  private lastConvergenceMsgKey = ''
   /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
    *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
    *  (isGoalActive) read LOCAL state instead of reaching back into the
@@ -912,6 +925,15 @@ export class AgentLoop {
   }
 
   /**
+   * Completed-turn count for this session. Used to detect a mid-session
+   * star-domain switch (>0 → switching now invalidates the prefix cache and
+   * forces a full context rebuild at the next request, ~10x cost).
+   */
+  getSessionTurnCount(): number {
+    return this.session.getTurnCount()
+  }
+
+  /**
    * PlusMenu — per-session disabled skill names. Filters the skill discovery
    * block (turn-step-producer) so disabled skills are hidden from the model.
    * Empty set = all skills available (default).
@@ -1391,6 +1413,13 @@ export class AgentLoop {
   ): Promise<{
     action: 'proceed' | 'abort'
   }> {
+    // Fix 3 — the user just intervened this turn, so any pre-intervention
+    // "hesitation" (no-tool) streak is broken: zero it before evaluation so a
+    // stale streak can't drive a spurious stagnation/abort right after the user
+    // speaks. (Turn-start and tool-use paths reset this elsewhere; this covers
+    // mid-run steer injection.)
+    if (userMessageConsumed) this.consecutiveNoToolTurns = 0
+
     const convergenceCheck = evaluateConvergence({
       turn,
       phaseClass: phaseClass as PhaseClass,
@@ -1407,44 +1436,69 @@ export class AgentLoop {
     debugLog(`[convergence] turn=${turn} score=${convergenceCheck.score.toFixed(2)} level=${convergenceCheck.level} phase=${phaseClass}`)
 
     if (convergenceCheck.shouldKick && convergenceCheck.injectedMessage) {
-      // Level 2: inject user guidance as a system-visible nudge
-      callbacks.onPhaseChange?.('convergence-warning', {
-        reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
-        suggestion: convergenceCheck.injectedMessage.slice(0, 200),
-      })
-      // R4 — externalize the convergence nudge as a structured course-correction
-      // so the desktop renders a "改道" card; the injected guidance below is what
-      // the agent acts on next, making the cause→effect visible to the user.
-      callbacks.onDecisionShift?.({
-        source: 'convergence',
-        reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,
-        methods: [convergenceCheck.injectedMessage.slice(0, 200)],
-        severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
-      })
-      this.advisoryBus.submit({
-        key: 'convergence',
-        priority: 0.65,
-        tier: 'operational',
-        category: 'discipline',
-        content: convergenceCheck.injectedMessage,
-      })
+      // Fix 3 — user-interaction reset. When the user just spoke/intervened this
+      // turn, the agent has already handed control back (the "right" convergence
+      // outcome). Reset the cooldown and skip emitting a nudge this turn so we
+      // don't nag right after the user starts acting. (An agent that ends a turn
+      // by asking the user a question also lands here on the next turn, since the
+      // user's answer arrives as a consumed message.)
+      if (userMessageConsumed) {
+        this.lastConvergenceEmitTurn = -Infinity
+        this.lastConvergenceEmitLevel = 0
+        this.lastConvergenceMsgKey = ''
+      } else {
+        // Fix 1 — cooldown + dedup gate on the visible side-effects. The message
+        // type is keyed by its header line (first line), so same-type nudges with
+        // only changed diagnostic numbers do not count as a new "direction".
+        const msgKey = convergenceCheck.injectedMessage.split('\n', 1)[0] ?? ''
+        const cooledDown = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
+        const escalated = convergenceCheck.level > this.lastConvergenceEmitLevel
+        const changedDirection = msgKey !== this.lastConvergenceMsgKey
+        if (cooledDown || escalated || changedDirection) {
+          this.lastConvergenceEmitTurn = turn
+          this.lastConvergenceEmitLevel = convergenceCheck.level
+          this.lastConvergenceMsgKey = msgKey
 
-      // When convergence is detected AND doom loop is blocked, the agent is
-      // likely in a post-completion verification loop. Append gate hint
-      // to the same SR (already injected above) instead of creating a second SR.
-      if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-        let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
-        try {
-          const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
-          if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
-        } catch { /* gate evaluation must never break convergence handling */ }
-        this.advisoryBus.submit({
-          key: 'convergence-gate',
-          priority: 0.6,
-          tier: 'operational',
-          category: 'discipline',
-          content: gateHint,
-        })
+          // Level 2: inject user guidance as a system-visible nudge
+          callbacks.onPhaseChange?.('convergence-warning', {
+            reason: `收敛检测 L${convergenceCheck.level}: ${phaseClass} 阶段 ${turn} 轮未收敛 (score=${convergenceCheck.score.toFixed(2)})`,
+            suggestion: convergenceCheck.injectedMessage.slice(0, 200),
+          })
+          // R4 — externalize the convergence nudge as a structured course-correction
+          // so the desktop renders a "改道" card; the injected guidance below is what
+          // the agent acts on next, making the cause→effect visible to the user.
+          callbacks.onDecisionShift?.({
+            source: 'convergence',
+            reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,
+            methods: [convergenceCheck.injectedMessage.slice(0, 200)],
+            severity: convergenceCheck.level >= 2 ? 'warn' : 'info',
+          })
+          this.advisoryBus.submit({
+            key: 'convergence',
+            priority: 0.65,
+            tier: 'operational',
+            category: 'discipline',
+            content: convergenceCheck.injectedMessage,
+          })
+
+          // When convergence is detected AND doom loop is blocked, the agent is
+          // likely in a post-completion verification loop. Append gate hint
+          // to the same SR (already injected above) instead of creating a second SR.
+          if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
+            let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+            try {
+              const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
+              if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
+            } catch { /* gate evaluation must never break convergence handling */ }
+            this.advisoryBus.submit({
+              key: 'convergence-gate',
+              priority: 0.6,
+              tier: 'operational',
+              category: 'discipline',
+              content: gateHint,
+            })
+          }
+        }
       }
     }
 
@@ -1458,13 +1512,28 @@ export class AgentLoop {
     }
 
     if (convergenceCheck.shouldAbort) {
-      const noToolInfo = this.consecutiveNoToolTurns >= 5 ? ` noToolTurns=${this.consecutiveNoToolTurns}` : ''
-      debugLog(`[convergence] turn=${turn} abort score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`)
-      callbacks.onPhaseChange?.('convergence-abort', {
-        reason: `收敛检测 L3 abort: score=${convergenceCheck.score.toFixed(2)}${noToolInfo}`,
+      // Structured stop-reason: distinguish the no-tool hard cap from a
+      // score-based abort, and tag whether the model was still reasoning (a
+      // near-miss that would previously have been a silent false熔断). This is
+      // the "反面找被熔断的原因" observability — emitted via debugLog +
+      // onPhaseChange, and the onAbort tag lets the TUI render a labeled stop
+      // instead of a bare "⏹ Interrupted" (which looked like a user interrupt).
+      const stopReason: StopReason = {
+        source: convergenceCheck.abortCause === 'no-tool' ? 'no-tool-abort' : 'convergence-abort',
+        turn,
+        voluntary: false,
+        score: convergenceCheck.score,
+        level: convergenceCheck.level,
+        noToolTurnCount: this.consecutiveNoToolTurns,
+        reasoningActive: convergenceCheck.reasoningActive,
+      }
+      emitStopReason(stopReason, {
+        record: r => { this.latestStopReason = r },
+        debug: debugLog,
+        onPhaseChange: callbacks.onPhaseChange,
       })
       if (!assistantResponded && !userMessageConsumed) this.session.removeLastMessage()
-      callbacks.onAbort()
+      callbacks.onAbort(stopReasonAbortTag(stopReason))
       return { action: 'abort' }
     }
 

@@ -4,6 +4,7 @@ import { SessionPersist, getSessionDir } from '../agent/session-persist.js'
 import { forkSession, listBranches, countMessageLines } from '../agent/session-fork.js'
 import { type StarDomainId } from '../agent/star-domain.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
+import { DOMAIN_SWITCH_CACHE_WARNING } from '../agent/domain-picker-entries.js'
 import { microCompactOai, estimateOaiTokens } from '../compact/micro.js'
 import { rollbackToCheckpoint, getRollbackPreview } from '../agent/checkpoint.js'
 import { runResumePreflightOai } from '../context/resume-preflight.js'
@@ -61,6 +62,7 @@ import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDen
 import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
+import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
 import { getShellCommand } from '../platform.js'
 import { createCoordinatorReviewDeps } from '../agent/review-coordinator-deps.js'
 import { routeReviewWorkflow, type ReviewMode, type ReviewOutcome } from '../agent/review-router.js'
@@ -808,16 +810,24 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { pushStatic, setIsStreaming, agent } = ctx
-      const env = await detectEnv(agent.cwd)
+      // Probe against the RESOLVED env (not raw process env) so results reflect
+      // what the agent can actually run after GUI-launch PATH recovery.
+      const resolved = getResolvedEnv(agent.cwd)
+      const env = await detectEnv(agent.cwd, resolved)
       const shell = getShellCommand()
+      const toolLine = (label: string, t: { available: boolean; command?: string; version?: string }): string =>
+        `${label} ${t.available ? `已安装 (${t.version ?? t.command ?? 'unknown'})` : '未安装 / 未在 PATH'}`
       const lines = [
         '环境体检 (/doctor)',
         '═══════════════════════',
         `平台: ${env.platform}`,
-        `Node: ${env.node.available ? `已安装 (${env.node.version ?? 'unknown'})` : '未安装'}`,
-        `Git:  ${env.git.available ? `已安装 (${env.git.version ?? 'unknown'})` : '未安装'}`,
-        `Python: ${env.python.available ? `${env.python.command} (${env.python.version ?? 'unknown'})` : '未安装'}`,
-        `uv:   ${env.uv.available ? `已安装 (${env.uv.version ?? 'unknown'})` : '未安装'}`,
+        toolLine('Node:  ', env.node),
+        toolLine('Git:   ', env.git),
+        toolLine('Python:', env.python),
+        toolLine('uv:    ', env.uv),
+        toolLine('Java:  ', env.java),
+        toolLine('Maven: ', env.maven),
+        toolLine('Gradle:', env.gradle),
         '',
         'Shell (bash 工具实际使用)',
         '───────────────────────',
@@ -827,6 +837,31 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         lines.push('', '⚠ Windows 未使用 Git Bash — 命令执行已退回 ' + shell.kind + '。')
         lines.push('  安装 Git for Windows 可获得更可靠的 POSIX 命令执行。')
       }
+
+      // PATH recovery diff: show what the resolver added on top of the raw
+      // process PATH, so the user knows whether GUI-launch recovery kicked in and
+      // what to add to `env.extraPath` if a tool is still missing.
+      const diff = getResolvedPathDiff(agent.cwd)
+      lines.push('', 'PATH 解析 (GUI 启动兜底)', '───────────────────────')
+      lines.push(`process PATH 条目: ${diff.processPath.length}   resolved PATH 条目: ${diff.resolvedPath.length}`)
+      if (diff.added.length > 0) {
+        lines.push('已补全以下目录（进程 PATH 缺失）:')
+        for (const d of diff.added.slice(0, 20)) lines.push(`  + ${d}`)
+        if (diff.added.length > 20) lines.push(`  … 及另外 ${diff.added.length - 20} 项`)
+      } else {
+        lines.push('resolved PATH 与 process PATH 一致（无需补全）。')
+      }
+      const stillMissing = [
+        !env.git.available ? 'git' : null,
+        !env.java.available ? 'java' : null,
+        !env.maven.available ? 'mvn' : null,
+        !env.gradle.available ? 'gradle' : null,
+      ].filter(Boolean)
+      if (stillMissing.length > 0) {
+        lines.push('', `仍未找到: ${stillMissing.join(', ')}`)
+        lines.push('若已安装，请把其可执行目录加入配置 env.extraPath（数组），或设置对应的 *_HOME 变量后重启天枢。')
+      }
+
       const guidance = formatEnvGuidance(env)
       pushStatic(createLogEntry({ type: 'system', content: lines.join('\n') + (guidance ? '\n\n' + guidance : '') }))
       setIsStreaming(false)
@@ -1082,22 +1117,22 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         })
         pushStatic(createLogEntry({ type: 'system', content: `星域一览\n\n${lines.join('\n\n')}\n\n使用 /domain <id|名称> 切换，/domain auto 恢复自动检测。` }))
       } else if (sub === 'auto') {
+        const midSession = ctx.agent.getSessionTurnCount() > 0
         ctx.agent.resetSessionDomain()
         ctx.onDomainChange?.(undefined)
         pushStatic(createLogEntry({ type: 'system', content: '星域已重置为自动检测模式。下一次对话将根据输入内容自动匹配星域。' }))
-      } else if (sub === 'off' || sub === 'none') {
-        ctx.agent.setSessionDomain(null)
-        ctx.onDomainChange?.(undefined)
-        pushStatic(createLogEntry({ type: 'system', content: '星域已关闭。本会话将不激活任何星域人格。' }))
+        if (midSession) pushStatic(createLogEntry({ type: 'system', content: DOMAIN_SWITCH_CACHE_WARNING }))
       } else {
         // Try to match by id or Chinese name
         const allDomains = starDomainRegistry.list()
         const matched = allDomains.find(d => d.id === sub || d.name === parts[1] || d.id === parts[1]?.toLowerCase())
         if (matched) {
+          const midSession = ctx.agent.getSessionTurnCount() > 0
           const domain = { id: matched.id, name: matched.name, volatileBlock: matched.volatileBlock, motto: matched.motto }
           ctx.agent.setSessionDomain(domain)
           ctx.onDomainChange?.(domain.name)
           pushStatic(createLogEntry({ type: 'system', content: `星域切换: ${domain.name} (${domain.id})\n${domain.motto}\n\n${domain.volatileBlock}` }))
+          if (midSession) pushStatic(createLogEntry({ type: 'system', content: DOMAIN_SWITCH_CACHE_WARNING }))
         } else {
           const validNames = allDomains.map(d => `${d.name}|${d.id}`).join(', ')
           pushStatic(createLogEntry({ type: 'system', content: `未知星域: "${parts[1]}"\n\n可用星域: ${validNames}\n\n使用 /domain list 查看所有星域。`, isError: true }))
@@ -2968,7 +3003,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       setAutoSafe: (v: boolean) => { autoSafeRef.current = v },
       rollbackTokenRef,
       setCockpitPanel: () => {},
-      pushStatic: (entry) => { app.commitStatic(entry.content) },
+      pushStatic: (entry) => { app.commitStatic(entry.content, { isError: entry.isError }) },
       setIsStreaming: (v: boolean) => { app.setStreamingState(v) },
       setCacheHitRate: (v: number) => { cacheHitRate = v },
       setSummaryState: () => {},
@@ -3264,6 +3299,36 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       app.commitStatic(next
         ? 'Auto-approve: on (auto-safe — high-risk still requires approval)'
         : 'Auto-approve: off (manual — all mutating tools require approval)')
+      app.setStreamingState(false)
+      return true
+    },
+  })
+
+  // /yes needs the same TUI state sync as /auto so worker pills / glance bar
+  // reflect the real approval mode.
+  register("/yes", {
+    description: "YOLO 模式 — 一键跳过所有审批（再次输入关闭）",
+    immediate: true,
+    handler: ({ trimmed }) => {
+      const parts = trimmed.split(/\s+/)
+      const sub = parts[1]?.toLowerCase()
+      const currentlyYolo = (ctx.agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
+      let enable: boolean
+      if (sub === 'on') enable = true
+      else if (sub === 'off') enable = false
+      else enable = !currentlyYolo
+
+      if (enable) {
+        ctx.agent.setApprovalMode('dangerously-skip-permissions')
+        autoSafeRef.current = false
+        app.setApprovalMode('dangerously-skip-permissions')
+        app.commitStatic('YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。')
+      } else {
+        ctx.agent.setApprovalMode('auto-safe')
+        autoSafeRef.current = true
+        app.setApprovalMode('auto-safe')
+        app.commitStatic('YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。')
+      }
       app.setStreamingState(false)
       return true
     },

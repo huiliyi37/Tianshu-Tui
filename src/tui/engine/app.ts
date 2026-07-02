@@ -68,7 +68,7 @@ import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../conn
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
-import { renderRewind, type RewindData } from '../format/rewind.js'
+import { renderRewind, type RewindData, type RewindFile, type RewindMode } from '../format/rewind.js'
 import { renderHistorySearch, type HistorySearchData } from '../format/history-search.js'
 import { searchHistory, loadHistory } from '../history.js'
 
@@ -623,9 +623,12 @@ export class TuiApp {
               this.inputLine.setValue('')
               this.renderLive()
             } else if (now - this.inputController.lastEscAt < 400) {
-              // Double-ESC → rewind
+              // Double-ESC → rewind. Default-select the most recent message
+              // (the common rewind target), like Claude Code.
               this.inputController.lastEscAt = 0
               this.overlayController.resetNav()
+              const n = this.overlayController.getData()?.rewindEntries?.().entries.length ?? 0
+              this.overlayController.nav().rewindIndex = n > 0 ? n - 1 : 0
               this.overlay.activate('rewind')
               this.renderLive()
             } else {
@@ -1325,28 +1328,45 @@ export class TuiApp {
     }
 
     if (id === 'rewind') {
-      const count = this.overlayController.getData()?.rewindEntries?.().entries.length ?? 0
-      const cur = this.overlayController.nav().rewindIndex
+      const entries = this.overlayController.getData()?.rewindEntries?.().entries ?? []
+      const count = entries.length
+      const nav = this.overlayController.nav()
+
+      // ── Phase 2: restore-granularity chooser (仅对话 / 仅代码 / 对话+代码) ──
+      if (nav.rewindPhase === 'action') {
+        const ACTION_COUNT = 3
+        if (key.name === 'down') { nav.rewindActionIndex = Math.min(nav.rewindActionIndex + 1, ACTION_COUNT - 1); this.overlay.rerender(); return true }
+        if (key.name === 'up') { nav.rewindActionIndex = Math.max(nav.rewindActionIndex - 1, 0); this.overlay.rerender(); return true }
+        if (key.name === 'escape' || key.name === 'left') { nav.rewindPhase = 'list'; this.overlay.rerender(); return true }
+        if (key.name === 'return') {
+          const entry = entries[nav.rewindIndex]
+          const mode = (['convo', 'code', 'both'] as const)[nav.rewindActionIndex] ?? 'convo'
+          this.deactivateOverlay()
+          if (entry) {
+            const exec = this.overlayController.getRewindExec()
+            if (exec) exec(entry.messageIndex, mode)
+            else this.setInput(entry.content)
+          }
+          return true
+        }
+        return false
+      }
+
+      // ── Phase 1: message list ──
+      const cur = nav.rewindIndex
       if (key.name === 'down') {
-        if (count > 0) { this.overlayController.nav().rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
+        if (count > 0) { nav.rewindIndex = Math.min(cur + 1, count - 1); this.overlay.rerender() }
         return true
       }
       if (key.name === 'up') {
-        if (count > 0) { this.overlayController.nav().rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
+        if (count > 0) { nav.rewindIndex = Math.max(cur - 1, 0); this.overlay.rerender() }
         return true
       }
       if (key.name === 'return') {
         if (count > 0) {
-          const entry = this.overlayController.getData()?.rewindEntries?.().entries[cur]
-          this.deactivateOverlay()
-          if (entry) {
-            if (this.overlayController.getRewindExec()) {
-              this.overlayController.getRewindExec()?.(entry.content)
-            } else {
-              // Fallback: just populate input (old behavior)
-              this.setInput(entry.content)
-            }
-          }
+          nav.rewindPhase = 'action'
+          nav.rewindActionIndex = 0
+          this.overlay.rerender()
         } else {
           this.deactivateOverlay()
         }
@@ -1458,6 +1478,14 @@ export class TuiApp {
         this.deactivateOverlay()
         return true
       }
+      if (c === 's') {
+        const entry = count > 0 ? this.overlayController.getData()?.themePickerData?.().entries[cur] : undefined
+        if (entry && this.overlayController.getThemePickerSaveDefaultExec()) {
+          this.overlayController.getThemePickerSaveDefaultExec()?.(entry.name)
+        }
+        this.deactivateOverlay()
+        return true
+      }
       return false
     }
 
@@ -1523,9 +1551,13 @@ export class TuiApp {
   }
 
   /** 将静态文本提交到 scrollback（slash command 输出等） */
-  commitStatic(text: string): void {
+  commitStatic(text: string, opts?: { isError?: boolean }): void {
+    // isError：错误类系统消息以 ✗ + error 色高亮，避免与普通输出混为一谈。
+    const out = opts?.isError
+      ? text.split('\n').map((l, i) => color(i === 0 ? `✗ ${l}` : l, this.theme.error)).join('\n')
+      : text
     this.commitAbove(() => {
-      this.commit.write({ text, trailingNewline: true })
+      this.commit.write({ text: out, trailingNewline: true })
     })
   }
 
@@ -1964,6 +1996,9 @@ export class TuiApp {
     this.markActivity()
     // Push through block writer (buffers text, emits in display-sized blocks)
     this.blockWriter.push(text)
+    // 逐 delta 触发（microtask 合并）重绘——live tail 拼接 blockWriter.peek() 后，
+    // 最新 token 无需等吐块即可逐字滑出（打字机节奏）。与 handleThinkingDelta 同口径。
+    this.writeBatcher.schedule()
   }
 
   private handleThinkingDelta(thinking: string): void {
@@ -2340,7 +2375,7 @@ export class TuiApp {
     this.resetRunLocalState()
     this.commitAbove(() => {
       this.commit.write({
-        text: `Error: ${error.message}`,
+        text: color(`✗ Error: ${error.message}`, this.theme.error),
         trailingNewline: true,
       })
     })
@@ -2399,6 +2434,10 @@ export class TuiApp {
     // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
     const isWatchdog = reason?.startsWith('watchdog')
     const isWatchdogGoal = reason === 'watchdog:goal'
+    // 收敛/连续无工具硬中断：这是守护开火，不是用户中断。以往走 onAbort() 无
+    // reason，显示成裸 "⏹ Interrupted"，与用户按 Esc 无法区分。给它一条带判据的
+    // 标注，并**不自动续跑**（模型可能在推理，注入 continue 反而扰乱；用户可自行键入）。
+    const isConvergence = reason?.startsWith('convergence')
     // Goal-mode auto-continue is bounded: a turn that re-stalls every
     // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
     // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
@@ -2406,13 +2445,18 @@ export class TuiApp {
     // plain interrupt so the user can intervene.
     const autoContinueExhausted = isWatchdogGoal
       && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
+    const convergenceLabel = reason === 'convergence:no-tool'
+      ? '⏹ 收敛守护中断：连续多轮未调用工具（如仍在推进，键入 continue 继续）'
+      : '⏹ 收敛守护中断：多轮未收敛（如仍在推进，键入 continue 继续）'
     this.commitAbove(() => {
       this.commit.write({
         text: isWatchdog && !autoContinueExhausted
           ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
           : autoContinueExhausted
             ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
-            : color('⏹ Interrupted', this.theme.muted),
+            : isConvergence
+              ? color(convergenceLabel, this.theme.muted)
+              : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
@@ -2643,7 +2687,8 @@ export class TuiApp {
     }
 
     // 2. Streaming tail (尾部不完整 markdown block，display-width aware 截断)
-    for (const line of this.streamRenderer.getLiveTailLines(6)) {
+    //    额外拼接 blockWriter.peek()——尚未吐块的最新 token，逐字可见（打字机节奏）。
+    for (const line of this.streamRenderer.getLiveTailLines(6, this.blockWriter.peek())) {
       lines.push({ text: line })
     }
 
@@ -3078,13 +3123,14 @@ export class TuiApp {
     chronicleEntries?: () => ChronicleData
     cockpitSnapshot?: () => CockpitSnapshot
     rewindEntries?: () => RewindData
+    rewindFilePreview?: (messageIndex: number) => RewindFile[]
     historySearchData?: () => HistorySearchData
     tasksData?: () => TasksData
     domainPickerData?: () => DomainPickerData
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
-  }, paletteExec?: (index: number) => void, rewindExec?: (content: string) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -3092,6 +3138,7 @@ export class TuiApp {
     this.overlayController.setDomainPickerExec(domainPickerExec)
     this.overlayController.setModelPickerExec(modelPickerExec)
     this.overlayController.setThemePickerExec(themePickerExec)
+    this.overlayController.setThemePickerSaveDefaultExec(themePickerSaveDefaultExec)
     this.overlayController.setChoicePanelExec(choicePanelExec)
     this.overlayController.setConnectExec(connectExec)
     // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
@@ -3140,11 +3187,22 @@ export class TuiApp {
       },
     })
 
-    // Rewind — selectedIndex 由 overlayNav 注入
+    // Rewind — selectedIndex/phase/action 由 overlayNav 注入；phase 2 附精确文件预览
     this.overlay.register('rewind', {
       render: (_w, _h) => {
-        const data = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
-        return renderRewind({ ...data, selectedIndex: this.overlayController.nav().rewindIndex }, this.columns, this.rows, this.theme)
+        const base = overlayData?.rewindEntries?.() ?? { entries: [], selectedIndex: 0 }
+        const nav = this.overlayController.nav()
+        const sel = base.entries[nav.rewindIndex]
+        const previewFiles = nav.rewindPhase === 'action' && sel && overlayData?.rewindFilePreview
+          ? overlayData.rewindFilePreview(sel.messageIndex)
+          : undefined
+        return renderRewind({
+          ...base,
+          selectedIndex: nav.rewindIndex,
+          phase: nav.rewindPhase,
+          actionIndex: nav.rewindActionIndex,
+          previewFiles,
+        }, this.columns, this.rows, this.theme)
       },
     })
 

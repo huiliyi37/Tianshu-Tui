@@ -13,6 +13,7 @@ import { isAuthorizedRequest } from './auth.js'
 import { loadConfig, saveConfig } from '../config/manager.js'
 import type { McpManager } from '../mcp/manager.js'
 import { mcpServerConfigSchema, type McpServerConfig } from '../mcp/config.js'
+import { MCP_PRESETS } from '../mcp/presets.js'
 import { serverLogger } from './logger.js'
 
 function withAuth(handler: RouteHandler, apiToken?: string): RouteHandler {
@@ -65,6 +66,13 @@ export function buildMcpRoutes(
           enabled: loadConfig().mcp?.enabled ?? true,
         },
       }
+    }, apiToken),
+
+    // GET /mcp/presets — curated one-click MCP catalog + which ids are already
+    // configured (mirrors provider `unconfigured` so the UI can render add state).
+    'GET /mcp/presets': withAuth(() => {
+      const configuredIds = Object.keys(cloneMcpServers())
+      return { status: 200, body: { presets: MCP_PRESETS, configuredIds } }
     }, apiToken),
 
     // POST /mcp/servers — add or update an MCP server config.

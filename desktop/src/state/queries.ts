@@ -12,6 +12,8 @@ import {
   getEnvironment,
   getHealth,
   getGithubPr,
+  getGithubPrDiff,
+  submitGithubPrReview,
   getHooks,
   getPlan,
   getFileDiff,
@@ -23,6 +25,8 @@ import {
   listPlans,
   listSchedule,
   listSessions,
+  listTasks,
+  cancelTask,
   pauseSchedule,
   rejectPlan,
   renameSession,
@@ -32,6 +36,7 @@ import {
   setHooks,
   setPlanMode,
   unarchiveSession,
+  type PrReviewInput,
 } from '../runtime/client'
 import type { HookEntry, PlanModeState } from '../runtime/types'
 
@@ -49,8 +54,10 @@ export const qk = {
   domains: (id: string | null) => ['domains', id] as const,
   hooks: (id: string | null) => ['hooks', id] as const,
   schedule: ['schedule'] as const,
+  tasks: ['tasks'] as const,
   githubPrs: ['github', 'prs'] as const,
   githubPr: (n: number) => ['github', 'pr', n] as const,
+  githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
   configProviders: ['config', 'providers'] as const,
   workingTree: ['git', 'working-tree'] as const,
   fileDiff: (path: string) => ['git', 'diff', path] as const,
@@ -92,7 +99,7 @@ export function useArtifacts(sessionId: string | null, rev: number) {
   })
 }
 
-/** List the star-domain picker entries for a session (Auto / Off / built-in & custom). */
+/** List the star-domain picker entries for a session (Auto / built-in & custom). */
 export function useDomains(sessionId: string | null) {
   return useQuery({
     queryKey: qk.domains(sessionId),
@@ -304,6 +311,20 @@ export function useDeleteSchedule() {
   })
 }
 
+/** All task execution records (polled). Automations dashboard filters by
+ *  scheduledTaskId client-side. */
+export function useTasks() {
+  return useQuery({ queryKey: qk.tasks, queryFn: listTasks, refetchInterval: 5000 })
+}
+
+export function useCancelTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => cancelTask(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.tasks }),
+  })
+}
+
 // ── GitHub PR ───────────────────────────────────────────────────────
 
 export function useGithubPrs() {
@@ -320,6 +341,31 @@ export function useGithubPr(number: number | null) {
     queryKey: qk.githubPr(number ?? 0),
     queryFn: () => (number ? getGithubPr(number) : Promise.reject()),
     enabled: !!number,
+  })
+}
+
+/** Fetch a PR's full unified diff on demand (when a PR is selected). */
+export function useGithubPrDiff(number: number | null) {
+  return useQuery({
+    queryKey: qk.githubPrDiff(number ?? 0),
+    queryFn: () => (number ? getGithubPrDiff(number) : Promise.reject()),
+    enabled: !!number,
+    staleTime: 30_000,
+  })
+}
+
+/** Submit a PR review; refresh PR detail + list so the new verdict/comments show. */
+export function useSubmitPrReview(number: number | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: PrReviewInput) => {
+      if (!number) return Promise.reject(new Error('No PR selected'))
+      return submitGithubPrReview(number, input)
+    },
+    onSuccess: () => {
+      if (number) qc.invalidateQueries({ queryKey: qk.githubPr(number) })
+      qc.invalidateQueries({ queryKey: qk.githubPrs })
+    },
   })
 }
 

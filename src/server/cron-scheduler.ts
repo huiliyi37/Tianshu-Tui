@@ -21,6 +21,14 @@ export interface CronTrigger {
   spec: string
 }
 
+/** Bounded automatic retry for a failed/timed_out run of a scheduled task. */
+export interface ScheduledTaskRetry {
+  /** Total attempts including the first (>= 1). */
+  maxAttempts: number
+  /** Base delay before a retry; grows linearly per attempt. */
+  backoffMs: number
+}
+
 export interface ScheduledTask {
   id: string
   prompt: string
@@ -33,10 +41,18 @@ export interface ScheduledTask {
   triggerCount: number
   /** When false, the task is retained but never fired (paused). Default true. */
   enabled?: boolean
+  /** Optional failure retry policy applied to each fired run. */
+  retry?: ScheduledTaskRetry
 }
 
 export type ScheduleTable = ScheduledTask[]
-export type TaskDueHandler = (prompt: string, allowedTools: string[], agentId?: string) => Promise<unknown>
+/** Extra context handed to due-task handlers so the created TaskRecord can be
+ *  linked back to its ScheduledTask and inherit the retry policy. */
+export interface TaskDueMeta {
+  scheduledTaskId?: string
+  retry?: ScheduledTaskRetry
+}
+export type TaskDueHandler = (prompt: string, allowedTools: string[], agentId?: string, meta?: TaskDueMeta) => Promise<unknown>
 export type UnsubscribeTaskDue = () => void
 
 export interface CronSchedulerConfig {
@@ -307,9 +323,10 @@ export class CronScheduler {
   }
 
   private async fireTask(task: ScheduledTask): Promise<void> {
+    const meta: TaskDueMeta = { scheduledTaskId: task.id, retry: task.retry }
     for (const handler of this.handlers) {
       try {
-        await handler(task.prompt, [...task.allowedTools], task.agentId)
+        await handler(task.prompt, [...task.allowedTools], task.agentId, meta)
       } catch (err) {
         serverLogger.warn('Scheduled task handler failed', { taskId: task.id, ...errorContext(err) })
       }
@@ -331,7 +348,7 @@ export function createScheduledTask(
   prompt: string,
   trigger: CronTrigger,
   allowedTools: string[] = [],
-  opts?: { recurringMaxAgeMs?: number; agentId?: string },
+  opts?: { recurringMaxAgeMs?: number; agentId?: string; retry?: ScheduledTaskRetry },
 ): ScheduledTask {
   return {
     id: `cron_${randomUUID().slice(0, 8)}`,
@@ -342,7 +359,20 @@ export function createScheduledTask(
     agentId: opts?.agentId,
     createdAt: new Date().toISOString(),
     triggerCount: 0,
+    ...(normalizeRetry(opts?.retry) ? { retry: normalizeRetry(opts?.retry)! } : {}),
   }
+}
+
+/** Sanitize a retry policy; returns undefined for absent/invalid input. */
+export function normalizeRetry(retry: unknown): ScheduledTaskRetry | undefined {
+  if (!retry || typeof retry !== 'object') return undefined
+  const r = retry as Partial<ScheduledTaskRetry>
+  const maxAttempts = Number(r.maxAttempts)
+  const backoffMs = Number(r.backoffMs)
+  if (!Number.isFinite(maxAttempts) || maxAttempts < 2) return undefined
+  const safeBackoff = Number.isFinite(backoffMs) && backoffMs >= 0 ? backoffMs : 0
+  // Cap to keep the scheduler bounded.
+  return { maxAttempts: Math.min(Math.floor(maxAttempts), 10), backoffMs: Math.min(safeBackoff, 60 * 60 * 1000) }
 }
 
 function validateTriggerOrThrow(trigger: CronTrigger): void {
@@ -393,6 +423,7 @@ function normalizeScheduledTask(value: unknown): ScheduledTask | null {
     ...(typeof task.agentId === 'string' ? { agentId: task.agentId } : {}),
     ...(typeof task.lastTriggeredAt === 'string' ? { lastTriggeredAt: task.lastTriggeredAt } : {}),
     ...(typeof task.enabled === 'boolean' ? { enabled: task.enabled } : {}),
+    ...(normalizeRetry(task.retry) ? { retry: normalizeRetry(task.retry)! } : {}),
   }
   try {
     validateTriggerOrThrow(normalized.trigger)
@@ -407,5 +438,6 @@ function cloneTask(task: ScheduledTask): ScheduledTask {
     ...task,
     allowedTools: [...task.allowedTools],
     trigger: { ...task.trigger },
+    ...(task.retry ? { retry: { ...task.retry } } : {}),
   }
 }

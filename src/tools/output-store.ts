@@ -69,6 +69,10 @@ const MODEL_HEAD_LINES = 100
 const MODEL_TAIL_LINES = 80
 const SUCCESS_INLINE_LINES = 20
 const SUCCESS_TAIL_LINES = 20
+// 失败输出超过该行数时，模型路径改用 error-aware 精选（聚焦报错行、丢无关噪声），
+// 而非 raw head/tail —— 与 buildUiOutput 对齐，减少环境报错对模型的干扰。
+const MODEL_ERROR_AWARE_THRESHOLD = 40
+const MODEL_ERROR_AWARE_BUDGET = 60
 
 function countLines(raw: string): number {
   if (raw.length === 0) return 0
@@ -105,6 +109,15 @@ export function buildModelOutput(raw: string, meta: ToolOutputMeta): string {
     const tail = lines.slice(-SUCCESS_TAIL_LINES)
     const omitted = lineCount - SUCCESS_TAIL_LINES
     return `${header}\n... ${omitted} lines omitted ...\n${tail.join('\n')}\n[output truncated: last ${SUCCESS_TAIL_LINES} of ${lineCount} lines shown — ${omitted} lines omitted${recovery}]`
+  }
+
+  // Failure with many lines: error-aware extraction — surface the failure reason
+  // and drop surrounding noise, instead of dumping the raw wall into the model's
+  // context (the same picker buildUiOutput uses, with a larger model budget).
+  if (meta.exitCode !== 0 && lineCount > MODEL_ERROR_AWARE_THRESHOLD) {
+    const picked = extractErrorAwareLines(lines, MODEL_ERROR_AWARE_BUDGET)
+    const omitted = Math.max(0, lineCount - picked.length)
+    return `${header}\n${picked.join('\n')}\n[error-aware: ${picked.length} of ${lineCount} lines shown, ${omitted} lines omitted${recovery}]`
   }
 
   // Output fits within model max lines — complete
@@ -146,7 +159,7 @@ export function buildUiOutput(raw: string, meta: ToolOutputMeta, maxLines = 20):
  * Error-aware line extraction: scans for error markers and keeps surrounding context.
  * Falls back to head+tail split if no error markers found or selection exceeds maxLines.
  */
-function extractErrorAwareLines(lines: string[], maxLines: number): string[] {
+export function extractErrorAwareLines(lines: string[], maxLines: number): string[] {
   // Patterns that indicate a line is diagnostically significant
   const markerRegex = /error\b|Error:|FAIL\b|AssertionError|assert|✗|✘|×|at\s+\S+\.(ts|tsx|js|jsx):\d+|^\s+\d+\s+\|\s|^\s+>/i
 

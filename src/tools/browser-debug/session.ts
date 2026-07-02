@@ -78,12 +78,12 @@ export class BrowserDebugSession {
         const entry = self!.log.addConsole(level, text)
         self!.emit(formatConsoleLine(entry))
       },
-      onRequestStart: (id, method, url, resourceType) => {
-        const entry = self!.log.startRequest(id, method, url, Date.now(), resourceType)
+      onRequestStart: (id, method, url, resourceType, headers, postData) => {
+        const entry = self!.log.startRequest(id, method, url, Date.now(), resourceType, headers, postData)
         self!.emit(formatNetworkLine(entry))
       },
-      onResponse: (id, status, resourceType) => {
-        const entry = self!.log.completeRequest(id, status, Date.now(), resourceType)
+      onResponse: (id, status, resourceType, headers) => {
+        const entry = self!.log.completeRequest(id, status, Date.now(), resourceType, headers)
         self!.emit(formatNetworkLine(entry))
       },
       onRequestFailed: (id, method, url, errorText, resourceType) => {

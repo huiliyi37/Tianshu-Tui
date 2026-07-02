@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -235,6 +235,30 @@ export function setMirrorConfig(input: {
   cfg.mirrors = mirrorsSchema.parse(merged)
   saveConfig(cfg)
   return cfg.mirrors
+}
+
+/** Snapshot of the UI preferences block for the TUI settings panel. */
+export function getUiConfig(): UiConfig {
+  return loadConfig().ui
+}
+
+/**
+ * Persist UI preferences (default theme, etc.) to the user global config.
+ * Validated through uiSchema. Theme changes take effect on the next session start.
+ */
+export function setUiConfig(input: { theme?: unknown }): UiConfig {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.ui }
+  if ('theme' in input) {
+    if (input.theme === undefined) {
+      delete merged.theme
+    } else {
+      merged.theme = input.theme
+    }
+  }
+  cfg.ui = uiSchema.parse(merged)
+  saveConfig(cfg)
+  return cfg.ui
 }
 
 export function setApiKey(providerName: string, key: string): void {

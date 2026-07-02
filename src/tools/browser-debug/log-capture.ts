@@ -23,6 +23,13 @@ export interface NetworkEntry {
   contentType?: string
   responseBody?: string
   responseBodyTruncated?: boolean
+  /** Request headers captured at request start (for API联调). */
+  requestHeaders?: Record<string, string>
+  /** Request payload (POST body) captured at request start, truncated. */
+  requestBody?: string
+  requestBodyTruncated?: boolean
+  /** Response headers captured on response. */
+  responseHeaders?: Record<string, string>
 }
 
 export interface NetworkQuery {
@@ -79,6 +86,177 @@ export function formatNetworkLine(entry: NetworkEntry, includeBody = false): str
   return line
 }
 
+/** A network line parsed back into fields, for structured (desktop) rendering. */
+export interface ParsedNetworkRow {
+  dir: 'ok' | 'pending' | 'failed'
+  method: string
+  url: string
+  status?: number
+  durationMs?: number
+  resourceType?: string
+  errorText?: string
+}
+
+/**
+ * Inverse of {@link formatNetworkLine} for the primary (non-body) line. Returns
+ * null for anything that is not a network line (console/cookie/storage output,
+ * body continuation lines, placeholders). Kept next to the formatter so the two
+ * stay in sync; the desktop renders a table from these rows.
+ */
+export function parseNetworkLine(line: string): ParsedNetworkRow | null {
+  let rest = line.replace(/\s+$/, '')
+  let resourceType: string | undefined
+  const typeMatch = rest.match(/ \[(\w+)\]$/)
+  if (typeMatch) {
+    resourceType = typeMatch[1]
+    rest = rest.slice(0, rest.length - typeMatch[0].length)
+  }
+  if (rest.startsWith('✗ ')) {
+    rest = rest.slice(2)
+    let errorText: string | undefined
+    const errMatch = rest.match(/ \((.+)\)$/)
+    if (errMatch) {
+      errorText = errMatch[1]
+      rest = rest.slice(0, rest.length - errMatch[0].length)
+    }
+    const sp = rest.indexOf(' ')
+    if (sp < 0) return null
+    return { dir: 'failed', method: rest.slice(0, sp), url: rest.slice(sp + 1), errorText, resourceType }
+  }
+  if (rest.startsWith('→ ')) {
+    rest = rest.slice(2)
+    const sp = rest.indexOf(' ')
+    if (sp < 0) return null
+    return { dir: 'pending', method: rest.slice(0, sp), url: rest.slice(sp + 1), resourceType }
+  }
+  if (rest.startsWith('← ')) {
+    rest = rest.slice(2)
+    let durationMs: number | undefined
+    const durMatch = rest.match(/ \((\d+)ms\)$/)
+    if (durMatch) {
+      durationMs = Number(durMatch[1])
+      rest = rest.slice(0, rest.length - durMatch[0].length)
+    }
+    const firstSp = rest.indexOf(' ')
+    if (firstSp < 0) return null
+    const status = Number(rest.slice(0, firstSp))
+    if (!Number.isFinite(status)) return null
+    const afterStatus = rest.slice(firstSp + 1)
+    const secondSp = afterStatus.indexOf(' ')
+    if (secondSp < 0) return null
+    return {
+      dir: 'ok',
+      status,
+      method: afterStatus.slice(0, secondSp),
+      url: afterStatus.slice(secondSp + 1),
+      durationMs,
+      resourceType,
+    }
+  }
+  return null
+}
+
+/** Severity bucket for a single browser_debug output line. */
+export type BrowserDebugLineKind = 'error' | 'warn' | 'ok' | 'pending' | 'muted'
+
+/**
+ * Classify one browser_debug output line by its console level / HTTP status,
+ * from the line prefix alone. Shared by the TUI (`colorBrowserDebugLine`) and
+ * the desktop renderer so both surfaces agree on severity.
+ *
+ * Console lines are prefixed `[error]/[warn]/[info]/[log]/[debug]`; network
+ * lines start with `✗` (failed), `→` (pending) or `← STATUS …` (completed).
+ */
+export function classifyBrowserDebugLine(line: string): BrowserDebugLineKind {
+  if (line.startsWith('[error]')) return 'error'
+  if (line.startsWith('[warn]')) return 'warn'
+  if (line.startsWith('[info]') || line.startsWith('[log]') || line.startsWith('[debug]')) {
+    return 'muted'
+  }
+  if (line.startsWith('✗')) return 'error'
+  if (line.startsWith('→')) return 'pending'
+  if (line.startsWith('←')) {
+    const status = Number(line.slice(1).trim().split(/\s+/)[0])
+    if (Number.isFinite(status)) {
+      if (status >= 500) return 'error'
+      if (status >= 400) return 'warn'
+      if (status >= 200 && status < 300) return 'ok'
+    }
+    return 'muted'
+  }
+  return 'muted'
+}
+
+/** Header names whose values must never be printed in full (tokens/cookies).
+ *  Security gate: no raw API keys / OAuth tokens / passwords in the transcript. */
+const SENSITIVE_HEADERS = new Set([
+  'authorization', 'proxy-authorization', 'cookie', 'set-cookie',
+  'x-api-key', 'api-key', 'x-auth-token', 'x-csrf-token',
+])
+
+/** Redact sensitive header values to `***(…last4)` while keeping the key visible,
+ *  so the user still sees the header is present without leaking the secret. */
+export function maskSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [rawKey, value] of Object.entries(headers)) {
+    out[rawKey] = SENSITIVE_HEADERS.has(rawKey.toLowerCase()) && value ? maskSecretValue(value) : value
+  }
+  return out
+}
+
+/** Mask a secret value to `***(…last4)`, keeping the last 4 chars for diagnosis. */
+export function maskSecretValue(value: string): string {
+  const tail = value.length > 4 ? value.slice(-4) : ''
+  return `***(…${tail})`
+}
+
+/** Storage keys whose values likely hold secrets (masked in `storage` output). */
+const SENSITIVE_KEY_RE = /(token|secret|auth|session|jwt|password|passwd|api[-_]?key|credential|refresh|access)/i
+const STORAGE_VALUE_MAX = 200
+
+interface CookieLike {
+  name: string
+  value: string
+  domain?: string
+  path?: string
+  httpOnly?: boolean
+  secure?: boolean
+  sameSite?: string
+}
+
+/** Render cookies one per line with masked values (cookies carry session ids). */
+export function formatCookies(cookies: CookieLike[]): string {
+  if (cookies.length === 0) return '(no cookies)'
+  return cookies.map((c) => {
+    const flags = [
+      c.domain || c.path ? `${c.domain ?? ''}${c.path ?? ''}` : '',
+      c.httpOnly ? 'httpOnly' : '',
+      c.secure ? 'secure' : '',
+      c.sameSite ? `sameSite=${c.sameSite}` : '',
+    ].filter(Boolean).join('; ')
+    return `${c.name}=${maskSecretValue(c.value)}${flags ? `  [${flags}]` : ''}`
+  }).join('\n')
+}
+
+/** Render a storage snapshot; mask values whose key looks sensitive, else truncate. */
+export function formatStorage(record: Record<string, string>): string {
+  const keys = Object.keys(record)
+  if (keys.length === 0) return '(empty)'
+  return keys.map((k) => {
+    const v = record[k] ?? ''
+    if (SENSITIVE_KEY_RE.test(k)) return `${k}: ${maskSecretValue(v)}`
+    const shown = v.length > STORAGE_VALUE_MAX ? `${v.slice(0, STORAGE_VALUE_MAX)}… (truncated)` : v
+    return `${k}: ${shown}`
+  }).join('\n')
+}
+
+function appendHeaderBlock(lines: string[], label: string, headers?: Record<string, string>): void {
+  if (!headers || Object.keys(headers).length === 0) return
+  lines.push(`${label}:`)
+  const masked = maskSensitiveHeaders(headers)
+  for (const [k, v] of Object.entries(masked)) lines.push(`  ${k}: ${v}`)
+}
+
 /** Multi-line detail for network_detail action. */
 export function formatNetworkDetail(entry: NetworkEntry): string {
   const lines = [
@@ -96,6 +274,13 @@ export function formatNetworkDetail(entry: NetworkEntry): string {
   }
   if (entry.durationMs !== undefined) lines.push(`duration: ${entry.durationMs}ms`)
   if (entry.contentType) lines.push(`content-type: ${entry.contentType}`)
+  appendHeaderBlock(lines, 'request headers', entry.requestHeaders)
+  if (entry.requestBody) {
+    lines.push('request body:')
+    lines.push(entry.requestBody)
+    if (entry.requestBodyTruncated) lines.push('… (request body truncated at 2048 chars)')
+  }
+  appendHeaderBlock(lines, 'response headers', entry.responseHeaders)
   if (entry.responseBody) {
     lines.push('body:')
     lines.push(entry.responseBody)
@@ -138,8 +323,17 @@ export class LogCapture {
     url: string,
     ts: number = Date.now(),
     resourceType?: string,
+    headers?: Record<string, string>,
+    postData?: string,
   ): NetworkEntry {
     const prev = this.network.get(requestId)
+    let requestBody = prev?.requestBody
+    let requestBodyTruncated = prev?.requestBodyTruncated
+    if (postData !== undefined) {
+      const { body, truncated } = truncateResponseBody(postData)
+      requestBody = body
+      requestBodyTruncated = truncated
+    }
     const entry: NetworkEntry = {
       requestId,
       method,
@@ -153,6 +347,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: headers ?? prev?.requestHeaders,
+      requestBody,
+      requestBodyTruncated,
+      responseHeaders: prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry
@@ -163,6 +361,7 @@ export class LogCapture {
     status: number,
     ts: number = Date.now(),
     resourceType?: string,
+    responseHeaders?: Record<string, string>,
   ): NetworkEntry {
     const prev = this.network.get(requestId)
     const entry: NetworkEntry = {
@@ -176,6 +375,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: prev?.requestHeaders,
+      requestBody: prev?.requestBody,
+      requestBodyTruncated: prev?.requestBodyTruncated,
+      responseHeaders: responseHeaders ?? prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry
@@ -202,6 +405,10 @@ export class LogCapture {
       contentType: prev?.contentType,
       responseBody: prev?.responseBody,
       responseBodyTruncated: prev?.responseBodyTruncated,
+      requestHeaders: prev?.requestHeaders,
+      requestBody: prev?.requestBody,
+      requestBodyTruncated: prev?.requestBodyTruncated,
+      responseHeaders: prev?.responseHeaders,
     }
     this.upsert(entry)
     return entry

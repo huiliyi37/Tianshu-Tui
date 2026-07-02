@@ -868,6 +868,11 @@ body {
   background: var(--panel-3, var(--bg)); padding: 2px 8px; border-radius: 3px;
   display: inline-block;
 }
+.mcp-preset-card.configured { border-style: solid; opacity: 0.7; cursor: default; }
+.mcp-preset-card.configured:hover { border-color: var(--border); background: transparent; }
+.mcp-preset-card.configured .mcp-preset-name { color: var(--muted); }
+.mcp-preset-keyform { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-1); }
+.mcp-preset-keyform .form-actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
 
 /* Rollback (R3) */
 .rollback { padding: 0 var(--space-3); }
@@ -2170,6 +2175,51 @@ body {
   line-height: 1.55; color: var(--text); white-space: pre-wrap; word-break: break-all;
   max-height: 400px; overflow-y: auto;
 }
+/* browser_debug rich output — per-line severity colouring + inline screenshot. */
+.bd-output { display: flex; flex-direction: column; }
+.bd-line { white-space: pre-wrap; word-break: break-all; }
+.bd-line.bd-error { color: var(--error); }
+.bd-line.bd-warn { color: var(--warning); }
+.bd-line.bd-ok { color: var(--success); }
+.bd-line.bd-pending { color: var(--faint); }
+.bd-line.bd-muted { color: var(--muted); }
+.bd-shot {
+  max-width: 100%; max-height: 320px; object-fit: contain;
+  border-radius: 6px; border: 1px solid var(--border);
+  margin-top: var(--space-2); display: block; cursor: zoom-in;
+  transition: filter 0.12s ease;
+}
+.bd-shot:hover { filter: brightness(1.06); }
+
+/* browser_debug network table */
+.bd-net { overflow-x: auto; }
+.bd-net-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.bd-net-table th, .bd-net-table td {
+  text-align: left; padding: 2px 8px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.bd-net-table th { color: var(--muted); font-weight: 600; user-select: none; }
+.bd-net-sortable { cursor: pointer; }
+.bd-net-sortable:hover { color: var(--fg); }
+.bd-net-num { text-align: right; }
+.bd-net-status { font-weight: 700; }
+.bd-net-status.bd-error { color: var(--error); }
+.bd-net-status.bd-warn { color: var(--warning); }
+.bd-net-status.bd-ok { color: var(--success); }
+.bd-net-status.bd-pending { color: var(--faint); }
+.bd-net-status.bd-muted { color: var(--muted); }
+.bd-net-method { color: var(--muted); }
+.bd-net-url {
+  max-width: 480px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--font-mono, monospace);
+}
+.bd-net-type { color: var(--faint); }
+.bd-net-clickable { cursor: pointer; }
+.bd-net-clickable:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+.bd-net-body {
+  margin: 0; padding: 6px 8px; white-space: pre-wrap; word-break: break-all;
+  color: var(--fg); background: var(--bg-subtle, rgba(127,127,127,0.06));
+}
 
 /* ── Timeline Group Styling (Cursor 3.0) ────────────────────────────────── */
 .timeline-group {
@@ -2375,6 +2425,12 @@ body {
 .model-picker-item:hover { background: var(--panel-2); }
 .model-picker-item.active { background: var(--accent-soft); color: var(--accent); }
 .model-picker-desc { color: var(--muted); font-size: var(--text-xs); font-family: var(--font-mono); }
+.model-picker-hint {
+  padding: var(--space-1) var(--space-2); margin-bottom: var(--space-1);
+  border-radius: var(--radius-sm); background: var(--warning-soft, var(--panel-2));
+  color: var(--warning, var(--muted)); font-size: var(--text-xs); line-height: 1.4;
+  border: 1px solid var(--border);
+}
 
 /* 星域 picker reuses .model-picker but its desc is prose (meta/motto), not a
    token count — drop the mono font and bound the width so long Chinese text
@@ -2650,6 +2706,26 @@ body {
 .gh-comment { margin-bottom: 12px; padding: 10px; background: var(--panel-2); border-radius: var(--radius-md); }
 .gh-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
 .gh-comment-body { font-size: 13px; }
+.gh-files-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.gh-files-head h5 { margin: 0; }
+
+/* PR review action bar */
+.gh-review-bar { position: sticky; bottom: 0; margin-top: 16px; padding: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px; }
+.gh-review-verdicts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gh-verdict { padding: 4px 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: none; color: var(--text); cursor: pointer; font-size: 12px; }
+.gh-verdict:hover { background: var(--panel); }
+.gh-verdict.active.v-approve { background: var(--success); border-color: var(--success); color: #fff; }
+.gh-verdict.active.v-request_changes { background: var(--error); border-color: var(--error); color: #fff; }
+.gh-verdict.active.v-comment { background: var(--accent); border-color: var(--accent); color: #fff; }
+.gh-review-count { margin-left: auto; font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
+.gh-review-summary { width: 100%; resize: vertical; padding: 8px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: inherit; }
+.gh-review-error { font-size: 12px; color: var(--error); }
+.gh-review-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.gh-review-clear { padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.gh-review-clear:disabled { opacity: 0.5; cursor: default; }
+.gh-review-submit { padding: 5px 16px; border: none; border-radius: var(--radius-sm); background: var(--accent); color: #fff; cursor: pointer; font-size: 13px; }
+.gh-review-submit:disabled { opacity: 0.5; cursor: default; }
+.file-diff-comment-badge { margin-left: 6px; font-size: 11px; color: var(--muted); }
 
 /* Clickable file paths */
 .file-path-link {
@@ -3033,6 +3109,75 @@ body {
 .rewind-empty { color: var(--muted); padding: 16px 0; text-align: center; font-size: 13px; }
 .rewind-error { color: var(--error); padding: 8px 0; font-size: 13px; }
 .rewind-hint { color: var(--muted); font-size: 12px; padding-top: 4px; }
+
+/* Rewind — action chooser layer (仅对话 / 仅代码 / 对话+代码) */
+.rewind-choose { display: flex; flex-direction: column; gap: 10px; }
+.rewind-chosen-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--panel-2, var(--hover));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rewind-actions { display: flex; flex-direction: column; gap: 6px; }
+.rewind-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.rewind-action:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+.rewind-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.rewind-action-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.rewind-action-desc { font-size: 12px; color: var(--muted); }
+
+/* Rewind — precise file preview (which files restore/delete) */
+.rewind-preview-tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.rewind-file-list {
+  list-style: none;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rewind-file { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.rewind-file-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  border-radius: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+}
+.rewind-file-restore .rewind-file-badge { color: var(--accent); }
+.rewind-file-delete .rewind-file-badge { color: var(--error); border-color: var(--error); }
+.rewind-file-path {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* React error boundary fallback */
 .error-boundary {

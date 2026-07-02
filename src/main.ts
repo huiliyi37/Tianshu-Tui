@@ -17,7 +17,7 @@ installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
 import type { BootstrapContext } from './bootstrap.js'
-import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider } from './config/manager.js'
+import { loadConfig as loadRivetConfig, setupProvider, setupCustomProvider, setUiConfig } from './config/manager.js'
 import type { GoalTracker as GoalTrackerInstance } from './agent/goal-tracker.js'
 import { createUpdateGoalTool } from './tools/update-goal.js'
 import { TuiApp } from './tui/engine/app.js'
@@ -28,6 +28,8 @@ import { buildCockpitSnapshot } from './tui/cockpit/state.js'
 import { loadTodos, setTodoSession } from './tools/todo.js'
 import { setPlanSession } from './agent/plan-store.js'
 import { formatWelcome } from './tui/format/welcome.js'
+import type { RewindMode } from './tui/format/rewind.js'
+import { collectPostBoundaryEditIds } from './agent/file-history.js'
 import { loadHistory } from './tui/history.js'
 import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
@@ -36,7 +38,8 @@ import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from '
 import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
-import { buildDomainPickerEntries } from './agent/domain-picker-entries.js'
+import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
+import { isStarSoulEnabled } from './agent/star-soul-gate.js'
 import { SessionPersist } from './agent/session-persist.js'
 import { loadConstellation } from './constellation/store.js'
 import { formatMilestoneLine } from './constellation/format.js'
@@ -381,9 +384,9 @@ async function main() {
   }
 
   // ── 默认加载天枢定制品牌主题 ──────────────────────────────────
-  if (getActiveThemeName() === 'cobalt') {
-    setTheme('tianshu')
-  }
+  // 优先使用用户配置的默认主题；未配置时保持向后兼容的 tianshu。
+  const themeName = ctx.config.ui?.theme ?? 'tianshu'
+  setTheme(themeName)
   const theme = getTheme()
 
   process.stderr.write(`[T9] Provider: ${ctx.provider.name}, Model: ${ctx.config.provider.default}\n`)
@@ -428,6 +431,16 @@ async function main() {
   // app 在此处必定非 null（前有 app = new TuiApp 赋值，无重赋 null 路径）
   const tuiApp = app!
   tuiApp.setApprovalMode(ctx!.config.agent.approval ?? 'auto-safe')
+  // TUI 默认钉住天枢星域(与桌面端 auto 形成对比):在首个请求前设置,仅构建
+  // 初始 frozenBase,无缓存代价;setSessionDomain 后 bindSessionDomain 的
+  // `!== undefined` 守卫会跳过按任务的 auto 关键词绑定。尊重 STAR_SOUL 总开关;
+  // 若已有钉住的域(理论上不会,TUI 不持久化选择态)则沿用。
+  if (ctx!.agent.getSessionDomain() === undefined && isStarSoulEnabled()) {
+    const tianshu = starDomainRegistry.get('tianshu')
+    if (tianshu) {
+      ctx!.agent.setSessionDomain({ id: tianshu.id, name: tianshu.name, volatileBlock: tianshu.volatileBlock, motto: tianshu.motto })
+    }
+  }
   const initialDomain = ctx!.agent.getSessionDomain()?.name
   if (initialDomain) {
     tuiApp.setSessionStarDomain(initialDomain)
@@ -517,17 +530,25 @@ async function main() {
         mcpManager: ctx.refs.mcpManager,
       })
     },
-    // Rewind — 最近用户消息
+    // Rewind — 最近用户消息（携带真实 messageIndex 作为回溯边界）
     rewindEntries: () => {
       const messages = ctx?.session.getMessages() ?? []
-      const userMsgs = messages
-        .filter(m => m.role === 'user')
-        .slice(-30)
-        .map((m, i) => ({
-          index: i + 1,
-          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-        }))
-      return { entries: userMsgs, selectedIndex: 0 }
+      const all: { index: number; messageIndex: number; content: string }[] = []
+      let ord = 0
+      messages.forEach((m, i) => {
+        if (m.role === 'user' && typeof m.content === 'string') {
+          ord++
+          all.push({ index: ord, messageIndex: i, content: m.content })
+        }
+      })
+      return { entries: all.slice(-30), selectedIndex: 0 }
+    },
+    // Rewind phase 2 — 精确到选中消息的代码回滚会影响哪些文件
+    rewindFilePreview: (messageIndex: number) => {
+      const fh = ctx?.agent.getFileHistory()
+      if (!fh) return []
+      const messages = ctx?.session.getMessages() ?? []
+      return fh.getBoundaryFiles(collectPostBoundaryEditIds(messages, messageIndex))
     },
     // Chronicle
     chronicleEntries: () => {
@@ -572,19 +593,26 @@ async function main() {
     }),
     modelPickerData: () => {
       const activeModelId = ctx?.agent.config.promptEngine.getModel()
-      const models = ctx?.provider.models ?? []
+      const entries: { id: string; alias: string; provider: string; current: boolean; contextWindow: number }[] = []
+      for (const [provName, prov] of Object.entries(ctx?.config.provider.providers ?? {})) {
+        for (const m of prov.models) {
+          entries.push({
+            id: m.id,
+            alias: m.alias ?? m.id,
+            provider: provName,
+            current: m.id === activeModelId,
+            contextWindow: m.contextWindow,
+          })
+        }
+      }
       return {
-        entries: models.map(m => ({
-          id: m.id,
-          alias: m.alias ?? m.id,
-          current: m.id === activeModelId,
-          contextWindow: m.contextWindow,
-        })),
+        entries,
         selectedIndex: 0,
       }
     },
     themePickerData: () => {
       const currentTheme = getActiveThemeName()
+      const defaultTheme = ctx?.config.ui?.theme
       const validThemes = Object.keys(THEMES) as ThemeName[]
       const themeDescriptions: Record<string, string> = {
         cobalt: '钴蓝·冷调中性 (默认风格)。oklch 调和，明度梯度清晰，视觉极度舒适。',
@@ -597,12 +625,14 @@ async function main() {
         pastel: '温和粉彩。二次元风格启发，高对比、低饱和度多色卡。',
         cyberpunk: '赛博朋克。霓虹极高对比，酷炫亮眼。',
         observatory: '五色星辰。传统五行配色体系，天玑星君玄灰底色。',
-        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。'
+        claude: 'Claude Code 官方 TUI 经典调色盘移植。橘黄经典。',
+        starfield: '星空星座。Rivet 原生星图美学，天蓝主星与星云紫辅色。'
       }
       return {
         entries: validThemes.map(t => ({
           name: t,
           current: t === currentTheme,
+          isDefault: t === defaultTheme,
           description: themeDescriptions[t] ?? 'Custom color theme'
         })),
         selectedIndex: 0,
@@ -632,45 +662,55 @@ async function main() {
         tuiApp.setInput(name + ' ')
       }
     }
-  }, /* rewindExec: */ (content: string) => {
-    // Rewind Enter 回调：截断消息到选中点 + 回填输入框
+  }, /* rewindExec: */ (messageIndex: number, mode: RewindMode) => {
+    // Rewind Enter 回调：按选择的粒度恢复（仅对话 / 仅代码 / 对话+代码）。
     const messages = ctx?.session.getMessages() ?? []
-    // Find the matching user message index
-    const matchIdx = messages
-      .map((m, i) => ({ m, i }))
-      .filter(({ m }) => m.role === 'user' && typeof m.content === 'string')
-      .filter(({ m }) => (m as { content: string }).content === content)
-      .pop()?.i
-    if (matchIdx !== undefined) {
-      ctx!.session.rewindToMessages(messages.slice(0, matchIdx))
-      ctx!.agent.config.promptEngine.resetAppendixBaseline()
-      // Commit a rewind marker to scrollback
-      tuiApp.commitStatic('⏪ Rewound — message restored to input.')
+    const target = messages[messageIndex]
+    const content = target && typeof target.content === 'string' ? target.content : ''
+    const doCode = mode === 'code' || mode === 'both'
+    const doConvo = mode === 'convo' || mode === 'both'
+
+    if (doCode) {
+      const fh = ctx?.agent.getFileHistory()
+      if (fh) {
+        const ids = collectPostBoundaryEditIds(messages, messageIndex)
+        fh.rewindToBoundary(ids).then(
+          changed => tuiApp.commitStatic(`⏪ 已把 ${changed.length} 个文件恢复到此消息${changed.length ? '' : '（无可恢复的编辑）'}`),
+          err => tuiApp.commitStatic(`回滚代码失败：${(err as Error).message}`),
+        )
+      } else {
+        tuiApp.commitStatic('无文件历史，无法恢复代码。')
+      }
     }
-    // Always populate input (even if match not found — user can still edit)
-    tuiApp.setInput(content)
+
+    if (doConvo && messageIndex >= 0) {
+      ctx!.session.rewindToMessages(messages.slice(0, messageIndex))
+      ctx!.agent.config.promptEngine.resetAppendixBaseline()
+      tuiApp.commitStatic('⏪ 已截断对话到此消息 — 已回填输入框。')
+      tuiApp.setInput(content)
+    }
   }, /* chronicleExec: */ (id: string) => {
     // Chronicle Enter 回调：把所选会话装填为 /resume 命令到输入框，由用户回车确认。
     // 用完整 id 前 8 位作前缀(id = resume id 绑死),避免序号随排序漂移。
     tuiApp.setInput(`/resume ${id.slice(0, 8)}`)
   }, /* domainPickerExec: */ (key: string) => {
     // Domain Picker Enter 回调：应用选中星域，引擎照常注入方法论，scrollback 仅写单行确认。
+    const midSession = ctx!.agent.getSessionTurnCount() > 0
     if (key === 'auto') {
       ctx!.agent.resetSessionDomain()
       tuiApp.setSessionStarDomain(undefined)
       tuiApp.commitStatic('Domain → Auto（按任务匹配）')
-    } else if (key === 'off') {
-      ctx!.agent.setSessionDomain(null)
-      tuiApp.setSessionStarDomain(undefined)
-      tuiApp.commitStatic('Domain → Off（无星域）')
     } else {
       const d = starDomainRegistry.get(key)
       if (d) {
         ctx!.agent.setSessionDomain({ id: d.id, name: d.name, volatileBlock: d.volatileBlock, motto: d.motto })
         tuiApp.setSessionStarDomain(d.name)
         tuiApp.commitStatic(`Domain → ${d.name} (${d.decisionStyle})`)
+      } else {
+        return
       }
     }
+    if (midSession) tuiApp.commitStatic(DOMAIN_SWITCH_CACHE_WARNING)
   }, /* modelPickerExec: */ (modelId: string) => {
     // Model Picker Enter 回调：执行模型切换。
     try { ctx!.agent.abort() } catch {}
@@ -686,6 +726,14 @@ async function main() {
     setTheme(themeName as ThemeName)
     tuiApp.forceRedraw()
     tuiApp.commitStatic(`Theme switched to: ${themeName}`)
+  }, /* themePickerSaveDefaultExec: */ (themeName: string) => {
+    // Theme Picker S 键回调：设为默认主题并持久化。
+    try {
+      setUiConfig({ theme: themeName })
+      tuiApp.commitStatic(`已设置默认主题为: ${themeName}（下次启动生效）`)
+    } catch (err) {
+      tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
+    }
   }, /* choicePanelExec: */ undefined, /* connectExec: */ (commit, summary) => {
     // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
     try {

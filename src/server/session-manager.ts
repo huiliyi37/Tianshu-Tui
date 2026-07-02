@@ -17,6 +17,7 @@
  *    across sessions (B4).
  */
 import type { AgentCallbacks, ApprovalMode } from '../agent/loop-types.js'
+import { collectPostBoundaryEditIds } from '../agent/file-history.js'
 import type { DelegationActivity } from '../tools/types.js'
 import type { ApprovalResult } from '../agent/approval-edit.js'
 import type { HookEvent, HookResult } from '../hooks/user-hooks-runner.js'
@@ -121,7 +122,8 @@ export interface SessionRecord {
    */
   model?: string
   /**
-   * PlusMenu — star-domain selection KEY ('auto' | 'off' | <domainId>). Stored
+   * PlusMenu — star-domain selection KEY ('auto' | <domainId>; legacy 'off'
+   * persists but resolves to auto). Stored
    * as the round-trippable key (not a display name) so rehydrate can restore the
    * live ActiveStarDomain. Absent → 'auto'.
    */
@@ -228,6 +230,10 @@ export interface ManagedAgent {
   replaceMessages(msgs: OaiMessage[]): void
   /** Rewind: like replaceMessages but also resets turnCount/filesRead/filesModified etc. */
   rewindToMessages(msgs: OaiMessage[]): void
+  /** Precise rewind: the session's per-edit FileHistory (write_file/edit_file
+   *  backups keyed by tool_use id). Absent on lightweight doubles / when no
+   *  history is wired. */
+  getFileHistory?(): import('../agent/file-history.js').FileHistory | undefined
   /**
    * Reset the prompt engine's delta appendix baseline after any history rewrite
    * (compaction, rewind, /compact). Optional so lightweight test doubles need
@@ -457,7 +463,8 @@ interface InternalSession {
   rehydratedArtifacts?: ArtifactStore
   /**
    * PlusMenu (domain) — live star-domain selection. Tri-state mirrors
-   * AgentLoop.getSessionDomain: undefined=Auto, null=Off, object=pinned. Applied
+   * AgentLoop.getSessionDomain: undefined=Auto, null=no-persona (env kill switch
+   * only), object=pinned. Applied
    * to the agent on ensureAgent (so lazy build is consistent) and after a model
    * rebuild (so the selection survives switchModel).
    */
@@ -1086,7 +1093,7 @@ export class RuntimeSessionManager {
   // ── PlusMenu: star domain ─────────────────────────────────────
 
   /**
-   * PlusMenu — list the domain picker entries for this session (Auto / Off /
+   * PlusMenu — list the domain picker entries for this session (Auto /
    * built-in + custom domains) with the session's current selection flagged.
    * Returns undefined when the session is missing.
    */
@@ -1884,6 +1891,49 @@ export class RuntimeSessionManager {
     }
   }
 
+  /**
+   * Preview the files a precise (per-message) code rewind would touch. Returns
+   * `available: false` when the session has no live agent / FileHistory or no
+   * tracked edits after the boundary — the caller can then fall back to the
+   * coarse checkpoint rollback (which also covers bash-driven changes).
+   */
+  previewFilesPrecise(
+    id: string,
+    messageIndex: number,
+  ): { available: boolean; files: { path: string; action: 'restore' | 'delete' }[] } | undefined {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    const fh = s.agent?.getFileHistory?.()
+    if (!s.agent || !fh) return { available: false, files: [] }
+    const msgs = s.agent.getMessages()
+    if (messageIndex < 0 || messageIndex >= msgs.length) return { available: false, files: [] }
+    const ids = collectPostBoundaryEditIds(msgs, messageIndex)
+    const files = fh.getBoundaryFiles(ids)
+    return { available: files.length > 0, files }
+  }
+
+  /**
+   * Precise (per-message) code rewind: restore every agent-edited file to its
+   * content as of the selected message; delete files created after it. Does NOT
+   * truncate the conversation (that's the separate rewind() path). Rejects while
+   * running (unsafe to restore files under an active writer).
+   */
+  async rewindFilesPrecise(
+    id: string,
+    messageIndex: number,
+  ): Promise<{ success: boolean; filesChanged: string[] } | undefined> {
+    const s = this.sessions.get(id)
+    if (!s) return undefined
+    if (s.running) return { success: false, filesChanged: [] }
+    const fh = s.agent?.getFileHistory?.()
+    if (!s.agent || !fh) return { success: false, filesChanged: [] }
+    const msgs = s.agent.getMessages()
+    if (messageIndex < 0 || messageIndex >= msgs.length) return { success: false, filesChanged: [] }
+    const ids = collectPostBoundaryEditIds(msgs, messageIndex)
+    const filesChanged = await fh.rewindToBoundary(ids)
+    return { success: true, filesChanged }
+  }
+
   // ── internals ─────────────────────────────────────────────────
 
   /**
@@ -2206,7 +2256,7 @@ function parseImageDataUrl(url: string): { mime: string; base64: string } | null
  * Resolve a star-domain selection KEY into the live tri-state + canonical key +
  * display label. Mirrors AgentLoop.getSessionDomain semantics:
  *  - 'auto' → state undefined (per-message auto-detect)
- *  - 'off'  → state null (no persona)
+ *  - 'off'  → legacy alias, resolves to auto (state undefined)
  *  - <id>   → the ActiveStarDomain, when the id is a known domain
  * Returns null for an unknown key so callers can 400/return false.
  */
@@ -2214,7 +2264,9 @@ function resolveDomainState(
   key: string,
 ): { state: ActiveStarDomain | null | undefined; key: string; label: string } | null {
   if (key === 'auto') return { state: undefined, key: 'auto', label: 'Auto' }
-  if (key === 'off') return { state: null, key: 'off', label: 'Off' }
+  // Legacy: the 'off' selection was removed. Old persisted sessions with
+  // domain:'off' resolve to Auto instead of breaking (state undefined, not null).
+  if (key === 'off') return { state: undefined, key: 'auto', label: 'Auto' }
   const d = starDomainRegistry.get(key)
   if (!d) return null
   return {
@@ -2225,8 +2277,8 @@ function resolveDomainState(
 }
 
 function resolveDomainPersona(key: string | undefined): { glyph: string; accent: 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'dim' } {
-  if (key === 'auto' || key === undefined) return { glyph: '⚙', accent: 'primary' }
-  if (key === 'off') return { glyph: '⊘', accent: 'dim' }
+  // 'off' removed; treat legacy value as Auto for persona rendering.
+  if (key === 'auto' || key === 'off' || key === undefined) return { glyph: '⚙', accent: 'primary' }
   const d = starDomainRegistry.get(key)
   if (!d) return { glyph: '⚙', accent: 'primary' }
   return { glyph: d.uiPersona.glyph, accent: d.uiPersona.accent }

@@ -205,4 +205,10 @@ export const DEFAULT_CONFIG: Config = {
     go: 'default',
     rust: 'default',
   },
+  env: {
+    resolve: true,
+    extraPath: [],
+    extraVars: {},
+  },
+  ui: {},
 }

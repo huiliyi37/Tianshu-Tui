@@ -40,7 +40,7 @@ export function DelegateDialog(props: {
 
   useEffect(() => {
     listDomains(sessionId)
-      .then((entries) => setDomains(entries.filter((e) => e.key !== 'auto' && e.key !== 'off')))
+      .then((entries) => setDomains(entries.filter((e) => e.key !== 'auto')))
       .catch(() => setDomains([]))
   }, [sessionId])
 

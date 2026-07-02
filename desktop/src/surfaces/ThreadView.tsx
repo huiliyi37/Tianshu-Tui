@@ -1,5 +1,6 @@
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { useQueryClient } from '@tanstack/react-query'
 import type { ApprovalMode, PlanModeState, SessionRecord } from '../runtime/types'
 import type { ConvoBlock, EventViewState } from '../state/event-reducer'
 import type { StreamStatus } from '../state/use-session-events'
@@ -79,6 +80,7 @@ export function ThreadView(props: {
   const [input, setInput] = useState('')
   const ui = useUiState()
   const dispatch = useUiDispatch()
+  const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
   const [showDelegateDialog, setShowDelegateDialog] = useState(false)
@@ -641,6 +643,8 @@ export function ThreadView(props: {
                             <PairedRow
                               key={tItem.entry.tool?.key ?? tItem.entry.result?.key ?? idx}
                               entry={tItem.entry}
+                              sessionId={session.id}
+                              onOpenImage={openImage}
                             />
                           )
                         }
@@ -741,6 +745,7 @@ export function ThreadView(props: {
             value={input}
             onChange={setInput}
             busy={busy}
+            threadNonEmpty={view.blocks.length > 0}
             onSubmit={async (text, images) => {
               if (selectedTurnIndex >= 0 && selectedTurnIndex < rewindPoints.length) {
                 const point = rewindPoints[selectedTurnIndex]
@@ -786,11 +791,18 @@ export function ThreadView(props: {
       {showRewind && (
         <RewindOverlay
           sessionId={session.id}
+          isRunning={busy}
           onClose={() => setShowRewind(false)}
           onRewound={(prompt) => {
             setInput(prompt)
             // Force re-fetch events to update the conversation view
             window.dispatchEvent(new Event('rewind-complete'))
+          }}
+          onCodeRolledBack={() => {
+            // Files changed on disk without a conversation event — refresh the
+            // working tree + any open per-file diffs so Changes reflects it now.
+            void qc.invalidateQueries({ queryKey: ['git', 'working-tree'] })
+            void qc.invalidateQueries({ queryKey: ['git', 'diff'] })
           }}
         />
       )}

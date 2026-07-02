@@ -150,7 +150,9 @@ export class LiveEngine {
     // 首次渲染 或 clear/clearForCommit 之后（lastDisplayRows === 0）：
     // 直接在当前位置 append 输出。尾行不带 `\n`，光标停在最后一行末尾。
     if (!this.hasRendered || this.lastDisplayRows === 0) {
-      this.stdout.write(this.buildAppend(bounded))
+      // 首帧 / clear/overlay 退出后的全量重铺同样用 CSI 2026 包裹，原子刷新
+      // 防撕裂（与增量帧一致）。尾行不带 `\n`，光标仍常驻最后一行末尾。
+      this.stdout.write(ANSI.BEGIN_SYNC + this.buildAppend(bounded) + ANSI.END_SYNC)
       this.lastDisplayRows = newDisplayRows
       this.lineCache = bounded.map(l => l.text)
       this.hasRendered = true

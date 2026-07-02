@@ -12,11 +12,22 @@
  */
 
 import stringWidth from 'string-width'
-import { ANSI, color } from '../engine/ansi.js'
+import { color } from '../engine/ansi.js'
 import { THEMES, type RivetTheme, type ThemeName } from '../theme.js'
 import { formatElapsed } from '../tool-elapsed.js'
 import type { TranscriptMessage } from '../scrollback-transcript.js'
 import type { ConnectView } from '../connect-flow.js'
+import {
+  frameTop as formatBorder,
+  frameBottom as formatBottomBorder,
+  frameTitle as formatTitleBar,
+  frameFooter as formatFooter,
+  frameLine as padLine,
+  frameDivider,
+  CURSOR,
+  CURRENT_MARK,
+  keyHints,
+} from './overlay-frame.js'
 
 
 function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, theme: RivetTheme): string {
@@ -31,52 +42,6 @@ function renderTabBar(activeTab: 'domain' | 'model' | 'theme', width: number, th
   const left = Math.floor(remaining / 2)
   const right = remaining - left
   return color('│', theme.dim) + ' '.repeat(left) + tabs + ' '.repeat(right) + color('│', theme.dim)
-}
-
-function formatBorder(width: number, theme: RivetTheme): string {
-  return color('┌' + '─'.repeat(width - 2) + '┐', theme.dim)
-}
-
-function formatBottomBorder(width: number, theme: RivetTheme): string {
-  return color('└' + '─'.repeat(width - 2) + '┘', theme.dim)
-}
-
-function formatTitleBar(title: string, width: number, theme: RivetTheme): string {
-  const padded = ` ${title} `
-  // stringWidth, not .length: CJK/emoji titles occupy 2 cells each, so .length
-  // under-counts and the border drifts right of the box edge.
-  const remaining = Math.max(0, width - 2 - stringWidth(padded))
-  const left = Math.floor(remaining / 2)
-  const right = remaining - left
-  return color('│' + ' '.repeat(left) + padded + ' '.repeat(right) + '│', theme.dim)
-}
-
-function formatFooter(hint: string, width: number, theme: RivetTheme): string {
-  const maxHintWidth = Math.max(0, width - 4) // 2 borders + 1 space each side
-  let visibleHint = hint
-  if (stringWidth(visibleHint) > maxHintWidth) {
-    // Preserve the right-hand side (close hints are usually at the tail).
-    let suffix = ''
-    let suffixWidth = 0
-    const chars = Array.from(hint)
-    for (let i = chars.length - 1; i >= 0; i--) {
-      const cw = stringWidth(chars[i]!)
-      if (suffixWidth + cw + 1 > maxHintWidth) break // +1 for leading ellipsis
-      suffix = chars[i]! + suffix
-      suffixWidth += cw
-    }
-    visibleHint = '…' + suffix
-  }
-  const padded = ` ${visibleHint} `
-  const remaining = width - 2 - stringWidth(padded)
-  return color('│' + padded + ' '.repeat(Math.max(0, remaining)) + '│', theme.dim)
-}
-
-function padLine(text: string, width: number, theme: RivetTheme): string {
-  // stringWidth handles ANSI stripping AND CJK/emoji cell width; the old
-  // `visible.length` under-padded any line with wide chars, misaligning the ┃ edge.
-  const padding = Math.max(0, width - 2 - stringWidth(text))
-  return color('│', theme.dim) + text + ' '.repeat(padding) + color('│', theme.dim)
 }
 
 // ── Pager ─────────────────────────────────────────────────────
@@ -154,16 +119,16 @@ export function renderPager(data: PagerData, width: number, height: number, them
 
   let effectivePage = Math.min(data.page, totalPages - 1)
   let title: string
-  let footer = '↑↓/j/k scroll  PgUp/PgDn  /search  m message  q/Esc close'
+  let footer = keyHints([['↑↓/j/k', '滚动'], ['PgUp/PgDn', '翻页'], ['/', '搜索'], ['m', '消息'], ['q/Esc', '关闭']])
 
   if (mode === 'search') {
     const current = data.searchCurrent ?? 0
     const total = data.searchMatches ?? 0
     const query = data.searchQuery ?? ''
     title = data.title
-      ? `${data.title} — Search "${query}" (${current}/${total})`
-      : `Search "${query}" (${current}/${total})`
-    footer = 'n/N next/prev  Esc clear search  q close'
+      ? `${data.title} — 搜索 "${query}" (${current}/${total})`
+      : `搜索 "${query}" (${current}/${total})`
+    footer = keyHints([['n/N', '上/下匹配'], ['Esc', '清除搜索'], ['q', '关闭']])
     if (messages.length > 0 && current > 0) {
       const msgIdx = current - 1 < messages.length ? current - 1 : 0
       effectivePage = pageForMessage(messages, msgIdx, pageSize)
@@ -172,13 +137,13 @@ export function renderPager(data: PagerData, width: number, height: number, them
   } else if (mode === 'message' && messages.length > 0) {
     const idx = Math.min(Math.max(0, data.selectedMessageIndex ?? 0), messages.length - 1)
     title = data.title
-      ? `${data.title} — Message ${idx + 1}/${messages.length}`
-      : `Message ${idx + 1}/${messages.length}`
-    footer = '↑↓/j/k prev/next message  Esc back  q close'
+      ? `${data.title} — 消息 ${idx + 1}/${messages.length}`
+      : `消息 ${idx + 1}/${messages.length}`
+    footer = keyHints([['↑↓/j/k', '上/下条'], ['Esc', '返回'], ['q', '关闭']])
     effectivePage = pageForMessage(messages, idx, pageSize)
     effectivePage = Math.min(effectivePage, totalPages - 1)
   } else {
-    title = data.title ? `${data.title} (${effectivePage + 1}/${totalPages})` : `Page ${effectivePage + 1}/${totalPages}`
+    title = data.title ? `${data.title} (${effectivePage + 1}/${totalPages})` : `📄 查看 (${effectivePage + 1}/${totalPages})`
   }
 
   // Top border + title
@@ -269,7 +234,7 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
   const lines: string[] = []
 
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(data.title ?? '❂ 星域总览 Starmap', width, theme))
+  lines.push(formatTitleBar(data.title ?? '❂ 星域总览', width, theme))
 
   // Column widths
   const glyphWidth = 5
@@ -320,7 +285,7 @@ export function renderStarmap(data: StarmapData, width: number, height: number, 
     lines.push(padLine(color(recognition.slice(0, width - 2), theme.primary), width, theme))
   }
 
-  lines.push(formatFooter('↑↓/j/k select  Enter activate  q/Esc close', width, theme))
+  lines.push(formatFooter(keyHints([['↑↓/j/k', '选择'], ['Enter', '激活'], ['q/Esc', '关闭']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -352,8 +317,8 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
   lines.push(formatBorder(width, theme))
 
   const title = data.searchText
-    ? `⌘ Commands — "${data.searchText}"`
-    : '⌘ Commands'
+    ? `⌘ 命令面板 — "${data.searchText}"`
+    : '⌘ 命令面板'
   lines.push(formatTitleBar(title, width, theme))
 
   const maxItems = height - 5 // border + title + footer + border = 4; +1 safety
@@ -363,7 +328,7 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     const cmd = visible[i]!
     const isSelected = i === data.selectedIndex
     const prefix = isSelected
-      ? color('▶', theme.primary, { bold: true })
+      ? color(CURSOR, theme.primary, { bold: true })
       : ' '
 
     const hotkey = cmd.hotkey
@@ -385,7 +350,7 @@ export function renderCommandPalette(data: PaletteData, width: number, height: n
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('Esc cancel  ↑↓ select  Enter run', width, theme))
+  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '执行'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -420,7 +385,7 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
   const lines: string[] = []
 
   lines.push(formatBorder(width, theme))
-  lines.push(formatTitleBar(data.title ?? '📜 会话编年史 Chronicle', width, theme))
+  lines.push(formatTitleBar(data.title ?? '📜 会话编年史', width, theme))
 
   const idxWidth = 6
   const timeWidth = Math.min(14, Math.floor(width * 0.18))
@@ -433,8 +398,8 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
   for (let i = 0; i < visible.length; i++) {
     const entry = visible[i]!
     const selected = i === sel
-    // 选中游标 ▸；当前会话用 primary 高亮（与选中区分：选中靠游标，当前靠色）。
-    const cursor = selected ? color('▸', theme.primary, { bold: true }) : ' '
+    // 选中游标；当前会话用 primary 高亮（与选中区分：选中靠游标，当前靠色）。
+    const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
     const idxColor = entry.current ? theme.primary : theme.dim
     const idx = color(`#${String(entry.index)}`.padEnd(idxWidth - 1), idxColor, entry.current ? { bold: true } : undefined)
     const time = color(entry.time.padEnd(timeWidth), entry.current ? theme.primary : theme.dim)
@@ -448,7 +413,7 @@ export function renderChronicle(data: ChronicleData, width: number, height: numb
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('↑↓ select  Enter → resume  Esc close', width, theme))
+  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '恢复会话'], ['Esc', '关闭']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -511,6 +476,7 @@ function tasksProgressBar(done: number, total: number, width = 8): string {
 export interface ModelPickerEntry {
   id: string
   alias: string
+  provider: string
   current: boolean
   contextWindow?: number
 }
@@ -525,6 +491,7 @@ export interface ModelPickerData {
 export interface ThemePickerEntry {
   name: string
   current: boolean
+  isDefault: boolean
   description: string
 }
 
@@ -536,9 +503,9 @@ export interface ThemePickerData {
 // ── Domain Picker ──────────────────────────────────────────────
 
 export interface DomainPickerEntry {
-  /** 选择键：'auto' | 'off' | domain id */
+  /** 选择键：'auto' | domain id */
   key: string
-  /** 展示名（中文星域名或 Auto/Off 标签） */
+  /** 展示名（中文星域名或 Auto 标签） */
   name: string
   /** 座右铭（可空） */
   motto: string
@@ -615,7 +582,7 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
     const eAccent = (theme as any)[eAccentKey] ?? theme.primary
     const eGlyph = e.uiPersona?.glyph ?? '●'
 
-    const cursor = selected ? color('▶', currentAccent, { bold: true }) : ' '
+    const cursor = selected ? color(CURSOR, currentAccent, { bold: true }) : ' '
     const mark = e.current ? color(eGlyph, eAccent, { bold: true }) : selected ? color(eGlyph, currentAccent) : color(eGlyph, theme.dim)
     const name = selected ? color(e.name, currentAccent, { bold: true }) : color(e.name, theme.secondary)
     const motto = e.motto ? `  ${e.motto}` : ''
@@ -658,7 +625,7 @@ export function renderDomainPicker(data: DomainPickerData, width: number, height
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -671,9 +638,9 @@ export function renderTasks(
   selectedIndex = -1,
 ): string[] {
   const lines: string[] = []
-  const title = data.filter === 'completed' ? 'Completed Agents'
-    : data.filter === 'all' ? 'All Agents'
-      : 'Running Agents'
+  const title = data.filter === 'completed' ? '◆ 已完成的子代理'
+    : data.filter === 'all' ? '◆ 全部子代理'
+      : '◆ 运行中的子代理'
   lines.push(formatBorder(width, theme))
   lines.push(formatTitleBar(title, width, theme))
 
@@ -723,7 +690,7 @@ export function renderTasks(
     let line = visible[i]!
     if (i === selectedBodyIndex) {
       // 把前导三个空格替换为光标 + 两个空格，保持宽度一致
-      line = `${color('▶', theme.primary, { bold: true })}  ${line.slice(3)}`
+      line = `${color(CURSOR, theme.primary, { bold: true })}  ${line.slice(3)}`
     }
     lines.push(padLine(line, width, theme))
   }
@@ -742,7 +709,7 @@ export function renderTasks(
   }
   if (summaryParts.length === 0) summaryParts.push(`${visibleCount} workers`)
   const summary = summaryParts.join(' · ')
-  lines.push(formatFooter(`${summary}  ·  ↑↓ select  Enter detail  Tab filter  q/Esc close`, width, theme))
+  lines.push(formatFooter(`${summary}   ·   ${keyHints([['↑↓', '选择'], ['Enter', '详情'], ['Tab', '筛选'], ['q/Esc', '关闭']])}`, width, theme))
   lines.push(formatBottomBorder(width, theme))
 
   return lines
@@ -765,14 +732,15 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
   for (let i = 0; i < visible.length; i++) {
     const e = visible[i]!
     const selected = i === sel
-    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
-    const mark = e.current ? color('●', theme.primary) : ' '
+    const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
+    const mark = e.current ? color(CURRENT_MARK, theme.primary) : ' '
     const aliasColor = selected ? color(e.alias, theme.primary, { bold: true }) : color(e.alias, theme.secondary)
+    const providerColor = selected ? color(`[${e.provider}] `, theme.dim) : color(`[${e.provider}] `, theme.dim)
     const idText = ` [${e.id}]`
     const tokensText = e.contextWindow ? `  ${(e.contextWindow / 1000).toFixed(0)}k ctx` : ''
-    const head = `${cursor} ${mark} ${aliasColor}${color(idText, theme.dim)}`
-    
-    const plainHead = `  ${e.current ? '●' : ' '} ${e.alias}${idText}`
+    const head = `${cursor} ${mark} ${providerColor}${aliasColor}${color(idText, theme.dim)}`
+
+    const plainHead = `  ${e.current ? '●' : ' '} [${e.provider}] ${e.alias}${idText}`
     const metaRoom = Math.max(0, innerWidth - stringWidth(plainHead) - 2)
     const metaText = tokensText && metaRoom > 6 ? tokensText.slice(0, metaRoom) : ''
     lines.push(padLine(`${head}${color(metaText, theme.dim)}`, width, theme))
@@ -807,7 +775,7 @@ export function renderModelPicker(data: ModelPickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -829,10 +797,11 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
   for (let i = 0; i < visible.length; i++) {
     const e = visible[i]!
     const selected = i === sel
-    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
-    const mark = e.current ? color('●', theme.primary) : ' '
+    const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
+    const mark = e.current ? color(CURRENT_MARK, theme.primary) : ' '
+    const defaultMark = e.isDefault ? color('★', theme.warning, { bold: true }) : ' '
     const nameColor = selected ? color(e.name, theme.primary, { bold: true }) : color(e.name, theme.secondary)
-    lines.push(padLine(`${cursor} ${mark} ${nameColor}`, width, theme))
+    lines.push(padLine(`${cursor} ${mark} ${defaultMark} ${nameColor}`, width, theme))
   }
   for (let i = visible.length; i < listRows; i++) {
     lines.push(padLine('', width, theme))
@@ -866,7 +835,7 @@ export function renderThemePicker(data: ThemePickerData, width: number, height: 
     lines.push(padLine(previewLines[i] ?? '', width, theme))
   }
 
-  lines.push(formatFooter('←/→ tab  ↑↓ select  Enter apply  Esc cancel', width, theme))
+  lines.push(formatFooter(keyHints([['←/→', '切换'], ['↑↓', '选择'], ['Enter', '应用'], ['S', '设为默认'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -896,14 +865,14 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
   const lines: string[] = []
   lines.push(formatBorder(width, theme))
   lines.push(formatTitleBar(data.title, width, theme))
-  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+  lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6 // padLine border(2) + left indent(2) + right gap(2)
   const contentRows = Math.max(1, height - 5) // border + title + separator + footer + bottom
 
   if (data.choices.length === 0) {
     lines.push(padLine(color('  （无可用选项）', theme.dim), width, theme))
-    lines.push(formatFooter('Esc close', width, theme))
+    lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
     lines.push(formatBottomBorder(width, theme))
     return lines
   }
@@ -918,7 +887,7 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     const accent = selected ? theme.primary : theme.dim
 
     // Label line: cursor + recommended star + label
-    const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+    const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
     const star = c.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
     const labelColor = selected ? theme.primary : theme.secondary
     const labelText = selected ? color(c.label, labelColor, { bold: true }) : color(c.label, labelColor)
@@ -942,7 +911,7 @@ export function renderChoicePanel(data: ChoicePanelData, width: number, height: 
     rowsUsed++
   }
 
-  lines.push(formatFooter('↑↓ select  Enter confirm  Esc cancel', width, theme))
+  lines.push(formatFooter(keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }
@@ -972,7 +941,7 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
   lines.push(formatBorder(width, theme))
   const titleBar = view.stepLabel ? `${view.title}   ${view.stepLabel}` : view.title
   lines.push(formatTitleBar(titleBar, width, theme))
-  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+  lines.push(frameDivider(width, theme))
 
   const innerWidth = width - 6
   const contentRows = Math.max(1, height - 5)
@@ -993,7 +962,7 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
       if (rowsUsed >= contentRows) break
       const opt = options[i]!
       const selected = i === data.selectedIndex
-      const cursor = selected ? color('▶', theme.primary, { bold: true }) : ' '
+      const cursor = selected ? color(CURSOR, theme.primary, { bold: true }) : ' '
       const star = opt.recommended ? color('★', theme.warning ?? theme.primary, { bold: true }) : ' '
       const labelColor = selected ? theme.primary : theme.secondary
       const label = selected ? color(opt.label, labelColor, { bold: true }) : color(opt.label, labelColor)
@@ -1022,7 +991,9 @@ export function renderConnect(data: ConnectOverlayData, width: number, height: n
 
   while (rowsUsed < contentRows) push('')
 
-  const footer = view.kind === 'choice' ? '↑↓ 选择  Enter 确认  Esc 取消' : 'Enter 提交  Esc 取消'
+  const footer = view.kind === 'choice'
+    ? keyHints([['↑↓', '选择'], ['Enter', '确认'], ['Esc', '取消']])
+    : keyHints([['Enter', '提交'], ['Esc', '取消']])
   lines.push(formatFooter(footer, width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
@@ -1047,7 +1018,7 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
     ? (worker.status === 'passed' ? theme.success : worker.status === 'failed' ? theme.error : theme.warning)
     : theme.primary
   lines.push(formatTitleBar(`${color(statusGlyph, statusColor)} ${worker.shortLabel}`, width, theme))
-  lines.push(padLine(color('─'.repeat(Math.max(0, width - 4)), theme.dim), width, theme))
+  lines.push(frameDivider(width, theme))
 
   // Detail rows
   const rows: [string, string][] = []
@@ -1077,7 +1048,7 @@ export function renderFleetDetail(worker: FleetWorkerView, width: number, height
     lines.push(padLine('', width, theme))
   }
 
-  lines.push(formatFooter('Esc close', width, theme))
+  lines.push(formatFooter(keyHints([['Esc', '关闭']]), width, theme))
   lines.push(formatBottomBorder(width, theme))
   return lines
 }

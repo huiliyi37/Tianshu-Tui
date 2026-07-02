@@ -19,6 +19,7 @@ import type {
   ProjectTemplatesApplyResult,
   ProjectTemplatesStatus,
   ScheduledTask,
+  TaskRecord,
   SessionEvent,
   SessionRecord,
   SkillStatus,
@@ -397,13 +398,13 @@ export function switchModel(id: string, modelId: string): Promise<SessionRecord>
   return apiPost<SessionRecord>(`/sessions/${id}/model`, { modelId })
 }
 
-/** List the star-domain picker entries (Auto / Off / domains, current flagged). */
+/** List the star-domain picker entries (Auto / domains, current flagged). */
 export async function listDomains(id: string): Promise<DomainEntry[]> {
   const { entries } = await apiGet<{ entries: DomainEntry[] }>(`/sessions/${id}/domains`)
   return entries
 }
 
-/** Set a session's star domain by key ('auto' | 'off' | <domainId>). */
+/** Set a session's star domain by key ('auto' | <domainId>). */
 export function setDomain(id: string, key: string): Promise<{ id: string; domain: string }> {
   return apiPost<{ id: string; domain: string }>(`/sessions/${id}/domain`, { key })
 }
@@ -488,6 +489,48 @@ export function getRewindPoints(id: string): Promise<{ points: RewindPoint[] }> 
 
 export function rewindSession(id: string, messageIndex: number, rollbackFiles?: boolean): Promise<SessionRecord> {
   return apiPost<SessionRecord>(`/sessions/${id}/rewind`, { messageIndex, rollbackFiles })
+}
+
+// ── Precise (per-message) code rewind via FileHistory ───────────────
+
+export interface PreciseFileEntry {
+  path: string
+  action: 'restore' | 'delete'
+}
+
+export interface PreciseFilePreview {
+  /** false → no per-edit history for this boundary; fall back to coarse rollback. */
+  available: boolean
+  files: PreciseFileEntry[]
+}
+
+export interface PreciseRewindResult {
+  success: boolean
+  filesChanged: string[]
+  error?: string
+}
+
+/** Preview the agent-edited files a precise rewind to `messageIndex` would touch. */
+export function getPreciseFilePreview(id: string, messageIndex: number): Promise<PreciseFilePreview> {
+  return apiPost<PreciseFilePreview>(`/sessions/${id}/rewind/file-preview`, { messageIndex })
+}
+
+/**
+ * Restore agent-edited files to their state at `messageIndex` (no conversation
+ * truncation). Reads the body on 200 and 409 alike so the caller can surface
+ * the reason on rejection.
+ */
+export async function rewindFilesPrecise(id: string, messageIndex: number): Promise<PreciseRewindResult> {
+  const res = await rivetFetch(`/sessions/${id}/rewind/files`, {
+    method: 'POST',
+    body: JSON.stringify({ messageIndex }),
+  })
+  const json = (await res.json().catch(() => ({}))) as Partial<PreciseRewindResult>
+  return {
+    success: json.success ?? false,
+    filesChanged: json.filesChanged ?? [],
+    error: json.error,
+  }
 }
 
 // ── Rollback (R3) ───────────────────────────────────────────────────
@@ -598,6 +641,7 @@ export function createSchedule(input: {
   prompt: string
   trigger: { type: 'interval' | 'cron' | 'oneshot'; spec: string }
   allowedTools?: string[]
+  retry?: { maxAttempts: number; backoffMs: number }
 }): Promise<ScheduledTask> {
   return apiPost<ScheduledTask>('/schedule', input)
 }
@@ -609,6 +653,25 @@ export function pauseSchedule(id: string, enabled: boolean): Promise<{ id: strin
 export async function deleteSchedule(id: string): Promise<void> {
   const res = await rivetFetch(`/schedule/${id}`, { method: 'DELETE' })
   if (!res.ok) throw new Error(`DELETE /schedule/${id} -> ${res.status}`)
+}
+
+// ── Tasks (execution history for automations) ───────────────────────
+
+/** List task execution records. The server returns all; callers filter by
+ *  scheduledTaskId client-side (the GET handler reads no query params). */
+export async function listTasks(): Promise<TaskRecord[]> {
+  const { tasks } = await apiGet<{ tasks: TaskRecord[] }>('/tasks')
+  return tasks
+}
+
+export async function getTask(id: string): Promise<TaskRecord> {
+  const { task } = await apiGet<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}`)
+  return task
+}
+
+export async function cancelTask(id: string): Promise<TaskRecord> {
+  const { task } = await apiPost<{ task: TaskRecord }>(`/tasks/${encodeURIComponent(id)}/cancel`)
+  return task
 }
 
 // ── GitHub PR Integration ───────────────────────────────────────────
@@ -634,12 +697,51 @@ export interface PrDetail extends PrSummary {
   files: { path: string; additions: number; deletions: number; status: string }[]
 }
 
+/** Pending inline review comment (mirrors gh-cli PrReviewComment). */
+export interface PrReviewComment {
+  path: string
+  oldLine?: number
+  newLine?: number
+  body: string
+}
+
+/** Review submission payload (mirrors gh-cli PrReviewInput — keep in sync). */
+export interface PrReviewInput {
+  event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT'
+  body: string
+  comments: PrReviewComment[]
+}
+
 export async function listGithubPrs(): Promise<{ prs: PrSummary[]; ghAvailable: boolean }> {
   return apiGet<{ prs: PrSummary[]; ghAvailable: boolean }>('/github/prs')
 }
 
 export async function getGithubPr(number: number): Promise<PrDetail> {
   return apiGet<PrDetail>(`/github/prs/${number}`)
+}
+
+export async function getGithubPrDiff(number: number): Promise<string> {
+  const { diff } = await apiGet<{ diff: string }>(`/github/prs/${number}/diff`)
+  return diff
+}
+
+/**
+ * Submit a PR review. On failure, surfaces gh's stderr from the JSON error body
+ * (apiPost would discard it) so the caller can show what actually went wrong.
+ */
+export async function submitGithubPrReview(number: number, input: PrReviewInput): Promise<void> {
+  const res = await rivetFetch(`/github/prs/${number}/review`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) {
+    let message = `POST /github/prs/${number}/review -> ${res.status}`
+    try {
+      const err = (await res.json()) as { error?: string }
+      if (err?.error) message = err.error
+    } catch { /* body not JSON — keep the status message */ }
+    throw new Error(message)
+  }
 }
 
 // ── Config: Provider Management ─────────────────────────────────────
@@ -779,10 +881,14 @@ export function setEditorConfig(
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────
 
-import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse } from './types'
+import type { McpStatusResponse, McpServerConfig, McpServerToolsResponse, McpPresetsResponse } from './types'
 
 export async function getMcpStatus(): Promise<McpStatusResponse> {
   return apiGet<McpStatusResponse>('/mcp/status')
+}
+
+export async function getMcpPresets(): Promise<McpPresetsResponse> {
+  return apiGet<McpPresetsResponse>('/mcp/presets')
 }
 
 export function addMcpServer(input: McpServerConfig): Promise<{ ok: boolean; serverId: string }> {

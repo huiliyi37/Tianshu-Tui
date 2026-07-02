@@ -23,6 +23,25 @@ export default defineConfig({
   // resolves it relative to the emitted module and seeds it into each project's
   // .rivet/skills on load. Keep this in sync with that resolver.
   publicDir: 'runtime-assets',
+  // Ship seed capsules with the bundle: copy docs/seed-capsule-*.md into
+  // dist/seed-capsules/ so npm / desktop users (whose install dir has no docs/)
+  // get the star-lore capsules out of the box. seed-capsule-store.bundledCapsulesDir()
+  // resolves this relative to the emitted module. docs/ stays the single source of
+  // truth (also synced to the public repo); this is a build-time copy, not a duplicate.
+  async onSuccess() {
+    const { readdirSync, mkdirSync, copyFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    try {
+      const files = readdirSync('docs').filter(f => /^seed-capsule-.+\.md$/.test(f))
+      if (files.length === 0) return
+      const dest = join('dist', 'seed-capsules')
+      mkdirSync(dest, { recursive: true })
+      for (const f of files) copyFileSync(join('docs', f), join(dest, f))
+      console.log(`[tsup] bundled ${files.length} seed-capsule(s) → dist/seed-capsules/`)
+    } catch (err) {
+      console.warn('[tsup] seed-capsule bundling skipped:', (err as Error).message)
+    }
+  },
   // tsup externalizes every package.json dependency by default. For a packaged
   // sidecar (no node_modules shipped) that's fatal: pure-JS deps left as bare
   // imports crash with ERR_MODULE_NOT_FOUND at startup. Force-bundle them here.

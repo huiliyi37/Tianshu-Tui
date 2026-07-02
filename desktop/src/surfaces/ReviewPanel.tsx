@@ -17,6 +17,7 @@ import { Markdown } from '../components/Markdown'
 import { PlanPanel } from './PlanPanel'
 import { TodoDock } from '../components/TodoDock'
 import { GithubPanel } from './GithubPanel'
+import { BrowserPanel } from './BrowserPanel'
 import { FileExplorer } from '../components/FileExplorer'
 import { ChangesTab } from './ChangesTab'
 import { isAutonomous } from '../lib/autonomy'
@@ -32,7 +33,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
-type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files' | 'canvas'
+type ReviewTab = 'review' | 'plan' | 'task' | 'github' | 'wt' | 'files' | 'canvas' | 'browser'
 
 interface TabDef {
   id: ReviewTab
@@ -262,6 +263,7 @@ export function ReviewPanel(props: {
       { id: 'wt', label: 'Diff', glyph: '⟐' },
       { id: 'files', label: 'Files', glyph: '📁' },
       { id: 'github', label: 'PR', glyph: '🔀' },
+      { id: 'browser', label: 'Browser', glyph: '🌐' },
     ]
     const filtered = all.filter((t) => enabledTabs.includes(t.id))
     return filtered.length > 0 ? filtered : [all[0]!]
@@ -341,6 +343,9 @@ export function ReviewPanel(props: {
 
         <TabsContent value="github" className="review-body">
           <GithubPanel />
+        </TabsContent>
+        <TabsContent value="browser" className="review-body">
+          <BrowserPanel sessionId={sessionId} />
         </TabsContent>
         <TabsContent value="canvas" className="review-body flex flex-col h-full">
           <div className="canvas-container flex flex-col h-full gap-2 p-2">

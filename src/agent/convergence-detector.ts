@@ -61,6 +61,22 @@ export interface ConvergenceResult {
   shouldForceSplit: boolean
   /** Individual signal values for diagnostics */
   signals: ConvergenceSignals
+  /**
+   * When shouldAbort is true, why. 'no-tool' = consecutive no-tool hard cap;
+   * 'score' = score-based level-3 abort. undefined when not aborting. Lets the
+   * loop tag the stop-reason accurately without re-deriving the cause.
+   */
+  abortCause?: 'no-tool' | 'score'
+  /**
+   * Whether the model was still emitting fresh, substantial, non-repetitive
+   * analysis (producingReport) when this was evaluated. When true, a no-tool
+   * hard cap is downgraded from a hard abort to a kick — a deep-reasoning model
+   * narrating multi-turn analysis is thinking, not spinning. Score-based
+   * convergence aborts are unaffected (they measure orthogonal stagnation
+   * signals). Surfaced so a near-miss (reasoning that almost got熔断) is
+   * diagnosable.
+   */
+  reasoningActive: boolean
 }
 
 export interface ConvergenceSignals {
@@ -382,6 +398,30 @@ function textRepetitionHasData(fingerprints: ReadonlyArray<string>): boolean {
   return longWordSets.length >= 3
 }
 
+/** Minimum recent text length that counts as a substantial analysis/report. */
+const REPORT_TEXT_MIN_LEN = 200
+
+/**
+ * isProducingReport: whether the agent is producing a substantial, fresh
+ * (non-repetitive) text deliverable — an analysis, code review, or conclusion.
+ *
+ * This is the legitimate face of read-heavy work: for a "检查代码" / audit /
+ * investigation task, the correct behavior IS to read+grep extensively and emit
+ * a text report — never edits. Without this discriminator, such tasks get
+ * flagged as read-only "stagnation" every turn and spammed with "去编辑/测试"
+ * nudges. We only treat it as report production when the text is NOT repetitive
+ * (textRepetitionPenalty high) — a repetitive read→reformat→read loop is the
+ * genuine stuck case and must still be caught.
+ */
+function isProducingReport(
+  textFingerprints: ReadonlyArray<string>,
+  textRepetitionPenalty: number,
+): boolean {
+  if (textRepetitionPenalty < 0.7) return false // repetitive text = stuck loop, not a report
+  const recent = textFingerprints.slice(-3)
+  return recent.some(fp => fp.length >= REPORT_TEXT_MIN_LEN)
+}
+
 // ─── Score Computation ──────────────────────────────────────────────
 
 function computeConvergenceScore(
@@ -393,6 +433,7 @@ function computeConvergenceScore(
   recentToolHistory: ConvergenceInput['recentToolHistory'],
   providerName?: string,
   signalsMissingData: ReadonlySet<keyof ConvergenceSignals> = new Set(),
+  producingReport = false,
 ): number {
   // Weight re-allocation for no-data signals: when a penalty signal lacks
   // sufficient data, its default 1.0 ("no penalty") would otherwise enter the
@@ -469,7 +510,10 @@ function computeConvergenceScore(
   const productiveCount = window.filter(h => productiveTools.has(h.tool)).length
   const productiveRatio = window.length > 0 ? productiveCount / window.length : 1.0
   const isGlm = providerName === 'glm'
-  if (window.length >= (isGlm ? 2 : 4) && productiveRatio === 0) {
+  // Skip the read-only penalty when the agent is producing a substantial text
+  // deliverable (review/analysis report): read-heavy work with a textual output
+  // is legitimate progress, not stagnation.
+  if (!producingReport && window.length >= (isGlm ? 2 : 4) && productiveRatio === 0) {
     if (isGlm) {
       // GLM ramp: turn 4→0.65, turn 7→0.35, turn 11→0.15, turn 15+→0.05
       if (turn >= 15) penalty = Math.min(penalty, 0.05)
@@ -531,8 +575,9 @@ function buildInjectedMessage(
   if (productiveStagnation) {
     lines.push('**天枢-感知：最近多轮全部是读取/搜索操作，没有任何编辑、测试或提交。**')
     lines.push('')
-    lines.push('信息已足够，请采取行动：')
-    lines.push('- 如果已有方案，直接编辑或测试')
+    lines.push('信息可能已足够，请收敛：')
+    lines.push('- 如果这是审查/排查类任务，输出你的结论或发现，交给用户判断——不要为了"做点什么"而去改代码')
+    lines.push('- 如果这是实现类任务且已有方案，直接编辑或测试')
     lines.push('- 如果不确定方向，向用户说出你的判断')
     lines.push('- 如果任务已完成，输出摘要并结束')
     return lines.join('\n')
@@ -635,7 +680,13 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   if (!oscillationHasData(input.toolFingerprints ?? [])) signalsMissingData.add('oscillationPenalty')
   if (!textRepetitionHasData(input.textFingerprints ?? [])) signalsMissingData.add('textRepetitionPenalty')
 
-  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData)
+  // Fix 2 — a read-heavy task that is emitting a substantial, non-repetitive
+  // text report (code review / audit / investigation) is producing its
+  // deliverable, not stalling. Relax the read-only penalty and suppress the
+  // productive-stagnation flag so it is not spammed with "去编辑/测试" nudges.
+  const producingReport = isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
+
+  const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData, producingReport)
 
   // Determine escalation level
   let level: 0 | 1 | 2 | 3 = 0
@@ -664,12 +715,23 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   const productiveRatio = stagnationWindow.length > 0
     ? productiveInWindow / stagnationWindow.length
     : 1.0
-  const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4) && productiveRatio === 0
+  const productiveStagnation = stagnationWindow.length >= Math.min(windowSize, 4) && productiveRatio === 0 && !producingReport
+
+  // Reasoning-aware no-tool handling. A model that keeps emitting fresh,
+  // substantial, non-repetitive analysis on each no-tool turn is reasoning
+  // through the problem (deep-thinking models legitimately narrate multi-turn
+  // analysis before acting), NOT spinning in a text-only loop. `producingReport`
+  // is the established "legitimate text deliverable" discriminator (non-repetitive
+  // + substantial ≥200 chars); reuse it so such turns are nudged (kick) rather
+  // than hard-killed. Genuine spin (repetitive / thin text) keeps producingReport
+  // false → the hard abort still fires. This is the core fix for the "他在推理，
+  // 但我们以为他终端" false circuit-break.
+  const reasoningActive = producingReport
 
   if (noToolCount >= NO_TOOL_ABORT_THRESHOLD) {
-    level = 3 // force abort — model is clearly stuck in a text-only loop
+    level = reasoningActive ? 2 : 3 // fresh reasoning → kick, not kill
   } else if (noToolCount >= 2 && isGlm) {
-    level = 3 // GLM: 2 consecutive no-tool turns → hard abort (faster than kick)
+    level = reasoningActive ? 2 : 3 // GLM: 2 no-tool turns → abort unless reasoning
   } else if (noToolCount >= 3) {
     level = 2 // kick on 3+ consecutive no-tool turns
   } else if (noToolCount >= 2 && turn >= 4) {
@@ -696,8 +758,15 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     level = 1
   }
 
-  const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD
-  const shouldAbort = (level >= 3 && score < 0.1) || noToolForceAbort
+  const noToolForceAbort = noToolCount >= NO_TOOL_ABORT_THRESHOLD && !reasoningActive
+  // Reasoning-aware guard applies only to the no-tool hard cap. A model that
+  // keeps emitting fresh substantial analysis on no-tool turns is thinking, not
+  // spinning, so the hard cap is downgraded to a kick. Score-based convergence
+  // aborts are kept independent — they measure orthogonal stagnation signals
+  // (repetition, oscillation, token efficiency) and should still fire when the
+  // composite score says the session is stuck.
+  const scoreAbort = level >= 3 && score < 0.1
+  const shouldAbort = scoreAbort || noToolForceAbort
   // Session split is pointless for no-tool stagnation — the problem is model
   // behavior, not context size.  Only split on score-based level 3.
   const shouldForceSplit = level >= 3 && !noToolForceAbort
@@ -714,5 +783,7 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
     shouldKick,
     shouldForceSplit,
     signals,
+    abortCause: shouldAbort ? (noToolForceAbort ? 'no-tool' : 'score') : undefined,
+    reasoningActive,
   }
 }

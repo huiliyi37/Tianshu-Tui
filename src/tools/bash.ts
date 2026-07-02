@@ -14,6 +14,7 @@ import { debugLog } from '../utils/debug.js'
 import { loadConfig } from '../config/manager.js'
 import { buildMirrorEnv, rewriteGitHubUrls } from './mirror-env.js'
 import { buildNotFoundHint, extractMissingCommand } from './env-check.js'
+import { getResolvedEnv } from './resolved-env.js'
 
 /** Success output inline threshold: commands that succeed with ≤ this many lines
  *  return full output to the model. Beyond this, only a header summary is returned
@@ -26,6 +27,18 @@ const SAFE_ENV_PREFIXES = [
   // Windows-critical: without SystemRoot the child process cannot load system
   // DLLs, causing cmd.exe / powershell.exe to exit(0) with zero output.
   'COMSPEC', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', 'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'PROGRAMDATA', 'PUBLIC', 'HOMEDRIVE', 'ALLUSERSPROFILE', 'PROCESSOR_',
+  // Toolchain vars: builds (maven/gradle/java/go/rust/android) and version
+  // managers rely on these; stripping them broke `mvn`/`java` when launched from
+  // a GUI with a minimal env. None contain sensitive keywords, so the KEY/TOKEN/
+  // SECRET filter below still removes anything genuinely secret.
+  'JAVA_HOME', 'JDK_HOME', 'JRE_HOME', 'CLASSPATH', 'JAVA_TOOL_OPTIONS',
+  'MAVEN_', 'M2_', 'M2', 'GRADLE_', 'ANT_HOME',
+  'GOPATH', 'GOROOT', 'GOBIN', 'GO111MODULE', 'GOFLAGS', 'GOPROXY',
+  'CARGO_HOME', 'RUSTUP_HOME',
+  'ANDROID_', 'NVM_DIR', 'PYENV', 'SDKMAN_DIR',
+  'DOTNET_', 'PYTHONPATH', 'VIRTUAL_ENV', 'CONDA_',
+  'PNPM_HOME', 'VOLTA_HOME', 'FNM_DIR', 'MISE_', 'ASDF_', 'RBENV_ROOT', 'GEM_',
+  'NODE_PATH', 'NODE_OPTIONS', 'KUBECONFIG', 'DOCKER_HOST',
 ] as const
 
 /** Keywords that indicate a sensitive env var — vars containing these substrings are stripped. */
@@ -276,7 +289,7 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
     const wantBackground = explicitBg === true || (explicitBg !== false && isLongRunner(rawCommand))
     if (wantBackground && params.jobs) {
       const mirrorEnv = buildMirrorEnv(mirrorConfig)
-      const env = { ...sanitizeEnv(process.env), ...mirrorEnv }
+      const env = { ...sanitizeEnv(getResolvedEnv(params.cwd)), ...mirrorEnv }
       const snap = params.jobs.spawn({ command, rawCommand, cwd: params.cwd, env })
       const auto = explicitBg !== true
       const sandboxNote = sandbox.sandboxed && sandbox.note ? `\n${sandbox.note}` : ''
@@ -297,7 +310,8 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
       const shell = getShellCommand()
       // Wrap by shell FAMILY (not fragile cmd-string matching): Git Bash needs
       // no encoding prefix (UTF-8 native) but must not emit literal `nul` files;
-      // PowerShell needs UTF-8 console encoding; cmd needs `chcp 65001`.
+      // PowerShell needs UTF-8 console encoding; cmd needs no prefix (WinStreamDecoder
+      // auto-detects GBK vs UTF-8 on the first chunk).
       let commandToRun = command
       if (shell.kind === 'bash') {
         commandToRun = rewriteWindowsNullRedirect(command)
@@ -306,14 +320,18 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         // before prefixing the UTF-8 encoding setup.
         commandToRun = `$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${rewritePowershellNullRedirect(command)}`
       } else if (shell.kind === 'cmd') {
-        commandToRun = `chcp 65001 > nul && ${command}`
+        // NOTE: removed `chcp 65001 > nul &&` prefix — the `nul` device redirect
+        // fails in sandboxed/WSL Windows environments (exit=1, empty stdout).
+        // WinStreamDecoder already auto-detects GBK vs UTF-8 on the first chunk,
+        // so the explicit chcp is unnecessary.
+        commandToRun = command
       }
 
       const mirrorEnv = buildMirrorEnv(mirrorConfig)
       debugLog(`[bash-spawn] kind=${shell.kind} shell=${shell.cmd} args=${JSON.stringify(shell.args)} cwd=${params.cwd ?? process.cwd()}`)
       const child = track(spawn(shell.cmd, [...shell.args, commandToRun], {
         cwd: params.cwd,
-        env: { ...sanitizeEnv(process.env), ...mirrorEnv },
+        env: { ...sanitizeEnv(getResolvedEnv(params.cwd)), ...mirrorEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
         // detached: true breaks stdio pipes on Windows cmd.exe — the new
         // console created in detached mode doesn't connect back to the parent's
@@ -400,7 +418,23 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         // no stdout, so this hit constantly). Pass empty through so buildModelOutput
         // emits the explicit "confirmed empty" marker instead. Failures/timeouts
         // keep a synthetic body so the reason is never blank.
-        const modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
+        // environment 类失败（127/126/9009 = 命令缺失/不可执行）：给模型标准化简洁体，
+        // 不把整墙红字灌进上下文（会污染前缀缓存、误导模型自判"代码出错"）。完整原文仍走
+        // uiContent（buildUiOutput(filtered)），用户在 TUI 能看到全部。
+        let modelBody: string
+        if (errorClass === 'environment') {
+          const missing = extractMissingCommand(filtered, rawCommand)
+          const notFound = exitCode === 127 || exitCode === 9009
+          const reason = notFound
+            ? `command not found${missing ? `: ${missing}` : ''}`
+            : exitCode === 126
+              ? 'command found but not executable (permission denied)'
+              : `environment error (exit ${exitCode})`
+          const hint = buildNotFoundHint(missing, process.platform)
+          modelBody = `环境/配置问题：${reason}。属环境/依赖缺失，非代码缺陷——请修复环境后重试，勿反复重跑相同命令。${hint}`
+        } else {
+          modelBody = filtered || (isTimeout ? 'Command timed out' : code === 0 ? '' : `Exit code: ${code}`)
+        }
 
         // Use ArtifactStore if available (preferred); otherwise fall back to output-store.
         // Skip persistRawOutput in artifact mode — ArtifactStore owns raw persistence,

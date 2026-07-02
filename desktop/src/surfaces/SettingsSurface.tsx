@@ -21,9 +21,9 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { toast } from 'sonner'
-import type { McpStatusResponse, McpServerConfig } from '../runtime/types'
+import type { McpStatusResponse, McpServerConfig, McpPreset } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
   Select,
@@ -783,12 +783,17 @@ function McpSettingsManager() {
   const [mcpStatus, setMcpStatus] = useState<McpStatusResponse | null>(null)
   const [mcpLoading, setMcpLoading] = useState(true)
   const [mcpError, setMcpError] = useState<string | null>(null)
+  const [presets, setPresets] = useState<McpPreset[] | null>(null)
+  const [configuredIds, setConfiguredIds] = useState<string[]>([])
 
   const fetchStatus = useCallback(() => {
     getMcpStatus()
       .then((s) => { setMcpStatus(s); setMcpError(null) })
       .catch((err) => setMcpError((err as Error).message))
       .finally(() => setMcpLoading(false))
+    getMcpPresets()
+      .then((p) => { setPresets(p.presets); setConfiguredIds(p.configuredIds) })
+      .catch(() => { /* non-fatal: preset grid just won't render */ })
   }, [])
 
   useEffect(() => {
@@ -818,6 +823,8 @@ function McpSettingsManager() {
       status={mcpStatus}
       statusLoading={mcpLoading}
       statusError={mcpError}
+      presets={presets}
+      configuredIds={configuredIds}
       onAdd={handleAdd}
       onRemove={handleRemove}
       onRestart={handleRestart}

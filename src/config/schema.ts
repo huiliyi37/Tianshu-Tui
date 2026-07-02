@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { mcpConfigSchema, type McpConfig } from '../mcp/config.js'
+import { THEME_NAMES } from '../tui/theme.js'
 
 export const modelConfigSchema = z.object({
   id: z.string(),
@@ -352,6 +353,25 @@ export const mirrorsSchema = z.object({
   rust: z.enum(['default', 'tsinghua', 'tuna', 'ustc']).default('default'),
 }).default({})
 
+export const envSchema = z.object({
+  /** Auto-resolve the real login-shell / registry PATH + toolchain vars so the
+   *  agent finds tools (mvn/git/...) even when the app is launched from a GUI
+   *  (Explorer/Finder/Dock) with a minimal PATH. Default true; set false to use
+   *  the raw process env only. */
+  resolve: z.boolean().default(true),
+  /** Extra directories appended to PATH for command execution — a manual
+   *  escape hatch when auto-resolution still misses a tool. */
+  extraPath: z.array(z.string()).default([]),
+  /** Extra environment variables injected into command execution. Highest
+   *  priority — overrides both process env and resolved values. */
+  extraVars: z.record(z.string(), z.string()).default({}),
+}).default({})
+
+export const uiSchema = z.object({
+  /** Default TUI color theme used on startup. Runtime /theme switches are not persisted. */
+  theme: z.enum(THEME_NAMES).optional(),
+}).default({})
+
 export const configSchema = z.object({
   provider: z.object({
     default: z.string(),
@@ -365,6 +385,8 @@ export const configSchema = z.object({
   workers: workersSchema,
   skills: skillsSchema,
   mirrors: mirrorsSchema,
+  env: envSchema,
+  ui: uiSchema,
 })
 
 export type Config = {
@@ -377,6 +399,8 @@ export type Config = {
   workers: WorkersConfig
   skills: SkillsConfig
   mirrors: MirrorsConfig
+  env: EnvConfig
+  ui: UiConfig
 }
 
 export type ProviderConfig = z.infer<typeof providerSchema>
@@ -392,3 +416,5 @@ export type CacheConfig = z.infer<typeof cacheSchema>
 export type WorkersConfig = z.infer<typeof workersSchema>
 export type SkillsConfig = z.infer<typeof skillsSchema>
 export type MirrorsConfig = z.infer<typeof mirrorsSchema>
+export type EnvConfig = z.infer<typeof envSchema>
+export type UiConfig = z.infer<typeof uiSchema>

@@ -31,8 +31,17 @@ import { errorContext, serverLogger } from './logger.js'
 // ─── Runtime 池接口（来自姊妹 ingress spec，Phase 2 实施） ────
 
 export interface RuntimeHandle {
-  /** 在 runtime 上执行 AgentLoop，返回结果 */
-  execute(prompt: string, signal: AbortSignal, allowedTools?: string[]): Promise<RuntimeResult>
+  /**
+   * 在 runtime 上执行 AgentLoop，返回结果。
+   * `onSessionStart` 在底层会话创建后立即回调，供 registry 回填 sessionId
+   * （即使随后执行失败也已关联）。执行失败/中止应 throw，由 registry 落 failed。
+   */
+  execute(
+    prompt: string,
+    signal: AbortSignal,
+    allowedTools?: string[],
+    onSessionStart?: (sessionId: string) => void,
+  ): Promise<RuntimeResult>
   /** 释放 runtime 回池 */
   release(): void
 }
@@ -94,6 +103,9 @@ export class TaskRegistry {
   /** 活跃任务的超时 timer */
   private timeoutTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+  /** 待触发的重试 timer（进程关闭时清理，避免泄漏）。 */
+  private retryTimers = new Set<ReturnType<typeof setTimeout>>()
+
   /** 每任务串行化锁：防止 transition/createTask 并发竞态 */
   private idLocks = new Map<string, Promise<void>>()
 
@@ -136,6 +148,10 @@ export class TaskRegistry {
         idempotencyKey,
         force,
         allowedTools: input.allowedTools,
+        ...(input.scheduledTaskId ? { scheduledTaskId: input.scheduledTaskId } : {}),
+        attempt: input.attempt ?? 1,
+        ...(input.retryOf ? { retryOf: input.retryOf } : {}),
+        ...(input.retry ? { retry: input.retry } : {}),
       }
 
       await this.store.save(r)
@@ -191,8 +207,71 @@ export class TaskRegistry {
         this.cleanup(id)
       }
 
+      // Bounded auto-retry: only genuine failures (not user cancels) re-run.
+      if (to === 'failed' || to === 'timed_out') {
+        this.maybeScheduleRetry(updated)
+      }
+
       return updated
     })
+  }
+
+  /**
+   * Backfill the executing session id onto a task (called by the runtime pool
+   * as soon as the session exists, so the desktop can jump to the thread even
+   * for failed runs). Serialized on the task id to avoid clobbering transitions.
+   */
+  async attachSessionId(id: string, sessionId: string): Promise<void> {
+    await this.serialized(id, async () => {
+      const record = await this.store.load(id)
+      if (!record || record.sessionId === sessionId) return
+      await this.store.save({ ...record, sessionId })
+    })
+  }
+
+  /**
+   * If a failed/timed_out record has a retry policy with attempts left, enqueue
+   * a fresh forced task after a linear backoff. The retry inherits the policy so
+   * it can retry again, bounded by maxAttempts.
+   */
+  private maybeScheduleRetry(record: TaskRecord): void {
+    const retry = record.retry
+    const attempt = record.attempt ?? 1
+    if (!retry || attempt >= retry.maxAttempts) return
+
+    const nextAttempt = attempt + 1
+    const origin = record.retryOf ?? record.id
+    const delay = Math.max(0, retry.backoffMs) * attempt
+
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(timer)
+      this.createTask({
+        prompt: record.prompt,
+        source: record.source,
+        callerId: record.callerId,
+        timeoutMs: record.timeoutMs,
+        allowedTools: record.allowedTools,
+        scheduledTaskId: record.scheduledTaskId,
+        retry,
+        attempt: nextAttempt,
+        retryOf: origin,
+        force: true,
+        idempotencyKey: `${origin}:retry:${nextAttempt}`,
+      }).catch(err => {
+        serverLogger.error('Failed to enqueue task retry', { taskId: record.id, ...errorContext(err) })
+      })
+    }, delay)
+    // Don't keep the event loop alive solely for a pending retry.
+    if (typeof (timer as { unref?: () => void }).unref === 'function') (timer as { unref: () => void }).unref()
+    this.retryTimers.add(timer)
+  }
+
+  /** Clear pending retry + timeout timers (call on shutdown to avoid leaks). */
+  dispose(): void {
+    for (const t of this.retryTimers) clearTimeout(t)
+    this.retryTimers.clear()
+    for (const t of this.timeoutTimers.values()) clearTimeout(t)
+    this.timeoutTimers.clear()
   }
 
   // ─── 取消 ──────────────────────────────────────────────────
@@ -339,7 +418,12 @@ export class TaskRegistry {
         return // cancel() 已处理状态转换
       }
 
-      const result = await handle.execute(record.prompt, ac.signal, record.allowedTools)
+      const result = await handle.execute(
+        record.prompt,
+        ac.signal,
+        record.allowedTools,
+        (sessionId) => { void this.attachSessionId(record.id, sessionId) },
+      )
 
       await this.transition(record.id, 'completed', { result })
     } catch (err) {

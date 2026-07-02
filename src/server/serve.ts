@@ -19,6 +19,7 @@ import { FileSessionPersistence } from './session-persistence.js'
 import { buildSessionRoutes } from './session-routes.js'
 import { buildHealthRoute } from './health-route.js'
 import { buildScheduleRoutes } from './schedule-routes.js'
+import { buildTaskRoutes } from './task-routes.js'
 import { buildConfigRoutes } from './config-routes.js'
 import { buildEnvRoute } from './env-route.js'
 import { buildProjectTemplatesRoutes } from './project-templates-routes.js'
@@ -523,6 +524,7 @@ function buildManagedAgent(
     getMessages: () => agent.session.getMessages(),
     replaceMessages: (msgs) => { agent.session.replaceMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
     rewindToMessages: (msgs) => { agent.session.rewindToMessages(msgs); agent.config.promptEngine.resetAppendixBaseline() },
+    getFileHistory: () => agent.getFileHistory(),
     // PlusMenu — star domain (delegate to the live agent).
     setSessionDomain: (domain) => agent.setSessionDomain(domain),
     resetSessionDomain: () => agent.resetSessionDomain(),
@@ -1011,10 +1013,12 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   // leaking timers.
   let scheduler: CronScheduler | undefined
   let wiring: CronWiring | undefined
+  let taskRegistry: TaskRegistry | undefined
   if (!opts.ephemeral) {
     const rivetDir = desktopDir()
     scheduler = new CronScheduler({ schedulePath: join(rivetDir, 'scheduled_tasks.json') })
     const registry = new TaskRegistry({ taskStore: new JsonTaskStore(join(rivetDir, 'tasks')) })
+    taskRegistry = registry
     const runtimePool = new SessionRuntimePool({ manager: sessions, defaultCwd: process.cwd() })
     // CronLock: with multiple sidecars pointed at the same desktop dir, exactly
     // one wins the lock and runs the scheduler — the rest stay idle instead of
@@ -1022,7 +1026,16 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     const lock = new CronLock({ lockPath: join(rivetDir, 'scheduled_tasks.lock') })
     wiring = new CronWiring({ scheduler, registry, runtimePool, lock })
     void wiring.start().catch(() => { /* non-fatal: scheduler stays idle */ })
-    Object.assign(routes, buildScheduleRoutes(scheduler, apiToken))
+    Object.assign(routes, buildScheduleRoutes(scheduler, apiToken, () => wiring?.getStatus()))
+    // Task audit/history API (execution records for the automations dashboard).
+    // The scheduler + task-registry share this desktop dir, so events land in
+    // .rivet/tasks/events alongside the task records.
+    Object.assign(routes, buildTaskRoutes({
+      registry,
+      apiToken,
+      notifyPolicy: 'state_changes',
+      eventsDir: join(rivetDir, 'tasks', 'events'),
+    }))
   }
 
   const server = startServer(port, routes, apiToken)
@@ -1040,6 +1053,7 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       sessions.shutdownAll()
       void wiring?.stop()
       wiring?.dispose()
+      taskRegistry?.dispose()
       scheduler?.stop()
       // Kill MCP child processes synchronously — async shutdown() may not
       // complete before the process exits, leaving orphaned subprocesses.

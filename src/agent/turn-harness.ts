@@ -56,8 +56,14 @@ export class TurnHarness {
             result = await exec.execute()
             if (!result.isError) break
             if (attempt === this.config.maxRetries - 1) {
+              // 瞬时失败重试耗尽时，不把大段 stderr 再灌一遍——超长只保留头部摘录，
+              // 再接失败后缀，避免环境噪声二次膨胀上下文。
+              const RETRY_CONTENT_CAP = 1500
+              const capped = result.content.length > RETRY_CONTENT_CAP
+                ? `${result.content.slice(0, RETRY_CONTENT_CAP)}\n… [+${result.content.length - RETRY_CONTENT_CAP} chars truncated]`
+                : result.content
               result = {
-                content: `${result.content}\n\n[All ${this.config.maxRetries} retries failed. Error class: ${errorClass}. Consider alternative approach.]`,
+                content: `${capped}\n\n[All ${this.config.maxRetries} retries failed. Error class: ${errorClass}. Consider alternative approach.]`,
                 isError: true,
               }
             }

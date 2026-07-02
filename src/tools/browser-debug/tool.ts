@@ -17,6 +17,8 @@ import {
   formatConsoleLine,
   formatNetworkLine,
   formatNetworkDetail,
+  formatCookies,
+  formatStorage,
   type ConsoleLevel,
   type NetworkQuery,
 } from './log-capture.js'
@@ -84,7 +86,19 @@ type BrowserDebugAction =
   | 'snapshot'
   | 'click'
   | 'type'
+  | 'press'
+  | 'select'
+  | 'hover'
+  | 'scroll'
+  | 'history'
   | 'wait'
+  | 'cookies'
+  | 'storage'
+  | 'set_cookie'
+  | 'clear_cookies'
+  | 'set_storage'
+  | 'clear_storage'
+  | 'pages'
   | 'await_login'
   | 'status'
   | 'clear_logs'
@@ -129,16 +143,26 @@ async function withLiveLogs<T>(
   }
 }
 
+function safePageUrls(session: BrowserDebugSession): string[] {
+  try {
+    return session.driver.pageUrls()
+  } catch {
+    return [session.driver.currentUrl()]
+  }
+}
+
 function formatStatus(session: BrowserDebugSession): string {
   const net = session.log.getNetwork()
   const failed = session.log.getNetwork({ failedOnly: true }).length
   const consoleTotal = session.log.getConsole().length
   const errCount = session.log.getConsole('error').length
+  const urls = safePageUrls(session)
   const lines = [
     `session: ${session.sessionKey}`,
     `mode: ${session.mode}${session.connectUrl ? ` (${session.connectUrl})` : ''}`,
     `headless: ${session.headless}`,
     `url: ${session.driver.currentUrl()}`,
+    `pages: ${urls.length} open${urls.length > 1 ? ` (active last): ${urls.join(' | ')}` : ''}`,
     `console: ${consoleTotal} message(s) (${errCount} error(s))`,
     `network: ${net.length} request(s) (${failed} failed/4xx/5xx)`,
   ]
@@ -203,8 +227,20 @@ Actions:
 - open / navigate {url}
 - console {level?}
 - network {failed_only?, url_filter?, api_only?, include_body?}
-- network_detail {request_id}
-- snapshot / eval / screenshot / click / type / wait
+- network_detail {request_id} — status, timing, request headers + payload, response headers + body (secrets like Authorization/Cookie are masked).
+- snapshot / eval / screenshot / click
+- type {selector, text, submit?} — submit=true presses Enter after filling
+- press {selector?, key} — keyboard key, e.g. Enter/Tab/Escape/ArrowDown
+- select {selector, value} — pick a <select> option
+- hover {selector} / scroll {selector? | to?}
+- wait {selector? | state?} — selector visible, or load state (load/domcontentloaded/networkidle)
+- history {go: back|forward|reload}
+- cookies {url_filter?} — list cookies for the context (values masked)
+- storage {kind: local|session} — dump localStorage/sessionStorage (secret-looking values masked)
+- set_cookie {name, value, url? | domain?+path?} — inject a cookie (restore a login)
+- clear_cookies — wipe all cookies (reset the session)
+- set_storage {kind, key, value} / clear_storage {kind} — write/reset web storage
+- pages — list open tabs/popups (OAuth popups become the action target automatically)
 - status / clear_logs / await_login / close`,
       input_schema: {
         type: 'object',
@@ -213,7 +249,10 @@ Actions:
             type: 'string',
             enum: [
               'open', 'navigate', 'console', 'network', 'network_detail', 'eval', 'screenshot', 'snapshot',
-              'click', 'type', 'wait', 'await_login', 'status', 'clear_logs', 'close',
+              'click', 'type', 'press', 'select', 'hover', 'scroll', 'history',
+              'wait', 'cookies', 'storage', 'pages',
+              'set_cookie', 'clear_cookies', 'set_storage', 'clear_storage',
+              'await_login', 'status', 'clear_logs', 'close',
             ],
             description: 'What to do.',
           },
@@ -223,8 +262,18 @@ Actions:
           url_filter: { type: 'string', description: 'network: substring filter on request URL (e.g. /api/).' },
           api_only: { type: 'boolean', description: 'network: only xhr/fetch requests.' },
           include_body: { type: 'boolean', description: 'network: include captured response bodies (xhr/fetch and 4xx/5xx).' },
-          selector: { type: 'string', description: 'CSS selector for click/type/wait/snapshot.' },
+          selector: { type: 'string', description: 'CSS selector for click/type/press/select/hover/scroll/wait/snapshot.' },
           text: { type: 'string', description: 'Text to fill for type.' },
+          submit: { type: 'boolean', description: 'type: press Enter after filling (submit the form).' },
+          key: { type: 'string', description: 'press: keyboard key (Enter/Tab/…); set_storage: storage key.' },
+          value: { type: 'string', description: 'select option / set_cookie value / set_storage value.' },
+          state: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'], description: 'wait: load state to wait for (when no selector).' },
+          to: { type: 'string', enum: ['top', 'bottom'], description: 'scroll: page target when no selector (default bottom).' },
+          go: { type: 'string', enum: ['back', 'forward', 'reload'], description: 'history: navigation direction.' },
+          kind: { type: 'string', enum: ['local', 'session'], description: 'storage/set_storage/clear_storage: which web storage (default local).' },
+          name: { type: 'string', description: 'set_cookie: cookie name.' },
+          domain: { type: 'string', description: 'set_cookie: cookie domain (with path, when no url).' },
+          path: { type: 'string', description: 'set_cookie: cookie path (default /).' },
           expression: { type: 'string', description: 'JavaScript expression for eval.' },
           level: { type: 'string', enum: ['log', 'info', 'warn', 'error', 'debug'], description: 'Console level filter.' },
           failed_only: { type: 'boolean', description: 'network: only failures and 4xx/5xx.' },
@@ -279,7 +328,7 @@ Actions:
           'Complete login / manual steps in the browser window, then reply to continue.'
         return {
           content: '[Awaiting manual login — the user will reply once done.]',
-          uiContent: `${msg}\n\n(The persistent profile keeps your session for later browser_debug actions.)`,
+          uiContent: `${msg}\n\n(OAuth popups / new tabs are tracked automatically; the persistent profile keeps your session for later browser_debug actions.)`,
           endTurn: true,
         }
       }
@@ -394,20 +443,142 @@ Actions:
             if (!selector || text === undefined) {
               return { content: 'type requires "selector" and "text".', isError: true }
             }
-            await withLiveLogs(session, params.onOutput, () => session.driver.type(selector, text))
-            return { content: `Typed into ${selector}.` }
+            const submit = params.input.submit === true
+            await withLiveLogs(session, params.onOutput, async () => {
+              await session.driver.type(selector, text)
+              if (submit) await session.driver.press(selector, 'Enter')
+            })
+            return { content: `Typed into ${selector}${submit ? ' and pressed Enter' : ''}.` }
+          }
+          case 'press': {
+            const selector = params.input.selector as string | undefined
+            const key = params.input.key as string | undefined
+            if (!key) return { content: 'press requires a "key" (e.g. Enter, Tab, Escape).', isError: true }
+            await withLiveLogs(session, params.onOutput, () => session.driver.press(selector, key))
+            return { content: selector ? `Pressed ${key} on ${selector}.` : `Pressed ${key}.` }
+          }
+          case 'select': {
+            const selector = params.input.selector as string | undefined
+            const value = params.input.value as string | undefined
+            if (!selector || value === undefined) {
+              return { content: 'select requires "selector" and "value".', isError: true }
+            }
+            const chosen = await withLiveLogs(session, params.onOutput, () =>
+              session.driver.selectOption(selector, value),
+            )
+            return { content: `Selected ${JSON.stringify(chosen)} in ${selector}.` }
+          }
+          case 'hover': {
+            const selector = params.input.selector as string | undefined
+            if (!selector) return { content: 'hover requires a "selector".', isError: true }
+            await withLiveLogs(session, params.onOutput, () => session.driver.hover(selector))
+            return { content: `Hovered ${selector}.` }
+          }
+          case 'scroll': {
+            const selector = params.input.selector as string | undefined
+            const to = params.input.to === 'top' ? 'top' : 'bottom'
+            await withLiveLogs(session, params.onOutput, () => session.driver.scroll(selector, to))
+            return { content: selector ? `Scrolled ${selector} into view.` : `Scrolled to ${to}.` }
+          }
+          case 'history': {
+            const go = params.input.go as string | undefined
+            if (go !== 'back' && go !== 'forward' && go !== 'reload') {
+              return { content: 'history requires "go": back | forward | reload.', isError: true }
+            }
+            if (go === 'reload') {
+              await withLiveLogs(session, params.onOutput, () => session.driver.reload(signal))
+              return { content: `Reloaded ${session.driver.currentUrl()}.` }
+            }
+            const moved = await withLiveLogs(session, params.onOutput, () =>
+              go === 'back' ? session.driver.goBack(signal) : session.driver.goForward(signal),
+            )
+            return {
+              content: moved
+                ? `Navigated ${go} to ${session.driver.currentUrl()}.`
+                : `No ${go} history to navigate to.`,
+            }
           }
           case 'wait': {
             const selector = params.input.selector as string | undefined
-            if (!selector) return { content: 'wait requires a "selector".', isError: true }
+            const state = params.input.state as 'load' | 'domcontentloaded' | 'networkidle' | undefined
             const timeoutMs =
               typeof params.input.timeout_ms === 'number' && params.input.timeout_ms > 0
                 ? params.input.timeout_ms
                 : 10_000
+            if (selector) {
+              await withLiveLogs(session, params.onOutput, () =>
+                session.driver.waitForSelector(selector, timeoutMs, signal),
+              )
+              return { content: `Element "${selector}" is visible (${timeoutMs}ms timeout).` }
+            }
+            if (state) {
+              await withLiveLogs(session, params.onOutput, () =>
+                session.driver.waitForLoadState(state, timeoutMs, signal),
+              )
+              return { content: `Reached load state "${state}" (${timeoutMs}ms timeout).` }
+            }
+            return { content: 'wait requires a "selector" or a "state" (load/domcontentloaded/networkidle).', isError: true }
+          }
+          case 'cookies': {
+            const urlFilter = typeof params.input.url_filter === 'string' && params.input.url_filter.trim()
+              ? params.input.url_filter.trim()
+              : undefined
+            const cookies = await withLiveLogs(session, params.onOutput, () => session.driver.cookies(urlFilter))
+            return { content: formatCookies(cookies) }
+          }
+          case 'storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            const record = await withLiveLogs(session, params.onOutput, () => session.driver.storage(kind))
+            return { content: `${kind}Storage:\n${formatStorage(record)}` }
+          }
+          case 'set_cookie': {
+            const name = params.input.name as string | undefined
+            const value = params.input.value as string | undefined
+            if (!name || value === undefined) {
+              return { content: 'set_cookie requires "name" and "value".', isError: true }
+            }
+            const url = typeof params.input.url === 'string' ? params.input.url : undefined
+            const domain = typeof params.input.domain === 'string' ? params.input.domain : undefined
+            const path = typeof params.input.path === 'string' ? params.input.path : undefined
+            if (!url && !domain) {
+              const current = (() => { try { return new URL(session.driver.currentUrl()).origin } catch { return undefined } })()
+              if (!current) return { content: 'set_cookie needs "url" or "domain" (page has no usable URL).', isError: true }
+              await withLiveLogs(session, params.onOutput, () => session.driver.addCookie({ name, value, url: current }))
+              return { content: `Set cookie "${name}" for ${current}.` }
+            }
             await withLiveLogs(session, params.onOutput, () =>
-              session.driver.waitForSelector(selector, timeoutMs, signal),
+              session.driver.addCookie({ name, value, url, domain, path: path ?? (domain ? '/' : undefined) }),
             )
-            return { content: `Element "${selector}" is visible (${timeoutMs}ms timeout).` }
+            return { content: `Set cookie "${name}" for ${url ?? `${domain}${path ?? '/'}`}.` }
+          }
+          case 'clear_cookies': {
+            await withLiveLogs(session, params.onOutput, () => session.driver.clearCookies())
+            return { content: 'All cookies cleared for this context.' }
+          }
+          case 'set_storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            const key = params.input.key as string | undefined
+            const value = params.input.value as string | undefined
+            if (!key || value === undefined) {
+              return { content: 'set_storage requires "key" and "value".', isError: true }
+            }
+            await withLiveLogs(session, params.onOutput, () => session.driver.setStorage(kind, key, value))
+            return { content: `Set ${kind}Storage["${key}"].` }
+          }
+          case 'clear_storage': {
+            const kind = params.input.kind === 'session' ? 'session' : 'local'
+            await withLiveLogs(session, params.onOutput, () => session.driver.clearStorage(kind))
+            return { content: `Cleared ${kind}Storage.` }
+          }
+          case 'pages': {
+            const urls = safePageUrls(session)
+            if (urls.length === 0) return { content: '(no open pages)' }
+            const active = urls.length - 1
+            return {
+              content: urls
+                .map((u, i) => `${i === active ? '* ' : '  '}[${i}] ${u}`)
+                .join('\n'),
+            }
           }
           case 'screenshot': {
             const png = await session.driver.screenshot()

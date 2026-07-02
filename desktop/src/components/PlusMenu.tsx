@@ -182,12 +182,12 @@ export function PlusMenu(props: {
           mode="single"
           emptyHint="未发现星域"
           onClose={closeSub}
-          load={async (id) => (await listDomains(id)).map<Row>((d) => ({
-            key: d.key,
-            label: d.name,
-            desc: d.meta || d.motto,
-            active: d.current,
-          }))}
+          load={async (id) => (await listDomains(id)).map<Row>((d) => {
+            const glyph = d.uiPersona?.glyph ? `${d.uiPersona.glyph} ` : ''
+            // Auto shows its keyword fallback so it never reads as "no domain".
+            const label = d.key === 'auto' ? `${glyph}${d.name} · 天枢` : `${glyph}${d.name}`
+            return { key: d.key, label, desc: d.meta || d.motto, active: d.current }
+          })}
           apply={async (id, row) => { await setDomain(id, row.key) }}
         />
       )}

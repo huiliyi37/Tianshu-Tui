@@ -30,6 +30,30 @@ import { buildCognitiveProjectionParts, createCognitiveLedger, getCognitivePhase
 import { formatImmuneContext } from './immune-context.js'
 
 /**
+ * Resolve the turn-level hard-stall watchdog ceiling (ms) from provider +
+ * reasoning config. Reverse-cause fix for reasoning models being falsely熔断:
+ *
+ * - GLM independent-reasoning → 0 (disabled): stream-level timeouts (read 720s /
+ *   hard-cap 20min) are authoritative; a per-turn hardStall abort mid-reasoning
+ *   causes "restart from scratch".
+ * - Deep-reasoning sessions (effort high/max) → raised ceiling: legitimate deep
+ *   thinking spans minutes; keep the watchdog as a safety net for genuine
+ *   boundary wedges but give reasoning-heavy turns slack so a busy-but-healthy
+ *   boundary isn't mistaken for a wedge.
+ * - Everything else → tight default (240s).
+ *
+ * Note: the watchdog is already disarmed during streaming (so in-stream
+ * reasoning never trips it); this ceiling only guards the non-streaming
+ * turn-boundary blind spot.
+ */
+export function resolveHardStallMs(config: { providerName?: string; reasoningEffort?: string }): number {
+  if (config.providerName === 'glm') return 0
+  const effort = config.reasoningEffort
+  const deepReasoning = effort === 'high' || effort === 'max'
+  return deepReasoning ? 480_000 : 240_000
+}
+
+/**
  * Cross-session loading check — prefers config over env var.
  *
  * - Env RIVET_NO_CROSS_SESSION=1/true → force-off (disabled=true)
@@ -101,13 +125,14 @@ export class TurnStepProducer {
     const heartbeat = new TurnHeartbeat({
       silentMs: 20_000,
       repeatMs: 15_000,
-      // GLM independent reasoning mode: no preserved thinking context, and the
-      // stream-level timeouts (read 720s / hard-cap 20min) are authoritative.
-      // Per-turn hardStall is counterproductive — GLM's legitimate deep reasoning
-      // spans multiple minutes; aborting mid-turn causes the exact "restart from
-      // scratch" symptom we're trying to avoid. Disable hardStall abort entirely
-      // for GLM; keep informational heartbeats.
-      hardStallMs: this.self.config.providerName === 'glm' ? 0 : 240_000,
+      // Hard-stall ceiling is reasoning-aware (see resolveHardStallMs). GLM's
+      // independent deep reasoning disables it entirely (stream-level timeouts are
+      // authoritative; a per-turn abort causes "restart from scratch"). Other
+      // deep-reasoning sessions (high/max effort) get a raised ceiling so a model
+      // that legitimately spans minutes at a boundary isn't falsely熔断, while the
+      // watchdog is kept as a safety net for genuine boundary wedges. Non-reasoning
+      // sessions keep the tight default.
+      hardStallMs: resolveHardStallMs(this.self.config),
       onHeartbeat: (elapsed, lastActivity) => {
         const seconds = Math.round(elapsed / 1000)
         callbacks.onPhaseChange?.('heartbeat', {

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
+import { isImageFile, isTextFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../lib/file-types'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
 //  - '@' anywhere → file mention picker; inserts a canonical `@file:<path>`
@@ -81,18 +82,6 @@ export function computeComposerTextareaStyle(scrollHeight: number, maxHeight = C
   }
 }
 
-// Accept any raster image/* (canvas transcodes BMP/etc into a provider-safe
-// PNG/JPEG on send). SVG is excluded: it is vector, useless for vision, and
-// rasterizing it through canvas is fraught (taint, sizing, scripts).
-function isImageMime(type: string): boolean {
-  return type.startsWith('image/') && type !== 'image/svg+xml'
-}
-
-/** File-name heuristic for when MIME is unavailable (Windows clipboard edge case). */
-function isImageFileName(name: string): boolean {
-  return /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)
-}
-
 type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
   | { mode: 'command'; items: ComposerCommand[]; index: number; matched: boolean }
@@ -112,8 +101,11 @@ export function Composer(props: {
   onDelegate?: () => void
   /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
   menuRev?: number
+  /** True when the thread already has messages — used to warn before a
+   *  cache-invalidating mid-session star-domain switch. */
+  threadNonEmpty?: boolean
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev, threadNonEmpty } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -136,7 +128,7 @@ export function Composer(props: {
   const [suggest, setSuggest] = useState<Suggest | null>(null)
   const [images, setImages] = useState<string[]>([])
   const [dragOver, setDragOver] = useState(false)
-  const [imageError, setImageError] = useState<string | null>(null)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
   const [speechSupported, setSpeechSupported] = useState(false)
   const [speechError, setSpeechError] = useState<string | null>(null)
@@ -188,29 +180,27 @@ export function Composer(props: {
 
   const closeSuggest = () => setSuggest(null)
 
-  const addFiles = useCallback(async (files: FileList | File[]) => {
-    setImageError(null)
-    // Accept any raster image/* (transcoded on compress), or a known extension
-    // when MIME is empty (Windows clipboard). SVG is rejected by isImageMime.
-    const arr = Array.from(files).filter(f => isImageMime(f.type) || (f.type === '' && isImageFileName(f.name)))
-    if (arr.length === 0) { setImageError('不支持的格式（仅 PNG/JPEG/WebP/GIF/BMP）'); return }
+  const addImages = useCallback(async (files: FileList | File[]) => {
+    setAttachmentError(null)
+    const arr = Array.from(files).filter(f => isImageFile(f))
+    if (arr.length === 0) { setAttachmentError('不支持的格式（仅支持 PNG/JPEG/WebP/GIF/BMP 图片）'); return }
     for (const f of arr) {
-      if (f.size > MAX_IMAGE_SIZE) { setImageError(`${f.name} 超过 5MB 限制`); return }
+      if (f.size > MAX_IMAGE_SIZE) { setAttachmentError(`${f.name} 超过 5MB 限制`); return }
     }
-    if (images.length + arr.length > MAX_IMAGES) { setImageError(`最多 ${MAX_IMAGES} 张图片`); return }
+    if (images.length + arr.length > MAX_IMAGES) { setAttachmentError(`最多 ${MAX_IMAGES} 张图片`); return }
     try {
       // Compress once: the resulting data URL is sent to the model AND rendered
       // as the thumbnail AND persisted server-side — one artifact, three uses.
       const results = await Promise.all(arr.map(f => compressImage(f)))
       setImages(prev => [...prev, ...results.map(r => r.dataUrl)])
     } catch {
-      setImageError('图片处理失败，请重试')
+      setAttachmentError('图片处理失败，请重试')
     }
   }, [images.length])
 
   const removeImage = (index: number) => {
     setImages(prev => prev.filter((_, i) => i !== index))
-    setImageError(null)
+    setAttachmentError(null)
   }
 
   const queryFiles = (token: MentionToken) => {
@@ -400,77 +390,107 @@ export function Composer(props: {
     }
   }
 
-  const onPaste = (e: React.ClipboardEvent) => {
-    // Extract image files from clipboard. Strategy:
+  const onPaste = async (e: React.ClipboardEvent) => {
+    // Extract files from clipboard. Strategy:
     //  1. Scan DataTransferItemList (has MIME metadata; most reliable).
     //     - macOS screenshots: item.type="image/png" but File.type=""
     //     - Windows clipboard: item.type may be "image/bmp" or empty
     //  2. Fallback to DataTransfer.files (some platforms only populate this).
     // Deduplicate by name:size since items and files overlap.
     const seen = new Set<string>()
-    const files: File[] = []
+    const pasted: { file: File; mimeHint?: string }[] = []
     const items = e.clipboardData.items
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!
       if (item.kind !== 'file') continue
       const f = item.getAsFile()
       if (!f || f.size === 0) continue
-      // item.type is the clipboard's declared MIME (most trustworthy).
-      // f.type may be empty on macOS/Windows clipboard images.
-      if (isImageMime(item.type) || isImageMime(f.type) || isImageFileName(f.name)) {
-        const key = `${f.name}:${f.size}:${f.lastModified}`
-        if (!seen.has(key)) {
-          seen.add(key)
-          files.push(f)
-        }
+      const key = `${f.name}:${f.size}:${f.lastModified}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        // item.type is the clipboard's declared MIME (most trustworthy).
+        // f.type may be empty on macOS/Windows clipboard images.
+        pasted.push({ file: f, mimeHint: item.type || undefined })
       }
     }
     // Fallback: platforms where .files is the sole source (e.g. drag-into-window).
     for (const f of Array.from(e.clipboardData.files)) {
       const key = `${f.name}:${f.size}:${f.lastModified}`
-      if (!seen.has(key) && (isImageMime(f.type) || isImageFileName(f.name))) {
+      if (!seen.has(key)) {
         seen.add(key)
-        files.push(f)
+        pasted.push({ file: f })
       }
     }
-    if (files.length > 0) {
-      e.preventDefault()
-      void addFiles(files)
+
+    const classify = async (p: typeof pasted[0]) => {
+      let type = p.mimeHint || p.file.type
+      // Last-resort byte-level detection for Windows clipboard images that
+      // report no MIME type and have no extension (e.g. "image").
+      if (!type && !p.file.name.includes('.')) {
+        const detected = await detectImageMimeByMagic(p.file)
+        if (detected) type = detected
+      }
+      const fileLike = { type, name: p.file.name }
+      return { file: p.file, fileLike }
+    }
+
+    const classified = await Promise.all(pasted.map(classify))
+    const imageFiles = classified.filter(c => isImageFile(c.fileLike)).map(c => c.file)
+    const textFiles = classified.filter(c => isTextFile(c.fileLike) && !isImageFile(c.fileLike)).map(c => c.file)
+    const unsupportedFiles = classified.filter(c => isUnsupportedFile(c.fileLike)).map(c => c.file)
+
+    if (imageFiles.length === 0 && textFiles.length === 0 && unsupportedFiles.length === 0) return
+
+    e.preventDefault()
+    if (unsupportedFiles.length > 0) {
+      toast.error(formatUnsupportedFiles(unsupportedFiles))
+    }
+    if (imageFiles.length > 0) void addImages(imageFiles)
+    if (textFiles.length > 0) {
+      void inlineTextFiles(textFiles)
     }
   }
+
+  const inlineTextFiles = useCallback(async (files: File[]) => {
+    const contents: string[] = []
+    for (const f of files) {
+      // Text files are INLINED as content, not added as @file path
+      // references (the browser only exposes the basename, not a real path).
+      // Use a plain header so this is never parsed as an @file: mention.
+      if (f.size > 512 * 1024) {
+        contents.push(`📎 ${f.name}（文件过大，已跳过）`)
+        continue
+      }
+      try {
+        const text = await f.text()
+        contents.push(`📎 ${f.name}（内联内容）\n\`\`\`\n${text}\n\`\`\``)
+      } catch {
+        contents.push(`📎 ${f.name}（读取失败）`)
+      }
+    }
+    if (contents.length > 0) {
+      const insert = contents.join('\n\n')
+      onChange(value ? `${value}\n${insert}` : insert)
+    }
+  }, [value, onChange])
 
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
+    setAttachmentError(null)
     if (e.dataTransfer.files.length === 0) return
     const files = Array.from(e.dataTransfer.files)
-    const imageFiles = files.filter(f => isImageMime(f.type) || isImageFileName(f.name))
-    const textFiles = files.filter(f => !isImageMime(f.type) && !isImageFileName(f.name))
+    const imageFiles = files.filter(f => isImageFile(f))
+    const textFiles = files.filter(f => isTextFile(f) && !isImageFile(f))
+    const unsupportedFiles = files.filter(f => isUnsupportedFile(f))
 
-    if (imageFiles.length > 0) void addFiles(imageFiles)
+    if (imageFiles.length === 0 && textFiles.length === 0 && unsupportedFiles.length === 0) return
 
-    if (textFiles.length > 0) {
-      const contents: string[] = []
-      for (const f of textFiles) {
-        // Dropped text files are INLINED as content, not added as @file path
-        // references (the browser only exposes the basename, not a real path).
-        // Use a plain header so this is never parsed as an @file: mention.
-        if (f.size > 512 * 1024) {
-          contents.push(`📎 ${f.name}（文件过大，已跳过）`)
-          continue
-        }
-        try {
-          const text = await f.text()
-          contents.push(`📎 ${f.name}（内联内容）\n\`\`\`\n${text}\n\`\`\``)
-        } catch {
-          contents.push(`📎 ${f.name}（读取失败）`)
-        }
-      }
-      if (contents.length > 0) {
-        const insert = contents.join('\n\n')
-        onChange(value ? `${value}\n${insert}` : insert)
-      }
+    if (unsupportedFiles.length > 0) {
+      setAttachmentError(formatUnsupportedFiles(unsupportedFiles))
     }
+    if (imageFiles.length > 0) void addImages(imageFiles)
+    if (textFiles.length > 0) void inlineTextFiles(textFiles)
   }
 
   const canSend = value.trim() || images.length > 0
@@ -557,7 +577,7 @@ export function Composer(props: {
           ))}
         </div>
       )}
-      {imageError && <div className="composer-error">{imageError}</div>}
+      {attachmentError && <div className="composer-error">{attachmentError}</div>}
       {speechError && <div className="composer-error">{speechError}</div>}
       <div className="composer-row">
         <textarea
@@ -577,11 +597,20 @@ export function Composer(props: {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
+          accept="image/*,.txt,.md,.json,.js,.jsx,.ts,.tsx,.css,.scss,.html,.yaml,.yml,.toml,.py,.go,.rs,.java,.c,.cpp,.h,.rb,.php,.sh,.bash,.zsh,.ps1,.sql,.log"
           multiple
           style={{ display: 'none' }}
           onChange={(e) => {
-            if (e.target.files) void addFiles(e.target.files)
+            if (!e.target.files) return
+            const files = Array.from(e.target.files)
+            const imageFiles = files.filter(f => isImageFile(f))
+            const textFiles = files.filter(f => isTextFile(f) && !isImageFile(f))
+            const unsupportedFiles = files.filter(f => isUnsupportedFile(f))
+            if (unsupportedFiles.length > 0) {
+              setAttachmentError(formatUnsupportedFiles(unsupportedFiles))
+            }
+            if (imageFiles.length > 0) void addImages(imageFiles)
+            if (textFiles.length > 0) void inlineTextFiles(textFiles)
             e.target.value = ''
           }}
         />
@@ -589,8 +618,8 @@ export function Composer(props: {
           className="btn ghost icon-btn"
           onClick={() => fileInputRef.current?.click()}
           disabled={images.length >= MAX_IMAGES}
-          title="选择图片"
-          aria-label="选择图片"
+          title="选择文件"
+          aria-label="选择文件"
         >📎</button>
         {speechSupported && (
           <button
@@ -619,7 +648,7 @@ export function Composer(props: {
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
-        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
+        <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -749,7 +778,10 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
 }
 
 /** Inline star-domain (星域) selector in the composer bar, beside the model picker. */
-function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; disabled?: boolean; menuRev?: number }) {
+const DOMAIN_SWITCH_CACHE_WARNING =
+  '会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。'
+
+function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessionId: string; disabled?: boolean; menuRev?: number; threadNonEmpty?: boolean }) {
   const [open, setOpen] = useState(false)
   const [entries, setEntries] = useState<DomainEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -789,6 +821,10 @@ function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; dis
 
   const select = async (e: DomainEntry) => {
     if (disabled || e.current) return
+    // Mid-session switch invalidates the prefix cache (~10x rebuild). Confirm first.
+    if (threadNonEmpty && !window.confirm(`⚠ ${DOMAIN_SWITCH_CACHE_WARNING}\n\n确定切换到「${e.name}」？`)) {
+      return
+    }
     setApplyingKey(e.key)
     try {
       await setDomain(sessionId, e.key)
@@ -817,6 +853,11 @@ function DomainPicker({ sessionId, disabled, menuRev }: { sessionId: string; dis
       </button>
       {open && (
         <div className="model-picker-menu" role="listbox">
+          {threadNonEmpty && (
+            <div className="model-picker-hint" role="note">
+              ⚠ {DOMAIN_SWITCH_CACHE_WARNING}
+            </div>
+          )}
           {loading && (
             <div className="model-picker-item" role="status" aria-busy>
               <span className="model-picker-name">加载中…</span>

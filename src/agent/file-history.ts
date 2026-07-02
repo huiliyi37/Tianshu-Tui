@@ -2,8 +2,30 @@ import { mkdir, readdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { diffLines } from 'diff'
 import { dirname, join } from 'node:path'
+import type { OaiMessage } from '../api/oai-types.js'
 
 const MAX_SNAPSHOTS = 100
+
+/**
+ * The write_file / edit_file tool_use ids whose calls occurred at or after
+ * `messageIndex` — i.e. edits made after a conversation boundary. These key the
+ * FileHistory snapshots a precise rewind to that boundary undoes. Shared by the
+ * server (session-manager) and the in-process TUI rewind flow so both compute
+ * the boundary identically.
+ */
+export function collectPostBoundaryEditIds(messages: OaiMessage[], messageIndex: number): Set<string> {
+  const ids = new Set<string>()
+  for (let i = messageIndex; i < messages.length; i++) {
+    const m = messages[i]
+    if (m && m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        const name = tc.function?.name
+        if (name === 'write_file' || name === 'edit_file') ids.add(tc.id)
+      }
+    }
+  }
+  return ids
+}
 
 export interface FileBackup {
   backupFileName: string | null
@@ -116,6 +138,63 @@ export class FileHistory {
       } catch { /* backup missing, skip */ }
     }
     return filesChanged
+  }
+
+  /**
+   * Precise rewind to a conversation boundary: restore every tracked file that
+   * was edited AFTER the boundary back to its content as of that boundary, and
+   * delete files first created after it.
+   *
+   * `postBoundaryIds` = the set of edit tool_use ids (write_file / edit_file)
+   * whose calls occurred after the boundary, in message order. For each file the
+   * EARLIEST post-boundary snapshot that touched it holds the file's pre-edit
+   * content — which is exactly its state at the boundary (no edits happened
+   * between the boundary and that first post-boundary edit). Restoring that
+   * backup (or deleting it when the backup is null, i.e. the file did not yet
+   * exist at the boundary) rewinds the file precisely to the boundary while
+   * preserving any edits made before it.
+   */
+  async rewindToBoundary(postBoundaryIds: Set<string>): Promise<string[]> {
+    const targets = this.firstBackupPerFile(postBoundaryIds)
+    const filesChanged: string[] = []
+    for (const [filePath, backup] of targets) {
+      if (backup.backupFileName === null) {
+        try {
+          await unlink(filePath)
+          filesChanged.push(filePath)
+        } catch { /* already gone */ }
+        continue
+      }
+      const backupPath = join(this.backupDir, this.sessionId, backup.backupFileName)
+      try {
+        const content = await readFile(backupPath, 'utf-8')
+        await mkdir(dirname(filePath), { recursive: true })
+        await writeFile(filePath, content, 'utf-8')
+        filesChanged.push(filePath)
+      } catch { /* backup missing, skip */ }
+    }
+    return filesChanged
+  }
+
+  /** Files a boundary rewind would touch, for a pre-confirm preview. */
+  getBoundaryFiles(postBoundaryIds: Set<string>): { path: string; action: 'restore' | 'delete' }[] {
+    return [...this.firstBackupPerFile(postBoundaryIds)].map(([path, b]) => ({
+      path,
+      action: b.backupFileName === null ? 'delete' : 'restore',
+    }))
+  }
+
+  /** For each file, the backup captured by its earliest post-boundary edit. */
+  private firstBackupPerFile(postBoundaryIds: Set<string>): Map<string, FileBackup> {
+    const firstPer = new Map<string, FileBackup>()
+    // snapshots are held in chronological push order
+    for (const snap of this.snapshots) {
+      if (!postBoundaryIds.has(snap.messageId)) continue
+      for (const [filePath, backup] of Object.entries(snap.trackedFileBackups)) {
+        if (!firstPer.has(filePath)) firstPer.set(filePath, backup)
+      }
+    }
+    return firstPer
   }
 
   async getDiffStats(targetMessageId: string): Promise<DiffStats | undefined> {

@@ -81,15 +81,27 @@ export function createMcpToolWrapper(
 
         const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'}]`
 
-        return {
-          content: result.isError ? `${annotation} · tool error\n${content}` : `${content}\n${annotation}`,
-          ...(result.isError ? { isError: true } : {}),
+        if (result.isError) {
+          // 模型只需知道"失败 + 首行原因"，不必把整段服务器错误文本灌进上下文；
+          // 完整原文走 uiContent 供 TUI 展示。
+          const firstLine = content.split('\n')[0]!.slice(0, 200)
+          return {
+            content: `${annotation} · tool error\n${firstLine}`,
+            uiContent: `${annotation} · tool error\n${content}`,
+            isError: true,
+          }
         }
+        return { content: `${content}\n${annotation}` }
       } catch (err) {
         const classified = classifyMcpError(err)
         const annotation = `[MCP: ${serverId} · ${needsApproval ? 'write-capable' : 'read-only'} · error: ${classified.class} · ${classified.suggestion}]`
+        // annotation 已含 class + suggestion 作为精简信号；模型 content 只取错误首行，
+        // 完整消息走 uiContent。
+        const fullMsg = err instanceof Error ? err.message : String(err)
+        const firstLine = fullMsg.split('\n')[0]!.slice(0, 200)
         return {
-          content: `MCP tool error (${rivetName}): ${err instanceof Error ? err.message : String(err)}\n${annotation}`,
+          content: `MCP tool error (${rivetName}): ${firstLine}\n${annotation}`,
+          uiContent: `MCP tool error (${rivetName}): ${fullMsg}\n${annotation}`,
           isError: true,
         }
       }

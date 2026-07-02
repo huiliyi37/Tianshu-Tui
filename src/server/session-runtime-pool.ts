@@ -32,16 +32,25 @@ export class SessionRuntimePool implements RuntimePool {
   acquire(taskId: string): Promise<RuntimeHandle> {
     this.size++
     const handle: RuntimeHandle = {
-      execute: async (prompt, signal): Promise<RuntimeResult> => {
+      execute: async (prompt, signal, _allowedTools, onSessionStart): Promise<RuntimeResult> => {
         const session = this.manager.createSession({
           cwd: this.defaultCwd,
           title: `${this.titlePrefix}:${taskId.slice(0, 8)}`,
         })
+        // Link the visible session to the task immediately, so the desktop can
+        // jump to the thread even if the run subsequently fails.
+        onSessionStart?.(session.id)
         const onAbort = () => this.manager.abort(session.id)
         if (signal.aborted) onAbort()
         else signal.addEventListener('abort', onAbort)
         try {
-          const { summary, changedFiles } = await this.manager.runAndWait(session.id, prompt)
+          const { status, summary, changedFiles } = await this.manager.runAndWait(session.id, prompt)
+          // Propagate real terminal state: a failed/aborted run must NOT be
+          // recorded as completed. Throwing lets TaskRegistry mark failed (or,
+          // when the abort came from cancel/timeout, keep that terminal state).
+          if (status === 'failed' || status === 'aborted') {
+            throw new Error(summary || `session ${status}`)
+          }
           return { summary, changedFiles }
         } finally {
           signal.removeEventListener('abort', onAbort)

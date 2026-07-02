@@ -1,7 +1,7 @@
 /**
  * Shared star-domain picker entry builder.
  *
- * Single source of truth for the "Auto / Off / <built-in & custom domains>"
+ * Single source of truth for the "Auto / <built-in & custom domains>"
  * selection list, consumed by BOTH the TUI domain-picker overlay (src/main.ts)
  * and the desktop server's GET /sessions/:id/domains route. Keeps the two
  * surfaces byte-identical instead of drifting copies.
@@ -9,8 +9,17 @@
 import { starDomainRegistry } from './star-domain-registry.js'
 import type { ActiveStarDomain } from './star-domain.js'
 
+/**
+ * Shared warning shown when a star-domain is switched MID-SESSION. Swapping the
+ * volatileBlock rewrites frozenBase, so the prefix cache is fully invalidated and
+ * the next request rebuilds the whole context (~10x cost). New sessions / picking
+ * a domain before the first turn pay nothing.
+ */
+export const DOMAIN_SWITCH_CACHE_WARNING =
+  '⚠ 会话中途切换星域会使前缀缓存整体失效，下一次请求需全量重建上下文（成本约 10 倍+）。建议新开会话或在会话开始时选择。'
+
 export interface DomainPickerEntry {
-  /** Selection key: 'auto' | 'off' | domain id. */
+  /** Selection key: 'auto' | domain id. */
   key: string
   name: string
   motto: string
@@ -30,9 +39,13 @@ export interface DomainPickerEntry {
 /**
  * Build the domain picker entries given the session's current domain state.
  *
+ * User-selectable options: `Auto` + each built-in/custom domain. The `Off`
+ * option was removed — a session with no persona is only reachable via the
+ * `STAR_SOUL=0` env kill switch, not a picker choice.
+ *
  * Tri-state mirrors AgentLoop.getSessionDomain():
  *  - `undefined` → Auto (per-message keyword match)
- *  - `null`      → Off (no domain persona)
+ *  - `null`      → no persona (env kill switch only; not user-selectable)
  *  - object      → a specific domain is pinned
  */
 export function buildDomainPickerEntries(
@@ -44,18 +57,10 @@ export function buildDomainPickerEntries(
       name: 'Auto',
       motto: '按任务匹配',
       meta: 'auto · 关键词自动匹配星域',
-      essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时不激活任何人格。',
-      current: current === undefined,
+      essence: '根据每条消息内容自动匹配最合适的星域方法论；未命中时回退天枢。',
+      // null (env kill switch) has no picker entry → also reflect as Auto-selected.
+      current: current === undefined || current === null,
       uiPersona: { separator: 'thin', accent: 'primary', glyph: '⚙' },
-    },
-    {
-      key: 'off',
-      name: 'Off',
-      motto: '无星域',
-      meta: '关闭星域人格',
-      essence: '本会话不激活任何星域方法论，仅使用基础执行纪律。',
-      current: current === null,
-      uiPersona: { separator: 'thin', accent: 'dim', glyph: '⊘' },
     },
     ...starDomainRegistry.list().map((d) => {
       const firstLine = (d.volatileBlock || '')

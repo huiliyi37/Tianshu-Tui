@@ -100,6 +100,9 @@ export interface CockpitSnapshot {
     physarumShadow: PhysarumShadowStats
     cacheDiagnostic: string | null
     reasoningEffort: string
+    /** Active star-domain label: pinned domain name, `Auto(天枢)` for auto
+     *  (keyword fallback), or `关闭(环境)` when STAR_SOUL kill switch is on. */
+    starDomain: string
   }
   mcp: {
     servers: Array<{

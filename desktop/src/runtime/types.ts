@@ -29,7 +29,7 @@ export interface SessionRecord {
   planMode?: PlanModeState
   /** PlusMenu — current provider model id (resolved id). Absent → global default. */
   model?: string
-  /** PlusMenu — star-domain selection key ('auto' | 'off' | <domainId>). */
+  /** PlusMenu — star-domain selection key ('auto' | <domainId>). */
   domain?: string
   /** Visual glyph for the current star-domain selection (for badges). */
   domainGlyph?: string
@@ -54,9 +54,9 @@ export interface ModelEntry {
   current: boolean
 }
 
-/** PlusMenu — a star-domain picker entry (Auto / Off / built-in & custom). */
+/** PlusMenu — a star-domain picker entry (Auto / built-in & custom). */
 export interface DomainEntry {
-  /** Selection key: 'auto' | 'off' | <domainId>. */
+  /** Selection key: 'auto' | <domainId>. */
   key: string
   name: string
   motto: string
@@ -239,6 +239,11 @@ export interface ProjectTemplatesApplyResult {
   decision: 'created' | 'declined' | 'skipped'
 }
 
+export interface ScheduledTaskRetry {
+  maxAttempts: number
+  backoffMs: number
+}
+
 export interface ScheduledTask {
   id: string
   prompt: string
@@ -248,6 +253,28 @@ export interface ScheduledTask {
   lastTriggeredAt?: string
   triggerCount: number
   enabled?: boolean
+  retry?: ScheduledTaskRetry
+}
+
+export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'timed_out'
+
+/** A single execution record (run) of a task; mirrors the backend TaskRecord. */
+export interface TaskRecord {
+  id: string
+  prompt: string
+  source: 'api' | 'cron' | 'manual' | 'internal'
+  status: TaskStatus
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  error?: string
+  result?: { summary: string; changedFiles: string[]; exitCode?: number }
+  allowedTools?: string[]
+  scheduledTaskId?: string
+  sessionId?: string
+  attempt?: number
+  retryOf?: string
+  retry?: ScheduledTaskRetry
 }
 
 export interface DelegationNode {
@@ -457,6 +484,31 @@ export interface McpServerToolsResponse {
     description: string
     inputSchema: Record<string, unknown>
   }>
+}
+
+export interface McpPresetEnvField {
+  key: string
+  label: string
+  help?: string
+}
+
+export interface McpPreset {
+  id: string
+  name: string
+  description: string
+  category: 'dev' | 'productivity' | 'communication' | 'knowledge'
+  transport: 'stdio' | 'sse'
+  command?: string
+  args?: string[]
+  url?: string
+  requiredEnv?: McpPresetEnvField[]
+  expectedTools?: string[]
+  docsUrl?: string
+}
+
+export interface McpPresetsResponse {
+  presets: McpPreset[]
+  configuredIds: string[]
 }
 
 /** I4 — user-defined hook event kinds. Mirrors backend HookEvent. */

@@ -37,7 +37,7 @@ import type { Config } from '../config/schema.js'
 import { computeUsageCost, findModelPricing } from '../utils/pricing.js'
 import { getRollbackPreview, rollbackToCheckpoint, makeOwnershipGuard } from '../agent/checkpoint.js'
 import { listProjectFiles, rankFiles, listDirEntries } from './file-list.js'
-import { listPrs, getPrDetail, isGhAvailable } from './gh-cli.js'
+import { listPrs, getPrDetail, isGhAvailable, getPrDiff, submitPrReview, type PrReviewInput } from './gh-cli.js'
 import { resolveAppPromptInput } from '../tui/slash-commands.js'
 import { RECOMMENDED_MAX_SKILLS } from '../skills/skill-loader.js'
 import { validatePath } from '../tools/path-validate.js'
@@ -240,7 +240,7 @@ export function buildSessionRoutes(
     }, apiToken),
 
     // ── PlusMenu: star-domain picker ──
-    // Read — Auto / Off / domains, current selection flagged (shared builder).
+    // Read — Auto / domains, current selection flagged (shared builder).
     'GET /sessions/:id/domains': withAuth((_body, params) => {
       const entries = manager.listDomains(params!.id!)
       if (!entries) return { status: 404, body: { error: 'Session not found' } }
@@ -1034,6 +1034,34 @@ export function buildSessionRoutes(
       return { status: 200, body: { ok: true, ...manager.getSession(params!.id!) } }
     }, apiToken),
 
+    // ── Precise rewind: preview the agent-edited files a per-message code
+    // rewind would restore/delete (from FileHistory). available=false lets the
+    // caller fall back to the coarse checkpoint rollback. ──
+    'POST /sessions/:id/rewind/file-preview': withAuth((body, params) => {
+      const data = (body ?? {}) as { messageIndex?: number }
+      if (typeof data.messageIndex !== 'number' || data.messageIndex < 0) {
+        return { status: 400, body: { error: 'Missing or invalid "messageIndex"' } }
+      }
+      const r = manager.previewFilesPrecise(params!.id!, data.messageIndex)
+      if (!r) return { status: 404, body: { error: 'Session not found' } }
+      return { status: 200, body: r }
+    }, apiToken),
+
+    // ── Precise rewind: restore agent-edited files to their state at the
+    // selected message (does NOT truncate the conversation). ──
+    'POST /sessions/:id/rewind/files': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { messageIndex?: number }
+      if (typeof data.messageIndex !== 'number' || data.messageIndex < 0) {
+        return { status: 400, body: { error: 'Missing or invalid "messageIndex"' } }
+      }
+      const r = await manager.rewindFilesPrecise(params!.id!, data.messageIndex)
+      if (!r) return { status: 404, body: { error: 'Session not found' } }
+      if (!r.success) {
+        return { status: 409, body: { error: 'Session is running, has no file history, or index out of range', ...r } }
+      }
+      return { status: 200, body: r }
+    }, apiToken),
+
     // Git worktrees — list all worktrees for the repo root (used by the desktop
     // sidebar to show worktree branch status for sessions).
     'GET /worktrees': withAuth(() => ({
@@ -1080,6 +1108,39 @@ export function buildSessionRoutes(
       const pr = await getPrDetail(cwd, num)
       if (!pr) return { status: 404, body: { error: 'PR not found or gh not available' } }
       return { status: 200, body: pr }
+    }, apiToken),
+
+    // GitHub PR full unified diff — for per-file rendering in DiffView.
+    'GET /github/prs/:number/diff': withAuth(async (_body, params) => {
+      const cwd = manager.getDefaultCwd()
+      const num = Number(params?.number)
+      if (!num || num <= 0) return { status: 400, body: { error: 'Invalid PR number' } }
+      const diff = await getPrDiff(cwd, num)
+      if (diff == null) return { status: 404, body: { error: 'PR diff not available or gh not available' } }
+      return { status: 200, body: { diff } }
+    }, apiToken),
+
+    // Submit a PR review (verdict + summary + inline comments) as one GitHub
+    // review. Surfaces gh's stderr on failure so the UI can explain what broke.
+    'POST /github/prs/:number/review': withAuth(async (body, params) => {
+      const cwd = manager.getDefaultCwd()
+      const num = Number(params?.number)
+      if (!num || num <= 0) return { status: 400, body: { error: 'Invalid PR number' } }
+      const data = (body ?? {}) as Partial<PrReviewInput>
+      const event = data.event
+      if (event !== 'APPROVE' && event !== 'REQUEST_CHANGES' && event !== 'COMMENT') {
+        return { status: 400, body: { error: 'Invalid review event' } }
+      }
+      // GitHub rejects a COMMENT review with neither a body nor inline comments.
+      const comments = Array.isArray(data.comments) ? data.comments : []
+      if (event === 'COMMENT' && !data.body?.trim() && comments.length === 0) {
+        return { status: 400, body: { error: 'Comment review requires a summary or at least one inline comment' } }
+      }
+      const result = await submitPrReview(cwd, num, { event, body: data.body ?? '', comments })
+      if (!result.ok) {
+        return { status: 502, body: { ok: false, error: result.stderr.trim() || 'gh review submission failed' } }
+      }
+      return { status: 200, body: { ok: true } }
     }, apiToken),
   }
 

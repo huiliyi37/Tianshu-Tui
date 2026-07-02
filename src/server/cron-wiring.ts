@@ -56,13 +56,16 @@ export class CronWiring {
 
     // 接线：scheduler 触发 → TaskRegistry 创建 cron 任务。
     // 使用显式订阅 API，避免方括号私有写入和单回调覆盖。
-    this.unsubscribeTaskDue = this.scheduler.subscribeTaskDue(async (prompt, allowedTools, agentId) => {
+    this.unsubscribeTaskDue = this.scheduler.subscribeTaskDue(async (prompt, allowedTools, agentId, meta) => {
       await this.registry.createTask({
         prompt,
         source: 'cron',
         callerId: agentId ?? 'cron-scheduler',
         // 保留空数组语义（空=无工具，undefined=默认全量）
         allowedTools,
+        // 关联回 ScheduledTask 并继承重试策略（用于看板分组 + 失败重试）。
+        scheduledTaskId: meta?.scheduledTaskId,
+        retry: meta?.retry,
       })
     })
 

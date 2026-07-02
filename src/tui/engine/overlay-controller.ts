@@ -1,6 +1,6 @@
 import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData } from '../format/overlay.js'
 import type { CockpitSnapshot, Panel } from '../cockpit/types.js'
-import type { RewindData } from '../format/rewind.js'
+import type { RewindData, RewindFile, RewindMode } from '../format/rewind.js'
 import type { HistorySearchData } from '../format/history-search.js'
 import type { ConnectCommit } from '../connect-flow.js'
 
@@ -12,6 +12,9 @@ export interface OverlayNavState {
   pagerSelectedMessage: number
   paletteIndex: number
   rewindIndex: number
+  /** Rewind overlay sub-phase: message list vs restore-granularity chooser. */
+  rewindPhase: 'list' | 'action'
+  rewindActionIndex: number
   historySearchIndex: number
   chronicleIndex: number
   tasksIndex: number
@@ -31,6 +34,8 @@ export interface OverlayDataProviders {
   chronicleEntries?: () => ChronicleData
   cockpitSnapshot?: () => CockpitSnapshot
   rewindEntries?: () => RewindData
+  /** Precise code-rewind preview for the selected message (phase 2 display). */
+  rewindFilePreview?: (messageIndex: number) => RewindFile[]
   historySearchData?: () => HistorySearchData
   tasksData?: () => TasksData
   domainPickerData?: () => DomainPickerData
@@ -45,14 +50,15 @@ export interface OverlayDataProviders {
  * TuiApp; this class only manages nav state / data providers / exec callbacks.
  */
 export class OverlayController {
-  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
+  private overlayNav: OverlayNavState = { pagerPage: 0, pagerMode: 'page', pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list', rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running', domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
   private overlayData?: OverlayDataProviders
   private paletteExec?: (index: number) => void
-  private rewindExec?: (content: string) => void
+  private rewindExec?: (messageIndex: number, mode: RewindMode) => void
   private chronicleExec?: (id: string) => void
   private domainPickerExec?: (key: string) => void
   private modelPickerExec?: (key: string) => void
   private themePickerExec?: (key: string) => void
+  private themePickerSaveDefaultExec?: (key: string) => void
   private choicePanelExec?: (id: string) => void
   private connectExec?: (commit: ConnectCommit, summary: string) => void
   private cockpitPanel: Panel = 'summary'
@@ -61,7 +67,7 @@ export class OverlayController {
   /** Direct mutable access to nav state object */
   nav(): OverlayNavState { return this.overlayNav }
   resetNav(): void {
-    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
+    this.overlayNav = { pagerPage: 0, pagerMode: 'page' as const, pagerSearchQuery: '', pagerSearchCurrent: 0, pagerSelectedMessage: 0, paletteIndex: 0, rewindIndex: 0, rewindPhase: 'list' as const, rewindActionIndex: 0, historySearchIndex: 0, chronicleIndex: 0, tasksIndex: 0, tasksFilter: 'running' as const, domainPickerIndex: 0, modelPickerIndex: 0, themePickerIndex: 0, choicePanelIndex: 0, connectIndex: 0, query: '' }
   }
 
   get pagerPage(): number { return this.overlayNav.pagerPage }
@@ -115,8 +121,8 @@ export class OverlayController {
   // ── exec callbacks ──
   getPaletteExec(): ((index: number) => void) | undefined { return this.paletteExec }
   setPaletteExec(fn: ((index: number) => void) | undefined): void { this.paletteExec = fn }
-  getRewindExec(): ((content: string) => void) | undefined { return this.rewindExec }
-  setRewindExec(fn: ((content: string) => void) | undefined): void { this.rewindExec = fn }
+  getRewindExec(): ((messageIndex: number, mode: RewindMode) => void) | undefined { return this.rewindExec }
+  setRewindExec(fn: ((messageIndex: number, mode: RewindMode) => void) | undefined): void { this.rewindExec = fn }
   getChronicleExec(): ((id: string) => void) | undefined { return this.chronicleExec }
   setChronicleExec(fn: ((id: string) => void) | undefined): void { this.chronicleExec = fn }
   getDomainPickerExec(): ((key: string) => void) | undefined { return this.domainPickerExec }
@@ -125,6 +131,8 @@ export class OverlayController {
   setModelPickerExec(fn: ((key: string) => void) | undefined): void { this.modelPickerExec = fn }
   getThemePickerExec(): ((key: string) => void) | undefined { return this.themePickerExec }
   setThemePickerExec(fn: ((key: string) => void) | undefined): void { this.themePickerExec = fn }
+  getThemePickerSaveDefaultExec(): ((key: string) => void) | undefined { return this.themePickerSaveDefaultExec }
+  setThemePickerSaveDefaultExec(fn: ((key: string) => void) | undefined): void { this.themePickerSaveDefaultExec = fn }
   getChoicePanelExec(): ((id: string) => void) | undefined { return this.choicePanelExec }
   setChoicePanelExec(fn: ((id: string) => void) | undefined): void { this.choicePanelExec = fn }
   getConnectExec(): ((commit: ConnectCommit, summary: string) => void) | undefined { return this.connectExec }

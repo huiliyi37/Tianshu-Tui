@@ -31,6 +31,9 @@ function parseTaskFilter(query: Record<string, string>): TaskFilter {
   if (query.source) {
     filter.source = query.source as TaskFilter['source']
   }
+  if (query.scheduledTaskId) {
+    filter.scheduledTaskId = query.scheduledTaskId
+  }
   if (query.limit) {
     const n = parseInt(query.limit, 10)
     if (n > 0) filter.limit = n

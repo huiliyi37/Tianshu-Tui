@@ -84,8 +84,12 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: 'apply_patch requires a non-empty "diff" string.', isError: true }
     }
 
+    // Normalize header paths to forward slashes so patches produced on/with
+    // Windows paths still apply cleanly and render as valid unified diffs.
+    const normalizedDiff = normalizeDiffPaths(diff)
+
     const result = await applyPatch(params.cwd, {
-      diff,
+      diff: normalizedDiff,
       checkOnly: params.input.check_only === true,
     })
 
@@ -93,14 +97,49 @@ export const APPLY_PATCH_TOOL: Tool = {
       return { content: `Patch failed: ${result.error}`, isError: true }
     }
 
+    // uiContent (display-only): echo the applied diff so the TUI/desktop card
+    // renders a colored +/- inline diff. Model-facing `content` stays a short
+    // summary (unchanged) → no prefix-cache/context cost. Cap the display diff
+    // to keep the UI responsive for huge patches.
     return {
       content: params.input.check_only === true
         ? 'Patch applies cleanly (check-only; no files modified).'
         : 'Patch applied successfully.',
+      uiContent: truncateDiffForUi(normalizedDiff.trim()),
     }
   },
 
   requiresApproval: () => true,
   isConcurrencySafe: () => false,
   isEnabled: () => true,
+}
+
+const APPLY_PATCH_MAX_UI_LINES = 600
+
+/** Normalize backslashes to forward slashes only in diff header lines so a
+ *  patch created on Windows (or mentioning Windows paths) stays valid for
+ *  `git apply` and renders correctly as a unified diff. Context/code lines are
+ *  left untouched. */
+function normalizeDiffPaths(diff: string): string {
+  return diff
+    .split('\n')
+    .map((line) => {
+      if (
+        line.startsWith('--- ') ||
+        line.startsWith('+++ ') ||
+        line.startsWith('diff --git')
+      ) {
+        return line.replace(/\\/g, '/')
+      }
+      return line
+    })
+    .join('\n')
+}
+
+/** Cap display-only diff lines; excess is replaced by a single hint line. */
+function truncateDiffForUi(diff: string, maxLines = APPLY_PATCH_MAX_UI_LINES): string {
+  const lines = diff.split('\n')
+  if (lines.length <= maxLines) return diff
+  const hidden = lines.length - maxLines
+  return [...lines.slice(0, maxLines), `… (${hidden} more diff lines, Ctrl+O)`].join('\n')
 }
