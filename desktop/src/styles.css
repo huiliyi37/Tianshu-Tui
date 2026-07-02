@@ -5625,3 +5625,142 @@ html[data-theme="nebula"] .plan-panel {
   border-radius: var(--radius-md);
   border-left: 3px solid var(--accent);
 }
+
+/* ══ P2 — 浮岛视觉体系 (Floating Islands) ═══════════════════════════
+   Window is the canvas, panels are rounded islands floating on it.
+   Late in the cascade on purpose: overrides the flat Codex-style chrome
+   defined earlier without rewriting it. */
+
+/* Canvas: painted on the shell, behind the wallpaper layer (parent background
+   paints under children), so glass mode still sees the wallpaper in gaps. */
+.shell { background: var(--canvas-bg); }
+
+/* Breathing room around the three-column group. */
+.workspace-resizable { padding: var(--island-gap); }
+
+/* Rail: leftmost floating island carrying surface navigation. */
+.rail {
+  width: 56px;
+  margin: var(--island-gap) 0 var(--island-gap) var(--island-gap);
+  border: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-island);
+}
+
+/* The three columns become islands. */
+.project-sidebar,
+.conversation,
+.review {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-island);
+  transition: border-radius var(--dur-island) var(--ease), box-shadow var(--dur-island) var(--ease);
+  overflow: hidden;
+}
+
+/* Resize handles live inside the island gap — invisible until hovered. */
+.panel-resize-handle {
+  width: var(--island-gap);
+  border-left: none;
+  background: transparent;
+}
+.panel-resize-handle:hover,
+.panel-resize-handle[data-resize-handle-active] {
+  border-left: none;
+}
+.panel-resize-handle:hover::after,
+.panel-resize-handle[data-resize-handle-active]::after {
+  content: '';
+  position: absolute; left: 50%; top: 14%; bottom: 14%;
+  width: 3px; transform: translateX(-50%);
+  border-radius: var(--radius-pill);
+  background: var(--accent); opacity: 0.55;
+}
+.panel-resize-handle.collapsed { width: 0; }
+
+/* Composer capsule — the visual anchor of the concept art. */
+.composer-float-inner {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-float);
+}
+
+/* User bubble: md radius with a tucked corner toward the sender. */
+.msg.user .msg-body {
+  border-radius: var(--radius-md) var(--radius-md) 4px var(--radius-md);
+}
+
+/* Floating chrome: modals / docks share the float shadow. */
+.modal {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+}
+.approval-modal-card { box-shadow: var(--shadow-float); }
+.jobs-dock {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+}
+
+/* Narrow windows: tighter gap so content keeps priority. */
+@media (max-width: 1200px) {
+  :root { --island-gap: 6px; }
+}
+
+/* ── P2-2 window chrome ─────────────────────────────────────────── */
+
+/* Self-drawn title bar (Windows/Linux, decorations: false). */
+html[data-titlebar="custom"] .shell { padding-top: 36px; }
+.titlebar {
+  position: fixed; top: 0; left: 0; right: 0; height: 36px;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--canvas-bg);
+  user-select: none; -webkit-user-select: none;
+}
+.titlebar-left {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding-left: 12px; min-width: 0;
+}
+.titlebar-logo {
+  width: 20px; height: 20px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  color: var(--text-strong); font-size: 11px; font-weight: var(--weight-semibold);
+  pointer-events: none;
+}
+.titlebar-title {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--muted); font-size: var(--text-sm);
+  max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.titlebar-title:hover { color: var(--text); background: var(--hover); }
+.titlebar-title-input {
+  background: var(--panel-2); border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  color: var(--text); font-size: var(--text-sm); padding: 2px 8px; outline: none;
+  min-width: 200px;
+}
+.titlebar-controls { display: flex; align-self: stretch; }
+.titlebar-btn {
+  width: 46px; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--muted); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.titlebar-btn:hover { background: var(--hover); color: var(--text); }
+.titlebar-btn.close:hover { background: #e81123; color: #fff; }
+
+/* macOS overlay: reserve space for the native traffic lights above the rail. */
+html[data-platform="mac"] .rail { padding-top: 34px; }
+
+/* Maximized: islands go edge-to-edge — no gaps, no rounding. */
+html[data-maximized] { --island-gap: 0px; }
+html[data-maximized] .rail,
+html[data-maximized] .project-sidebar,
+html[data-maximized] .conversation,
+html[data-maximized] .review {
+  border-radius: 0;
+  box-shadow: none;
+}
+html[data-maximized] .rail { border-width: 0 1px 0 0; }

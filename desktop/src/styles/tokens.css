@@ -31,16 +31,27 @@
   --space-6: 24px;
   --space-8: 32px;
 
-  /* Radii */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Radii — P2「浮岛」rounded language (was 6/8/12, too conservative). */
+  --radius-sm: 8px;    /* chips, small buttons */
+  --radius-md: 12px;   /* inputs, list rows, message cards */
+  --radius-lg: 16px;   /* panel islands, modals */
+  --radius-xl: 20px;   /* window-level containers, composer capsule */
   --radius-pill: 999px;
+
+  /* ── Island system (P2) — window is the canvas, panels are floating islands.
+     canvas-bg / island-bg / shadows are refined per theme in themes/*.json;
+     these are safe fallbacks derived from the base palette. */
+  --island-gap: 10px;
+  --canvas-bg: var(--bg);
+  --island-bg: var(--panel);
+  --shadow-island: 0 1px 2px rgb(0 0 0 / 0.2), 0 4px 16px rgb(0 0 0 / 0.15);
+  --shadow-float: 0 8px 32px rgb(0 0 0 / 0.35);
 
   /* Motion */
   --ease: cubic-bezier(0.2, 0, 0, 1);
   --dur-fast: 90ms;
   --dur: 140ms;
+  --dur-island: 160ms; /* unified radius/shadow transition for islands */
 
   /* Z-index */
   --z-modal: 50;

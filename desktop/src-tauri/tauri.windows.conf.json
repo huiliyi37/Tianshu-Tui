@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "天枢 · Tianshu",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 600,
+        "transparent": true,
+        "decorations": false,
+        "shadow": true
+      }
+    ]
+  }
+}

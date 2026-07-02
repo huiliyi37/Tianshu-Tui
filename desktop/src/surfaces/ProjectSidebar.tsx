@@ -1,40 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  History, Home, Clock, Bell, Puzzle, GitBranch, BarChart3,
-  Network, Settings, Scale, Plug, SlidersHorizontal, FolderOpen, LayoutGrid, Pencil, Trash2, type LucideIcon,
-} from 'lucide-react'
+import { SlidersHorizontal, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { useCloseSession, useDeleteSession, useRenameSession, useSessions, useUnarchiveSession } from '../state/queries'
-import { useUiDispatch, useUiState, type Surface } from '../state/store'
+import { useUiDispatch, useUiState } from '../state/store'
 import { addKnownProject, deriveProjects, loadKnownProjects, projectId, removeKnownProject, renameKnownProject } from '../lib/projects'
 import { pickFolder } from '../lib/dialog'
 import { listAllSessions } from '../runtime/client'
 import type { SessionRecord } from '../runtime/types'
 
 
-const CORE_SURFACES: Surface[] = ['workspace', 'mission', 'automations', 'attention']
-const TOOL_SURFACES: Surface[] = ['git', 'skills', 'insights', 'delegation', 'council', 'hooks']
-
-const NAV_ICONS: Record<Surface, LucideIcon> = {
-  home: Home,
-  workspace: History,
-  mission: LayoutGrid,
-  automations: Clock,
-  attention: Bell,
-  skills: Puzzle,
-  git: GitBranch,
-  insights: BarChart3,
-  delegation: Network,
-  council: Scale,
-  hooks: Plug,
-  settings: Settings,
-}
-
-function NavIcon({ surface }: { surface: Surface }) {
-  const Ic = NAV_ICONS[surface]
-  return <Ic size={16} strokeWidth={1.7} aria-hidden />
-}
-
+// P2-3a: surface navigation moved to the Rail (App shell). The sidebar is now a
+// pure project/session list — search, project tree, archived sessions.
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp
@@ -69,7 +45,6 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
   const [showArchived, setShowArchived] = useState(false)
   const [archivedSessions, setArchivedSessions] = useState<SessionRecord[]>([])
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
-  const [toolsExpanded, setToolsExpanded] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const loadArchived = async () => {
@@ -208,45 +183,6 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
             </button>
           )}
         </div>
-
-        <nav className="sidebar-nav" aria-label={t('sidebar.mainNav')}>
-          {CORE_SURFACES.map((s) => (
-            <button
-              key={s}
-              className={`sidebar-nav-item ${ui.surface === s ? 'active' : ''}`}
-              onClick={() => dispatch({ type: 'setSurface', surface: s })}
-            >
-              <span className="sni-icon"><NavIcon surface={s} /></span>
-              <span className="sni-label">{t(s)}</span>
-            </button>
-          ))}
-
-          <div
-            className="sidebar-section-head tools-toggle-head"
-            onClick={() => setToolsExpanded(!toolsExpanded)}
-            style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0 4px 0', padding: '6px 8px' }}
-          >
-            <span className="sidebar-section-title">{t('sidebar.tools')}</span>
-            <span className="tools-toggle-arrow" style={{ fontSize: '9px', opacity: 0.6 }}>{toolsExpanded ? '▲' : '▼'}</span>
-          </div>
-
-          {toolsExpanded && (
-            <div className="sidebar-sub-nav">
-              {TOOL_SURFACES.map((s) => (
-                <button
-                  key={s}
-                  className={`sidebar-nav-item sub-item ${ui.surface === s ? 'active' : ''}`}
-                  onClick={() => dispatch({ type: 'setSurface', surface: s })}
-                >
-                  <span className="sni-icon"><NavIcon surface={s} /></span>
-                  <span className="sni-label">{t(s)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </nav>
-
-        <div className="sidebar-divider" />
 
         <div className="search-wrapper">
           <span className="search-icon" aria-hidden>
@@ -521,23 +457,17 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
 
       <div className="sidebar-bottom" style={{ display: 'flex', gap: '4px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>
         <button
-          className={`sidebar-nav-item bottom-settings-btn ${ui.surface === 'settings' ? 'active' : ''}`}
-          onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
-          style={{ flex: 1 }}
-        >
-          <span className="sni-icon"><Settings size={16} strokeWidth={1.7} /></span>
-          <span className="sni-label">{t('settings')}</span>
-        </button>
-        <button
           className={`sidebar-archive-btn ${showArchived ? 'active' : ''}`}
           onClick={loadArchived}
           title={t('sidebar.archive')}
           style={{
-            width: '32px',
+            flex: 1,
             height: '32px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: '6px',
+            fontSize: 'var(--text-sm)',
             background: 'transparent',
             border: 'none',
             borderRadius: 'var(--radius-sm)',
@@ -547,6 +477,7 @@ export function ProjectSidebar(props: { onCollapse?: () => void }) {
           }}
         >
           <FolderOpen size={16} />
+          <span>{t('sidebar.archive')}</span>
         </button>
       </div>
     </div>

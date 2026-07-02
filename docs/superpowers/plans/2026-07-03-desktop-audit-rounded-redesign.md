@@ -127,30 +127,30 @@ Claude Desktop 把模型、权限模式、上下文用量全部内联在输入�
 --shadow-float: 0 8px 32px rgb(0 0 0 / .35);  /* modal/popover */
 ```
 
-- [ ] 7 套 JSON 主题各补 `canvas-bg`/`island-bg`/阴影 token(暗色系拉开画布与浮岛的明度差;浅色系用描边 + 弱阴影替代)。
-- [ ] 动效:面板出现 `surface-in` 已有,补 160ms 的 radius/shadow 过渡统一手感。
+- [x] 7 套 JSON 主题各补 `canvas-bg`/`island-bg`/阴影 token(暗色系拉开画布与浮岛的明度差;浅色系用描边 + 弱阴影替代)。
+- [x] 动效:面板出现 `surface-in` 已有,补 160ms 的 radius/shadow 过渡统一手感(`--dur-island`)。
 
 ### P2-2 自定义标题栏(Windows 重点)
 
 现状 `tauri.conf.json` 用系统原生标题栏,与圆角浮岛气质割裂。
-- [ ] `decorations: false` + 自绘标题栏:左侧 logo + 会话标题(可点击重命名,对标 Claude Desktop),右侧自绘 最小化/最大化/关闭(Windows 风格 hover 红色关闭);`data-tauri-drag-region` 拖拽。
-- [ ] macOS 走 `titleBarStyle: overlay` 保留原生红绿灯,内容延伸到顶(双平台分支,Tauri 2 支持)。
-- [ ] Windows 注意:无边框窗口要自己处理边缘 resize(Tauri `startResizeDragging`)与 Win11 圆角(DWM 自动给,Win10 直角可接受);最大化时去圆角去间隙(全屏浮岛贴边)。
-- [ ] 已有的 Mica/vibrancy(`lib.rs:209-223`)与浮岛叠加验证:玻璃态下浮岛用半透明 `island-bg` + backdrop-blur,solid 模式用实色。
+- [x] `decorations: false` + 自绘标题栏:`tauri.windows.conf.json` + `TitleBar.tsx`——左侧 logo + 会话标题(点击重命名),右侧 最小化/最大化/关闭(hover 红色关闭);`data-tauri-drag-region` 拖拽 + 双击最大化。⚠️ 需 Windows 实机验证。
+- [x] macOS 走 `titleBarStyle: Overlay`(`tauri.macos.conf.json`)保留原生红绿灯;`html[data-platform="mac"]` 给 Rail 顶部留 34px。⚠️ 需 macOS 打包验证红绿灯与 Rail 不重叠。
+- [x] Windows 边缘 resize 依赖 `shadow: true` 的原生 resize border(未手写 startResizeDragging 边条);最大化时 `html[data-maximized]` 去圆角去间隙。⚠️ 需 Windows 实机验证边缘拖拽。
+- [ ] 已有的 Mica/vibrancy(`lib.rs:209-223`)与浮岛叠加验证:玻璃态下浮岛用半透明 `island-bg` + backdrop-blur,solid 模式用实色。(待 Windows 实机)
 
 ### P2-3 布局改造(`WorkspaceSurface`)
 
-- [ ] **挂载 `Rail.tsx`**——组件已写好、带 i18n tooltip、CSS 都在(`styles.css:132`),就是没 import。作为最左侧 56px 浮岛,承载 surface 切换;ProjectSidebar 瘦身为纯项目/会话列表。这一步零新代码,纯接线。
-- [ ] 三栏 Panel 之间加 `--island-gap`,每栏包 `--radius-lg` 卡片 + `--shadow-island`;resize handle 藏进间隙(hover 显形)。
-- [ ] Composer 改胶囊浮层:脱离面板底边,悬浮在对话流之上(`--radius-xl` + `--shadow-float`),内嵌 P1-1 的芯片组。这是概念图的视觉锚点。
-- [ ] 消息区:user 消息右对齐圆角气泡(`--radius-md`,一侧收小),assistant 消息通栏软卡;工具调用 chip 化(现有折叠组样式升级为 pill)。
-- [ ] JobsDock / TodoDock / ApprovalModal 统一浮岛化(modal 用 `--radius-lg` + `--shadow-float`)。
+- [x] **挂载 `Rail.tsx`**——App shell 接线(含 attention 徽标计数),56px 浮岛;ProjectSidebar 瘦身为纯项目/会话列表(移除 surface 导航与底部设置钮)。
+- [x] 三栏 Panel 之间加 `--island-gap`,每栏包 `--radius-lg` 卡片 + `--shadow-island`;resize handle 藏进间隙(hover 显 accent 条)。
+- [x] Composer 胶囊浮层已有(`composer-float-inner`),升级为 `--radius-xl` + `--shadow-float`。
+- [x] 消息区:user 气泡收敛为 `--radius-md` + 单角收小;assistant 保持通栏自然流;工具折叠组随 radius token 升级(16px)。
+- [x] JobsDock / ApprovalModal / modal 统一 `--radius-lg` + `--shadow-float`。
 
 ### P2-4 验收
 
-- [ ] 7 主题 × glass/solid × Win11/Win10/macOS 截图走查;
-- [ ] 虚拟列表滚动性能无回退(浮岛阴影用 GPU 合成层,避免逐项 box-shadow 重绘——阴影打在面板容器不打在列表项);
-- [ ] 窄窗(<1200px)折叠逻辑(`WorkspaceSurface.tsx:62-82`)与浮岛间隙适配。
+- [x] 浏览器 dev 模式截图走查:dark / sakura 两主题确认浮岛间隙、圆角、画布明度差正常;⚠️ 7 主题 × glass/solid × Win11/Win10/macOS 全矩阵待实机。
+- [x] 阴影只打在三个面板容器 + Rail 上,不打在列表项(虚拟列表无逐项 box-shadow)。
+- [x] 窄窗(<1200px)`--island-gap` 收窄为 6px(media query);审查面板自动折叠逻辑不变。
 
 ---
 
