@@ -15,6 +15,7 @@ import { Group, Panel, Separator, usePanelRef } from 'react-resizable-panels'
 import { loadPanelLayout, saveSidebarWidth, saveReviewWidth, resetPanelLayout } from '../lib/panel-layout'
 import { UpdateBanner } from '../components/UpdateBanner'
 import { parseMcpToolName, previewOf, editableKey } from '../lib/approval-preview'
+import { isApprovalConsent } from '../lib/consent'
 import { DiffView } from '../components/DiffView'
 
 const HomeSurface = lazy(() => import('./HomeSurface').then((m) => ({ default: m.HomeSurface })))
@@ -83,19 +84,34 @@ export function WorkspaceSurface() {
   // Desktop notifications now fire globally for ANY session (Q2) via
   // useGlobalNotifications mounted in App — no per-active-session effects here.
 
+  // Consent bridge (Q): when a tool is blocked on approval and the user types an
+  // unambiguous whole-message consent, resolve the pending approval instead of
+  // sending/steering it as prose — otherwise the message never reaches the
+  // approval channel and the model keeps re-hitting the same gate. Returns true
+  // when it consumed the input. Guarded on both send and steer paths since a
+  // pending approval means the session is running (submits route to steer).
+  const tryConsentBridge = useCallback((text: string): boolean => {
+    if (!activeId || !view.pendingApproval) return false
+    if (!isApprovalConsent(text)) return false
+    void answerApproval(activeId, view.pendingApproval.requestId, 'approve')
+    return true
+  }, [activeId, view.pendingApproval])
+
   const handleSend = useCallback((prompt: string, images?: string[]) => {
     if (!activeId) return
+    if (!images?.length && tryConsentBridge(prompt)) return
     sendPrompt.mutate({ id: activeId, prompt, images })
-  }, [activeId, sendPrompt])
+  }, [activeId, sendPrompt, tryConsentBridge])
 
   // T3 — queue mid-run guidance. If the run already finished between render and
   // submit (idle), fall back to starting a fresh turn so input is never lost.
   const handleSteer = useCallback((text: string) => {
     if (!activeId) return
+    if (tryConsentBridge(text)) return
     void steerSession(activeId, text).then((r) => {
       if (r === 'idle') sendPrompt.mutate({ id: activeId, prompt: text })
     })
-  }, [activeId, sendPrompt])
+  }, [activeId, sendPrompt, tryConsentBridge])
 
   const handleApproval = useCallback(
     (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => {

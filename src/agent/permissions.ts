@@ -88,6 +88,21 @@ export function learnBashPrefix(command: string, permissions: PermissionConfig |
   }
 }
 
+/** Learn a file-scoped allow rule into the session overlay after user approval,
+ *  so subsequent identical edits to the SAME file don't re-prompt within the
+ *  session. Mirrors learnBashPrefix for write tools; dedupes to bound growth.
+ *  The path is stored verbatim — permission patterns treat non-`*` characters
+ *  as literals (see patternMatches), so an exact path matches only itself. */
+export function learnFileApproval(
+  toolName: string,
+  filePath: string,
+  overlay: PermissionOverlay | undefined,
+): void {
+  if (!overlay || !filePath) return
+  const exists = overlay.allow.some(r => r.tool === toolName && r.params?.file_path === filePath)
+  if (!exists) overlay.allow.push({ tool: toolName, params: { file_path: filePath } })
+}
+
 /** Characters that terminate a shell token or start a shell operator.
  *  Used to verify the command contains no shell metacharacters after the
  *  allowlisted prefix. */

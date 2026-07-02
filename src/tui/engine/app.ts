@@ -316,6 +316,13 @@ export class TuiApp {
    *  real turn completion or user submit. */
   private _watchdogAutoContinues = 0
   private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
+  /** Timestamp of the last approval denial. A watchdog abort that happens while
+   *  (or just after) a tool is blocked on approval must NOT auto-continue: the
+   *  resubmitted 'continue' just re-emits the same approval-blocked call, giving
+   *  the deny→continue→deny self-driving loop. Suppress auto-continue in that
+   *  window and let the user intervene instead. */
+  private _lastApprovalDeniedAt = 0
+  private static readonly APPROVAL_STALL_GRACE_MS = 5_000
   /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
   private sidePanelLeaderPending = false
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
@@ -776,6 +783,8 @@ export class TuiApp {
 
   private resolveApproval(result: ApprovalResult | boolean): void {
     if (!this.approvalIntentController.approvalPending) return
+    const approved = typeof result === 'boolean' ? result : result.approved
+    if (!approved) this._lastApprovalDeniedAt = Date.now()
     this.approvalIntentController.approvalPending.resolve(result)
     this.approvalIntentController.approvalPending = null
     this.input.setMode('input')
@@ -2418,6 +2427,13 @@ export class TuiApp {
   private handleAbort(reason?: string): void {
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
+    // Capture approval-blocked state BEFORE resolveApproval(false) below clears
+    // it: a watchdog abort that fired while (or just after) a tool was blocked on
+    // approval must not auto-continue — the resubmitted 'continue' only re-emits
+    // the same approval-blocked call (deny→continue→deny self-driving loop).
+    const approvalBlocked =
+      !!this.approvalIntentController.approvalPending
+      || (Date.now() - this._lastApprovalDeniedAt < TuiApp.APPROVAL_STALL_GRACE_MS)
     // 中断时若停在审批确认态：解析为拒绝，让 tool-pipeline 的前置 await
     // 立即 settle，并复位输入模式。否则审批态残留——后续按键被当确认解析、
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
@@ -2452,26 +2468,32 @@ export class TuiApp {
     // plain interrupt so the user can intervene.
     const autoContinueExhausted = isWatchdogGoal
       && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
+    // Approval-blocked stall: never auto-continue. Re-driving 'continue' just
+    // re-emits the approval-blocked tool and spins deny→continue→deny; the human
+    // must approve (or redirect) instead. Show an actionable hint.
+    const suppressForApproval = isWatchdogGoal && approvalBlocked
     const convergenceLabel = reason === 'convergence:no-tool'
       ? '⏹ 收敛守护中断：连续多轮未调用工具（如仍在推进，键入 continue 继续）'
       : '⏹ 收敛守护中断：多轮未收敛（如仍在推进，键入 continue 继续）'
     this.commitAbove(() => {
       this.commit.write({
-        text: isWatchdog && !autoContinueExhausted
-          ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
-          : autoContinueExhausted
-            ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
-            : isConvergence
-              ? color(convergenceLabel, this.theme.muted)
-              : color('⏹ Interrupted', this.theme.muted),
+        text: suppressForApproval
+          ? color('⏹ 等待你的审批 — 该操作需批准才能继续（批准 / 调整指令 / 键入 continue）', this.theme.muted)
+          : isWatchdog && !autoContinueExhausted
+            ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
+            : autoContinueExhausted
+              ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
+              : isConvergence
+                ? color(convergenceLabel, this.theme.muted)
+                : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
     })
     // Watchdog abort in goal mode: auto-resubmit so the agent continues
     // without waiting for the user to type "continue" — but only while under
-    // the consecutive-stall cap.
-    if (isWatchdogGoal && !autoContinueExhausted) {
+    // the consecutive-stall cap AND not blocked on a pending/just-denied approval.
+    if (isWatchdogGoal && !autoContinueExhausted && !suppressForApproval) {
       this._watchdogAutoContinues++
       this.onSubmitCallback?.('continue')
     }

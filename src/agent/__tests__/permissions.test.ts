@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, createPermissionOverlay } from '../permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, createPermissionOverlay, learnFileApproval } from '../permissions.js'
 
 describe('permission allow rules', () => {
   it('matches exact tool names and exact parameter values', () => {
@@ -99,5 +99,30 @@ describe('createPermissionOverlay', () => {
   it('returns empty overlay', () => {
     const overlay = createPermissionOverlay()
     assert.deepEqual(overlay, { allow: [], deny: [], bashAllow: [], bashDeny: [] })
+  })
+})
+
+describe('learnFileApproval', () => {
+  it('adds a file-scoped allow rule that matches the exact path afterwards', () => {
+    const overlay = createPermissionOverlay()
+    learnFileApproval('edit_file', 'src/foo.ts', overlay)
+    assert.equal(overlay.allow.length, 1)
+    assert.equal(isToolAllowed('edit_file', { file_path: 'src/foo.ts' }, overlay.allow), true)
+    // A different file is NOT auto-allowed by the learned rule.
+    assert.equal(isToolAllowed('edit_file', { file_path: 'src/bar.ts' }, overlay.allow), false)
+  })
+
+  it('dedupes repeated approvals of the same tool+file', () => {
+    const overlay = createPermissionOverlay()
+    learnFileApproval('write_file', 'a.ts', overlay)
+    learnFileApproval('write_file', 'a.ts', overlay)
+    assert.equal(overlay.allow.length, 1)
+  })
+
+  it('no-ops on empty path or missing overlay', () => {
+    const overlay = createPermissionOverlay()
+    learnFileApproval('edit_file', '', overlay)
+    assert.equal(overlay.allow.length, 0)
+    assert.doesNotThrow(() => learnFileApproval('edit_file', 'a.ts', undefined))
   })
 })

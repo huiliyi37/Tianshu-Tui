@@ -28,7 +28,7 @@ import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
 import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
-import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix } from './permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
@@ -805,7 +805,28 @@ export async function executeToolUse(
         : approvalResult
       const finalInput = applyApprovalEdit(tu.input, resolved)
       if (!finalInput) {
-        const denyMsg = 'Tool execution denied: requires user approval'
+        // Record the denied call's fingerprint so the doom-loop detector can see
+        // repeated identical denials. Denied calls short-circuit here, before the
+        // post-exec recordToolFingerprint at the bottom, so without this the
+        // anti-repeat window never sees them and the model re-emits the same
+        // approval-blocked call forever (the classic "requires user approval" loop).
+        // Use outputClass 'error' to match the offender fingerprint the doom-loop
+        // gate compares against (see the doomLevel === 'blocked' branch above).
+        traceStore = recordToolFingerprint(traceStore, fingerprintToolCall(tu.name, tu.input, 'error'), null)
+        const target = writePath
+          ? ` (${writePath})`
+          : tu.name === 'bash' && typeof tu.input.command === 'string'
+            ? ` (${tu.input.command.slice(0, 60)})`
+            : ''
+        // Instructive, non-retry denial: this is NOT a rejection of the change on
+        // its merits — it needs explicit user approval the model cannot self-grant.
+        // Re-emitting the identical call only re-hits the same gate, so tell the
+        // model to stop and hand control back to the user instead of retrying.
+        const denyMsg = [
+          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.`,
+          'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
+          'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
+        ].join('\n')
         callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: denyMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
@@ -816,6 +837,13 @@ export async function executeToolUse(
       // Thermocline 2: learn bash command prefix into session allowlist after approval
       if (tu.name === 'bash' && typeof tu.input.command === 'string') {
         learnBashPrefix(tu.input.command, deps.config.permissions)
+     }
+      // Learn a file-scoped approval so subsequent identical edits to the same
+      // file don't re-prompt (a key driver of the "approve → edit → approve
+      // again" fatigue that seeds retry loops). Manual mode only — auto-safe must
+      // keep re-checking high-risk writes rather than trusting a one-off approve.
+      if (approvalMode === 'manual' && (tu.name === 'edit_file' || tu.name === 'write_file') && typeof tu.input.file_path === 'string') {
+        learnFileApproval(tu.name, tu.input.file_path, deps.config.permissionsOverlay)
      }
       // Out-of-workspace file op approved: record a directory-subtree grant so
       // both gates (validatePathSafe + sandbox) accept it. Recompute from the

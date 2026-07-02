@@ -137,3 +137,20 @@ test('世代守卫：旧 run 的迟到 onApprovalRequired 自动拒绝', async (
   const result = await staleCallbacks.onApprovalRequired('t1', 'bash', { command: 'rm -rf /' })
   assert.equal(result, false, '已死 run 的审批请求应自动拒绝，不弹 UI')
 })
+
+test('挂起审批时 watchdog:goal abort 不自动续跑（等待用户批准，切断 deny→continue→deny 环）', async () => {
+  const { app } = makeApp()
+  const runs: string[] = []
+  app.onSubmit((t) => { runs.push(t) })
+
+  const cb = wrapCallbacksWithTuiApp(app)
+  // 触发审批挂起（promise 保持 pending 直到 abort 将其解析为拒绝）。
+  const pending = cb.onApprovalRequired('t1', 'edit_file', { file_path: 'x.ts' })
+  await tick()
+  // 卡在审批上时 watchdog 开火：绝不能自动 continue，否则重发同一被拒调用成环。
+  cb.onAbort('watchdog:goal')
+  await tick()
+
+  assert.equal(await pending, false, '挂起审批在 abort 时被解析为拒绝')
+  assert.equal(runs.filter((r) => r === 'continue').length, 0, '审批挂起时不得自动续跑')
+})

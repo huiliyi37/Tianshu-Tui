@@ -5,6 +5,7 @@ import { join, resolve as resolvePath } from 'node:path'
 import { executeToolUse, type ToolPipelineDeps } from '../tool-pipeline.js'
 import { createTurnBudget } from '../turn-budget.js'
 import { fingerprintToolCall } from '../trace-store.js'
+import { createPermissionOverlay } from '../permissions.js'
 import type { EvidenceTrackerPublic } from '../evidence.js'
 import { ArtifactStore } from '../../artifact/store.js'
 import { _setSandboxBackendForTest, _resetSandboxBackendCache } from '../../tools/sandbox-profile.js'
@@ -940,7 +941,7 @@ describe('executeToolUse', () => {
       assert.equal(approvalCalls, 1)
       assert.equal(executed, false)
       assert.equal((result.toolResult as any).is_error, true)
-      assert.match((result.toolResult as any).content, /requires user approval/)
+      assert.match((result.toolResult as any).content, /requires explicit user approval/)
     } finally {
       _resetSandboxBackendCache()
     }
@@ -1097,7 +1098,7 @@ describe('executeToolUse', () => {
       )
       assert.equal(executed, false)
       assert.equal((result.toolResult as any).is_error, true)
-      assert.match((result.toolResult as any).content, /requires user approval/)
+      assert.match((result.toolResult as any).content, /requires explicit user approval/)
       assert.equal(isWriteGranted(target), false, 'no grant on denial')
     } finally {
       _resetGrantsForTest()
@@ -1127,6 +1128,67 @@ describe('executeToolUse', () => {
     )
     assert.equal(approvalCalls, 0, 'in-workspace read must not prompt')
     _resetGrantsForTest()
+  })
+
+  it('denied approval returns an instructive non-retry message and records a fingerprint', async () => {
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'manual',
+        toolRegistry: {
+          execute: async () => ({ content: 'ok', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => false }
+    const result = await executeToolUse(
+      { id: 'tu-deny-edit', name: 'edit_file', input: { file_path: 'src/foo.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+    const content = (result.toolResult as any).content as string
+    assert.equal((result.toolResult as any).is_error, true)
+    assert.match(content, /requires explicit user approval/)
+    assert.match(content, /Do NOT re-emit/)
+    assert.match(content, /edit_file/)
+    assert.match(content, /src\/foo\.ts/)
+    // Fingerprint recorded so the doom-loop detector can see repeated denials
+    // (denied calls short-circuit before the post-exec recorder at the bottom).
+    const expectedFp = fingerprintToolCall('edit_file', { file_path: 'src/foo.ts' }, 'error')
+    assert.ok(result.traceStore.toolFingerprints.includes(expectedFp), 'denied call fingerprint recorded')
+  })
+
+  it('manual-mode approval of edit_file learns a file-scoped allow so the same file is not re-prompted', async () => {
+    let approvalCalls = 0
+    const overlay = createPermissionOverlay()
+    const deps = makeDeps({
+      config: {
+        ...makeDeps().config,
+        approvalMode: 'manual',
+        permissionsOverlay: overlay,
+        toolRegistry: {
+          execute: async () => ({ content: 'edited', isError: false }),
+          get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
+          needsApproval: () => true,
+        },
+      } as any,
+    })
+    const callbacks = { ...noopCallbacks, onApprovalRequired: async () => { approvalCalls++; return true } }
+    await executeToolUse(
+      { id: 'tu-edit-1', name: 'edit_file', input: { file_path: 'src/bar.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+    assert.equal(approvalCalls, 1, 'first edit prompts')
+    assert.ok(
+      overlay.allow.some(r => r.tool === 'edit_file' && r.params?.file_path === 'src/bar.ts'),
+      'file-scoped allow learned after approval',
+    )
+    await executeToolUse(
+      { id: 'tu-edit-2', name: 'edit_file', input: { file_path: 'src/bar.ts' } },
+      deps, callbacks as any, 1, false,
+    )
+    assert.equal(approvalCalls, 1, 'same file must not re-prompt after learning')
   })
 
   it('P1.3: strips trailing whitespace from tool result content', async () => {
