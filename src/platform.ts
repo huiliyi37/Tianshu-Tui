@@ -103,6 +103,12 @@ export interface GitBashProbeDeps {
 export function resolveGitBashPath(deps: GitBashProbeDeps): string | null {
   if (!deps.isWindows) return null
 
+  // Priority 0: bundled busybox-w32 (shipped with the desktop app).
+  // This guarantees a POSIX shell on every Windows install without depending
+  // on the user installing Git for Windows.
+  const bundledBusybox = deps.env['RIVET_BUNDLED_BUSYBOX']
+  if (bundledBusybox && deps.exists(bundledBusybox)) return bundledBusybox
+
   const override = deps.env['RIVET_GIT_BASH_PATH']
   if (override && deps.exists(override)) return override
 

@@ -52,6 +52,9 @@ struct SidecarLaunchSpec {
     cwd: Option<PathBuf>,
     port: u16,
     token: String,
+    /// Bundled busybox.exe path (Windows-only). Passed as RIVET_BUNDLED_BUSYBOX
+    /// so platform.ts can use it as a shell fallback before degrading to PowerShell.
+    bundled_busybox: Option<PathBuf>,
 }
 
 struct Sidecar {
@@ -355,6 +358,29 @@ fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
         .join("node-runtime")
         .join(format!("{}-{}", node_os, node_arch))
         .join(format!("node{}", ext));
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Locate the bundled busybox-w32 binary (Windows-only, provides POSIX shell).
+/// Returns None on non-Windows or when not bundled.
+fn bundled_busybox_path(app: &tauri::App) -> Option<PathBuf> {
+    if std::env::consts::OS != "windows" {
+        return None;
+    }
+    let res = resource_dir_fallback(app);
+    let busybox_arch = match std::env::consts::ARCH {
+        "aarch64" => "win-aarch64",
+        "x86_64" => "win-x86_64",
+        _ => return None,
+    };
+    let path = res
+        .join("shell-runtime")
+        .join(busybox_arch)
+        .join("busybox.exe");
     if path.exists() {
         Some(path)
     } else {
@@ -689,6 +715,11 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
         // only covers the clean-shutdown paths we control.)
         .env("RIVET_PARENT_PID", std::process::id().to_string());
+    // Pass bundled busybox path to sidecar so platform.ts finds it before
+    // degrading to PowerShell on Windows (no-op when None / non-Windows).
+    if let Some(bb) = &spec.bundled_busybox {
+        cmd.env("RIVET_BUNDLED_BUSYBOX", bb.to_string_lossy().as_ref());
+    }
     // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
     // resolved to absolute paths above, so the child's different cwd can't break
     // locating them). Leave it inherited only if home can't be resolved.
@@ -730,6 +761,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         cwd: sidecar_cwd(app),
         port,
         token: token.clone(),
+        bundled_busybox: bundled_busybox_path(app),
     };
 
     let mut child = spawn_from_spec(&spec);
