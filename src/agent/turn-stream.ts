@@ -1,4 +1,4 @@
-import type { StreamCallbacks } from '../api/stream-client.js'
+import type { StreamCallbacks, StreamAttemptAbortedInfo } from '../api/stream-client.js'
 import type { StreamClient } from '../api/stream-client.js'
 import type { OaiChatRequest } from '../api/oai-types.js'
 import type { ContentBlock, Usage } from '../api/types.js'
@@ -47,6 +47,8 @@ export interface TurnStreamDeps {
   prewarmFile?: (filePath: string) => void
   addUsage: (usage: Partial<Usage>) => void
   recordTurnCache: (turn: number, usage: Usage) => void
+  /** Optional: record a failed stream attempt (partial output discarded) for diagnostics. */
+  recordStreamAttemptAborted?: (info: StreamAttemptAbortedInfo) => void
 }
 
 export interface TurnStreamInput {
@@ -183,6 +185,9 @@ export class TurnStreamController {
       },
       onRateLimit: (retryDelayMs) => {
         input.callbacks.onRateLimit?.(retryDelayMs)
+      },
+      onStreamAttemptAborted: (info) => {
+        this.deps.recordStreamAttemptAborted?.(info)
       },
       onToolCallHint: (toolName, partialArgs) => {
         input.callbacks.onToolHint?.(toolName)

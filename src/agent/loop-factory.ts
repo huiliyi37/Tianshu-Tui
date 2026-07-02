@@ -48,6 +48,27 @@ return new TurnStreamController({
         }
       },
       addUsage: usage => { self.session.addUsage(usage) },
+      // 4e1aaa21 post-mortem: aborted attempts silently discarded minutes of
+      // streamed reasoning. Record each failure in the cache-log so the loss
+      // is attributable without reverse-engineering timestamp gaps.
+      recordStreamAttemptAborted: info => {
+        const sid = self.config.sessionId ?? 'anon'
+        const line = JSON.stringify({
+          event: 'stream_attempt_aborted',
+          t: Date.now(),
+          model: self.config.promptEngine.getModel(),
+          provider: info.provider,
+          receivedChars: info.receivedChars,
+          elapsedMs: info.elapsedMs,
+          errorName: info.errorName,
+          errorMessage: info.errorMessage.slice(0, 300),
+        })
+        import('node:fs/promises').then(fs => {
+          const dir = join(getSessionDir(self.cwd), sid)
+          return fs.mkdir(dir, { recursive: true })
+            .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+        }).catch(() => {})
+      },
       recordTurnCache: (turn, usage) => {
         self.session.recordTurnCache(turn, usage)
         const hitRateNum = usage.input_tokens > 0

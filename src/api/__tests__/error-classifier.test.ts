@@ -176,6 +176,16 @@ describe('classifyApiError', () => {
     assert.equal(result.retryable, true)
   })
 
+  // 4e1aaa21 post-mortem: raw undici TimeoutError DOMException (fired by an
+  // AbortSignal.timeout mid-body) must classify as retryable timeout, NOT as
+  // a user AbortError (DOMException name takes precedence over instance type).
+  it('classifies undici AbortSignal.timeout DOMException as retryable timeout', () => {
+    const err = new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+    const result = classifyApiError(err)
+    assert.equal(result.category, 'timeout')
+    assert.equal(result.retryable, true)
+  })
+
   it('classifies AbortError as client_error (no retry)', () => {
     const err = new DOMException('Aborted', 'AbortError')
     const result = classifyApiError(err)
