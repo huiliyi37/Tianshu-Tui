@@ -159,26 +159,28 @@ async fn apply_storage_location(
     let mut migrated = false;
     if migrate && old_home.exists() && old_home != new_home {
         ensure_parent_dir(&new_home)?;
-        let old_data = old_home.join(".rivet");
-        let new_data = new_home.join(".rivet");
-        if old_data.exists() {
-            // Run the recursive copy on a blocking thread — session data can
-            // be hundreds of MB and must not freeze the UI.
-            let result = tauri::async_runtime::spawn_blocking(move || {
-                copy_dir_all(&old_data, &new_data)
-            })
-            .await
-            .map_err(|e| format!("迁移线程异常: {}", e))?;
-            match result {
-                Ok(()) => migrated = true,
-                Err(e) => {
-                    return Ok(StorageApplyResult {
-                        success: false,
-                        migrated: false,
-                        requires_restart: false,
-                        error: Some(format!("迁移失败: {}", e)),
-                    });
-                }
+        // Both homes ARE the data roots (RIVET_HOME semantics — resolve_rivet_home
+        // already returns a path ending in `.rivet` or a user-picked folder).
+        // Joining another `.rivet` here made the source never exist, so "migrate"
+        // silently copied nothing while still reporting success.
+        let old_data = old_home.clone();
+        let new_data = new_home.clone();
+        // Run the recursive copy on a blocking thread — session data can
+        // be hundreds of MB and must not freeze the UI.
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            copy_dir_all(&old_data, &new_data)
+        })
+        .await
+        .map_err(|e| format!("迁移线程异常: {}", e))?;
+        match result {
+            Ok(()) => migrated = true,
+            Err(e) => {
+                return Ok(StorageApplyResult {
+                    success: false,
+                    migrated: false,
+                    requires_restart: false,
+                    error: Some(format!("迁移失败: {}", e)),
+                });
             }
         }
     }
@@ -572,7 +574,20 @@ fn default_rivet_home<R: tauri::Runtime>(app: &impl tauri::Manager<R>) -> PathBu
         }
     }
     if cfg!(target_os = "windows") {
-        PathBuf::from(std::env::var("LOCALAPPDATA").unwrap_or_default()).join(".rivet")
+        // Mirror the Node-side fallback (src/config/paths.ts): an empty
+        // LOCALAPPDATA must not yield a relative `.rivet` with an undefined cwd.
+        let base = std::env::var("LOCALAPPDATA")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                app.path()
+                    .home_dir()
+                    .ok()
+                    .map(|h| h.join("AppData").join("Local"))
+            })
+            .unwrap_or_else(|| PathBuf::from(std::env::var("USERPROFILE").unwrap_or_default()));
+        base.join(".rivet")
     } else {
         app.path()
             .home_dir()
