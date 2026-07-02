@@ -614,6 +614,15 @@ export function ThreadView(props: {
 
         <div className="thread-header-meta">
           {/* model / plan-mode / context-ring 在 Composer 底栏已有可交互版本——header 不重复 */}
+          {session.reasoningEffort && (
+            <button
+              className="effort-chip"
+              title={`推理强度: ${session.reasoningEffort}（点击切换）`}
+              onClick={() => onSend('/effort')}
+            >
+              {session.reasoningEffort}
+            </button>
+          )}
           {session.contextWindow && session.contextWindow > 0 && ctxPct >= 80 ? (
             <div className="ctx-bar warn" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens — 接近上限`}>
               <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />

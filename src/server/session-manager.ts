@@ -141,6 +141,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
   contextWindow?: number
+  /** Current reasoning effort level (off/low/medium/high/max). Absent → model default. */
+  reasoningEffort?: string
   /** Archived (closed) sessions are excluded from listSessions() and hidden in the desktop sidebar. */
   archived?: boolean
   /** Git worktree branch name — set when the session was created with isolated worktree. */
@@ -238,6 +240,8 @@ export interface ManagedAgent {
     status: 'mounted' | 'already-active' | 'not-extended' | 'unknown' | 'gating-off'
     cacheImpact: 'prefix-invalidated' | 'none'
   }
+  /** Current reasoning effort level (off/low/medium/high/max). */
+  getReasoningEffort?(): string | undefined
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
@@ -1573,6 +1577,7 @@ export class RuntimeSessionManager {
     if (s.agent) {
       try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
       try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
+      try { record.reasoningEffort = s.agent.getReasoningEffort?.() } catch { /* non-fatal */ }
     }
     const persona = resolveDomainPersona(record.domain)
     record.domainGlyph = persona.glyph

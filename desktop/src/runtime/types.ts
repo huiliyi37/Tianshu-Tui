@@ -39,6 +39,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size in tokens. */
   contextWindow?: number
+  /** Current reasoning effort level (off/low/medium/high/max). */
+  reasoningEffort?: string
   /** Archived (closed) sessions are hidden from the sidebar. */
   archived?: boolean
   /** Git worktree branch name — set when created with isolated worktree. */

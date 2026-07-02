@@ -1909,6 +1909,12 @@ body {
   padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
 }
 .phase-chip.stalled, .elapsed.stalled { color: var(--destructive); }
+.effort-chip {
+  background: var(--accent-soft); color: var(--accent);
+  padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--text-xs);
+  border: none; cursor: pointer; text-transform: capitalize;
+}
+.effort-chip:hover { filter: brightness(1.1); }
 .elapsed { font-variant-numeric: tabular-nums; }
 
 .messages { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-5); position: relative; }

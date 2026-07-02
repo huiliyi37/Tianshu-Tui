@@ -559,6 +559,7 @@ function buildManagedAgent(
     // (last API prompt_tokens + tail estimate), provider-agnostic.
     getEstimatedTokens: () => agent.session.getRealOccupancy(),
     getContextWindow: () => spec.model.contextWindow,
+    getReasoningEffort: () => agent.getReasoningEffort(),
     // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
     // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。
     shutdown: () => {
