@@ -77,6 +77,10 @@ export interface ExecuteBatchResult {
   /** True when any tool in the batch returned endTurn: true (e.g. ask_user_question).
    *  The orchestrator uses this to end the turn as final. */
   endTurn?: boolean
+  /** Number of tool_use in this batch — for wedged-loop detection. */
+  toolCount: number
+  /** Number of tool_result marked is_error in this batch — for wedged-loop detection. */
+  errorCount: number
 }
 
 export interface CompleteTurnParams {
@@ -105,6 +109,10 @@ export interface TurnStateBag {
   latestFsWatcherState: FsWatcherState
   consecutiveNoToolTurns: number
   autoContinueCount: number
+  /** Fingerprint of the last fully-errored tool batch — for wedged-loop detection. */
+  wedgeToolFingerprint: string
+  /** Consecutive identical fully-errored tool batches — for wedged-loop detection. */
+  wedgeRepeatCount: number
   thinkingOnlyRetries: number
   lastThinkingContent: string
   lastTurnTextFingerprint: string
@@ -251,6 +259,22 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
 // ── TurnOrchestrator ──
 
 const MAX_RULE_RETRIES = 2
+
+/** Consecutive identical fully-errored tool batches before the run is ended as a
+ *  wedged loop. Guards against the "requires user approval" denial loop (and any
+ *  same-args-same-error retry) spinning to maxTurns and ballooning context → OOM. */
+const MAX_WEDGE_REPEATS = 3
+
+/** Order-preserving fingerprint of a tool batch (name + input). Two batches with
+ *  the same tools and args produce the same string, so a model re-emitting an
+ *  identical failing call is detectable across turns. */
+function toolBatchFingerprint(toolUses: { name: string; input: unknown }[]): string {
+  try {
+    return JSON.stringify(toolUses.map(tu => [tu.name, tu.input]))
+  } catch {
+    return toolUses.map(tu => tu.name).join('|')
+  }
+}
 
 export class TurnOrchestrator {
   constructor(private deps: TurnOrchestratorDeps) {}
@@ -726,6 +750,35 @@ export class TurnOrchestrator {
               this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
               signal!,
               'post-turn-endTurn',
+            )
+            finalTurnCompleted = true
+            break
+          }
+
+          // Wedged-loop guard: a model that re-emits the SAME tool batch and gets
+          // an all-error result every time (the classic "requires user approval"
+          // denial loop — see the boundary-stall screenshot) would otherwise spin
+          // to maxTurns, ballooning context until the sidecar OOMs. Detect an
+          // identical, fully-errored batch repeating and end the run instead.
+          const allErrored = r.toolCount > 0 && r.errorCount === r.toolCount
+          const batchFingerprint = allErrored ? toolBatchFingerprint(toolUses) : ''
+          if (allErrored && batchFingerprint === this.deps.state.wedgeToolFingerprint) {
+            this.deps.state.wedgeRepeatCount = this.deps.state.wedgeRepeatCount + 1
+          } else {
+            this.deps.state.wedgeRepeatCount = allErrored ? 1 : 0
+            this.deps.state.wedgeToolFingerprint = batchFingerprint
+          }
+          if (this.deps.state.wedgeRepeatCount >= MAX_WEDGE_REPEATS) {
+            this.emitStop({
+              source: 'wedged-loop',
+              turn,
+              voluntary: false,
+              detail: `${toolUses.map(tu => tu.name).join(',')} ×${this.deps.state.wedgeRepeatCount}`,
+            }, callbacks)
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              signal!,
+              'post-turn-wedged',
             )
             finalTurnCompleted = true
             break

@@ -105,6 +105,56 @@ describe('AgentLoop — multi-turn tool_use', () => {
     assert.equal(session.getMessages().length, 2) // user + assistant
   })
 
+  it('ends a wedged run when the same tool batch keeps erroring (denied-approval loop)', async () => {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    let execCount = 0
+    const failTool: Tool = {
+      definition: { name: 'always_fail', description: 'always errors', input_schema: { type: 'object', properties: {} } },
+      execute: async () => { execCount++; return { content: 'denied: requires user approval', isError: true } },
+      requiresApproval: () => false,
+      isConcurrencySafe: () => false,
+      isEnabled: () => true,
+    }
+    registry.register(failTool)
+
+    // Client that re-emits the SAME tool_use every turn. Without the wedge guard
+    // this spins until maxTurns (20), ballooning context — the sidecar-OOM cause.
+    let n = 0
+    const client: StreamClient = {
+      stream: mock.fn(async (_req: unknown, cb: StreamCallbacks, _sig?: AbortSignal) => {
+        cb.onContentBlock(makeToolUseBlock(`call-${n++}`, 'always_fail', { x: 1 }))
+        cb.onStopReason('tool_use', { input_tokens: 100, output_tokens: 10 })
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop({ client, promptEngine: makeEngine(), toolRegistry: registry, maxTurns: 20, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, TEST_CWD)
+
+    let finalCompletions = 0
+    const stopReasons: string[] = []
+    const errors: Error[] = []
+    await agent.run('go', {
+      onTextDelta: () => {},
+      onThinkingDelta: () => {},
+      onToolUse: () => {},
+      onToolResult: () => {},
+      onTurnComplete: (_usage: unknown, _turn: number, isFinal?: boolean) => { if (isFinal) finalCompletions++ },
+      onError: (e: Error) => { errors.push(e) },
+      onAbort: () => {},
+      onApprovalRequired: async () => false,
+      onPhaseChange: (phase: string, detail?: { reason?: string }) => {
+        if (phase === 'stop-reason' && detail?.reason) stopReasons.push(detail.reason)
+      },
+    })
+
+    assert.deepEqual(errors, [], 'no unexpected errors')
+    // Guard trips at MAX_WEDGE_REPEATS (3) — far below maxTurns (20).
+    assert.ok(execCount >= 3 && execCount <= 5, `wedge guard should stop early, ran ${execCount}×`)
+    assert.ok(stopReasons.some(r => r.includes('工具死循环')), `expected a wedged-loop stop reason, got: ${JSON.stringify(stopReasons)}`)
+    assert.equal(finalCompletions, 1, 'exactly one final turn completion is emitted so the UI resets')
+  })
+
   it('syncs auto reasoning effort to the client without going below the configured floor', async () => {
     const session = new SessionContext()
     const registry = new ToolRegistry()

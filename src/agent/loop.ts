@@ -163,6 +163,8 @@ export class AgentLoop {
   lastThinkingContent = ''
   consecutiveNoToolTurns = 0
   autoContinueCount = 0
+  wedgeToolFingerprint = ''
+  wedgeRepeatCount = 0
   lastTurnTextFingerprint = ''
   lastTurnThinkingFingerprint = ''
   lastPrewarmAt = 0

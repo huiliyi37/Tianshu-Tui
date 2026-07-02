@@ -135,6 +135,10 @@ export interface ToolExecBatchResult {
   artifactIdsAccessed: string[]
   /** True when any tool returned endTurn: true (e.g. ask_user_question). */
   endTurn?: boolean
+  /** Number of tool_use in this batch — for wedged-loop detection. */
+  toolCount: number
+  /** Number of tool_result marked is_error in this batch — for wedged-loop detection. */
+  errorCount: number
 }
 
 export class ToolExecutionController {
@@ -573,6 +577,11 @@ export class ToolExecutionController {
       this.deps.setClientReasoningEffort(newEffort)
    }
 
-    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined }
+    const errorCount = input.toolUses.reduce((n, tu) => {
+      const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
+      return n + (result && 'is_error' in result && result.is_error === true ? 1 : 0)
+    }, 0)
+
+    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined, toolCount: input.toolUses.length, errorCount }
  }
 }

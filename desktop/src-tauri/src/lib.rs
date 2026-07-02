@@ -628,7 +628,15 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>) {
     // node / bad entry path otherwise leaves the UI with a valid-looking handle
     // pointing at nothing, surfacing only as opaque fetch failures later.
     let mut cmd = Command::new(&node);
-    cmd.arg(&entry)
+    // Node runtime flags MUST precede the script path. The tsup banner bakes these
+    // into dist/main.js's shebang, but `node main.js` ignores the shebang (Windows
+    // ignores it entirely), so without passing them here the sidecar runs on V8's
+    // default heap and `global.gc()` is undefined — making the post-compaction
+    // gc() calls inert and leaving no deterministic ceiling. --expose-gc cannot be
+    // set via NODE_OPTIONS (Node rejects it), so it has to be a direct arg.
+    cmd.arg("--max-old-space-size=4096")
+        .arg("--expose-gc")
+        .arg(&entry)
         .arg("serve")
         .arg("--port")
         .arg(port.to_string())

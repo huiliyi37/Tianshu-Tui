@@ -20,6 +20,14 @@ export const DEFAULT_QUALITY_COMPACT_THRESHOLDS: QualityCompactThresholds = {
   subscriptionCeiling: 0.6,
 }
 
+/** Heap-usage ratio (heapUsed / real V8 limit) above which an in-turn micro-compact
+ *  is forced regardless of the 1M-window turn-0 deferral. Below this, heap pressure
+ *  on a 1M window is deferred to the next user boundary (turn 0) to protect the
+ *  prefix cache; at/above it, deferring risks OOMing the whole process before the
+ *  next turn 0 ever arrives (a long/wedged run never returns to turn 0), so we
+ *  accept the cache reprefill as the far lesser evil. */
+export const HEAP_EMERGENCY_RATIO = 0.85
+
 export interface CompactBoundaryDeps {
   // Field accessors
   getCompactFailures: () => CompactCircuitBreakerState
@@ -200,10 +208,16 @@ export class CompactBoundaryCoordinator {
     const is1M = this.deps.getContextWindow() >= 1_000_000
     const heapCompactThreshold = is1M ? 0.75 : 0.6
     const heapPressure = heapRatio >= heapCompactThreshold
+    // Emergency valve: at severe heap pressure the deferral-to-turn-0 rule below
+    // becomes a death trap — a long/wedged run (up to DEFAULT_MAX_TURNS=50) never
+    // returns to turn 0, so the pending flag is set but the compaction never fires
+    // and the process OOMs. Force an in-turn micro-compact regardless of window/turn.
+    const heapEmergency = heapRatio >= HEAP_EMERGENCY_RATIO
     const msgCount = this.deps.getMessages().length
     if (!compactResult.compacted && (heapPressure || this.deps.getPendingHeapCompact()) && msgCount >= 10) {
-      // P2-5: on 1M windows, heap micro-compact deferred to turn 0
-      if (is1M && turn !== 0) {
+      // P2-5: on 1M windows, heap micro-compact deferred to turn 0 — UNLESS heap is
+      // in the emergency band, where deferring risks OOM before the next turn 0.
+      if (is1M && turn !== 0 && !heapEmergency) {
         if (heapPressure) this.deps.setPendingHeapCompact(true)
       } else if (is1M && !heapPressure && this.deps.shouldDelayCompact(2)) {
         this.deps.setPendingHeapCompact(false)

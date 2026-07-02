@@ -130,6 +130,25 @@ describe('CompactBoundaryCoordinator (C-line: extracted, was untested)', () => {
     assert.equal(r.compacted, false)
   })
 
+  it('emergency valve: forces in-turn heap compaction on 1M windows at ratio ≥ 0.85 (turn ≠ 0)', async () => {
+    // Above the emergency band the turn-0 deferral is a death trap: a long/wedged
+    // run never returns to turn 0, so deferring risks OOM. The valve must compact
+    // in-turn instead of queuing — observable as setPendingHeapCompact(false), the
+    // opposite of the deferral path which queues with setPendingHeapCompact(true).
+    const setCalls: boolean[] = []
+    const { coord } = makeCoord({
+      getContextWindow: () => 1_000_000,
+      getMessages: () => bigMsgs(12),
+      setPendingHeapCompact: (v) => { setCalls.push(v) },
+    })
+    const r = await coord.runCompaction(5, {
+      memory: { heapUsedBytes: 90, memoryLimitBytes: 100 }, // ratio 0.9 ≥ 0.85 emergency
+    })
+    assert.ok(setCalls.includes(false), 'emergency compacts in-turn (does not queue)')
+    assert.ok(!setCalls.includes(true), 'emergency must NOT defer to turn 0')
+    assert.equal(r.shouldAbort, false)
+  })
+
   it('records lastCompactTurn and consumes the user message when maybeCompact compacts', async () => {
     const { coord, calls } = makeCoord({ compacted: true })
     const r = await coord.runCompaction(7, null)

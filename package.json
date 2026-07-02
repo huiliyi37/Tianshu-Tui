@@ -39,7 +39,7 @@
     "prepublishOnly": "npm run build",
     "dev": "tsup --watch",
     "build": "tsup",
-    "start": "node --expose-gc --max-old-space-size=1536 dist/main.js",
+    "start": "node --expose-gc --max-old-space-size=4096 dist/main.js",
     "typecheck": "tsc --noEmit",
     "typecheck:baseline": "tsx scripts/typecheck-baseline.ts",
     "test": "tsx scripts/run-node-tests.ts",

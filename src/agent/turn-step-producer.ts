@@ -163,6 +163,8 @@ export class TurnStepProducer {
     this.self.lastThinkingContent = ''
     this.self.consecutiveNoToolTurns = 0
     this.self.autoContinueCount = 0
+    this.self.wedgeToolFingerprint = ''
+    this.self.wedgeRepeatCount = 0
     this.self.lastTurnTextFingerprint = ''
     this.self.evidence.reset()
     this.self.repairHintTracker = new RepairHintTracker()

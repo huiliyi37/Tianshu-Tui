@@ -118,7 +118,7 @@ export default defineConfig({
     // stays on the entry for direct CLI exec (node strips it from imported
     // modules) and carries the GC/heap flags.
     options.banner = {
-      js: "#!/usr/bin/env -S node --expose-gc --max-old-space-size=1536\nimport { createRequire as __rivetCreateRequire } from 'node:module'; const require = __rivetCreateRequire(import.meta.url);",
+      js: "#!/usr/bin/env -S node --expose-gc --max-old-space-size=4096\nimport { createRequire as __rivetCreateRequire } from 'node:module'; const require = __rivetCreateRequire(import.meta.url);",
     }
   },
 } satisfies Options)
