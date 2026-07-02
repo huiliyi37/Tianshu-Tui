@@ -319,7 +319,7 @@ export function ThreadView(props: {
       name: '/team',
       desc: '团队模式 · 多 agent 协作',
       example: '/team <任务描述>',
-      run: () => onSend('Run team-mode workflow through team_orchestrate for the task I will describe next.'),
+      run: () => onSend('/team'),
     },
     {
       name: '/interview',
@@ -375,7 +375,7 @@ export function ThreadView(props: {
       name: '/council',
       desc: '议事会 · 星域专家审查',
       example: '/council <目标描述>',
-      run: () => onSend('Convene a star-domain council to review this objective. Use council_convene with the task I will describe next.'),
+      run: () => onSend('/council'),
     },
     {
       name: '/goal',
