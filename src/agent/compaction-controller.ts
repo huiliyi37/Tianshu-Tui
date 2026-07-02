@@ -81,6 +81,35 @@ function extractUserIntentChain(messages: OaiMessage[]): string[] {
 }
 
 /**
+ * File-write tools that mutate the workspace. Read/search tools are excluded so
+ * the change chain stays precise (zero false positives). Non-read-only bash is
+ * left to the prompt instruction — command read/write classification is
+ * unreliable and over-enumeration would pollute the summary.
+ */
+const WRITE_TOOLS = new Set([
+  'write_file', 'edit_file', 'edit', 'apply_patch', 'multi_edit',
+  'notebook_edit', 'ast_edit', 'hash_edit',
+])
+
+/**
+ * Extract the write-action chain: every file-write operation in the trajectory,
+ * in order, rendered as `[T<turn>] <tool> <target>` (with a FAIL marker). This
+ * mirrors extractUserIntentChain — a deterministic injection so the LLM summary
+ * never loses "what was changed on the machine", which is the primary guard
+ * against a fresh session redoing already-completed work.
+ */
+export function extractWriteActionChain(trajectory: TrajectoryEntry[]): string[] {
+  const MAX = 40
+  return trajectory
+    .filter(e => WRITE_TOOLS.has(e.tool))
+    .slice(-MAX)
+    .map(e => {
+      const failed = e.status === 'failed' || e.status === 'retried-failed'
+      return `[T${e.turn}] ${e.tool} ${e.target}${failed ? ' (FAIL)' : ''}`
+    })
+}
+
+/**
  * Find a safe split point that doesn't cut through a tool_calls ↔ tool group.
  *
  * The OpenAI-compatible API requires every assistant message with tool_calls
@@ -1065,6 +1094,7 @@ export class CompactionController {
     debugLog(`[partial-compact] anchor=${anchor.length} old=${oldZone.length} recent=${recentZone.length}`)
 
     const userIntentChain = extractUserIntentChain(oldZone)
+    const writeActionChain = extractWriteActionChain(this.deps.getTrajectoryEntries())
     const partialBudget = this.summaryBudget().partial
     const summaryPrompt: OaiMessage = {
       role: 'user',
@@ -1075,6 +1105,14 @@ export class CompactionController {
         '## 用户意图链（按时间序）',
         ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),
         '',
+        ...(writeActionChain.length > 0
+          ? [
+              '## 变更动作清单（防止重复劳动，必须逐条保留）',
+              ...writeActionChain.map((m, i) => `${i + 1}. ${m}`),
+              '同时列出所有改动机器状态的非只读命令；不要列入只读动作（读取/搜索/grep/glob）。',
+              '',
+            ]
+          : []),
         '## 保留',
         '1. 每条用户消息的核心意图',
         '2. 关键技术决策和原因',
@@ -1190,6 +1228,7 @@ export class CompactionController {
       if (messages.length < CACHE_ANCHOR_MESSAGES + 2) return null
 
       const userIntentChain = extractUserIntentChain(messages)
+      const writeActionChain = extractWriteActionChain(this.deps.getTrajectoryEntries())
       const compactMessages: OaiMessage[] = [
         ...messages,
         {
@@ -1202,6 +1241,16 @@ export class CompactionController {
             '以下是用户所有消息（按时间序），**必须逐条保留核心意图，不得合并或遗漏**：',
             ...userIntentChain.map((m, i) => `${i + 1}. ${m}`),
             '',
+            ...(writeActionChain.length > 0
+              ? [
+                  '## 必须完整保留的变更动作清单（防止新会话重复劳动）',
+                  '以下是本会话已执行的文件写操作（按时间序），**必须逐条保留，不得省略或合并**：',
+                  ...writeActionChain.map((m, i) => `${i + 1}. ${m}`),
+                  '此外必须列出所有改动过机器状态的**非只读命令**（安装/生成/迁移/git commit·push/构建产物）；',
+                  '**不要**列入只读动作（读取/搜索/grep/glob/git status·diff）——它们无需保留。',
+                  '',
+                ]
+              : []),
             '## 保留以下内容',
             '1. 用户的核心需求和意图演变（如果用户纠正了 agent 的理解，以用户的纠正为准）',
             '2. 所有关键技术决策及其原因',
@@ -1214,6 +1263,7 @@ export class CompactionController {
             '- 工具输出的详细内容（只保留结论）',
             '- 探索性搜索的中间过程',
             '- 重复的状态汇报',
+            '（注意：只读探索动作可丢弃，但**写操作本身不可丢**——只丢弃其冗长输出）',
             '',
             `只输出总结内容，不要调用工具。格式用 markdown，控制在 ${this.summaryBudget().full} 字以内。`,
           ].join('\n'),

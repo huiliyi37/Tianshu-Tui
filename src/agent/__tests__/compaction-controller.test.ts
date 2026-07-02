@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { CompactionController, findSafeSplitPoint, foldAgedRecallBlocks, RECALL_KEEP_RECENT } from '../compaction-controller.js'
+import { CompactionController, extractWriteActionChain, findSafeSplitPoint, foldAgedRecallBlocks, RECALL_KEEP_RECENT } from '../compaction-controller.js'
 import { buildRecallMarker } from '../../compact/recall-marker.js'
 import { SessionContext } from '../context.js'
 import { PromptEngine } from '../../prompt/engine.js'
@@ -1465,5 +1465,96 @@ describe('foldAgedRecallBlocks (A3 recall eviction)', () => {
     const once = foldAgedRecallBlocks(zone, RECALL_KEEP_RECENT)
     const twice = foldAgedRecallBlocks(once, RECALL_KEEP_RECENT)
     assert.deepEqual(twice, once)
+  })
+})
+
+function traj(partial: Partial<TrajectoryEntry> & Pick<TrajectoryEntry, 'turn' | 'tool' | 'target' | 'status'>): TrajectoryEntry {
+  return { durationMs: 1, inputSummary: '', resultSummary: '', ...partial }
+}
+
+describe('extractWriteActionChain', () => {
+  it('keeps only file-write tools, in order, excluding read/search', () => {
+    const chain = extractWriteActionChain([
+      traj({ turn: 1, tool: 'read_file', target: 'src/a.ts', status: 'success' }),
+      traj({ turn: 2, tool: 'grep', target: 'foo', status: 'success' }),
+      traj({ turn: 3, tool: 'edit_file', target: 'src/a.ts', status: 'success' }),
+      traj({ turn: 4, tool: 'bash', target: 'ls', status: 'success' }),
+      traj({ turn: 5, tool: 'write_file', target: 'src/b.ts', status: 'success' }),
+    ])
+    assert.deepEqual(chain, ['[T3] edit_file src/a.ts', '[T5] write_file src/b.ts'])
+  })
+
+  it('marks failed / retried-failed writes with a FAIL tag', () => {
+    const chain = extractWriteActionChain([
+      traj({ turn: 1, tool: 'apply_patch', target: 'src/a.ts', status: 'failed' }),
+      traj({ turn: 2, tool: 'write_file', target: 'src/b.ts', status: 'retried-failed' }),
+      traj({ turn: 3, tool: 'edit', target: 'src/c.ts', status: 'retried-success' }),
+    ])
+    assert.deepEqual(chain, [
+      '[T1] apply_patch src/a.ts (FAIL)',
+      '[T2] write_file src/b.ts (FAIL)',
+      '[T3] edit src/c.ts',
+    ])
+  })
+
+  it('returns empty for a read-only trajectory', () => {
+    const chain = extractWriteActionChain([
+      traj({ turn: 1, tool: 'read_file', target: 'src/a.ts', status: 'success' }),
+      traj({ turn: 2, tool: 'glob', target: '**/*.ts', status: 'success' }),
+    ])
+    assert.deepEqual(chain, [])
+  })
+
+  it('caps the chain at the 40 most recent writes', () => {
+    const entries = Array.from({ length: 50 }, (_, i) =>
+      traj({ turn: i + 1, tool: 'edit_file', target: `src/f${i + 1}.ts`, status: 'success' }))
+    const chain = extractWriteActionChain(entries)
+    assert.equal(chain.length, 40)
+    assert.equal(chain[0], '[T11] edit_file src/f11.ts')
+    assert.equal(chain[39], '[T50] edit_file src/f50.ts')
+  })
+})
+
+describe('compaction prompt — write-action chain injection', () => {
+  async function captureCompactPrompt(trajectory: TrajectoryEntry[]): Promise<string> {
+    const session = new SessionContext()
+    session.replaceMessages([
+      { role: 'user', content: 'fix the bug in src/foo.ts' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: 'continue' },
+      { role: 'assistant', content: 'done' },
+    ])
+    let captured = ''
+    const primaryClient: StreamClient = {
+      stream: async (request: OaiChatRequest, callbacks: StreamCallbacks) => {
+        const last = request.messages[request.messages.length - 1]
+        captured = typeof last?.content === 'string' ? last.content : ''
+        callbacks.onTextDelta('Edited src/foo.ts to fix it.')
+      },
+    }
+    const controller = makeController(session, {
+      contextWindow: 1_000_000,
+      primaryClient,
+      getTrajectoryEntries: () => trajectory,
+    })
+    await controller.llmCompact()
+    return captured
+  }
+
+  it('injects the write-action chain when writes exist', async () => {
+    const prompt = await captureCompactPrompt([
+      traj({ turn: 1, tool: 'write_file', target: 'src/foo.ts', status: 'success' }),
+    ])
+    assert.match(prompt, /变更动作清单/, 'prompt must carry the change-action section')
+    assert.match(prompt, /\[T1\] write_file src\/foo\.ts/, 'prompt must list the concrete write')
+    assert.match(prompt, /非只读命令/, 'prompt must ask for non-read-only commands')
+  })
+
+  it('omits the write-action section when there are no writes', async () => {
+    const prompt = await captureCompactPrompt([
+      traj({ turn: 1, tool: 'read_file', target: 'src/foo.ts', status: 'success' }),
+    ])
+    assert.doesNotMatch(prompt, /变更动作清单/, 'no write section when trajectory is read-only')
+    assert.match(prompt, /必须完整保留的用户意图链/, 'user intent chain still present')
   })
 })
