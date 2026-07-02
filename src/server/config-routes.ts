@@ -4,6 +4,7 @@
  *
  *   GET    /config/providers                list providers with key status
  *   POST   /config/providers                add/update a provider (setup flow)
+ *   POST   /config/providers/custom         create a new OpenAI-compatible provider from scratch
  *   DELETE /config/providers/:name          remove a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
@@ -14,6 +15,7 @@ import {
   loadConfig,
   getApiKeyStatus,
   setupProvider,
+  setupCustomProvider,
   removeProvider,
   setDefaultProvider,
   setApiKey,
@@ -99,6 +101,40 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
 
       try {
         setupProvider({ providerName, apiKey, apiKeyEnv, baseUrl, model: parsedModel, makeDefault })
+        return { status: 200, body: { ok: true, providerName } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    'POST /config/providers/custom': withAuth((body) => {
+      // 凭空创建一个 OpenAI 兼容 provider（不依赖预设）——支持 Ollama/vLLM/
+      // OpenAI 直连/第三方兼容端点。与 setupProvider 区别：后者要求 providerName
+      // 在预设或已存在，本端点从零 materialize 一个完整 ProviderConfig。
+      const { providerName, apiKey, baseUrl, makeDefault, model } = body as {
+        providerName?: string
+        apiKey?: string
+        baseUrl?: string
+        makeDefault?: boolean
+        model?: ModelConfig
+      }
+      if (!providerName) return { status: 400, body: { error: 'providerName is required' } }
+      if (!baseUrl) return { status: 400, body: { error: 'baseUrl is required' } }
+      if (!model) return { status: 400, body: { error: 'model is required' } }
+
+      const result = modelConfigSchema.safeParse(model)
+      if (!result.success) {
+        return { status: 400, body: { error: `Invalid model: ${result.error.message}` } }
+      }
+
+      try {
+        setupCustomProvider({
+          providerName,
+          baseUrl,
+          ...(apiKey ? { apiKey } : {}),
+          model: result.data,
+          makeDefault,
+        })
         return { status: 200, body: { ok: true, providerName } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }

@@ -800,6 +800,28 @@ export function setupConfigProvider(
   return apiPost('/config/providers', input)
 }
 
+export interface SetupCustomProviderInput {
+  providerName: string
+  baseUrl: string
+  /** Optional — local deployments (Ollama/vLLM) need no key. */
+  apiKey?: string
+  model: {
+    id: string
+    alias?: string
+    contextWindow: number
+    maxTokens: number
+  }
+  makeDefault?: boolean
+}
+
+/** Create a brand-new OpenAI-compatible provider from scratch (no preset needed).
+ *  Supports Ollama / vLLM / OpenAI direct / third-party compatible endpoints. */
+export function setupCustomProvider(
+  input: SetupCustomProviderInput,
+): Promise<{ ok: boolean; providerName: string }> {
+  return apiPost('/config/providers/custom', input)
+}
+
 export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
   return rivetFetch(`/config/providers/${name}`, { method: 'DELETE' })
     .then(r => r.json() as Promise<{ ok: boolean }>)

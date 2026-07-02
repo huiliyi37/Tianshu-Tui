@@ -387,7 +387,8 @@ export function setupProvider(options: SetupProviderOptions): void {
 export interface SetupCustomProviderOptions {
   providerName: string
   baseUrl: string
-  apiKey: string
+  /** API key — optional for local deployments (Ollama/vLLM) that need no auth. */
+  apiKey?: string
   model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
   makeDefault?: boolean
 }
@@ -413,7 +414,7 @@ export function setupCustomProvider(options: SetupCustomProviderOptions): void {
   }
   const provider: ProviderConfig = {
     name: options.providerName,
-    apiKey: options.apiKey,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
     baseUrl: options.baseUrl,
     protocol: 'openai',
     capabilities: {

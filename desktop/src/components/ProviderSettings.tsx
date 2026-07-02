@@ -5,6 +5,7 @@ import { Pencil } from 'lucide-react'
 import { useConfigProviders, qk } from '../state/queries'
 import {
   setupConfigProvider,
+  setupCustomProvider,
   removeConfigProvider,
   setProviderKey,
   setProviderAsDefault,
@@ -504,7 +505,7 @@ function CustomProviderCard({ onRefresh }: { onRefresh: () => void }) {
     }
     setBusy(true)
     try {
-      await setupConfigProvider({
+      await setupCustomProvider({
         providerName: name,
         baseUrl,
         apiKey: state.apiKey.trim() || undefined,
