@@ -432,7 +432,11 @@ export function buildSessionRoutes(
               body: { error: `Unknown slash command: "${first}". Type a normal message or use the command menu (+).` },
             }
           }
-          prompt = resolved
+          prompt = resolved.prompt
+          // 桌面端也需挂载 workflow 声明的 EXTENDED 工具（与 TUI main.ts 对齐）。
+          for (const toolName of resolved.requiredTools ?? []) {
+            manager.enableTool(params!.id!, toolName)
+          }
         }
       }
 

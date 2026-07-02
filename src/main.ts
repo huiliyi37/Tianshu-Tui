@@ -847,11 +847,25 @@ async function main() {
 
     // 将 slash 命令解析为 agent prompt（对齐 Ink resolveAppPromptInput）。
     // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
-    const prompt = resolveAppPromptInput(trimmed, process.cwd())
-    if (prompt === null) {
+    const resolved = resolveAppPromptInput(trimmed, process.cwd())
+    if (resolved === null) {
       app!.rejectSubmit()
       app!.commitStatic(`⚠️  Unknown command: ${trimmed.split(/\s/)[0]}\nType /help for available commands.`)
       return
+    }
+
+    // workflow 声明的 EXTENDED 工具在发 run 前挂载——prompt 契约与工具可见性同源
+    // （会话 5158719d：/council 指示调 council_convene 而门控把它摘了 → 模型被迫模拟）。
+    for (const toolName of resolved.requiredTools ?? []) {
+      const mount = ctx!.agent.enableTool(toolName)
+      if (mount.status === 'mounted') {
+        const costNote = mount.cacheImpact === 'prefix-invalidated'
+          ? '（下一请求前缀缓存一次性 MISS，后续轮次按新工具集重新缓存）'
+          : ''
+        app!.commitStatic(`🔧 已为本次 workflow 挂载工具 ${toolName}${costNote}`)
+      }
+      // already-active / gating-off → 静默（工具本就可见）
+      // unknown / not-extended → 不应发生（requiredTools 与 EXTENDED_TOOLS 的一致性由 workflow 测试钉住）
     }
 
     // 单一权威：TuiApp.agentBusy 是唯一的 streaming 闩。app.onSubmit 只在 TuiApp
@@ -859,7 +873,7 @@ async function main() {
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
     const callbacks = wrapCallbacksWithTuiApp(app!)
-    ctx!.agent.run(prompt, callbacks).catch((err) => {
+    ctx!.agent.run(resolved.prompt, callbacks).catch((err) => {
       process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
     })
   })

@@ -107,7 +107,7 @@ describe('/context 占用明细', () => {
 
 describe('resolveAppPromptInput', () => {
   it('returns non-slash input unchanged', async () => {
-    assert.equal(resolveAppPromptInput('hello world', '/cwd'), 'hello world')
+    assert.equal(resolveAppPromptInput('hello world', '/cwd')?.prompt, 'hello world')
   })
 
   it('returns null for unrecognized slash commands (safety guard)', async () => {
@@ -122,51 +122,51 @@ describe('resolveAppPromptInput', () => {
     const resolved = resolveAppPromptInput('/plan add workflow aliases', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('创建实现计划：add workflow aliases'))
-    assert.ok(resolved.includes('计划模板路由'))
-    assert.ok(resolved.includes('docs/superpowers/plans/'))
-    assert.ok(resolved.includes('禁用占位符'))
-    assert.ok(resolved.includes('不要写实现代码'))
+    assert.ok(resolved!.prompt.includes('创建实现计划：add workflow aliases'))
+    assert.ok(resolved!.prompt.includes('计划模板路由'))
+    assert.ok(resolved!.prompt.includes('docs/superpowers/plans/'))
+    assert.ok(resolved!.prompt.includes('禁用占位符'))
+    assert.ok(resolved!.prompt.includes('不要写实现代码'))
   })
 
   it('resolves /write-plan into a writing-plans workflow prompt', async () => {
     const resolved = resolveAppPromptInput('/write-plan 你说的很好，把这个内容记录到设计文档。如果行数太长就拆分两个，一个背景说明，一个是设计文档。其次，即便我使用 claude code 也是多个会话来并行执行。', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('创建实现计划：你说的很好，把这个内容记录到设计文档。'))
-    assert.ok(resolved.includes('计划模板路由'))
-    assert.ok(resolved.includes('docs/superpowers/plans/'))
-    assert.ok(resolved.includes('多会话并行开发设计文档.md'))
-    assert.ok(!resolved.includes('你说的很好-把这个内容记录到设计文档-如果行数太长'))
-    assert.ok(resolved.includes('收尾'))
+    assert.ok(resolved!.prompt.includes('创建实现计划：你说的很好，把这个内容记录到设计文档。'))
+    assert.ok(resolved!.prompt.includes('计划模板路由'))
+    assert.ok(resolved!.prompt.includes('docs/superpowers/plans/'))
+    assert.ok(resolved!.prompt.includes('多会话并行开发设计文档.md'))
+    assert.ok(!resolved!.prompt.includes('你说的很好-把这个内容记录到设计文档-如果行数太长'))
+    assert.ok(resolved!.prompt.includes('收尾'))
   })
 
   it('resolves /plan close into a plan_close workflow prompt with apply by default', async () => {
     const resolved = resolveAppPromptInput('/plan close docs/superpowers/plans/demo.md --tasks 1-7', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('Use the plan_close tool'))
-    assert.ok(resolved.includes('- file_path: docs/superpowers/plans/demo.md'))
-    assert.ok(resolved.includes('- tasks: 1-7'))
-    assert.ok(resolved.includes('- apply: true'))
-    assert.ok(!resolved.includes('Preview only'))
+    assert.ok(resolved!.prompt.includes('Use the plan_close tool'))
+    assert.ok(resolved!.prompt.includes('- file_path: docs/superpowers/plans/demo.md'))
+    assert.ok(resolved!.prompt.includes('- tasks: 1-7'))
+    assert.ok(resolved!.prompt.includes('- apply: true'))
+    assert.ok(!resolved!.prompt.includes('Preview only'))
   })
 
   it('resolves /plan-close into a plan_close workflow prompt with apply by default', async () => {
     const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('Use the plan_close tool'))
-    assert.ok(resolved.includes('- tasks: all'))
-    assert.ok(resolved.includes('- apply: true'))
+    assert.ok(resolved!.prompt.includes('Use the plan_close tool'))
+    assert.ok(resolved!.prompt.includes('- tasks: all'))
+    assert.ok(resolved!.prompt.includes('- apply: true'))
   })
 
   it('supports --preview to keep plan_close in preview mode', async () => {
     const resolved = resolveAppPromptInput('/plan-close docs/superpowers/plans/demo.md --tasks all --preview', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('- apply: false'))
-    assert.ok(resolved.includes('Preview only; do not write the file.'))
+    assert.ok(resolved!.prompt.includes('- apply: false'))
+    assert.ok(resolved!.prompt.includes('Preview only; do not write the file.'))
   })
 
   it('returns null for empty /plan (handled by handleSlashCommand before resolver)', async () => {
@@ -177,37 +177,53 @@ describe('resolveAppPromptInput', () => {
     const resolved = resolveAppPromptInput('/team docs/superpowers/plans/loop-split-v3.md', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('团队模式核心骨架'))
-    assert.ok(resolved.includes('team_orchestrate'))
-    assert.ok(resolved.includes('plan_task'))
-    assert.ok(resolved.includes('patcher workers as 天梁 executors'))
-    assert.ok(resolved.includes('deliver_task'))
+    assert.ok(resolved!.prompt.includes('团队模式核心骨架'))
+    assert.ok(resolved!.prompt.includes('team_orchestrate'))
+    assert.ok(resolved!.prompt.includes('plan_task'))
+    assert.ok(resolved!.prompt.includes('patcher workers as 天梁 executors'))
+    assert.ok(resolved!.prompt.includes('deliver_task'))
   })
 
   it('resolves /team max into a planning-first prompt', async () => {
     const resolved = resolveAppPromptInput('/team max refactor loop pipeline', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('/team max'))
-    assert.ok(resolved.includes('multi-perspective planning'))
-    assert.ok(resolved.includes('risk audit'))
+    assert.ok(resolved!.prompt.includes('/team max'))
+    assert.ok(resolved!.prompt.includes('multi-perspective planning'))
+    assert.ok(resolved!.prompt.includes('risk audit'))
   })
 
   it('resolves /council into a council_convene workflow prompt', async () => {
     const resolved = resolveAppPromptInput('/council 拆分 loop.ts 是否遗漏回滚', '/cwd')
     assert.ok(resolved !== null)
 
-    assert.ok(resolved.includes('星域议事会'))
-    assert.ok(resolved.includes('council_convene'))
-    assert.ok(resolved.includes('拆分 loop.ts 是否遗漏回滚'))
-    assert.ok(resolved.includes('绝不触发 team_orchestrate'))
+    assert.ok(resolved!.prompt.includes('星域议事会'))
+    assert.ok(resolved!.prompt.includes('council_convene'))
+    assert.ok(resolved!.prompt.includes('拆分 loop.ts 是否遗漏回滚'))
+    assert.ok(resolved!.prompt.includes('绝不触发 team_orchestrate'))
   })
 
   it('returns council usage prompt for empty /council args', async () => {
     const resolved = resolveAppPromptInput('/council', '/cwd')
     assert.ok(resolved !== null)
-    assert.ok(resolved!.includes('Council usage:'))
-    assert.ok(resolved!.includes('--rounds'))
+    assert.ok(resolved!.prompt.includes('Council usage:'))
+    assert.ok(resolved!.prompt.includes('--rounds'))
+  })
+
+  it('workflow 命令透传 requiredTools', async () => {
+    const r = resolveAppPromptInput('/council 审查方案', '/cwd')
+    assert.ok(r && typeof r === 'object')
+    assert.deepEqual(r!.requiredTools, ['council_convene', 'team_orchestrate'])
+  })
+
+  it('普通文本返回 requiredTools 为空', async () => {
+    const r = resolveAppPromptInput('plain prompt', '/cwd')
+    assert.equal(r?.requiredTools, undefined)
+    assert.equal(r?.prompt, 'plain prompt')
+  })
+
+  it('未知 slash 仍返回 null', async () => {
+    assert.equal(resolveAppPromptInput('/nonexistent', '/cwd'), null)
   })
 })
 

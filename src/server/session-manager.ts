@@ -227,6 +227,15 @@ export interface ManagedAgent {
    *  and the `job` tool operate on an instance the server subscribes to. Optional
    *  so lightweight test doubles need not implement it. */
   setJobs?(jobs: import('../tools/job-store.js').SessionJobs): void
+  /**
+   * Mount an EXTENDED-layer tool onto the main agent (mirrors AgentLoop.enableTool).
+   * Used by workflow slash-command resolution to ensure prompt-declared tools are
+   * visible before run. Optional so lightweight test doubles need not implement it.
+   */
+  enableTool?(name: string): {
+    status: 'mounted' | 'already-active' | 'not-extended' | 'unknown' | 'gating-off'
+    cacheImpact: 'prefix-invalidated' | 'none'
+  }
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
@@ -1737,6 +1746,18 @@ export class RuntimeSessionManager {
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
   getDefaultCwd(): string {
     return this.defaultCwd
+  }
+
+  /**
+   * Mount an EXTENDED-layer tool onto the session's agent (workflow auto-mount).
+   * Returns the mount status, or undefined if the session/agent lacks enableTool
+   * (lightweight doubles). No-op if gating is off (tool already visible).
+   */
+  enableTool(id: string, name: string): { status: string; cacheImpact: string } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    const agent = this.ensureAgent(session)
+    return agent.enableTool?.(name)
   }
 
   /**

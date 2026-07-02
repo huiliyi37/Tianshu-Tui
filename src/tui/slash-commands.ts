@@ -372,14 +372,20 @@ export function searchMemory(ctx: SlashHandlerContext, query: string): string {
   return hits.length === 0 ? `No memory found for "${query}".` : `Memory search: ${query}\n${hits.map(h => `- ${h}`).join('\n')}`
 }
 
-export function resolveAppPromptInput(input: string, cwd: string): string | null {
-  if (!input.startsWith('/')) return input
+export interface ResolvedPromptInput {
+  prompt: string
+  /** 见 WorkflowResolveResult.requiredTools。仅 ecosystem workflow 路径可能非空。 */
+  requiredTools?: readonly string[]
+}
+
+export function resolveAppPromptInput(input: string, cwd: string): ResolvedPromptInput | null {
+  if (!input.startsWith('/')) return { prompt: input }
   const workflow = resolveEcosystemWorkflowInput(input)
-  if (workflow) return workflow.prompt
+  if (workflow) return { prompt: workflow.prompt, requiredTools: workflow.requiredTools }
   const custom = resolveCustomCommand(cwd, input)
-  if (custom) return custom
+  if (custom) return { prompt: custom }
   const skillPrompt = resolveSkillPrompt(input, cwd)
-  if (skillPrompt !== null) return skillPrompt
+  if (skillPrompt !== null) return { prompt: skillPrompt }
   // /review [max] [focus description] — map to deliver_task instruction for the agent
   const reviewMatch = input.match(/^\/review(?:\s+(max))?(?:\s+(.*))?$/i)
   if (reviewMatch) {
@@ -388,11 +394,11 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
     const level = isMax ? 'L3' : 'L2'
     const levelLabel = level === 'L3' ? 'L3 Review Squadron (5 inspectors)' : 'L2 adversarial verifier'
     const focusInstruction = focusText ? ` Focus specifically on: ${focusText}.` : ''
-    return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.${focusInstruction}`
+    return { prompt: `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.${focusInstruction}` }
   }
   // /review typos — don't silently drop user input
   if (/^\/review/i.test(input)) {
-    return `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.`
+    return { prompt: `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.` }
   }
   // Unrecognized slash command — return null to signal "blocked"
   return null
@@ -3362,7 +3368,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       handler: ({ app, input, trimmed }) => {
         const resolved = resolveAppPromptInput(trimmed, ctx.cwd)
         if (resolved !== null) {
-          app.submitText(resolved)
+          app.submitText(resolved.prompt)
           return true
         }
         const fallback = getHandler(name)
