@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareSemver, parseSemver, emitLines, buildWindowsSelfUpdateScript } from '../updater.js'
+import { compareSemver, parseSemver, emitLines, buildWindowsSelfUpdateScript, withResumeArgs } from '../updater.js'
 import { WinStreamDecoder } from '../../platform.js'
 
 describe('updater semver', () => {
@@ -72,6 +72,61 @@ describe('buildWindowsSelfUpdateScript', () => {
       execPath: "C:\\o'brien\\node.exe",
     })
     assert.match(script, /'C:\\o''brien\\node\.exe'/)
+  })
+
+  it('carries --resume <id> into the relaunch ArgumentList (escaped)', () => {
+    const sid = 'abc123-def-456'
+    const script = buildWindowsSelfUpdateScript({
+      ...base,
+      argv: withResumeArgs(base.argv, sid),
+    })
+    assert.match(script, /-ArgumentList @\(/)
+    assert.match(script, /'--resume'/)
+    assert.ok(script.includes(`'${sid}'`), 'session id present as a quoted arg')
+  })
+})
+
+describe('withResumeArgs', () => {
+  it('returns argv unchanged (minus session flags) when no sessionId', () => {
+    assert.deepEqual(withResumeArgs(['dist/main.js']), ['dist/main.js'])
+    assert.deepEqual(withResumeArgs(['dist/main.js', '--verbose']), ['dist/main.js', '--verbose'])
+  })
+
+  it('appends --resume <id> when sessionId given', () => {
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js'], 'sid-1'),
+      ['dist/main.js', '--resume', 'sid-1'],
+    )
+  })
+
+  it('strips pre-existing --new / --continue before appending current resume', () => {
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '--new'], 'sid-1'),
+      ['dist/main.js', '--resume', 'sid-1'],
+    )
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '--continue'], 'sid-1'),
+      ['dist/main.js', '--resume', 'sid-1'],
+    )
+  })
+
+  it('strips a stale --resume <oldid> (with its value) then appends current id', () => {
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '--resume', 'old-id', '--verbose'], 'new-id'),
+      ['dist/main.js', '--verbose', '--resume', 'new-id'],
+    )
+  })
+
+  it('handles bare --resume with no following value', () => {
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '--resume'], 'new-id'),
+      ['dist/main.js', '--resume', 'new-id'],
+    )
+    // trailing --resume followed by another flag (not a value) — flag preserved
+    assert.deepEqual(
+      withResumeArgs(['dist/main.js', '--resume', '--verbose']),
+      ['dist/main.js', '--verbose'],
+    )
   })
 })
 

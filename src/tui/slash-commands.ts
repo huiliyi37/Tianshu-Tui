@@ -3112,7 +3112,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       // （better_sqlite3.node）→ "另一个程序正在使用此文件"。改为分离式更新器：
       // 等本进程退出释放文件锁后再装、再拉起。
       if (process.platform === 'win32' && check.installType === 'global') {
-        const scheduled = spawnWindowsSelfUpdate(root, 'latest', true)
+        const scheduled = spawnWindowsSelfUpdate(root, 'latest', true, ctx.sessionId)
         if (!scheduled) {
           app.commitStatic('❌ 无法启动后台更新器，请手动执行：npm install -g tianshu-tui@latest')
           return true
@@ -3141,7 +3141,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       setTimeout(() => {
         ctx.shutdown()
         app.dispose()
-        restartProcess()
+        restartProcess(ctx.sessionId)
       }, 250)
       return true
     },

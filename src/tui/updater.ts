@@ -421,9 +421,37 @@ export async function runUpdate(
   })
 }
 
-/** 更新成功后拉起新进程并退出当前进程。 */
-export function restartProcess(): void {
-  const args = process.argv.slice(1)
+/**
+ * 为重启 argv 注入「恢复当前会话」标志。
+ *
+ * 背景：默认启动铸造全新会话（session-recovery：无隐式恢复）。update 重启若沿用
+ * 原始 argv（用户多为 `rivet` 无参启动），新进程就开新会话 → 历史丢失、模型不记得。
+ * 这里剔除已有的会话选择标志（`--new` / `--continue` / `--resume [id]`，含其值），
+ * 再追加 `--resume <sessionId>`（映射 RIVET_RESUME_ID），让重启确定性续接当前会话。
+ * 指定 id 的恢复不受 cleanExit 影响，且同 cwd 天然通过校验。
+ *
+ * 纯函数，便于单测。sessionId 缺省时原样返回（去除会话标志后的 argv）。
+ */
+export function withResumeArgs(argv: string[], sessionId?: string): string[] {
+  const cleaned: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!
+    if (a === '--new' || a === '--continue') continue
+    if (a === '--resume') {
+      // 连带吞掉其可选值（下一个非 flag token 视为会话 id/prefix）。
+      const next = argv[i + 1]
+      if (next !== undefined && !next.startsWith('-')) i++
+      continue
+    }
+    cleaned.push(a)
+  }
+  if (sessionId) cleaned.push('--resume', sessionId)
+  return cleaned
+}
+
+/** 更新成功后拉起新进程并退出当前进程。sessionId 存在时重启续接该会话。 */
+export function restartProcess(sessionId?: string): void {
+  const args = withResumeArgs(process.argv.slice(1), sessionId)
   const child = spawn(process.execPath, args, {
     detached: true,
     stdio: 'ignore',
@@ -473,7 +501,7 @@ export function buildWindowsSelfUpdateScript(opts: {
  * 安排 Windows 后台自更新：spawn 分离 PowerShell（等本进程退出→装→重启），
  * 返回是否成功排程。调用方随后应主动退出当前进程释放文件锁。
  */
-export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch = true): boolean {
+export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch = true, sessionId?: string): boolean {
   const name = readPackageName(root)
   if (!name) return false
   const script = buildWindowsSelfUpdateScript({
@@ -481,7 +509,7 @@ export function spawnWindowsSelfUpdate(root: string, channel: string, relaunch =
     packageName: name,
     channel,
     execPath: process.execPath,
-    argv: process.argv.slice(1),
+    argv: withResumeArgs(process.argv.slice(1), sessionId),
     cwd: process.cwd(),
     relaunch,
   })
