@@ -737,9 +737,15 @@ export function ThreadView(props: {
         )}
       </div>
 
-      {session.status === 'completed' && view.completionSummary && (
-        <CompletionCurtain summary={view.completionSummary} />
-      )}
+      {session.status === 'completed' && view.completionSummary && (() => {
+        // 只在有实际交付时显示完成面板——todo 全部完成，或有代码改动。
+        // 普通问答（无 todo 无改动）不弹 CompletionCurtain。
+        const hasTodos = view.todos.length > 0
+        const allTodosDone = hasTodos && view.todos.every(t => t.status === 'completed')
+        const hasFileChanges = (view.completionSummary.filesModified?.length ?? 0) > 0
+        if (!allTodosDone && !hasFileChanges) return null
+        return <CompletionCurtain summary={view.completionSummary} />
+      })()}
 
       <DelegationPill
         nodes={view.delegation}
