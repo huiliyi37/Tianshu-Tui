@@ -52,6 +52,7 @@ import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -321,13 +322,6 @@ const L0_WRAPPED_TOOLS: ReadonlySet<string> = new Set([
 
 function isDietNoInfoReadResult(content: string): boolean {
   return content.includes('[diet:redundant]') || content.includes('[diet:useless]')
-}
-
-function toolTargetFromInput(toolName: string, input: Record<string, unknown>): string {
-  if (typeof input.file_path === 'string') return input.file_path
-  if (typeof input.path === 'string') return input.path
-  if (typeof input.command === 'string') return input.command.slice(0, 50)
-  return toolName
 }
 
 function countRecentReadLoopPlaceholders(

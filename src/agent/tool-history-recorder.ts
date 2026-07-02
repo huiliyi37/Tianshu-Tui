@@ -2,6 +2,7 @@ import type { AgentLoop } from './loop.js'
 import type { HealthSignal } from './trajectory-health.js'
 import { createHash } from 'node:crypto'
 import { TYPECHECK_CMD_RE } from './typecheck-gate.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 /**
  * Record tool execution history and trigger deferred post-tool processing.
@@ -20,13 +21,7 @@ export function recordToolHistory(
     // quarantine/doom, otherwise benign command-name differences make the agent
     // recoil. Visible status stays honest; only the immune amplifier is neutralised.
     const immuneError = errorClass === 'environment' ? false : isError
-    const target = typeof input?.path === 'string'
-      ? input.path
-      : typeof input?.file_path === 'string'
-        ? input.file_path
-        : typeof input?.command === 'string'
-          ? input.command.slice(0, 50)
-          : name
+    const target = toolTargetFromInput(name, input ?? {})
     // Deterministic argsHash: tool name + sorted input keys → SHA-256 first 8 hex chars.
     const argsHash = createHash('sha256')
       .update(`${name}:${JSON.stringify(input, Object.keys(input).sort())}`)

@@ -2,6 +2,7 @@ import { TrajectoryRecorder, type TrajectoryEntry } from './trajectory.js'
 import type { FailureClass } from './failure-classifier.js'
 import { shouldRetryToolFailure } from './retry-policy.js'
 import type { FailureJournal } from './failure-journal.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 export interface ToolExecution {
   id: string
@@ -77,13 +78,7 @@ export class TurnHarness {
       ? (result.isError ? 'retried-failed' : 'retried-success')
       : (result.isError ? 'failed' : 'success')
 
-    const target = typeof exec.input.file_path === 'string'
-      ? exec.input.file_path
-      : typeof exec.input.path === 'string'
-        ? exec.input.path
-        : typeof exec.input.command === 'string'
-          ? exec.input.command.slice(0, 50)
-          : exec.name
+    const target = toolTargetFromInput(exec.name, exec.input as Record<string, unknown>)
 
     this.trajectory.record({
       turn: exec.turn,

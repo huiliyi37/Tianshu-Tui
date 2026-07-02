@@ -39,6 +39,7 @@ import {
 } from './prediction-error.js'
 import type { ReasoningEffort } from './auto-reasoning.js'
 import { createRuntimeHookContext } from './runtime-hooks.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 export interface ToolExecutionDeps {
   config: AgentConfig
@@ -506,14 +507,10 @@ export class ToolExecutionController {
 
     for (const tu of input.toolUses) {
       const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
-      const target =
-        typeof tu.input?.file_path === 'string'
-          ? tu.input.file_path
-          : typeof tu.input?.path === 'string'
-            ? tu.input.path
-            : typeof tu.input?.command === 'string'
-              ? tu.input.command.slice(0, 50)
-              : undefined
+      const hasTargetField = typeof tu.input?.file_path === 'string'
+        || typeof tu.input?.path === 'string'
+        || typeof tu.input?.command === 'string'
+      const target = hasTargetField ? toolTargetFromInput(tu.name, tu.input as Record<string, unknown>) : undefined
       await this.deps.runtimeHooks.runPostTool(
         createRuntimeHookContext(
           this.deps.buildRuntimeSnapshot(),
