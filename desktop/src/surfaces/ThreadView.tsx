@@ -310,9 +310,6 @@ export function ThreadView(props: {
     return Math.min(Math.round((tokens / window) * 100), 100)
   }, [session.contextTokens, session.contextWindow])
 
-  // U9: latest turn tokens are already tracked by the reducer in lastTotalTokens.
-  const latestTokens = view.lastTotalTokens
-
   // Cache hit rate from cumulative cache tokens in turn_complete events.
   const cacheHitRate = useMemo(() => {
     const total = view.cacheReadTokens + view.cacheCreationTokens
@@ -612,32 +609,15 @@ export function ThreadView(props: {
         )}
 
         <div className="thread-header-meta">
-          {session.model && (
-            <span className="model-chip" title={`当前模型: ${session.model}`}>
-              {session.model.replace(/^(deepseek-|glm-|mimo-)/, '').slice(0, 16)}
-            </span>
-          )}
-          <span className={`mode-chip ${view.planMode === 'planning' ? 'plan' : 'agent'}`}>
-            {view.planMode === 'planning' ? 'Plan' : 'Agent'}
-          </span>
-          <button
-            className={`view-mode-chip ${viewMode}`}
-            onClick={() => dispatch({ type: 'cycleViewMode' })}
-            title="视图模式 (⌘O 循环)：标准 → 详尽 → 摘要"
-            aria-label="切换视图模式"
-          >
-            {viewMode === 'normal' ? '标准' : viewMode === 'verbose' ? '详尽' : '摘要'}
-          </button>
-          {session.contextWindow && session.contextWindow > 0 ? (
-            <div className="ctx-bar" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens`}>
+          {/* model / plan-mode / context-ring 在 Composer 底栏已有可交互版本——header 不重复 */}
+          {session.contextWindow && session.contextWindow > 0 && ctxPct >= 80 ? (
+            <div className="ctx-bar warn" title={`${formatTokens(session.contextTokens ?? 0)} / ${formatTokens(session.contextWindow)} tokens — 接近上限`}>
               <div className="ctx-bar-fill" style={{ width: `${ctxPct}%` }} />
               <span className="ctx-bar-label">{ctxPct}%</span>
             </div>
-          ) : latestTokens > 0 ? (
-            <span className="ctx-meter" title="上一轮上下文 tokens">{formatTokens(latestTokens)} tok</span>
           ) : null}
           {cacheHitRate !== null ? (
-            <span className="cache-chip" title={`缓存读 {formatTokens(view.cacheReadTokens)} / 创建 {formatTokens(view.cacheCreationTokens)}`}>
+            <span className="cache-chip" title={`缓存读 ${formatTokens(view.cacheReadTokens)} / 创建 ${formatTokens(view.cacheCreationTokens)}`}>
               ⚡{cacheHitRate}%
             </span>
           ) : null}
@@ -730,6 +710,7 @@ export function ThreadView(props: {
                       domainGlyph={domainGlyph}
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
+                      onCancelContinue={onAbort}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -1073,10 +1054,10 @@ const Block = memo(BlockImpl, (a, b) =>
   a.block === b.block && a.isStreaming === b.isStreaming &&
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
-  a.onContinue === b.onContinue
+  a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName, onContinue }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, domainName, onContinue, onCancelContinue }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
@@ -1085,6 +1066,8 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
   domainName?: string
   /** Resume a run stopped by the watchdog quota (sends "continue"). */
   onContinue?: () => void
+  /** C2 刹车 — cancel a pending watchdog auto-continue countdown (aborts the session). */
+  onCancelContinue?: () => void
 }) {
   if (block.kind === 'user') {
     return (
@@ -1186,6 +1169,10 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
   }
   if (block.kind === 'watchdog_recovery' && block.watchdog) {
     const w = block.watchdog
+    // C2 刹车 — pending auto-continue: cancellable countdown card.
+    if (w.pendingAutoContinue) {
+      return <WatchdogPendingCard w={w} onContinue={onContinue} onCancel={onCancelContinue} />
+    }
     const stopped = !w.autoContinue
     const tag = stopped
       ? (w.stopReason === 'session-total' ? '配额耗尽'
@@ -1217,6 +1204,63 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, domainGlyph, do
     <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} />
     </MsgBlock>
+  )
+}
+
+/**
+ * C2 刹车 — watchdog auto-continue countdown card. The server delays the
+ * 'continue' resubmit by delayMs; this card counts it down and offers
+ * 「立即继续」(send continue now) / 「取消」(abort → cancels the server timer).
+ * Once the countdown lapses the server continues on its own — the card then
+ * reads as a plain recovery notice.
+ */
+function WatchdogPendingCard({ w, onContinue, onCancel }: {
+  w: NonNullable<ConvoBlock['watchdog']>
+  onContinue?: () => void
+  onCancel?: () => void
+}) {
+  const deadline = (w.receivedAt ?? Date.now()) + (w.delayMs ?? 5000)
+  const [remainMs, setRemainMs] = useState(() => Math.max(0, deadline - Date.now()))
+  useEffect(() => {
+    if (w.cancelled) return
+    const t = setInterval(() => {
+      const r = Math.max(0, deadline - Date.now())
+      setRemainMs(r)
+      if (r <= 0) clearInterval(t)
+    }, 200)
+    return () => clearInterval(t)
+  }, [deadline, w.cancelled])
+
+  const cancelled = w.cancelled === true
+  const pending = !cancelled && remainMs > 0
+  const quota = `${w.sessionTotal}/12`
+  return (
+    <div className={`decision-shift ${cancelled ? 'warn' : 'info'}`}>
+      <div className="ds-head">
+        <span className="ds-glyph" aria-hidden>{cancelled ? '⏹' : '⟳'}</span>
+        <span className="ds-domain">边界停滞恢复</span>
+        <span className="ds-tag">{cancelled ? '已取消' : pending ? '倒计时' : '自动恢复'}</span>
+      </div>
+      <div className="ds-reason">
+        {cancelled
+          ? '续跑已取消——等待你的下一条指令。'
+          : pending
+            ? `检测到边界停滞，${Math.ceil(remainMs / 1000)}s 后自动续跑（可取消）。`
+            : '倒计时结束，已自动注入 continue 恢复执行。'}
+        {' '}
+        <span className="watchdog-quota">会话配额 {quota} · 连续 {w.consecutive}/3</span>
+      </div>
+      {pending && (
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {onContinue && (
+            <button className="btn-sm watchdog-continue" onClick={onContinue}>立即继续</button>
+          )}
+          {onCancel && (
+            <button className="btn-sm watchdog-continue" onClick={onCancel}>取消</button>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
