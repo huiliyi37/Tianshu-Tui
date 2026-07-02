@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { collectFiles } from '../ast-shared.js'
+import { GLOB_TOOL } from '../glob.js'
+import type { ToolCallParams } from '../types.js'
 
 /**
  * Integration test: verify that directory traversal silently skips restricted
@@ -91,5 +93,19 @@ describe('EPERM silent-skip integration', { skip: shouldSkip && 'skipped: Window
       (err: NodeJS.ErrnoException) => err.code === 'EACCES' || err.code === 'EPERM',
       'collectFiles with non-restricted denied subdir must throw',
     )
+  })
+
+  it('glob surfaces error on root path that is restricted', async () => {
+    // Root dir itself is restricted → must return isError, not empty result
+    const restricted = join(tmpRoot, '.Spotlight-V100')
+    mkdirSync(restricted)
+    chmodSync(restricted, 0o000)
+
+    const result = await GLOB_TOOL.execute({
+      input: { pattern: '*', path: restricted },
+      toolUseId: 'test',
+      cwd: restricted,
+    } as unknown as ToolCallParams)
+    assert.equal(result.isError, true, 'glob on restricted root must return isError')
   })
 })

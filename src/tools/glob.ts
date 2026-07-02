@@ -5,6 +5,7 @@ import { validatePathSafe } from './path-validate.js'
 import { relativePosix } from '../path-format.js'
 import { GitignoreFilter } from './gitignore.js'
 import { classifyPath } from '../context/attention-filter.js'
+import { isRestrictedPath } from '../platform/restricted-paths.js'
 
 const EXCLUDE_DIRS = new Set([
   'node_modules', '.git', 'dist', '.next', 'build', 'target', '__pycache__',
@@ -86,7 +87,15 @@ async function walkDir(
   let names: string[]
   try {
     names = await readdir(dir)
-  } catch {
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException
+    // Root path restricted → propagate (agent needs "target unreachable" not empty result).
+    // Non-root + restricted system path + permission error → silent skip.
+    // Other errors on subdirs → silent skip (preserves existing catch-all behavior).
+    if (dir === root || !isRestrictedPath(String(e.path ?? e.message ?? ''), e.code ?? '')) {
+      if (dir === root) throw err
+      return
+    }
     return
   }
 
@@ -170,7 +179,12 @@ Bad: glob(pattern="node_modules/**") (excluded by default)`,
     const gitignore = await GitignoreFilter.create(params.cwd)
     const includeSilentMatches = globPatternExplicitlyTargetsSilentLayer(pattern, requestedRoot)
     const files: string[] = []
-    await walkDir(searchRoot, files, searchRoot, regex, includeSilentMatches)
+    try {
+      await walkDir(searchRoot, files, searchRoot, regex, includeSilentMatches)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { content: `Error: ${message}`, isError: true }
+    }
 
     const matches = files
       .filter(f => !gitignore.isIgnored(params.cwd, join(searchRoot, f)))
