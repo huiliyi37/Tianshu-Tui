@@ -176,4 +176,32 @@ describe('git-clear-after-fail-hook', () => {
     hook.resetFailWindow()
     assert.equal(hook.getFailWindow(), null)
   })
+
+  it('fires on test fail → git restore <file> (single file, not just restore .)', () => {
+    const { submitted, hook } = collectAdvisories()
+    hook.run(makeCtx(1), makeTestFail())
+    hook.run(makeCtx(1), makeBashOk('git restore src/foo.ts'))
+    assert.equal(submitted.length, 1)
+  })
+
+  it('FIRES when grep between fail and git clear has no file-path target', () => {
+    const { submitted, hook } = collectAdvisories()
+    hook.run(makeCtx(1), makeTestFail())
+    // grep with a bare keyword, no file path → not a real diagnosis
+    hook.run(
+      makeCtx(1, [{ tool: 'grep', target: 'TODO' }]),
+      makeBashOk('git stash'),
+    )
+    assert.equal(submitted.length, 1)
+  })
+
+  it('does NOT fire when grep targets a real file path between fail and git clear', () => {
+    const { submitted, hook } = collectAdvisories()
+    hook.run(makeCtx(1), makeTestFail())
+    hook.run(
+      makeCtx(1, [{ tool: 'grep', target: 'src/foo.test.ts' }]),
+      makeBashOk('git stash'),
+    )
+    assert.equal(submitted.length, 0)
+  })
 })

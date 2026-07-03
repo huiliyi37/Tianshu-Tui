@@ -59,7 +59,7 @@ const TEST_CMD_RE = /\b(test|vitest|jest|pytest|mocha|tsx\s+--test|npm\s+(run\s+
  *   `git stash list` / `git stash pop` / `git stash show` / `git stash apply`
  *   `git diff` / `git status` / `git log`
  */
-const GIT_CLEAR_RE = /(?:^|\s)(?:git\s+(?:stash(?!\s+(?:pop|list|show|apply|drop|branch))|reset\s+(?:--hard|--mixed)|checkout\s+--|restore\s+\.|clean\s+-[a-z]*f)|git\s+stash\s*$)/
+const GIT_CLEAR_RE = /(?:^|\s)(?:git\s+(?:stash(?!\s+(?:pop|list|show|apply|drop|branch))|reset\s+(?:--hard|--mixed)|checkout\s+--|restore\s+\S|clean\s+-[a-z]*f)|git\s+stash\s*$)/
 
 /** 核验类工具——read/grep/find 等根因定位动作 */
 const VERIFY_TOOLS = new Set([
@@ -107,11 +107,22 @@ export function createGitClearAfterFailHook(
       const cmd = (tool.input?.command as string) ?? tool.target ?? ''
       if (!GIT_CLEAR_RE.test(cmd)) return
 
-      // 检查窗口内是否有根因定位动作（read/grep/find）
+      // 检查窗口内是否有根因定位动作（read/grep/find）。
+      // 与缺口②不同：测试失败的诊断目标不固定（可能在任何文件），
+      // 不做文件级精确匹配，但排除非诊断性的操作（target 不含路径特征）。
       const history = ctx.snapshot.recentToolHistory
-      const hasDiagnosis = history.some(
-        h => VERIFY_TOOLS.has(h.tool) || (h.tool === 'bash' && /\b(grep|cat|find|rg|head|tail)\b/.test(h.target ?? '')),
-      )
+      const hasDiagnosis = history.some(h => {
+        if (VERIFY_TOOLS.has(h.tool)) {
+          // verify 工具的 target 必须看起来像文件路径（含 / 或 .ext）
+          const target = h.target ?? ''
+          return /[/.]/.test(target)
+        }
+        if (h.tool === 'bash') {
+          const target = h.target ?? ''
+          return /\b(grep|cat|find|rg|head|tail)\b/.test(target) && /[/.]/.test(target)
+        }
+        return false
+      })
 
       // 无根因定位 + git 清场 → constitutional advisory（不可逆 + 多会话误伤）
       if (!hasDiagnosis) {
