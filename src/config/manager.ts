@@ -49,6 +49,26 @@ export function findProjectConfig(startDir: string): string | undefined {
 }
 
 /**
+ * One-shot legacy migration for the C3 autonomy brake (2026-07): configs
+ * written before `autonomyBrake` existed persisted the then-default
+ * `checkpointEveryTurns: 10`. Users found 10 too sensitive, so the default
+ * moved to 25 — but a persisted 10 would pin them to the old behavior forever.
+ * When the brake field is absent AND the interval equals the old default,
+ * treat the 10 as unmigrated legacy and drop it so the new schema default
+ * applies. Explicit non-10 values (user actually tuned it) are untouched.
+ */
+function migrateLegacyCheckpointInterval(raw: Record<string, unknown>): Record<string, unknown> {
+  const agent = raw.agent
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return raw
+  const a = agent as Record<string, unknown>
+  if (a.autonomyBrake === undefined && a.checkpointEveryTurns === 10) {
+    const { checkpointEveryTurns: _legacy, ...rest } = a
+    return { ...raw, agent: rest }
+  }
+  return raw
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -73,7 +93,7 @@ export function loadConfig(options?: {
   if (existsSync(configPath)) {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      base = deepMerge(base, raw as Record<string, unknown>)
+      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
     } catch {
       // malformed user config — fall through to defaults
     }
@@ -85,7 +105,7 @@ export function loadConfig(options?: {
   if (projectPath && existsSync(projectPath)) {
     try {
       const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
-      base = deepMerge(base, raw as Record<string, unknown>)
+      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
     } catch {
       // malformed project config — skip
     }
@@ -211,25 +231,46 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
 
 // --- Autonomy brakes (C3) ---
 
-/** Snapshot of the autonomy checkpoint setting for the desktop settings UI. */
-export function getAutonomyConfig(): { checkpointEveryTurns: number } {
-  return { checkpointEveryTurns: loadConfig().agent.checkpointEveryTurns }
+export type AutonomyBrakeMode = 'cruise' | 'unleashed'
+
+export interface AutonomyConfigSnapshot {
+  autonomyBrake: AutonomyBrakeMode
+  checkpointEveryTurns: number
+}
+
+/** Snapshot of the autonomy brake settings for the desktop/TUI settings UI. */
+export function getAutonomyConfig(): AutonomyConfigSnapshot {
+  const agent = loadConfig().agent
+  return { autonomyBrake: agent.autonomyBrake, checkpointEveryTurns: agent.checkpointEveryTurns }
 }
 
 /**
- * Persist the autonomy checkpoint interval (0 = off). Validated as a
- * non-negative integer. Takes effect at the next run() (the orchestrator reads
- * it live per turn).
+ * Persist the autonomy brake settings. `autonomyBrake` selects the mode
+ * (cruise = pause-with-digest, unleashed = no brake + non-blocking pings);
+ * `checkpointEveryTurns` is the interval for both (0 = off). Takes effect at
+ * the next run() (the orchestrator reads it live per turn).
+ *
+ * NOTE: the caller (UI) is responsible for the unleashed risk-acknowledgement
+ * flow; this layer just persists the validated value.
  */
-export function setAutonomyConfig(input: { checkpointEveryTurns?: unknown }): { checkpointEveryTurns: number } {
+export function setAutonomyConfig(input: {
+  autonomyBrake?: unknown
+  checkpointEveryTurns?: unknown
+}): AutonomyConfigSnapshot {
   const cfg = loadConfig()
+  if (input.autonomyBrake !== undefined) {
+    if (input.autonomyBrake !== 'cruise' && input.autonomyBrake !== 'unleashed') {
+      throw new Error("autonomyBrake must be 'cruise' or 'unleashed'")
+    }
+    cfg.agent.autonomyBrake = input.autonomyBrake
+  }
   if (input.checkpointEveryTurns !== undefined) {
     const v = Number(input.checkpointEveryTurns)
     if (!Number.isInteger(v) || v < 0) throw new Error('checkpointEveryTurns must be a non-negative integer')
     cfg.agent.checkpointEveryTurns = v
   }
   saveConfig(cfg)
-  return { checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
+  return { autonomyBrake: cfg.agent.autonomyBrake, checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
 }
 
 /** Snapshot of the mirror configuration block. */

@@ -709,6 +709,22 @@ export class AgentLoop {
     this.config.approvalMode = mode
   }
 
+  /** C3 — runtime switch for the autonomy brake (e.g. TUI /autonomy command).
+   *  The orchestrator reads these live per turn, so this takes effect at the
+   *  next turn boundary. */
+  setAutonomyBrake(mode: 'cruise' | 'unleashed', checkpointEveryTurns?: number): void {
+    this.config.autonomyBrake = mode
+    if (checkpointEveryTurns !== undefined) this.config.checkpointEveryTurns = checkpointEveryTurns
+  }
+
+  /** C3 — current autonomy brake snapshot for status displays. */
+  getAutonomyBrake(): { autonomyBrake: 'cruise' | 'unleashed'; checkpointEveryTurns: number } {
+    return {
+      autonomyBrake: this.config.autonomyBrake ?? 'cruise',
+      checkpointEveryTurns: this.config.checkpointEveryTurns ?? 0,
+    }
+  }
+
   /** Return the current session permission overlay, initializing if needed. */
   private getPermissionOverlay(): PermissionOverlay {
     if (!this.config.permissionsOverlay) {

@@ -10,8 +10,8 @@
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
- *   GET    /config/autonomy                 autonomy checkpoint interval (C3)
- *   PUT    /config/autonomy                 set autonomy checkpoint interval (C3)
+ *   GET    /config/autonomy                 autonomy brake mode + checkpoint interval (C3)
+ *   PUT    /config/autonomy                 set autonomy brake mode / checkpoint interval (C3)
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -231,18 +231,21 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
-    // C3 — autonomy checkpoint interval (0 = off) for the desktop settings UI.
+    // C3 — autonomy brake mode + interval for the desktop settings UI.
     'GET /config/autonomy': withAuth(() => {
       return { status: 200, body: getAutonomyConfig() }
     }, apiToken),
 
     'PUT /config/autonomy': withAuth((body) => {
-      const { checkpointEveryTurns } = (body ?? {}) as { checkpointEveryTurns?: unknown }
-      if (checkpointEveryTurns === undefined) {
-        return { status: 400, body: { error: 'checkpointEveryTurns is required' } }
+      const { autonomyBrake, checkpointEveryTurns } = (body ?? {}) as {
+        autonomyBrake?: unknown
+        checkpointEveryTurns?: unknown
+      }
+      if (autonomyBrake === undefined && checkpointEveryTurns === undefined) {
+        return { status: 400, body: { error: 'autonomyBrake or checkpointEveryTurns is required' } }
       }
       try {
-        return { status: 200, body: { ok: true, ...setAutonomyConfig({ checkpointEveryTurns }) } }
+        return { status: 200, body: { ok: true, ...setAutonomyConfig({ autonomyBrake, checkpointEveryTurns }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

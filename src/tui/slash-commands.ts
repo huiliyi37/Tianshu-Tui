@@ -60,7 +60,7 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
-import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
+import { getMirrorConfig, setMirrorConfig, setAutonomyConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
@@ -79,6 +79,7 @@ const HELP_TEXT = `Available commands:
 /verbose — Toggle verbose tool output
 /auto — Toggle auto-approve
 /permission [status|mode|allow|deny|bash|remove|reset|test] — Manage permission mode and rules
+/autonomy [cruise [轮数]|unleashed] — 自治刹车档位（巡航检查点 / 完全自治）
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -1437,6 +1438,78 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       pushStatic(createLogEntry({ type: 'system', content: '未知子命令。用法: /permission [status|mode|allow|deny|bash|remove|reset|test]', isError: true }))
       setIsStreaming(false)
       return true
+    },
+  },
+  {
+    name: '/autonomy',
+    immediate: true,
+    handler(ctx) {
+      const { parts, pushStatic, setIsStreaming } = ctx
+      const sub = parts[1]?.toLowerCase()
+      const finish = (content: string, isError = false): true => {
+        pushStatic(createLogEntry({ type: 'system', content, isError }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (!sub) {
+        const { autonomyBrake, checkpointEveryTurns } = ctx.agent.getAutonomyBrake()
+        const modeLabel = autonomyBrake === 'cruise' ? '巡航（cruise）' : '完全自治（unleashed）'
+        const intervalLabel = checkpointEveryTurns > 0
+          ? autonomyBrake === 'cruise'
+            ? `每 ${checkpointEveryTurns} 轮暂停并同步进度`
+            : `每 ${checkpointEveryTurns} 轮非阻塞播报进度`
+          : '轮次刹车/播报已关闭'
+        return finish(`自治刹车状态\n\n  模式: ${modeLabel}\n  间隔: ${intervalLabel}\n  生效范围: 仅自治档（dangerously-skip-permissions）\n\n命令:\n  /autonomy cruise [轮数] — 巡航档（默认 25，推荐 20-30）\n  /autonomy unleashed — 完全自治档（需二次确认）`)
+      }
+
+      if (sub === 'cruise') {
+        let interval: number | undefined
+        if (parts[2] !== undefined) {
+          const v = Number(parts[2])
+          if (!Number.isInteger(v) || v < 0) {
+            return finish('轮数必须是非负整数（0 = 关闭刹车）。用法: /autonomy cruise [轮数]', true)
+          }
+          interval = v
+        }
+        try {
+          const saved = setAutonomyConfig({ autonomyBrake: 'cruise', checkpointEveryTurns: interval })
+          ctx.agent.setAutonomyBrake('cruise', saved.checkpointEveryTurns)
+          return finish(`✓ 已切换到巡航档：每 ${saved.checkpointEveryTurns} 轮暂停并同步进度摘要（0 = 关闭）。已持久化，下一轮生效。`)
+        } catch (err) {
+          return finish(`设置失败: ${(err as Error).message}`, true)
+        }
+      }
+
+      if (sub === 'unleashed') {
+        const confirmed = parts[2]?.toLowerCase() === 'confirm'
+        if (!confirmed) {
+          return finish([
+            '⚠ 完全自治档（unleashed）风险说明',
+            '',
+            '  · 无轮次刹车 — run 会持续执行直到任务完成或 maxTurns 上限',
+            '  · 工具审批已跳过（自治档本身的行为）',
+            '  · 沙箱仍会拦截项目目录外的写入',
+            '  · 每隔检查点间隔会发一条非阻塞进度播报（不暂停）',
+            '  · 回滚兜底：run 开始前有 git 检查点，随时可用 /rollback 回到起点',
+            '  · Windows 注意：沙箱能力降级，逃逸风险相对更高',
+            '',
+            '确认进入请输入: /autonomy unleashed confirm',
+          ].join('\n'))
+        }
+        try {
+          const saved = setAutonomyConfig({ autonomyBrake: 'unleashed' })
+          ctx.agent.setAutonomyBrake('unleashed')
+          const pingLabel = saved.checkpointEveryTurns > 0
+            ? `每 ${saved.checkpointEveryTurns} 轮播报进度（不暂停）`
+            : '进度播报已关闭'
+          return finish(`✓ 已切换到完全自治档：无轮次刹车，${pingLabel}。/rollback 可随时回滚兜底。已持久化，下一轮生效。`)
+        } catch (err) {
+          return finish(`设置失败: ${(err as Error).message}`, true)
+        }
+      }
+
+      return finish('未知子命令。用法: /autonomy [cruise [轮数]|unleashed]', true)
     },
   },
   {

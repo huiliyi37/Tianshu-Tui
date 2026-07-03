@@ -494,6 +494,55 @@ export function appendMeridianBlastRadius(
   return text + '\n\nMeridian blast radius:\n' + parts.join('\n')
 }
 
+/** Input snapshot for the autonomy progress digest (C3). */
+export interface ProgressDigestInput {
+  turns: number
+  filesModified: string[]
+  recentTools: Array<{ tool: string; target: string; status: 'success' | 'failed' | 'running' }>
+  usage: { input_tokens: number; output_tokens: number }
+  todos?: Array<{ content: string; status: string }>
+}
+
+function formatTokenCount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+/**
+ * C3 — human-readable progress digest shown at autonomy checkpoints (cruise
+ * pause card) and progress pings (unleashed broadcast). Pure function: all
+ * data comes from the snapshot so it is unit-testable without an AgentLoop.
+ */
+export function buildProgressDigest(input: ProgressDigestInput): string {
+  const lines: string[] = [`已执行 ${input.turns} 轮。`]
+
+  if (input.filesModified.length > 0) {
+    const shown = input.filesModified.slice(0, 8)
+    const more = input.filesModified.length - shown.length
+    lines.push(`修改文件 (${input.filesModified.length})：${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`)
+  } else {
+    lines.push('修改文件：无')
+  }
+
+  if (input.recentTools.length > 0) {
+    const items = input.recentTools.slice(-5).map(t => {
+      const icon = t.status === 'failed' ? '✗' : t.status === 'running' ? '…' : '✓'
+      return `${t.tool} ${t.target} ${icon}`.trim()
+    })
+    lines.push(`最近工具：${items.join(' · ')}`)
+  }
+
+  if (input.todos && input.todos.length > 0) {
+    const done = input.todos.filter(t => t.status === 'completed').length
+    const inProgress = input.todos.find(t => t.status === 'in_progress')
+    let todoLine = `任务进度：${done}/${input.todos.length} 完成`
+    if (inProgress) todoLine += `，进行中：${inProgress.content}`
+    lines.push(todoLine)
+  }
+
+  lines.push(`Token：输入 ${formatTokenCount(input.usage.input_tokens)} / 输出 ${formatTokenCount(input.usage.output_tokens)}`)
+  return lines.join('\n')
+}
+
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   return new TurnOrchestrator({
     // === Lifecycle ===
@@ -508,6 +557,15 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
     getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
       ? (self.config.checkpointEveryTurns ?? 0)
       : 0,
+    // C3 — brake mode: cruise pauses at the interval, unleashed only pings.
+    getAutonomyBrake: () => self.config.autonomyBrake ?? 'cruise',
+    buildProgressDigest: (turns) => buildProgressDigest({
+      turns,
+      filesModified: [...self.evidence.getState().filesModified],
+      recentTools: self.recentToolHistory.slice(-5),
+      usage: self.session.getTotalUsage(),
+      todos: self.config.getTodos?.(),
+    }),
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,

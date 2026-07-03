@@ -128,7 +128,7 @@ export function stopReasonAbortTag(r: StopReason): string | undefined {
  * orchestrator (debug + telemetry + phase + record) can share one emit path.
  */
 export interface StopReasonSink {
-  onPhaseChange?: (phase: string, detail?: { reason?: string }) => void
+  onPhaseChange?: (phase: string, detail?: { reason?: string; voluntary?: boolean; source?: StopReasonSource }) => void
   debug?: (msg: string) => void
   telemetry?: (rec: { kind: string } & Record<string, unknown>) => void
   record?: (r: StopReason) => void
@@ -139,7 +139,9 @@ export function emitStopReason(r: StopReason, sink: StopReasonSink): void {
   sink.record?.(r)
   sink.debug?.(formatStopReasonLog(r))
   sink.telemetry?.({ kind: 'stop-reason', ...r })
-  sink.onPhaseChange?.('stop-reason', { reason: describeStopReason(r) })
+  // voluntary/source ride along so UIs can filter: only guard-forced stops need
+  // a visible system line (voluntary finishes already render a completion badge).
+  sink.onPhaseChange?.('stop-reason', { reason: describeStopReason(r), voluntary: r.voluntary, source: r.source })
 }
 
 function fmtScore(score: number | undefined): string {

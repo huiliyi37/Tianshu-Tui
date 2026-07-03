@@ -9,11 +9,14 @@ import { PromptEngine } from '../../prompt/engine.js'
 import { ToolRegistry } from '../../tools/registry.js'
 import { READ_FILE_TOOL } from '../../tools/read-file.js'
 import type { StreamCallbacks, StreamClient } from '../../api/stream-client.js'
-import type { AgentCallbacks, ApprovalMode } from '../loop-types.js'
+import type { AgentCallbacks, ApprovalMode, AutonomyCheckpointInfo } from '../loop-types.js'
+import { buildProgressDigest } from '../loop-factory.js'
 
 // C3 (自治模式刹车): in autonomous mode (dangerously-skip-permissions) the run
-// pauses cleanly after `checkpointEveryTurns` turns instead of barreling on to
-// maxTurns. Supervised modes are unaffected (approvals are their brake).
+// brakes according to the autonomyBrake mode: 'cruise' pauses cleanly after
+// `checkpointEveryTurns` turns with a progress digest; 'unleashed' never pauses
+// but emits non-blocking progress pings at the interval. Supervised modes are
+// unaffected (approvals are their brake).
 
 const TEST_CWD = mkdtempSync(join(tmpdir(), 'rivet-autonomy-cp-'))
 writeFileSync(join(TEST_CWD, 'f.txt'), 'hello')
@@ -46,7 +49,7 @@ function makeToolClient(toolTurns: number): StreamClient & { calls: () => number
   } as unknown as StreamClient & { calls: () => number }
 }
 
-function makeCallbacks(checkpoints: number[]): AgentCallbacks {
+function makeCallbacks(checkpoints: AutonomyCheckpointInfo[]): AgentCallbacks {
   return {
     onTextDelta: () => {},
     onThinkingDelta: () => {},
@@ -56,11 +59,15 @@ function makeCallbacks(checkpoints: number[]): AgentCallbacks {
     onError: (error: Error) => { throw error },
     onAbort: () => {},
     onApprovalRequired: async () => true,
-    onAutonomyCheckpoint: (turns) => { checkpoints.push(turns) },
+    onAutonomyCheckpoint: (info) => { checkpoints.push(info) },
   }
 }
 
-function makeAgent(client: StreamClient, opts: { checkpointEveryTurns?: number; approvalMode?: ApprovalMode }): AgentLoop {
+function makeAgent(client: StreamClient, opts: {
+  checkpointEveryTurns?: number
+  approvalMode?: ApprovalMode
+  autonomyBrake?: 'cruise' | 'unleashed'
+}): AgentLoop {
   const registry = new ToolRegistry()
   registry.register(READ_FILE_TOOL)
   return new AgentLoop({
@@ -72,24 +79,57 @@ function makeAgent(client: StreamClient, opts: { checkpointEveryTurns?: number; 
     compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
     ...(opts.checkpointEveryTurns !== undefined ? { checkpointEveryTurns: opts.checkpointEveryTurns } : {}),
     ...(opts.approvalMode ? { approvalMode: opts.approvalMode } : {}),
+    ...(opts.autonomyBrake ? { autonomyBrake: opts.autonomyBrake } : {}),
   }, new SessionContext(), TEST_CWD)
 }
 
 describe('TurnOrchestrator: autonomy checkpoint (C3)', () => {
-  it('autonomous mode pauses after checkpointEveryTurns turns', async () => {
+  it('autonomous mode (cruise) pauses after checkpointEveryTurns turns', async () => {
     const client = makeToolClient(10) // would run 11 turns unchecked
-    const checkpoints: number[] = []
+    const checkpoints: AutonomyCheckpointInfo[] = []
     const agent = makeAgent(client, { checkpointEveryTurns: 3, approvalMode: 'dangerously-skip-permissions' })
 
     await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
 
     assert.equal(client.calls(), 3, 'run must stop after 3 turns at the checkpoint')
-    assert.deepEqual(checkpoints, [3], 'onAutonomyCheckpoint fires once with the turn count')
+    assert.equal(checkpoints.length, 1, 'onAutonomyCheckpoint fires once')
+    assert.equal(checkpoints[0]!.turns, 3)
+    assert.equal(checkpoints[0]!.paused, true, 'cruise checkpoint is a pause')
+  })
+
+  it('cruise checkpoint digest includes files and token usage', async () => {
+    const client = makeToolClient(10)
+    const checkpoints: AutonomyCheckpointInfo[] = []
+    const agent = makeAgent(client, { checkpointEveryTurns: 3, approvalMode: 'dangerously-skip-permissions' })
+
+    await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
+
+    const digest = checkpoints[0]!.digest
+    assert.match(digest, /已执行 3 轮/, 'digest reports the turn count')
+    assert.match(digest, /最近工具：.*read_file/, 'digest lists recent tool activity')
+    assert.match(digest, /Token：输入/, 'digest reports token usage')
+  })
+
+  it('unleashed mode never pauses but pings at the interval', async () => {
+    const client = makeToolClient(7) // 8 turns total (7 tool + 1 text)
+    const checkpoints: AutonomyCheckpointInfo[] = []
+    const agent = makeAgent(client, {
+      checkpointEveryTurns: 3,
+      approvalMode: 'dangerously-skip-permissions',
+      autonomyBrake: 'unleashed',
+    })
+
+    await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
+
+    assert.equal(client.calls(), 8, 'unleashed run proceeds to its natural finish')
+    assert.deepEqual(checkpoints.map(c => c.turns), [3, 6], 'pings at every interval multiple')
+    assert.ok(checkpoints.every(c => c.paused === false), 'all pings are non-blocking')
+    assert.ok(checkpoints.every(c => c.digest.includes('已执行')), 'pings carry a digest')
   })
 
   it('supervised mode ignores the checkpoint (approvals are the brake)', async () => {
     const client = makeToolClient(5)
-    const checkpoints: number[] = []
+    const checkpoints: AutonomyCheckpointInfo[] = []
     const agent = makeAgent(client, { checkpointEveryTurns: 3, approvalMode: 'auto-safe' })
 
     await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
@@ -100,12 +140,74 @@ describe('TurnOrchestrator: autonomy checkpoint (C3)', () => {
 
   it('checkpointEveryTurns=0 disables the brake in autonomous mode', async () => {
     const client = makeToolClient(5)
-    const checkpoints: number[] = []
+    const checkpoints: AutonomyCheckpointInfo[] = []
     const agent = makeAgent(client, { checkpointEveryTurns: 0, approvalMode: 'dangerously-skip-permissions' })
 
     await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
 
     assert.equal(client.calls(), 6)
     assert.deepEqual(checkpoints, [])
+  })
+
+  it('buildProgressDigest formats files, tools, todos and usage', () => {
+    const digest = buildProgressDigest({
+      turns: 25,
+      filesModified: ['src/a.ts', 'src/b.ts'],
+      recentTools: [
+        { tool: 'edit_file', target: 'src/a.ts', status: 'success' },
+        { tool: 'bash', target: 'npm test', status: 'failed' },
+      ],
+      usage: { input_tokens: 123_400, output_tokens: 950 },
+      todos: [
+        { content: '任务一', status: 'completed' },
+        { content: '任务二', status: 'in_progress' },
+        { content: '任务三', status: 'pending' },
+      ],
+    })
+
+    assert.match(digest, /已执行 25 轮/)
+    assert.match(digest, /修改文件 \(2\)：src\/a\.ts, src\/b\.ts/)
+    assert.match(digest, /edit_file src\/a\.ts ✓/)
+    assert.match(digest, /bash npm test ✗/)
+    assert.match(digest, /任务进度：1\/3 完成，进行中：任务二/)
+    assert.match(digest, /Token：输入 123\.4k \/ 输出 950/)
+  })
+
+  it('buildProgressDigest caps the modified-file list at 8', () => {
+    const files = Array.from({ length: 12 }, (_, i) => `src/f${i}.ts`)
+    const digest = buildProgressDigest({
+      turns: 5,
+      filesModified: files,
+      recentTools: [],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    })
+    assert.match(digest, /修改文件 \(12\)：/)
+    assert.match(digest, /\(\+4 more\)/)
+  })
+
+  it('buildProgressDigest handles an empty run gracefully', () => {
+    const digest = buildProgressDigest({
+      turns: 3,
+      filesModified: [],
+      recentTools: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
+    })
+    assert.match(digest, /修改文件：无/)
+    assert.ok(!digest.includes('最近工具'), 'no tool line when history is empty')
+    assert.ok(!digest.includes('任务进度'), 'no todo line when todos are absent')
+  })
+
+  it('setAutonomyBrake switches mode at runtime', async () => {
+    const client = makeToolClient(10)
+    const checkpoints: AutonomyCheckpointInfo[] = []
+    const agent = makeAgent(client, { checkpointEveryTurns: 3, approvalMode: 'dangerously-skip-permissions' })
+
+    agent.setAutonomyBrake('unleashed', 5)
+    assert.deepEqual(agent.getAutonomyBrake(), { autonomyBrake: 'unleashed', checkpointEveryTurns: 5 })
+
+    await agent.run('read the file repeatedly', makeCallbacks(checkpoints))
+
+    assert.equal(client.calls(), 11, 'unleashed run proceeds to its natural finish')
+    assert.deepEqual(checkpoints.map(c => c.turns), [5, 10], 'pings honor the updated interval')
   })
 })

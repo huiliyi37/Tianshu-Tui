@@ -146,6 +146,7 @@ export function getPaletteCommands(): PaletteCommand[] {
     { name: '/plan', description: 'Create implementation plan (writing-plans workflow)' },
     { name: '/write-plan', description: 'Alias of /plan — same writing-plans workflow' },
     { name: '/plan-mode', description: 'Enter plan authoring mode (Shift+Tab toggles Plan/Agent)' },
+    { name: '/autonomy', description: '自治刹车档位 — cruise 巡航检查点 / unleashed 完全自治' },
     { name: '/plan-list', description: 'List submitted plans awaiting approval' },
     { name: '/plan-approve', description: 'Approve a plan and start execution' },
     { name: '/plan-reject', description: 'Reject a plan with feedback for revision' },

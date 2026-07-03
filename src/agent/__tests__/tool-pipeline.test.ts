@@ -60,6 +60,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'ok', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
         hooks: null,
         lspEnabled: false,
@@ -114,6 +115,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: '[diet:useless] retried successfully', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -136,6 +138,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: '[diet:redundant] re-read later', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -165,6 +168,7 @@ describe('executeToolUse', () => {
           execute: async (_name: string, params: any) => { seen = params.verificationSnapshot; return { content: 'ok', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -193,6 +197,7 @@ describe('executeToolUse', () => {
           execute: async (_name: string, params: any) => { seen = params.verificationSnapshot; return { content: 'ok', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -227,6 +232,7 @@ describe('executeToolUse', () => {
           },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false, timeoutMs: () => 20 }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         } as any,
       } as any,
     })
@@ -260,6 +266,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'Plan closed: docs/superpowers/plans/demo.md', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -294,6 +301,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'Plan close preview: docs/superpowers/plans/demo.md', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -330,6 +338,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'edited', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -363,6 +372,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'edited', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -467,6 +477,7 @@ describe('executeToolUse', () => {
           }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -517,6 +528,7 @@ describe('executeToolUse', () => {
           }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -564,6 +576,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'Applied edit to src/foo.ts', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -592,6 +605,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'type error', isError: true }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -739,6 +753,7 @@ describe('executeToolUse', () => {
               isConcurrencySafe: () => false,
             }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
         repairPipeline: {
@@ -811,6 +826,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: hugeContent, isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -838,6 +854,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: hugeContent, isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       repairPipeline: {
@@ -872,6 +889,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'wrote', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getReliabilityDecision: () => ({ mode: 'degraded', reason: 'resource pressure rising', blockedTools: ['bash_write'] }),
@@ -898,6 +916,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'read', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getReliabilityDecision: () => ({ mode: 'minimal', reason: 'memory pressure critical', blockedTools: ['bash'] }),
@@ -927,6 +946,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'removed', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
@@ -963,6 +983,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'ok', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
@@ -996,6 +1017,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'wrote', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
@@ -1026,6 +1048,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'wrote', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
       getSensorium: () => ({ momentum: 0.8, pressure: 0.2, confidence: 0.95, complexity: 0.2, freshness: 0.9, stability: 0.9 }),
@@ -1054,6 +1077,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'reset', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => true,
+          resolveName: (n: string) => n,
         },
       } as any,
       getSensorium: () => ({ momentum: 0.2, pressure: 0.9, confidence: 0.1, complexity: 0.9, freshness: 0.1, stability: 0.1 }),
@@ -1087,6 +1111,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'wrote', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1121,6 +1146,7 @@ describe('executeToolUse', () => {
           execute: async () => { executed = true; return { content: 'wrote', isError: false } },
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1152,6 +1178,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'ok', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1173,6 +1200,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'ok', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => true,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1205,6 +1233,7 @@ describe('executeToolUse', () => {
           execute: async () => ({ content: 'edited', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => true,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1284,6 +1313,7 @@ describe('executeToolUse', () => {
             execute: async () => { executed = true; return { content: 'todo updated', isError: false } },
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1306,6 +1336,7 @@ describe('executeToolUse', () => {
             execute: async () => { executed = true; return { content: 'file body', isError: false } },
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1346,6 +1377,7 @@ describe('artifactIntercept in tool pipeline', () => {
           execute: async () => ({ content: 'ok', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
         hooks: null,
         lspEnabled: false,
@@ -1406,6 +1438,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeOutput, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1455,6 +1488,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: l0Wrapped, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1487,6 +1521,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeOutput, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1524,6 +1559,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: skillBody, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1560,6 +1596,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: smallOutput, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1589,6 +1626,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeError, isError: true }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1625,6 +1663,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeOutput, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
       })
@@ -1721,6 +1760,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeOutput1, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
         sessionId: 'worker-wo_1',
@@ -1736,6 +1776,7 @@ describe('artifactIntercept in tool pipeline', () => {
             execute: async () => ({ content: largeOutput2, isError: false }),
             get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
             needsApproval: () => false,
+          resolveName: (n: string) => n,
           },
         } as any,
         sessionId: 'worker-wo_2',
@@ -1792,6 +1833,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: 'test output', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
         hooks: null,
         lspEnabled: false,
@@ -1838,6 +1880,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: '1 test failed', isError: true }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1861,6 +1904,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: '1 test failed', isError: true }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1884,6 +1928,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: 'file not found', isError: true }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1907,6 +1952,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: "命令未找到：'python'", isError: true, errorClass: 'environment' }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1930,6 +1976,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: '命令未找到', isError: true, errorClass: 'environment' }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1953,6 +2000,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: 'all tests passed', isError: false }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })
@@ -1976,6 +2024,7 @@ describe('phase-aware prediction recording', () => {
           execute: async () => ({ content: '1 test failed', isError: true }),
           get: () => ({ definition: { input_schema: {} }, isConcurrencySafe: () => false }),
           needsApproval: () => false,
+          resolveName: (n: string) => n,
         },
       } as any,
     })

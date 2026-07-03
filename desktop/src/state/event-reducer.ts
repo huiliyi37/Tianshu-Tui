@@ -89,6 +89,10 @@ export interface ConvoBlock {
   }
   /** C3 自治档检查点 — 已连续执行的轮数。 */
   checkpointTurns?: number
+  /** C3 — 进度摘要（修改文件 / 最近工具 / token 用量）。 */
+  checkpointDigest?: string
+  /** C3 — true=巡航档暂停等确认；false=完全自治档非阻塞播报（run 继续）。 */
+  checkpointPaused?: boolean
 }
 
 export interface EventViewState {
@@ -450,14 +454,20 @@ function applyEvent(state: EventViewState, ev: SessionEvent): EventViewState {
       return next
     }
     case 'autonomy_checkpoint': {
-      // C3 — the autonomous run paused after N turns for user confirmation.
-      next.private_textOpen = false
-      next.private_thinkingOpen = false
+      // C3 — cruise pause (paused=true, awaits confirmation) or unleashed
+      // non-blocking progress ping (paused=false, the run keeps going).
+      const paused = ev.data.paused !== false
+      if (paused) {
+        next.private_textOpen = false
+        next.private_thinkingOpen = false
+      }
       next.blocks = [...next.blocks, {
         key: `acp-${ev.seq}`,
         kind: 'autonomy_checkpoint',
-        text: '自治检查点',
+        text: paused ? '自治检查点' : '自治进度播报',
         checkpointTurns: Number(ev.data.turns ?? 0),
+        checkpointDigest: typeof ev.data.digest === 'string' ? ev.data.digest : undefined,
+        checkpointPaused: paused,
       }]
       next.blocksRev = next.blocksRev + 1
       return next

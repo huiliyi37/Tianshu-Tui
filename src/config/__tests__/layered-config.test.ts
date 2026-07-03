@@ -25,6 +25,68 @@ describe('loadConfig — 3-layer resolution', () => {
       'DEFAULT_CONFIG.agent.checkpointEveryTurns must match schema default — drift makes the schema value dead')
   })
 
+  it('DEFAULT_CONFIG.agent.autonomyBrake matches schema default (drift guard, C3)', () => {
+    const schemaDefault = agentSchema.shape.autonomyBrake._def.defaultValue()
+    assert.equal(DEFAULT_CONFIG.agent.autonomyBrake, schemaDefault,
+      'DEFAULT_CONFIG.agent.autonomyBrake must match schema default — drift makes the schema value dead')
+  })
+
+  // ── C3 legacy migration: persisted checkpointEveryTurns=10 (old default)
+  // without an autonomyBrake field is unmigrated legacy → new default 25.
+  // RIVET_CONFIG_PATH is pinned to an isolated temp file so the developer's
+  // real ~/.rivet/config.json can't leak into the assertions. ──
+
+  function withIsolatedUserConfig(userConfig: unknown, fn: () => void): void {
+    const userCfgPath = join(tempDir, `user-config-${Math.random().toString(36).slice(2)}.json`)
+    if (userConfig !== undefined) writeFileSync(userCfgPath, JSON.stringify(userConfig))
+    const prev = process.env.RIVET_CONFIG_PATH
+    process.env.RIVET_CONFIG_PATH = userCfgPath
+    try {
+      fn()
+    } finally {
+      if (prev === undefined) delete process.env.RIVET_CONFIG_PATH
+      else process.env.RIVET_CONFIG_PATH = prev
+      rmSync(userCfgPath, { force: true })
+    }
+  }
+
+  it('migrates legacy user-config checkpointEveryTurns=10 (no autonomyBrake) to the new default 25', () => {
+    withIsolatedUserConfig({ agent: { checkpointEveryTurns: 10 } }, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.checkpointEveryTurns, 25, 'legacy 10 is treated as unmigrated → schema default 25')
+      assert.equal(config.agent.autonomyBrake, 'cruise')
+    })
+  })
+
+  it('keeps checkpointEveryTurns=10 when autonomyBrake is explicitly set (already migrated)', () => {
+    withIsolatedUserConfig({ agent: { autonomyBrake: 'cruise', checkpointEveryTurns: 10 } }, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.checkpointEveryTurns, 10, 'explicit post-migration 10 must be honored')
+    })
+  })
+
+  it('keeps explicitly tuned non-10 checkpoint intervals untouched', () => {
+    withIsolatedUserConfig({ agent: { checkpointEveryTurns: 15 } }, () => {
+      const config = loadConfig()
+      assert.equal(config.agent.checkpointEveryTurns, 15)
+    })
+  })
+
+  it('migrates legacy 10 in the project config layer too', () => {
+    withIsolatedUserConfig(undefined, () => {
+      const projectDir = join(tempDir, 'legacy-cp-project')
+      mkdirSync(projectDir, { recursive: true })
+      writeFileSync(join(projectDir, '.rivet-config.json'), JSON.stringify({
+        agent: { checkpointEveryTurns: 10 },
+      }))
+
+      const config = loadConfig({ cwd: projectDir })
+      assert.equal(config.agent.checkpointEveryTurns, 25)
+
+      rmSync(projectDir, { recursive: true, force: true })
+    })
+  })
+
   it('applies project config over defaults', () => {
     const projectDir = join(tempDir, 'my-project')
     mkdirSync(projectDir, { recursive: true })

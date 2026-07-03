@@ -186,8 +186,10 @@ import type { IntentPreview } from '../../agent/intent-preview.js'
 import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
+import type { AutonomyCheckpointInfo } from '../../agent/loop-types.js'
 import { FleetRegistry } from '../fleet-registry.js'
 import { WatchdogRecoveryPolicy } from '../../agent/watchdog-recovery-policy.js'
+import { phaseStatusLabel } from '../phase-status.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -199,9 +201,11 @@ export interface AgentCallbacks {
   onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
-  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
+  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; voluntary?: boolean; source?: string }) => void
   onIntentNote?: (intent: IntentPreview) => void
   onSteerDrain?: () => string | null
+  /** C3 — autonomy checkpoint pause (cruise) / progress ping (unleashed). */
+  onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
   /** T4 — structured per-worker delegation status/progress feeding the fleet read model. */
   onDelegationActivity?: (activity: DelegationActivity) => void
 }
@@ -763,7 +767,20 @@ export class TuiApp {
       onAbort: (reason) => this.handleAbort(reason),
       onApprovalRequired: async (id, name, input) => this.handleApprovalRequired(id, name, input),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
-      onPhaseChange: (phase, _detail) => {
+      onPhaseChange: (phase, detail) => {
+        // stop-reason: surface guard-forced stops (max-turns / wedged-loop /
+        // convergence …) as a visible system line — previously this phase was
+        // silently dropped, leaving the user to guess why the run halted.
+        // Voluntary finishes already render a completion badge; the checkpoint
+        // source is skipped here because onAutonomyCheckpoint renders the
+        // richer digest card for it.
+        if (phase === 'stop-reason') {
+          if (detail?.voluntary === false && detail.source !== 'checkpoint') {
+            const label = phaseStatusLabel(phase, detail)
+            if (label) this.commitStatic(color(label, this.theme.warning))
+          }
+          return
+        }
         // Only map recognized phases to ActivityPhase; ignore unknown strings
         const knownPhases: Record<string, ActivityPhase> = {
           idle: 'idle',
@@ -784,6 +801,7 @@ export class TuiApp {
         // for the status bar display
       },
       onIntentNote: (intent) => this.handleIntentNote(intent),
+      onAutonomyCheckpoint: (info) => this.handleAutonomyCheckpoint(info),
       onSteerDrain: () => this.steerBuffer.drain(),
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
@@ -3211,6 +3229,27 @@ export class TuiApp {
     }
     lines.push(` │ ${color(copy.action, this.theme.secondary)}`)
     lines.push(` ╰─ ${color(copy.steerHint, this.theme.secondary)}`)
+    this.commitStatic(lines.join('\n'))
+  }
+
+  /**
+   * C3 自治刹车 — cruise 暂停时渲染进度摘要卡（之前 TUI 完全静默，用户只能
+   * 盲猜发"继续"）；unleashed 播报打一条简短的非阻塞系统块。
+   */
+  private handleAutonomyCheckpoint(info: AutonomyCheckpointInfo): void {
+    const lines: string[] = []
+    if (info.paused) {
+      lines.push(this.renderBanner(`⏸ 自治检查点 — 已执行 ${info.turns} 轮`, this.theme.warning))
+      for (const line of info.digest.split('\n')) {
+        lines.push(` │ ${color(line, this.theme.secondary)}`)
+      }
+      lines.push(` ╰─ ${color('输入 continue 继续，或 /autonomy 调整刹车档位', this.theme.secondary)}`)
+    } else {
+      lines.push(color(`◦ 自治进度播报（第 ${info.turns} 轮，不暂停）`, this.theme.secondary))
+      for (const line of info.digest.split('\n')) {
+        lines.push(color(`  ${line}`, this.theme.secondary))
+      }
+    }
     this.commitStatic(lines.join('\n'))
   }
 

@@ -1229,8 +1229,24 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     )
   }
   if (block.kind === 'autonomy_checkpoint') {
-    // C3 刹车 — the autonomous run paused after N turns; the user resumes explicitly.
+    // C3 刹车 — cruise pause (resume explicitly) vs unleashed non-blocking
+    // progress ping (informational, no resume button — the run keeps going).
     const turns = block.checkpointTurns ?? 0
+    const paused = block.checkpointPaused !== false
+    if (!paused) {
+      return (
+        <div className="decision-shift info">
+          <div className="ds-head">
+            <span className="ds-glyph" aria-hidden>◦</span>
+            <span className="ds-domain">自治进度播报</span>
+            <span className="ds-tag">第 {turns} 轮 · 不暂停</span>
+          </div>
+          {block.checkpointDigest && (
+            <pre className="ds-digest">{block.checkpointDigest}</pre>
+          )}
+        </div>
+      )
+    }
     return (
       <div className="decision-shift info">
         <div className="ds-head">
@@ -1241,6 +1257,9 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         <div className="ds-reason">
           已连续自主执行 {turns} 轮。停在这里核对方向——确认没跑偏再继续，或直接键入新指令改道。
         </div>
+        {block.checkpointDigest && (
+          <pre className="ds-digest">{block.checkpointDigest}</pre>
+        )}
         {onContinue && (
           <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
         )}

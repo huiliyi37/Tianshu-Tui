@@ -2202,9 +2202,14 @@ export class RuntimeSessionManager {
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
       onSteerDrain: () => session.steer.drain(),
-      // C3 — 自治档检查点：run 在 N 轮后干净收尾，桌面渲染确认卡片。
-      onAutonomyCheckpoint: (turnsDone) => {
-        this.append(session, 'autonomy_checkpoint', { turns: turnsDone })
+      // C3 — 自治档检查点/播报：cruise 暂停（paused=true，桌面渲染确认卡片）；
+      // unleashed 非阻塞播报（paused=false，信息卡，run 继续）。digest 为进度摘要。
+      onAutonomyCheckpoint: (info) => {
+        this.append(session, 'autonomy_checkpoint', {
+          turns: info.turns,
+          digest: info.digest,
+          paused: info.paused,
+        })
       },
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the

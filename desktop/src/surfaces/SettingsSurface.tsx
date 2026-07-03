@@ -15,13 +15,13 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { AutonomyControl } from '../components/AutonomyControl'
 import { GlassCustomPanel } from '../components/GlassCustomPanel'
 import { FontSettingsPanel } from '../components/FontSettingsPanel'
-import { coerceLevel, type AutonomyLevel } from '../lib/autonomy'
+import { coerceLevel, isWindows, type AutonomyLevel } from '../lib/autonomy'
 import { loadDefaultAutonomy, saveDefaultAutonomy, loadNotifPref, saveNotifPref, type ToolDensity, type NotifPref } from '../lib/persist'
 import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getAutonomyConfig, setAutonomyConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getAutonomyConfig, setAutonomyConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol, type AutonomyBrakeMode } from '../runtime/client'
 import { toast } from 'sonner'
 import type { McpStatusResponse, McpServerConfig, McpPreset } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
@@ -33,6 +33,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 type SettingsCat = 'appearance' | 'behavior' | 'integrations' | 'system' | 'help'
 
 const SETTINGS_CATS: { id: SettingsCat; icon: LucideIcon }[] = [
@@ -528,43 +538,134 @@ function AutostartSection() {
   )
 }
 
-/** C3 刹车 — 自治档检查点档位（每 N 轮暂停等确认，0 = 关）。仅自治档生效。 */
+/** C3 刹车 — 自治刹车双模式：巡航档（每 N 轮暂停+进度摘要）/ 完全自治档
+ *  （无刹车、显式风险确认、非阻塞播报、回滚兜底）。仅自治档生效。 */
 function CheckpointSection() {
-  const [value, setValue] = useState<number | null>(null)
+  const [cfg, setCfg] = useState<{ autonomyBrake: AutonomyBrakeMode; checkpointEveryTurns: number } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [confirmUnleashed, setConfirmUnleashed] = useState(false)
+  const [customInterval, setCustomInterval] = useState('')
 
   useEffect(() => {
-    void getAutonomyConfig().then((c) => setValue(c.checkpointEveryTurns)).catch(() => setValue(null))
+    void getAutonomyConfig()
+      .then((c) => setCfg({ autonomyBrake: c.autonomyBrake ?? 'cruise', checkpointEveryTurns: c.checkpointEveryTurns }))
+      .catch(() => setCfg(null))
   }, [])
 
-  const update = useCallback(async (next: number) => {
+  const update = useCallback(async (patch: { autonomyBrake?: AutonomyBrakeMode; checkpointEveryTurns?: number }) => {
     setMsg(null)
-    setValue(next)
     try {
-      await setAutonomyConfig({ checkpointEveryTurns: next })
+      const saved = await setAutonomyConfig(patch)
+      setCfg({ autonomyBrake: saved.autonomyBrake, checkpointEveryTurns: saved.checkpointEveryTurns })
       setMsg('已保存 · 新会话生效')
     } catch (err) {
       setMsg(`保存失败：${(err as Error).message}`)
     }
   }, [])
 
-  if (value === null) return null
+  if (cfg === null) return null
+
+  const isCruise = cfg.autonomyBrake === 'cruise'
+  const presetIntervals = [20, 25, 30]
+  const isPreset = presetIntervals.includes(cfg.checkpointEveryTurns)
+
+  const applyCustomInterval = () => {
+    const v = Number(customInterval)
+    if (!Number.isInteger(v) || v < 0) {
+      setMsg('轮数必须是非负整数（0 = 关闭刹车）')
+      return
+    }
+    setCustomInterval('')
+    void update({ checkpointEveryTurns: v })
+  }
 
   return (
     <section className="settings-group">
-      <h4>自治检查点</h4>
-      <Select value={String(value)} onValueChange={(v) => void update(Number(v))}>
-        <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="10">每 10 轮暂停</SelectItem>
-          <SelectItem value="20">每 20 轮暂停</SelectItem>
-          <SelectItem value="0">关闭</SelectItem>
-        </SelectContent>
-      </Select>
-      <div className="meta">
-        自治档（免批准）连续执行到设定轮数时暂停，等你确认方向后再继续——防止「刹不住」。受监督档位不受影响。
+      <h4>自治刹车</h4>
+      <div className="autonomy-seg" role="radiogroup" aria-label="自治刹车模式">
+        <button
+          type="button"
+          className={`autonomy-opt${isCruise ? ' active' : ''}`}
+          onClick={() => { if (!isCruise) void update({ autonomyBrake: 'cruise' }) }}
+        >
+          <span className="autonomy-glyph" aria-hidden>⏸</span>
+          巡航
+        </button>
+        <button
+          type="button"
+          className={`autonomy-opt level-autonomous${isCruise ? '' : ' active'}`}
+          onClick={() => { if (isCruise) setConfirmUnleashed(true) }}
+        >
+          <span className="autonomy-glyph" aria-hidden>✦</span>
+          完全自治
+        </button>
       </div>
+      {isCruise ? (
+        <>
+          <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+            <Select
+              value={isPreset ? String(cfg.checkpointEveryTurns) : 'custom'}
+              onValueChange={(v) => { if (v !== 'custom') void update({ checkpointEveryTurns: Number(v) }) }}
+            >
+              <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="20">每 20 轮暂停</SelectItem>
+                <SelectItem value="25">每 25 轮暂停（推荐）</SelectItem>
+                <SelectItem value="30">每 30 轮暂停</SelectItem>
+                {!isPreset && (
+                  <SelectItem value="custom">
+                    {cfg.checkpointEveryTurns === 0 ? '已关闭' : `每 ${cfg.checkpointEveryTurns} 轮暂停（自定义）`}
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+            <input
+              className="settings-input"
+              style={{ width: 96 }}
+              inputMode="numeric"
+              placeholder="自定义轮数"
+              value={customInterval}
+              onChange={(e) => setCustomInterval(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') applyCustomInterval() }}
+            />
+            <button type="button" className="btn-sm" onClick={applyCustomInterval} disabled={!customInterval.trim()}>
+              应用
+            </button>
+          </div>
+          <div className="meta">
+            巡航档：自治模式（免批准）连续执行到设定轮数时暂停，附带进度摘要（改了哪些文件 / 最近工具 / token 用量），确认方向后再继续。受监督档位不受影响。
+          </div>
+        </>
+      ) : (
+        <div className="meta">
+          完全自治档：无轮次刹车，每 {cfg.checkpointEveryTurns > 0 ? `${cfg.checkpointEveryTurns} 轮` : '—'}发一条非阻塞进度播报（不暂停）。回滚兜底：run 开始前有 git 检查点，可随时回滚。
+        </div>
+      )}
       {msg && <div className="meta">{msg}</div>}
+
+      <AlertDialog open={confirmUnleashed} onOpenChange={setConfirmUnleashed}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>切换到完全自治档？</AlertDialogTitle>
+            <AlertDialogDescription>
+              此档位下自治 run 将不再有轮次刹车，持续执行直到任务完成或轮次上限。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="meta" style={{ paddingLeft: '1.2em', margin: '4px 0' }}>
+            <li>工具审批已跳过（自治模式本身的行为）</li>
+            <li>沙箱仍会拦截项目目录外的写入</li>
+            <li>每隔设定轮数发一条非阻塞进度播报（不暂停）</li>
+            <li>回滚兜底：run 开始前自动创建 git 检查点，随时可回滚到起点</li>
+            {isWindows() && <li><strong>Windows 注意：沙箱能力降级，逃逸风险相对更高</strong></li>}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmUnleashed(false); void update({ autonomyBrake: 'unleashed' }) }}>
+              我了解风险，切换
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   )
 }

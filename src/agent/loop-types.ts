@@ -37,8 +37,16 @@ export interface AgentConfig {
    */
   maxAutoContinue?: number
   /**
-   * C3 自治档检查点 — pause the run for user confirmation after this many turns
-   * within a single run(). 0/unset disables. Only enforced when approvalMode is
+   * C3 自治刹车模式 — 'cruise' pauses at the checkpoint interval with a progress
+   * digest; 'unleashed' never pauses (non-blocking progress pings only, rollback
+   * is the safety net). Defaults to 'cruise' when unset. Only meaningful when
+   * approvalMode is 'dangerously-skip-permissions'.
+   */
+  autonomyBrake?: 'cruise' | 'unleashed'
+  /**
+   * C3 自治档检查点间隔 — cruise: pause the run for user confirmation after this
+   * many turns within a single run(); unleashed: non-blocking progress ping
+   * interval. 0/unset disables. Only enforced when approvalMode is
    * 'dangerously-skip-permissions' (supervised modes brake via approvals).
    */
   checkpointEveryTurns?: number
@@ -211,6 +219,16 @@ export interface DecisionShift {
   severity?: 'info' | 'warn'
 }
 
+/** C3 — payload for autonomy checkpoint pauses (cruise) and progress pings (unleashed). */
+export interface AutonomyCheckpointInfo {
+  /** Turns completed in this run when the event fired. */
+  turns: number
+  /** Human-readable progress digest: files modified, recent tools, token usage. */
+  digest: string
+  /** true = run paused awaiting confirmation (cruise); false = non-blocking ping (unleashed). */
+  paused: boolean
+}
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -221,7 +239,7 @@ export interface AgentCallbacks {
   onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
-  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
+  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string; voluntary?: boolean; source?: string }) => void
   /** R4 — structured course-correction signal surfaced to the desktop conversation. */
   onDecisionShift?: (shift: DecisionShift) => void
   /**
@@ -234,9 +252,11 @@ export interface AgentCallbacks {
   onIntentNote?: (intent: IntentPreview) => void
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
-  /** C3 自治档检查点 — the run paused after `turnsDone` turns awaiting user
-   *  confirmation ("continue" resumes). Only fires in autonomous mode. */
-  onAutonomyCheckpoint?: (turnsDone: number) => void
+  /** C3 自治档检查点/播报 — fires only in autonomous mode. `paused: true` means
+   *  the run stopped awaiting user confirmation ("continue" resumes, cruise
+   *  brake); `paused: false` is a non-blocking progress ping (unleashed brake,
+   *  the run keeps going). `digest` is a human-readable progress summary. */
+  onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
   /** T4 — structured per-worker delegation status/progress (subagent panel). */
   onDelegationActivity?: (activity: DelegationActivity) => void
 }
