@@ -968,10 +968,19 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       return { status: 400, body: { error: 'Missing path' } }
     }
     const reveal = (body as Record<string, unknown>)?.reveal === true
+    // 路径存在性检查——不静默吞错（之前 spawn error 被 () => {} 吞掉，用户看不到失败）。
+    const { existsSync } = require('node:fs') as typeof import('node:fs')
+    const { resolve: resolvePath } = require('node:path') as typeof import('node:path')
+    const resolved = resolvePath(filePath)
+    if (!existsSync(resolved)) {
+      return { status: 404, body: { error: `Path not found: ${resolved}` } }
+    }
     import('node:child_process').then(({ spawn }) => {
       const command = reveal ? buildRevealCommand(filePath) : buildOpenPathCommand(filePath)
       const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' })
-      child.on('error', () => {})
+      child.on('error', (err) => {
+        console.error(`[open-file] spawn failed: ${command.cmd} ${command.args.join(' ')} → ${err.message}`)
+      })
       child.on('spawn', () => child.unref())
     })
     return { status: 200, body: { opened: filePath } }

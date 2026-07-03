@@ -194,16 +194,18 @@ export function FileExplorer({ sessionId, cwd }: { sessionId: string | null; cwd
   }, [])
 
   const openSelectedFile = useCallback((path: string) => {
-    void openFileInSystem(path)
+    openFileInSystem(path).catch((e) => toast.error(`打开失败: ${(e as Error).message}`))
   }, [])
 
   const revealSelectedFile = useCallback((path: string) => {
-    void openFileInSystem(path, true)
+    openFileInSystem(path, true).catch((e) => toast.error(`在文件管理器中显示失败: ${(e as Error).message}`))
   }, [])
 
   const openDirectory = useCallback((dirPath: string) => {
-    void openFileInSystem(dirPath || '.')
-  }, [])
+    // 传绝对路径——后端 resolve 依赖 cwd，sidecar cwd 不一定是项目根。
+    const abs = cwd ? toAbsolute(dirPath || '.', cwd) : (dirPath || '.')
+    openFileInSystem(abs).catch((e) => toast.error(`打开文件夹失败: ${(e as Error).message}`))
+  }, [cwd])
 
   const copyToClipboard = useCallback((text: string) => {
     navigator.clipboard.writeText(text).then(
