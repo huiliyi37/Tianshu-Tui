@@ -89,9 +89,14 @@ export function ThreadView(props: {
   onRetryStream?: () => void
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
-  const [input, setInput] = useState('')
   const ui = useUiState()
   const dispatch = useUiDispatch()
+  const [input, setInputRaw] = useState(ui.composerDrafts[session.id] ?? '')
+  /** Wrapper that also syncs to the store so drafts survive tab switches. */
+  const setInput = useCallback((text: string) => {
+    setInputRaw(text)
+    dispatch({ type: 'setComposerDraft', sessionId: session.id, text })
+  }, [dispatch, session.id])
   const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
