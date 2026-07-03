@@ -41,6 +41,7 @@ import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
 import { createAdvisoryReadbackHooks } from './hooks/advisory-readback-hook.js'
+import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-copilot-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -190,6 +191,12 @@ export interface RuntimeHookDeps {
   advisoryReadback?: import('./advisory-readback.js').AdvisoryReadback
   /** P1a：核销判定后的会话累计回调（guardian meta 接线） */
   onAdvisoryOutcomes?: (totals: { adopted: number; ignored: number }) => void
+  /** Phase 3 异步副驾：cheap model 情境合成。缺省 → 不装副驾 hook。 */
+  asyncCopilot?: {
+    getContext: () => CopilotContextPack
+    /** resolve null = cheap client 不可用（副驾永久休眠） */
+    complete: (system: string, user: string) => Promise<string | null>
+  }
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
 
@@ -464,6 +471,19 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
       readback: deps.advisoryReadback,
       writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
       onOutcomes: deps.onAdvisoryOutcomes,
+    }))
+  }
+
+  // Async-Copilot: postTurn hook — cheap-model 情境合成的中层建议（Phase 3）。
+  // 可行性双闸门为运行时数据判定（全局采纳率 >30% 才激活）,自我淘汰降频。
+  // Gated by RIVET_ASYNC_COPILOT (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.advisoryReadback && deps.asyncCopilot && process.env.RIVET_ASYNC_COPILOT !== '0') {
+    hooks.push(createAsyncCopilotHook({
+      advisoryBus: deps.advisoryBus,
+      readback: deps.advisoryReadback,
+      getContext: deps.asyncCopilot.getContext,
+      complete: deps.asyncCopilot.complete,
+      writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
     }))
   }
 

@@ -280,6 +280,36 @@ return {
     }
 }
 
+/**
+ * Phase 3 副驾的 cheap completion（懒初始化,进程内缓存）。
+ * 优先 workers.profiles.cheap 的独立 StreamClient（不与主会话争 socket）;
+ * 无 cheap profile 或构建失败 → resolve null（副驾休眠,绝不回退主模型——
+ * 副驾建议不值得花主模型的钱和延迟）。
+ */
+function buildLazyCopilotCompletion(self: AgentLoop): (system: string, user: string) => Promise<string | null> {
+  let completionPromise: Promise<((system: string, user: string, signal?: AbortSignal) => Promise<string>) | null> | undefined
+  return async (system, user) => {
+    completionPromise ??= (async () => {
+      try {
+        const { buildCheapClient, completionFromClient } = await import('./goal-criteria.js')
+        const { loadConfig } = await import('../config/manager.js')
+        const cfg = await loadConfig()
+        const cheapProfile = cfg.workers?.profiles?.cheap
+        const allProviders = self.config.allProviders ?? {}
+        if (!cheapProfile || !allProviders[cheapProfile.provider]) return null
+        const cheap = buildCheapClient(cheapProfile, allProviders)
+        return cheap ? completionFromClient(cheap.client, cheap.model) : null
+      } catch {
+        return null
+      }
+    })()
+    const completion = await completionPromise
+    if (!completion) return null // 基础设施缺失 → hook 永久休眠
+    // 单次调用失败向上抛（hook catch 后静默跳过本次,不算基础设施不可用）
+    return completion(system, user)
+  }
+}
+
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
   const userBridgeDeps = {
     cwd: self.cwd,
@@ -335,6 +365,15 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
     // P1a 核销闭环：advisory 采纳核销器 + 会话累计采纳/忽略同步到 guardian meta。
     advisoryReadback: self.advisoryReadback,
     onAdvisoryOutcomes: totals => self.recordAdvisoryOutcomes(totals),
+    // Phase 3 异步副驾：cheap client 懒初始化（首次触发才 loadConfig/建连接）。
+    // 构建失败 resolve null → hook 永久休眠,不影响主链路。
+    asyncCopilot: {
+      getContext: () => ({
+        objective: self.taskContract?.objective ?? null,
+        starDomain: self.sessionDomain?.name ?? null,
+      }),
+      complete: buildLazyCopilotCompletion(self),
+    },
     getPhysarumShadowStats: () => self.getPhysarumShadowStats(),
     getDomainId: () => self.sessionDomain?.id ?? null,
     getFileObservations: () => self.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
