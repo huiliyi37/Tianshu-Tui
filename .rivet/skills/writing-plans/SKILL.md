@@ -97,7 +97,7 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 - 子代理返回的 findings 是待核验假设——定稿前用 `read_file` / `grep` 对关键结论做独立确认
 
 **不要**：
-- 不要调用 `task` / `Agent` / `TodoWrite` / `WebSearch` 等非 Rivet 工具——这些不存在于 Rivet 中，调用会失败
+- 不要调用 `task` / `Agent` / `TodoWrite` 等非 Rivet 的子代理工具——这些不存在于 Rivet 中，调用会失败。Rivet 的搜索/调研工具是 `web_search` 和 `web_fetch`，子代理工具是 `delegate_task` / `delegate_batch`
 - 把主线任务本身委派给子代理（那是执行阶段的事）
 - 派写入型 profile（patcher）——计划阶段只读不改文件
 
