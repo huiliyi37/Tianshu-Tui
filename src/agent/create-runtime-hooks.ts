@@ -37,6 +37,7 @@ import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
+import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -427,6 +428,16 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_PROBE_TRACKING (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_PROBE_TRACKING !== '0') {
     hooks.push(createProbeTrackingHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // External-Claim Tracking: postTool hook — detects delegate_task/batch
+  // results containing file:line references, then warns if the agent edits
+  // those paths without independent verification (read_file/grep) first.
+  // Session-scoped claim set with TTL. Guards the "格式完整不是可信度信号"
+  // discipline against authoritative-sounding worker reports.
+  // Gated by RIVET_EXTERNAL_CLAIM_TRACKING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_EXTERNAL_CLAIM_TRACKING !== '0') {
+    hooks.push(createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a
