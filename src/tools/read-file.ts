@@ -32,10 +32,15 @@ function trimGitignoreCache(): void {
 }
 
 // P5+P6 follow-up: in-process dedup for read_file to prevent the model from
-// burning tokens by repeatedly reading the same unchanged file. Key includes
-// the file's mtime so an external edit (or our own write_file) auto-invalidates.
+// burning tokens by repeatedly reading the same unchanged file. Entries record
+// the file's mtime AND size at read time so an external edit (or our own
+// write_file/edit_file) auto-invalidates; our own edits additionally delete
+// entries eagerly via invalidateReadHistory().
 interface ReadHistoryEntry {
   mtimeMs: number
+  /** stat().size of the whole file at read time — second staleness signal
+   *  alongside mtime, hardening against coarse-mtime filesystems (exFAT: 2s). */
+  sizeBytes: number
   rawBytes: number
   modelBytes: number
   truncated: boolean
@@ -49,10 +54,12 @@ const readHistory = new Map<string, ReadHistoryEntry>()
 const READ_HISTORY_MAX = 500
 
 /** File-level dedup: records full-file reads so fragment reads can be
- * blocked without re-reading. Key = canonicalPath, no offset/limit.
- * Independent of readHistory (per-slice dedup). */
+ * blocked without re-reading. Key = fileHistoryKey(sessionId, canonicalPath),
+ * no offset/limit. Independent of readHistory (per-slice dedup). */
 interface FileReadHistoryEntry {
   mtimeMs: number
+  /** stat().size at read time — see ReadHistoryEntry.sizeBytes. */
+  sizeBytes: number
   totalLines: number
   rawBytes: number
   modelBytes: number
@@ -61,6 +68,34 @@ interface FileReadHistoryEntry {
 }
 const fileReadHistory = new Map<string, FileReadHistoryEntry>()
 const FILE_READ_HISTORY_MAX = 200
+
+/** 表2 — last observed file state per session. Written by read_file, grep
+ *  registration, AND successful edits (edit_file/hash_edit/write_file). Read
+ *  by the stale-file detection in the edit tools and read_section.
+ *
+ *  This is deliberately separate from readHistory/fileReadHistory (表1): 表1
+ *  means "content the model actually read" and is only ever written by read
+ *  paths — edits DELETE its entries (invalidateReadHistory) so read-ref can
+ *  never claim "unchanged" against pre-edit content. 表2 carries the old
+ *  refreshFileReadMtime duty: after our own successful edit we note the new
+ *  mtime here so the next edit's staleness check doesn't false-positive on
+ *  our own write (read-edit-stale loop prevention). */
+interface KnownFileState {
+  mtimeMs: number
+  sizeBytes: number
+}
+const lastKnownFileState = new Map<string, KnownFileState>()
+const LAST_KNOWN_MAX = 500
+
+function trimLastKnown(): void {
+  if (lastKnownFileState.size <= LAST_KNOWN_MAX) return
+  const drop = Math.ceil(lastKnownFileState.size * 0.2)
+  let i = 0
+  for (const key of lastKnownFileState.keys()) {
+    lastKnownFileState.delete(key)
+    if (++i >= drop) break
+  }
+}
 
 /** When enabled, repeated reads of unchanged files return a compact reference
  *  instead of re-emitting the full content. Default-on (opt-out with RIVET_READ_REF=0).
@@ -89,19 +124,21 @@ let readRefCount = 0
 /** Session-level file edit tracking: records which files this session has
  *  successfully written to. Used by staleness detection to disambiguate
  *  "modified externally" from "you edited this yourself earlier."
+ *  Keyed by `${sessionId ?? ''}::${path}` so concurrent in-process sessions
+ *  (fork/worker) don't see each other's edit marks.
  *  Intentionally NOT cleared on compaction — the agent should always know
  *  which files it has touched, even after long sessions. */
 const sessionFileEdits = new Set<string>()
 
 /** Mark a file as having been written by this session. Call after any
  *  successful write (edit_file, hash_edit, write_file, apply_patch). */
-export function markSessionFileEdit(canonicalPath: string): void {
-  sessionFileEdits.add(canonicalPath)
+export function markSessionFileEdit(canonicalPath: string, sessionId?: string): void {
+  sessionFileEdits.add(fileHistoryKey(sessionId, canonicalPath))
 }
 
 /** Check whether this session has previously written to this file. */
-export function wasFileEditedBySession(canonicalPath: string): boolean {
-  return sessionFileEdits.has(canonicalPath)
+export function wasFileEditedBySession(canonicalPath: string, sessionId?: string): boolean {
+  return sessionFileEdits.has(fileHistoryKey(sessionId, canonicalPath))
 }
 
 /** Test-only: reset session edit tracking between unit tests. */
@@ -112,8 +149,9 @@ function readHistoryKey(cwd: string, canonicalPath: string, offset: number, limi
   return `${sessionId ?? ''}::${cwd}::${canonicalPath}::${offset}::${limit ?? 'all'}`
 }
 
-/** Key for fileReadHistory — scoped by sessionId so concurrent sessions in the
- *  same cwd (fork/worker) don't see each other's "already read" entries. */
+/** Key for fileReadHistory / lastKnownFileState / sessionFileEdits — scoped by
+ *  sessionId so concurrent sessions in the same cwd (fork/worker) don't see
+ *  each other's "already read"/"already edited" state. */
 function fileHistoryKey(sessionId: string | undefined, canonicalPath: string): string {
   return `${sessionId ?? ''}::${canonicalPath}`
 }
@@ -134,61 +172,88 @@ function trimFileReadHistory(): void {
 
 /**
  * Returns true when a prior read of the same file (same offset/limit, or a full-file
- * read that subsumes this request) was recorded with a matching mtime — meaning the
- * file has NOT been modified since it was last read.
+ * read that subsumes this request) was recorded with a matching mtime AND size —
+ * meaning the file has NOT been modified since it was last read.
  */
 export function isUnchangedRepeatRead(
   canonical: string,
   currentMtimeMs: number,
+  currentSizeBytes: number,
   dedupKey: string,
   offset: number,
   limit: number | undefined,
   sessionId?: string,
 ): boolean {
   const priorSame = readHistory.get(dedupKey)
-  if (priorSame && priorSame.mtimeMs === currentMtimeMs) return true
+  if (priorSame && priorSame.mtimeMs === currentMtimeMs && priorSame.sizeBytes === currentSizeBytes) return true
   const fullPrior = fileReadHistory.get(fileHistoryKey(sessionId, canonical))
-  if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && offset === 1 && !limit) return true
+  if (fullPrior && fullPrior.mtimeMs === currentMtimeMs && fullPrior.sizeBytes === currentSizeBytes && offset === 1 && !limit) return true
   return false
 }
 
 /** Test-only: clear dedup state between unit tests. */
-/** Test-only: clear dedup state between unit tests. */
 export function __resetReadHistoryForTests(): void {
   readHistory.clear()
   fileReadHistory.clear()
+  lastKnownFileState.clear()
   sessionFileEdits.clear()
   readRefSavedBytes = 0
   readRefCount = 0
 }
 
-/** Return the last known mtimeMs for a file from the read history, or null if never read. */
-export function getFileReadMtime(canonicalPath: string): number | null {
-  const entry = fileReadHistory.get(canonicalPath)
+/** Return the last mtimeMs this session observed for a file (via read_file,
+ *  grep, or its own successful edit), or null if never observed. */
+export function getFileReadMtime(canonicalPath: string, sessionId?: string): number | null {
+  const entry = lastKnownFileState.get(fileHistoryKey(sessionId, canonicalPath))
   return entry ? entry.mtimeMs : null
 }
 
-/** Refresh the mtime cache for a file after stale detection.
- *  This prevents a read-edit-stale loop: after edit_file detects a stale file,
- *  it updates the cache so the next edit attempt (after the model re-reads)
- *  won't immediately fail again. Returns the new mtimeMs or null. */
-export function refreshFileReadMtime(canonicalPath: string, newMtimeMs: number): void {
-  const entry = fileReadHistory.get(canonicalPath)
-  if (entry) {
-    entry.mtimeMs = newMtimeMs
+/** Record the file state this session just observed (read or wrote).
+ *  Successor of the old refreshFileReadMtime: after a successful edit the
+ *  caller notes the post-write mtime here so the NEXT edit's staleness check
+ *  doesn't false-positive on our own write (read-edit-stale loop prevention).
+ *  Writes 表2 only — never touches the read-dedup tables, so read-ref can
+ *  never be tricked into claiming pre-edit content is current. */
+export function noteFileObserved(canonicalPath: string, mtimeMs: number, sizeBytes: number, sessionId?: string): void {
+  lastKnownFileState.set(fileHistoryKey(sessionId, canonicalPath), { mtimeMs, sizeBytes })
+  trimLastKnown()
+}
+
+/** Drop every read-dedup record (all sessions) for a canonical path. Called
+ *  after a successful edit_file/hash_edit/write_file: the on-disk content no
+ *  longer matches what any session read, so "already read and unchanged"
+ *  claims and artifact-backed slices for this path must die. Cross-session
+ *  deletion is safe — those entries would fail the mtime+size check anyway. */
+export function invalidateReadHistory(canonicalPath: string): void {
+  const suffix = `::${canonicalPath}`
+  for (const key of fileReadHistory.keys()) {
+    if (key.endsWith(suffix)) fileReadHistory.delete(key)
+  }
+  // readHistory keys embed offset/limit after the path: match the path segment.
+  const segment = `::${canonicalPath}::`
+  for (const key of readHistory.keys()) {
+    if (key.includes(segment)) readHistory.delete(key)
   }
 }
 
-/** Test-only: inject a file read history entry so stale detection can trigger
+/** One-stop bookkeeping after a successful write (edit_file/hash_edit/
+ *  write_file): drop every read-dedup record for the path (its content is no
+ *  longer what any session read), note the post-write file state so the next
+ *  edit's staleness check doesn't false-positive on our own write, and mark
+ *  the file as session-edited. */
+export async function recordSuccessfulEdit(canonicalPath: string, sessionId?: string): Promise<void> {
+  invalidateReadHistory(canonicalPath)
+  markSessionFileEdit(canonicalPath, sessionId)
+  try {
+    const s = await stat(canonicalPath)
+    noteFileObserved(canonicalPath, s.mtimeMs, s.size, sessionId)
+  } catch { /* file vanished between write and stat — nothing to note */ }
+}
+
+/** Test-only: inject a last-known file state so stale detection can trigger
  *  without needing to call read_file first. */
-export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: number): void {
-  fileReadHistory.set(canonicalPath, {
-    mtimeMs,
-    totalLines: 0,
-    rawBytes: 0,
-    modelBytes: 0,
-    recordedAt: Date.now(),
-  })
+export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: number, sessionId?: string): void {
+  lastKnownFileState.set(fileHistoryKey(sessionId, canonicalPath), { mtimeMs, sizeBytes: -1 })
 }
 
 /**
@@ -196,19 +261,14 @@ export function __setFileReadMtimeForTests(canonicalPath: string, mtimeMs: numbe
  * This allows hash_edit's position-only mode to succeed after grep
  * without requiring a full read_file call.
  *
- * Only registers if the file has NOT been read before (avoids overwriting
- * a more detailed entry from read_file).
+ * Only registers if the file has NOT been observed before (avoids overwriting
+ * a more precise entry from read_file or an edit).
  */
-export function registerGrepFileAccess(canonicalPath: string, mtimeMs: number): void {
-  if (fileReadHistory.has(canonicalPath)) return
-  fileReadHistory.set(canonicalPath, {
-    mtimeMs,
-    totalLines: 0,
-    rawBytes: 0,
-    modelBytes: 0,
-    recordedAt: Date.now(),
-  })
-  trimFileReadHistory()
+export function registerGrepFileAccess(canonicalPath: string, mtimeMs: number, sessionId?: string): void {
+  const key = fileHistoryKey(sessionId, canonicalPath)
+  if (lastKnownFileState.has(key)) return
+  lastKnownFileState.set(key, { mtimeMs, sizeBytes: -1 })
+  trimLastKnown()
 }
 
 /** Return cumulative read-ref telemetry for cacheCreate cost analysis (B4). */
@@ -497,14 +557,17 @@ export const READ_FILE_TOOL: Tool = {
     const limit = params.input.limit as number | undefined
     let dedupKey: string | null = null
     let currentMtimeMs: number | null = null
+    let currentSizeBytes: number | null = null
     let canonical: string | null = null
     try {
       canonical = validatePath(params.cwd, filePath)
       if (existsSync(canonical)) {
-        currentMtimeMs = (await stat(canonical)).mtimeMs
+        const currentStat = await stat(canonical)
+        currentMtimeMs = currentStat.mtimeMs
+        currentSizeBytes = currentStat.size
         dedupKey = readHistoryKey(params.cwd, canonical, offset, limit, params.sessionId)
         const prior = readHistory.get(dedupKey)
-        if (prior && prior.mtimeMs === currentMtimeMs && prior.artifactId) {
+        if (prior && prior.mtimeMs === currentMtimeMs && prior.sizeBytes === currentSizeBytes && prior.artifactId) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, prior.artifactId, offset, limit)
             if (slice !== null) {
@@ -515,7 +578,7 @@ export const READ_FILE_TOOL: Tool = {
           debugLog(`[read-dedup] artifact unreadable, falling through to normal read file=${canonical}`)
         }
         const fullEntry = fileReadHistory.get(fileHistoryKey(params.sessionId, canonical))
-        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
+        if (fullEntry && fullEntry.mtimeMs === currentMtimeMs && fullEntry.sizeBytes === currentSizeBytes && fullEntry.artifactId && (offset !== 1 || limit !== undefined)) {
           if (params.artifactStore) {
             const slice = await sliceFromArtifact(params.artifactStore, fullEntry.artifactId, offset, limit)
             if (slice !== null) {
@@ -530,8 +593,8 @@ export const READ_FILE_TOOL: Tool = {
 
     // ── 重复读取检测 ──
     // 检测本轮是否已读过同一文件且未变更，若是则在前端注入提醒。
-    const unchangedRepeat = (canonical && currentMtimeMs !== null && dedupKey)
-      ? isUnchangedRepeatRead(canonical, currentMtimeMs, dedupKey, offset, limit, params.sessionId)
+    const unchangedRepeat = (canonical && currentMtimeMs !== null && currentSizeBytes !== null && dedupKey)
+      ? isUnchangedRepeatRead(canonical, currentMtimeMs, currentSizeBytes, dedupKey, offset, limit, params.sessionId)
       : false
 
     let repeatWarning: string | null = null
@@ -612,11 +675,17 @@ export const READ_FILE_TOOL: Tool = {
 
     const rawPath = await persistRawOutput(params.toolUseId, payload.rawContent)
 
+    // 表2: note the observed file state so edit-tool staleness checks work.
+    if (canonical && currentMtimeMs !== null && currentSizeBytes !== null) {
+      noteFileObserved(canonical, currentMtimeMs, currentSizeBytes, params.sessionId)
+    }
+
     // Helper to write the dedup entry once we know whether an artifact was created.
     const recordDedup = (artifactId?: string): void => {
-      if (!dedupKey || currentMtimeMs === null) return
+      if (!dedupKey || currentMtimeMs === null || currentSizeBytes === null) return
       readHistory.set(dedupKey, {
         mtimeMs: currentMtimeMs,
+        sizeBytes: currentSizeBytes,
         rawBytes: payload.rawContent.length,
         modelBytes: payload.modelContent.length,
         truncated: payload.rawContent.length !== payload.modelContent.length,
@@ -628,10 +697,11 @@ export const READ_FILE_TOOL: Tool = {
 
     // Record file-level dedup entry for full-file reads.
     const recordFileDedup = (artifactId?: string): void => {
-      if (!canonical || currentMtimeMs === null) return
+      if (!canonical || currentMtimeMs === null || currentSizeBytes === null) return
       if (offset !== 1 || limit !== undefined) return // only full reads
       fileReadHistory.set(fileHistoryKey(params.sessionId, canonical), {
         mtimeMs: currentMtimeMs,
+        sizeBytes: currentSizeBytes,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,
         modelBytes: payload.modelContent.length,
@@ -734,14 +804,16 @@ async function handleMultiRead(params: ToolCallParams, paths: string[]): Promise
       totalBytes += payload.rawContent.length
 
       // Record file-level dedup for each file
-      const currentMtimeMs = (await stat(payload.canonicalPath)).mtimeMs
+      const currentStat = await stat(payload.canonicalPath)
       fileReadHistory.set(fileHistoryKey(params.sessionId, payload.canonicalPath), {
-        mtimeMs: currentMtimeMs,
+        mtimeMs: currentStat.mtimeMs,
+        sizeBytes: currentStat.size,
         totalLines: payload.rawContent.split('\n').length,
         rawBytes: payload.rawContent.length,
         modelBytes: payload.modelContent.length,
         recordedAt: Date.now(),
       })
+      noteFileObserved(payload.canonicalPath, currentStat.mtimeMs, currentStat.size, params.sessionId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       const display = trimmed.replace(params.cwd + '/', '')

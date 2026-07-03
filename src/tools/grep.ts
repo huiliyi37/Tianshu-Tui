@@ -110,7 +110,7 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
     const artifactThreshold = getToolArtifactThreshold('grep', params.contextWindow)
 
     // Try ripgrep first, fall back to native search
-    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, contextLines, modelCap, params.artifactStore, artifactThreshold, params.abortSignal)
+    const rgResult = await tryRipgrep(pattern, absPath, searchPath, glob, maxResults, params.cwd, literal, contextLines, modelCap, params.artifactStore, artifactThreshold, params.abortSignal, params.sessionId)
     if (rgResult !== null) return rgResult
 
     // Native fallback
@@ -128,8 +128,8 @@ Bad: grep(pattern="x") (too broad — will match too many lines)`,
         ? results.slice(0, maxResults).join('\n') + '\n... (truncated)'
         : results.join('\n')
       let hintedText = appendLogRangeHints(text, searchPath)
-      hintedText = await appendHashEditHints(hintedText, absPath, params.cwd)
-      await registerGrepFilesFromOutput(hintedText, params.cwd)
+      hintedText = await appendHashEditHints(hintedText, absPath, params.cwd, params.sessionId)
+      await registerGrepFilesFromOutput(hintedText, params.cwd, params.sessionId)
 
       if (params.artifactStore) {
         if (hintedText.length < artifactThreshold) {
@@ -196,7 +196,7 @@ function appendLogRangeHints(content: string, searchPath: string): string {
  *
  * Reads the file once, extracts hashes for matched line numbers, appends them.
  */
-async function appendHashEditHints(content: string, absPath: string, cwd: string): Promise<string> {
+async function appendHashEditHints(content: string, absPath: string, cwd: string, sessionId?: string): Promise<string> {
   // Only add hints for single-file results (not directory-wide greps)
   let fileStat
   try {
@@ -204,7 +204,7 @@ async function appendHashEditHints(content: string, absPath: string, cwd: string
   } catch { return content }
   if (!fileStat.isFile()) return content
 
-  registerGrepFileAccess(absPath, fileStat.mtimeMs)
+  registerGrepFileAccess(absPath, fileStat.mtimeMs, sessionId)
 
   const lineNumbers: number[] = []
   for (const line of content.split('\n')) {
@@ -242,7 +242,7 @@ async function appendHashEditHints(content: string, absPath: string, cwd: string
  * Parses rg output lines to extract file paths, stats each, and registers
  * them in fileReadHistory so hash_edit can be used directly.
  */
-async function registerGrepFilesFromOutput(content: string, cwd: string): Promise<void> {
+async function registerGrepFilesFromOutput(content: string, cwd: string, sessionId?: string): Promise<void> {
   const seen = new Set<string>()
   for (const line of content.split('\n')) {
     // rg --no-heading format: "relative/path:linenum: content"
@@ -255,7 +255,7 @@ async function registerGrepFilesFromOutput(content: string, cwd: string): Promis
       const absFilePath = resolve(cwd, relPath)
       const s = await stat(absFilePath)
       if (s.isFile()) {
-        registerGrepFileAccess(absFilePath, s.mtimeMs)
+        registerGrepFileAccess(absFilePath, s.mtimeMs, sessionId)
       }
     } catch { /* skip unresolvable paths */ }
     if (seen.size >= 20) break
@@ -275,6 +275,7 @@ async function tryRipgrep(
   artifactStore?: ArtifactStore,
   artifactThreshold: number = 0,
   abortSignal?: AbortSignal,
+  sessionId?: string,
 ): Promise<ToolResult | null> {
   if (typeof pattern !== 'string' || pattern.length === 0) {
     return Promise.resolve({ content: 'Error: pattern is required (non-empty string)', isError: true })
@@ -365,8 +366,8 @@ async function tryRipgrep(
       let hintedText = appendLogRangeHints(text, searchPath)
 
       void (async () => {
-        hintedText = await appendHashEditHints(hintedText, absPath, cwd)
-        await registerGrepFilesFromOutput(hintedText, cwd)
+        hintedText = await appendHashEditHints(hintedText, absPath, cwd, sessionId)
+        await registerGrepFilesFromOutput(hintedText, cwd, sessionId)
 
         if (artifactStore) {
           if (hintedText.length < artifactThreshold) {

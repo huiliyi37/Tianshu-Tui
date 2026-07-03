@@ -1,4 +1,6 @@
+import { isAbsolute, resolve } from 'node:path'
 import type { EventRecord } from '../session-registry.js'
+import { invalidateReadHistory } from '../../tools/read-file.js'
 
 export interface CrossSessionHookDeps {
   consumeEvents: (sessionId: string, afterId: number) => EventRecord[]
@@ -6,6 +8,26 @@ export interface CrossSessionHookDeps {
   setCrossSessionAppendix: (content: string) => void
   getLastSeenEventId: () => number
   setLastSeenEventId: (id: number) => void
+  /** Workspace root — enables read-cache invalidation for file_changed events
+   *  (relative event paths are resolved against it). */
+  cwd?: string
+}
+
+/**
+ * Drop this process's read-dedup records for files another session reports as
+ * changed (`file_changed` events from stigmergy-hook). Aligns the read cache
+ * with the file-level concurrency ownership semantics: once a peer session's
+ * exclusive-claim edit lands, "already read and unchanged" must never be
+ * answered from pre-edit state — the next read_file does a real read.
+ * Passive mtime+size staleness checks remain the backstop; this is the
+ * proactive path.
+ */
+export function invalidateReadCachesForEvents(events: readonly EventRecord[], cwd: string): void {
+  for (const e of events) {
+    if (e.eventType !== 'file_changed' || !e.filePath) continue
+    const canonical = isAbsolute(e.filePath) ? e.filePath : resolve(cwd, e.filePath)
+    invalidateReadHistory(canonical)
+  }
 }
 
 /**
@@ -67,6 +89,7 @@ export function createCrossSessionHook(deps: CrossSessionHookDeps) {
         const maxId = Math.max(...events.map(e => e.id))
         deps.setLastSeenEventId(maxId)
         deps.setCrossSessionAppendix(formatEventsForAppendix(events))
+        if (deps.cwd) invalidateReadCachesForEvents(events, deps.cwd)
       }
     },
   }

@@ -151,7 +151,7 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
   it('returns true for exact same offset/limit repeat of unchanged file', async () => {
     const fp = makeFile('src/foo.ts', 'line 1\nline 2\nline 3\n')
     const { stat } = await import('node:fs/promises')
-    const mtime = (await stat(fp)).mtimeMs
+    const st = await stat(fp)
     const dedupKey = `${dir}::${fp}::1::all`
 
     // First read to populate readHistory
@@ -165,13 +165,13 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
     assert.ok(r1.content.includes('line 1'))
 
     // Now check isUnchangedRepeatRead
-    assert.equal(isUnchangedRepeatRead(fp, mtime, dedupKey, 1, undefined), true)
+    assert.equal(isUnchangedRepeatRead(fp, st.mtimeMs, st.size, dedupKey, 1, undefined), true)
   })
 
   it('returns true for full-read superset match', async () => {
     const fp = makeFile('src/bar.ts', 'a\nb\nc\n')
     const { stat } = await import('node:fs/promises')
-    const mtime = (await stat(fp)).mtimeMs
+    const st = await stat(fp)
 
     // Full-file read to populate fileReadHistory
     await READ_FILE_TOOL.execute({
@@ -183,7 +183,7 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
 
     // New read of same file (offset=1, no limit) → full superset match
     const dedupKey = `${dir}::${fp}::1::all`
-    assert.equal(isUnchangedRepeatRead(fp, mtime, dedupKey, 1, undefined), true)
+    assert.equal(isUnchangedRepeatRead(fp, st.mtimeMs, st.size, dedupKey, 1, undefined), true)
   })
 
   it('returns false when mtime changed (file was modified)', async () => {
@@ -200,20 +200,37 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
 
     // Modify the file
     await writeFile(fp, 'new content\n', 'utf-8')
-    const newMtime = (await stat(fp)).mtimeMs
+    const newStat = await stat(fp)
     const dedupKey = `${dir}::${fp}::1::all`
 
-    assert.equal(isUnchangedRepeatRead(fp, newMtime, dedupKey, 1, undefined), false)
+    assert.equal(isUnchangedRepeatRead(fp, newStat.mtimeMs, newStat.size, dedupKey, 1, undefined), false)
   })
 
   it('returns false for first read (not in history)', () => {
-    assert.equal(isUnchangedRepeatRead('/nope', Date.now(), '/nope::1::all', 1, undefined), false)
+    assert.equal(isUnchangedRepeatRead('/nope', Date.now(), 100, '/nope::1::all', 1, undefined), false)
+  })
+
+  it('returns false when size changed even if mtime is identical (coarse-mtime filesystems)', async () => {
+    const fp = makeFile('src/coarse.ts', 'aaaa\nbbbb\ncccc\n')
+    const { stat } = await import('node:fs/promises')
+    const st = await stat(fp)
+
+    await READ_FILE_TOOL.execute({
+      toolUseId: 't-coarse',
+      cwd: dir,
+      input: { file_path: fp },
+      contextWindow: 128_000,
+    })
+
+    // Same mtime, different size → must NOT be treated as unchanged
+    const dedupKey = `${dir}::${fp}::1::all`
+    assert.equal(isUnchangedRepeatRead(fp, st.mtimeMs, st.size + 7, dedupKey, 1, undefined), false)
   })
 
   it('returns false when offset differs from prior read', async () => {
     const fp = makeFile('src/qux.ts', '1\n2\n3\n4\n5\n')
     const { stat } = await import('node:fs/promises')
-    const mtime = (await stat(fp)).mtimeMs
+    const st = await stat(fp)
 
     // Read offset=1, limit=2
     await READ_FILE_TOOL.execute({
@@ -225,7 +242,7 @@ describe('isUnchangedRepeatRead (任务 B1)', () => {
 
     // New read: offset=3, limit=2 — different dedup key
     const newDedupKey = `${dir}::${fp}::3::2`
-    assert.equal(isUnchangedRepeatRead(fp, mtime, newDedupKey, 3, 2), false)
+    assert.equal(isUnchangedRepeatRead(fp, st.mtimeMs, st.size, newDedupKey, 3, 2), false)
   })
 })
 

@@ -3,7 +3,7 @@ import { dirname, relative } from 'path'
 import type { Tool } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { refreshFileReadMtime, getFileReadMtime, markSessionFileEdit } from './read-file.js'
+import { getFileReadMtime, recordSuccessfulEdit } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 import { applyEol, chooseEol, detectFileEol, toLf } from './line-endings.js'
@@ -92,7 +92,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     try {
       const currentStat = await stat(filePath)
       const currentMtime = currentStat.mtimeMs
-      const lastReadMtime = getFileReadMtime(filePath)
+      const lastReadMtime = getFileReadMtime(filePath, params.sessionId)
       if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
         console.warn(`⚠ write_file: ${filePath} was modified externally since last read. Overwriting.`)
       }
@@ -107,8 +107,7 @@ Bad: using write_file to change one line in an existing file (use edit_file inst
     const finalContent = applyEol(content, chooseEol(filePath, existingEol, getTargetEol()))
 
     await writeFileAtomicAsync(filePath, finalContent)
-    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-    markSessionFileEdit(filePath)
+    await recordSuccessfulEdit(filePath, params.sessionId)
     const lines = finalContent.split('\n').length
     const warn = syntaxCheck(filePath, finalContent)
     const afterForDiff = toLf(content)

@@ -19,7 +19,7 @@ import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
-import { formatEventsForAppendix, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
+import { formatEventsForAppendix, invalidateReadCachesForEvents, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
 // staleness/vigor-low advisory entries migrated to CCR hook (cognitive-capsule-router.ts)
 import { classifySeason } from './cognitive-season.js'
@@ -360,6 +360,9 @@ export class TurnStepProducer {
       if (events.length > 0) {
         this.self.lastSeenEventId = Math.max(...events.map(e => e.id))
         appendix = formatEventsForAppendix(events)
+        // Peer sessions edited these files — drop our read-dedup records so
+        // the next read_file returns real content instead of a [read-ref].
+        invalidateReadCachesForEvents(events, this.self.cwd)
       }
       // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
       const claims = this.self.config.sessionRegistry.getActiveClaims(this.self.config.sessionId)

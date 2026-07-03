@@ -4,7 +4,7 @@ import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { buildFileDiff, computeChangedLineRanges } from './edit-diff.js'
 import { hashLine } from './hash-edit.js'
-import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
+import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession } from './read-file.js'
 import { syntaxCheck } from './syntax-check.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { findFuzzyMatch, applyFuzzyReplacement } from './fuzzy-match.js'
@@ -63,10 +63,11 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     // model's last read_file, reject the edit to prevent silent corruption.
     // hash_edit is the safe alternative — its anchor verification catches this.
     const currentMtime = fileStat.mtimeMs
-    const lastReadMtime = getFileReadMtime(filePath)
+    const lastReadMtime = getFileReadMtime(filePath, params.sessionId)
     if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
-      // Auto-refresh mtime cache to prevent read-edit-stale loop:
-      refreshFileReadMtime(filePath, currentMtime)
+      // Note the observed state to prevent a read-edit-stale loop (表2 only —
+      // the read-dedup tables are untouched so read-ref stays honest):
+      noteFileObserved(filePath, currentMtime, fileStat.size, params.sessionId)
 
       // Smart stale recovery: instead of a generic "re-read" error, auto-read
       // the current content and either re-apply or show what changed.
@@ -90,8 +91,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           if (replaceAll) {
             const newContent = freshContent.replaceAll(oldString, newString)
             await writeFileAtomicAsync(filePath, applyEol(newContent, freshEol))
-            refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-            markSessionFileEdit(filePath)
+            await recordSuccessfulEdit(filePath, params.sessionId)
             const occurrences = (freshContent.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
             const expectedCount = params.input.expected_count as number | undefined
             const warn = syntaxCheck(filePath, newContent)
@@ -110,8 +110,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           }
           const recovered = freshContent.replace(oldString, newString)
           await writeFileAtomicAsync(filePath, applyEol(recovered, freshEol))
-          refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-          markSessionFileEdit(filePath)
+          await recordSuccessfulEdit(filePath, params.sessionId)
           const warn = syntaxCheck(filePath, recovered)
           return {
             content: `Applied edit to ${filePath} (file was modified externally but content still matched)${warn ? '\n\n' + warn : ''}`,
@@ -137,7 +136,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
           const start = Math.max(0, bestIdx - CONTEXT)
           const end = Math.min(freshLines.length, bestIdx + oldString.split('\n').length + CONTEXT)
           const actualWindow = freshLines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n')
-          const modNote = wasFileEditedBySession(filePath) ? ' — you previously edited this file in the current session' : ' externally'
+          const modNote = wasFileEditedBySession(filePath, params.sessionId) ? ' — you previously edited this file in the current session' : ' externally'
           return {
             content: `File ${filePath} was modified${modNote} since your last read_file. old_string no longer matches.\n\nCurrent content near the expected location (line ${bestIdx + 1}):\n\`\`\`\n${actualWindow}\n\`\`\`\n\nUpdate your old_string to match the current content and retry, or use hash_edit with anchors.`,
             isError: true,
@@ -146,7 +145,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
 
         // No close match — show file head
         const head = freshLines.slice(0, 30).map((l, i) => `${i + 1}: ${l}`).join('\n')
-        const modNote = wasFileEditedBySession(filePath) ? ' — you previously edited this file in the current session' : ' externally'
+        const modNote = wasFileEditedBySession(filePath, params.sessionId) ? ' — you previously edited this file in the current session' : ' externally'
         return {
           content: `File ${filePath} was modified${modNote} since your last read_file. old_string not found.\n\nFile head:\n\`\`\`\n${head}${freshLines.length > 30 ? `\n... (${freshLines.length} lines total)` : ''}\n\`\`\`\n\nRe-read the file to see full content, or use hash_edit with anchors.`,
           isError: true,
@@ -187,8 +186,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       }
       const newContent = content.replaceAll(oldString, newString)
       await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-      refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-      markSessionFileEdit(filePath)
+      await recordSuccessfulEdit(filePath, params.sessionId)
       const occurrences = (content.match(new RegExp(escapeRegExp(oldString), 'g')) || []).length
       const expectedCount = params.input.expected_count as number | undefined
       const warn = syntaxCheck(filePath, newContent)
@@ -210,8 +208,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
       if (fuzzy) {
         const recovered = applyFuzzyReplacement(content, fuzzy, newString)
         await writeFileAtomicAsync(filePath, applyEol(recovered, eol))
-        refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-        markSessionFileEdit(filePath)
+        await recordSuccessfulEdit(filePath, params.sessionId)
         const warn = syntaxCheck(filePath, recovered)
         // Surface the whitespace drift so the model can self-correct in
         // subsequent edits — without this, error accumulates across calls.
@@ -241,8 +238,7 @@ Prefer edit_file for unique-string swaps; use hash_edit for whitespace-ambiguous
     }
     const newContent = content.replace(oldString, newString)
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-    markSessionFileEdit(filePath)
+    await recordSuccessfulEdit(filePath, params.sessionId)
     const warn = syntaxCheck(filePath, newContent)
     return {
       content: `Applied edit to ${filePath}` + (warn ? '\n\n' + warn : ''),

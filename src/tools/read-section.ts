@@ -141,7 +141,7 @@ Good: read_section(file_path="src/tools/bash.ts", section="L100-L200")`,
         const canonical = validatePath(params.cwd, file_path)
 
         // Staleness check: warn if file mtime differs from last read_file
-        const lastMtime = getFileReadMtime(canonical)
+        const lastMtime = getFileReadMtime(canonical, params.sessionId)
         let stalenessNote = ''
         if (lastMtime !== null) {
           try {
