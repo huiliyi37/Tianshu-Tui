@@ -58,11 +58,21 @@ const DEBUGGER_RE = /\bdebugger\b/g
  */
 const ONLY_PROBE_RE = /\b(it|describe|test|xit|xdescribe|xit)\.only\s*\(/g
 
+/**
+ * 裸 assert( 调用——非测试文件中的运行时断言
+ * 来源：计划文档缺口① 落地修正清单第 3 点"本仓库约定 assert 只出现在
+ *   测试里，排除 *.test.ts 后剩下的裸 assert( 新增行都可疑"
+ * 匹配 `assert(` 但不匹配 `console.assert(`（已被 console 模式管）
+ * 也不匹配 import 语句中的 assert 关键字
+ */
+const ASSERT_PROBE_RE = /(^|[^.\w])assert\s*\(/gm
+
 /** 所有探针正则集合 */
 const PROBE_PATTERNS: Array<{ name: string; re: RegExp }> = [
   { name: 'console.log/debug/dir/trace', re: CONSOLE_PROBE_RE },
   { name: 'debugger', re: DEBUGGER_RE },
   { name: '.only() test isolation', re: ONLY_PROBE_RE },
+  { name: 'bare assert()', re: ASSERT_PROBE_RE },
 ]
 
 // ── 白名单 ──────────────────────────────────────────────────────

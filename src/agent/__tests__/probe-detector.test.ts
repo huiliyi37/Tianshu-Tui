@@ -85,6 +85,24 @@ describe('probe-detector', () => {
       const hits = detectProbes(content, 'src/foo.ts')
       assert.equal(hits[0]!.lineNumber, 3)
     })
+
+    it('detects bare assert() in production code', () => {
+      const hits = detectProbes('assert(x > 0)\n', 'src/foo.ts')
+      assert.equal(hits.length, 1)
+      assert.equal(hits[0]!.pattern, 'bare assert()')
+    })
+
+    it('does NOT detect assert in import assertion syntax', () => {
+      const hits = detectProbes('import json from "./data.json" assert { type: "json" }\n', 'src/foo.ts')
+      assert.equal(hits.length, 0)
+    })
+
+    it('does NOT detect console.assert (covered by console pattern)', () => {
+      const hits = detectProbes('console.assert(x > 0)\n', 'src/foo.ts')
+      // console.assert is NOT in CONSOLE_PROBE_RE (only log/debug/dir/trace),
+      // and "console.assert" has a dot before assert so ASSERT_PROBE_RE won't match
+      assert.equal(hits.length, 0)
+    })
   })
 
   describe('isWhitelistedPath', () => {
