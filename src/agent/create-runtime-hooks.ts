@@ -38,6 +38,7 @@ import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
 import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
+import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -438,6 +439,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_EXTERNAL_CLAIM_TRACKING (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_EXTERNAL_CLAIM_TRACKING !== '0') {
     hooks.push(createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Git-Clear-After-Fail: postTool hook — detects the pattern of running git
+  // stash/reset/checkout/restore/clean shortly after a test failure without
+  // any diagnosis (read/grep) in between. Constitutional tier: the underlying
+  // action is irreversible and can harm other sessions in a shared worktree.
+  // Gated by RIVET_GIT_CLEAR_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_GIT_CLEAR_GUARD !== '0') {
+    hooks.push(createGitClearAfterFailHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a
