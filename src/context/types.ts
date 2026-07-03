@@ -202,5 +202,8 @@ export interface SessionMetadata {
     shifts: Record<string, number>
     advisoriesRendered: number
     advisoriesDropped: number
+    /** P1a 核销闭环：expect 谓词判定的采纳/忽略累计（缺省 = 会话早于该功能） */
+    advisoriesAdopted?: number
+    advisoriesIgnored?: number
   }
 }

@@ -332,6 +332,9 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
         dimValues: event.dimValues,
       })
     },
+    // P1a 核销闭环：advisory 采纳核销器 + 会话累计采纳/忽略同步到 guardian meta。
+    advisoryReadback: self.advisoryReadback,
+    onAdvisoryOutcomes: totals => self.recordAdvisoryOutcomes(totals),
     getPhysarumShadowStats: () => self.getPhysarumShadowStats(),
     getDomainId: () => self.sessionDomain?.id ?? null,
     getFileObservations: () => self.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],

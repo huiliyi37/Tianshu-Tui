@@ -133,6 +133,9 @@ export function createGitClearAfterFailHook(
           tier: 'constitutional',
           content: `⚠ 测试刚失败，你正在用 git 清场命令（stash/reset/checkout/restore/clean）清空工作区。这会丢改动且可能误伤其他会话。先定位根因：用 read_file/grep 检查测试是否非隔离、是否共享临时路径、是否受外部改动影响。多会话共享工作区下任何丢改动的操作都可能误伤别的会话。`,
           ttl: 1,
+          // 核销：清场已发生（postTool 检测），采纳 = 事后补根因定位动作。
+          // 谓词映射表（P1a）：git-clear → tool_appears(诊断类, 2 轮)
+          expect: { kind: 'tool_appears', tools: [...VERIFY_TOOLS], withinTurns: 2 },
         })
       }
 

@@ -41,6 +41,24 @@ export interface PheromoneRef {
  * All dimensions are 0.0–1.0 continuous values.
  * Computed purely from existing monitor outputs — zero LLM overhead.
  */
+/**
+ * P1b（2026-07-04 advisory 生命周期设计）：维度数据质量标注。
+ *
+ * 问题：confidence 在 0 改动时返回 1.0（空虚真值），momentum 在无预测样本时
+ * 返回 0（看起来像停滞）。数值本身无法区分"实测良好/实测糟糕"与"无数据回退"，
+ * 程序化消费方（CCR 匹配规则、deriveStrategy.shouldEscalate）会把回退值当实测
+ * 信号用——排查型会话（零改动）的 confidence 恒 1.0 饱和就是这样静音了 P1/P3/P5。
+ * 显示层（cognitive-mirror 的 "none" 标签）已处理，这里补齐程序化消费侧。
+ */
+export interface SensoriumQuality {
+  /** confidence 是否来自实测——vacuous = 0 改动的 0/0 空虚真值 */
+  confidence: 'measured' | 'vacuous'
+  /** momentum 是否有预测样本——no-data = 窗口为空时的 0 回退 */
+  momentum: 'measured' | 'no-data'
+  /** stability 的 verification 分量是否实测（vacuous 时已做去饱和重归一） */
+  stability: 'measured' | 'partial'
+}
+
 export interface Sensorium {
   /** Prediction accuracy momentum: 滑动窗口成功率（窗口内正确数/总数），抗探索性报错噪声 */
   momentum: number
@@ -55,8 +73,12 @@ export interface Sensorium {
   complexity: number
   /** Cross-session file familiarity: avg pheromone strength (default 0.5) */
   freshness: number
-  /** 连续稳定性：doom (0.40) + prediction (0.25) + diversity (0.20) + verification (0.15) */
+  /** 连续稳定性：doom (0.40) + prediction (0.25) + diversity (0.20) + verification (0.15)。
+   *  P1b：verification 分量空虚时按剩余权重重归一（不再吃 +0.15 的虚增）。 */
   stability: number
+  /** P1b 数据质量标注 — 可选以兼容既有构造点；computeSensorium 恒填。
+   *  缺省语义 = 'measured'（旧行为）。 */
+  quality?: SensoriumQuality
 }
 
 /**
@@ -236,16 +258,19 @@ function computeStability(
     : 0.5
 
   // verification coverage: are we verifying what we change?
-  const verificationCoverage = evidence.filesModified > 0
-    ? clamp(evidence.verifiedCount / evidence.filesModified)
-    : 1.0
-
-  return clamp(
-    0.40 * doomBase +
-    0.25 * predictionRate +
-    0.20 * diversity +
-    0.15 * verificationCoverage,
-  )
+  // P1b 去饱和：0 改动时 verification 分量是空虚真值（0/0），旧口径按 1.0 计入
+  // 会给排查型会话（长期零改动）虚增 +0.15 稳定性。空虚时剔除该分量并按剩余
+  // 权重（0.85）重归一，让 stability 只反映有数据的维度。
+  if (evidence.filesModified > 0) {
+    const verificationCoverage = clamp(evidence.verifiedCount / evidence.filesModified)
+    return clamp(
+      0.40 * doomBase +
+      0.25 * predictionRate +
+      0.20 * diversity +
+      0.15 * verificationCoverage,
+    )
+  }
+  return clamp((0.40 * doomBase + 0.25 * predictionRate + 0.20 * diversity) / 0.85)
 }
 
 // ─── Public API ─────────────────────────────────────────────────────
@@ -264,6 +289,13 @@ export function computeSensorium(input: SensoriumInput): Sensorium {
     complexity: computeComplexity(input.toolCallHistory),
     freshness: computeFreshness(input.pheromones, input.gitChangeRate, input.fsEventRate),
     stability: computeStability(input.doomLevel, input.predictionAcc, input.toolCallHistory, input.evidenceState),
+    // P1b：数据质量标注 — 让程序化消费方（CCR/deriveStrategy）能把
+    // "无数据回退值"与"实测值"区分开，不再把空虚真值当状态信号。
+    quality: {
+      confidence: input.evidenceState.filesModified > 0 ? 'measured' : 'vacuous',
+      momentum: input.predictionAcc.predictions.length > 0 ? 'measured' : 'no-data',
+      stability: input.evidenceState.filesModified > 0 ? 'measured' : 'partial',
+    },
   }
 }
 
@@ -389,7 +421,8 @@ export function computeStrategy(s: Sensorium): StrategyProfile {
     reasoningEffort,
     explorationBreadth,
     commitThreshold,
-    shouldEscalate: s.confidence < 0.3 && s.momentum < 0.2,
+    // P1b：momentum 无预测样本时是 0 回退值，不是实测停滞——不能作为升级证据
+    shouldEscalate: s.confidence < 0.3 && s.momentum < 0.2 && s.quality?.momentum !== 'no-data',
     thetaCycleInterval: s.complexity > 0.5 ? 3 : 7,
   }
 }

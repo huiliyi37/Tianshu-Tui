@@ -16,6 +16,33 @@
 
 export type AdvisoryTier = 'constitutional' | 'operational' | 'informational'
 
+/**
+ * expect 谓词 — 描述"这条提醒被采纳时,后续轮次应该能观察到什么行为"。
+ *
+ * P1a（2026-07-04 advisory 生命周期设计）：advisory 此前是发后不管的
+ * 单向广播——没人知道模型是否照做。expect 让每条提醒携带一个可客观核销
+ * 的行为签名,postTurn 由 advisory-readback-hook 对照 turn 级工具事件核销,
+ * 产出 adopted/ignored 账本（习惯化对抗与 Phase 3 降频的数据地基）。
+ *
+ * 语义约定:
+ *   - `withinTurns`: 观察窗口（含送达轮）,缺省 1 = 只看送达当轮。
+ *   - `tool_appears` 的 `tools: []` 表示"任意工具调用即算采纳"
+ *     （即计划中的 tool_stops 反向谓词:无工具僵局被打破）。
+ *   - `pattern_absent` 是负向谓词:到期时目标文件不再包含任何 needle
+ *     （子串匹配,如探针残留的行内容）→ 采纳。文件消失也算采纳。
+ */
+export type AdvisoryExpectation =
+  | {
+      kind: 'tool_appears'
+      tools: string[]
+      /** 可选 target 约束 — 工具的 target 需包含此片段（如特定文件路径） */
+      targetIncludes?: string
+      withinTurns?: number
+    }
+  | { kind: 'verify_attempted'; withinTurns?: number }
+  | { kind: 'file_touched'; paths: string[]; withinTurns?: number }
+  | { kind: 'pattern_absent'; path: string; needles: string[]; withinTurns?: number }
+
 export interface AdvisoryEntry {
   /** 去重键 — 同 key 在同轮只保留优先级最高的一条 */
   key: string
@@ -29,6 +56,16 @@ export interface AdvisoryEntry {
   tier?: AdvisoryTier
   /** TTL（轮次），默认为 1（仅本轮） */
   ttl?: number
+  /** 采纳核销谓词 — 缺省则该条不参与采纳率统计（只计送达） */
+  expect?: AdvisoryExpectation
+}
+
+/** render() 实际送达的条目快照 — 供 readback 跟踪（send 侧账本的"已送达"半边） */
+export interface DeliveredAdvisory {
+  key: string
+  category: AdvisoryCategory
+  tier?: AdvisoryTier
+  expect?: AdvisoryExpectation
 }
 
 export type AdvisoryCategory =
@@ -162,6 +199,26 @@ export interface AdvisoryLedgerDelta {
 
 const LEDGER_DROPPED_KEYS_CAP = 50
 
+// ─── P1b 习惯化对抗 ────────────────────────────────────────────────
+// 核销账本（AdvisoryReadback）显示某 key 连续被忽略时的两级反应：
+//   streak >= 2 → 升级措辞：在条目前标注"已连续 N 次未见执行"——被忽略的
+//     事实本身是新信息，比原文重复更能穿透注意力习惯化。
+//   streak >= 3 → 有界静音：连续无效的提醒是纯噪音，静音 N 个渲染周期。
+//     期满放行一次（probation）：若那次被采纳则 streak 清零恢复正常；
+//     仍被忽略（streak 增长）才再次静音。constitutional tier 永不静音。
+
+/** 触发升级措辞的最低连续忽略次数 */
+export const HABITUATION_ESCALATE_STREAK = 2
+/** 触发静音的最低连续忽略次数 */
+export const HABITUATION_SILENCE_STREAK = 3
+/** 每次静音持续的渲染周期数 */
+export const HABITUATION_SILENCE_RENDERS = 4
+
+/** 习惯化查询接口 — 由 AdvisoryReadback 实现（结构化鸭子类型，便于测试） */
+export interface HabituationPolicy {
+  getIgnoredStreak(key: string): number
+}
+
 export class AdvisoryBus {
   private entries: AdvisoryEntry[] = []
   /** 存活条目 — 未过期的跨轮条目 */
@@ -171,6 +228,19 @@ export class AdvisoryBus {
   private ledgerRendered = 0
   private ledgerDropped = 0
   private ledgerDroppedKeys: string[] = []
+  // ── P1a 核销闭环：render 实际送达的条目（供 advisory-readback 追踪采纳） ──
+  private delivered: DeliveredAdvisory[] = []
+  // ── P1b 习惯化对抗 ──
+  private habituation: HabituationPolicy | null = null
+  /** key → 剩余静音渲染周期数 */
+  private silenceRemaining = new Map<string, number>()
+  /** key → 上次触发静音时的 ignoredStreak（防止同一 streak 反复静音，保证 probation 放行） */
+  private lastSilencedStreak = new Map<string, number>()
+
+  /** P1b：注入习惯化查询源（AdvisoryReadback）。缺省 = 不做习惯化对抗。 */
+  setHabituationPolicy(policy: HabituationPolicy): void {
+    this.habituation = policy
+  }
 
   /** 投递一条劝导 */
   submit(entry: AdvisoryEntry): void {
@@ -197,6 +267,16 @@ export class AdvisoryBus {
     this.ledgerDropped = 0
     this.ledgerDroppedKeys = []
     return delta
+  }
+
+  /**
+   * 读取并清空"已送达"条目快照（自上次 drain 以来 render 输出过的条目）。
+   * turn-step-producer 在 render 后立刻 drain 并交给 AdvisoryReadback 跟踪。
+   */
+  drainDelivered(): DeliveredAdvisory[] {
+    const out = this.delivered
+    this.delivered = []
+    return out
   }
 
   private recordDropped(keys: Iterable<string>): void {
@@ -228,6 +308,43 @@ export class AdvisoryBus {
    */
   render(activeStarDomain?: string): string {
     let all = [...this.alive, ...this.entries]
+
+    // ── P1b 习惯化对抗（constitutional 豁免） ──
+    if (this.habituation) {
+      // 静音计时按渲染周期流逝（无论该 key 本轮是否被投递）
+      for (const [k, v] of this.silenceRemaining) {
+        if (v <= 1) this.silenceRemaining.delete(k)
+        else this.silenceRemaining.set(k, v - 1)
+      }
+      const droppedSilenced = new Set<string>()
+      const kept: AdvisoryEntry[] = []
+      for (const e of all) {
+        if (e.tier === 'constitutional') {
+          kept.push(e)
+          continue
+        }
+        if (this.silenceRemaining.has(e.key)) {
+          droppedSilenced.add(e.key)
+          continue
+        }
+        const streak = this.habituation.getIgnoredStreak(e.key)
+        // streak 加深才触发新静音 — 期满 probation 放行一次，采纳则 streak 清零
+        if (streak >= HABITUATION_SILENCE_STREAK && streak > (this.lastSilencedStreak.get(e.key) ?? 0)) {
+          this.lastSilencedStreak.set(e.key, streak)
+          this.silenceRemaining.set(e.key, HABITUATION_SILENCE_RENDERS)
+          droppedSilenced.add(e.key)
+          continue
+        }
+        if (streak >= HABITUATION_ESCALATE_STREAK) {
+          // 升级措辞："被忽略"这个事实本身是新信息，比原文重复更穿透习惯化
+          kept.push({ ...e, content: `（此提醒已连续 ${streak} 次未见执行——若你有意跳过请在回复中说明理由）${e.content}` })
+          continue
+        }
+        kept.push(e)
+      }
+      this.recordDropped(droppedSilenced)
+      all = kept
+    }
 
     // Star-domain dedup — static entries only; situational star_domain exempt
     if (activeStarDomain) {
@@ -293,6 +410,14 @@ export class AdvisoryBus {
     this.recordDropped([...deduped.keys()].filter(k => !renderedKeys.has(k)))
     this.ledgerRendered += sorted.length
 
+    // P1a 核销闭环：记录实际送达的条目（含 expect 谓词），供 readback 追踪
+    this.delivered.push(...sorted.map(e => ({
+      key: e.key,
+      category: e.category,
+      tier: e.tier,
+      expect: e.expect,
+    })))
+
     if (sorted.length === 0) {
       this.entries = []
       this.alive = []
@@ -321,6 +446,9 @@ export class AdvisoryBus {
     this.ledgerRendered = 0
     this.ledgerDropped = 0
     this.ledgerDroppedKeys = []
+    this.delivered = []
+    this.silenceRemaining.clear()
+    this.lastSilencedStreak.clear()
   }
 }
 

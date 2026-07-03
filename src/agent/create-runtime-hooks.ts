@@ -40,6 +40,7 @@ import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
 import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
+import { createAdvisoryReadbackHooks } from './hooks/advisory-readback-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -185,6 +186,10 @@ export interface RuntimeHookDeps {
   getTodos?: () => import('../tools/todo-store.js').TodoItem[]
   /** CCR telemetry callback — invoked on each capsule router trigger for offline analysis. */
   onCcrTrigger?: (event: CcrTriggerEvent) => void
+  /** P1a 核销闭环：advisory 采纳核销器（loop.advisoryReadback）。缺省 → 不装核销 hook。 */
+  advisoryReadback?: import('./advisory-readback.js').AdvisoryReadback
+  /** P1a：核销判定后的会话累计回调（guardian meta 接线） */
+  onAdvisoryOutcomes?: (totals: { adopted: number; ignored: number }) => void
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
 
@@ -449,6 +454,17 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_GIT_CLEAR_GUARD (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_GIT_CLEAR_GUARD !== '0') {
     hooks.push(createGitClearAfterFailHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Advisory-Readback: postTool 观察 + postTurn 核销 — 对送达的 advisory 按
+  // expect 谓词判定 adopted/ignored，产出采纳率账本（P1a 生命周期闭环）。
+  // 无独立开关：随 advisoryBus 存在自动启用（观察半边零副作用）。
+  if (deps.advisoryBus && deps.advisoryReadback) {
+    hooks.push(...createAdvisoryReadbackHooks({
+      readback: deps.advisoryReadback,
+      writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
+      onOutcomes: deps.onAdvisoryOutcomes,
+    }))
   }
 
   // Reasoning-Spiral Guard: preTurn hook — detects single-turn reasoning

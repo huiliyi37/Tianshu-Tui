@@ -76,6 +76,14 @@ export function createProbeTrackingHook(
         category: 'discipline',
         content: `探针检测：${writeContent.filePath} 新增了调试探针（${hits.map(h => h.pattern).join(', ')}）。修复完成后、交付前记得清理这些探针——残留探针 = 任务未完成。`,
         ttl: 1,
+        // 谓词映射表（P1a）：probe → pattern_absent(负向, 4 轮窗口——修完再清是合法节奏)。
+        // needle 用命中行内容（去掉截断省略号），到期时文件不再包含 = 已清理。
+        expect: {
+          kind: 'pattern_absent',
+          path: writeContent.filePath,
+          needles: hits.map(h => h.line.replace(/\.\.\.$/, '')),
+          withinTurns: 4,
+        },
       })
     },
   }

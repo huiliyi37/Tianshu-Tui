@@ -99,19 +99,36 @@ describe('computeSensorium', () => {
       pheromones: [],
       doomLevel: 'none',
     }
-    // none + neutral defaults: 0.40*0.90 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.735
+    // P1b 去饱和：0 改动时 verification 分量是空虚真值，剔除后按剩余权重
+    // （0.85）重归一 — 不再吃 +0.15 的虚增。
+    // none: (0.40*0.90 + 0.25*0.5 + 0.20*0.5) / 0.85 ≈ 0.688
     const sNone = computeSensorium(base).stability
-    assert.ok(sNone > 0.7 && sNone < 0.9, `none stability ${sNone} should be in (0.7, 0.9)`)
+    assert.ok(sNone > 0.6 && sNone < 0.8, `none stability ${sNone} should be in (0.6, 0.8)`)
 
-    // warn: 0.40*0.50 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.575
+    // warn: (0.40*0.50 + 0.25*0.5 + 0.20*0.5) / 0.85 = 0.5
     const sWarn = computeSensorium({ ...base, doomLevel: 'warn' }).stability
-    assert.ok(sWarn > 0.45 && sWarn < 0.70, `warn stability ${sWarn} should be in (0.45, 0.70)`)
+    assert.ok(sWarn > 0.40 && sWarn < 0.65, `warn stability ${sWarn} should be in (0.40, 0.65)`)
     assert.ok(sWarn < sNone, 'warn should have lower stability than none')
 
-    // blocked: 0.40*0.10 + 0.25*0.5 + 0.20*0.5 + 0.15*1.0 = 0.415
+    // blocked: (0.40*0.10 + 0.25*0.5 + 0.20*0.5) / 0.85 ≈ 0.312
     const sBlocked = computeSensorium({ ...base, doomLevel: 'blocked' }).stability
-    assert.ok(sBlocked > 0.25 && sBlocked < 0.55, `blocked stability ${sBlocked} should be in (0.25, 0.55)`)
+    assert.ok(sBlocked > 0.20 && sBlocked < 0.50, `blocked stability ${sBlocked} should be in (0.20, 0.50)`)
     assert.ok(sBlocked < sWarn, 'blocked should have lower stability than warn')
+
+    // P1b quality 标注：0 改动 → confidence vacuous / stability partial；
+    // 无预测样本 → momentum no-data
+    const q = computeSensorium(base).quality!
+    assert.equal(q.confidence, 'vacuous')
+    assert.equal(q.momentum, 'no-data')
+    assert.equal(q.stability, 'partial')
+    const qMeasured = computeSensorium({
+      ...base,
+      evidenceState: { filesModified: 2, verifiedCount: 1 },
+      predictionAcc: { windowSize: 10, predictions: [true], consecutiveCorrect: 1 },
+    }).quality!
+    assert.equal(qMeasured.confidence, 'measured')
+    assert.equal(qMeasured.momentum, 'measured')
+    assert.equal(qMeasured.stability, 'measured')
   })
 
   it('stability decreases with low prediction accuracy', () => {

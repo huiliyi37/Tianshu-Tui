@@ -86,7 +86,7 @@ export function extractClaimedPaths(content: string): string[] {
   FILE_LINE_RE.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = FILE_LINE_RE.exec(content)) !== null) {
-    paths.add(canonicalizePath(match[1]))
+    paths.add(canonicalizePath(match[1]!))
   }
   return [...paths]
 }
@@ -186,6 +186,13 @@ export function createExternalClaimTrackingHook(
           category: 'discipline',
           content: `⚠ delegate 报告中提到了 ${writePath}，你正在编辑它，但中间没有独立核验（read_file/grep）。worker 报告的行号可能偏移或引用了过时文件状态。先用 read_file 或 grep 独立确认该路径的当前内容，再编辑。`,
           ttl: 1,
+          // 谓词映射表（P1a）：external-claim → tool_appears(核验类, 目标=声称路径, 2 轮)
+          expect: {
+            kind: 'tool_appears',
+            tools: [...VERIFY_TOOLS, 'bash'],
+            targetIncludes: claimedPath,
+            withinTurns: 2,
+          },
         })
       }
     },

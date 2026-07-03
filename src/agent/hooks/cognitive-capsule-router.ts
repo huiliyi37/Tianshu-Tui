@@ -14,7 +14,7 @@
  */
 
 import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
-import type { AdvisoryEntry } from '../advisory-bus.js'
+import type { AdvisoryEntry, AdvisoryExpectation } from '../advisory-bus.js'
 import type { EvidenceState } from '../evidence.js'
 import type { Sensorium } from '../sensorium.js'
 import type { VigorState } from '../vigor.js'
@@ -92,6 +92,8 @@ interface RouteRule {
   suppressOnTestIntent?: boolean
   /** 胶囊召回指向的星域（缺省 = rule.star）。P7 由天权发声但方法论在瑶光胶囊。 */
   recallStar?: string
+  /** P1a 核销谓词 — 该改道提醒被采纳时的行为签名（缺省 = 只计送达） */
+  expect?: AdvisoryExpectation
 }
 
 interface RouteState {
@@ -172,6 +174,8 @@ const RULES: RouteRule[] = [
     promptTemplate: '【天权】验证连续失败 {verify_fail_streak} 次。停止同方向变体重试——换维度（不同证据路径/更小复现）或先用探针确认前提。瑶光胶囊有 RED→GREEN 方法论可 recall。',
     // 最后一个工具就是失败的测试 — 这正是要提醒的时刻，不做测试意图让位
     recallStar: '瑶光',
+    // 核销：换维度后仍应回到验证——2 轮内出现验证尝试即采纳
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
   },
   {
     id: 'P3',
@@ -181,6 +185,7 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Q3', 'X3']),
     promptTemplate: '【天权】检查点：改了 {files_modified} 个文件未验证，且执行能量在下降。如果同一方向第三次撞墙，换维度。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
   },
   {
     id: 'P1',
@@ -190,6 +195,7 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Y1', 'Y2', 'Y5']),
     promptTemplate: '【瑶光】改了 {files_modified} 个文件但还没验证（距上次验证 {turns_since_verify} 轮）。typecheck + 相关测试，跑通再继续。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
   },
   {
     id: 'P5',
@@ -199,6 +205,7 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Y3', 'Y6']),
     promptTemplate: '【瑶光】大面积改动（{files_modified} 文件，验证覆盖 {verification_coverage}）。只交付已验证的部分，未验证的留到下轮。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
   },
   {
     id: 'P6',
@@ -208,6 +215,8 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['X1', 'X3', 'X4']),
     promptTemplate: '【天璇】排查已连续 {readonly_streak} 次只读且预测动量偏低——当前证据维度可能挖穿了。换一层抽象或换一个证据路径（日志/git 历史/小复现），天璇胶囊有跨域换视角方法论可 recall。',
     // 只读排查中读到 test 文件是常态，不做测试意图让位
+    // 无 expect："换证据维度"没有单一行为签名（换目录 glob / git log / 写复现
+    // 都算采纳），谓词会系统性误判——只计送达（P1a 谓词映射表的显式豁免项）。
   },
 ]
 
@@ -367,7 +376,9 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
       vigorPhasic: vigor?.phasic ?? 0.0,
       lastTool: last.tool,
       lastToolTarget: last.target,
-      momentum: sensorium.momentum ?? 1.0,
+      // P1b：momentum 无预测样本时是 0 回退（quality='no-data'），会让 P6 的
+      // "momentum < 0.35" 把无数据误判为停滞——回退到 1.0（中性偏乐观）。
+      momentum: sensorium.quality?.momentum === 'no-data' ? 1.0 : (sensorium.momentum ?? 1.0),
       readOnlyStreak: computeReadOnlyStreak(recentToolHistory),
       verifyFailStreak: computeVerifyFailStreak(recentToolHistory),
     }
@@ -439,6 +450,7 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
           category: 'star_domain',
           content,
           ttl: 1,
+          expect: rule.expect,
         })
 
         // 胶囊经验召回 — CCR 触发的一等附属：同轮追加一条 informational 条目

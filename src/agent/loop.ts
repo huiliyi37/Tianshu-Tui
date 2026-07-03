@@ -67,6 +67,7 @@ import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
 import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryReadback } from './advisory-readback.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
@@ -240,7 +241,10 @@ export class AgentLoop {
     shifts: Record<string, number>
     advisoriesRendered: number
     advisoriesDropped: number
-  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0 }
+    /** P1a 核销闭环：expect 谓词判定为采纳/忽略的累计数 */
+    advisoriesAdopted: number
+    advisoriesIgnored: number
+  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0, advisoriesAdopted: 0, advisoriesIgnored: 0 }
   private lastGuardianMetaFingerprint = ''
   /** 记录一次结构化改道发射（source: 'kick' | 'convergence' | …）。 */
   recordDecisionShift(source: string): void {
@@ -251,11 +255,16 @@ export class AgentLoop {
     this.guardianActivity.advisoriesRendered += delta.rendered
     this.guardianActivity.advisoriesDropped += delta.dropped
   }
+  /** P1a：核销判定后同步会话累计采纳/忽略（来自 AdvisoryReadback.getTotals）。 */
+  recordAdvisoryOutcomes(totals: { adopted: number; ignored: number }): void {
+    this.guardianActivity.advisoriesAdopted = totals.adopted
+    this.guardianActivity.advisoriesIgnored = totals.ignored
+  }
   /** 把 guardian 活动摘要写进 session meta（仅在计数变化时写，原子写、失败不致命）。 */
   flushGuardianMeta(): void {
     if (!this.persist) return
     const ga = this.guardianActivity
-    const fingerprint = JSON.stringify([ga.ccr, ga.shifts, ga.advisoriesRendered, ga.advisoriesDropped])
+    const fingerprint = JSON.stringify([ga.ccr, ga.shifts, ga.advisoriesRendered, ga.advisoriesDropped, ga.advisoriesAdopted, ga.advisoriesIgnored])
     if (fingerprint === this.lastGuardianMetaFingerprint) return
     this.lastGuardianMetaFingerprint = fingerprint
     try {
@@ -265,6 +274,8 @@ export class AgentLoop {
           shifts: { ...ga.shifts },
           advisoriesRendered: ga.advisoriesRendered,
           advisoriesDropped: ga.advisoriesDropped,
+          advisoriesAdopted: ga.advisoriesAdopted,
+          advisoriesIgnored: ga.advisoriesIgnored,
         },
       })
     } catch { /* meta 摘要是观测辅助 — 永不阻断 turn */ }
@@ -402,6 +413,8 @@ export class AgentLoop {
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
   advisoryBus = new AdvisoryBus()
+  /** P1a 核销闭环：advisory 送达后按 expect 谓词核销 adopted/ignored */
+  advisoryReadback = new AdvisoryReadback()
   /** F-fix: tool calls since the last discipline re-anchor advisory. */
   private toolCallsSinceReanchor = 0
   /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
@@ -427,6 +440,8 @@ export class AgentLoop {
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
     this.traceStore = createTraceStore()
+    // P1b 习惯化对抗：核销账本的 ignoredStreak 驱动升级措辞/有界静音
+    this.advisoryBus.setHabituationPolicy(this.advisoryReadback)
     this.harness = new TurnHarness(
       { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,
@@ -1632,6 +1647,12 @@ export class AgentLoop {
             tier: 'operational',
             category: 'discipline',
             content: convergenceCheck.injectedMessage,
+            // 谓词映射表（P1a）：仅无工具僵局变体可客观核销——任意工具调用
+            // 即打破僵局（计划中的 tool_stops 反向谓词）。其余变体（重复循环/
+            // 换推进方式）没有单一行为签名，不设谓词，只计送达。
+            expect: this.consecutiveNoToolTurns >= 2
+              ? { kind: 'tool_appears', tools: [], withinTurns: 1 }
+              : undefined,
           })
 
           // When convergence is detected, append the delivery gate hint so the

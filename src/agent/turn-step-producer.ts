@@ -340,6 +340,10 @@ export class TurnStepProducer {
     const activeStarName = this.self.sessionDomain?.name
     this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName))
 
+    // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
+    // 送达轮 = 当前 turn；postTurn 的 advisory-readback-evaluate 按窗口核销。
+    this.self.advisoryReadback.track(this.self.advisoryBus.drainDelivered(), turn)
+
     // Phase 0 观测：advisory 投递账本落盘（仅有活动时写，避免遥测噪音），
     // 并把 guardian 活动摘要（CCR/改道/丢弃计数）同步进 session meta。
     const advisoryLedger = this.self.advisoryBus.drainLedger()
