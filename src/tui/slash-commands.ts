@@ -34,7 +34,7 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan, readPlan, resolvePlanOptionLabel } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -1445,6 +1445,15 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
+      // Idempotent re-entry: if already planning, keep the current draft —
+      // re-entering would create a fresh empty draft and orphan the one the
+      // agent is writing to.
+      if (ctx.agent.getPlanModeState() === 'planning') {
+        const activePath = ctx.agent.getActivePlanFilePath()
+        pushStatic(createLogEntry({ type: 'system', content: `🔍 Plan Mode is already active.${activePath ? `\nActive plan file: \`${activePath}\`` : ''}\n\nUse Shift+Tab or /plan-approve to exit.` }))
+        setIsStreaming(false)
+        return true
+      }
       ctx.agent.enterPlanMode()
       pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
       setIsStreaming(false)
@@ -1500,25 +1509,39 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       }
 
       const cwd = ctx.agent.cwd
+
+      // Validate the selected approach BEFORE mutating the plan file — approving
+      // first would leave the file marked APPROVED even when the option is bogus.
+      let resolvedApproach: string | undefined
+      if (selectedApproach) {
+        const pending = await readPlan(cwd, slug)
+        if (!pending) {
+          pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
+          setIsStreaming(false)
+          return true
+        }
+        if (pending.options && pending.options.length > 0) {
+          resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
+          if (!resolvedApproach) {
+            const available = pending.options.map(o => `  \`${o.label}\``).join('\n')
+            pushStatic(createLogEntry({
+              type: 'system',
+              content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
+              isError: true,
+            }))
+            setIsStreaming(false)
+            return true
+          }
+        } else {
+          resolvedApproach = selectedApproach
+        }
+      }
+
       const approved = await approvePlan(cwd, slug)
       if (!approved) {
         pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
         setIsStreaming(false)
         return true
-      }
-
-      if (selectedApproach && approved.options && approved.options.length > 0) {
-        const known = approved.options.some(o => o.label === selectedApproach)
-        if (!known) {
-          const available = approved.options.map(o => `  \`${o.label}\``).join('\n')
-          pushStatic(createLogEntry({
-            type: 'system',
-            content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
-            isError: true,
-          }))
-          setIsStreaming(false)
-          return true
-        }
       }
 
       // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
@@ -1527,9 +1550,9 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       ctx.agent.setActivePlan({
         slug,
         title: approved.title,
-        selectedApproach: selectedApproach || undefined,
+        selectedApproach: resolvedApproach,
       })
-      const approachLine = selectedApproach ? `\nSelected approach: **${selectedApproach}**` : ''
+      const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
       pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
       setIsStreaming(false)
       return true

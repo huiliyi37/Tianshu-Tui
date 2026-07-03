@@ -34,6 +34,7 @@ import {
   readPlan as storeReadPlan,
   approvePlan as storeApprovePlan,
   rejectPlan as storeRejectPlan,
+  resolvePlanOptionLabel,
   type PlanDocument,
 } from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
@@ -1389,6 +1390,20 @@ export class RuntimeSessionManager {
   async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    // Validate the selected approach BEFORE mutating the plan file — approving
+    // first would leave the file marked APPROVED even when the option is bogus.
+    let resolvedApproach: string | undefined
+    if (selectedApproach?.trim()) {
+      const pending = await storeReadPlan(session.record.cwd, slug)
+      if (!pending) return false
+      if (pending.options && pending.options.length > 0) {
+        resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
+        if (!resolvedApproach) return false
+      } else {
+        // No recorded options — pass the user's text through as-is.
+        resolvedApproach = selectedApproach.trim()
+      }
+    }
     let approved: PlanDocument | null
     try {
       approved = await storeApprovePlan(session.record.cwd, slug)
@@ -1396,16 +1411,12 @@ export class RuntimeSessionManager {
       return false
     }
     if (!approved) return false
-    if (selectedApproach && approved.options && approved.options.length > 0) {
-      const known = approved.options.some(o => o.label === selectedApproach)
-      if (!known) return false
-    }
     const agent = this.ensureAgent(session)
     try {
       agent.setActivePlan?.({
         slug,
         title: approved.title,
-        selectedApproach: selectedApproach?.trim() || undefined,
+        selectedApproach: resolvedApproach,
       })
     } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
@@ -1414,8 +1425,8 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
-    if (selectedApproach?.trim()) {
-      kickoff += `\nSelected approach: ${selectedApproach.trim()} — execute ONLY this approach. Do not execute unselected alternatives.`
+    if (resolvedApproach) {
+      kickoff += `\nSelected approach: ${resolvedApproach} — execute ONLY this approach. Do not execute unselected alternatives.`
     }
     this.run(id, kickoff)
     return true

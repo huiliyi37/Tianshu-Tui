@@ -47,14 +47,27 @@ export class ToolRegistry {
       .sort((a, b) => a.name.localeCompare(b.name))
   }
 
+  /**
+   * Resolve a possibly-foreign tool name to its canonical registered name.
+   * Returns the input unchanged when it is already registered or no alias
+   * matches. The tool pipeline calls this BEFORE its permission gates
+   * (plan-mode, deny rules, approval, risk) so aliases cannot slip past
+   * policies keyed on the canonical name.
+   */
+  resolveName(name: string): string {
+    if (this.tools.has(name)) return name
+    const aliasKey = FOREIGN_ALIASES[name.toLowerCase()]
+    if (aliasKey && this.tools.has(aliasKey)) return aliasKey
+    return name
+  }
+
   async execute(name: string, params: ToolCallParams): Promise<ToolResult> {
     let tool = this.tools.get(name)
     let resolvedName = name
     let aliasNote: string | undefined
 
-    // Transparent alias remapping: foreign tool names (Cursor/Claude Code
-    // conventions) silently map to their Rivet equivalents. The model gets
-    // the real tool result + a one-line prefix so it learns the correct name.
+    // Fallback alias remapping for direct callers that bypass the tool
+    // pipeline (which already canonicalizes via resolveName before its gates).
     if (!tool) {
       const aliasKey = FOREIGN_ALIASES[name.toLowerCase()]
       if (aliasKey) {

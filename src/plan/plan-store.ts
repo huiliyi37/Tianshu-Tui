@@ -37,6 +37,18 @@ export interface PlanOption {
 
 const PLAN_OPTIONS_FRONTMATTER_RE = /^---\nrivet-options:\s*(\[[\s\S]*?\])\s*\n---\n/
 
+/** approve/reject 写入的状态标记行（H1 前）。 */
+const PLAN_STATUS_LINE_RE = /^>\s*\*\*Status:\s*(?:APPROVED|REJECTED|EXECUTED)\*\*.*(?:\r?\n)+/gm
+
+/**
+ * 剥离 approve/reject 留下的状态标记行。重新提交（尤其是省略 plan 字段、
+ * 从活动计划文件整读的路径）时必须清掉，否则旧的 REJECTED 标记会让
+ * 新提交被 parsePlanStatus 误判为 rejected，从待批准列表里消失。
+ */
+export function stripPlanStatusMarkers(content: string): string {
+  return content.replace(PLAN_STATUS_LINE_RE, '')
+}
+
 /** .rivet/plans 相对于项目根目录的路径 */
 const PLANS_DIR = '.rivet/plans'
 
@@ -89,6 +101,25 @@ export function parsePlanOptions(content: string): PlanOption[] | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * 在方案列表中解析用户输入的方案名。大小写不敏感、忽略首尾空白，
+ * 并容忍省略 "(Recommended)" 一类括号后缀。命中时返回规范标签
+ * （options 中的原始 label），未命中返回 undefined。
+ */
+export function resolvePlanOptionLabel(
+  options: readonly PlanOption[],
+  input: string,
+): string | undefined {
+  const normalize = (s: string) => s.trim().toLowerCase()
+  const stripSuffix = (s: string) => normalize(s).replace(/\s*\([^)]*\)\s*$/, '')
+  const wanted = normalize(input)
+  const exact = options.find(o => normalize(o.label) === wanted)
+  if (exact) return exact.label
+  const wantedBare = stripSuffix(input)
+  const bareMatches = options.filter(o => stripSuffix(o.label) === wantedBare)
+  return bareMatches.length === 1 ? bareMatches[0]!.label : undefined
 }
 
 function buildPlanFrontmatter(options?: readonly PlanOption[]): string {
@@ -184,7 +215,9 @@ async function markPlanStatus(
     newContent = statusLine + plan.content
   }
 
-  await writePlan(cwd, slug, newContent)
+  // 透传 options — writePlan 会剥离旧 frontmatter，不传会把多方案记录抹掉，
+  // 导致 approve 后 selectedApproach 校验永远跳过（见 2026-07-03 缺陷复盘）。
+  await writePlan(cwd, slug, newContent, plan.options)
   return readPlan(cwd, slug)
 }
 

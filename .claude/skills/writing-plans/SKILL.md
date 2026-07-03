@@ -14,7 +14,10 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 **与 superpowers writing-plans 的差异：**
 - 天枢不依赖 `using-git-worktrees` / `finishing-a-development-branch`——改为 B1 归属门禁
 - 计划阶段由主代理主导调研：核心路径自己读代码，侧支探查可派只读星域子代理并行调研
-- 计划保存路径统一为 `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`
+
+**保存路径与收尾方式（按当前模式二选一）：**
+- **Plan Mode 激活时**（系统提示中有 `<plan-mode>` 块）：计划写入**活动计划文件**（`<plan-mode>` 块中给出的路径，通常是 `.rivet/plans/draft-*.md`——这是唯一可写的文件），成熟后用 `plan action=submit` 提交等待用户批准。**不要**写 `docs/superpowers/plans/`（会被写入门禁拦截），也**不要**以 executing-plans 交接收尾。
+- **独立使用时**（无 `<plan-mode>` 块）：计划保存到 `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`，完成后交接给 `executing-plans` 执行。
 
 ## 流程
 
@@ -134,7 +137,7 @@ description: 创建可执行的实现计划——先深入调研再设计方案�
 
 #### 3.1 计划文档模板
 
-计划保存到 `docs/superpowers/plans/YYYY-MM-DD-<语义短名>.md`。
+保存位置见开头「保存路径与收尾方式」：Plan Mode 下写活动计划文件；独立使用保存到 `docs/superpowers/plans/YYYY-MM-DD-<语义短名>.md`。
 
 ```markdown
 # [功能名称] 实现计划
@@ -214,7 +217,9 @@ git commit -m "feat(scope): 描述（任务 N/M）"
 
 ### 步骤 5：执行交接
 
-计划完成后，输出：
+**Plan Mode 下**：用 `plan action=submit` 提交（可省略 plan 字段，从活动计划文件读取；多方案时传 `options`），然后等待用户 `/plan-approve` 或 `/plan-reject`——未批准前不推进。
+
+**独立使用时**，计划完成后输出：
 
 ```
 计划已完成并保存到 `docs/superpowers/plans/YYYY-MM-DD-<slug>.md`。

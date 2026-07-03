@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentLoop, formatActivePlanPointer } from '../loop.js'
@@ -1632,5 +1632,88 @@ describe('formatActivePlanPointer', () => {
     })
     assert.match(out, /已选方案/)
     assert.match(out, /Redis cache/)
+  })
+})
+
+describe('AgentLoop — plan mode lifecycle (2026-07-03 缺陷复盘)', () => {
+  function makeAgent() {
+    const session = new SessionContext()
+    const registry = new ToolRegistry()
+    registry.register(READ_FILE_TOOL)
+    const client = mockClient([makeTextBlock('ok')])
+    const engine = makeEngine()
+    const cwd = mkdtempSync(join(tmpdir(), 'rivet-planmode-'))
+    const agent = new AgentLoop({ client, promptEngine: engine, toolRegistry: registry, maxTurns: 2, contextWindow: 1_000_000, compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' } }, session, cwd)
+    return { agent, engine, cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) }
+  }
+
+  it('enterPlanMode pins writing-plans skill; exitPlanMode releases it', () => {
+    const { agent, engine, cleanup } = makeAgent()
+    try {
+      agent.enterPlanMode()
+      assert.ok(engine.getInvokedSkillNames().includes('writing-plans'), 'skill pinned on enter')
+      agent.exitPlanMode()
+      assert.ok(
+        !engine.getInvokedSkillNames().includes('writing-plans'),
+        'skill must be released on exit — leaving it would re-inject the planning skill into every execution turn',
+      )
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('setActivePlan (approval) also releases the writing-plans skill', () => {
+    const { agent, engine, cleanup } = makeAgent()
+    try {
+      agent.enterPlanMode()
+      agent.setActivePlan({ slug: 'p', title: 'P' })
+      assert.ok(!engine.getInvokedSkillNames().includes('writing-plans'))
+      assert.equal(agent.getPlanModeState(), 'off')
+      assert.equal(agent.getActivePlanFilePath(), null)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('enterPlanMode is idempotent — re-entry keeps the current draft', () => {
+    const { agent, cleanup } = makeAgent()
+    try {
+      agent.enterPlanMode()
+      const first = agent.getActivePlanFilePath()
+      assert.ok(first, 'draft created on first enter')
+      agent.enterPlanMode()
+      assert.equal(agent.getActivePlanFilePath(), first, 're-entry must not orphan the draft being written')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('explicit planFilePath (rejection revision) still retargets while planning', () => {
+    const { agent, cleanup } = makeAgent()
+    try {
+      agent.enterPlanMode()
+      agent.enterPlanMode({ planFilePath: '.rivet/plans/my-plan.md' })
+      assert.equal(agent.getActivePlanFilePath(), '.rivet/plans/my-plan.md')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('exitPlanMode removes an untouched empty draft but keeps written ones', () => {
+    const { agent, cwd, cleanup } = makeAgent()
+    try {
+      agent.enterPlanMode()
+      const emptyDraft = join(cwd, agent.getActivePlanFilePath()!)
+      agent.exitPlanMode()
+      assert.ok(!existsSync(emptyDraft), 'empty draft cleaned up — no .rivet/plans litter from toggling')
+
+      agent.enterPlanMode()
+      const writtenDraft = join(cwd, agent.getActivePlanFilePath()!)
+      writeFileSync(writtenDraft, '# Draft\n\ncontent\n', 'utf-8')
+      agent.exitPlanMode()
+      assert.ok(existsSync(writtenDraft), 'non-empty draft preserved')
+    } finally {
+      cleanup()
+    }
   })
 })

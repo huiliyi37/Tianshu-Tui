@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify } from '../plan-store.js'
+import { writePlan, readPlan, listPlans, approvePlan, rejectPlan, deletePlan, slugify, stripPlanStatusMarkers, resolvePlanOptionLabel } from '../plan-store.js'
 import { checked, checkedAt } from '../../utils/guard.js'
 
 describe('slugify', () => {
@@ -158,5 +158,90 @@ describe('plan-store CRUD', () => {
     } finally {
       cleanup()
     }
+  })
+
+  // 2026-07-03 缺陷复盘: markPlanStatus 回写时未透传 options,
+  // 批准/驳回会把多方案 frontmatter 永久抹掉,导致 selectedApproach 校验形同虚设。
+  it('approvePlan preserves options frontmatter', async () => {
+    const { dir, cleanup } = setup()
+    try {
+      const options = [
+        { label: 'A (Recommended)', description: 'fast' },
+        { label: 'B', description: 'safe' },
+      ]
+      await writePlan(dir, 'multi', '# Multi\n\nBody.', options)
+      const approved = await approvePlan(dir, 'multi')
+      assert.deepEqual(checked(approved).options, options)
+      const reread = await readPlan(dir, 'multi')
+      assert.deepEqual(checked(reread).options, options)
+      assert.equal(checked(reread).status, 'approved')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('rejectPlan preserves options frontmatter', async () => {
+    const { dir, cleanup } = setup()
+    try {
+      const options = [{ label: 'X', description: 'only' }, { label: 'Y', description: 'alt' }]
+      await writePlan(dir, 'multi-rej', '# Multi\n\nBody.', options)
+      const rejected = await rejectPlan(dir, 'multi-rej')
+      assert.deepEqual(checked(rejected).options, options)
+    } finally {
+      cleanup()
+    }
+  })
+})
+
+describe('stripPlanStatusMarkers', () => {
+  it('removes approve/reject status lines so resubmission is not stuck rejected', () => {
+    const content = '> **Status: REJECTED** — 2026-07-03T00:00:00.000Z\n\n# Plan\n\nrevised body\n'
+    const stripped = stripPlanStatusMarkers(content)
+    assert.ok(!stripped.includes('Status: REJECTED'))
+    assert.ok(stripped.startsWith('# Plan'))
+  })
+
+  it('removes stacked markers from repeated approve/reject cycles', () => {
+    const content =
+      '> **Status: REJECTED** — 2026-07-01\n\n> **Status: APPROVED** — 2026-07-02\n\n# Plan\n\nbody\n'
+    const stripped = stripPlanStatusMarkers(content)
+    assert.ok(!stripped.includes('Status:'))
+    assert.ok(stripped.startsWith('# Plan'))
+  })
+
+  it('leaves regular blockquotes untouched', () => {
+    const content = '# Plan\n\n> **Note:** this is a design note\n'
+    assert.equal(stripPlanStatusMarkers(content), content)
+  })
+})
+
+describe('resolvePlanOptionLabel', () => {
+  const options = [
+    { label: 'Big Bang (Recommended)', description: 'all at once' },
+    { label: 'Incremental', description: 'step by step' },
+  ]
+
+  it('matches exact label', () => {
+    assert.equal(resolvePlanOptionLabel(options, 'Incremental'), 'Incremental')
+  })
+
+  it('matches case-insensitively and returns canonical label', () => {
+    assert.equal(resolvePlanOptionLabel(options, 'incremental'), 'Incremental')
+  })
+
+  it('tolerates omitting the (Recommended) suffix', () => {
+    assert.equal(resolvePlanOptionLabel(options, 'big bang'), 'Big Bang (Recommended)')
+  })
+
+  it('returns undefined for unknown labels', () => {
+    assert.equal(resolvePlanOptionLabel(options, 'YOLO'), undefined)
+  })
+
+  it('returns undefined when a bare label is ambiguous', () => {
+    const ambiguous = [
+      { label: 'Fast (v1)', description: 'a' },
+      { label: 'Fast (v2)', description: 'b' },
+    ]
+    assert.equal(resolvePlanOptionLabel(ambiguous, 'fast'), undefined)
   })
 })

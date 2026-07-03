@@ -139,6 +139,41 @@ describe('plan tool submit', () => {
     assert.ok(written.includes('flowchart TD'))
   })
 
+  // 2026-07-03 缺陷复盘: 驳回后模型修订同一文件再重提交(省略 plan 字段),
+  // 残留的 Status: REJECTED 标记曾让新提交被 parsePlanStatus 误判为 rejected,
+  // 从待批准列表消失。submit 必须剥离历史状态标记。
+  it('strips stale status markers when resubmitting a rejected plan file', async () => {
+    const draftPath = '.rivet/plans/revise-me.md'
+    const abs = join(dir, draftPath)
+    mkdirSync(dirname(abs), { recursive: true })
+    writeFileSync(abs, [
+      '> **Status: REJECTED** — 2026-07-03T00:00:00.000Z',
+      '',
+      '# Revised Plan',
+      '',
+      '## 根因分析',
+      '边界条件未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/foo.ts`（已按反馈调整）。',
+    ].join('\n'), 'utf-8')
+
+    const result = await execute(
+      { action: 'submit', title: 'Revised Plan' },
+      { activePlanFilePath: draftPath },
+    )
+    assert.ok(!result.isError, result.content)
+
+    const written = readFileSync(join(dir, '.rivet/plans/revised-plan.md'), 'utf-8')
+    assert.ok(!written.includes('Status: REJECTED'), 'stale rejection marker must not survive resubmission')
+    assert.ok(written.trimStart().startsWith('# Revised Plan'))
+  })
+
   it('persists options in plan frontmatter', async () => {
     const plan = [
       '## 根因分析',

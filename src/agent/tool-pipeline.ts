@@ -519,6 +519,20 @@ export async function executeToolUse(
 ): Promise<ToolExecResult> {
   let { traceStore, importGraph, lastConflictCheckCount, latestRisk } = deps
   let checkpointCreated = checkpointAlreadyCreated
+
+  // Canonicalize foreign tool aliases (task/agent/todowrite → Rivet names)
+  // BEFORE any gate runs. Every downstream policy — plan-mode whitelist, deny
+  // rules, approval, risk assessment, TDD gate — keys on tu.name; resolving
+  // aliases inside registry.execute (after the gates) would let e.g. a deny
+  // rule on `delegate_task` be bypassed by calling `task`.
+  const canonicalToolName = deps.config.toolRegistry.resolveName(tu.name)
+  const aliasNote = canonicalToolName !== tu.name
+    ? `[NOTE: "${tu.name}" 自动映射为 "${canonicalToolName}" — 下次请直接调 ${canonicalToolName}]`
+    : undefined
+  if (canonicalToolName !== tu.name) {
+    tu = { ...tu, name: canonicalToolName }
+  }
+
   const params: ToolCallParams = {
     input: tu.input,
     toolUseId: tu.id,
@@ -1007,6 +1021,12 @@ export async function executeToolUse(
     // Normalize: strip trailing whitespace to produce stable byte sequences
     // for DeepSeek exact-prefix cache. Non-deterministic trailing whitespace
     finalContent = finalContent.trimEnd()
+
+    // Foreign-alias teaching note: the call was transparently remapped at the
+    // pipeline entry; surface the canonical name so the model learns it.
+    if (aliasNote) {
+      finalContent = `${aliasNote}\n${finalContent}`
+    }
 
     // LSP: notify the language server that a file changed on disk.
     // Must happen BEFORE diagnostics so the server's view is current.

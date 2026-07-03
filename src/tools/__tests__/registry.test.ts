@@ -118,6 +118,23 @@ describe('ToolRegistry.execute: unknown tool surfaces did-you-mean hint', () => 
     )
   })
 
+  // resolveName lets the tool pipeline canonicalize BEFORE its permission
+  // gates — otherwise a deny rule on delegate_task could be bypassed by
+  // calling the `task` alias (remapping used to happen only inside execute).
+  it('resolveName canonicalizes foreign aliases for pre-gate use', () => {
+    const registry = makeRegistry()
+    assert.equal(registry.resolveName('task'), 'delegate_task')
+    assert.equal(registry.resolveName('Agent'), 'delegate_task')
+    assert.equal(registry.resolveName('read_file'), 'read_file')
+    assert.equal(registry.resolveName('no_such_tool'), 'no_such_tool')
+  })
+
+  it('resolveName does not remap when the alias target is unregistered', () => {
+    const registry = new ToolRegistry()
+    registry.register(fakeTool('read_file'))
+    assert.equal(registry.resolveName('task'), 'task')
+  })
+
   it('surfaces the typo "delegte_task" → delegate_task (Levenshtein)', async () => {
     const registry = makeRegistry()
 

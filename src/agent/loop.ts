@@ -81,7 +81,7 @@ import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join, dirname } from 'node:path'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -1131,6 +1131,12 @@ export class AgentLoop {
 
   /** Enter plan mode — only read-only tools allowed. Clears any stale approved-plan pointer. */
   enterPlanMode(opts?: { planFilePath?: string }): void {
+    // Idempotent re-entry: already planning with a live draft and no explicit
+    // target → keep the current draft. Creating a fresh one would orphan the
+    // file the agent is incrementally writing to.
+    if (this.planModeState === 'planning' && this.activePlanFilePath && !opts?.planFilePath) {
+      return
+    }
     this.planModeState = 'planning'
     this.config.promptEngine.setActivePlan(null)
 
@@ -1150,8 +1156,26 @@ export class AgentLoop {
   /** Exit plan mode — user approved, all tools allowed */
   exitPlanMode(): void {
     this.planModeState = 'off'
-    this.activePlanFilePath = null
+    this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+  }
+
+  /**
+   * Shared plan-mode teardown: drop the draft pointer (removing the draft file
+   * when it is still empty, so toggling in and out doesn't litter .rivet/plans/)
+   * and release the writing-plans skill pin — leaving it invoked would re-inject
+   * the full planning skill into every post-approval execution turn.
+   */
+  private releasePlanModeArtifacts(): void {
+    const draft = this.activePlanFilePath
+    this.activePlanFilePath = null
+    if (draft && /\/draft-\d+\.md$/.test(draft.replace(/\\/g, '/'))) {
+      try {
+        const abs = join(this.cwd, draft)
+        if (existsSync(abs) && readFileSync(abs, 'utf-8').trim() === '') rmSync(abs)
+      } catch { /* best-effort cleanup */ }
+    }
+    this.markSkillCompleted(WRITING_PLANS_SKILL)
   }
 
   /**
@@ -1167,7 +1191,7 @@ export class AgentLoop {
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
     this.planModeState = 'off'
-    this.activePlanFilePath = null
+    this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
   }
 

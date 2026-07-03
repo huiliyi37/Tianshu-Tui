@@ -7,7 +7,7 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify, type PlanOption } from '../plan/plan-store.js'
+import { writePlan, slugify, stripPlanStatusMarkers, type PlanOption } from '../plan/plan-store.js'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
@@ -249,7 +249,9 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     planContent = draftText
   }
 
-  const planBody = planContent as string
+  // 剥离历史 approve/reject 状态标记 — 驳回修订后从活动计划文件整读重提交时,
+  // 残留的 "> **Status: REJECTED**" 会让新提交被误判为 rejected,从待批准列表消失。
+  const planBody = stripPlanStatusMarkers(planContent as string)
 
   const slug = slugify(title)
 

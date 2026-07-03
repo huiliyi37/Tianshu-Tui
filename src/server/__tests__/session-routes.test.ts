@@ -317,6 +317,44 @@ test('Plan: POST /plans/:slug/approve marks approved and starts a run', async ()
   assert.ok(!kickoff.includes('do it'), 'kickoff must not embed the plan body')
 })
 
+// 2026-07-03 缺陷复盘: approve 曾先改文件再校验 selectedApproach,且改文件时
+// 把 options frontmatter 抹掉 — 校验永远跳过、无效方案名被静默接受。
+test('Plan: approve with valid option preserves options and threads the canonical label', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  const fm = '---\nrivet-options: [{"label":"Fast (Recommended)","description":"a"},{"label":"Safe","description":"b"}]\n---\n\n'
+  writeFileSync(join(plansDir, 'opt.md'), `${fm}# Opt\n\ndo it`, 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  // Case-insensitive match resolves to the canonical label.
+  const res = await router('POST', `/sessions/${s.id}/plans/opt/approve`, { selectedApproach: 'safe' }, AUTH)
+  assert.equal(res.status, 200)
+  const after = readFileSync(join(plansDir, 'opt.md'), 'utf-8')
+  assert.match(after, /Status: APPROVED/)
+  assert.match(after, /rivet-options/, 'options frontmatter must survive approval')
+  const agent = agents[0]!
+  assert.equal(agent.activePlanCalls[0]!.selectedApproach, 'Safe')
+  assert.match(agent.runPrompts[0]!, /Selected approach: Safe/)
+})
+
+test('Plan: approve with unknown option fails BEFORE marking the file approved', async () => {
+  const { manager, router, agents } = setup()
+  const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
+  const plansDir = join(dir, '.rivet', 'plans')
+  mkdirSync(plansDir, { recursive: true })
+  const fm = '---\nrivet-options: [{"label":"Fast","description":"a"},{"label":"Safe","description":"b"}]\n---\n\n'
+  writeFileSync(join(plansDir, 'opt2.md'), `${fm}# Opt2\n\ndo it`, 'utf-8')
+  const s = manager.createSession({ cwd: dir })
+
+  const res = await router('POST', `/sessions/${s.id}/plans/opt2/approve`, { selectedApproach: 'YOLO' }, AUTH)
+  assert.equal(res.status, 409)
+  const after = readFileSync(join(plansDir, 'opt2.md'), 'utf-8')
+  assert.doesNotMatch(after, /Status: APPROVED/, 'file must stay untouched when the option is invalid')
+  assert.equal(agents.length === 0 || agents[0]!.runPrompts.length === 0, true, 'no kickoff run on failed approval')
+})
+
 test('Plan: POST /plans/:slug/reject keeps the file, re-enters plan mode, and kicks revision', async () => {
   const { manager, router, agents } = setup()
   const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
