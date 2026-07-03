@@ -8,6 +8,7 @@ import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
 import { EvidenceTracker } from './evidence.js'
+import { computeVerifyFailStreak } from './hooks/cognitive-capsule-router.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
@@ -223,12 +224,50 @@ export class AgentLoop {
   private lastConvergenceEmitTurn = -Infinity
   private lastConvergenceEmitLevel = 0
   private lastConvergenceMsgKey = ''
+  /** 上次发射时的验证失败流水 — 第四突破条件（流水加深 → 提前发射）的基线。 */
+  private lastConvergenceEmitVerifyFailStreak = 0
+  /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
+   *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
+   *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
+   *  相邻轮让位（避免同轮双重提醒），其余轮 CCR 正常参与。 */
+  wasConvergenceEmittedRecently(): boolean {
+    return this.session.getTurnCount() - this.lastConvergenceEmitTurn <= 1
+  }
   /** Phase 0 观测 — guardian（CCR / 改道 / kick）触发计数。会话内累计，
    *  随遥测与 session meta 落盘，让"守护链路被静音"从体感问题变成数据问题。 */
-  readonly guardianActivity: { ccr: number; shifts: Record<string, number> } = { ccr: 0, shifts: {} }
+  readonly guardianActivity: {
+    ccr: number
+    shifts: Record<string, number>
+    advisoriesRendered: number
+    advisoriesDropped: number
+  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0 }
+  private lastGuardianMetaFingerprint = ''
   /** 记录一次结构化改道发射（source: 'kick' | 'convergence' | …）。 */
   recordDecisionShift(source: string): void {
     this.guardianActivity.shifts[source] = (this.guardianActivity.shifts[source] ?? 0) + 1
+  }
+  /** 累计 advisory 投递账本（来自 AdvisoryBus.drainLedger）。 */
+  recordAdvisoryLedger(delta: { rendered: number; dropped: number }): void {
+    this.guardianActivity.advisoriesRendered += delta.rendered
+    this.guardianActivity.advisoriesDropped += delta.dropped
+  }
+  /** 把 guardian 活动摘要写进 session meta（仅在计数变化时写，原子写、失败不致命）。 */
+  flushGuardianMeta(): void {
+    if (!this.persist) return
+    const ga = this.guardianActivity
+    const fingerprint = JSON.stringify([ga.ccr, ga.shifts, ga.advisoriesRendered, ga.advisoriesDropped])
+    if (fingerprint === this.lastGuardianMetaFingerprint) return
+    this.lastGuardianMetaFingerprint = fingerprint
+    try {
+      this.persist.updateMetadata({
+        guardianActivity: {
+          ccr: ga.ccr,
+          shifts: { ...ga.shifts },
+          advisoriesRendered: ga.advisoriesRendered,
+          advisoriesDropped: ga.advisoriesDropped,
+        },
+      })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 turn */ }
   }
   /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
    *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
@@ -1552,6 +1591,7 @@ export class AgentLoop {
         this.lastConvergenceEmitTurn = -Infinity
         this.lastConvergenceEmitLevel = 0
         this.lastConvergenceMsgKey = ''
+        this.lastConvergenceEmitVerifyFailStreak = 0
       } else {
         // Fix 1 — cooldown + dedup gate on the visible side-effects. The message
         // type is keyed by its header line (first line), so same-type nudges with
@@ -1560,10 +1600,16 @@ export class AgentLoop {
         const cooledDown = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
         const escalated = convergenceCheck.level > this.lastConvergenceEmitLevel
         const changedDirection = msgKey !== this.lastConvergenceMsgKey
-        if (cooledDown || escalated || changedDirection) {
+        // 第四突破条件（2026-07-04 触发面修复）：验证失败流水加深 = 排查轮次
+        // 正在膨胀，是最尖锐的"需要改道"信号——不等冷却到期，提前发射。
+        // 与 CCR P7 同信号源（computeVerifyFailStreak），语义失败才计入。
+        const verifyFailStreak = computeVerifyFailStreak(this.recentToolHistory)
+        const verifyFailEscalated = verifyFailStreak >= 2 && verifyFailStreak > this.lastConvergenceEmitVerifyFailStreak
+        if (cooledDown || escalated || changedDirection || verifyFailEscalated) {
           this.lastConvergenceEmitTurn = turn
           this.lastConvergenceEmitLevel = convergenceCheck.level
           this.lastConvergenceMsgKey = msgKey
+          this.lastConvergenceEmitVerifyFailStreak = verifyFailStreak
 
           // Level 2: inject user guidance as a system-visible nudge
           callbacks.onPhaseChange?.('convergence-warning', {
@@ -1573,6 +1619,7 @@ export class AgentLoop {
           // R4 — externalize the convergence nudge as a structured course-correction
           // so the desktop renders a "改道" card; the injected guidance below is what
           // the agent acts on next, making the cause→effect visible to the user.
+          this.recordDecisionShift('convergence')
           callbacks.onDecisionShift?.({
             source: 'convergence',
             reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,

@@ -707,7 +707,14 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // text report (code review / audit / investigation) is producing its
   // deliverable, not stalling. Relax the read-only penalty and suppress the
   // productive-stagnation flag so it is not spammed with "去编辑/测试" nudges.
-  const producingReport = isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
+  //
+  // 收窄（2026-07-04 触发面修复）：豁免仅对"纯审查"生效——存在未验证编辑时，
+  // 边写长分析文本边搁置验证正是该被提醒的场景，不是审查报告。原豁免让
+  // 排查/验证类会话（每轮都输出大段分析）把改道机制永久静音，验证轮次膨胀。
+  const hasUnverifiedEdits = input.evidenceState.filesModified.size > 0
+    && input.evidenceState.deliveryStatus !== 'verified'
+  const producingReport = !hasUnverifiedEdits
+    && isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
 
   const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData, producingReport)
 
