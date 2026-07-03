@@ -293,7 +293,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
-        || report.staleFailureCandidates > 0
+        || report.supersededFailures > 0
+        || report.staleSnapshotDropped > 0
         || report.toolInvocationFailureCandidates.length > 0
         || report.shortestNextStep
       if (hasVerificationDiagnostics) {
@@ -302,7 +303,10 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           lines.push(`  Current blocking failure: ${report.currentBlockingFailure}`)
         }
         if (report.staleFailureCandidates > 0) {
-          lines.push(`  Stale failure candidates: ${report.staleFailureCandidates}`)
+          lines.push(`  Superseded failures: ${report.staleFailureCandidates} (failed earlier but later passed — already fixed, not blocking)`)
+        }
+        if (report.staleSnapshotDropped > 0) {
+          lines.push(`  Stale snapshot verifications: ${report.staleSnapshotDropped} (ran on outdated code, may be irrelevant)`)
         }
         if (report.toolInvocationFailureCandidates.length > 0) {
           lines.push('  Tool invocation failure candidates:')
@@ -390,6 +394,21 @@ For complex specs or cross-module integration, include checklist entries: fact-f
 
       lines.push('', `Attribution: ${report.attributionSummary}`)
 
+      // Failure attribution summary: distinguish "my fault" vs "not my fault" failures.
+      // Helps the agent understand: which failures should I fix, which are external?
+      {
+        const parts: string[] = []
+        if (report.currentBlockingFailure) parts.push(`1 owned blocking failure — your responsibility`)
+        if (report.supersededFailures > 0) parts.push(`${report.supersededFailures} superseded (later fixed)`)
+        if (report.staleSnapshotDropped > 0) parts.push(`${report.staleSnapshotDropped} stale snapshot (outdated code)`)
+        if (report.toolInvocationFailureCandidates.length > 0) parts.push(`${report.toolInvocationFailureCandidates.length} invocation failure(s)`)
+        if (parts.length > 0) {
+          lines.push(`Failure breakdown: ${parts.join(' | ')}`)
+          lines.push('→ 只有 "blocking failure" 是你的改动直接导致的。superseded 已经修复了，stale snapshot 跑的是旧代码，invocation failure 是环境问题。')
+          lines.push('→ 不要为 superseded/stale/invocation 类失败反复重试——它们不反映你的代码质量。')
+        }
+      }
+
       // Recovery journal: detect files that were restored (undo/git checkout) during this session.
       // A clean file after restore may hide unfinished intent — surface it explicitly.
       const recoveries = readUnacknowledged(params.cwd)
@@ -467,10 +486,10 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         }
 
         if (report.state === 'RED') {
-          // Stale failure candidates: failures that likely pre-date this change.
-          // force=true allows override when all blocking failures look pre-existing.
-          if (forceGate && report.staleFailureCandidates > 0) {
-            lines.push('', '⚠️  RED overridden (force=true): stale failure candidates detected.')
+          // Superseded failures: failures that were later fixed (already green).
+          // force=true allows override when all blocking failures look superseded.
+          if (forceGate && report.supersededFailures > 0) {
+            lines.push('', '⚠️  RED overridden (force=true): superseded failures detected (these were later fixed).')
             lines.push('   Verify these pre-existing failures are unrelated to your changes before proceeding.')
           } else if (
             report.attributionClass === 'unverified'
@@ -479,8 +498,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             lines.push('', `✅ 机械式变更 (${mechanicalClass.class})，免验证交付：${mechanicalClass.reason}`)
           } else {
             lines.push('', '❌ Cannot commit: delivery gate is RED.')
-            if (report.staleFailureCandidates > 0) {
-              lines.push('   (Stale failure candidates found — use force=true if pre-existing.)')
+            if (report.supersededFailures > 0) {
+              lines.push('   (Superseded failures found — these were later fixed, use force=true if pre-existing.)')
             }
             lines.push('', 'Recovery:')
             if (report.blockingReason) {

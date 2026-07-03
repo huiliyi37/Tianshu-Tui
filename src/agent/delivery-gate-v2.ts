@@ -91,9 +91,13 @@ export interface DeliveryGateResult {
   ownedFileCount: number
   externalFileCount: number
   verificationCount: number
-  /** Count of earlier failures superseded by later successes */
+  /** Count of earlier failures superseded by later successes — these were fixed. */
   supersededFailures: number
+  /** Count of verifications dropped because their snapshotRef is stale
+   *  (owned diff changed since they ran — ran on outdated code). */
+  staleSnapshotDropped: number
   latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
+  /** @deprecated use supersededFailures instead — renamed for semantic clarity. */
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -116,11 +120,14 @@ export interface DeliveryReport {
   externalFiles: string[]
   externalFileCount: number
   verificationCount: number
-  /** Count of earlier failures superseded by later successes */
+  /** Count of earlier failures superseded by later successes — these were fixed. */
   supersededFailures: number
+  /** Count of verifications dropped because their snapshotRef is stale. */
+  staleSnapshotDropped: number
   /** Latest verification pass/fail/skipped totals — for "声明即实测" echo in deliver_task output.
    *  Agents copy these numbers into delivery reports instead of guessing from memory. */
   latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
+  /** @deprecated use supersededFailures instead — renamed for semantic clarity. */
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -178,7 +185,9 @@ export function createDeliveryGateV2(opts: {
   const { taskLedger, ownership, attribution } = opts
 
   const emptyDiagnostics = {
+    supersededFailures: 0,
     staleFailureCandidates: 0,
+    staleSnapshotDropped: 0,
     toolInvocationFailureCandidates: [] as string[],
   }
 
@@ -187,13 +196,15 @@ export function createDeliveryGateV2(opts: {
       || (v.status === 'failed' && v.exitCode !== 0 && v.passed === 0 && v.failed === 0 && v.skipped === 0)
   }
 
-  function verificationDiagnostics(verifications: VerificationMetadata[], supersededFailures: number): Pick<DeliveryGateResult, 'staleFailureCandidates' | 'toolInvocationFailureCandidates' | 'shortestNextStep'> {
+  function verificationDiagnostics(verifications: VerificationMetadata[], supersededFailures: number, staleSnapshotDropped: number): Pick<DeliveryGateResult, 'supersededFailures' | 'staleFailureCandidates' | 'staleSnapshotDropped' | 'toolInvocationFailureCandidates' | 'shortestNextStep'> {
     const invocationFailures = verifications.filter(isToolInvocationFailure)
     const shortestNextStep = invocationFailures
       .map(v => v.recommendedCommand ?? v.resolvedCommand)
       .find((cmd): cmd is string => typeof cmd === 'string' && cmd.length > 0)
     return {
+      supersededFailures,
       staleFailureCandidates: supersededFailures,
+      staleSnapshotDropped,
       toolInvocationFailureCandidates: invocationFailures.map(v => v.command),
       ...(shortestNextStep ? { shortestNextStep } : {}),
     }
@@ -254,14 +265,14 @@ export function createDeliveryGateV2(opts: {
 
     // Use effective verifications (deduplicated by supersession + VSW staleness)
     const rawVerifications = taskLedger.getVerifications()
-    const { effective: ownedVerifications, supersededFailures } = getEffectiveVerifications(rawVerifications, currentSnapshotRef)
+    const { effective: ownedVerifications, supersededFailures, staleSnapshotDropped } = getEffectiveVerifications(rawVerifications, currentSnapshotRef)
 
     // Combine owned + external verifications for full picture
     const allVerifications = [
       ...ownedVerifications,
       ...externalVerifications,
     ]
-    const diagnostics = verificationDiagnostics(allVerifications, supersededFailures)
+    const diagnostics = verificationDiagnostics(allVerifications, supersededFailures, staleSnapshotDropped)
 
     // 层 1a: latest verification totals for "声明即实测" echo
     const _lv = allVerifications.length > 0 ? allVerifications[allVerifications.length - 1] : undefined
@@ -453,6 +464,7 @@ export function createDeliveryGateV2(opts: {
       externalFileCount: result.externalFileCount,
       verificationCount: result.verificationCount,
       supersededFailures: result.supersededFailures,
+      staleSnapshotDropped: result.staleSnapshotDropped,
       latestVerificationTotals: result.latestVerificationTotals,
       staleFailureCandidates: result.staleFailureCandidates,
       toolInvocationFailureCandidates: result.toolInvocationFailureCandidates,
