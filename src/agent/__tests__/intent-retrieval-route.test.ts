@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { extractTaskContract } from '../../context/task-contract.js'
 import {
   buildHeuristicRetrievalRoute,
+  extractAskLine,
   normalizeRetrievalRoute,
   renderIntentRetrievalRoute,
   type RetrievalPriority,
@@ -109,6 +110,60 @@ describe('intent retrieval route heuristic', () => {
     const route = routeFor('修 bug')
     assert.ok(!route.taskKinds.includes('social_idle'))
     assert.ok(route.taskKinds.includes('bug_fix'))
+  })
+
+  it('classifies gap-analysis inspection wording (检查…有没有缺陷) as review_audit', () => {
+    const route = routeFor('检查分析一下 用户意图识别这部分 有没有缺陷和场景不覆盖 遗漏的')
+
+    assert.ok(route.taskKinds.includes('review_audit'), `expected review_audit, got ${route.taskKinds}`)
+    // review_audit 基线必须带上测试覆盖与历史风险两个源
+    assert.equal(priorityFor(route, 'tests'), 'must')
+    assert.ok(sources(route).includes('memory'))
+  })
+
+  it('classifies bare 检查/排查 wording as review_audit instead of default new_feature', () => {
+    const check = routeFor('检查一下这个模块有没有遗漏的场景')
+    assert.ok(check.taskKinds.includes('review_audit'), `expected review_audit, got ${check.taskKinds}`)
+    assert.ok(!check.taskKinds.includes('new_feature'))
+    assert.ok(check.confidence >= 0.6, 'specific classification should clear the injection gate')
+
+    const investigate = routeFor('排查一下权限校验这块的覆盖情况')
+    assert.ok(investigate.taskKinds.includes('review_audit'), `expected review_audit, got ${investigate.taskKinds}`)
+  })
+
+  it('classifies project overview questions as codebase_overview with repo-wide sweep', () => {
+    const route = routeFor('给我讲讲这个项目的整体架构和模块职责')
+
+    assert.ok(route.taskKinds.includes('codebase_overview'), `expected codebase_overview, got ${route.taskKinds}`)
+    const codebase = route.directions.find(direction => direction.source === 'codebase')
+    assert.equal(codebase?.priority, 'must')
+    assert.match(codebase?.query ?? '', /repo_map|模块地图/, 'overview must ask for a module map, not a single entry file')
+    assert.ok(sources(route).includes('docs'))
+  })
+
+  it('classifies "这个项目是干嘛的" as codebase_overview', () => {
+    const route = routeFor('这个项目是干嘛的，主要模块有哪些')
+    assert.ok(route.taskKinds.includes('codebase_overview'), `expected codebase_overview, got ${route.taskKinds}`)
+  })
+})
+
+describe('extractAskLine — 意图原文提取', () => {
+  it('picks the last ask-bearing line of a multi-line message', () => {
+    const message = '背景：我们上周改了压缩机制\n有些用户反馈离开一会回来上下文没了\n帮我查一下现在的压缩情况'
+    assert.equal(extractAskLine(message), '帮我查一下现在的压缩情况')
+  })
+
+  it('falls back to the first line when no line carries an ask marker', () => {
+    assert.equal(extractAskLine('实现登录模块\n用现有的会话存储'), '实现登录模块')
+  })
+
+  it('returns the single line unchanged for single-line messages', () => {
+    assert.equal(extractAskLine('修复这个失败'), '修复这个失败')
+  })
+
+  it('objectiveSummary prefers the ask line over the first (background) line', () => {
+    const route = routeFor('这是一段背景说明而已，讲上周发生了什么\n真正的问题：为什么闲时压缩会提前触发？')
+    assert.match(route.objectiveSummary ?? '', /为什么闲时压缩/)
   })
 })
 

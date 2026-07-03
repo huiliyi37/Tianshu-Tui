@@ -140,6 +140,38 @@ describe('AgentLoop intent retrieval router wiring', () => {
     assert.match(joined, /fallback-used="true"/)
   })
 
+  it('injects a cognitive-alignment advisory instead of nothing on low-confidence classification', async () => {
+    const engine = makeEngine()
+    const requests: OaiChatRequest[] = []
+    const client: StreamClient = {
+      stream: mock.fn(async (request: OaiChatRequest, cb: StreamCallbacks) => {
+        requests.push(request)
+        finishText(cb)
+      }),
+    } as unknown as StreamClient
+
+    const agent = new AgentLoop({
+      client,
+      promptEngine: engine,
+      toolRegistry: new ToolRegistry(),
+      maxTurns: 1,
+      contextWindow: 1_000_000,
+      compact: { enabled: false, autoThreshold: 800_000, autoFloor: 500_000, model: 'flash' },
+      fsWatcherEnabled: false,
+      intentRetrievalRouter: { enabled: true, classifier: 'heuristic' },
+    }, new SessionContext(), TEST_CWD)
+
+    // 无任何已覆盖动词/关键词 → 兜底 new_feature，置信度 0.55 < 0.6
+    await agent.run('把那个东西弄得更顺手一些', makeCallbacks())
+
+    assert.equal(requests.length, 1)
+    const joined = requests[0]!.messages.map(message => typeof message.content === 'string' ? message.content : '').join('\n')
+    assert.match(joined, /<intent-retrieval-route advisory="true" scope="current-turn" confidence="low">/)
+    assert.match(joined, /意图分类不确定/)
+    // 低置信时不注入具体检索方向，避免锚定错误的任务类型
+    assert.doesNotMatch(joined, /source="codebase" priority="must"/)
+  })
+
   it('clears current-turn route on non-actionable follow-up', async () => {
     const engine = makeEngine()
     const setRouteCalls: Array<string | null> = []
