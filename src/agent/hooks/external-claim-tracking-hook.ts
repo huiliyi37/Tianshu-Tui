@@ -119,7 +119,28 @@ export function createExternalClaimTrackingHook(
       // ── Step 1: delegate 完成 → 抽取声称路径 ──────────────────
       if (DELEGATE_TOOLS.has(tool.name) && tool.success && tool.resultContent) {
         const claimedPaths = extractClaimedPaths(tool.resultContent)
+
+        // 豁免：delegate 输入中指派 worker 改的文件路径——这些是主控明确
+        // 要求 worker 改的，主控跟进编辑同一文件是正常协作，不是盲信。
+        // 来源：文档缺口② 落地修正清单第 4 点 "delegate 任务本身指派 worker
+        // 改某文件、主控随后跟进同一文件"
+        const inputPaths = new Set<string>()
+        const files = tool.input?.files
+        if (Array.isArray(files)) {
+          for (const f of files) {
+            if (typeof f === 'string') inputPaths.add(canonicalizePath(f))
+          }
+        }
+        // files param on delegate_task
+        const inputFiles = tool.input?.input_files
+        if (Array.isArray(inputFiles)) {
+          for (const f of inputFiles) {
+            if (typeof f === 'string') inputPaths.add(canonicalizePath(f))
+          }
+        }
+
         for (const filePath of claimedPaths) {
+          if (inputPaths.has(filePath)) continue // 豁免：主控指派的路径
           tracker.claims.push({
             filePath,
             turn,
@@ -142,16 +163,21 @@ export function createExternalClaimTrackingHook(
       const matchedClaim = activeClaims.find(c => c.filePath === writePath || writePath.endsWith(c.filePath) || c.filePath.endsWith(writePath))
       if (!matchedClaim) return
 
-      // 检查 recentToolHistory：delegate 之后是否有 read/grep 核验过该路径
+      // 检查 recentToolHistory：delegate 之后是否有 read/grep 核验过**该特定文件**
+      // 不是"任意 verify 工具"——read_file src/foo.ts 不核验 delegate 报告的 src/bar.ts
       const history = ctx.snapshot.recentToolHistory
-      const delegateTurn = matchedClaim.turn
+      const claimedPath = matchedClaim.filePath
 
-      // 看历史中 delegate 之后的核验操作
-      // recentToolHistory 是滑动窗口（最近 ~5 条），如果 delegate 刚发生不久，
-      // 窗口可能仍包含它。更可靠的检查：看窗口内是否有 read/grep 操作。
-      const hasIndependentVerify = history.some(
-        h => VERIFY_TOOLS.has(h.tool) || (h.tool === 'bash' && /\b(grep|cat|find|rg)\b/.test(h.target ?? '')),
-      )
+      const hasIndependentVerify = history.some(h => {
+        // verify 工具的 target 必须包含声称的文件路径
+        const target = h.target ?? ''
+        const pathMatches = target.includes(claimedPath) || claimedPath.includes(target)
+        if (!pathMatches) return false
+
+        if (VERIFY_TOOLS.has(h.tool)) return true
+        if (h.tool === 'bash' && /\b(grep|cat|find|rg)\b/.test(target)) return true
+        return false
+      })
 
       if (!hasIndependentVerify) {
         deps.advisoryBus.submit({

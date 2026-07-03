@@ -195,5 +195,46 @@ describe('external-claim-tracking-hook', () => {
       )
       assert.equal(submitted.length, 0)
     })
+
+    it('FIRES when read_file verified an UNRELATED file (not the claimed path)', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      // delegate reports src/bar.ts
+      hook.run(makeCtx(1), makeDelegateResult('src/bar.ts:42'))
+      // model reads an UNRELATED file
+      hook.run(
+        makeCtx(2, [{ tool: 'read_file', target: 'src/foo.ts' }]),
+        makeWriteTool('src/bar.ts'),
+      )
+      // should STILL fire — verifying src/foo.ts does not verify src/bar.ts
+      assert.equal(submitted.length, 1)
+    })
+
+    it('FIRES when grep verified an unrelated file', () => {
+      const submitted: AdvisoryEntry[] = []
+      const hook = createExternalClaimTrackingHook({
+        advisoryBus: { submit: (e: AdvisoryEntry) => { submitted.push(e) } },
+      })
+      hook.run(makeCtx(1), makeDelegateResult('src/bar.ts:42'))
+      hook.run(
+        makeCtx(2, [{ tool: 'grep', target: 'src/unrelated.ts' }]),
+        makeWriteTool('src/bar.ts'),
+      )
+      assert.equal(submitted.length, 1)
+    })
+
+    it('does NOT track paths listed in delegate input files (exempt: dispatcher-assigned)', () => {
+      const hook = createExternalClaimTrackingHook({ advisoryBus: { submit: () => {} } })
+      // delegate_task with files param — these are dispatcher-assigned, not claims
+      hook.run(makeCtx(1), {
+        name: 'delegate_task', success: true,
+        input: { files: ['src/assigned.ts'] },
+        resultContent: 'Modified src/assigned.ts:10',
+      } as unknown as RuntimeToolEvent)
+      // should NOT be in claims — it's an assigned path
+      assert.equal(hook.getClaimTracker().claims.length, 0)
+    })
   })
 })
