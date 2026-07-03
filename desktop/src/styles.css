@@ -113,7 +113,8 @@ html, body, #root { height: 100%; margin: 0; }
 html, body { overscroll-behavior: none; }
 
 html[data-surface="glass"],
-html[data-surface="glass"] body {
+html[data-surface="glass"] body,
+html[data-surface="glass"] .shell {
   background: transparent !important;
 }
 
