@@ -702,7 +702,17 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
     // default heap and `global.gc()` is undefined — making the post-compaction
     // gc() calls inert and leaving no deterministic ceiling. --expose-gc cannot be
     // set via NODE_OPTIONS (Node rejects it), so it has to be a direct arg.
-    cmd.arg("--max-old-space-size=4096")
+    //
+    // Heap ceiling is tunable via RIVET_SIDECAR_HEAP_MB (system env) for heavy
+    // workloads (large knowledge-base ingestion, multi-million-token sessions).
+    // The Node-side resource sensor reads the real V8 ceiling, so all memory
+    // pressure signals follow this value automatically.
+    let heap_mb = std::env::var("RIVET_SIDECAR_HEAP_MB")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(4096);
+    cmd.arg(format!("--max-old-space-size={heap_mb}"))
         .arg("--expose-gc")
         .arg(&spec.entry)
         .arg("serve")
