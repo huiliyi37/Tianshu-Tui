@@ -607,6 +607,7 @@ export function Composer(props: {
       <div className="composer-row">
         <textarea
           ref={taRef}
+          className="composer-input"
           value={text}
           placeholder={planning
             ? '描述你的目标…'
