@@ -136,6 +136,11 @@ export function createGitClearAfterFailHook(
           // 核销：清场已发生（postTool 检测），采纳 = 事后补根因定位动作。
           // 谓词映射表（P1a）：git-clear → tool_appears(诊断类, 2 轮)
           expect: { kind: 'tool_appears', tools: [...VERIFY_TOOLS], withinTurns: 2 },
+          // Phase 2：immediate + 消息流细断点。边界认知：本 hook 是事后检测,
+          // advisory 发出时清场命令已执行完——immediate 只保证下一次不被调度器
+          // 恶化（挂起/抑制）。真正的当轮拦截需要工具层 pre-execution gate。
+          immediate: true,
+          channel: 'system-reminder',
         })
       }
 

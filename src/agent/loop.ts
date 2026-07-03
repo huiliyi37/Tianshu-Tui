@@ -442,6 +442,19 @@ export class AgentLoop {
     this.traceStore = createTraceStore()
     // P1b 习惯化对抗：核销账本的 ignoredStreak 驱动升级措辞/有界静音
     this.advisoryBus.setHabituationPolicy(this.advisoryReadback)
+    // Phase 2 挂起观察自愈判定：expect 谓词在观察窗口内已被自发满足 → 撤销
+    this.advisoryBus.setSelfHealCheck((expect, since, now) =>
+      this.advisoryReadback.wasSatisfiedBetween(expect, since, now))
+    // Phase 2 阶段抑制：产出流 = 近期编辑+验证交替且无失败（navigator 沉默规则）。
+    // 只影响 encouragement/typecheck/informational 白名单——守护类不受抑制。
+    this.advisoryBus.setFlowStateProvider(() => {
+      const recent = this.recentToolHistory.slice(-6)
+      if (recent.length < 3) return false
+      const hasEdit = recent.some(h => ['edit_file', 'hash_edit', 'write_file', 'apply_patch'].includes(h.tool))
+      const hasVerify = recent.some(h => h.tool === 'run_tests' || (h.tool === 'bash' && /\b(test|typecheck|tsc)\b/i.test(h.target ?? '')))
+      const hasFailure = recent.some(h => h.status === 'failed')
+      return hasEdit && hasVerify && !hasFailure
+    })
     this.harness = new TurnHarness(
       { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,

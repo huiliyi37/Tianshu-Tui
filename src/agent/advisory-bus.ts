@@ -43,6 +43,16 @@ export type AdvisoryExpectation =
   | { kind: 'file_touched'; paths: string[]; withinTurns?: number }
   | { kind: 'pattern_absent'; path: string; needles: string[]; withinTurns?: number }
 
+/**
+ * Phase 2 投递通道（2026-07-04 生命周期设计）：
+ *   'bus'（缺省）— `<星域-advisory>` 附录块,下个请求构建时可见（粗断点）
+ *   'system-reminder' — session.appendSystemReminder 进消息流（细断点,
+ *     模型必读通道；缓存安全:只追加尾部,不重写历史）
+ *   'status' — 仅进 TUI 状态区不进 prompt（dark cockpit 单感官通道）。
+ *     无 status sink 时回退 bus 渲染——宁可占预算不静默消失。
+ */
+export type AdvisoryChannel = 'bus' | 'system-reminder' | 'status'
+
 export interface AdvisoryEntry {
   /** 去重键 — 同 key 在同轮只保留优先级最高的一条 */
   key: string
@@ -58,6 +68,18 @@ export interface AdvisoryEntry {
   ttl?: number
   /** 采纳核销谓词 — 缺省则该条不参与采纳率统计（只计送达） */
   expect?: AdvisoryExpectation
+  // ── Phase 2 生命周期字段 ──
+  /** 跳过挂起观察与阶段抑制,直达投递（按 hook 语义标记,如 git-clear 事后守护） */
+  immediate?: boolean
+  /** 挂起观察:先挂 N 个渲染周期。窗口内 expect 谓词已被自发满足 → 自愈撤销
+   *  （不投递）;被其他条目 corroborates 指认 → 提前确认;到期 → 强制送达。
+   *  constitutional / immediate 条目忽略此字段。 */
+  observe?: { turns: number }
+  /** 多信号确认:本条目作为独立信号,可提前确认这些 key 的挂起条目
+   *  （独立性由提交方保证:不同 phase 或不同 category 的 hook 才互相指认） */
+  corroborates?: string[]
+  /** 投递通道,缺省 'bus' */
+  channel?: AdvisoryChannel
 }
 
 /** render() 实际送达的条目快照 — 供 readback 跟踪（send 侧账本的"已送达"半边） */
@@ -195,6 +217,10 @@ export interface AdvisoryLedgerDelta {
   dropped: number
   /** 被丢弃条目的 key（去重后，最多保留最近 50 个） */
   droppedKeys: string[]
+  /** Phase 2:进入挂起观察 / 被阶段抑制推迟的条目数（挂起 ≠ 丢弃） */
+  deferred: number
+  /** Phase 2:挂起期内自愈撤销的条目数（模型自发做了该做的事,提醒作废） */
+  revoked: number
 }
 
 const LEDGER_DROPPED_KEYS_CAP = 50
@@ -219,6 +245,14 @@ export interface HabituationPolicy {
   getIgnoredStreak(key: string): number
 }
 
+// ─── Phase 2 打断调度常量 ─────────────────────────────────────────
+// 阶段抑制白名单（天枢建议,已核准）：仅抑制锦上添花类信号。
+// discipline / constitutional / star_domain 不受阶段抑制——抑制判据（产出流）
+// 与守护触发判据（如连续无工具）不是同一信号,全局静音会误杀守护。
+const FLOW_SUPPRESSIBLE_CATEGORIES: ReadonlySet<AdvisoryCategory> = new Set(['encouragement', 'typecheck'])
+/** 阶段抑制最多推迟的渲染周期数 — 到限强制送达（TTL 强制送达红线） */
+const FLOW_SUPPRESS_MAX_DEFERRALS = 2
+
 export class AdvisoryBus {
   private entries: AdvisoryEntry[] = []
   /** 存活条目 — 未过期的跨轮条目 */
@@ -236,10 +270,47 @@ export class AdvisoryBus {
   private silenceRemaining = new Map<string, number>()
   /** key → 上次触发静音时的 ignoredStreak（防止同一 streak 反复静音，保证 probation 放行） */
   private lastSilencedStreak = new Map<string, number>()
+  // ── Phase 2 状态机 ──
+  private ledgerDeferred = 0
+  private ledgerRevoked = 0
+  /** 挂起观察中的条目（candidate → pending）。挂起态不渲染 = 不产生附录抖动。 */
+  private pendingWatch: Array<{ entry: AdvisoryEntry; startTurn: number; waitedRenders: number }> = []
+  /** 阶段抑制推迟的条目（保 TTL 强制送达:deferrals 到上限必须投递） */
+  private suppressedCarry: Array<{ entry: AdvisoryEntry; deferrals: number }> = []
+  /** 自愈判定 — 挂起窗口内 expect 谓词是否已被自发满足（wire 到 AdvisoryReadback） */
+  private selfHealCheck: ((expect: AdvisoryExpectation, sinceTurn: number, nowTurn: number) => boolean) | null = null
+  /** 产出流判定 — true 时对白名单类别做阶段抑制（navigator 沉默规则） */
+  private flowStateProvider: (() => boolean) | null = null
+  /** status 通道 sink — 未设置时 status 条目回退 bus 渲染（不静默消失） */
+  private statusSink: ((entries: AdvisoryEntry[]) => void) | null = null
+  /** system-reminder 通道待送内容（drainSystemReminders 取走） */
+  private systemReminderOut: string[] = []
 
   /** P1b：注入习惯化查询源（AdvisoryReadback）。缺省 = 不做习惯化对抗。 */
   setHabituationPolicy(policy: HabituationPolicy): void {
     this.habituation = policy
+  }
+
+  /** Phase 2：注入自愈判定（挂起观察需要;缺省 = 挂起只按 TTL 到期送达）。 */
+  setSelfHealCheck(check: (expect: AdvisoryExpectation, sinceTurn: number, nowTurn: number) => boolean): void {
+    this.selfHealCheck = check
+  }
+
+  /** Phase 2：注入产出流判定（阶段抑制需要;缺省 = 不抑制）。 */
+  setFlowStateProvider(provider: () => boolean): void {
+    this.flowStateProvider = provider
+  }
+
+  /** Phase 2：注入 TUI 状态区 sink。设置后 channel='status' 条目改走此通道。 */
+  setStatusSink(sink: (entries: AdvisoryEntry[]) => void): void {
+    this.statusSink = sink
+  }
+
+  /** Phase 2：取走 system-reminder 通道的待送内容（调用方负责 appendSystemReminder）。 */
+  drainSystemReminders(): string[] {
+    const out = this.systemReminderOut
+    this.systemReminderOut = []
+    return out
   }
 
   /** 投递一条劝导 */
@@ -261,11 +332,15 @@ export class AdvisoryBus {
       rendered: this.ledgerRendered,
       dropped: this.ledgerDropped,
       droppedKeys: [...new Set(this.ledgerDroppedKeys)],
+      deferred: this.ledgerDeferred,
+      revoked: this.ledgerRevoked,
     }
     this.ledgerSubmitted = 0
     this.ledgerRendered = 0
     this.ledgerDropped = 0
     this.ledgerDroppedKeys = []
+    this.ledgerDeferred = 0
+    this.ledgerRevoked = 0
     return delta
   }
 
@@ -306,8 +381,62 @@ export class AdvisoryBus {
    *   (2026-07-04 触发面修复：旧逻辑按内容前缀无差别过滤，同星域的改道提醒
    *   被静态 persona 顶掉——静音栈的一环。)
    */
-  render(activeStarDomain?: string): string {
-    let all = [...this.alive, ...this.entries]
+  render(activeStarDomain?: string, turn = 0): string {
+    // ── Phase 2 状态机:candidate → pending → confirmed/revoked ──
+    // A. 先处理既有挂起（新条目在 B 段才入队——观察进度从下个渲染周期起算,
+    //    否则 observe.turns=1 会在挂起当轮就被判到期,挂起形同虚设）:
+    //    corroborate 提前确认 → 自愈撤销 → TTL 到期强制送达
+    const corroboratedKeys = new Set<string>()
+    for (const e of [...this.alive, ...this.entries]) {
+      for (const k of e.corroborates ?? []) corroboratedKeys.add(k)
+    }
+    const promoted: AdvisoryEntry[] = []
+    const stillPending: typeof this.pendingWatch = []
+    for (const p of this.pendingWatch) {
+      if (corroboratedKeys.has(p.entry.key)) {
+        // 多信号确认:独立信号（不同 phase/category 的 hook）指认 → 提前送达
+        promoted.push(p.entry)
+        continue
+      }
+      if (this.selfHealCheck && p.entry.expect && this.selfHealCheck(p.entry.expect, p.startTurn, turn)) {
+        // 自愈撤销:模型在挂起期已自发做了该做的事——提醒作废（ICU 延迟确认降误报）
+        this.ledgerRevoked++
+        continue
+      }
+      p.waitedRenders++
+      if (p.waitedRenders >= p.entry.observe!.turns) {
+        promoted.push(p.entry) // 挂起不等于丢弃:max-wait 到期必须投递
+      } else {
+        stillPending.push(p)
+      }
+    }
+    this.pendingWatch = stillPending
+
+    // B. intake:opt-in observe 的新条目进入挂起观察（挂起态不渲染,缓存安全）。
+    //    本轮刚被提前确认/到期送达的 key 不再重新挂起（避免送达轮重复入队）。
+    const promotedKeys = new Set(promoted.map(e => e.key))
+    const directEntries: AdvisoryEntry[] = []
+    for (const e of this.entries) {
+      if (e.observe && !e.immediate && e.tier !== 'constitutional' && !promotedKeys.has(e.key)) {
+        const existing = this.pendingWatch.find(p => p.entry.key === e.key)
+        if (existing) {
+          existing.entry = e // 条件仍在:刷新内容,保留观察进度
+        } else {
+          this.pendingWatch.push({ entry: e, startTurn: turn, waitedRenders: 0 })
+          this.ledgerDeferred++
+        }
+        continue
+      }
+      directEntries.push(e)
+    }
+    this.entries = directEntries
+
+    // C. 阶段抑制推迟的条目回到竞争池（到限强制送达在 E 段判定）
+    const carried = this.suppressedCarry
+    this.suppressedCarry = []
+
+    let all = [...this.alive, ...this.entries, ...promoted, ...carried.map(c => c.entry)]
+    const deferralsByKey = new Map(carried.map(c => [c.entry.key, c.deferrals]))
 
     // ── P1b 习惯化对抗（constitutional 豁免） ──
     if (this.habituation) {
@@ -353,6 +482,52 @@ export class AdvisoryBus {
         e.content.startsWith(tag) && e.category !== 'star_domain'
       this.recordDropped(all.filter(isFrozenDuplicate).map(e => e.key))
       all = all.filter(e => !isFrozenDuplicate(e))
+    }
+
+    // ── Phase 2 阶段抑制（category 白名单,navigator 沉默规则）──
+    // 主控处于产出流时推迟锦上添花类信号;到 FLOW_SUPPRESS_MAX_DEFERRALS 强制送达。
+    if (this.flowStateProvider?.()) {
+      const kept: AdvisoryEntry[] = []
+      for (const e of all) {
+        const suppressible = !e.immediate
+          && e.tier !== 'constitutional'
+          && (FLOW_SUPPRESSIBLE_CATEGORIES.has(e.category) || e.tier === 'informational')
+        const deferrals = deferralsByKey.get(e.key) ?? 0
+        if (suppressible && deferrals < FLOW_SUPPRESS_MAX_DEFERRALS) {
+          this.suppressedCarry.push({ entry: e, deferrals: deferrals + 1 })
+          this.ledgerDeferred++
+          continue
+        }
+        kept.push(e)
+      }
+      all = kept
+    }
+
+    // ── Phase 2 通道分流（bus 竞争前分走,不占 Top-N 预算）──
+    // system-reminder:细断点,直接计送达(delivered)并出队给调用方注入消息流。
+    // status:仅当 sink 存在时分流;否则回退 bus(宁可占预算不静默消失)。
+    const srEntries = all.filter(e => e.channel === 'system-reminder')
+    if (srEntries.length > 0) {
+      all = all.filter(e => e.channel !== 'system-reminder')
+      const srDeduped = new Map<string, AdvisoryEntry>()
+      for (const e of srEntries) {
+        const existing = srDeduped.get(e.key)
+        if (!existing || e.priority > existing.priority) srDeduped.set(e.key, e)
+      }
+      for (const e of srDeduped.values()) {
+        this.systemReminderOut.push(e.content)
+        this.ledgerRendered++
+        this.delivered.push({ key: e.key, category: e.category, tier: e.tier, expect: e.expect })
+      }
+    }
+    if (this.statusSink) {
+      const statusEntries = all.filter(e => e.channel === 'status')
+      if (statusEntries.length > 0) {
+        all = all.filter(e => e.channel !== 'status')
+        this.statusSink(statusEntries)
+        this.ledgerRendered += statusEntries.length
+        this.delivered.push(...statusEntries.map(e => ({ key: e.key, category: e.category, tier: e.tier, expect: e.expect })))
+      }
     }
 
     // Separate by tier — constitutional bypasses all caps
@@ -449,6 +624,11 @@ export class AdvisoryBus {
     this.delivered = []
     this.silenceRemaining.clear()
     this.lastSilencedStreak.clear()
+    this.ledgerDeferred = 0
+    this.ledgerRevoked = 0
+    this.pendingWatch = []
+    this.suppressedCarry = []
+    this.systemReminderOut = []
   }
 }
 

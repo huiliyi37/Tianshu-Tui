@@ -338,7 +338,13 @@ export class TurnStepProducer {
     // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
     // matches the domain already rendered in the frozen base.
     const activeStarName = this.self.sessionDomain?.name
-    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName))
+    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName, turn))
+
+    // Phase 2 通道分级：system-reminder 通道条目走消息流细断点（必读通道,
+    // 缓存安全:只追加尾部）。目前仅 git-clear 等 immediate 守护使用。
+    for (const sr of this.self.advisoryBus.drainSystemReminders()) {
+      this.self.session.appendSystemReminder(sr)
+    }
 
     // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
     // 送达轮 = 当前 turn；postTurn 的 advisory-readback-evaluate 按窗口核销。

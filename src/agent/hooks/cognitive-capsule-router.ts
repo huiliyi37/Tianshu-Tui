@@ -94,6 +94,8 @@ interface RouteRule {
   recallStar?: string
   /** P1a 核销谓词 — 该改道提醒被采纳时的行为签名（缺省 = 只计送达） */
   expect?: AdvisoryExpectation
+  /** Phase 2 多信号确认 — 本规则触发时提前确认这些 key 的挂起条目 */
+  corroborates?: string[]
 }
 
 interface RouteState {
@@ -196,6 +198,10 @@ const RULES: RouteRule[] = [
     promptTemplate: '【瑶光】改了 {files_modified} 个文件但还没验证（距上次验证 {turns_since_verify} 轮）。typecheck + 相关测试，跑通再继续。',
     suppressOnTestIntent: true,
     expect: { kind: 'verify_attempted', withinTurns: 2 },
+    // Phase 2 多信号确认：P1(preTurn/star_domain)与 self-verify(postTurn/
+    // discipline)、typecheck(postTurn/typecheck)是独立信号（不同 phase 且
+    // 不同 category）——P1 触发时提前确认它们的挂起条目。
+    corroborates: ['self-verify', 'typecheck-reminder'],
   },
   {
     id: 'P5',
@@ -451,6 +457,7 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
           content,
           ttl: 1,
           expect: rule.expect,
+          corroborates: rule.corroborates,
         })
 
         // 胶囊经验召回 — CCR 触发的一等附属：同轮追加一条 informational 条目

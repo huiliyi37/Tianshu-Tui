@@ -172,6 +172,16 @@ export class AdvisoryReadback {
     return this.stats.get(key)?.ignoredStreak ?? 0
   }
 
+  /**
+   * Phase 2 自愈判定 — expect 谓词在 [sinceTurn, nowTurn] 观察窗口内是否已被
+   * 自发满足（模型没被提醒就做了该做的事 → 挂起条目撤销,不投递）。
+   * pattern_absent 直接读当前文件状态（已不在 = 已自愈）。
+   */
+  wasSatisfiedBetween(expect: AdvisoryExpectation, sinceTurn: number, nowTurn: number): boolean {
+    if (expect.kind === 'pattern_absent') return this.checkPatternAbsent(expect)
+    return this.checkPositive(expect, sinceTurn, nowTurn)
+  }
+
   /** 会话累计采纳/忽略计数（guardian meta 摘要用） */
   getTotals(): { adopted: number; ignored: number } {
     let adopted = 0
