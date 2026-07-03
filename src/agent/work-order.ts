@@ -152,6 +152,25 @@ const workerArtifactSchema = z.object({
 
 export type WorkerArtifact = z.infer<typeof workerArtifactSchema>
 
+/** Root cause when a worker fails (status = 'blocked' or 'failed').
+ *  Enables the primary agent to choose the right recovery strategy:
+ *  - json_parse / schema_mismatch → retry with clearer format instructions
+ *  - timeout / circuit_open → do NOT retry immediately, wait or skip
+ *  - worker_crash → retry may help (infra flake)
+ *  - claim_conflict → resolve the conflict first
+ *  - caller_aborted → the primary cancelled this, don't retry same request
+ */
+export type WorkerFailureReason =
+  | 'caller_aborted'
+  | 'circuit_open'
+  | 'claim_conflict'
+  | 'timeout'
+  | 'json_parse'
+  | 'schema_mismatch'
+  | 'worker_crash'
+  | 'worker_blocked'
+  | 'unknown'
+
 export const workerResultSchema = z.object({
   workOrderId: z.string().min(1),
   status: z.enum(['passed', 'failed', 'blocked', 'escalated']),
@@ -169,6 +188,8 @@ export const workerResultSchema = z.object({
   risks: z.array(z.string()),
   nextActions: z.array(z.string()),
   evidenceStatus: z.enum(['verified', 'failed', 'blocked', 'unverified', 'skipped']).default('unverified'),
+  /** Why the worker failed — enables recovery-strategy differentiation. */
+  failureReason: z.enum(['caller_aborted', 'circuit_open', 'claim_conflict', 'timeout', 'json_parse', 'schema_mismatch', 'worker_crash', 'worker_blocked', 'unknown']).optional(),
   /** Runtime metadata: actual model used by the worker. */
   model: z.string().optional(),
   /** Runtime metadata: provider used by the worker. */
