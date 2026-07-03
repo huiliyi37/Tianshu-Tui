@@ -21,7 +21,7 @@ import { useSurfaceCommands } from './lib/use-surface-commands'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
 import { FirstRunGitDialog } from './components/FirstRunGitDialog'
-import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured } from './runtime/client'
+import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured, fixAutocrlf } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
 
 export function App() {
@@ -227,8 +227,21 @@ export function App() {
         )}
         {env.data && env.data.platform === 'win32' && env.data.gitAutocrlf === 'true' && !envDismissed && (
           <div className="banner warn">
-            检测到 git core.autocrlf=true：checkout 为 CRLF 而 agent 写入 LF，diff 会出现整文件换行噪音。
-            建议改为 input：<code>git config --global core.autocrlf input</code>
+            换行符设置可能影响代码 diff。你的 Git 当前会把文件转为 Windows 换行（CRLF），但 AI 写入的是 Unix 换行（LF），这会导致 diff 显示整文件变更（只是换行差异）。
+            <button
+              className="banner-action"
+              onClick={async () => {
+                try {
+                  await fixAutocrlf()
+                  await env.refetch()
+                  toast.success('已修复 — Git 换行设为 input（保留 LF）')
+                } catch (e) {
+                  toast.error(`修复失败: ${(e as Error).message}`)
+                }
+              }}
+            >
+              一键修复
+            </button>
             <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
               ×
             </button>

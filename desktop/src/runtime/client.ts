@@ -162,6 +162,11 @@ export function getEnvironment(): Promise<EnvironmentInfo> {
   return apiGet<EnvironmentInfo>('/environment')
 }
 
+/** One-click fix: set git core.autocrlf to 'input' (prevents CRLF diff noise). */
+export function fixAutocrlf(): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>('/config/fix-autocrlf')
+}
+
 export function getProjectTemplatesStatus(cwd: string): Promise<ProjectTemplatesStatus> {
   return apiGet<ProjectTemplatesStatus>(`/project-templates/status?cwd=${encodeURIComponent(cwd)}`)
 }
@@ -936,14 +941,21 @@ export function setEditorConfig(
 }
 
 // ── Autonomy brakes (C3) ─────────────────────────────────────────────
-export interface AutonomyConfig { checkpointEveryTurns: number }
+export type AutonomyBrakeMode = 'cruise' | 'unleashed'
+
+export interface AutonomyConfig {
+  /** cruise = pause with digest at the interval; unleashed = non-blocking pings only. */
+  autonomyBrake: AutonomyBrakeMode
+  /** cruise pause / unleashed ping interval (turns). 0 = off. */
+  checkpointEveryTurns: number
+}
 
 export function getAutonomyConfig(): Promise<AutonomyConfig> {
   return apiGet<AutonomyConfig>('/config/autonomy')
 }
 
 export function setAutonomyConfig(
-  input: { checkpointEveryTurns: number },
+  input: { autonomyBrake?: AutonomyBrakeMode; checkpointEveryTurns?: number },
 ): Promise<{ ok: boolean } & AutonomyConfig> {
   return apiPut<{ ok: boolean } & AutonomyConfig>('/config/autonomy', input)
 }
