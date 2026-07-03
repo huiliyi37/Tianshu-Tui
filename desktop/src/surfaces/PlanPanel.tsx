@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
-import type { PlanStatus, PlanSummary } from '../runtime/types'
+import type { PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
 import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
 
 const STATUS_LABEL: Record<PlanStatus, string> = {
@@ -50,6 +50,7 @@ export function PlanPanel(props: {
   const [rejecting, setRejecting] = useState(false)
   const [comment, setComment] = useState('')
   const [copied, setCopied] = useState(false)
+  const [selectedApproach, setSelectedApproach] = useState<string | null>(null)
 
   const approve = useApprovePlan()
   const reject = useRejectPlan()
@@ -86,10 +87,30 @@ export function PlanPanel(props: {
     () => all.find((p) => p.slug === selected) ?? null,
     [all, selected],
   )
+  const planOptions: PlanOption[] = useMemo(
+    () => doc.data?.options ?? current?.options ?? [],
+    [doc.data?.options, current?.options],
+  )
+
+  useEffect(() => {
+    if (planOptions.length === 0) {
+      setSelectedApproach(null)
+      return
+    }
+    setSelectedApproach((prev) => {
+      if (prev && planOptions.some(o => o.label === prev)) return prev
+      const recommended = planOptions.find(o => /\(Recommended\)/i.test(o.label))
+      return recommended?.label ?? planOptions[0]!.label
+    })
+  }, [selected, planOptions])
 
   const onBuild = () => {
     if (!sessionId || !selected) return
-    approve.mutate({ id: sessionId, slug: selected })
+    approve.mutate({
+      id: sessionId,
+      slug: selected,
+      selectedApproach: planOptions.length >= 2 ? selectedApproach ?? undefined : undefined,
+    })
   }
   const onReject = () => {
     if (!sessionId || !selected) return
@@ -191,6 +212,26 @@ export function PlanPanel(props: {
             {doc.isLoading && <div className="empty sm">加载方案…</div>}
             {doc.data?.content && <Markdown source={doc.data.content} />}
           </div>
+
+          {planOptions.length >= 2 && current?.status === 'submitted' && !rejecting && (
+            <div className="plan-options">
+              <div className="plan-options-label">选择执行方案</div>
+              {planOptions.map((opt) => (
+                <label key={opt.label} className={`plan-option ${selectedApproach === opt.label ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="plan-option"
+                    checked={selectedApproach === opt.label}
+                    onChange={() => setSelectedApproach(opt.label)}
+                  />
+                  <span className="plan-option-body">
+                    <span className="plan-option-label">{opt.label}</span>
+                    {opt.description && <span className="plan-option-desc">{opt.description}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
 
           {rejecting ? (
             <div className="plan-reject">

@@ -70,6 +70,14 @@ rsync $RSYNC_FLAGS \
 rsync $RSYNC_FLAGS \
   -r "$DEV_DIR/docs/stars/" "$PUB_DIR/docs/stars/"
 
+echo "=== 同步: runtime-assets/（内置 skill，随 dist 打包）==="
+# tsup publicDir 把 runtime-assets/bundled-skills → dist/bundled-skills，desktop 通过
+# tauri resources 的 ../../dist 整包带走。缺了它 npm run build 的硬闸门会 exit(1)，
+# 公开仓库/Windows CI 直接构建失败。必须同步。
+rsync $RSYNC_FLAGS \
+  --exclude 'node_modules/' \
+  "$DEV_DIR/runtime-assets/" "$PUB_DIR/runtime-assets/"
+
 echo "=== 同步: .rivet/knowledge/（排除本地专属记录）==="
 rsync $RSYNC_FLAGS \
   --exclude='debug-windows-cmd-chcp-nul.md' \

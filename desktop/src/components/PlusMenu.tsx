@@ -92,7 +92,7 @@ export function PlusMenu(props: {
             <>
               <DropdownMenuRadioGroup
                 value={planning ? 'plan' : 'agent'}
-                onValueChange={(v) => onSetPlanMode(v as PlanModeState)}
+                onValueChange={(v) => onSetPlanMode(v === 'plan' ? 'planning' : 'off')}
               >
                 <DropdownMenuRadioItem value="plan">
                   <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>◑</span>

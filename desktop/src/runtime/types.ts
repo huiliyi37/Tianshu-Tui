@@ -12,6 +12,11 @@ export type PlanModeState = 'off' | 'planning'
 /** Lifecycle of a submitted plan document on disk. */
 export type PlanStatus = 'submitted' | 'approved' | 'executed' | 'rejected'
 
+export interface PlanOption {
+  label: string
+  description: string
+}
+
 export interface SessionRecord {
   id: string
   status: SessionStatus
@@ -139,6 +144,7 @@ export interface PlanSummary {
   path: string
   createdAt: number
   approvedAt?: number
+  options?: PlanOption[]
 }
 
 /** Full plan document including markdown content. */
@@ -150,6 +156,7 @@ export interface PlanDoc {
   status: PlanStatus
   createdAt: number | string
   approvedAt?: number | string
+  options?: PlanOption[]
 }
 
 export type SessionEventType =

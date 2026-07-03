@@ -468,8 +468,11 @@ export async function getPlan(id: string, slug: string): Promise<PlanDoc> {
 }
 
 /** Build — approve a plan and start executing it. */
-export function approvePlan(id: string, slug: string): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}/approve`)
+export function approvePlan(id: string, slug: string, selectedApproach?: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(
+    `/sessions/${id}/plans/${encodeURIComponent(slug)}/approve`,
+    selectedApproach ? { selectedApproach } : undefined,
+  )
 }
 
 /** Reject a plan with optional revision feedback. */

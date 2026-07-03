@@ -181,7 +181,8 @@ export function useSetPlanMode() {
 export function useApprovePlan() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, slug }: { id: string; slug: string }) => approvePlan(id, slug),
+    mutationFn: ({ id, slug, selectedApproach }: { id: string; slug: string; selectedApproach?: string }) =>
+      approvePlan(id, slug, selectedApproach),
     onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: qk.plans(id) })
       qc.invalidateQueries({ queryKey: qk.sessions })
@@ -194,7 +195,10 @@ export function useRejectPlan() {
   return useMutation({
     mutationFn: ({ id, slug, comment }: { id: string; slug: string; comment?: string }) =>
       rejectPlan(id, slug, comment),
-    onSuccess: (_d, { id }) => qc.invalidateQueries({ queryKey: qk.plans(id) }),
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: qk.plans(id) })
+      qc.invalidateQueries({ queryKey: qk.sessions })
+    },
   })
 }
 

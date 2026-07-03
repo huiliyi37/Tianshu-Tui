@@ -670,6 +670,23 @@ body {
 
 .plan-detail { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .plan-doc { flex: 1; overflow-y: auto; padding: var(--space-3); }
+.plan-options {
+  border-top: 1px solid var(--border);
+  padding: var(--space-2) var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+  flex-shrink: 0;
+}
+.plan-options-label { font-size: var(--text-xs); color: var(--muted); font-weight: var(--weight-medium); }
+.plan-option {
+  display: flex; align-items: flex-start; gap: var(--space-2);
+  padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+  cursor: pointer; background: var(--panel-2);
+}
+.plan-option.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.plan-option input { margin-top: 2px; }
+.plan-option-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.plan-option-label { font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.plan-option-desc { font-size: var(--text-xs); color: var(--muted); line-height: 1.4; }
 .plan-actions {
   display: flex; justify-content: flex-end; gap: var(--space-2);
   padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); flex-shrink: 0;

@@ -366,9 +366,14 @@ export function ThreadView(props: {
     },
     {
       name: '/plan',
-      desc: '创建实施方案',
+      desc: '进入 Plan 模式 · 调研后写方案',
       example: '/plan <功能描述>',
-      run: () => onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.'),
+      run: () => {
+        if (onSetPlanMode && view.planMode !== 'planning') {
+          onSetPlanMode('planning')
+        }
+        onSend('Enter plan mode. Explore the codebase and produce an implementation plan for the task I will describe next.')
+      },
     },
     {
       name: '/write-plan',
@@ -538,7 +543,7 @@ export function ThreadView(props: {
       desc: '生成 Mermaid 图表骨架',
       run: () => onSend('Generate a mermaid diagram skeleton. Types: architecture, dataflow, sequence, flowchart, comparison, state.'),
     },
-  ], [onSetApprovalMode, onSend])
+  ], [onSetApprovalMode, onSend, onSetPlanMode, view.planMode])
 
   // Lookup map for welcome cards/pills to call the actual slash command
   // run() instead of sending raw text to the model.
