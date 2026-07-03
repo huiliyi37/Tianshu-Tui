@@ -117,6 +117,7 @@ function planSummary(p: PlanDocument) {
     path: p.path,
     createdAt: p.createdAt instanceof Date ? p.createdAt.getTime() : p.createdAt,
     approvedAt: p.approvedAt instanceof Date ? p.approvedAt.getTime() : p.approvedAt,
+    options: p.options,
   }
 }
 
@@ -203,10 +204,14 @@ export function buildSessionRoutes(
     }, apiToken),
 
     // Build — approve a plan and inject it as the next turn for execution.
-    'POST /sessions/:id/plans/:slug/approve': withAuth(async (_body, params) => {
-      const ok = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!))
+    'POST /sessions/:id/plans/:slug/approve': withAuth(async (body, params) => {
+      const data = (body ?? {}) as { selectedApproach?: string }
+      const selectedApproach = typeof data.selectedApproach === 'string' && data.selectedApproach.trim()
+        ? data.selectedApproach.trim()
+        : undefined
+      const ok = await manager.approvePlan(params!.id!, decodeSlug(params!.slug!), selectedApproach)
       if (!ok) {
-        return { status: 409, body: { error: 'Session missing/running or plan not found' } }
+        return { status: 409, body: { error: 'Session missing/running, plan not found, or unknown selectedApproach' } }
       }
       return { status: 200, body: { ok: true } }
     }, apiToken),

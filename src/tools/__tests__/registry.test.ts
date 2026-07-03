@@ -58,16 +58,63 @@ describe('ToolRegistry.execute: unknown tool surfaces did-you-mean hint', () => 
     return registry
   }
 
-  it('surfaces "Did you mean: delegate_task" for `task` (substring fallback)', async () => {
+  it('transparently maps `task` → delegate_task (foreign alias, not error)', async () => {
     const registry = makeRegistry()
 
+    // `task` is a Cursor/Claude Code convention. It should transparently
+    // map to delegate_task — no error, no wasted turn.
+    const result = await registry.execute('task', {
+      input: { objective: 'test' },
+      toolUseId: 'tu-1',
+      cwd: process.cwd(),
+    })
+    assert.ok(result.content.includes('[NOTE: "task" 自动映射为 "delegate_task"'))
+    assert.ok(result.content.includes('delegate_task executed'))
+  })
+
+  it('transparently maps `TodoWrite` → todo (foreign alias, case-insensitive)', async () => {
+    const registry = makeRegistry()
+    const todoTool = fakeTool('todo')
+    // Overwrite the earlier fakeTool('todo') with one that returns a recognizable result
+    registry.register(todoTool)
+
+    const result = await registry.execute('TodoWrite', {
+      input: { action: 'read' },
+      toolUseId: 'tu-1',
+      cwd: process.cwd(),
+    })
+    assert.ok(result.content.includes('[NOTE: "TodoWrite" 自动映射为 "todo"'))
+    assert.ok(result.content.includes('todo executed'))
+  })
+
+  it('transparently maps `Agent` → delegate_task (foreign alias)', async () => {
+    const registry = makeRegistry()
+
+    const result = await registry.execute('Agent', {
+      input: { objective: 'test' },
+      toolUseId: 'tu-1',
+      cwd: process.cwd(),
+    })
+    assert.ok(result.content.includes('[NOTE: "Agent" 自动映射为 "delegate_task"'))
+    assert.ok(result.content.includes('delegate_task executed'))
+  })
+
+  it('alias resolution still checks isEnabled before executing', async () => {
+    const registry = makeRegistry()
+    // Disable delegate_task — `task` alias should throw
+    const disabled: Tool = {
+      ...fakeTool('delegate_task'),
+      isEnabled: () => false,
+    }
+    registry.register(disabled)
+
     await assert.rejects(
-      () => registry.execute('task', { input: {}, toolUseId: 'tu-1', cwd: process.cwd() }),
-      (err: Error) => {
-        assert.match(err.message, /Unknown tool: task/)
-        assert.match(err.message, /Did you mean: delegate_task/)
-        return true
-      },
+      () => registry.execute('task', {
+        input: { objective: 'test' },
+        toolUseId: 'tu-1',
+        cwd: process.cwd(),
+      }),
+      /Tool delegate_task is disabled/,
     )
   })
 

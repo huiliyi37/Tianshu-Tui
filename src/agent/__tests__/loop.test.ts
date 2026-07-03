@@ -1623,4 +1623,14 @@ describe('formatActivePlanPointer', () => {
     assert.match(out, /&lt;tag&gt;/)
     assert.match(out, /&quot;q&quot;/)
   })
+
+  it('includes selected approach when provided', () => {
+    const out = formatActivePlanPointer({
+      slug: 'my-plan',
+      title: 'My Plan',
+      selectedApproach: 'Redis cache (Recommended)',
+    })
+    assert.match(out, /已选方案/)
+    assert.match(out, /Redis cache/)
+  })
 })

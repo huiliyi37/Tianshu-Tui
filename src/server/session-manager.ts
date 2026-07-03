@@ -219,14 +219,14 @@ export interface ManagedAgent {
    * (off). Mirrors AgentLoop.enterPlanMode/exitPlanMode. Optional so lightweight
    * test doubles need not implement it.
    */
-  enterPlanMode?(): void
+  enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
   /**
    * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
    * reminder into the agent's dynamic appendix (NOT the plan body, which stays
    * on disk). Mirrors AgentLoop.setActivePlan. Optional for lightweight doubles.
    */
-  setActivePlan?(plan: { slug: string; title: string } | null): void
+  setActivePlan?(plan: { slug: string; title: string; selectedApproach?: string } | null): void
   /** Inject the session-owned background job registry so bash(run_in_background)
    *  and the `job` tool operate on an instance the server subscribes to. Optional
    *  so lightweight test doubles need not implement it. */
@@ -1386,7 +1386,7 @@ export class RuntimeSessionManager {
    * inject the approved plan as the next turn so the agent executes it. Refuses
    * when the session is missing/running or the plan can't be approved.
    */
-  async approvePlan(id: string, slug: string): Promise<boolean> {
+  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
     let approved: PlanDocument | null
@@ -1396,17 +1396,28 @@ export class RuntimeSessionManager {
       return false
     }
     if (!approved) return false
+    if (selectedApproach && approved.options && approved.options.length > 0) {
+      const known = approved.options.some(o => o.label === selectedApproach)
+      if (!known) return false
+    }
     const agent = this.ensureAgent(session)
-    // Inject a tiny pointer (slug/title/path) instead of the full plan body —
-    // the body stays the single source of truth on disk, keeping the prefix
-    // cache intact and the user turn short. setActivePlan also releases plan mode.
-    try { agent.setActivePlan?.({ slug, title: approved.title }) } catch { /* non-fatal */ }
+    try {
+      agent.setActivePlan?.({
+        slug,
+        title: approved.title,
+        selectedApproach: selectedApproach?.trim() || undefined,
+      })
+    } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
     session.record.planMode = 'off'
     this.append(session, 'plan_mode', { state: 'off' })
     this.touch(session)
     this.persistRecord(session)
-    this.run(id, `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`)
+    let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
+    if (selectedApproach?.trim()) {
+      kickoff += `\nSelected approach: ${selectedApproach.trim()} — execute ONLY this approach. Do not execute unselected alternatives.`
+    }
+    this.run(id, kickoff)
     return true
   }
 
@@ -1425,15 +1436,21 @@ export class RuntimeSessionManager {
       return false
     }
     if (!rejected) return false
+    const agent = this.ensureAgent(session)
+    try {
+      agent.enterPlanMode?.({ planFilePath: `.rivet/plans/${slug}.md` })
+    } catch { /* non-fatal */ }
+    session.record.planMode = 'planning'
+    this.append(session, 'plan_mode', { state: 'planning' })
     this.append(session, 'plan_submitted', { slug, title: rejected.title, status: 'rejected' })
     this.touch(session)
+    this.persistRecord(session)
     const note = comment?.trim()
     if (note && !session.running) {
-      const prompt =
-        `[PLAN REJECTED] ${rejected.title} (slug: ${slug})\n` +
-        `Feedback: ${note}\n\n` +
-        `Revise the plan to address this feedback, then call plan_submit again.`
-      this.run(id, prompt)
+      this.run(
+        id,
+        `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`,
+      )
     }
     return true
   }

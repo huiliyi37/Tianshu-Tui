@@ -552,6 +552,7 @@ export async function executeToolUse(
     reviewDepth: deps.config.reviewDepth,
     delegationDepth: deps.config.delegationDepth,
     abortSignal: deps.abortSignal,
+    activePlanFilePath: deps.config.activePlanFilePath,
  }
 
   // Star signature: counter training-mode regression at token level (思路 E)
@@ -683,8 +684,15 @@ export async function executeToolUse(
       // and slide the offending fingerprints out of the detection window.
    }
 
-    // Plan-mode gate — block write tools during planning phase
-    const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
+    // Plan-mode gate — block write tools during planning phase (except active plan file)
+    const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
+      ? tu.input.file_path
+      : undefined
+    const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name, {
+      cwd: deps.cwd,
+      targetFilePath: writePath,
+      activePlanFilePath: deps.config.activePlanFilePath,
+    })
     if (!planModeResult.allowed) {
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
@@ -694,9 +702,6 @@ export async function executeToolUse(
     // Sensitive-area preflight — nudge, don't block. The model must read the
     // knowledge manifest before editing prompt/memory/recall/verification/ownership
     // paths, but existing approval and edit gates remain responsible for hard safety.
-    const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
-      ? tu.input.file_path
-      : undefined
     if (writePath && deps.taskLedger && shouldRequireSensitivePreflight({ path: writePath, events: deps.taskLedger.getEvents() })) {
       callbacks.onToolResult(tu.id, tu.name, buildSensitivePreflightMessage(writePath), false)
    }

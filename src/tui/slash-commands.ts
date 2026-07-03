@@ -1446,7 +1446,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       ctx.agent.enterPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan.\n\nWhen ready, call `plan_submit` with your plan. Then:\n  /plan-list — list submitted plans\n  /plan-approve <slug> — approve and start execution\n  /plan-reject <slug> — reject with feedback' }))
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
       setIsStreaming(false)
       return true
     },
@@ -1479,6 +1479,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
+      const selectedApproach = parts.slice(2).join(' ').trim() || undefined
       if (!slug) {
         // No slug — list plans and hint
         const cwd = ctx.agent.cwd
@@ -1506,11 +1507,30 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      if (selectedApproach && approved.options && approved.options.length > 0) {
+        const known = approved.options.some(o => o.label === selectedApproach)
+        if (!known) {
+          const available = approved.options.map(o => `  \`${o.label}\``).join('\n')
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
+            isError: true,
+          }))
+          setIsStreaming(false)
+          return true
+        }
+      }
+
       // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
       // plan body stays on disk to keep the prefix cache intact. setActivePlan
       // also releases plan mode internally.
-      ctx.agent.setActivePlan({ slug, title: approved.title })
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
+      ctx.agent.setActivePlan({
+        slug,
+        title: approved.title,
+        selectedApproach: selectedApproach || undefined,
+      })
+      const approachLine = selectedApproach ? `\nSelected approach: **${selectedApproach}**` : ''
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
       setIsStreaming(false)
       return true
     },
@@ -1522,8 +1542,9 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
+      const feedback = parts.slice(2).join(' ').trim()
       if (!slug) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug>\n\nUse /plan-list to see available plans.', isError: true }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug> [feedback]\n\nUse /plan-list to see available plans.', isError: true }))
         setIsStreaming(false)
         return true
       }
@@ -1536,7 +1557,14 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nThe plan was marked REJECTED but kept on disk. Provide feedback and the agent can revise it in place.` }))
+      ctx.agent.enterPlanMode({ planFilePath: `.rivet/plans/${slug}.md` })
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nPlan mode remains active. Revise \`.rivet/plans/${slug}.md\` in place, then resubmit with \`plan action=submit\`.${feedback ? '' : '\n\nTip: /plan-reject <slug> <feedback> injects revision guidance.'}`,
+      }))
+      if (feedback && ctx.submitToAgent) {
+        ctx.submitToAgent(`User rejected the plan. Feedback:\n\n${feedback}`)
+      }
       setIsStreaming(false)
       return true
     },

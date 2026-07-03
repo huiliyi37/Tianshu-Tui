@@ -859,6 +859,22 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  app.setPlanModeToggleHandler(() => {
+    const agent = ctx!.agent
+    if (agent.planModeState === 'planning') {
+      agent.exitPlanMode()
+      app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+    } else {
+      agent.enterPlanMode()
+      const path = agent.getActivePlanFilePath()
+      app!.commitStatic([
+        '🔍 Plan Mode 已激活。Write 操作已锁定（活动计划文件除外）。',
+        path ? `\n活动计划文件: \`${path}\`` : '',
+        '\n工作流: 识别关键问题 → delegate_task 调研 → 增量写计划 → ask_user_question 或 plan submit。',
+        '\nShift+Tab 再次切换关闭。/plan-approve · /plan-reject <slug> <反馈>',
+      ].join(''))
+    }
+  })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
 
   // ── Wire agent → TuiApp ──────────────────────────────────────

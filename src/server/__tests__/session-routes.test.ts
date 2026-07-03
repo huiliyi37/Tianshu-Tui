@@ -18,11 +18,13 @@ class FakeAgent implements ManagedAgent {
   callbacks?: AgentCallbacks
   artifacts: Artifact[] = []
   runPrompts: string[] = []
-  activePlanCalls: ({ slug: string; title: string } | null)[] = []
+  activePlanCalls: ({ slug: string; title: string; selectedApproach?: string } | null)[] = []
+  enterPlanModeCalls: Array<{ planFilePath?: string } | undefined> = []
   private resolveRun?: () => void
   run(p: string, cb: AgentCallbacks) { this.runPrompts.push(p); this.callbacks = cb; return new Promise<void>((r) => { this.resolveRun = r }) }
   abort() { this.resolveRun?.() }
-  setActivePlan(plan: { slug: string; title: string } | null) { this.activePlanCalls.push(plan) }
+  setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null) { this.activePlanCalls.push(plan) }
+  enterPlanMode(opts?: { planFilePath?: string }) { this.enterPlanModeCalls.push(opts) }
   listArtifacts() { return this.artifacts }
   readArtifact(id: string) { return Promise.resolve(this.artifacts.some((a) => a.id === id) ? `raw:${id}` : null) }
   getMessages(): OaiMessage[] { return [] }
@@ -306,7 +308,8 @@ test('Plan: POST /plans/:slug/approve marks approved and starts a run', async ()
   // and the kickoff run is a short one-liner, not the full plan content.
   const agent = agents[0]!
   assert.equal(agent.activePlanCalls.length, 1)
-  assert.deepEqual(agent.activePlanCalls[0], { slug: 'gamma', title: 'Gamma' })
+  assert.equal(agent.activePlanCalls[0]!.slug, 'gamma')
+  assert.equal(agent.activePlanCalls[0]!.title, 'Gamma')
   assert.equal(agent.runPrompts.length, 1)
   const kickoff = agent.runPrompts[0]!
   assert.match(kickoff, /Gamma/)
@@ -314,8 +317,8 @@ test('Plan: POST /plans/:slug/approve marks approved and starts a run', async ()
   assert.ok(!kickoff.includes('do it'), 'kickoff must not embed the plan body')
 })
 
-test('Plan: POST /plans/:slug/reject keeps the file and marks rejected', async () => {
-  const { manager, router } = setup()
+test('Plan: POST /plans/:slug/reject keeps the file, re-enters plan mode, and kicks revision', async () => {
+  const { manager, router, agents } = setup()
   const dir = mkdtempSync(join(tmpdir(), 'rivet-plans-'))
   const plansDir = join(dir, '.rivet', 'plans')
   mkdirSync(plansDir, { recursive: true })
@@ -326,6 +329,12 @@ test('Plan: POST /plans/:slug/reject keeps the file and marks rejected', async (
   assert.equal(res.status, 200)
   const after = readFileSync(join(plansDir, 'delta.md'), 'utf-8')
   assert.match(after, /Status: REJECTED/)
+  assert.equal(manager.getSession(s.id)!.planMode, 'planning')
+  assert.equal(agents[0]!.enterPlanModeCalls.length, 1)
+  assert.deepEqual(agents[0]!.enterPlanModeCalls[0], { planFilePath: '.rivet/plans/delta.md' })
+  assert.equal(agents[0]!.runPrompts.length, 1)
+  assert.match(agents[0]!.runPrompts[0]!, /User rejected the plan/)
+  assert.match(agents[0]!.runPrompts[0]!, /too vague/)
 })
 
 // ── PlusMenu routes (models / domains / skills) ─────────────────────

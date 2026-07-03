@@ -147,6 +147,8 @@ export interface ToolCallParams {
   /** B3: delegation nesting depth of the calling agent (primary=0, worker=1).
    *  Delegate tools forward this so the coordinator can enforce the depth cap. */
   delegationDepth?: number
+  /** Active plan draft file (relative to cwd) while in plan mode. */
+  activePlanFilePath?: string | null
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */

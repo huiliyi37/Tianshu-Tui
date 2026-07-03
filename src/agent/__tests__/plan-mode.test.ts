@@ -1,10 +1,14 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS } from '../plan-mode.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { checkPlanMode, PLAN_MODE_ALLOWED_TOOLS, createActivePlanDraftPath } from '../plan-mode.js'
 import { createDefaultToolRegistry } from '../../tools/default-registry.js'
 import { WEB_SEARCH_TOOL } from '../../tools/web-search.js'
 import { createRepoGraphTool } from '../../tools/repo-graph.js'
 import { createMemoryTool } from '../../tools/memory.js'
+import { ASK_USER_QUESTION_TOOL } from '../../tools/ask-user-question.js'
 import type { ContextClaimStore } from '../../context/claim-store.js'
 
 describe('checkPlanMode', () => {
@@ -14,17 +18,35 @@ describe('checkPlanMode', () => {
     assert.deepEqual(checkPlanMode('off', 'edit_file'), { allowed: true })
   })
 
-  it('planning state allows read-only exploration tools', () => {
+  it('planning state allows read-only exploration and planning tools', () => {
     const allowedTools = ['read_file', 'read_section', 'grep', 'glob', 'repo_map',
       'inspect_project', 'related_tests', 'diff', 'todo', 'plan',
-      'repo_graph', 'web_fetch', 'web_search', 'memory']
+      'repo_graph', 'web_fetch', 'web_search', 'memory',
+      'ask_user_question', 'delegate_task']
     for (const tool of allowedTools) {
       assert.deepEqual(checkPlanMode('planning', tool), { allowed: true }, `${tool} should be allowed`)
     }
   })
 
-  it('planning state blocks write tools', () => {
-    const blockedTools = ['write_file', 'edit_file', 'bash', 'run_tests']
+  it('planning state blocks write tools except active plan file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'rivet-plan-mode-'))
+    try {
+      const planPath = '.rivet/plans/draft-test.md'
+      const blocked = checkPlanMode('planning', 'write_file', { cwd: dir, targetFilePath: 'src/foo.ts', activePlanFilePath: planPath })
+      assert.equal(blocked.allowed, false)
+
+      const allowed = checkPlanMode('planning', 'write_file', { cwd: dir, targetFilePath: planPath, activePlanFilePath: planPath })
+      assert.equal(allowed.allowed, true)
+
+      const editAllowed = checkPlanMode('planning', 'edit_file', { cwd: dir, targetFilePath: planPath, activePlanFilePath: planPath })
+      assert.equal(editAllowed.allowed, true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('planning state blocks other write tools', () => {
+    const blockedTools = ['bash', 'run_tests']
     for (const tool of blockedTools) {
       const result = checkPlanMode('planning', tool)
       assert.equal(result.allowed, false, `${tool} should be blocked`)
@@ -33,28 +55,30 @@ describe('checkPlanMode', () => {
     }
   })
 
-  it('planning state blocks delegation and delivery tools', () => {
-    const blockedTools = ['delegate_task', 'delegate_batch', 'deliver_task']
-    for (const tool of blockedTools) {
-      const result = checkPlanMode('planning', tool)
-      assert.equal(result.allowed, false, `${tool} should be blocked in plan mode`)
-      assert.ok(result.reason!.includes('Plan Mode'), `${tool} reason should mention Plan Mode`)
-    }
+  it('planning state allows delegate_batch but blocks deliver_task', () => {
+    // delegate_batch is allowed in plan mode (parallel read-only scouts for investigation)
+    const batchResult = checkPlanMode('planning', 'delegate_batch')
+    assert.equal(batchResult.allowed, true, 'delegate_batch should be allowed for parallel investigation')
+
+    // deliver_task (execution/commit) is blocked — it's a write operation
+    const deliverResult = checkPlanMode('planning', 'deliver_task')
+    assert.equal(deliverResult.allowed, false, 'deliver_task should be blocked in plan mode')
+    assert.ok(deliverResult.reason!.includes('Plan Mode'), 'deliver_task reason should mention Plan Mode')
   })
 
-  it('PLAN_MODE_ALLOWED_TOOLS excludes write and delegation tools', () => {
-    assert.ok(PLAN_MODE_ALLOWED_TOOLS instanceof Set)
-    assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('read_file'))
+  it('PLAN_MODE_ALLOWED_TOOLS includes clarification and delegation', () => {
+    assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('ask_user_question'))
+    assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('delegate_task'))
+    assert.ok(PLAN_MODE_ALLOWED_TOOLS.has('delegate_batch'))
     assert.ok(!PLAN_MODE_ALLOWED_TOOLS.has('write_file'))
-    assert.ok(!PLAN_MODE_ALLOWED_TOOLS.has('delegate_task'))
-    assert.ok(!PLAN_MODE_ALLOWED_TOOLS.has('delegate_batch'))
     assert.ok(!PLAN_MODE_ALLOWED_TOOLS.has('deliver_task'))
   })
 
-  // Drift guard: every whitelisted tool must resolve to a real registered tool.
-  // This previously broke when web_search was listed here but never registered
-  // anywhere (orphan). web_search/repo_graph/recall live in the interactive
-  // (bootstrap) layer, not the kernel default-registry.
+  it('createActivePlanDraftPath returns draft path under .rivet/plans', () => {
+    const path = createActivePlanDraftPath()
+    assert.match(path, /^\.rivet\/plans\/draft-\d+\.md$/)
+  })
+
   it('every PLAN_MODE_ALLOWED_TOOLS entry resolves to a registered tool', () => {
     const defaultNames = createDefaultToolRegistry([], { desktopTools: true, browserTool: true })
       .getDefinitions()
@@ -63,6 +87,9 @@ describe('checkPlanMode', () => {
       WEB_SEARCH_TOOL.definition.name,
       createRepoGraphTool(() => null).definition.name,
       createMemoryTool({} as ContextClaimStore).definition.name,
+      ASK_USER_QUESTION_TOOL.definition.name,
+      'delegate_task',
+      'delegate_batch',
     ]
     const available = new Set([...defaultNames, ...interactiveNames])
     for (const tool of PLAN_MODE_ALLOWED_TOOLS) {

@@ -288,6 +288,8 @@ export class TuiApp {
   private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
   /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
   private planModeProvider?: () => boolean
+  /** Shift+Tab 切换 plan/agent 模式（由 main-ansi 注入） */
+  private planModeToggleHandler?: () => void
   /** Side panel 状态变化回调（用于持久化到 session metadata） */
   private onSidePanelChange?: (open: boolean) => void
   /** Block stream writer: chunks streaming text into display-sized blocks */
@@ -579,6 +581,11 @@ export class TuiApp {
       }
 
       // ── Global shortcuts (before input line processing) ──────
+      if (key.name === 'shift_tab') {
+        this.planModeToggleHandler?.()
+        this.renderLive()
+        return
+      }
       if (key.name === 'ctrl_c') {
         if (this.isAgentActive()) {
           // Agent active (含首 token 前/纯工具窗口): abort current agent run
@@ -1993,6 +2000,11 @@ export class TuiApp {
    */
   setPlanModeProvider(provider: () => boolean): void {
     this.planModeProvider = provider
+  }
+
+  /** Shift+Tab toggles plan mode (enter/exit). Wired from main-ansi. */
+  setPlanModeToggleHandler(handler: () => void): void {
+    this.planModeToggleHandler = handler
   }
 
   /**

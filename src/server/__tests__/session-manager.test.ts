@@ -1,8 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-/** finally 是微任务、续跑决策在 setImmediate 宏任务——一个 setTimeout(5) 覆盖两者。 */
-const settle = () => new Promise((r) => setTimeout(r, 5))
+/** Flush enough event-loop iterations to cover setImmediate + setTimeout(0)
+ *  (watchdog auto-continue's two-stage timer chain). Old settle(5) was too
+ *  short when maybeWatchdogAutoContinue gained a setImmediate→setTimeout(0) hop. */
+const settle = async () => {
+  await new Promise((r) => setTimeout(r, 5))
+  await new Promise((r) => setImmediate(r))
+  await new Promise((r) => setTimeout(r, 10))
+}
 import { RuntimeSessionManager, type ManagedAgent, type ModelOption, type DelegateActivityUpdate } from '../session-manager.js'
 import type { AgentCallbacks } from '../../agent/loop-types.js'
 import type { Artifact } from '../../artifact/types.js'

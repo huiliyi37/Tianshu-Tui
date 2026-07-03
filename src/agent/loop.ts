@@ -20,6 +20,8 @@ import { buildGateConvergenceHint } from './delivery-gate-v2.js'
 import { RoutingMetricsCollector } from '../model/routing-metrics.js'
 import type { ImportGraph } from './import-graph.js'
 import type { PlanModeState } from './plan-mode.js'
+import { createActivePlanDraftPath } from './plan-mode.js'
+import { WRITING_PLANS_SKILL } from './plan-delegation.js'
 import { RepairPipeline } from './repair-pipeline.js'
 import { fourHorsemenPass, semanticRepairPass } from './repair-passes.js'
 import { ctclSanitizerPass } from './ctcl-sanitizer.js'
@@ -78,8 +80,8 @@ import { createFailureJournal, type FailureJournal } from './failure-journal.js'
 import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
-import { join } from 'node:path'
-import { writeFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -106,12 +108,15 @@ export type { ApprovalMode, AgentConfig, AgentCallbacks }
  * source of truth on disk at `.rivet/plans/<slug>.md`. The agent reads it on
  * demand and tracks steps via the existing todo mechanism.
  */
-export function formatActivePlanPointer(plan: { slug: string; title: string }): string {
+export function formatActivePlanPointer(plan: { slug: string; title: string; selectedApproach?: string }): string {
   const esc = (s: string) =>
     s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
   const slug = esc(plan.slug)
   const title = esc(plan.title)
-  return `<active-plan slug="${slug}" title="${title}" path=".rivet/plans/${slug}.md">已批准,正在执行此方案。完整步骤见该文件,需要时用 read_file 查看;开工前先用 todo 列出有序步骤跟踪进度,完成后 plan_close。</active-plan>`
+  const approach = plan.selectedApproach
+    ? `已选方案: ${esc(plan.selectedApproach)}。只执行此方案，勿执行未选中的备选。 `
+    : ''
+  return `<active-plan slug="${slug}" title="${title}" path=".rivet/plans/${slug}.md">${approach}已批准,正在执行此方案。完整步骤见该文件,需要时用 read_file 查看;开工前先用 todo 列出有序步骤跟踪进度,完成后 plan_close。</active-plan>`
 }
 
 
@@ -175,6 +180,8 @@ export class AgentLoop {
   /** Latest per-turn free-energy signals — consumed by coordinator EFE worker routing. */
   latestPolicySignals?: { efe: EFEComponents; sensorium: Sensorium }
   planModeState: PlanModeState = 'off'
+  /** Relative path to the active plan file (draft or revision target). Writable in plan mode. */
+  activePlanFilePath: string | null = null
   decisions: string[] = []
   trajectory = new TrajectoryRecorder()
   failureJournal: FailureJournal = createFailureJournal()
@@ -795,7 +802,9 @@ export class AgentLoop {
   /** Sync plan-mode state into config so tool-pipeline reads it */
   syncPlanModeToConfig(): void {
     this.config.planModeState = this.planModeState
+    this.config.activePlanFilePath = this.activePlanFilePath
     this.config.promptEngine.setPlanModeState(this.planModeState)
+    this.config.promptEngine.setActivePlanFilePath(this.activePlanFilePath)
   }
 
   setReasoningEffort(effort: import('./auto-reasoning.js').ReasoningEffort | 'auto'): void {
@@ -1121,13 +1130,29 @@ export class AgentLoop {
   }
 
   /** Enter plan mode — only read-only tools allowed. Clears any stale approved-plan pointer. */
-  enterPlanMode(): void {
+  enterPlanMode(opts?: { planFilePath?: string }): void {
     this.planModeState = 'planning'
     this.config.promptEngine.setActivePlan(null)
+
+    const cwd = this.cwd
+    if (opts?.planFilePath) {
+      this.activePlanFilePath = opts.planFilePath.replace(/\\/g, '/')
+    } else {
+      this.activePlanFilePath = createActivePlanDraftPath()
+      const abs = join(cwd, this.activePlanFilePath)
+      mkdirSync(dirname(abs), { recursive: true })
+      if (!existsSync(abs)) writeFileSync(abs, '', 'utf-8')
+    }
+    this.syncPlanModeToConfig()
+    this.markSkillInvoked(WRITING_PLANS_SKILL)
   }
 
   /** Exit plan mode — user approved, all tools allowed */
-  exitPlanMode(): void { this.planModeState = 'off' }
+  exitPlanMode(): void {
+    this.planModeState = 'off'
+    this.activePlanFilePath = null
+    this.syncPlanModeToConfig()
+  }
 
   /**
    * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
@@ -1135,18 +1160,22 @@ export class AgentLoop {
    * Approving releases plan mode (state→off) so execution tools are unblocked.
    * Cache-safe: the pointer never enters the frozen base.
    */
-  setActivePlan(plan: { slug: string; title: string } | null): void {
+  setActivePlan(plan: { slug: string; title: string; selectedApproach?: string } | null): void {
     if (!plan) {
       this.config.promptEngine.setActivePlan(null)
       return
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
     this.planModeState = 'off'
+    this.activePlanFilePath = null
     this.syncPlanModeToConfig()
   }
 
   /** Get current plan mode state */
   getPlanModeState(): PlanModeState { return this.planModeState }
+
+  /** Relative path to the active plan file while in plan mode. */
+  getActivePlanFilePath(): string | null { return this.activePlanFilePath }
 
   getPrewarmStats(): { hits: number; misses: number; hitRate: number } { return this.prewarm.stats() }
 

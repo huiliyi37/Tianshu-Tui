@@ -148,6 +148,8 @@ export interface AgentConfig {
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
   /** Plan Mode state — when 'planning', write tools are blocked in tool-pipeline. */
   planModeState?: PlanModeState
+  /** Active plan draft file (relative to cwd) — only this path is writable in plan mode. */
+  activePlanFilePath?: string | null
   /** Optional stream rules — abort and inject reminders when model output matches patterns.
    *  Each rule has a regex `pattern` and an `inject` message appended as a user reminder. */
   streamRules?: StreamRule[]

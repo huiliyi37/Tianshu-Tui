@@ -26,7 +26,16 @@ export interface PlanDocument {
   status: 'submitted' | 'approved' | 'executed' | 'rejected'
   /** 批准时间 */
   approvedAt?: Date
+  /** 多方案选项（submit 时持久化） */
+  options?: PlanOption[]
 }
+
+export interface PlanOption {
+  label: string
+  description: string
+}
+
+const PLAN_OPTIONS_FRONTMATTER_RE = /^---\nrivet-options:\s*(\[[\s\S]*?\])\s*\n---\n/
 
 /** .rivet/plans 相对于项目根目录的路径 */
 const PLANS_DIR = '.rivet/plans'
@@ -62,15 +71,42 @@ function extractTitle(content: string): string {
   return m?.[1]?.trim() || 'Untitled Plan'
 }
 
+/** 从计划 frontmatter 解析多方案选项 */
+export function parsePlanOptions(content: string): PlanOption[] | undefined {
+  const m = content.match(PLAN_OPTIONS_FRONTMATTER_RE)
+  if (!m) return undefined
+  try {
+    const parsed = JSON.parse(m[1]!) as unknown
+    if (!Array.isArray(parsed)) return undefined
+    const options = parsed.filter(
+      (item): item is PlanOption =>
+        item !== null
+        && typeof item === 'object'
+        && typeof (item as PlanOption).label === 'string'
+        && typeof (item as PlanOption).description === 'string',
+    )
+    return options.length > 0 ? options : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function buildPlanFrontmatter(options?: readonly PlanOption[]): string {
+  if (!options || options.length === 0) return ''
+  return `---\nrivet-options: ${JSON.stringify(options)}\n---\n\n`
+}
+
 /** 写计划文件。返回写入的文件路径（相对于 cwd） */
 export async function writePlan(
   cwd: string,
   slug: string,
   content: string,
+  options?: readonly PlanOption[],
 ): Promise<string> {
   await ensurePlansDir(cwd)
   const filePath = planFilePath(cwd, slug)
-  await writeFile(filePath, content, 'utf-8')
+  const body = buildPlanFrontmatter(options) + content.replace(PLAN_OPTIONS_FRONTMATTER_RE, '')
+  await writeFile(filePath, body, 'utf-8')
   return join(PLANS_DIR, `${slug}.md`)
 }
 
@@ -91,6 +127,7 @@ export async function readPlan(
       path: join(PLANS_DIR, `${slug}.md`),
       createdAt: s.birthtime,
       status,
+      options: parsePlanOptions(content),
     }
   } catch {
     return null
