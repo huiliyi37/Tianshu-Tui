@@ -425,16 +425,16 @@ export function Composer(props: {
     const seen = new Set<string>()
     const pasted: { file: File; mimeHint?: string }[] = []
     const items = e.clipboardData.items
+    let hasFile = false
     for (let i = 0; i < items.length; i++) {
       const item = items[i]!
       if (item.kind !== 'file') continue
       const f = item.getAsFile()
       if (!f || f.size === 0) continue
+      hasFile = true
       const key = `${f.name}:${f.size}:${f.lastModified}`
       if (!seen.has(key)) {
         seen.add(key)
-        // item.type is the clipboard's declared MIME (most trustworthy).
-        // f.type may be empty on macOS/Windows clipboard images.
         pasted.push({ file: f, mimeHint: item.type || undefined })
       }
     }
@@ -443,9 +443,14 @@ export function Composer(props: {
       const key = `${f.name}:${f.size}:${f.lastModified}`
       if (!seen.has(key)) {
         seen.add(key)
+        hasFile = true
         pasted.push({ file: f })
       }
     }
+
+    // preventDefault MUST run synchronously — if we await first, the browser's
+    // default paste has already inserted content, causing duplicate images.
+    if (hasFile) e.preventDefault()
 
     const classify = async (p: typeof pasted[0]) => {
       let type = p.mimeHint || p.file.type
@@ -465,8 +470,6 @@ export function Composer(props: {
     const unsupportedFiles = classified.filter(c => isUnsupportedFile(c.fileLike)).map(c => c.file)
 
     if (imageFiles.length === 0 && textFiles.length === 0 && unsupportedFiles.length === 0) return
-
-    e.preventDefault()
     if (unsupportedFiles.length > 0) {
       toast.error(formatUnsupportedFiles(unsupportedFiles))
     }
