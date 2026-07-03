@@ -12,6 +12,7 @@ import {
   MessageSquare,
 } from 'lucide-react'
 import { useUiDispatch } from '../state/store'
+import { openExternal } from '../lib/open-external'
 
 const REPO_URL = 'https://github.com/huiliyi37/Tianshu-Tui'
 const RELEASES_URL = 'https://github.com/huiliyi37/Tianshu-Tui/releases'
@@ -61,7 +62,7 @@ export function HomeSurface() {
   const [busy, setBusy] = useState(false)
 
   const open = (href: string) => {
-    window.open(href, '_blank', 'noopener,noreferrer')
+    openExternal(href)
   }
 
   const createFirstThread = () => {

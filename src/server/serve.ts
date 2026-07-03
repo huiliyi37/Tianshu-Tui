@@ -986,26 +986,6 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
     return { status: 200, body: { opened: filePath } }
   }
 
-  // Open an external URL in the system browser. `start` is a cmd builtin (not an
-  // exe), so on Windows it must be invoked via `cmd /c start "" <url>`; the empty
-  // title arg keeps URLs parsed correctly. Used by the first-run Git install
-  // dialog's "open download page" button.
-  routes['POST /open-external'] = (body) => {
-    const url = (body as Record<string, unknown>)?.url
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-      return { status: 400, body: { error: 'Missing or invalid url (must be http/https)' } }
-    }
-    import('node:child_process').then(({ execFile }) => {
-      if (process.platform === 'win32') {
-        execFile('cmd', ['/c', 'start', '', url], () => {})
-      } else {
-        const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
-        execFile(opener, [url], () => {})
-      }
-    })
-    return { status: 200, body: { opened: url } }
-  }
-
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.
   const version = process.env.npm_package_version ?? '2.9.0'
   // registryOk lets the desktop tell "sidecar up but concurrency dormant" apart

@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import { openExternal } from '../lib/open-external'
 
 // U8b — highlight.js is loaded on demand the first time we actually need to
 // highlight a code block. This keeps the initial bundle smaller and avoids
@@ -23,8 +24,9 @@ function getHljs(): Promise<Hljs> {
 // Security: rehype-raw is intentionally NOT enabled — model output is untrusted,
 // so raw HTML must never be injected. react-markdown escapes HTML by default.
 //
-// Links open in the system browser (Tauri routes window.open externally) rather
-// than navigating the app shell.
+// Links open in the system browser via the opener plugin (Tauri intercepts
+// window.open, so we route through openUrl) rather than navigating the app
+// shell.
 
 // Guards: skip highlighting a single oversized code block (cost ∝ length), and
 // bypass the whole Markdown pipeline for pathologically large messages to avoid
@@ -67,13 +69,7 @@ function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
       href={href}
       onClick={(e) => {
         e.preventDefault()
-        if (href) {
-          try {
-            window.open(href, '_blank', 'noopener,noreferrer')
-          } catch {
-            // non-fatal — sandboxed contexts may block window.open
-          }
-        }
+        if (href) openExternal(href)
       }}
     >
       {children}

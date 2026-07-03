@@ -18,6 +18,7 @@ import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { useSurfaceCommands } from './lib/use-surface-commands'
+import { openExternal } from './lib/open-external'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
 import { FirstRunGitDialog } from './components/FirstRunGitDialog'
@@ -268,7 +269,7 @@ export function App() {
             未检测到 Git Bash。当前 shell 降级为 {env.data.shell.kind === 'powershell' ? 'PowerShell' : 'cmd.exe'}，部分 bash 命令可能不兼容。
             <button
               className="banner-action"
-              onClick={() => window.open('https://git-scm.com/download/win', '_blank')}
+              onClick={() => openExternal('https://git-scm.com/download/win')}
             >
               下载 Git for Windows
             </button>

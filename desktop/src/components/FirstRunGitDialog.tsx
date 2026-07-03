@@ -8,7 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { openExternal } from '../runtime/client'
+import { openExternal } from '../lib/open-external'
 import { qk } from '../state/queries'
 
 const GIT_WIN_DOWNLOAD = 'https://git-scm.com/download/win'
@@ -25,16 +25,12 @@ export function FirstRunGitDialog({ open, onDismiss }: { open: boolean; onDismis
   const [opening, setOpening] = useState(false)
   const [rechecking, setRechecking] = useState(false)
 
-  const handleOpenDownload = async () => {
+  const handleOpenDownload = () => {
     setOpening(true)
-    try {
-      await openExternal(GIT_WIN_DOWNLOAD)
-    } catch {
-      // sidecar opener failed — fall back to a webview tab
-      window.open(GIT_WIN_DOWNLOAD, '_blank')
-    } finally {
-      setOpening(false)
-    }
+    // openExternal is fire-and-forget (plugin-opener with a window.open
+    // fallback baked in); flip the button back once dispatched.
+    openExternal(GIT_WIN_DOWNLOAD)
+    setTimeout(() => setOpening(false), 400)
   }
 
   const handleRecheck = async () => {

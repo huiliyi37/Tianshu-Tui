@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { listMcpServerTools, openExternal } from '../runtime/client'
+import { listMcpServerTools } from '../runtime/client'
+import { openExternal } from '../lib/open-external'
 import type { McpStatusResponse, McpServerConfig, McpConnectionState, McpPreset, McpServerToolsResponse } from '../runtime/types'
 
 /**
@@ -133,7 +134,7 @@ function PresetCard({
             {preset.docsUrl && (
               <button
                 className="btn-mini"
-                onClick={() => void openExternal(preset.docsUrl!)}
+                onClick={() => openExternal(preset.docsUrl!)}
               >
                 文档
               </button>
@@ -145,7 +146,7 @@ function PresetCard({
         <button
           className="btn-mini"
           style={{ marginTop: 4 }}
-          onClick={() => void openExternal(preset.docsUrl!)}
+          onClick={() => openExternal(preset.docsUrl!)}
         >
           文档
         </button>
