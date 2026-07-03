@@ -35,6 +35,7 @@ import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -407,6 +408,14 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Probe-Tracking: postTool hook — detects debug probes (console.log,
+  // debugger, .only) in write operations. Session-scoped tracker survives
+  // across turns; deliver-task gate does authoritative fs re-scan.
+  // Gated by RIVET_PROBE_TRACKING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_PROBE_TRACKING !== '0') {
+    hooks.push(createProbeTrackingHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a

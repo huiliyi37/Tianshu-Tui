@@ -41,6 +41,7 @@ import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverPro
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
+import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -94,6 +95,9 @@ export interface B1Context {
   /** Injectable typecheck runner for the review-gate backstop. Absent → the
    *  real `tsc --noEmit` is used (covers worker/headless). Tests pass a mock. */
   typecheckRunner?: import('./typecheck-gate.js').TypecheckRunner
+  /** Injectable probe scanner for the probe-residue gate. Absent → the real
+   *  scanFilesForProbes with readFileSync is used. Tests pass a mock. */
+  scanProbes?: (files: string[], cwd: string) => import('./probe-detector.js').ProbeHit[]
 }
 
 // ── Post-commit review batching ──
@@ -611,6 +615,24 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           lines.push(...formatReadButNeverProduced(falseGreen))
         } catch {
           // best-effort: never let the nudge break delivery
+        }
+
+        // Probe-residue gate: scan owned files for leftover debug probes
+        // (console.log/debugger/.only etc.). YELLOW, non-blocking — the model
+        // may have intentionally added logging. fs re-scan is authoritative:
+        // probes already cleaned by a later edit won't be in the file.
+        try {
+          const scanner = ctx.scanProbes ?? ((files, cwd) => {
+            return scanFilesForProbes(files, cwd, (p) => {
+              try { return readFileSync(p, 'utf-8') } catch { return null }
+            })
+          })
+          const probeHits = scanner(filesToCommit, params.cwd)
+          if (probeHits.length > 0) {
+            lines.push(...formatProbeHits(probeHits))
+          }
+        } catch {
+          // best-effort: never let probe scanning break delivery
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)
