@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs'
+import { getHeapStatistics } from 'node:v8'
 
 export interface MemorySample {
   timestamp: number
@@ -34,6 +35,17 @@ const MAX_MEMORY_SAMPLES = 12
 function defaultMemoryLimitBytes(): number {
   const configured = Number(process.env.RIVET_MEMORY_LIMIT_BYTES)
   if (Number.isFinite(configured) && configured > 0) return configured
+  // Read the actual V8 old-space ceiling so heapRatio/rssRatio track the real
+  // crash point. On the desktop the sidecar is spawned as `node main.js` (the
+  // tsup shebang's --max-old-space-size is ignored, entirely so on Windows), so
+  // this reflects whatever ceiling the launcher passed — the hardcoded 1GB below
+  // otherwise decouples every memory-pressure signal from reality.
+  try {
+    const limit = getHeapStatistics().heap_size_limit
+    if (Number.isFinite(limit) && limit > 0) return limit
+  } catch {
+    // getHeapStatistics unavailable — fall back to the conservative constant.
+  }
   return DEFAULT_MEMORY_LIMIT_BYTES
 }
 

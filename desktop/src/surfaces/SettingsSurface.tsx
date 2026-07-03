@@ -21,7 +21,7 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getAutonomyConfig, setAutonomyConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
 import { toast } from 'sonner'
 import type { McpStatusResponse, McpServerConfig, McpPreset } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
@@ -201,6 +201,7 @@ export function SettingsSurface() {
               <AutonomyControl value={autonomy} onChange={pickAutonomy} />
               <div className="meta">{t('autonomyHint')}</div>
             </section>
+            <CheckpointSection />
             <section className="settings-group">
               <h4>{t('toolDensity')}</h4>
               <Select value={ui.toolDensity} onValueChange={(v) => pickDensity(v as ToolDensity)}>
@@ -305,6 +306,7 @@ export function SettingsSurface() {
                 </dl>
               )}
             </section>
+            <AutostartSection />
             <PlatformSection />
             <StorageLocationSection />
             <StorageSection />
@@ -335,7 +337,6 @@ const HELP_COMMANDS: HelpCmd[] = [
   { cmd: '/council <目标>', desc: <>议事会：多星域专家对抗会诊，<strong>只出计划不执行</strong>。可指定席位、辩论轮数；每席可在「集成 → 路由」配成异构。</> },
   { cmd: '/review [关注点]', desc: <>L2 审查：对当前未提交改动派单个对抗验证审查员（<code>deliver_task</code> commit + L2）。</> },
   { cmd: '/review max [关注点]', desc: <>L3 审查编队：5 名审查员并行复核（<code>deliver_task</code> commit + L3）。大改动或交付前用它兜底。</> },
-  { cmd: '/goal <高层目标>', desc: <>自主目标：设定高层目标后<strong>跨多个 turn 持续自主执行</strong>直到达成。用 <code>/cancel-goal</code> 取消。</> },
   { cmd: '/plan <功能>', desc: <>规划模式：先读代码，出一份带 Mermaid 图 + TDD 步骤的实现计划（不写实现代码），保存到 <code>docs/superpowers/plans/</code>。</> },
 ]
 
@@ -476,6 +477,98 @@ function formatBytes(n: number): string {
  * sidecar start (the target is resolved once at startup). Per-project overrides
  * still go through the project's .rivet-config.json `editor` block.
  */
+/** W5 — launch-at-login toggle (tauri-plugin-autostart). Windows: HKCU Run key;
+    macOS: LaunchAgent. Hidden entirely in browser-dev (no Tauri runtime). */
+function AutostartSection() {
+  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!isTauri) return
+    void import('@tauri-apps/plugin-autostart')
+      .then((m) => m.isEnabled())
+      .then(setEnabled)
+      .catch(() => setEnabled(null))
+  }, [isTauri])
+
+  const toggle = useCallback(async () => {
+    if (enabled === null || busy) return
+    setBusy(true)
+    try {
+      const m = await import('@tauri-apps/plugin-autostart')
+      if (enabled) await m.disable()
+      else await m.enable()
+      setEnabled(await m.isEnabled())
+    } catch (err) {
+      toast.error(`开机自启设置失败：${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [enabled, busy])
+
+  if (!isTauri || enabled === null) return null
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>开机自启</h4>
+        <p className="meta">登录系统时自动启动天枢（Windows 注册表 Run 键 / macOS LaunchAgent）。</p>
+      </div>
+      <label className="flex items-center gap-2 text-xs text-text" style={{ cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          disabled={busy}
+          onChange={() => void toggle()}
+        />
+        <span>{enabled ? '已启用 — 登录时自动启动' : '未启用'}</span>
+      </label>
+    </section>
+  )
+}
+
+/** C3 刹车 — 自治档检查点档位（每 N 轮暂停等确认，0 = 关）。仅自治档生效。 */
+function CheckpointSection() {
+  const [value, setValue] = useState<number | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    void getAutonomyConfig().then((c) => setValue(c.checkpointEveryTurns)).catch(() => setValue(null))
+  }, [])
+
+  const update = useCallback(async (next: number) => {
+    setMsg(null)
+    setValue(next)
+    try {
+      await setAutonomyConfig({ checkpointEveryTurns: next })
+      setMsg('已保存 · 新会话生效')
+    } catch (err) {
+      setMsg(`保存失败：${(err as Error).message}`)
+    }
+  }, [])
+
+  if (value === null) return null
+
+  return (
+    <section className="settings-group">
+      <h4>自治检查点</h4>
+      <Select value={String(value)} onValueChange={(v) => void update(Number(v))}>
+        <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="10">每 10 轮暂停</SelectItem>
+          <SelectItem value="20">每 20 轮暂停</SelectItem>
+          <SelectItem value="0">关闭</SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="meta">
+        自治档（免批准）连续执行到设定轮数时暂停，等你确认方向后再继续——防止「刹不住」。受监督档位不受影响。
+      </div>
+      {msg && <div className="meta">{msg}</div>}
+    </section>
+  )
+}
+
 function PlatformSection() {
   const [cfg, setCfg] = useState<EditorConfig | null>(null)
   const [msg, setMsg] = useState<string | null>(null)

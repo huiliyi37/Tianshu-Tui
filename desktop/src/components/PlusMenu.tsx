@@ -57,6 +57,8 @@ export function PlusMenu(props: {
   onRunCommand: (cmd: ComposerCommand) => void
   /** Open the "派子代理" dispatch dialog (user-launched background subagent). */
   onDelegate?: () => void
+  /** Send a slash workflow command (/council, /team) — opens the workflow prompt. */
+  onWorkflow?: (cmd: string) => void
   onClose: () => void
   /** Controlled open state for the root dropdown. */
   open?: boolean
@@ -64,7 +66,7 @@ export function PlusMenu(props: {
 }) {
   const {
     sessionId, menuRev, sessionRunning, planMode, onSetPlanMode,
-    onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onClose,
+    onPickImage, imageDisabled, commands, onRunCommand, onDelegate, onWorkflow, onClose,
     open, onOpenChange,
   } = props
   const planning = planMode === 'planning'
@@ -90,7 +92,7 @@ export function PlusMenu(props: {
             <>
               <DropdownMenuRadioGroup
                 value={planning ? 'plan' : 'agent'}
-                onValueChange={(v) => onSetPlanMode(v as PlanModeState)}
+                onValueChange={(v) => onSetPlanMode(v === 'plan' ? 'planning' : 'off')}
               >
                 <DropdownMenuRadioItem value="plan">
                   <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>◑</span>
@@ -117,6 +119,21 @@ export function PlusMenu(props: {
               <span>派子代理</span>
               <span className="ml-auto text-xs text-muted-foreground">后台跑</span>
             </DropdownMenuItem>
+          )}
+
+          {onWorkflow && (
+            <>
+              <DropdownMenuItem onClick={pick(() => onWorkflow('/council'))}>
+                <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>♟</span>
+                <span>议事会</span>
+                <span className="ml-auto text-xs text-muted-foreground">多模型评审</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={pick(() => onWorkflow('/team'))}>
+                <span className="inline-flex w-4 justify-center text-muted-foreground" aria-hidden>⬡</span>
+                <span>团队模式</span>
+                <span className="ml-auto text-xs text-muted-foreground">多 agent 协作</span>
+              </DropdownMenuItem>
+            </>
           )}
 
           {commands && commands.length > 0 && (

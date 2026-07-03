@@ -37,6 +37,7 @@ import {
   type PlanDocument,
 } from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
+import { WatchdogRecoveryPolicy } from '../agent/watchdog-recovery-policy.js'
 import { buildDomainPickerEntries, type DomainPickerEntry } from '../agent/domain-picker-entries.js'
 import { starDomainRegistry } from '../agent/star-domain-registry.js'
 import type { ActiveStarDomain } from '../agent/star-domain.js'
@@ -84,6 +85,10 @@ export type SessionEventType =
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'
+  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
+  | 'watchdog_recovery'
+  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
+  | 'autonomy_checkpoint'
 
 export interface SessionEvent {
   seq: number
@@ -136,6 +141,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size (max tokens). Absent → session is idle/rehydrated. */
   contextWindow?: number
+  /** Current reasoning effort level (off/low/medium/high/max). Absent → model default. */
+  reasoningEffort?: string
   /** Archived (closed) sessions are excluded from listSessions() and hidden in the desktop sidebar. */
   archived?: boolean
   /** Git worktree branch name — set when the session was created with isolated worktree. */
@@ -212,18 +219,29 @@ export interface ManagedAgent {
    * (off). Mirrors AgentLoop.enterPlanMode/exitPlanMode. Optional so lightweight
    * test doubles need not implement it.
    */
-  enterPlanMode?(): void
+  enterPlanMode?(opts?: { planFilePath?: string }): void
   exitPlanMode?(): void
   /**
    * Set (or clear) the approved-plan pointer. Injects a tiny slug/title/path
    * reminder into the agent's dynamic appendix (NOT the plan body, which stays
    * on disk). Mirrors AgentLoop.setActivePlan. Optional for lightweight doubles.
    */
-  setActivePlan?(plan: { slug: string; title: string } | null): void
+  setActivePlan?(plan: { slug: string; title: string; selectedApproach?: string } | null): void
   /** Inject the session-owned background job registry so bash(run_in_background)
    *  and the `job` tool operate on an instance the server subscribes to. Optional
    *  so lightweight test doubles need not implement it. */
   setJobs?(jobs: import('../tools/job-store.js').SessionJobs): void
+  /**
+   * Mount an EXTENDED-layer tool onto the main agent (mirrors AgentLoop.enableTool).
+   * Used by workflow slash-command resolution to ensure prompt-declared tools are
+   * visible before run. Optional so lightweight test doubles need not implement it.
+   */
+  enableTool?(name: string): {
+    status: 'mounted' | 'already-active' | 'not-extended' | 'unknown' | 'gating-off'
+    cacheImpact: 'prefix-invalidated' | 'none'
+  }
+  /** Current reasoning effort level (off/low/medium/high/max). */
+  getReasoningEffort?(): string | undefined
   /** Rewind: return the current message list (for listing rewind points). */
   getMessages(): OaiMessage[]
   /** Rewind: replace the message list (truncate to a prior point). */
@@ -398,6 +416,8 @@ export interface RuntimeSessionManagerOptions {
   maxLoadedSessions?: number
   /** Auto-resolve a pending intervention after this many ms. 0 = never. Default 0. */
   approvalTimeoutMs?: number
+  /** C2 刹车 — watchdog 停滞续跑前的可取消倒计时窗口（ms）。Default 5000. */
+  watchdogContinueDelayMs?: number
   /** Optional durable store. When set, sessions survive sidecar restarts. */
   persistence?: SessionPersistenceAdapter
   /**
@@ -489,6 +509,23 @@ interface InternalSession {
    * report consistent elapsed. Lazily created.
    */
   delegationStartedAt?: Map<string, number>
+  /** Watchdog stall 恢复状态机（与 TUI 共享实现），随 session 生命周期。 */
+  watchdogPolicy?: WatchdogRecoveryPolicy
+  /** 最近一次 onAbort 携带的 reason（watchdog 家族判定用）。每次 run 起跑清空。 */
+  lastAbortReason?: string
+  /** onAbort 时刻是否有审批挂起——必须在此捕获，run().finally 的 rejectAllPending 会清掉 pending map。 */
+  abortWhileApprovalPending?: boolean
+  /** 最近一次审批被拒的时刻（this.now() 读数），驱动 grace 窗口抑制。 */
+  lastApprovalDeniedAt?: number
+  /** 标记下一次 run 是 watchdog 自动续跑（跳过 recordUserSubmit，与 TUI 的
+   *  onSubmitCallback 直呼路径对齐——自动续跑不得重置 consecutive）。 */
+  watchdogAutoResubmit?: boolean
+  /** 用户在 watchdog stall→setImmediate 续跑窗口内 abort → 置 true 抑制续跑。
+   *  abort() 对已停会话是空操作（status 已 aborted），不加此标记则窄窗口内
+   *  自动续跑会盖掉用户刚表达的「停」。run() 起跑时清。 */
+  watchdogRecoveryCancelled?: boolean
+  /** C2 刹车 — watchdog 续跑倒计时定时器。窗口内用户 abort / 新 prompt 取消。 */
+  watchdogContinueTimer?: NodeJS.Timeout
 }
 
 const REDACTED = '[REDACTED]'
@@ -496,6 +533,10 @@ const SENSITIVE_KEY = /(?:api[_-]?key|token|secret|password|authorization)/i
 
 /** Tools that spawn worker agents — surfaced as delegation-tree nodes (N3). */
 const DELEGATION_TOOLS = new Set(['delegate_task', 'delegate_batch', 'team_orchestrate'])
+
+/** 审批拒绝后的 watchdog 续跑抑制窗口——与 TuiApp.APPROVAL_STALL_GRACE_MS 对齐：
+ *  拒绝后立刻 stall 的自动 continue 只会重发同一个被拒调用（deny→continue→deny 环）。 */
+const WATCHDOG_APPROVAL_GRACE_MS = 5_000
 
 /** Cap on concurrent user-dispatched background workers per session (guards the
  *  shared coordinator from being swamped). */
@@ -557,6 +598,7 @@ export class RuntimeSessionManager {
   /** LRU of session ids whose event log is currently resident (oldest first). */
   private readonly loadedOrder: string[] = []
   private readonly approvalTimeoutMs: number
+  private readonly watchdogContinueDelayMs: number
   private readonly persistence?: SessionPersistenceAdapter
   private readonly getRegistry?: () => SessionRegistry | undefined
   private readonly listModelsFn?: () => ModelOption[]
@@ -570,6 +612,7 @@ export class RuntimeSessionManager {
     this.maxEvents = opts.maxEvents ?? 5000
     this.maxLoadedSessions = opts.maxLoadedSessions ?? 16
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 0
+    this.watchdogContinueDelayMs = opts.watchdogContinueDelayMs ?? 5_000
     this.persistence = opts.persistence
     this.getRegistry = opts.getSessionRegistry
     this.listModelsFn = opts.listModels
@@ -926,6 +969,20 @@ export class RuntimeSessionManager {
   run(id: string, prompt: string, images?: string[]): boolean {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    const wasAutoResubmit = session.watchdogAutoResubmit === true
+    session.watchdogAutoResubmit = false
+    session.watchdogRecoveryCancelled = false
+    // C2 — 任何新 run（用户 prompt 或倒计时自身触发的 continue）都终结待续跑窗口。
+    if (session.watchdogContinueTimer) {
+      clearTimeout(session.watchdogContinueTimer)
+      session.watchdogContinueTimer = undefined
+    }
+    session.lastAbortReason = undefined
+    session.abortWhileApprovalPending = false
+    session.watchdogPolicy ??= new WatchdogRecoveryPolicy()
+    // 用户主动提交恢复续跑预算；自动续跑注入的 'continue' 不算（与 TUI 的
+    // onSubmitCallback 直呼路径一致，否则 consecutive cap 形同虚设）。
+    if (!wasAutoResubmit) session.watchdogPolicy.recordUserSubmit()
     // Materialize the on-disk log before appending — otherwise a reconnecting
     // viewer (since=0) would replay only this run's events, not the history.
     this.ensureEvents(session)
@@ -976,6 +1033,7 @@ export class RuntimeSessionManager {
         this.touch(session)
         this.append(session, 'done', { status: session.record.status })
         this.persistRecord(session)
+        this.maybeWatchdogAutoContinue(session)
       })
     return true
   }
@@ -1328,7 +1386,7 @@ export class RuntimeSessionManager {
    * inject the approved plan as the next turn so the agent executes it. Refuses
    * when the session is missing/running or the plan can't be approved.
    */
-  async approvePlan(id: string, slug: string): Promise<boolean> {
+  async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
     let approved: PlanDocument | null
@@ -1338,17 +1396,28 @@ export class RuntimeSessionManager {
       return false
     }
     if (!approved) return false
+    if (selectedApproach && approved.options && approved.options.length > 0) {
+      const known = approved.options.some(o => o.label === selectedApproach)
+      if (!known) return false
+    }
     const agent = this.ensureAgent(session)
-    // Inject a tiny pointer (slug/title/path) instead of the full plan body —
-    // the body stays the single source of truth on disk, keeping the prefix
-    // cache intact and the user turn short. setActivePlan also releases plan mode.
-    try { agent.setActivePlan?.({ slug, title: approved.title }) } catch { /* non-fatal */ }
+    try {
+      agent.setActivePlan?.({
+        slug,
+        title: approved.title,
+        selectedApproach: selectedApproach?.trim() || undefined,
+      })
+    } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
     session.record.planMode = 'off'
     this.append(session, 'plan_mode', { state: 'off' })
     this.touch(session)
     this.persistRecord(session)
-    this.run(id, `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`)
+    let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
+    if (selectedApproach?.trim()) {
+      kickoff += `\nSelected approach: ${selectedApproach.trim()} — execute ONLY this approach. Do not execute unselected alternatives.`
+    }
+    this.run(id, kickoff)
     return true
   }
 
@@ -1367,15 +1436,21 @@ export class RuntimeSessionManager {
       return false
     }
     if (!rejected) return false
+    const agent = this.ensureAgent(session)
+    try {
+      agent.enterPlanMode?.({ planFilePath: `.rivet/plans/${slug}.md` })
+    } catch { /* non-fatal */ }
+    session.record.planMode = 'planning'
+    this.append(session, 'plan_mode', { state: 'planning' })
     this.append(session, 'plan_submitted', { slug, title: rejected.title, status: 'rejected' })
     this.touch(session)
+    this.persistRecord(session)
     const note = comment?.trim()
     if (note && !session.running) {
-      const prompt =
-        `[PLAN REJECTED] ${rejected.title} (slug: ${slug})\n` +
-        `Feedback: ${note}\n\n` +
-        `Revise the plan to address this feedback, then call plan_submit again.`
-      this.run(id, prompt)
+      this.run(
+        id,
+        `User rejected the plan. Feedback:\n\n${note}\n\nRevise the plan in \`.rivet/plans/${slug}.md\`, then call plan action=submit again.`,
+      )
     }
     return true
   }
@@ -1519,6 +1594,7 @@ export class RuntimeSessionManager {
     if (s.agent) {
       try { record.contextTokens = s.agent.getEstimatedTokens?.() } catch { /* non-fatal */ }
       try { record.contextWindow = s.agent.getContextWindow?.() } catch { /* non-fatal */ }
+      try { record.reasoningEffort = s.agent.getReasoningEffort?.() } catch { /* non-fatal */ }
     }
     const persona = resolveDomainPersona(record.domain)
     record.domainGlyph = persona.glyph
@@ -1595,6 +1671,15 @@ export class RuntimeSessionManager {
     if (!s) return false
     if (s.record.status === 'running') {
       s.record.status = 'aborted'
+    }
+    // 窄窗口竞态修复：watchdog stall 后 finally → setImmediate 续跑之间，用户
+    // abort 对已停会话是空操作。设此标记让 setImmediate 守卫放弃续跑。
+    s.watchdogRecoveryCancelled = true
+    // C2 — 取消进行中的续跑倒计时（用户点了「取消」或 Esc）。
+    if (s.watchdogContinueTimer) {
+      clearTimeout(s.watchdogContinueTimer)
+      s.watchdogContinueTimer = undefined
+      this.append(s, 'watchdog_recovery', { cancelled: true })
     }
     s.agent?.abort()
     this.rejectAllPending(s, 'aborted')
@@ -1705,6 +1790,18 @@ export class RuntimeSessionManager {
   }
 
   /**
+   * Mount an EXTENDED-layer tool onto the session's agent (workflow auto-mount).
+   * Returns the mount status, or undefined if the session/agent lacks enableTool
+   * (lightweight doubles). No-op if gating is off (tool already visible).
+   */
+  enableTool(id: string, name: string): { status: string; cacheImpact: string } | undefined {
+    const session = this.sessions.get(id)
+    if (!session) return undefined
+    const agent = this.ensureAgent(session)
+    return agent.enableTool?.(name)
+  }
+
+  /**
    * Resolve a pending approval. Returns false if the request is gone.
    * An optional `editedInput` lets the human tweak the tool input
    * (e.g. per-hunk edit picks) before it runs — flows through ApprovalResult.
@@ -1729,6 +1826,7 @@ export class RuntimeSessionManager {
       result.editedInput = editedInput
     }
     pend.resolve(result)
+    if (!approved) s.lastApprovalDeniedAt = this.now()
     this.recountApprovals(s)
     this.append(s, 'approval_resolved', {
       requestId,
@@ -2033,6 +2131,9 @@ export class RuntimeSessionManager {
         }
       },
       onToolResult: (toolId, name, result, isError, _rawPath, uiContent) => {
+        // 终态才计进度单元；isError === undefined 是流式 chunk（TUI 侧同款过滤，
+        // 否则单次长输出工具就能伪装稀疏 stall）。
+        if (isError !== undefined) session.watchdogPolicy?.recordToolResult()
         this.append(session, 'tool_result', {
           id: toolId,
           name,
@@ -2055,10 +2156,16 @@ export class RuntimeSessionManager {
         }
         this.scanArtifacts(session)
       },
-      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) =>
-        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) }),
+      onTurnComplete: (usage, turnNumber, isFinal, evidenceSummary) => {
+        session.watchdogPolicy?.recordTurnComplete()
+        this.append(session, 'turn_complete', { usage, turnNumber, isFinal: !!isFinal, ...(isFinal && evidenceSummary ? { evidence: evidenceSummary } : {}) })
+      },
       onError: (err) => this.append(session, 'error', { error: redactText(err.message) }),
-      onAbort: () => {
+      onAbort: (reason) => {
+        session.lastAbortReason = reason
+        // 在 finally 的 rejectAllPending 清场之前捕获审批挂起态。
+        session.abortWhileApprovalPending =
+          [...session.pending.values()].some((p) => p.kind === 'approval')
         if (session.record.status === 'running') session.record.status = 'aborted'
       },
       onCheckpoint: (hash) => this.append(session, 'checkpoint', { hash }),
@@ -2084,6 +2191,10 @@ export class RuntimeSessionManager {
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
       onSteerDrain: () => session.steer.drain(),
+      // C3 — 自治档检查点：run 在 N 轮后干净收尾，桌面渲染确认卡片。
+      onAutonomyCheckpoint: (turnsDone) => {
+        this.append(session, 'autonomy_checkpoint', { turns: turnsDone })
+      },
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the
       // delegation-tree parent). Emitted alongside the existing text stream.
@@ -2108,6 +2219,7 @@ export class RuntimeSessionManager {
         pend.timer = setTimeout(() => {
           if (session.pending.delete(requestId)) {
             resolve({ approved: false })
+            session.lastApprovalDeniedAt = this.now()
             this.recountApprovals(session)
             this.append(session, 'approval_resolved', { requestId, decision: 'timeout' })
           }
@@ -2116,6 +2228,52 @@ export class RuntimeSessionManager {
       session.pending.set(requestId, pend)
       this.recountApprovals(session)
       this.append(session, 'approval_required', { requestId, toolName: name, input: redactValue(input) })
+    })
+  }
+
+  /**
+   * Watchdog stall 自动恢复（桌面端对齐 TUI v3）：run settle 后判定是否注入
+   * 'continue'。必须经 setImmediate 延迟——给排队中的用户 HTTP 动作（run/archive）
+   * 让路，执行前复核会话仍处 aborted 且无人抢跑（TUI「让位守卫」的桌面对应物）。
+   *
+   * C2 刹车：决定续跑后不再立即重发——先追加带 pendingAutoContinue+delayMs 的
+   * watchdog_recovery 事件（桌面渲染倒计时卡片），倒计时结束复核守卫再续跑。
+   * 窗口内用户 abort（置 watchdogRecoveryCancelled）或发新 prompt（run() 清
+   * 定时器）都能取消——「Loop 续跑刹不住」的修复点。
+   */
+  private maybeWatchdogAutoContinue(session: InternalSession): void {
+    const reason = session.lastAbortReason
+    if (!reason?.startsWith('watchdog')) return
+    const policy = session.watchdogPolicy
+    if (!policy) return
+    const suppressed = session.abortWhileApprovalPending === true
+      || (session.lastApprovalDeniedAt != null
+          && this.now() - session.lastApprovalDeniedAt < WATCHDOG_APPROVAL_GRACE_MS)
+    setImmediate(() => {
+      // 让位守卫：用户已重新驱动（running）、状态被改（非 aborted）、已归档，
+      // 或用户在窄窗口内 abort 过 → 放弃续跑。
+      if (session.running || session.record.status !== 'aborted' || session.record.archived) return
+      if (session.watchdogRecoveryCancelled) return
+      const decision = policy.onStall({ suppressed })
+      const delayMs = this.watchdogContinueDelayMs
+      this.append(session, 'watchdog_recovery', {
+        reason,
+        autoContinue: decision.autoContinue,
+        ...(decision.stopReason ? { stopReason: decision.stopReason } : {}),
+        ...(decision.autoContinue ? { dense: decision.dense === true, pendingAutoContinue: true, delayMs } : {}),
+        ...policy.snapshot(),
+      })
+      if (!decision.autoContinue) return
+      const timer = setTimeout(() => {
+        session.watchdogContinueTimer = undefined
+        // 倒计时后复核同一组守卫——期间用户可能已 abort / 提交新 prompt / 归档。
+        if (session.running || session.record.status !== 'aborted' || session.record.archived) return
+        if (session.watchdogRecoveryCancelled) return
+        session.watchdogAutoResubmit = true
+        if (!this.run(session.record.id, 'continue')) session.watchdogAutoResubmit = false
+      }, delayMs)
+      timer.unref?.()
+      session.watchdogContinueTimer = timer
     })
   }
 
@@ -2138,6 +2296,7 @@ export class RuntimeSessionManager {
   }
 
   private rejectAllPending(session: InternalSession, reason: string): void {
+    if (session.pending.size > 0) session.lastApprovalDeniedAt = this.now()
     for (const [requestId, pend] of session.pending) {
       if (pend.timer) clearTimeout(pend.timer)
       pend.resolve({ approved: false })

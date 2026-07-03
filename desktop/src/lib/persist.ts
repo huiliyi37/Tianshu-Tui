@@ -14,6 +14,7 @@ const KEY_JOBS_DOCK = 'tianshu.jobsDockVisible'
 const KEY_TABS = 'tianshu.openTabs'
 const KEY_SPLIT_MODE = 'tianshu.splitMode'
 const KEY_NOTIF_PREF = 'tianshu.notifPref'
+const KEY_VIEW_MODE = 'tianshu.viewMode'
 
 // ── Split mode (Phase 3 preview, persisted now) ──
 
@@ -45,6 +46,25 @@ export function loadNotifPref(): NotifPref {
 
 export function saveNotifPref(pref: NotifPref): void {
   try { localStorage.setItem(KEY_NOTIF_PREF, pref) } catch { /* non-fatal */ }
+}
+
+// ── Thread view mode (P1-2, Claude Desktop transcript view) ──
+// normal: timeline groups collapsed (current default)
+// verbose: timeline groups expanded
+// summary: assistant/user text only — tools and thinking hidden
+
+export type ViewMode = 'normal' | 'verbose' | 'summary'
+
+export function loadViewMode(): ViewMode {
+  try {
+    const v = localStorage.getItem(KEY_VIEW_MODE)
+    if (v === 'normal' || v === 'verbose' || v === 'summary') return v
+  } catch { /* non-fatal */ }
+  return 'normal'
+}
+
+export function saveViewMode(mode: ViewMode): void {
+  try { localStorage.setItem(KEY_VIEW_MODE, mode) } catch { /* non-fatal */ }
 }
 
 // ── Tool density ──

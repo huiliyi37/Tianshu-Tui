@@ -4,6 +4,7 @@ import { compressDeadEnds, formatDeadEndRules } from '../../context/dead-end-rul
 import type { DeadEndEntry } from '../../context/dead-end-rules.js'
 import type { AdvisoryBus } from '../advisory-bus.js'
 import { shouldKick } from '../dissipative-kick.js'
+import { matchesDeadEnd } from '../dead-end-match.js'
 
 export interface SignalConsumerRuntimeHookOptions {
   /** Avoid repeating identical injected hints across turns. Default true. */
@@ -69,12 +70,7 @@ export function createSignalConsumerRuntimeHook(options: SignalConsumerRuntimeHo
         const recentTargets = ctx.snapshot.recentToolHistory.map(t => t.target).filter(Boolean)
         const hasFileContext = recentTargets.length > 0
         const relevant = hasFileContext
-          ? deadEnds.filter(p => {
-              for (const rt of recentTargets) {
-                if (p.path.includes(rt) || rt.includes(p.path)) return true
-              }
-              return false
-            })
+          ? deadEnds.filter(p => matchesDeadEnd(p.path, recentTargets))
           : deadEnds
         if (relevant.length === 0) return
         const seen = new Set<string>()

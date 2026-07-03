@@ -941,6 +941,7 @@ export function createAgentRuntime(deps: {
       toolRegistry,
       maxTurns: config.agent.maxTurns,
       maxAutoContinue: config.agent.maxAutoContinue,
+      checkpointEveryTurns: config.agent.checkpointEveryTurns,
       getSessionMemoryState: () => persist.getSessionMemoryState(),
       fileHistory,
       contextClaimStore: claimStore,
@@ -997,6 +998,7 @@ export function createAgentRuntime(deps: {
     // groupTeamTasks same-file serialization prevent stomping. Mirrors the real
     // "multiple sessions, one branch" workflow.
     sharedWorktree: true,
+    patcherTier: config.workers.patcherTier,
   })
 
   return { agent }

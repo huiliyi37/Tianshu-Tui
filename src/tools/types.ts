@@ -147,6 +147,8 @@ export interface ToolCallParams {
   /** B3: delegation nesting depth of the calling agent (primary=0, worker=1).
    *  Delegate tools forward this so the coordinator can enforce the depth cap. */
   delegationDepth?: number
+  /** Active plan draft file (relative to cwd) while in plan mode. */
+  activePlanFilePath?: string | null
   /** AbortSignal from the tool pipeline — fires when the tool-level timeout
    *  rejects. Delegate tools propagate this to the coordinator so zombie
    *  workers are cleaned up immediately. */
@@ -183,6 +185,9 @@ export interface VerificationMetadata {
   timestamp?: number
 }
 
+/** Classification of a failing shell result — shared by ToolResult + pipeline signatures. */
+export type ToolErrorClass = 'environment' | 'exec-failure' | 'timeout'
+
 export interface ToolResult {
   /** Content sent to model as tool_result */
   content: string
@@ -212,8 +217,10 @@ export interface ToolResult {
   /** Classification of a failing shell result. 'environment' = the command could not
    *  run because the host lacks it (command-not-found / shell-not-found), NOT a model
    *  competence failure — downstream (momentum/doom/approval) must not penalise these,
-   *  otherwise benign Windows command-name differences make the agent timid. */
-  errorClass?: 'environment' | 'exec-failure'
+   *  otherwise benign Windows command-name differences make the agent timid.
+   *  'timeout' = the command exceeded its budget — slow ≠ dead-end, so dead-end
+   *  pheromone deposition must exclude these too. */
+  errorClass?: ToolErrorClass
   /** Executed command (bash) — used by ToolAccumulator for per-command collapse summaries. */
   command?: string
   /** Signal the turn loop to end after this tool result (e.g. ask_user_question

@@ -3,7 +3,7 @@ import type { OaiChatRequest, OaiMessage, OaiToolDefinition } from './oai-types.
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
-import { wireAbortToReaderCancel } from './abort-reader.js'
+import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 
 export interface AnthropicClientConfig {
   baseUrl: string
@@ -336,6 +336,8 @@ export class AnthropicClient implements StreamClient {
     let streamTimedOut = false
     let idleTimer: ReturnType<typeof setTimeout> | null = null
     let receivedFirstChunk = false
+    /** Chars streamed this attempt (reasoning + text) — reported when the attempt aborts. */
+    let receivedChars = 0
 
     // Wire external abort signal to reader.cancel() so that agent.abort()
     // can interrupt a blocking reader.read() call (same fix as OpenAIClient).
@@ -346,6 +348,7 @@ export class AnthropicClient implements StreamClient {
     const timeoutController = new AbortController()
     const maxStreamMs = 10 * 60_000
     const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+    const streamStartedAt = Date.now()
 
     const signalCleanup = signal
       ? wireAbortToReaderCancel(AbortSignal.any([signal, timeoutController.signal]), reader)
@@ -430,9 +433,11 @@ export class AnthropicClient implements StreamClient {
               const delta = parsed.delta as Record<string, unknown> | undefined
               if (!delta) break
               if (delta.type === 'text_delta' && typeof delta.text === 'string') {
+                receivedChars += delta.text.length
                 textBlocks.push(delta.text)
                 callbacks.onTextDelta(delta.text)
               } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+                receivedChars += delta.thinking.length
                 thinkingBlocks.push(delta.thinking)
                 callbacks.onThinkingDelta(delta.thinking)
               } else if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string' && index !== undefined) {
@@ -485,6 +490,18 @@ export class AnthropicClient implements StreamClient {
         // 仅在收到真实内容事件（排除 ping 心跳）时重置 idle timer
         if (sawContentEvent) resetIdleTimer()
       }
+    } catch (err) {
+      // Observability: surface how much streamed output this attempt discards.
+      callbacks.onStreamAttemptAborted?.({
+        provider: 'anthropic',
+        receivedChars,
+        elapsedMs: Date.now() - streamStartedAt,
+        errorName: (err as Error)?.name ?? 'Error',
+        errorMessage: (err as Error)?.message ?? String(err),
+      })
+      // Body-phase TimeoutError (raw undici DOMException) → descriptive,
+      // classifiable Error. User AbortError and other errors pass through.
+      throw wrapBodyTimeoutError(err, 'Anthropic', streamStartedAt)
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
       if (maxStreamTimer) clearTimeout(maxStreamTimer)

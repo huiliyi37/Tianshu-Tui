@@ -37,7 +37,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 64_000,
           reasoningEffort: 'max',
-          pricing: { input: 0.5, output: 2.0, cacheRead: 0.05, cacheWrite: 0.5 },
+          pricing: { input: 3, output: 6, cacheRead: 0.025, cacheWrite: 3 },
         },
         {
           id: 'deepseek-v4-flash',
@@ -45,7 +45,7 @@ export const PROVIDER_PRESETS: Record<ProviderPresetKey, ProviderPreset> = {
           contextWindow: 1_000_000,
           maxTokens: 64_000,
           reasoningEffort: 'high',
-          pricing: { input: 0.1, output: 0.4, cacheRead: 0.01, cacheWrite: 0.1 },
+          pricing: { input: 1, output: 2, cacheRead: 0.02, cacheWrite: 1 },
         },
       ],
       unsupported: [],

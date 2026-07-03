@@ -10,6 +10,7 @@ import {
   loadJobsDockVisible,
   loadToolDensity,
   loadSplitMode,
+  loadViewMode,
   saveActiveProject,
   saveActiveSessionId,
   saveAttentionSeen,
@@ -20,8 +21,10 @@ import {
   saveJobsDockVisible,
   saveToolDensity,
   saveSplitMode,
+  saveViewMode,
   type ToolDensity,
   type SplitMode,
+  type ViewMode,
 } from '../lib/persist'
 import type { MentionKind } from '../lib/mention-input'
 
@@ -37,6 +40,8 @@ export interface UiState {
   error: string | null
   attentionSeen: string[] // seen attention signatures (Q2)
   toolDensity: ToolDensity
+  /** Thread transcript view mode (P1-2): normal / verbose / summary. Cmd+O cycles. */
+  viewMode: ViewMode
   sidebarVisible: boolean
   reviewVisible: boolean
   terminalVisible: boolean
@@ -56,6 +61,9 @@ export interface UiState {
   /** Transient references queued from the file explorer to be appended as
    *  @file / @folder mentions in the composer. Not persisted across reloads. */
   composerAttachments: ComposerAttachment[]
+  /** One-shot request to focus a review-panel tab (e.g. ArtifactCard "Review").
+   *  `rev` bumps so repeated requests for the same tab still trigger. */
+  reviewTabRequest: { tab: string; rev: number } | null
 }
 
 /** A queued @-reference (file or folder) awaiting insertion into the composer. */
@@ -72,6 +80,8 @@ type UiAction =
   | { type: 'setError'; error: string | null }
   | { type: 'markSeen'; sigs: string[] }
   | { type: 'setToolDensity'; density: ToolDensity }
+  | { type: 'setViewMode'; mode: ViewMode }
+  | { type: 'cycleViewMode' }
   | { type: 'setSidebar'; visible: boolean }
   | { type: 'setReview'; visible: boolean }
   | { type: 'setTerminal'; visible: boolean }
@@ -84,6 +94,7 @@ type UiAction =
   | { type: 'openConnect'; open: boolean }
   | { type: 'addComposerAttachments'; items: ComposerAttachment[] }
   | { type: 'clearComposerAttachments' }
+  | { type: 'requestReviewTab'; tab: string }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -110,6 +121,13 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'setToolDensity':
       return { ...state, toolDensity: action.density }
+    case 'setViewMode':
+      return { ...state, viewMode: action.mode }
+    case 'cycleViewMode': {
+      const order: ViewMode[] = ['normal', 'verbose', 'summary']
+      const next = order[(order.indexOf(state.viewMode) + 1) % order.length]!
+      return { ...state, viewMode: next }
+    }
     case 'setSidebar':
       return { ...state, sidebarVisible: action.visible, zenMode: action.visible ? false : state.zenMode }
     case 'setReview':
@@ -166,6 +184,14 @@ function reducer(state: UiState, action: UiAction): UiState {
     }
     case 'clearComposerAttachments':
       return { ...state, composerAttachments: [] }
+    case 'requestReviewTab':
+      return {
+        ...state,
+        reviewVisible: true,
+        zenMode: false,
+        reviewManuallyToggled: true,
+        reviewTabRequest: { tab: action.tab, rev: (state.reviewTabRequest?.rev ?? 0) + 1 },
+      }
     default:
       return state
   }
@@ -184,6 +210,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     error: null,
     attentionSeen: loadAttentionSeen(),
     toolDensity: loadToolDensity(),
+    viewMode: loadViewMode(),
     sidebarVisible: loadSidebarVisible(),
     reviewVisible: loadReviewVisible(),
     terminalVisible: loadTerminalVisible(),
@@ -194,6 +221,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     reviewManuallyToggled: false,
     connectOpen: false,
     composerAttachments: [],
+    reviewTabRequest: null,
   }))
 
   useEffect(() => {
@@ -211,6 +239,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveToolDensity(state.toolDensity)
   }, [state.toolDensity])
+
+  useEffect(() => {
+    saveViewMode(state.viewMode)
+  }, [state.viewMode])
 
   useEffect(() => {
     saveSidebarVisible(state.sidebarVisible)

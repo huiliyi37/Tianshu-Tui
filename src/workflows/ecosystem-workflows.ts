@@ -22,6 +22,13 @@ export interface PlanClosePromptOptions {
 export interface WorkflowResolveResult {
   command: string
   prompt: string
+  /**
+   * prompt 指示模型直接调用、但位于 EXTENDED 层的工具。
+   * 调用方（TUI 提交路径）负责在发起 run 前经 agent.enableTool() 挂载，
+   * 保证 prompt 契约与工具可见性由同一个解析结果背书（会话 5158719d：
+   * /council 指示调 council_convene 而门控把它摘了 → 模型被迫模拟议事会）。
+   */
+  requiredTools?: readonly string[]
 }
 
 export interface TeamWorkflowPromptOptions {
@@ -415,12 +422,19 @@ export function resolveEcosystemWorkflowInput(input: string, opts?: { date?: Dat
 
   if (TEAM_COMMANDS.has(parsed.command)) {
     const team = parseTeamWorkflowArgs(parsed.args)
-    return { command: parsed.command, prompt: team ? buildTeamWorkflowPrompt(team) : TEAM_USAGE }
+    // team_orchestrate 在 EXTENDED 层——成功分支才声明（usage 无真实调用）。
+    return team
+      ? { command: parsed.command, prompt: buildTeamWorkflowPrompt(team), requiredTools: ['team_orchestrate'] }
+      : { command: parsed.command, prompt: TEAM_USAGE }
   }
 
   if (COUNCIL_COMMANDS.has(parsed.command)) {
     const council = parseCouncilWorkflowArgs(parsed.args)
-    return { command: parsed.command, prompt: council ? buildCouncilWorkflowPrompt(council) : COUNCIL_USAGE }
+    // council_convene 出计划 + 用户确认后 team_orchestrate 交接执行（prompt L409 契约），
+    // 两者都在 EXTENDED 层——成功分支才声明（usage 无真实调用）。
+    return council
+      ? { command: parsed.command, prompt: buildCouncilWorkflowPrompt(council), requiredTools: ['council_convene', 'team_orchestrate'] }
+      : { command: parsed.command, prompt: COUNCIL_USAGE }
   }
 
   if (PLAN_CLOSE_COMMANDS.has(parsed.command)) {

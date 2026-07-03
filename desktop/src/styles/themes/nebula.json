@@ -35,7 +35,11 @@
     "--overlay": "rgba(2, 2, 6, 0.65)",
     "--shadow-sm": "0 1px 3px rgba(2, 2, 8, 0.5)",
     "--shadow-md": "0 6px 20px rgba(5, 5, 15, 0.6)",
-    "--shadow-lg": "0 16px 48px rgba(10, 10, 30, 0.7), 0 0 20px rgba(94, 106, 210, 0.1)"
+    "--shadow-lg": "0 16px 48px rgba(10, 10, 30, 0.7), 0 0 20px rgba(94, 106, 210, 0.1)",
+    "--canvas-bg": "#040408",
+    "--island-bg": "#10101c",
+    "--shadow-island": "0 1px 3px rgba(2, 2, 8, 0.5), 0 6px 20px rgba(5, 5, 15, 0.45)",
+    "--shadow-float": "0 8px 32px rgba(5, 5, 15, 0.65), 0 0 16px rgba(94, 106, 210, 0.08)"
   },
   "surfaces": {
     "--sidebar-surface-bg": "var(--panel)",

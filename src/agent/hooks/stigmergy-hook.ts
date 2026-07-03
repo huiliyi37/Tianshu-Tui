@@ -51,12 +51,25 @@ export function createStigmergyRuntimeHook(deps: StigmergyRuntimeHookDeps): Post
         }
       }
 
-      if (tool.name === 'bash') {
-        const bashErrors = ctx.snapshot.recentToolHistory.filter(
-          h => h.tool === 'bash' && h.status === 'failed',
-        ).length
-        if (bashErrors >= 2) {
-          deposits.push({ path: tool.target ?? 'bash-command', signal: 'dead-end', strength: 0.9 })
+      if (tool.name === 'bash' && !tool.success && tool.target) {
+        // Dead-end 三重收紧（会话 5158719d 噪音链修复）：
+        // 1. 当前 bash 必须失败——旧逻辑在当前成功时也沉积（噪音）。
+        // 2. 同 target 重复 ≥2——任务 1 后 target 有区分度，跨 target 不累计。
+        // 3. 排除非语义失败（timeout=慢≠死路，environment=缺命令≠死路）。
+        //    双保险：history 的 errorClass + 当前 tool 的 failureClass 两路都查。
+        const isNonSemantic = (h: { errorClass?: string }) =>
+          h.errorClass === 'timeout' || h.errorClass === 'environment'
+        const currentNonSemantic = tool.failureClass === 'timeout' || tool.failureClass === 'env_missing'
+        if (!currentNonSemantic) {
+          const semanticFailures = ctx.snapshot.recentToolHistory.filter(
+            h => h.tool === 'bash'
+              && h.status === 'failed'
+              && h.target === tool.target
+              && !isNonSemantic(h),
+          ).length
+          if (semanticFailures >= 2) {
+            deposits.push({ path: tool.target, signal: 'dead-end', strength: 0.9 })
+          }
         }
       }
 

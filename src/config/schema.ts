@@ -171,7 +171,10 @@ export type CouncilConfig = z.infer<typeof councilConfigSchema>
 
 export const agentSchema = z.object({
   approval: z.enum(['auto-accept', 'auto-safe', 'suggest', 'manual', 'dangerously-skip-permissions']).default('auto-safe'),
-  maxTurns: z.number().int().positive().default(50),
+  // 长任务远端兜底。runaway 由 wedged-loop/convergence/watchdog/context-pressure
+  // 先行拦截，此值对标 Claude Code/Codex 的"无硬上限"取宽松 4 倍余量（50→200，
+  // 会话 5158719d 证明 50 轮迫使用户在正常长任务中反复手动「继续」）。
+  maxTurns: z.number().int().positive().default(200),
   mode: z.enum(['code', 'ask', 'plan']).default('code'),
   autoReasoning: z.boolean().default(true),
   /** Explicit opt-in for Songline substrate post-session pheromone/cycle relay. */
@@ -209,6 +212,12 @@ export const agentSchema = z.object({
    * or an open task contract (phantom tool-call recovery). 0 disables. Clamped 0..3.
    */
   maxAutoContinue: z.number().int().min(0).max(3).default(1),
+  /**
+   * C3 自治档检查点 — in autonomous mode (dangerously-skip-permissions), pause
+   * the run for user confirmation after this many turns. 0 disables. Only the
+   * autonomous tier is affected; supervised modes brake via approvals.
+   */
+  checkpointEveryTurns: z.number().int().min(0).default(10),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
@@ -322,6 +331,11 @@ export const workerRoutingSchema = z.record(z.string(), z.string()).default({
 export const workersSchema = z.object({
   profiles: z.record(z.string(), workerProfileSchema).default({}),
   routing: workerRoutingSchema,
+  /** 天梁 patcher 子代理的默认 tier（config.workers.patcherTier）。
+   *  flash 能力足以承担各级风险的执行任务，默认 'cheap'（不因 riskTier 预判降级
+   *  ——浪费生产力）；可设 'balanced' 或 'strong' 让执行者用更强模型（如 DeepSeek Pro）。
+   *  连续失败 ≥2 次仍自动升 strong。 */
+  patcherTier: z.enum(['cheap', 'balanced', 'strong']).default('cheap'),
 }).default({})
 
 export const skillsSchema = z.object({

@@ -35,6 +35,7 @@ import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
 import type { AdvisoryBus } from './advisory-bus.js'
@@ -406,6 +407,16 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Language Anchor: postTool hook — when a turn's cumulative tool output is a
+  // large, overwhelmingly non-CJK dump (code/log/search floods), re-anchor the
+  // reasoning language via a short Chinese advisory. Counters training-mode
+  // regression (English enumerative CoT) that star-signature alone cannot hold
+  // against tens of KB of English (4e1aaa21 post-mortem).
+  // Gated by RIVET_LANGUAGE_ANCHOR (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_LANGUAGE_ANCHOR !== '0') {
+    hooks.push(createLanguageAnchorHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Context Pressure: afterPerception hook — warns when context window

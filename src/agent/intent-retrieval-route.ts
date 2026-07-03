@@ -17,6 +17,7 @@ export type IntentTaskKind =
   | 'architecture_design'
   | 'refactor'
   | 'usage_question'
+  | 'codebase_overview'
   | 'code_explanation'
   | 'review_audit'
   | 'verification'
@@ -58,6 +59,7 @@ const TASK_KINDS: readonly IntentTaskKind[] = [
   'architecture_design',
   'refactor',
   'usage_question',
+  'codebase_overview',
   'code_explanation',
   'review_audit',
   'verification',
@@ -84,8 +86,9 @@ const KIND_RANK: Record<IntentTaskKind, number> = {
   architecture_design: 6,
   verification: 7,
   usage_question: 8,
-  code_explanation: 9,
-  social_idle: 10,
+  codebase_overview: 9,
+  code_explanation: 10,
+  social_idle: 11,
 }
 
 export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> = {
@@ -123,6 +126,11 @@ export const TASK_KIND_BASELINES: Record<IntentTaskKind, RetrievalDirection[]> =
     { source: 'external', priority: 'should', query: '若是外部 API/库，再查官方资料。', reason: '外部行为应以官方资料为准。' },
     { source: 'codebase', priority: 'optional', query: '必要时查实现或示例确认真实用法。', reason: '代码可校正文档缺失或过期。' },
     { source: 'git', priority: 'avoid', query: '默认不查 git，除非问题涉及近期变更或回归。', reason: '普通用法问题通常不需要历史。' },
+  ],
+  codebase_overview: [
+    { source: 'codebase', priority: 'must', query: '先用 repo_map/inspect_project 建立模块地图，再看各模块入口与职责；不以单一入口文件代表全局。', reason: '概览需要覆盖面，单文件总结会漏掉主要子系统。' },
+    { source: 'docs', priority: 'should', query: '查 README、AGENTS.md、架构文档和目录索引。', reason: '项目文档常有现成的架构说明与职责表。' },
+    { source: 'memory', priority: 'optional', query: '召回项目结构与架构决策的既有记忆。', reason: '记忆可补充代码看不出的演进背景。' },
   ],
   code_explanation: [
     { source: 'codebase', priority: 'must', query: '查被解释对象、相邻实现和调用方。', reason: '解释代码必须基于真实实现。' },
@@ -202,6 +210,16 @@ export function normalizeRetrievalRoute(raw: unknown, fallbackInput?: RetrievalR
   }
 }
 
+/**
+ * 低置信分类时注入的极简对齐提示——意图最模糊的场景恰恰最需要认知同步，
+ * 沉默（不注入任何路由）会让主模型直接按关键词锚定展开。
+ */
+export const LOW_CONFIDENCE_INTENT_ADVISORY = [
+  '<intent-retrieval-route advisory="true" scope="current-turn" confidence="low">',
+  '  意图分类不确定：先用一句话向用户同步你对任务的理解（必要时问至多一个澄清问题），检索按实际问题自主展开，不受用户关键词锚定。',
+  '</intent-retrieval-route>',
+].join('\n')
+
 export function renderIntentRetrievalRoute(route: RetrievalRoute): string {
   const normalized = normalizeRetrievalRoute(route)
   const attrs = [
@@ -257,6 +275,7 @@ function inferTaskKinds(userMessage: string, lastAssistantMessage?: string, task
   if (/(设计|架构|方案|选型|architecture|architect|design|strategy)/i.test(sanitized)) add('architecture_design')
   if (/(验证|跑测试|确认是否完成|verify|verification|test this|run tests)/i.test(sanitized)) add('verification')
   if (/(怎么用|如何用|配置|命令|api|usage|how\s+to|configure|command)/i.test(sanitized)) add('usage_question')
+  if (hasOverviewIntent(sanitized)) add('codebase_overview')
   if (/(解释|看一下|分析|说明|explain|describe|walk through|read)/i.test(sanitized)) add('code_explanation')
 
   if (kinds.length === 0 && isTrivialInput(sanitized)) add('social_idle')
@@ -281,8 +300,12 @@ function hasSecurityIntent(text: string): boolean {
   return /(权限|越权|安全|泄露|密钥|路径穿越|命令执行|token 泄露|secret|api key|security|permission|authz|path traversal|command injection|rce|leak|expose)/i.test(text)
 }
 
+function hasOverviewIntent(userMessage: string): boolean {
+  return /(概览|整体架构|项目结构|全局\S{0,6}(了解|梳理)|(这个|该|本)项目\S{0,6}(干嘛|做什么|是什么)|overview|architecture\s+of|walk\s+me\s+through\s+the\s+(codebase|project|repo))/i.test(userMessage)
+}
+
 function hasReviewIntent(userMessage: string): boolean {
-  return /(审查|审核|风险|blast\s*radius|review|audit)/i.test(userMessage)
+  return /(审查|审核|风险|检查|排查|走查|自查|盘点|有没有\s*(问题|缺陷|漏洞|遗漏|风险)|缺陷|遗漏|覆盖不全|不覆盖|blast\s*radius|review|audit|gap\s*analysis|missing\s+coverage)/i.test(userMessage)
 }
 
 function baselineForKind(kind: IntentTaskKind, contract?: TaskContract): RetrievalDirection[] {
@@ -332,8 +355,29 @@ function normalizeDirection(raw: unknown): RetrievalDirection[] {
   }]
 }
 
+const ASK_MARKER_RE = /(帮我|请|需要|检查|分析|为什么|怎么|如何|[？?]|吗)/
+
+/**
+ * 从多行消息中提取「真正的请求句」——用户常见结构是先铺背景、最后一句才是
+ * 要求（认知对齐 Stage 0.1：不把意图提前收敛成第一行）。取最后一个含请求
+ * 标记的行；单行或无标记时回退首行。
+ */
+export function extractAskLine(message: string): string {
+  const lines = message.split('\n').map(line => line.trim()).filter(Boolean)
+  if (lines.length <= 1) return lines[0] ?? ''
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (ASK_MARKER_RE.test(lines[i]!)) return lines[i]!
+  }
+  return lines[0]!
+}
+
 function summarizeObjective(input: RetrievalRouteInput): string | undefined {
-  const objective = input.taskContract?.objective || input.userMessage.split('\n')[0]?.trim() || ''
+  const firstLine = input.userMessage.split('\n')[0]?.trim() || ''
+  const askLine = extractAskLine(input.userMessage)
+  // 请求句与首行不同时优先请求句；否则保持原行为（contract objective 优先）
+  const objective = askLine && askLine !== firstLine
+    ? askLine
+    : (input.taskContract?.objective || firstLine)
   return truncate(objective, MAX_FIELD_LENGTH) || undefined
 }
 

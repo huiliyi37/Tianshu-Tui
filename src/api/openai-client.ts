@@ -7,7 +7,7 @@ import { fetchWithTimeout } from './fetch-timeout.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { sanitizeMessageContent } from '../utils/sanitize.js'
-import { wireAbortToReaderCancel } from './abort-reader.js'
+import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -503,7 +503,7 @@ export class OpenAIClient implements StreamClient {
   /** Parse SSE stream from a reader — exposed for testing */
   async parseStreamFromReader(
     reader: ReadableStreamDefaultReader<Uint8Array>,
-    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason'>>,
+    callbacks: Partial<Pick<StreamCallbacks, 'onTextDelta' | 'onContentBlock' | 'onStopReason' | 'onStreamAttemptAborted'>>,
     signal?: AbortSignal,
     reasoningRef?: { content: string },
     /**
@@ -731,6 +731,18 @@ export class OpenAIClient implements StreamClient {
         callbacks.onStopReason?.(mapFinishReason(this.pendingStopReason), {})
         this.pendingStopReason = null
       }
+    } catch (err) {
+      // Observability: surface how much streamed output this attempt discards.
+      callbacks.onStreamAttemptAborted?.({
+        provider: this.config.providerName ?? 'openai',
+        receivedChars: reasoningAccum.length + this._textAccum.length,
+        elapsedMs: Date.now() - streamStartedAt,
+        errorName: (err as Error)?.name ?? 'Error',
+        errorMessage: (err as Error)?.message ?? String(err),
+      })
+      // Body-phase TimeoutError (raw undici DOMException) → descriptive,
+      // classifiable Error. User AbortError and other errors pass through.
+      throw wrapBodyTimeoutError(err, 'OpenAI', streamStartedAt)
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
       if (maxStreamTimer) clearTimeout(maxStreamTimer)

@@ -48,6 +48,27 @@ return new TurnStreamController({
         }
       },
       addUsage: usage => { self.session.addUsage(usage) },
+      // 4e1aaa21 post-mortem: aborted attempts silently discarded minutes of
+      // streamed reasoning. Record each failure in the cache-log so the loss
+      // is attributable without reverse-engineering timestamp gaps.
+      recordStreamAttemptAborted: info => {
+        const sid = self.config.sessionId ?? 'anon'
+        const line = JSON.stringify({
+          event: 'stream_attempt_aborted',
+          t: Date.now(),
+          model: self.config.promptEngine.getModel(),
+          provider: info.provider,
+          receivedChars: info.receivedChars,
+          elapsedMs: info.elapsedMs,
+          errorName: info.errorName,
+          errorMessage: info.errorMessage.slice(0, 300),
+        })
+        import('node:fs/promises').then(fs => {
+          const dir = join(getSessionDir(self.cwd), sid)
+          return fs.mkdir(dir, { recursive: true })
+            .then(() => fs.appendFile(join(dir, 'cache-log.jsonl'), line + '\n'))
+        }).catch(() => {})
+      },
       recordTurnCache: (turn, usage) => {
         self.session.recordTurnCache(turn, usage)
         const hitRateNum = usage.input_tokens > 0
@@ -207,7 +228,7 @@ return new ToolExecutionController({
       getSessionTurnCount: () => self.session.getTurnCount(),
       getSessionId: () => self.config.sessionId,
       addToolResults: results => { self.session.addToolResults(results) },
-      recordToolHistory: (name, input, isError, content) => self.recordToolHistory(name, input, isError, content),
+      recordToolHistory: (name, input, isError, content, errorClass) => self.recordToolHistory(name, input, isError, content, errorClass),
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
@@ -481,6 +502,12 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
+    // C3 — checkpoint brake applies only to the autonomous tier; supervised
+    // modes already stop at approvals. Read live (not captured) so a mid-session
+    // approval-mode switch takes effect on the next turn.
+    getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
+      ? (self.config.checkpointEveryTurns ?? 0)
+      : 0,
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,
@@ -557,6 +584,10 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       set consecutiveNoToolTurns(v) { self.consecutiveNoToolTurns = v },
       get autoContinueCount() { return self.autoContinueCount },
       set autoContinueCount(v) { self.autoContinueCount = v },
+      get wedgeToolFingerprint() { return self.wedgeToolFingerprint },
+      set wedgeToolFingerprint(v) { self.wedgeToolFingerprint = v },
+      get wedgeRepeatCount() { return self.wedgeRepeatCount },
+      set wedgeRepeatCount(v) { self.wedgeRepeatCount = v },
       get thinkingOnlyRetries() { return self.thinkingOnlyRetries },
       set thinkingOnlyRetries(v) { self.thinkingOnlyRetries = v },
       get lastThinkingContent() { return self.lastThinkingContent },

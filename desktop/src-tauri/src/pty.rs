@@ -48,19 +48,93 @@ struct PtyExit {
     id: String,
 }
 
-/// 默认 shell：尊重用户 $SHELL / %COMSPEC%，否则退回平台常规值。
+/// Windows：定位 Git Bash（与 agent bash 工具 `src/platform.ts::resolveGitBashPath`
+/// 同一优先级链：env 覆盖 → 从 `where git` 推导 → 常见安装位置）。
+/// 刻意不搜 PATH 上的裸 `bash.exe` —— 那可能是 WSL 的 System32 bash。
+#[cfg(windows)]
+fn find_git_bash() -> Option<String> {
+    if let Ok(p) = std::env::var("RIVET_GIT_BASH_PATH") {
+        if !p.is_empty() && std::path::Path::new(&p).exists() {
+            return Some(p);
+        }
+    }
+    // git.exe 通常在 <root>\cmd\ 或 <root>\bin\；bash.exe 在 <root>\bin\。
+    if let Ok(out) = std::process::Command::new("where").arg("git").output() {
+        if out.status.success() {
+            if let Some(first) = String::from_utf8_lossy(&out.stdout).lines().next() {
+                let git = std::path::Path::new(first.trim());
+                if let Some(root) = git.parent().and_then(|p| p.parent()) {
+                    let bash = root.join("bin").join("bash.exe");
+                    if bash.exists() {
+                        return Some(bash.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    let mut candidates = vec![
+        std::path::PathBuf::from(r"C:\Program Files\Git\bin\bash.exe"),
+        std::path::PathBuf::from(r"C:\Program Files (x86)\Git\bin\bash.exe"),
+    ];
+    if let Ok(la) = std::env::var("LOCALAPPDATA") {
+        if !la.is_empty() {
+            candidates.push(
+                std::path::Path::new(&la)
+                    .join("Programs")
+                    .join("Git")
+                    .join("bin")
+                    .join("bash.exe"),
+            );
+        }
+    }
+    candidates
+        .into_iter()
+        .find(|c| c.exists())
+        .map(|c| c.to_string_lossy().to_string())
+}
+
+/// 默认 shell。Windows 与 agent bash 工具对齐：Git Bash 优先（除非
+/// RIVET_USE_POWERSHELL 强制），否则 %COMSPEC%；Unix 尊重 $SHELL。
 fn default_shell() -> String {
-    let raw = {
-        #[cfg(windows)]
-        {
-            std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string())
+    #[cfg(windows)]
+    {
+        let force_pwsh = std::env::var("RIVET_USE_POWERSHELL")
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .unwrap_or(false);
+        if !force_pwsh {
+            if let Some(bash) = find_git_bash() {
+                return bash;
+            }
         }
-        #[cfg(not(windows))]
-        {
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
-        }
-    };
-    resolve_shell_path(&raw)
+        let raw = std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".to_string());
+        resolve_shell_path(&raw)
+    }
+    #[cfg(not(windows))]
+    {
+        let raw = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        resolve_shell_path(&raw)
+    }
+}
+
+/// 按 shell 类型注入启动参数——目前只用于 Windows 编码修正：
+/// PowerShell 5.x 默认控制台编码是 GBK/OEM，agent 侧 `bash.ts` 已注入
+/// UTF-8，PTY 这边对齐，否则集成终端中文乱码。非 Windows shell 名字
+/// 不会命中这些后缀，无需平台门控。
+fn shell_startup_args(shell: &str) -> Vec<String> {
+    let lower = shell.to_ascii_lowercase();
+    if lower.ends_with("powershell.exe") || lower.ends_with("pwsh.exe") {
+        vec![
+            "-NoLogo".to_string(),
+            "-NoExit".to_string(),
+            "-Command".to_string(),
+            "[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8"
+                .to_string(),
+        ]
+    } else if lower.ends_with("cmd.exe") {
+        vec!["/K".to_string(), "chcp 65001 >nul".to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 /// 把 shell 名解析为绝对路径。PATH 受限时 portable-pty 找不到 `powershell.exe`
@@ -135,7 +209,10 @@ pub fn pty_spawn(
     let shell = shell
         .map(|s| resolve_shell_path(&s))
         .unwrap_or_else(default_shell);
-    let mut cmd = CommandBuilder::new(shell);
+    let mut cmd = CommandBuilder::new(&shell);
+    for arg in shell_startup_args(&shell) {
+        cmd.arg(arg);
+    }
     if !cwd.is_empty() {
         cmd.cwd(cwd);
     }

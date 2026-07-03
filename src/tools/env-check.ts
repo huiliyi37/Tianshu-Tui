@@ -19,11 +19,23 @@ export interface PythonEnvInfo {
   git: ToolVersion
   node: ToolVersion
   /** JVM toolchain — surfaced so /doctor can show whether GUI-launched PATH
-   *  resolution actually recovered them (the maven/java pain point). */
+   * resolution actually recovered them (the maven/java pain point). */
   java: ToolVersion
   maven: ToolVersion
   gradle: ToolVersion
   platform: NodeJS.Platform
+  /** Effective `git config core.autocrlf` ('true' | 'input' | 'false'), probed on
+   *  Windows only. Undefined when unset, git missing, or not Windows. `true` is a
+   *  mixed-EOL hazard: checkouts get CRLF while the agent writes LF. */
+  gitAutocrlf?: string
+  /** Shell info — Windows 上 Git Bash 是否可用、当前降级到什么 shell。
+   *  桌面端据此决定是否弹 Git 安装引导面板。 */
+  shell?: {
+    kind: 'bash' | 'powershell' | 'cmd' | 'sh'
+    gitBashAvailable: boolean
+    /** 降级原因（gitBashAvailable=false 时有值）。 */
+    fallbackReason?: string
+  }
 }
 
 const PYTHON_INSTALL_GUIDE: Record<string, string> = {
@@ -107,6 +119,9 @@ export async function detectEnv(cwd?: string, env?: NodeJS.ProcessEnv): Promise<
     detectTool(['mvn'], ['--version'], env),
     detectTool(['gradle'], ['--version'], env),
   ])
+  const gitAutocrlf = process.platform === 'win32' && git.available
+    ? await detectGitAutocrlf(git.path ?? git.command, cwd, env)
+    : undefined
   return {
     python,
     uv,
@@ -116,7 +131,38 @@ export async function detectEnv(cwd?: string, env?: NodeJS.ProcessEnv): Promise<
     maven,
     gradle,
     platform: process.platform,
+    ...(gitAutocrlf !== undefined ? { gitAutocrlf } : {}),
   }
+}
+
+/** Probe the effective `git config core.autocrlf`. Returns undefined when unset
+ *  (git exits 1) or on any failure. Runs in `cwd` so repo-local config wins. */
+async function detectGitAutocrlf(
+  gitCmd: string,
+  cwd?: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(gitCmd, ['config', '--get', 'core.autocrlf'], {
+      timeout: 5000,
+      env: env ?? process.env,
+      ...(cwd ? { cwd } : {}),
+    })
+    const v = stdout.trim().toLowerCase()
+    return v.length > 0 ? v : undefined
+  } catch {
+    return undefined // unset (exit 1) or git error — either way, nothing to warn about
+  }
+}
+
+/** True when the checkout is at mixed-EOL risk: Windows + `core.autocrlf=true`
+ *  (CRLF working tree while the agent writes LF → noisy diffs). `input`/`false`
+ *  are fine. */
+export function needsAutocrlfWarning(
+  gitAutocrlf: string | undefined,
+  platform: NodeJS.Platform | string,
+): boolean {
+  return platform === 'win32' && gitAutocrlf === 'true'
 }
 
 /** Build a human-readable guidance block for missing tools. */

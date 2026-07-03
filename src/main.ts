@@ -48,6 +48,7 @@ import { execSync } from 'child_process'
 import { applyProjectTemplates, recordTemplatesDecision } from './bootstrap/project-templates.js'
 import { checkForUpdate, formatUpdateBanner } from './tui/updater.js'
 import { detectEnv, formatGitMissingBanner } from './tools/env-check.js'
+import { computeUsageCost, findModelPricing } from './utils/pricing.js'
 
 // ── CLI args ───────────────────────────────────────────────────
 
@@ -638,6 +639,20 @@ async function main() {
         selectedIndex: 0,
       }
     },
+    // Effort 选择面板——/effort 无参数时弹出，上下选择 + 回车确认。
+    choicePanelData: () => {
+      const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
+      const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
+      const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
+        { id: 'auto', label: 'Auto', description: '按任务复杂度自动选档（架构/安全/根因→max，重构/调试→high，查看→low）', recommended: isAuto, current: isAuto },
+        { id: 'max', label: 'Max', description: '完整推理链。最深度思考，适合架构设计、安全审查、根因排查', current: !isAuto && current === 'max' },
+        { id: 'high', label: 'High', description: '认真推理。复杂重构、bug 修复、功能实现', current: !isAuto && current === 'high' },
+        { id: 'medium', label: 'Medium', description: '标准编码。常规改动、添加测试', current: !isAuto && current === 'medium' },
+        { id: 'low', label: 'Low', description: '轻量推理。简单查询、读取文件', current: !isAuto && current === 'low' },
+        { id: 'off', label: 'Off', description: '关闭思考。最快响应，纯执行', current: !isAuto && current === 'off' },
+      ]
+      return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
+    },
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
@@ -734,7 +749,12 @@ async function main() {
     } catch (err) {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
-  }, /* choicePanelExec: */ undefined, /* connectExec: */ (commit, summary) => {
+  }, /* choicePanelExec: */ (id: string) => {
+    // Effort 选择面板回车回调。
+    ctx!.agent.setReasoningEffort(id as import('./agent/auto-reasoning.js').ReasoningEffort | 'auto')
+    const label = id === 'auto' ? 'Auto（按任务复杂度自动选档）' : id
+    tuiApp.commitStatic(`Reasoning effort → ${label}`)
+  }, /* connectExec: */ (commit, summary) => {
     // Connect 向导提交回调：写盘 → 重载 → 内存回填 → 即时切到新默认模型。
     try {
       if (commit.mode === 'preset') {
@@ -800,10 +820,13 @@ async function main() {
     if (!ctx) return null
     const session = ctx.session
     const total = session.getTotalUsage()
-    const cacheRead = total.cache_read_input_tokens
-    const normalInput = Math.max(0, total.input_tokens - cacheRead)
-    // Ink 近似定价：normal $1/M · cacheRead $0.1/M · out $4/M（单次计算，不累加）
-    const cost = (normalInput * 1 + cacheRead * 0.1 + total.output_tokens * 4) / 1_000_000
+    // 真实定价：从 provider config 查当前模型的 pricing（CNY per 1M tokens），
+    // 按 input/output/cacheRead/cacheWrite/reasoning 五档精确计算。无 pricing 时回退 0。
+    const providers = ctx.agent.config.allProviders ?? {}
+    const providerName = ctx.agent.config.providerName
+    const modelId = ctx?.provider.models[0]?.id
+    const pricing = findModelPricing(providers, providerName, modelId)
+    const cost = pricing ? computeUsageCost(total, pricing).total : 0
     const maxTokens = ctx.agent.config.contextWindow ?? currentModel?.contextWindow ?? 0
     return {
       // Real occupancy: anchor on last API prompt_tokens + estimate the tail
@@ -836,6 +859,22 @@ async function main() {
   // 把 AgentLoop 的运行时状态暴露给 TUI，用于 GlanceBar 和 side panel。
   app.setGoalTrackerProvider(() => ctx!.refs.goalTrackerRef.current)
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
+  app.setPlanModeToggleHandler(() => {
+    const agent = ctx!.agent
+    if (agent.planModeState === 'planning') {
+      agent.exitPlanMode()
+      app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
+    } else {
+      agent.enterPlanMode()
+      const path = agent.getActivePlanFilePath()
+      app!.commitStatic([
+        '🔍 Plan Mode 已激活。Write 操作已锁定（活动计划文件除外）。',
+        path ? `\n活动计划文件: \`${path}\`` : '',
+        '\n工作流: 识别关键问题 → delegate_task 调研 → 增量写计划 → ask_user_question 或 plan submit。',
+        '\nShift+Tab 再次切换关闭。/plan-approve · /plan-reject <slug> <反馈>',
+      ].join(''))
+    }
+  })
   app.setPlanTraceProvider(() => ctx!.agent.planTrace)
 
   // ── Wire agent → TuiApp ──────────────────────────────────────
@@ -847,11 +886,25 @@ async function main() {
 
     // 将 slash 命令解析为 agent prompt（对齐 Ink resolveAppPromptInput）。
     // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
-    const prompt = resolveAppPromptInput(trimmed, process.cwd())
-    if (prompt === null) {
+    const resolved = resolveAppPromptInput(trimmed, process.cwd())
+    if (resolved === null) {
       app!.rejectSubmit()
       app!.commitStatic(`⚠️  Unknown command: ${trimmed.split(/\s/)[0]}\nType /help for available commands.`)
       return
+    }
+
+    // workflow 声明的 EXTENDED 工具在发 run 前挂载——prompt 契约与工具可见性同源
+    // （会话 5158719d：/council 指示调 council_convene 而门控把它摘了 → 模型被迫模拟）。
+    for (const toolName of resolved.requiredTools ?? []) {
+      const mount = ctx!.agent.enableTool(toolName)
+      if (mount.status === 'mounted') {
+        const costNote = mount.cacheImpact === 'prefix-invalidated'
+          ? '（下一请求前缀缓存一次性 MISS，后续轮次按新工具集重新缓存）'
+          : ''
+        app!.commitStatic(`🔧 已为本次 workflow 挂载工具 ${toolName}${costNote}`)
+      }
+      // already-active / gating-off → 静默（工具本就可见）
+      // unknown / not-extended → 不应发生（requiredTools 与 EXTENDED_TOOLS 的一致性由 workflow 测试钉住）
     }
 
     // 单一权威：TuiApp.agentBusy 是唯一的 streaming 闩。app.onSubmit 只在 TuiApp
@@ -859,7 +912,7 @@ async function main() {
     // isStreaming 标志——正是「双门异步清除时机不同」造成 Esc 后死会话的根因。
     // run 生命周期回调（完成/错误/中止）由 bridge 桥接到 TuiApp，并带世代守卫。
     const callbacks = wrapCallbacksWithTuiApp(app!)
-    ctx!.agent.run(prompt, callbacks).catch((err) => {
+    ctx!.agent.run(resolved.prompt, callbacks).catch((err) => {
       process.stderr.write(`[T9] Agent error: ${(err as Error)?.message}\n`)
     })
   })

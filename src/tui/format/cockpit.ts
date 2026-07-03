@@ -80,7 +80,7 @@ export function renderCockpit(snapshot: CockpitSnapshot, width: number, height: 
   if (show('model')) {
     body.push('')
     const m = snapshot.model
-    body.push(` ${statusGlyph(snapshot.panelStatuses.model, theme)} ${color('Model', theme.primary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  $${m.cost.toFixed(4)}`)
+    body.push(` ${statusGlyph(snapshot.panelStatuses.model, theme)} ${color('Model', theme.primary, { bold: true })}  ${m.name}  cache:${Math.round(m.cacheHitRate * 100)}%  ${m.inputTokens.toLocaleString()}↓ ${m.outputTokens.toLocaleString()}↑  ¥${m.cost.toFixed(4)}`)
     if (m.reasoningEffort) {
       body.push(`    reasoning: ${m.reasoningEffort}  prewarm: ${Math.round(m.prewarmHitRate * 100)}%`)
     }

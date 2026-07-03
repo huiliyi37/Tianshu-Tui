@@ -89,7 +89,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   agent: {
     approval: 'suggest',
-    maxTurns: 50,
+    maxTurns: 200,
     mode: 'code',
     autoReasoning: true,
     songlineEnabled: false,
@@ -121,6 +121,7 @@ export const DEFAULT_CONFIG: Config = {
     maxTeamParallel: 3,
     council: { seats: [] },
     maxAutoContinue: 1,
+    checkpointEveryTurns: 10,
     intentRetrievalRouter: {
       enabled: true,
       classifier: 'heuristic',
@@ -192,6 +193,7 @@ export const DEFAULT_CONFIG: Config = {
       risky_refactor: 'cheap-flash',
       planning: 'capable',
     },
+    patcherTier: 'cheap',
   },
   skills: {
     importFromClaude: [],

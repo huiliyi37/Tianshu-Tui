@@ -183,7 +183,7 @@ export interface SlashHandlerContext {
   setSummaryState: (v: SummaryState | ((prev: SummaryState) => SummaryState)) => void
   mcpManagerRef: MutableRefLike<import('../mcp/manager.js').McpManager | null>
   claimStoreRef: MutableRefLike<ContextClaimStore | null>
-  setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort) => void
+  setReasoningEffort?: (effort: import('../agent/auto-reasoning.js').ReasoningEffort | 'auto') => void
   reasoningEffort?: string
   onDomainChange?: (domainName: string | undefined) => void
   /** T5: bandit promotion state for /status observability. */
@@ -372,14 +372,20 @@ export function searchMemory(ctx: SlashHandlerContext, query: string): string {
   return hits.length === 0 ? `No memory found for "${query}".` : `Memory search: ${query}\n${hits.map(h => `- ${h}`).join('\n')}`
 }
 
-export function resolveAppPromptInput(input: string, cwd: string): string | null {
-  if (!input.startsWith('/')) return input
+export interface ResolvedPromptInput {
+  prompt: string
+  /** 见 WorkflowResolveResult.requiredTools。仅 ecosystem workflow 路径可能非空。 */
+  requiredTools?: readonly string[]
+}
+
+export function resolveAppPromptInput(input: string, cwd: string): ResolvedPromptInput | null {
+  if (!input.startsWith('/')) return { prompt: input }
   const workflow = resolveEcosystemWorkflowInput(input)
-  if (workflow) return workflow.prompt
+  if (workflow) return { prompt: workflow.prompt, requiredTools: workflow.requiredTools }
   const custom = resolveCustomCommand(cwd, input)
-  if (custom) return custom
+  if (custom) return { prompt: custom }
   const skillPrompt = resolveSkillPrompt(input, cwd)
-  if (skillPrompt !== null) return skillPrompt
+  if (skillPrompt !== null) return { prompt: skillPrompt }
   // /review [max] [focus description] — map to deliver_task instruction for the agent
   const reviewMatch = input.match(/^\/review(?:\s+(max))?(?:\s+(.*))?$/i)
   if (reviewMatch) {
@@ -388,11 +394,11 @@ export function resolveAppPromptInput(input: string, cwd: string): string | null
     const level = isMax ? 'L3' : 'L2'
     const levelLabel = level === 'L3' ? 'L3 Review Squadron (5 inspectors)' : 'L2 adversarial verifier'
     const focusInstruction = focusText ? ` Focus specifically on: ${focusText}.` : ''
-    return `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.${focusInstruction}`
+    return { prompt: `Run code review on the current uncommitted changes: call deliver_task with commit=true and review_level="${level}". This triggers ${levelLabel}.${focusInstruction}` }
   }
   // /review typos — don't silently drop user input
   if (/^\/review/i.test(input)) {
-    return `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.`
+    return { prompt: `User typed "${input}" which looks like a /review command but didn't match the expected format. Usage: /review [max] [focus description]. Run /review max to trigger L3 Review Squadron.` }
   }
   // Unrecognized slash command — return null to signal "blocked"
   return null
@@ -1440,7 +1446,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       ctx.agent.enterPlanMode()
-      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked. Explore the codebase and produce a plan.\n\nWhen ready, call `plan_submit` with your plan. Then:\n  /plan-list — list submitted plans\n  /plan-approve <slug> — approve and start execution\n  /plan-reject <slug> — reject with feedback' }))
+      pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
       setIsStreaming(false)
       return true
     },
@@ -1473,6 +1479,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
+      const selectedApproach = parts.slice(2).join(' ').trim() || undefined
       if (!slug) {
         // No slug — list plans and hint
         const cwd = ctx.agent.cwd
@@ -1500,11 +1507,30 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
+      if (selectedApproach && approved.options && approved.options.length > 0) {
+        const known = approved.options.some(o => o.label === selectedApproach)
+        if (!known) {
+          const available = approved.options.map(o => `  \`${o.label}\``).join('\n')
+          pushStatic(createLogEntry({
+            type: 'system',
+            content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
+            isError: true,
+          }))
+          setIsStreaming(false)
+          return true
+        }
+      }
+
       // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
       // plan body stays on disk to keep the prefix cache intact. setActivePlan
       // also releases plan mode internally.
-      ctx.agent.setActivePlan({ slug, title: approved.title })
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
+      ctx.agent.setActivePlan({
+        slug,
+        title: approved.title,
+        selectedApproach: selectedApproach || undefined,
+      })
+      const approachLine = selectedApproach ? `\nSelected approach: **${selectedApproach}**` : ''
+      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
       setIsStreaming(false)
       return true
     },
@@ -1516,8 +1542,9 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
       const slug = parts[1]?.toLowerCase()
+      const feedback = parts.slice(2).join(' ').trim()
       if (!slug) {
-        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug>\n\nUse /plan-list to see available plans.', isError: true }))
+        pushStatic(createLogEntry({ type: 'system', content: 'Usage: /plan-reject <slug> [feedback]\n\nUse /plan-list to see available plans.', isError: true }))
         setIsStreaming(false)
         return true
       }
@@ -1530,7 +1557,14 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return true
       }
 
-      pushStatic(createLogEntry({ type: 'system', content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nThe plan was marked REJECTED but kept on disk. Provide feedback and the agent can revise it in place.` }))
+      ctx.agent.enterPlanMode({ planFilePath: `.rivet/plans/${slug}.md` })
+      pushStatic(createLogEntry({
+        type: 'system',
+        content: `❌ Plan rejected: **${rejected.title}** (\`${slug}\`)\n\nPlan mode remains active. Revise \`.rivet/plans/${slug}.md\` in place, then resubmit with \`plan action=submit\`.${feedback ? '' : '\n\nTip: /plan-reject <slug> <feedback> injects revision guidance.'}`,
+      }))
+      if (feedback && ctx.submitToAgent) {
+        ctx.submitToAgent(`User rejected the plan. Feedback:\n\n${feedback}`)
+      }
       setIsStreaming(false)
       return true
     },
@@ -2067,7 +2101,7 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
       // 占用明细头：cache 命中率 + 本轮 cost（与 GlanceBar 同源），对齐 Claude Code /context。
       const usagePct = sections.maxTokens > 0 ? Math.round(sections.estimatedTokens / sections.maxTokens * 100) : 0
       const cacheStr = ctx.cacheHitRate !== undefined ? `${Math.round(ctx.cacheHitRate * 100)}%` : 'n/a'
-      const costStr = `$${(ctx.cost ?? 0).toFixed(2)}`
+      const costStr = `¥${(ctx.cost ?? 0).toFixed(2)}`
       const realTokens = ctx.session.getLastRealPromptTokens()
       const realStr = realTokens > 0 ? `\nAPI (last): ${realTokens.toLocaleString()} tokens` : ''
 
@@ -2574,16 +2608,23 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     name: '/effort',
     immediate: true,
     handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
+      const { parts, pushStatic, setIsStreaming, surfacePush } = ctx
       const cmd = parts[0]!.toLowerCase()
-      const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | undefined
-      const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max'> = ['off', 'low', 'medium', 'high', 'max']
-      if (!level || !(valid as string[]).includes(level)) {
-        const current = ctx.reasoningEffort ?? 'high'
-        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort: ${current}\nUsage: /effort [off|low|medium|high|max]\n\nSet max for full reasoning on every turn.` }))
-      } else {
+      const level = parts[1]?.toLowerCase() as 'off' | 'low' | 'medium' | 'high' | 'max' | 'auto' | undefined
+      const valid: Array<'off' | 'low' | 'medium' | 'high' | 'max' | 'auto'> = ['off', 'low', 'medium', 'high', 'max', 'auto']
+      if (!level) {
+        // 无参数 → 打开交互式选择面板（上下选、回车确认）。
+        surfacePush?.('choice-panel')
+        setIsStreaming(false)
+        return true
+      }
+      if ((valid as string[]).includes(level)) {
         ctx.setReasoningEffort?.(level)
-        pushStatic(createLogEntry({ type: 'system', content: `Reasoning effort set to: ${level}` }))
+        pushStatic(createLogEntry({ type: 'system', content: level === 'auto'
+          ? 'Reasoning effort: auto (autoReasoning picks per task)'
+          : `Reasoning effort set to: ${level}` }))
+      } else {
+        pushStatic(createLogEntry({ type: 'system', content: `Usage: /effort [off|low|medium|high|max|auto]\n\nSet max for full reasoning on every turn. auto lets autoReasoning pick per-task complexity.` }))
       }
       setIsStreaming(false)
       return true
@@ -3026,6 +3067,10 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
         : undefined,
       submitToAgent: (prompt: string) => { app.submitText(prompt) },
       goalTrackerRef: ctx.refs.goalTrackerRef,
+      surfacePush: (id: string) => { app.activateOverlay(id) },
+      surfacePop: () => { app.deactivateOverlay() },
+      setReasoningEffort: (effort) => { ctx.agent.setReasoningEffort(effort) },
+      reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
     }
   }
 
@@ -3362,7 +3407,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       handler: ({ app, input, trimmed }) => {
         const resolved = resolveAppPromptInput(trimmed, ctx.cwd)
         if (resolved !== null) {
-          app.submitText(resolved)
+          app.submitText(resolved.prompt)
           return true
         }
         const fallback = getHandler(name)

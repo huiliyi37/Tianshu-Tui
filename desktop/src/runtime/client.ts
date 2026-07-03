@@ -468,8 +468,11 @@ export async function getPlan(id: string, slug: string): Promise<PlanDoc> {
 }
 
 /** Build — approve a plan and start executing it. */
-export function approvePlan(id: string, slug: string): Promise<{ ok: boolean }> {
-  return apiPost<{ ok: boolean }>(`/sessions/${id}/plans/${encodeURIComponent(slug)}/approve`)
+export function approvePlan(id: string, slug: string, selectedApproach?: string): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>(
+    `/sessions/${id}/plans/${encodeURIComponent(slug)}/approve`,
+    selectedApproach ? { selectedApproach } : undefined,
+  )
 }
 
 /** Reject a plan with optional revision feedback. */
@@ -800,6 +803,43 @@ export function setupConfigProvider(
   return apiPost('/config/providers', input)
 }
 
+export interface SetupCustomProviderInput {
+  providerName: string
+  baseUrl: string
+  /** Optional — local deployments (Ollama/vLLM) need no key. */
+  apiKey?: string
+  model: {
+    id: string
+    alias?: string
+    contextWindow: number
+    maxTokens: number
+  }
+  makeDefault?: boolean
+}
+
+/** Create a brand-new OpenAI-compatible provider from scratch (no preset needed).
+ *  Supports Ollama / vLLM / OpenAI direct / third-party compatible endpoints. */
+export function setupCustomProvider(
+  input: SetupCustomProviderInput,
+): Promise<{ ok: boolean; providerName: string }> {
+  return apiPost('/config/providers/custom', input)
+}
+
+export interface BalanceInfo {
+  currency: string
+  totalBalance: string
+}
+
+export interface BalanceResult {
+  isAvailable: boolean
+  balances: BalanceInfo[]
+}
+
+/** Query DeepSeek account balance (official API). Returns null for non-DeepSeek providers. */
+export function getBalance(): Promise<{ balance: BalanceResult | null }> {
+  return apiGet<{ balance: BalanceResult | null }>('/config/balance')
+}
+
 export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
   return rivetFetch(`/config/providers/${name}`, { method: 'DELETE' })
     .then(r => r.json() as Promise<{ ok: boolean }>)
@@ -888,6 +928,19 @@ export function setEditorConfig(
   input: { platform?: EditorPlatform; eol?: EditorEol },
 ): Promise<{ ok: boolean } & EditorConfig> {
   return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
+}
+
+// ── Autonomy brakes (C3) ─────────────────────────────────────────────
+export interface AutonomyConfig { checkpointEveryTurns: number }
+
+export function getAutonomyConfig(): Promise<AutonomyConfig> {
+  return apiGet<AutonomyConfig>('/config/autonomy')
+}
+
+export function setAutonomyConfig(
+  input: { checkpointEveryTurns: number },
+): Promise<{ ok: boolean } & AutonomyConfig> {
+  return apiPut<{ ok: boolean } & AutonomyConfig>('/config/autonomy', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

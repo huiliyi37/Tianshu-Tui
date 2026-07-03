@@ -53,14 +53,24 @@ export function renderPlanMethodologyAdvisory(
  * architecture/data-flow diagram (the salience for this lives in the appendix,
  * close to where the model is reasoning, instead of a far-away tool description).
  */
-export function renderPlanModeBlock(): string {
+export function renderPlanModeBlock(activePlanFilePath?: string | null): string {
+  const planFileLine = activePlanFilePath
+    ? `\n活动计划文件: \`${activePlanFilePath}\` — 用 write_file / edit_file 增量写入计划正文（仅此文件可写）。`
+    : ''
+
   return `<plan-mode>
-你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令。
+你处于规划模式。只能读文件和探索代码库——禁止写、改、执行任何会修改状态的命令（活动计划文件除外）。${planFileLine}
 
 工作流：
-1. 用 read_file、grep、glob、repo_map、inspect_project 探索代码库
-2. 理解完整范围：哪些文件需要改动、要遵循哪些既有模式
-3. 计划成型后，调用 \`plan\` 工具（\`action=submit\`）提交一份打磨好的设计文档
+1. **识别关键问题** — 先列出 2-3 个对计划至关重要的问题。不确定代码结构时，用 \`delegate_task\`（profile=code_scout）并行调研；独立问题并行派多个 worker。
+2. **外部调研** — 涉及外部库/协议/最佳实践时，用 \`web_search\` / \`web_fetch\` 核实，不凭训练记忆下结论。
+3. **设计收敛** — 最多 2-3 个真正不同的方案；一个明显更优就只提一个。偏好/约束不明时用 \`ask_user_question\` 澄清。
+4. **回读验证** — 写计划前重读关键文件核实理解。
+5. **写入计划** — 将完整设计写入活动计划文件（write_file / edit_file），或成熟后用 \`plan action=submit\` 提交（可省略 plan 字段，从活动计划文件读取）。
+
+收尾契约 — 每个 turn 必须以以下之一结束，禁止以纯文本收尾：
+- \`ask_user_question\` — 澄清需求/偏好/约束
+- \`plan action=submit\` — 计划已成熟，请求用户批准
 
 计划质量标准——你的计划应该是一份完整的设计文档，禁止占位符：
 - 至少包含一张 Mermaid 图（架构图或数据流图）。图形承载语义——(圆角)=用户/输入，[[子程序]]=agent/处理器，{{六边形}}=LLM/模型，[(圆柱)]=存储/DB，{菱形}=判断；边 --> 同步/读，==> 写/强，-.-> 异步/事件。复制下方骨架并替换节点文字：
@@ -81,15 +91,15 @@ flowchart LR
 - 包含根因分析，而非只描述表面症状
 - 用完整路径引用文件，如 \`src/agent/loop.ts:643\`
 - 每个文件给出提议代码（diff 或伪代码），不能只有文件路径或 "TODO"
-- 存在设计决策时，用表格对比备选方案
+- 存在设计决策时，用表格对比备选方案；多方案时在 submit 的 \`options\` 参数中列出供用户选择
 - 包含验证计划：测试用例和人工验证步骤
 - 自检：如果 plan 字段里出现 "TODO"、"FIXME"、"待补充"、"placeholder"、"TBD"、"[x]" 空白条目或仅标题无正文的章节，说明计划尚未打磨完成，继续探索并补充内容后再提交。
 
-4. 提交 \`plan\` 后，等待用户批准或驳回。未经批准不要继续推进。
+提交 \`plan\` 后，等待用户批准或驳回。未经批准不要继续推进。
 
 用户会回复：
-- /plan-approve <slug> — 批准，开始执行
-- /plan-reject <slug> — 驳回，修订
+- /plan-approve <slug> [方案名] — 批准（可选指定方案），开始执行
+- /plan-reject <slug> <反馈> — 驳回并给出修订意见，plan mode 保持激活
 </plan-mode>`
 }
 
@@ -120,6 +130,9 @@ export interface ToolHistoryEntry {
    *  edit_file(a.ts, "x", "y") and edit_file(a.ts, "y", "z") get different hashes. */
   argsHash?: string
   error?: string
+  /** Failure classification — dead-end pheromone deposition uses this to exclude
+   *  timeout/environment (non-semantic) failures from the dead-end signal. */
+  errorClass?: import('../tools/types.js').ToolErrorClass
 }
 
 export interface VolatileContext {
@@ -206,6 +219,8 @@ export interface VolatileContext {
   worktreeReality?: WorktreeReality
   /** Plan Mode state — when 'planning', injects a block reminding the agent it may only read */
   planModeState?: 'off' | 'planning' | 'approved'
+  /** Active plan file path (relative) for incremental plan writing */
+  activePlanFilePath?: string | null
   /** Project memory loaded from .rivet/knowledge/memory.jsonl (frozen: changes only on file update) */
   projectMemoryBlock?: string
   /** Codebase index — module summaries + CLI entries from MeridianDB.
@@ -556,7 +571,7 @@ export function buildDynamicAppendixParts(ctx: VolatileContext, maxChars?: numbe
   // Plan-mode instruction block: governs the whole planning turn (read-only +
   // plan quality standard + diagram skeletons). Cache-safe — appendix only.
   if (ctx.planModeState === 'planning') {
-    parts.push(renderPlanModeBlock())
+    parts.push(renderPlanModeBlock(ctx.activePlanFilePath))
   }
 
   // Phase 2B: output verbosity steering (opt-in via RIVET_TERSE=1, off by default).

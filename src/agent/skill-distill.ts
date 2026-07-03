@@ -119,7 +119,7 @@ function slugify(text: string): string {
 }
 
 function fileStem(path: string): string {
-  const base = path.split('/').pop() ?? path
+  const base = path.split(/[\\/]/).pop() ?? path
   return base.replace(/\.[^.]+$/, '')
 }
 

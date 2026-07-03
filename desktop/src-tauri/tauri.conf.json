@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5273",
-    "beforeBuildCommand": "npm run build && node ../scripts/pack-native.js && node ../scripts/stage-runtime-deps.js && node scripts/fetch-node-runtime.js && node scripts/codesign-nested.js",
+    "beforeBuildCommand": "npm run build && node ../scripts/pack-native.js && node ../scripts/stage-runtime-deps.js && node scripts/fetch-node-runtime.js && node scripts/fetch-shell-runtime.js && node scripts/codesign-nested.js",
     "frontendDist": "../dist"
   },
   "app": {
@@ -31,7 +31,8 @@
     "targets": ["app", "dmg", "nsis", "msi"],
     "resources": {
       "../../dist": "rivet-runtime",
-      "resources/node": "node-runtime"
+      "resources/node": "node-runtime",
+      "resources/shell": "shell-runtime"
     },
     "icon": [
       "icons/32x32.png",

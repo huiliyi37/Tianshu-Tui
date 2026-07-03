@@ -2,6 +2,20 @@ import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import type { ToolDefinition } from '../api/types.js'
 import { didYouMeanHint } from './did-you-mean.js'
 
+/**
+ * Foreign tool names from other agent frameworks (Cursor, Claude Code, etc.)
+ * mapped to their Rivet equivalents. Transparent remapping avoids forcing
+ * the model to memorize framework-specific tool names — the call just works.
+ *
+ * Key: foreign name (case-insensitive lookup).
+ * Val: Rivet tool name.
+ */
+const FOREIGN_ALIASES: Record<string, string> = {
+  todowrite: 'todo',
+  task: 'delegate_task',
+  agent: 'delegate_task',
+}
+
 export class ToolRegistry {
   private tools = new Map<string, Tool>()
 
@@ -34,7 +48,24 @@ export class ToolRegistry {
   }
 
   async execute(name: string, params: ToolCallParams): Promise<ToolResult> {
-    const tool = this.tools.get(name)
+    let tool = this.tools.get(name)
+    let resolvedName = name
+    let aliasNote: string | undefined
+
+    // Transparent alias remapping: foreign tool names (Cursor/Claude Code
+    // conventions) silently map to their Rivet equivalents. The model gets
+    // the real tool result + a one-line prefix so it learns the correct name.
+    if (!tool) {
+      const aliasKey = FOREIGN_ALIASES[name.toLowerCase()]
+      if (aliasKey) {
+        tool = this.tools.get(aliasKey)
+        if (tool) {
+          resolvedName = aliasKey
+          aliasNote = `[NOTE: "${name}" 自动映射为 "${aliasKey}" — 下次请直接调 ${aliasKey}]`
+        }
+      }
+    }
+
     if (!tool) {
       // Session 6176a17f history: LLM hallucinated `task` (Cursor/Claude Code
       // convention) instead of `delegate_task`. The bare "Unknown tool: task"
@@ -49,8 +80,13 @@ export class ToolRegistry {
       // readability and the catalog parse.
       throw new Error(`Unknown tool: ${name}. If this is an EXTENDED-layer tool, use delegate_task to dispatch a worker, or /tools enable <name> to mount it on the primary agent. ${hint}`)
     }
-    if (!tool.isEnabled()) throw new Error(`Tool ${name} is disabled`)
-    return tool.execute(params)
+    if (!tool.isEnabled()) throw new Error(`Tool ${resolvedName} is disabled`)
+
+    const result = await tool.execute(params)
+    if (aliasNote) {
+      result.content = `${aliasNote}\n${result.content}`
+    }
+    return result
   }
 
   needsApproval(name: string, params: ToolCallParams): boolean {

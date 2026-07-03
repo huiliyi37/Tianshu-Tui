@@ -3,5 +3,22 @@
   "identifier": "default",
   "description": "天枢桌面默认能力集：主窗口可调用 core 命令。",
   "windows": ["main"],
-  "permissions": ["core:default", "notification:default", "dialog:default", "updater:default", "process:default"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled",
+    "notification:default",
+    "dialog:default",
+    "updater:default",
+    "process:default"
+  ]
 }

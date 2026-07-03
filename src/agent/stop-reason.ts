@@ -27,10 +27,14 @@ export type StopReasonSource =
   | 'watchdog-stall'
   /** maxTurns budget exhausted before a final turn. Guard-forced. */
   | 'max-turns'
+  /** Same fully-errored tool batch re-emitted N× (e.g. denied-approval loop). Guard-forced. */
+  | 'wedged-loop'
   /** User Ctrl+C / Esc. User action. */
   | 'user-interrupt'
   /** Provider/stream error. Fault. */
   | 'stream-error'
+  /** C3 自治档检查点 — turn budget within a run reached, paused for user confirmation. */
+  | 'checkpoint'
 
 export interface StopReason {
   source: StopReasonSource
@@ -69,10 +73,14 @@ export function describeStopReason(r: StopReason): string {
       return '⏹ 被停滞看门狗中断（回合边界疑似卡死）'
     case 'max-turns':
       return `⏹ 达到最大轮次上限（turn=${r.turn}）— 任务可能未完成`
+    case 'wedged-loop':
+      return `⏹ 检测到工具死循环（同一失败调用重复${r.detail ? `：${r.detail}` : ''}）— 已终止以防上下文膨胀`
     case 'user-interrupt':
       return '⏹ 用户中断'
     case 'stream-error':
       return '⏹ 流式错误中断'
+    case 'checkpoint':
+      return `⏸ 自治检查点（已连续执行 ${r.turn} 轮）— 等待确认后继续`
   }
 }
 

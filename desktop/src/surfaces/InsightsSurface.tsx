@@ -1,9 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useUiState } from '../state/store'
 import { useSessions } from '../state/queries'
-import { getInsights } from '../runtime/client'
-import type { InsightsResponse, SessionRecord } from '../runtime/types'
-import { computeDeepSeekCost, formatCny } from '../lib/pricing'
+import { getInsights, getBalance } from '../runtime/client'
+import type { InsightsResponse, SessionRecord, BalanceResult } from '../runtime/types'
+
+/** Format a CNY amount for display. Backend /insights returns cost in CNY
+ *  (per provider-presets pricing, DeepSeek official rates). */
+function formatCny(value: number): string {
+  if (value === 0) return '¥0.00'
+  if (value < 0.0001) return '<¥0.0001'
+  return `¥${value.toFixed(4).replace(/\.?0+$/, '')}`
+}
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
@@ -26,73 +33,6 @@ function startOfDay(ts: number): number {
 
 function isToday(ts: number): boolean {
   return startOfDay(ts) === startOfDay(Date.now())
-}
-
-function recomputeCost(insights: InsightsResponse): InsightsResponse {
-  const recalcWorker = (w: InsightsResponse['workers'][number]) => ({
-    ...w,
-    cost: computeDeepSeekCost(
-      {
-        inputTokens: w.inputTokens,
-        outputTokens: w.outputTokens,
-        cacheReadTokens: w.cacheReadTokens,
-        cacheWriteTokens: w.cacheWriteTokens,
-      },
-      w.model,
-    ),
-  })
-
-  const workers = insights.workers.map(recalcWorker)
-  const modelBreakdown = insights.modelBreakdown.map((m) => ({
-    ...m,
-    cost: computeDeepSeekCost(
-      {
-        inputTokens: m.inputTokens,
-        outputTokens: m.outputTokens,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
-      m.model,
-    ),
-  }))
-  // Provider breakdown lacks per-model detail; default to Flash for conservative display.
-  const providerBreakdown = insights.providerBreakdown.map((p) => ({
-    ...p,
-    cost: computeDeepSeekCost(
-      {
-        inputTokens: p.inputTokens,
-        outputTokens: p.outputTokens,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      },
-      'flash',
-    ),
-  }))
-
-  const totalCost = workers.reduce((sum, w) => sum + w.cost, 0)
-  const mainSession = insights.mainSession
-    ? {
-        ...insights.mainSession,
-        cost: computeDeepSeekCost(
-          {
-            inputTokens: insights.mainSession.inputTokens,
-            outputTokens: insights.mainSession.outputTokens,
-            cacheReadTokens: insights.mainSession.cacheReadTokens,
-            cacheWriteTokens: insights.mainSession.cacheWriteTokens,
-          },
-          insights.mainSession.model,
-        ),
-      }
-    : null
-  const mainCost = mainSession?.cost ?? 0
-  return {
-    ...insights,
-    totals: { ...insights.totals, cost: totalCost + mainCost },
-    mainSession,
-    workers,
-    modelBreakdown,
-    providerBreakdown,
-  }
 }
 
 function aggregateInsights(list: InsightsResponse[]): InsightsResponse {
@@ -143,6 +83,7 @@ export function InsightsSurface() {
 
   const [activeInsights, setActiveInsights] = useState<InsightsResponse | null>(null)
   const [dailyInsights, setDailyInsights] = useState<InsightsResponse | null>(null)
+  const [balance, setBalance] = useState<BalanceResult | null | undefined>(undefined)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -159,8 +100,10 @@ export function InsightsSurface() {
         activeSessionId ? getInsights(activeSessionId) : null,
         ...todaySessions.map((s: SessionRecord) => getInsights(s.id)),
       ])
-      setActiveInsights(active ? recomputeCost(active) : null)
-      setDailyInsights(recomputeCost(aggregateInsights(daily.filter(Boolean) as InsightsResponse[])))
+      setActiveInsights(active)
+      setDailyInsights(aggregateInsights(daily.filter(Boolean) as InsightsResponse[]))
+      // 余额查询（非阻塞——失败静默，balance 保持 undefined 不显示卡片）
+      getBalance().then((r) => setBalance(r.balance)).catch(() => {})
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -235,6 +178,24 @@ export function InsightsSurface() {
         </header>
 
         {error && <div className="meta warn">加载失败：{error}</div>}
+
+        {balance && (
+          <section className="insights-section">
+            <h4>账户余额</h4>
+            <div className="insights-grid">
+              <div className={`insight-card ${balance.isAvailable ? '' : 'warn'}`}>
+                <div className="insight-value">
+                  {balance.balances.length > 0
+                    ? `${balance.balances[0]!.currency} ${balance.balances[0]!.totalBalance}`
+                    : '—'}
+                </div>
+                <div className="insight-label">
+                  {balance.isAvailable ? '可用余额（DeepSeek）' : '账户不可用 / 已欠费'}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {renderSummary('全天汇总', dailyInsights)}
 

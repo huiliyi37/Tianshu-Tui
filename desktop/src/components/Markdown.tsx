@@ -81,6 +81,22 @@ function ExternalLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   )
 }
 
+/** Internal file-mention link — clicking opens the file in a side panel. */
+function FileMentionLink({ path, onClick, children }: { path: string; onClick?: (p: string) => void; children: React.ReactNode }) {
+  return (
+    <a
+      className="mention-link"
+      href={`#file:${path}`}
+      onClick={(e) => {
+        e.preventDefault()
+        onClick?.(path)
+      }}
+    >
+      {children}
+    </a>
+  )
+}
+
 /** U4: code block wrapper with a hover copy button. */
 function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   const { children, ...rest } = props
@@ -111,10 +127,17 @@ function CodeBlock(props: React.HTMLAttributes<HTMLPreElement>) {
   )
 }
 
-const COMPONENTS = {
-  a: ExternalLink,
-  pre: CodeBlock,
-} as const
+/** Pre-process source: convert @file:path tokens into markdown links so
+ *  react-markdown renders them as <a> elements we can intercept. Matches both
+ *  quoted (@file:"path with spaces") and unquoted (@file:path) forms. */
+function linkifyFileMentions(source: string): string {
+  return source.replace(/@file:(?:"([^"]+)"|([^\s)]+))/g, (_match, quoted, unquoted) => {
+    const path = quoted ?? unquoted
+    // Use the basename as the visible label, full path in href.
+    const label = path.replace(/.*[/\\]/, '') || path
+    return `[📁 ${label}](#file:${path})`
+  })
+}
 
 // During streaming a fenced code block is often half-open (odd number of ```
 // fences). Left as-is, react-markdown swallows the rest of the message into a
@@ -145,7 +168,7 @@ export function normalizeMathDelimiters(source: string): string {
     .replace(/^(\s*)\$\$([^\n$]+)\$\$\s*$/gm, (_, indent: string, body: string) => `${indent}$$\n${indent}${body}\n${indent}$$`)
 }
 
-function MarkdownImpl({ source, highlight = true }: { source: string; highlight?: boolean }) {
+function MarkdownImpl({ source, highlight = true, onFileClick }: { source: string; highlight?: boolean; onFileClick?: (path: string) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const huge = source.length > MD_RENDER_MAX
 
@@ -163,13 +186,25 @@ function MarkdownImpl({ source, highlight = true }: { source: string; highlight?
     return <div className="md md-streaming" ref={ref}>{source}</div>
   }
 
-  const normalized = normalizeMathDelimiters(source)
+  const normalized = normalizeMathDelimiters(linkifyFileMentions(source))
+  const components = {
+    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => {
+      const { href, children, ...rest } = props
+      // Internal file mention link (#file:path) → side panel.
+      if (href?.startsWith('#file:')) {
+        const path = href.slice(6)
+        return <FileMentionLink path={path} onClick={onFileClick}>{children}</FileMentionLink>
+      }
+      return <ExternalLink href={href} {...rest}>{children}</ExternalLink>
+    },
+    pre: CodeBlock,
+  }
   return (
     <div className="md" ref={ref}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={COMPONENTS}
+        components={components}
       >
         {normalized}
       </ReactMarkdown>
@@ -181,5 +216,5 @@ function MarkdownImpl({ source, highlight = true }: { source: string; highlight?
 // frequently; this keeps re-parses limited to actual content/mode changes.
 export const Markdown = React.memo(
   MarkdownImpl,
-  (a, b) => a.source === b.source && a.highlight === b.highlight,
+  (a, b) => a.source === b.source && a.highlight === b.highlight && a.onFileClick === b.onFileClick,
 )

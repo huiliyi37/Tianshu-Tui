@@ -34,7 +34,8 @@ const SHARD_SELF_VERIFY =
 /** Top-level module path of a file (first two path segments, e.g. `src/tui`).
  *  Used to group scope files into orthogonal shards that touch disjoint files. */
 function moduleKey(file: string): string {
-  const parts = file.split('/').filter(Boolean)
+  // Split on both separators — Windows tool inputs may carry backslashes.
+  const parts = file.split(/[\\/]/).filter(Boolean)
   if (parts.length >= 2) return `${parts[0]}/${parts[1]}`
   return parts[0] ?? file
 }

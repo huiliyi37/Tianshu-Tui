@@ -100,6 +100,10 @@ When to create/update (do it without being asked):
 
 When NOT to use: a single trivial step (don't add ceremony to one-shot edits).
 
+TDD discipline:
+- For code tasks (not docs/config), the FIRST step of each task should be writing or updating a test (RED), then making it pass (GREEN). Structure your todos to reflect this: e.g. "Write test for X" → "Implement X" → "Refactor".
+- This is NOT mandatory for: documentation, config changes, refactors with existing test coverage, or quick typo fixes.
+
 Status rules:
 - Mark a task in_progress BEFORE you start it; keep exactly ONE task in_progress at a time.
 - Mark a task completed IMMEDIATELY when done — do not batch completions.

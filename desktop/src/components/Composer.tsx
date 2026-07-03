@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { listFiles, listModels, switchModel, listDomains, setDomain } from '../runtime/client'
 import { detectMention, applyMention, formatFileMention, type MentionToken } from '../lib/mention-input'
-import { detectSlash, filterCommands, isKnownSlashCommand, type ComposerCommand } from '../lib/composer-commands'
+import { detectSlash, filterCommands, type ComposerCommand } from '../lib/composer-commands'
 import { toast } from 'sonner'
 import type { ModelEntry, DomainEntry, PlanModeState } from '../runtime/types'
+import { AutonomyControl } from './AutonomyControl'
+import type { AutonomyLevel } from '../lib/autonomy'
 import { PlusMenu } from './PlusMenu'
 import { compressImage } from '../lib/image-compress'
+import i18n from '../i18n'
 import { isImageFile, isTextFile, isUnsupportedFile, formatUnsupportedFiles, detectImageMimeByMagic } from '../lib/file-types'
 
 // Composer (D2/D3) — message input with two autocompletes sharing one dropdown:
@@ -86,6 +89,19 @@ type Suggest =
   | { mode: 'file'; token: MentionToken; items: string[]; index: number }
   | { mode: 'command'; items: ComposerCommand[]; index: number; matched: boolean }
 
+/** Live context stats for the composer usage ring (P1-1). */
+export interface ContextUsage {
+  /** Estimated tokens currently in context (last turn total). */
+  usedTokens: number
+  /** Model context window; 0/undefined hides the ring. */
+  contextWindow?: number
+  /** Cumulative prefix-cache reads/creations for the hit-rate detail. */
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  /** Context growth of the latest turn. */
+  deltaTokens: number
+}
+
 export function Composer(props: {
   sessionId: string
   value: string
@@ -99,13 +115,20 @@ export function Composer(props: {
   onSetPlanMode?: (state: PlanModeState) => void
   /** PlusMenu — open the "派子代理" dispatch dialog. */
   onDelegate?: () => void
+  /** PlusMenu — send a workflow slash command (/council, /team). */
+  onWorkflow?: (cmd: string) => void
   /** PlusMenu — bumped on model/domain/skills SSE so an open panel refetches. */
   menuRev?: number
   /** True when the thread already has messages — used to warn before a
    *  cache-invalidating mid-session star-domain switch. */
   threadNonEmpty?: boolean
+  /** P1-1 chip row — permission level chip (监督/默认/自治) inline by the send button. */
+  approvalLevel?: AutonomyLevel
+  onSetApprovalLevel?: (level: AutonomyLevel) => void
+  /** P1-1 chip row — context usage ring (used/window + cache detail popover). */
+  contextUsage?: ContextUsage
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, menuRev, threadNonEmpty } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -268,9 +291,10 @@ export function Composer(props: {
     if (suggest.mode === 'file') selectFile(suggest.token, suggest.items[suggest.index]!)
     else if (suggest.index >= 0 && suggest.matched) runCommand(suggest.items[suggest.index]!)
     else {
-      // No matching command — toast and keep the menu open briefly so the user sees the hint.
-      const firstToken = value.trim().split(/\s/)[0]
-      toast.error(`未知命令 "${firstToken}" — 输入 / 查看可用命令`)
+      // Not in the local menu — send through to the server slash resolver
+      // instead of rejecting client-side (the server knows more commands).
+      closeSuggest()
+      submit()
     }
   }
 
@@ -285,13 +309,10 @@ export function Composer(props: {
   const submit = () => {
     const text = value.trim()
     if (!text && images.length === 0) return
-    // Guard: reject unknown slash commands instead of sending them to the agent
-    // (which would misinterpret the /token as a literal request). Mirrors TUI
-    // resolveAppPromptInput returning null for unrecognized slashes.
-    if (commands && commands.length > 0 && !isKnownSlashCommand(text, commands)) {
-      toast.error(`未知命令 "${text.split(/\s/)[0]}" — 输入 / 查看可用命令`)
-      return
-    }
+    // Slash commands pass through to the server: POST /prompt runs the full
+    // resolveAppPromptInput translation (same as TUI), so commands missing from
+    // the local menu (e.g. /write-plan) still work. Truly unknown slashes get a
+    // 400 whose toast + input restore is handled by useSendPrompt.onError.
     onSubmit(text || '(图片)', images.length > 0 ? images : undefined)
     setImages([])
   }
@@ -305,7 +326,8 @@ export function Composer(props: {
     const SpeechRecognitionCtor = win.SpeechRecognition || win.webkitSpeechRecognition
     if (!SpeechRecognitionCtor) return
     const recognition = new SpeechRecognitionCtor()
-    recognition.lang = 'zh-CN'
+    // Follow the UI locale instead of hardcoding Chinese (P1-7).
+    recognition.lang = i18n.language === 'en' ? 'en-US' : 'zh-CN'
     recognition.continuous = true
     recognition.interimResults = true
     recognition.onstart = () => {
@@ -381,6 +403,9 @@ export function Composer(props: {
         setImages([])
       } else if (value.trim()) {
         onChange('')
+      } else if (busy) {
+        // P1-6: Esc with an empty composer stops the running turn (Claude Desktop parity).
+        onAbort()
       } else if (now - lastEscAt.current < 400) {
         lastEscAt.current = 0
         onDoubleEscape()
@@ -644,11 +669,16 @@ export function Composer(props: {
             commands={commands}
             onRunCommand={runCommand}
             onDelegate={onDelegate}
+            onWorkflow={onWorkflow}
             onClose={() => {}}
           />
         </div>
         <ModelPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} />
         <DomainPicker sessionId={sessionId} disabled={busy} menuRev={menuRev} threadNonEmpty={threadNonEmpty} />
+        {approvalLevel && onSetApprovalLevel && (
+          <AutonomyControl compact value={approvalLevel} onChange={onSetApprovalLevel} />
+        )}
+        {contextUsage && <ContextRing usage={contextUsage} />}
         {onSetPlanMode && (
           <button
             className={`mode-toggle ${planning ? 'plan' : 'agent'}`}
@@ -671,6 +701,101 @@ export function Composer(props: {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+function formatTok(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return String(n)
+}
+
+/** Context usage ring (P1-1) — SVG ring beside the send button; >80% turns
+ *  warning-colored with a /compact hint. Click opens a detail popover with
+ *  cache hit rate (our DeepSeek prefix-cache visibility, Claude doesn't have
+ *  this). Hidden when the model window is unknown and nothing was used yet. */
+function ContextRing({ usage }: { usage: ContextUsage }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const { usedTokens, contextWindow, cacheReadTokens, cacheCreationTokens, deltaTokens } = usage
+  if (!usedTokens && !cacheReadTokens && !cacheCreationTokens) return null
+
+  const pct = contextWindow && contextWindow > 0
+    ? Math.min(Math.round((usedTokens / contextWindow) * 100), 100)
+    : null
+  const warn = pct !== null && pct >= 80
+  const cacheTotal = cacheReadTokens + cacheCreationTokens
+  const hitRate = cacheTotal > 0 ? Math.round((cacheReadTokens / cacheTotal) * 100) : null
+
+  // r=7 ring in a 18×18 viewBox; stroke-dasharray drives the fill arc.
+  const r = 7
+  const circ = 2 * Math.PI * r
+  const filled = pct !== null ? (pct / 100) * circ : 0
+
+  return (
+    <div className={`ctx-ring-wrap ${warn ? 'warn' : ''}`} ref={ref}>
+      <button
+        className="ctx-ring-trigger"
+        onClick={() => setOpen((o) => !o)}
+        title={pct !== null
+          ? `上下文 ${formatTok(usedTokens)} / ${formatTok(contextWindow!)} (${pct}%)${warn ? ' · 建议 /compact' : ''}`
+          : `上下文 ${formatTok(usedTokens)} tokens`}
+        aria-label="上下文用量"
+        aria-expanded={open}
+      >
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+          <circle cx="9" cy="9" r={r} fill="none" stroke="var(--border)" strokeWidth="2.5" />
+          {pct !== null && (
+            <circle
+              cx="9" cy="9" r={r} fill="none"
+              stroke={warn ? 'var(--warning, #f59e0b)' : 'var(--accent)'}
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeDasharray={`${filled} ${circ - filled}`}
+              transform="rotate(-90 9 9)"
+            />
+          )}
+        </svg>
+        <span className="ctx-ring-label">{pct !== null ? `${pct}%` : formatTok(usedTokens)}</span>
+      </button>
+      {open && (
+        <div className="ctx-ring-popover" role="dialog" aria-label="上下文明细">
+          <div className="ctx-ring-row">
+            <span>上下文</span>
+            <span>{formatTok(usedTokens)}{contextWindow ? ` / ${formatTok(contextWindow)}` : ''} tok</span>
+          </div>
+          {deltaTokens > 0 && (
+            <div className="ctx-ring-row">
+              <span>本轮增量</span>
+              <span>+{formatTok(deltaTokens)}</span>
+            </div>
+          )}
+          {hitRate !== null && (
+            <>
+              <div className="ctx-ring-row">
+                <span>缓存命中率</span>
+                <span>⚡{hitRate}%</span>
+              </div>
+              <div className="ctx-ring-row sub">
+                <span>缓存读 / 创建</span>
+                <span>{formatTok(cacheReadTokens)} / {formatTok(cacheCreationTokens)}</span>
+              </div>
+            </>
+          )}
+          {warn && <div className="ctx-ring-hint">上下文超过 80%——发送 /compact 可压缩会话</div>}
+        </div>
+      )}
     </div>
   )
 }

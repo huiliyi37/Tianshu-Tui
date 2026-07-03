@@ -13,7 +13,7 @@
 
 import type { WriteStream, ReadStream } from 'node:tty'
 import { CommitEngine } from './commit-engine.js'
-import { LiveEngine, type LiveRegionLine } from './live-engine.js'
+import { LiveEngine, padDynamicRegion, type LiveRegionLine } from './live-engine.js'
 import { OverlayEngine } from './overlay-engine.js'
 import { InputHandler, type KeyPress } from './input-handler.js'
 import { ResizeHandler } from './resize-handler.js'
@@ -60,10 +60,10 @@ import { formatSpinnerStatus, formatTurnWorkSummary } from '../format/spinner-st
 import { formatSlashHint, slashCompletionTarget, filterSlashCommands, type SlashHintEntry } from '../format/slash-hint.js'
 import { extractAtToken, getCompletions, applyCompletion } from '../file-completer.js'
 import stringWidth from 'string-width'
-import { truncateToDisplayWidth, displayWidth } from '../width.js'
+import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
 import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderConnect } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ConnectOverlayData } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
 import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../connect-flow.js'
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
@@ -81,6 +81,15 @@ export function formatElapsedShort(ms: number): string {
   const mins = Math.floor(ms / 60000)
   const secs = Math.floor((ms % 60000) / 1000)
   return `${mins}m${secs}s`
+}
+
+/**
+ * live region 行上限：终端高度感知（`min(28, rows - 1)`）。
+ * 固定 28 在小终端上会让全量重写的 cursorUp 回顶量超出屏幕 → 错位/残影，
+ * 故上限随终端高度收缩；下限 4 保输入框 chrome 最低可用。
+ */
+export function liveMaxRowsFor(rows: number): number {
+  return Math.max(4, Math.min(28, (rows || 24) - 1))
 }
 
 /** Truncate a string (possibly containing ANSI) to fit within maxWidth display columns. */
@@ -178,6 +187,7 @@ import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
 import { FleetRegistry } from '../fleet-registry.js'
+import { WatchdogRecoveryPolicy } from '../../agent/watchdog-recovery-policy.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -278,6 +288,8 @@ export class TuiApp {
   private planTraceProvider?: () => import('../../agent/plan-execution-trace.js').PlanExecutionTrace | null
   /** 当前 plan-mode 状态访问器（返回是否处于 planning） */
   private planModeProvider?: () => boolean
+  /** Shift+Tab 切换 plan/agent 模式（由 main-ansi 注入） */
+  private planModeToggleHandler?: () => void
   /** Side panel 状态变化回调（用于持久化到 session metadata） */
   private onSidePanelChange?: (open: boolean) => void
   /** Block stream writer: chunks streaming text into display-sized blocks */
@@ -310,12 +322,16 @@ export class TuiApp {
    * 与当前 gen 不符即被丢弃，杜绝旧 run 的 onAbort/onTextDelta 污染新 run 状态。
    */
   private _runGen = 0
-  /** Consecutive watchdog auto-continues without intervening progress. Caps the
-   *  goal-mode "⟳ Auto-recovering → continue" loop so a genuinely-wedged turn
-   *  can't re-abort every hardStallMs and burn budget forever. Reset on any
-   *  real turn completion or user submit. */
-  private _watchdogAutoContinues = 0
-  private static readonly MAX_WATCHDOG_AUTO_CONTINUES = 3
+  /** Watchdog stall 自动恢复状态机（consecutive/session-total/进度感知配额），
+   *  与桌面 sidecar 共享同一实现 — 见 src/agent/watchdog-recovery-policy.ts。 */
+  private readonly watchdogPolicy = new WatchdogRecoveryPolicy()
+  /** Timestamp of the last approval denial. A watchdog abort that happens while
+   *  (or just after) a tool is blocked on approval must NOT auto-continue: the
+   *  resubmitted 'continue' just re-emits the same approval-blocked call, giving
+   *  the deny→continue→deny self-driving loop. Suppress auto-continue in that
+   *  window and let the user intervene instead. */
+  private _lastApprovalDeniedAt = 0
+  private static readonly APPROVAL_STALL_GRACE_MS = 5_000
   /** Ctrl+X leader key 待处理状态（用于 ctrl+x r 打开右侧面板） */
   private sidePanelLeaderPending = false
   private sidePanelLeaderTimer: ReturnType<typeof setTimeout> | null = null
@@ -355,7 +371,7 @@ export class TuiApp {
 
     // Initialize engines
     this.commit = new CommitEngine({ stdout: options.stdout })
-    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: 28 })
+    this.live = new LiveEngine({ stdout: options.stdout, reservedRows: 3, maxRows: liveMaxRowsFor(options.rows) })
     this.overlay = new OverlayEngine({
       stdout: options.stdout,
       getSize: () => ({ cols: this.columns, rows: this.rows }),
@@ -374,7 +390,7 @@ export class TuiApp {
         // auto-continue counter so a later legitimate stall gets the full
         // recovery budget again. (The auto-continue path resubmits via
         // onSubmitCallback directly and does NOT pass through here.)
-        if (trimmed) this._watchdogAutoContinues = 0
+        if (trimmed) this.watchdogPolicy.recordUserSubmit()
 
         // 输入历史：会话内更新 + 持久化（queued 与直接 submit 都记录）
         if (trimmed) {
@@ -482,6 +498,7 @@ export class TuiApp {
     this.resize.onResize((cols, rows) => {
       this.columns = cols
       this.rows = rows
+      this.live.setMaxRows(liveMaxRowsFor(rows))
       this.rerender()
     })
 
@@ -564,6 +581,11 @@ export class TuiApp {
       }
 
       // ── Global shortcuts (before input line processing) ──────
+      if (key.name === 'shift_tab') {
+        this.planModeToggleHandler?.()
+        this.renderLive()
+        return
+      }
       if (key.name === 'ctrl_c') {
         if (this.isAgentActive()) {
           // Agent active (含首 token 前/纯工具窗口): abort current agent run
@@ -776,6 +798,8 @@ export class TuiApp {
 
   private resolveApproval(result: ApprovalResult | boolean): void {
     if (!this.approvalIntentController.approvalPending) return
+    const approved = typeof result === 'boolean' ? result : result.approved
+    if (!approved) this._lastApprovalDeniedAt = Date.now()
     this.approvalIntentController.approvalPending.resolve(result)
     this.approvalIntentController.approvalPending = null
     this.input.setMode('input')
@@ -921,6 +945,14 @@ export class TuiApp {
         const entries = this.overlayController.getData()?.themePickerData?.().entries ?? []
         const curIdx = entries.findIndex(e => e.current)
         if (curIdx >= 0) this.overlayController.nav().themePickerIndex = curIdx
+        return this.overlay.activate(id)
+      }
+      case 'choice-panel': {
+        this.overlayController.resetNav()
+        // 光标初始定位到当前 effort 档位（data 里标记了 current/recommended）。
+        const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
+        const curIdx = choices.findIndex(c => c.recommended || (c as ChoiceEntry & { current?: boolean }).current)
+        if (curIdx >= 0) this.overlayController.nav().choicePanelIndex = curIdx
         return this.overlay.activate(id)
       }
       default:
@@ -1496,6 +1528,26 @@ export class TuiApp {
       return false
     }
 
+    if (id === 'choice-panel') {
+      const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
+      const cur = this.overlayController.nav().choicePanelIndex
+      if (key.name === 'down') {
+        if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur + 1) % choices.length; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (choices.length > 0) { this.overlayController.nav().choicePanelIndex = (cur - 1 + choices.length) % choices.length; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = choices[cur]
+        if (entry && this.overlayController.getChoicePanelExec()) this.overlayController.getChoicePanelExec()?.(entry.id)
+        this.deactivateOverlay()
+        return true
+      }
+      return false
+    }
+
     return false
   }
 
@@ -1950,6 +2002,11 @@ export class TuiApp {
     this.planModeProvider = provider
   }
 
+  /** Shift+Tab toggles plan mode (enter/exit). Wired from main-ansi. */
+  setPlanModeToggleHandler(handler: () => void): void {
+    this.planModeToggleHandler = handler
+  }
+
   /**
    * 注册 side panel 状态变化回调，用于把展开状态持久化到会话元数据。
    */
@@ -2130,7 +2187,13 @@ export class TuiApp {
       return
     }
 
-    // Terminal result: commit to scrollback
+    // Terminal result: commit to scrollback.
+    // Progress unit counted HERE (after the streaming-chunk early return), not
+    // at method entry: onOutput streams one callback per chunk with isError
+    // undefined, and counting chunks would let a single chatty tool call (4+
+    // chunks) satisfy the threshold — diluting the dense-stall detector
+    // calibrated for (>= 2 full tool batches).
+    this.watchdogPolicy.recordToolResult()
     const toolAcc = this.toolGroupController.getAccumulated(id)
     this.toolGroupController.deleteAccumulated(id)
     const meta = this.toolGroupController.getPending(id)
@@ -2284,9 +2347,8 @@ export class TuiApp {
     this.state.turnNumber = turnNumber
 
     // A completed turn (even intermediate) is forward progress: the stream
-    // produced output, so the prior boundary stall cleared. Reset the goal-mode
-    // watchdog auto-continue counter to restore the full recovery budget.
-    this._watchdogAutoContinues = 0
+    // produced output, so the prior boundary stall cleared.
+    this.watchdogPolicy.recordTurnComplete()
 
     // Flush 工具折叠组残余
     if (this.toolGroupController.isActiveGroup()) this.flushToolGroup()
@@ -2362,10 +2424,12 @@ export class TuiApp {
     }
   }
 
-  /** 估算累计费用（对齐 app.tsx 的近似定价：normal $1/M、cache $0.1/M、out $4/M） */
+  /** Fallback cost estimate when no metricsProvider is wired (tests / no-config).
+   *  Returns 0 — real cost comes from metricsProvider (main.ts wires findModelPricing
+   *  + computeUsageCost). Guessing a price without knowing the provider/model
+   *  produces misleading numbers, so we don't. */
   private estimateSessionCost(): number {
-    const normalInput = Math.max(0, this.metricsGlanceController.totalUsage.input - this.metricsGlanceController.totalUsage.cacheRead)
-    return (normalInput * 1 + this.metricsGlanceController.totalUsage.cacheRead * 0.1 + this.metricsGlanceController.totalUsage.output * 4) / 1_000_000
+    return 0
   }
 
   private handleError(error: Error): void {
@@ -2418,6 +2482,13 @@ export class TuiApp {
   private handleAbort(reason?: string): void {
     // 世代自增：被中断的旧 run 的迟到回调（bridge 捕获旧 gen）将被丢弃
     this._runGen++
+    // Capture approval-blocked state BEFORE resolveApproval(false) below clears
+    // it: a watchdog abort that fired while (or just after) a tool was blocked on
+    // approval must not auto-continue — the resubmitted 'continue' only re-emits
+    // the same approval-blocked call (deny→continue→deny self-driving loop).
+    const approvalBlocked =
+      !!this.approvalIntentController.approvalPending
+      || (Date.now() - this._lastApprovalDeniedAt < TuiApp.APPROVAL_STALL_GRACE_MS)
     // 中断时若停在审批确认态：解析为拒绝，让 tool-pipeline 的前置 await
     // 立即 settle，并复位输入模式。否则审批态残留——后续按键被当确认解析、
     // 输入框无法使用（这是 abort 中途审批"假死"的一个分支）。
@@ -2440,39 +2511,55 @@ export class TuiApp {
     this.live.clear()
     // 可见的中断提示：watchdog abort → 自动恢复提示；用户中断 → 原样
     const isWatchdog = reason?.startsWith('watchdog')
-    const isWatchdogGoal = reason === 'watchdog:goal'
     // 收敛/连续无工具硬中断：这是守护开火，不是用户中断。以往走 onAbort() 无
     // reason，显示成裸 "⏹ Interrupted"，与用户按 Esc 无法区分。给它一条带判据的
     // 标注，并**不自动续跑**（模型可能在推理，注入 continue 反而扰乱；用户可自行键入）。
     const isConvergence = reason?.startsWith('convergence')
-    // Goal-mode auto-continue is bounded: a turn that re-stalls every
-    // hardStallMs would otherwise loop "⟳ Auto-recovering → continue" forever
-    // and burn budget. After MAX_WATCHDOG_AUTO_CONTINUES consecutive watchdog
-    // aborts with no intervening progress, stop auto-continuing and surface a
-    // plain interrupt so the user can intervene.
-    const autoContinueExhausted = isWatchdogGoal
-      && this._watchdogAutoContinues >= TuiApp.MAX_WATCHDOG_AUTO_CONTINUES
+    // Watchdog auto-continue is bounded by the shared WatchdogRecoveryPolicy
+    // (consecutive cap / session-total cap / progress-aware quota). Suppression
+    // conditions (approval-blocked, user draft) are caller-side here and passed
+    // into the single onStall() call so message and behavior share one decision.
+    const suppressForApproval = isWatchdog && approvalBlocked
+    // v3 yield-to-user guard: if the input line has an unsubmitted draft, the
+    // user is present and about to act — don't inject 'continue' and race them.
+    const yieldToUser = isWatchdog && this.inputLine.value.trim().length > 0
+    // Single decision point: the SAME StallDecision drives both the message and
+    // the behavior branch below — the v3 "shows Auto-recovering but never
+    // recovers" lie came from computing them separately. Suppressed/exhausted
+    // stalls consume no policy state (progress carries over to the next stall).
+    const decision = isWatchdog
+      ? this.watchdogPolicy.onStall({ suppressed: suppressForApproval || yieldToUser })
+      : null
+    const shouldAutoContinue = decision?.autoContinue === true
+    const sessionTotalExhausted = decision?.stopReason === 'session-total'
+    const autoContinueExhausted = sessionTotalExhausted || decision?.stopReason === 'consecutive'
     const convergenceLabel = reason === 'convergence:no-tool'
       ? '⏹ 收敛守护中断：连续多轮未调用工具（如仍在推进，键入 continue 继续）'
       : '⏹ 收敛守护中断：多轮未收敛（如仍在推进，键入 continue 继续）'
     this.commitAbove(() => {
       this.commit.write({
-        text: isWatchdog && !autoContinueExhausted
-          ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
-          : autoContinueExhausted
-            ? color('⏹ Stalled repeatedly — auto-recovery paused (type to continue)', this.theme.muted)
-            : isConvergence
-              ? color(convergenceLabel, this.theme.muted)
-              : color('⏹ Interrupted', this.theme.muted),
+        text: suppressForApproval
+          ? color('⏹ 等待你的审批 — 该操作需批准才能继续（批准 / 调整指令 / 键入 continue）', this.theme.muted)
+          : yieldToUser
+            ? color('⏹ Boundary stall — 检测到你正在输入，未自动恢复（回车提交或键入 continue）', this.theme.muted)
+            : shouldAutoContinue
+              ? color('⟳ Auto-recovering (boundary stall)', this.theme.muted)
+              : autoContinueExhausted
+                ? color(sessionTotalExhausted
+                    ? '⏹ Stalled repeatedly (session quota exhausted) — type to continue'
+                    : '⏹ Stalled repeatedly (consecutive limit) — type to continue',
+                  this.theme.muted)
+                : isConvergence
+                  ? color(convergenceLabel, this.theme.muted)
+                  : color('⏹ Interrupted', this.theme.muted),
         trailingNewline: true,
       })
       this.state.committedCount++
     })
-    // Watchdog abort in goal mode: auto-resubmit so the agent continues
-    // without waiting for the user to type "continue" — but only while under
-    // the consecutive-stall cap.
-    if (isWatchdogGoal && !autoContinueExhausted) {
-      this._watchdogAutoContinues++
+    // Watchdog auto-resubmit so the agent continues without waiting for the
+    // user to type "continue". Cap/quota/progress bookkeeping all happened
+    // inside policy.onStall() above — here we only act on its verdict.
+    if (shouldAutoContinue) {
       this.onSubmitCallback?.('continue')
     }
     this.onAbortCallback?.()
@@ -2536,6 +2623,38 @@ export class TuiApp {
     }, this.theme)
     this.thinkingLinesMemo = { key, lines: computed }
     return computed
+  }
+
+  /** ambiguous 宽度模式缓存（与 LiveEngine.ambiguousWide 同口径，进程内基本不变）。 */
+  private ambiguousWideCache: boolean | null = null
+
+  /**
+   * 单行 display rows 度量（wrapping-aware），与 LiveEngine.rowsForLine 同口径——
+   * 定高视口的行数预算必须与引擎实际渲染行数一致，否则垫行后总高度仍会漂移。
+   */
+  private displayRowsFor(text: string, width: number): number {
+    this.ambiguousWideCache ??= ambiguousWideEnabled()
+    if (width <= 0) return 1
+    const dw = displayWidth(text, { ambiguousAsWide: this.ambiguousWideCache })
+    if (dw === 0) return 1
+    return Math.ceil(dw / width)
+  }
+
+  /**
+   * 活动期动态区高度预算（display rows）。
+   *
+   * 活动期（run 进行中，phase 非 idle——thinking/streaming/analyzing/waiting 均含）
+   * 返回固定预算：renderLive 会把动态段垫高/截断到恰好该值，live region 总高度
+   * 逐帧恒定 → 输入框屏幕坐标不随 thinking/streaming 字符数浮动。
+   * 空闲期返回 0，live region 自然塌回 chrome-only（每 turn 结束一次性收敛）。
+   *
+   * 预算 = rows - chromeRows - 2（留缝让 scrollback 最后输出可见），期望区间
+   * 6–16 行；小终端优先不超屏——可用空间不足 6 行时取实际可用值（可为 0）。
+   */
+  private getDynamicBudget(chromeRows: number): number {
+    if (this.state.phase === 'idle') return 0
+    const raw = (this.rows || 24) - chromeRows - 2
+    return Math.max(0, Math.min(16, raw))
   }
 
   /**
@@ -2831,7 +2950,7 @@ export class TuiApp {
     // ── 底部 chrome 起点：从此往后（任务面板 + GlanceBar + 输入框 + 提示）是
     //    恒可见的保留区，内容超屏时 LiveEngine 截断的是上方 dynamic 段，
     //    不会裁掉任务面板与输入框。
-    const chromeStart = lines.length
+    let chromeStart = lines.length
 
     // 3b. 常驻任务面板（todo 列表）——空列表不渲染。宽屏时已由 side panel 承载。
     if (!showSidePanel) {
@@ -2966,6 +3085,22 @@ export class TuiApp {
           lines.push({ text: this.clampLine(`${marker}${name}`) })
         }
         lines.push({ text: this.clampLine(color('tab to cycle', this.theme.dim)) })
+      }
+    }
+
+    // ── 活动期定高视口：动态段恒定占位（不足垫空行、超出截最旧行），
+    //    live region 总高度逐帧不变 → 输入框在 thinking/streaming 全程钉在原位。
+    //    空闲期 budget=0 原样返回，塌回自然流。度量与 LiveEngine.rowsForLine 同口径。
+    {
+      let chromeRows = 0
+      for (let i = chromeStart; i < lines.length; i++) {
+        chromeRows += this.displayRowsFor(lines[i]!.text, cols)
+      }
+      const budget = this.getDynamicBudget(chromeRows)
+      if (budget > 0) {
+        const padded = padDynamicRegion(lines, chromeStart, budget, (text) => this.displayRowsFor(text, cols))
+        lines = padded.lines
+        chromeStart = padded.chromeStart
       }
     }
 

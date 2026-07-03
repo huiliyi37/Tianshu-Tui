@@ -28,7 +28,15 @@ function collectTsFiles(cwd: string): string[] {
   const files: string[] = []
   function walk(dir: string): void {
     if (files.length >= MAX_FILES) return
-    const entries = readdirSync(dir, { withFileTypes: true })
+    let entries: import('fs').Dirent[]
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      // Import graph is a best-effort impact-hint feature (deprecated, superseded
+      // by meridian-*.ts). A permission error on a subdir must never produce
+      // tool errors or kill the run — silently skip the unreadable directory.
+      return
+    }
     for (const entry of entries) {
       if (files.length >= MAX_FILES) return
       if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue

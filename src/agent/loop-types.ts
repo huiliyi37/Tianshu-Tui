@@ -36,6 +36,12 @@ export interface AgentConfig {
    * when unset (caller opts in via config.agent.maxAutoContinue).
    */
   maxAutoContinue?: number
+  /**
+   * C3 自治档检查点 — pause the run for user confirmation after this many turns
+   * within a single run(). 0/unset disables. Only enforced when approvalMode is
+   * 'dangerously-skip-permissions' (supervised modes brake via approvals).
+   */
+  checkpointEveryTurns?: number
   contextWindow: number
   compact: CompactionConfig
   providerProfile?: ProviderProfile
@@ -142,6 +148,8 @@ export interface AgentConfig {
   meridianIndexer?: import('../repo/meridian-indexer.js').MeridianIndexer | null
   /** Plan Mode state — when 'planning', write tools are blocked in tool-pipeline. */
   planModeState?: PlanModeState
+  /** Active plan draft file (relative to cwd) — only this path is writable in plan mode. */
+  activePlanFilePath?: string | null
   /** Optional stream rules — abort and inject reminders when model output matches patterns.
    *  Each rule has a regex `pattern` and an `inject` message appended as a user reminder. */
   streamRules?: StreamRule[]
@@ -226,6 +234,9 @@ export interface AgentCallbacks {
   onIntentNote?: (intent: IntentPreview) => void
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
+  /** C3 自治档检查点 — the run paused after `turnsDone` turns awaiting user
+   *  confirmation ("continue" resumes). Only fires in autonomous mode. */
+  onAutonomyCheckpoint?: (turnsDone: number) => void
   /** T4 — structured per-worker delegation status/progress (subagent panel). */
   onDelegationActivity?: (activity: DelegationActivity) => void
 }

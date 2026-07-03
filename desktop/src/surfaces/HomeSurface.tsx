@@ -174,8 +174,8 @@ export function HomeSurface() {
           常用命令
         </h2>
         <div className="home-commands">
-          <code>/goal &lt;目标&gt;</code>
-          <span>设定跨回合自主目标</span>
+          <code>/team &lt;任务&gt;</code>
+          <span>拆解任务并行执行</span>
           <code>/plan &lt;功能&gt;</code>
           <span>创建实现计划</span>
           <code>/python status</code>

@@ -36,6 +36,10 @@ export interface TddGateConfig {
    * while leaving a 2-edit exploration window.
    */
   threshold: number
+  /** When true (default), don't block if the agent hasn't read any test files —
+   *  the project may have no tests, or the task is a quick fix. Downgrades block
+   *  to suggest so the agent isn't stuck on projects without test infrastructure. */
+  skipIfNoTests: boolean
 }
 
 export interface TddGateDecision {
@@ -55,11 +59,13 @@ export const EDIT_TOOLS = new Set(['edit_file', 'write_file', 'apply_patch', 'ha
 // Defaults
 // ---------------------------------------------------------------------------
 
-/** Default config: enabled, enforce, block after 3 consecutive unverified edits. */
+/** Default config: enabled, enforce, block after 3 consecutive unverified edits,
+ *  but skip blocking when no test files have been read (project may lack tests). */
 export const DEFAULT_TDD_GATE_CONFIG: TddGateConfig = {
   enabled: true,
   mode: 'enforce',
   threshold: 3,
+  skipIfNoTests: true,
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +73,7 @@ export const DEFAULT_TDD_GATE_CONFIG: TddGateConfig = {
 // ---------------------------------------------------------------------------
 
 const BLOCK_MESSAGE = (edits: number) =>
-  `TDD Gate: ${edits} edits without a test run. Write a failing test first (run_tests should fail = RED), then edit. Run your test command to clear this gate.`
+  `TDD Gate: ${edits} edits without a test run. Write a failing test first (run_tests or bash test command should fail = RED), then edit. Run tests (run_tests tool or bash: npm test / pytest / etc.) to clear this gate.`
 
 const SUGGEST_MESSAGE = (edits: number) =>
   `TDD discipline: ${edits} edit(s) made, 0 verifications. Consider running tests before more edits.`
@@ -121,6 +127,12 @@ export function evaluateTddGate(
   if (gateState.editsSinceLastTest >= config.threshold) {
     // suggest mode never blocks — it only advises.
     if (config.mode === 'suggest') {
+      return { action: 'suggest', message: SUGGEST_MESSAGE(gateState.editsSinceLastTest) }
+    }
+    // skipIfNoTests: if the agent hasn't read any test files, the project may
+    // lack test infrastructure (or this is a quick fix on a project without tests).
+    // Downgrade block → suggest so the agent isn't permanently stuck.
+    if (config.skipIfNoTests && !gateState.hasReadTestFiles) {
       return { action: 'suggest', message: SUGGEST_MESSAGE(gateState.editsSinceLastTest) }
     }
     return { action: 'block', message: BLOCK_MESSAGE(gateState.editsSinceLastTest) }

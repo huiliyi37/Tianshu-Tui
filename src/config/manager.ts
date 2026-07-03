@@ -209,6 +209,29 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
   return cfg.editor
 }
 
+// --- Autonomy brakes (C3) ---
+
+/** Snapshot of the autonomy checkpoint setting for the desktop settings UI. */
+export function getAutonomyConfig(): { checkpointEveryTurns: number } {
+  return { checkpointEveryTurns: loadConfig().agent.checkpointEveryTurns }
+}
+
+/**
+ * Persist the autonomy checkpoint interval (0 = off). Validated as a
+ * non-negative integer. Takes effect at the next run() (the orchestrator reads
+ * it live per turn).
+ */
+export function setAutonomyConfig(input: { checkpointEveryTurns?: unknown }): { checkpointEveryTurns: number } {
+  const cfg = loadConfig()
+  if (input.checkpointEveryTurns !== undefined) {
+    const v = Number(input.checkpointEveryTurns)
+    if (!Number.isInteger(v) || v < 0) throw new Error('checkpointEveryTurns must be a non-negative integer')
+    cfg.agent.checkpointEveryTurns = v
+  }
+  saveConfig(cfg)
+  return { checkpointEveryTurns: cfg.agent.checkpointEveryTurns }
+}
+
 /** Snapshot of the mirror configuration block. */
 export function getMirrorConfig(): MirrorsConfig {
   return loadConfig().mirrors
@@ -387,7 +410,8 @@ export function setupProvider(options: SetupProviderOptions): void {
 export interface SetupCustomProviderOptions {
   providerName: string
   baseUrl: string
-  apiKey: string
+  /** API key — optional for local deployments (Ollama/vLLM) that need no auth. */
+  apiKey?: string
   model: { id: string; alias?: string; contextWindow: number; maxTokens: number; reasoningEffort?: ModelConfig['reasoningEffort'] }
   makeDefault?: boolean
 }
@@ -413,7 +437,7 @@ export function setupCustomProvider(options: SetupCustomProviderOptions): void {
   }
   const provider: ProviderConfig = {
     name: options.providerName,
-    apiKey: options.apiKey,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
     baseUrl: options.baseUrl,
     protocol: 'openai',
     capabilities: {

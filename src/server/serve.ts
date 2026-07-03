@@ -7,7 +7,8 @@
  * existing AgentLoop / ArtifactStore — no runtime rewrite, only an API surface.
  */
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { startServer } from './index.js'
 import { desktopDir, desktopSessionsDir } from '../config/paths.js'
 import { serverLogger } from './logger.js'
@@ -559,6 +560,7 @@ function buildManagedAgent(
     // (last API prompt_tokens + tail estimate), provider-agnostic.
     getEstimatedTokens: () => agent.session.getRealOccupancy(),
     getContextWindow: () => spec.model.contextWindow,
+    getReasoningEffort: () => agent.getReasoningEffort(),
     // Wave L: 进程退出释放本 session 的 coordinator timer + in-flight worker
     // 句柄。abort() 仅中止当前 turn；shutdown() 是终结性操作。
     shutdown: () => {
@@ -1063,6 +1065,27 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
   }
 }
 
+export interface ParentWatchdogOptions {
+  /** Probe interval. Default 3000ms. */
+  intervalMs?: number
+  /** Consecutive failed probes required before onParentGone fires. Default 3. */
+  maxMisses?: number
+  /** Injectable liveness probe (tests). Returns true when the parent is alive. */
+  probe?: (ppid: number) => boolean
+}
+
+/** True when `ppid` still exists (signal-0 probe; EPERM = alive but not ours). */
+export function probeParentAlive(ppid: number): boolean {
+  try {
+    // signal 0 probes existence/permission without actually signalling.
+    process.kill(ppid, 0)
+    return true
+  } catch (err) {
+    // ESRCH = parent gone. EPERM = alive but not ours → still alive.
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
 /**
  * Parent-death watchdog. The desktop shell spawns the sidecar with
  * `RIVET_PARENT_PID` set to its own pid; we poll whether that process still
@@ -1070,25 +1093,65 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
  * for the case the shell's `Child::kill()` can't cover — a crash, a SIGKILL, or
  * Windows "End task" — which would otherwise leave an orphaned `node.exe`
  * holding the port. No-op when the env var is absent (manual `rivet serve`).
+ *
+ * 宽限：单次探测失败可能是瞬时误报（父进程短暂无响应、电源状态切换等），
+ * 立即自杀会造成「sidecar 半夜无故死亡」。改为连续 maxMisses 次（默认 3 次
+ * ≈ 9s）失败才触发退出，期间任一次成功即清零；每次 miss 记日志留现场。
  */
-function installParentWatchdog(onParentGone: () => void): void {
+export function installParentWatchdog(
+  onParentGone: (info: { ppid: number; misses: number }) => void,
+  options: ParentWatchdogOptions = {},
+): void {
   const raw = process.env.RIVET_PARENT_PID
   const ppid = raw ? Number(raw) : NaN
   if (!Number.isInteger(ppid) || ppid <= 0) return
+  const intervalMs = options.intervalMs ?? 3000
+  const maxMisses = options.maxMisses ?? 3
+  const probe = options.probe ?? probeParentAlive
+  let misses = 0
+  let fired = false
   const timer = setInterval(() => {
-    let alive = true
-    try {
-      // signal 0 probes existence/permission without actually signalling.
-      process.kill(ppid, 0)
-    } catch (err) {
-      // ESRCH = parent gone. EPERM = alive but not ours → still alive.
-      alive = (err as NodeJS.ErrnoException).code === 'EPERM'
+    if (fired) return
+    if (probe(ppid)) {
+      misses = 0
+      return
     }
-    if (!alive) onParentGone()
-  }, 3000)
+    misses++
+    if (misses < maxMisses) {
+      console.error(`[serve] parent pid ${ppid} probe miss ${misses}/${maxMisses} — exiting after ${maxMisses} consecutive misses`)
+      return
+    }
+    // fired guard: shutdown (process.exit) may take a beat; the interval must
+    // not re-enter onParentGone in the meantime.
+    fired = true
+    clearInterval(timer)
+    onParentGone({ ppid, misses })
+  }, intervalMs)
   // Don't let the watchdog itself keep the event loop alive — the HTTP server
   // already does, and an unref'd timer won't block a clean exit.
   timer.unref()
+}
+
+/**
+ * Best-effort exit-reason breadcrumb. OOM / hard kills can't write anything, so
+ * the PRESENCE of this file distinguishes a deliberate self-shutdown (watchdog,
+ * signal) from a silent death — the exact ambiguity that made the "sidecar died
+ * overnight" incidents unattributable. Written to the desktop dir next to the
+ * scheduler artifacts; failures are swallowed.
+ */
+function writeExitBreadcrumb(reason: string, extra: Record<string, unknown> = {}): void {
+  try {
+    const path = join(desktopDir(), 'sidecar-exit.json')
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, JSON.stringify({
+      reason,
+      pid: process.pid,
+      at: new Date().toISOString(),
+      ...extra,
+    }, null, 2))
+  } catch {
+    // best-effort — never block shutdown on breadcrumb IO
+  }
 }
 
 /**
@@ -1111,10 +1174,17 @@ export function serveCommand(args: string[]): void {
     server.close()
     process.exit(0)
   }
-  process.on('SIGINT', shutdownServer)
-  process.on('SIGTERM', shutdownServer)
-  installParentWatchdog(() => {
-    console.error('[serve] parent process gone — shutting down sidecar')
+  process.on('SIGINT', () => {
+    writeExitBreadcrumb('signal', { signal: 'SIGINT' })
+    shutdownServer()
+  })
+  process.on('SIGTERM', () => {
+    writeExitBreadcrumb('signal', { signal: 'SIGTERM' })
+    shutdownServer()
+  })
+  installParentWatchdog(({ ppid, misses }) => {
+    console.error(`[serve] parent process gone (pid ${ppid}, ${misses} consecutive probe misses) — shutting down sidecar`)
+    writeExitBreadcrumb('parent-gone', { ppid, misses })
     shutdownServer()
   })
 

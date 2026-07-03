@@ -1,8 +1,10 @@
 import { memo } from 'react'
 import type { ConvoBlock } from '../state/event-reducer'
 import { FileText, CheckCircle2, BookOpen } from 'lucide-react'
+import { useUiDispatch } from '../state/store'
 
 function ArtifactCardImpl({ block }: { block: ConvoBlock }) {
+  const dispatch = useUiDispatch()
   let title = 'Artifact'
   let summary = 'Generated or updated file'
   let icon = <FileText size={16} />
@@ -49,7 +51,12 @@ function ArtifactCardImpl({ block }: { block: ConvoBlock }) {
         <p className="ac-summary">{summary}</p>
       </div>
       <div className="ac-footer">
-        <button className="ac-btn review-btn">Review</button>
+        <button
+          className="ac-btn review-btn"
+          onClick={() => dispatch({ type: 'requestReviewTab', tab: isPlan ? 'plan' : isTask ? 'task' : 'review' })}
+        >
+          Review
+        </button>
       </div>
     </div>
   )

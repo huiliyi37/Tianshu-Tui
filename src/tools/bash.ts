@@ -3,7 +3,7 @@ import { DANGEROUS_BASH_PATTERNS } from '../agent/approval-risk.js'
 import type { Tool, ToolCallParams } from './types.js'
 import { track } from './process-tracker.js'
 import { killProcessTree } from './process-kill.js'
-import { getShellCommand, WinStreamDecoder, rewriteWindowsNullRedirect, rewritePowershellNullRedirect } from '../platform.js'
+import { getShellCommand, getShellDiagnostics, WinStreamDecoder, rewriteWindowsNullRedirect, rewritePowershellNullRedirect } from '../platform.js'
 import { wrapSandboxCommand as sandboxWrap } from './sandbox-profile.js'
 import { persistRawOutput, buildModelOutput, buildUiOutput } from './output-store.js'
 import { applyCommandFilter } from './command-filters.js'
@@ -20,6 +20,9 @@ import { getResolvedEnv } from './resolved-env.js'
  *  return full output to the model. Beyond this, only a header summary is returned
  *  (recoverable via the artifact reference in the same message). */
 const SUCCESS_INLINE_LINES = 20
+
+/** 一次性 flag：shell 降级警告只在 session 首次 bash 执行时注入一次。 */
+let _shellFallbackWarned = false
 
 /** Environment variable prefixes that should be preserved for child processes. */
 const SAFE_ENV_PREFIXES = [
@@ -99,7 +102,10 @@ export function classifyBashOutcome(
   exitCode: number,
   stderr: string,
   isWindows: boolean,
-): { isError: boolean; errorClass?: 'environment' | 'exec-failure' } {
+): { isError: boolean; errorClass?: 'environment' | 'exec-failure' | 'timeout' } {
+  // exitCode -1 is the sole product of the timeout path (isTimeout ? -1 : code).
+  // Classify it distinctly from exec-failure: a slow command is not a dead-end.
+  if (exitCode === -1) return { isError: true, errorClass: 'timeout' }
   if (isWindows) {
     // Windows-native not-found: cmd.exe 9009 / PowerShell "is not recognized".
     const winNotFound =
@@ -380,6 +386,17 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
       const buildResult = async (code: number, isTimeout = false) => {
         stdout += stdoutDecoder.end()
         stderr += stderrDecoder.end()
+        // Shell 降级一次性警告（session 首次）：Windows 上 Git Bash 缺失时 fallback 到
+        // PowerShell/cmd，告诉模型/用户根因，避免"命令大面积失败但不知为什么"。
+        let shellFallbackNote = ''
+        if (!_shellFallbackWarned) {
+          const diag = getShellDiagnostics()
+          if (diag.fallbackReason) {
+            _shellFallbackWarned = true
+            shellFallbackNote = `⚠ ${diag.fallbackReason}\n` +
+              `建议：安装 Git for Windows（https://git-scm.com）或设置 RIVET_GIT_BASH_PATH 指向 bash.exe。\n`
+          }
+        }
         const truncNote = stdoutTruncated
           ? `[stdout truncated: output exceeded 32KB (${stdoutRawBytes} bytes total), showing last 24KB — full output at rawPath below]\n`
           : ''
@@ -453,8 +470,9 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
             debugLog(`[artifact-skip] tool=bash cmd=${rawCommand.slice(0, 60)} raw=${raw.length} threshold=${artifactThreshold}`)
             const rawPath = await persistRawOutput(params.toolUseId, raw)
             const baseContent = buildModelOutput(modelBody, { ...meta, rawPath })
+            const prefix = shellFallbackNote + (rereadWarn ? rereadWarn + '\n' : '')
             return {
-              content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
+              content: prefix ? prefix + baseContent : baseContent,
               uiContent: buildUiOutput(filtered, meta),
               rawPath,
               isError,
@@ -486,8 +504,9 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
             ? `[${rawCommand}] exit=0 (${lineCount} lines) — success output folded, full output recoverable below`
             : buildModelOutput(modelBody, meta)
           const baseContent = `${modelOutput}\n\nUse read_section(artifactId="${artifactId}", section="L1-L500") to load full output if the head/tail above is not enough.\n[artifact:${artifactId}]`
+          const prefix = shellFallbackNote + (rereadWarn ? rereadWarn + '\n' : '')
           return {
-            content: rereadWarn ? rereadWarn + '\n' + baseContent : baseContent,
+            content: prefix ? prefix + baseContent : baseContent,
             uiContent: buildUiOutput(filtered, meta),
             rawPath: artifact?.rawPath,
             isError,
@@ -577,7 +596,21 @@ Long-running / non-terminating commands (dev servers, watchers, installs) run in
         if (timer) clearTimeout(timer)
         if (forceKillTimer) clearTimeout(forceKillTimer)
         cleanupAbort()
-        resolve({ content: err.message, isError: true })
+        // spawn ENOENT（shell 二进制找不到）走环境分级——给根因而非裸 err.message。
+        const msg = err.message
+        if ('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+          const diag = getShellDiagnostics()
+          const hint = diag.fallbackReason
+            ? `\n${diag.fallbackReason}\n建议：设置 RIVET_GIT_BASH_PATH 环境变量指向 bash.exe，或安装 Git for Windows。`
+            : `\nShell 路径无效：${diag.cmd}。建议检查 shell 是否已安装。`
+          resolve({
+            content: `Shell 执行失败：找不到 shell 二进制 (${diag.cmd})。${hint}`,
+            isError: true,
+            errorClass: 'environment',
+          })
+          return
+        }
+        resolve({ content: msg, isError: true })
       })
     })
   },

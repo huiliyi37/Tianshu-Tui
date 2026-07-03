@@ -57,6 +57,10 @@ const VERB_INTENT_MAP: Record<string, IntentTaskKind> = {
   // 审查类 → review_audit
   '审查': 'review_audit',
   '审核': 'review_audit',
+  '检查': 'review_audit',
+  '排查': 'review_audit',
+  '走查': 'review_audit',
+  '盘点': 'review_audit',
   'review': 'review_audit',
   'audit': 'review_audit',
 

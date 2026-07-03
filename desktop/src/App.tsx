@@ -6,10 +6,13 @@ import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
+import { TitleBar } from './components/TitleBar'
 
+import { toast } from 'sonner'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { ConnectWizard } from './components/ConnectWizard'
 import { CommandPalette } from './components/CommandPalette'
+import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { Toaster } from 'sonner'
 import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
@@ -31,7 +34,8 @@ export function App() {
   useGlobalNotifications()
 
   const [paletteOpen, setPaletteOpen] = useState(false)
-  useGlobalShortcuts(setPaletteOpen)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  useGlobalShortcuts(setPaletteOpen, setShortcutsOpen)
   const commands = useSurfaceCommands()
 
 
@@ -44,6 +48,26 @@ export function App() {
   const [templatesStatus, setTemplatesStatus] = useState<ProjectTemplatesStatus | null>(null)
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [storageConfigured, setStorageConfigured] = useState<boolean | null>(null)
+
+  // W2 — sidecar crash auto-recovery: the Rust shell respawns a crashed sidecar
+  // on the same port/token and emits this event once it passes /health again.
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    void import('@tauri-apps/api/event')
+      .then((m) => m.listen('sidecar-restarted', () => {
+        toast.success('运行时进程已自动恢复')
+        void health.refetch()
+      }))
+      .then((off) => {
+        if (cancelled) off()
+        else unlisten = off
+      })
+      .catch(() => {})
+    return () => { cancelled = true; unlisten?.() }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     isStorageConfigured()
@@ -153,6 +177,7 @@ export function App() {
   return (
     <WallpaperProvider>
       <div className="shell">
+        <TitleBar />
         <WallpaperLayer />
       <div className="main">
         {sidecarFailed && sidecarDown ? (
@@ -200,6 +225,15 @@ export function App() {
             </button>
           </div>
         )}
+        {env.data && env.data.platform === 'win32' && env.data.gitAutocrlf === 'true' && !envDismissed && (
+          <div className="banner warn">
+            检测到 git core.autocrlf=true：checkout 为 CRLF 而 agent 写入 LF，diff 会出现整文件换行噪音。
+            建议改为 input：<code>git config --global core.autocrlf input</code>
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
         {env.data && !env.data.git.available && !envDismissed && env.data.platform !== 'win32' && (
           <div className="banner warn">
             未检测到 Git。代码仓库操作需要 Git。
@@ -210,6 +244,20 @@ export function App() {
               onClick={() => dispatch({ type: 'setSurface', surface: 'settings' })}
             >
               查看环境
+            </button>
+            <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
+              ×
+            </button>
+          </div>
+        )}
+        {env.data && env.data.platform === 'win32' && env.data.shell && !env.data.shell.gitBashAvailable && !envDismissed && (
+          <div className="banner warn">
+            未检测到 Git Bash。当前 shell 降级为 {env.data.shell.kind === 'powershell' ? 'PowerShell' : 'cmd.exe'}，部分 bash 命令可能不兼容。
+            <button
+              className="banner-action"
+              onClick={() => window.open('https://git-scm.com/download/win', '_blank')}
+            >
+              下载 Git for Windows
             </button>
             <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
               ×
@@ -237,6 +285,8 @@ export function App() {
       {paletteOpen && (
         <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
       )}
+
+      <ShortcutOverlay open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
 
       {ui.connectOpen && (
         <ConnectWizard onClose={() => dispatch({ type: 'openConnect', open: false })} />

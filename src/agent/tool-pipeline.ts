@@ -1,7 +1,7 @@
 import type { AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { TurnBudget } from './turn-budget.js'
 import type { ContentBlock } from '../api/types.js'
-import type { ToolCallParams, VerificationMetadata } from '../tools/types.js'
+import type { ToolCallParams, VerificationMetadata, ToolErrorClass } from '../tools/types.js'
 import type { TurnHarness } from './turn-harness.js'
 import type { EvidenceTrackerPublic } from './evidence.js'
 import type { TraceStore } from './trace-store.js'
@@ -26,9 +26,9 @@ import type { LspManager } from '../lsp/manager.js'
 import { startTraceEvent, finishTraceEvent, fingerprintToolCall, fingerprintToolClass, recordToolFingerprint, recordTraceEvent, offendingFingerprints, getDoomLoopThresholds } from './trace-store.js'
 import { summarizeRepairTelemetry } from './repair-pipeline.js'
 import type { InterventionLevel } from './prediction-error.js'
-import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, requiresBashWriteApproval } from './approval-risk.js'
+import { assessToolRisk, CONFIDENCE_THRESHOLDS, isDestructiveGitAction, isSafeWriteOnly, requiresBashWriteApproval } from './approval-risk.js'
 import type { Sensorium } from './sensorium.js'
-import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix } from './permissions.js'
+import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied, learnBashPrefix, learnFileApproval } from './permissions.js'
 import { isSandboxActive } from '../tools/sandbox-profile.js'
 import { applyApprovalEdit, type ApprovalResult } from './approval-edit.js'
 import { debugEnabled, debugLog } from '../utils/debug.js'
@@ -52,6 +52,7 @@ import { buildCommitNudge } from './commit-nudge.js'
 import { evaluateTddGate, parseTddGateConfig, EDIT_TOOLS, type TddGateConfig } from './tdd-gate.js'
 import { checkPlanMode } from './plan-mode.js'
 import { buildSensitivePreflightMessage, shouldRequireSensitivePreflight } from './sensitive-preflight.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 /** Extract artifact ID from content if it starts with [artifact:ID] */
 function extractArtifactId(content: string): string | undefined {
@@ -223,7 +224,7 @@ export interface ToolPipelineDeps {
   onSkillInvoked?: (name: string) => void
   /** Called when the model explicitly marks a skill as complete via the skill tool. */
   onSkillCompleted?: (name: string) => void
-  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure'): void
+  recordToolHistory(name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass): void
   getInterventionLevel?(): InterventionLevel
   recordPrediction?(correct: boolean): void
   /** Current sensorium snapshot — enables confidence-driven adaptive approval. */
@@ -321,13 +322,6 @@ const L0_WRAPPED_TOOLS: ReadonlySet<string> = new Set([
 
 function isDietNoInfoReadResult(content: string): boolean {
   return content.includes('[diet:redundant]') || content.includes('[diet:useless]')
-}
-
-function toolTargetFromInput(toolName: string, input: Record<string, unknown>): string {
-  if (typeof input.file_path === 'string') return input.file_path
-  if (typeof input.path === 'string') return input.path
-  if (typeof input.command === 'string') return input.command.slice(0, 50)
-  return toolName
 }
 
 function countRecentReadLoopPlaceholders(
@@ -558,6 +552,7 @@ export async function executeToolUse(
     reviewDepth: deps.config.reviewDepth,
     delegationDepth: deps.config.delegationDepth,
     abortSignal: deps.abortSignal,
+    activePlanFilePath: deps.config.activePlanFilePath,
  }
 
   // Star signature: counter training-mode regression at token level (思路 E)
@@ -689,8 +684,15 @@ export async function executeToolUse(
       // and slide the offending fingerprints out of the detection window.
    }
 
-    // Plan-mode gate — block write tools during planning phase
-    const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name)
+    // Plan-mode gate — block write tools during planning phase (except active plan file)
+    const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
+      ? tu.input.file_path
+      : undefined
+    const planModeResult = checkPlanMode(deps.config.planModeState ?? 'off', tu.name, {
+      cwd: deps.cwd,
+      targetFilePath: writePath,
+      activePlanFilePath: deps.config.activePlanFilePath,
+    })
     if (!planModeResult.allowed) {
       const planMsg = planModeResult.reason ?? 'Plan Mode: write operations blocked'
       callbacks.onToolResult(tu.id, tu.name, planMsg, true)
@@ -700,9 +702,6 @@ export async function executeToolUse(
     // Sensitive-area preflight — nudge, don't block. The model must read the
     // knowledge manifest before editing prompt/memory/recall/verification/ownership
     // paths, but existing approval and edit gates remain responsible for hard safety.
-    const writePath = (tu.name === 'write_file' || tu.name === 'edit_file') && typeof tu.input.file_path === 'string'
-      ? tu.input.file_path
-      : undefined
     if (writePath && deps.taskLedger && shouldRequireSensitivePreflight({ path: writePath, events: deps.taskLedger.getEvents() })) {
       callbacks.onToolResult(tu.id, tu.name, buildSensitivePreflightMessage(writePath), false)
    }
@@ -759,11 +758,19 @@ export async function executeToolUse(
     // in-workspace bash write is safe-by-construction (writes can't escape the
     // workspace, and B2 rollback makes them reversible), so it must NOT
     // interrupt an unattended run for approval. When no sandbox is available we
-    // stay fail-closed and keep requiring approval for write commands.
+    // stay fail-closed for risky writes, but auto-safe mode auto-approves safe
+    // writes (mkdir/touch/cp/echo>file) to avoid approval fatigue on Windows.
+    const noSandbox = !isSandboxActive()
+    const bashCommand = tu.name === 'bash' && typeof tu.input.command === 'string' ? tu.input.command : ''
+    const safeWriteInNoSandbox = noSandbox
+      && approvalMode === 'auto-safe'
+      && bashCommand.length > 0
+      && isSafeWriteOnly(bashCommand)
     const bashWriteRequiresApproval =
       requiresBashWriteApproval(tu.name, tu.input)
       && !allowlisted && !bashAllowlisted
-      && !isSandboxActive()
+      && !safeWriteInNoSandbox
+      && noSandbox
 
     // Protection mode: during doom-loop, destructive git actions always require
     // approval. warn is the live window (blocked is short-circuited earlier).
@@ -805,7 +812,31 @@ export async function executeToolUse(
         : approvalResult
       const finalInput = applyApprovalEdit(tu.input, resolved)
       if (!finalInput) {
-        const denyMsg = 'Tool execution denied: requires user approval'
+        // Record the denied call's fingerprint so the doom-loop detector can see
+        // repeated identical denials. Denied calls short-circuit here, before the
+        // post-exec recordToolFingerprint at the bottom, so without this the
+        // anti-repeat window never sees them and the model re-emits the same
+        // approval-blocked call forever (the classic "requires user approval" loop).
+        // Use outputClass 'error' to match the offender fingerprint the doom-loop
+        // gate compares against (see the doomLevel === 'blocked' branch above).
+        traceStore = recordToolFingerprint(traceStore, fingerprintToolCall(tu.name, tu.input, 'error'), null)
+        const target = writePath
+          ? ` (${writePath})`
+          : tu.name === 'bash' && typeof tu.input.command === 'string'
+            ? ` (${tu.input.command.slice(0, 60)})`
+            : ''
+        // Instructive, non-retry denial: this is NOT a rejection of the change on
+        // its merits — it needs explicit user approval the model cannot self-grant.
+        // Re-emitting the identical call only re-hits the same gate, so tell the
+        // model to stop and hand control back to the user instead of retrying.
+        const noSandboxReason = bashWriteRequiresApproval && noSandbox
+          ? '\n根因：当前环境无文件系统沙箱（Windows 原生 / 沙箱未启用），写命令需人工审批。这不是命令本身的问题——审批后即可执行。要减少审批频率，可切换到 auto-safe 模式（低风险写命令自动放行）或使用 WSL（Linux 子系统下有沙箱）。'
+          : ''
+        const denyMsg = [
+          `Tool "${tu.name}"${target} was not executed: it requires explicit user approval, which you cannot grant yourself.${noSandboxReason}`,
+          'This is NOT a rejection of the change itself. Do NOT re-emit the identical call — repeating it will keep hitting the same approval gate and make no progress.',
+          'Instead: briefly state what you were about to do and why it needs approval, then stop and wait for the user to approve it (or adjust their instruction).',
+        ].join('\n')
         callbacks.onToolResult(tu.id, tu.name, denyMsg, true)
         return { toolResult: { type: 'tool_result', tool_use_id: tu.id, content: denyMsg, is_error: true }, traceStore, importGraph, lastConflictCheckCount, checkpointCreated, latestRisk }
      }
@@ -816,6 +847,13 @@ export async function executeToolUse(
       // Thermocline 2: learn bash command prefix into session allowlist after approval
       if (tu.name === 'bash' && typeof tu.input.command === 'string') {
         learnBashPrefix(tu.input.command, deps.config.permissions)
+     }
+      // Learn a file-scoped approval so subsequent identical edits to the same
+      // file don't re-prompt (a key driver of the "approve → edit → approve
+      // again" fatigue that seeds retry loops). Manual mode only — auto-safe must
+      // keep re-checking high-risk writes rather than trusting a one-off approve.
+      if (approvalMode === 'manual' && (tu.name === 'edit_file' || tu.name === 'write_file') && typeof tu.input.file_path === 'string') {
+        learnFileApproval(tu.name, tu.input.file_path, deps.config.permissionsOverlay)
      }
       // Out-of-workspace file op approved: record a directory-subtree grant so
       // both gates (validatePathSafe + sandbox) accept it. Recompute from the
@@ -1171,7 +1209,16 @@ export async function executeToolUse(
         if (cmd.startsWith('git ')) {
           deps.taskLedger.record({ type: 'git_action', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        } else if (/\b(tsc|typecheck|check|test|jest|vitest|mocha|pytest|eslint|lint|build)\b/.test(cmd)) {
-          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: harnessResult.isError ? 'failed' : 'passed', meta: { scope: 'full' } })
+          const testStatus = harnessResult.isError ? 'failed' : 'passed'
+          deps.taskLedger.record({ type: 'verification', command: cmd.slice(0, 200), status: testStatus, meta: { scope: 'full' } })
+          // bash 跑测试/typecheck/lint 也归零 TDD 门禁——否则 agent 用 bash npm test
+          // 而非 run_tests 工具时门禁计数器永远不重置，第 4 次编辑必误报拦截。
+          deps.evidence.trackVerification({
+            command: cmd.slice(0, 200),
+            status: testStatus === 'passed' ? 'passed' : 'failed',
+            scope: 'full',
+            exitCode: 0, passed: 0, failed: 0, skipped: 0, durationMs: 0,
+          })
        } else {
           deps.taskLedger.record({ type: 'tool_exec', tool: tu.name, meta: { command: cmd.slice(0, 200) } })
        }
@@ -1343,7 +1390,13 @@ export async function executeToolUse(
         }
       } else {
         if (!importGraph) {
-          importGraph = buildImportGraph(deps.cwd)
+          try {
+            importGraph = buildImportGraph(deps.cwd)
+          } catch {
+            // Best-effort impact analysis — must never produce tool errors.
+            // collectTsFiles already catches per-dir errors; this is a belt
+            // for any remaining fs failure (e.g. root cwd itself unreadable).
+          }
         }
         if (importGraph) {
           importGraph = invalidateFile(importGraph, deps.cwd, filePath)

@@ -103,6 +103,12 @@ export interface GitBashProbeDeps {
 export function resolveGitBashPath(deps: GitBashProbeDeps): string | null {
   if (!deps.isWindows) return null
 
+  // Priority 0: bundled busybox-w32 (shipped with the desktop app).
+  // This guarantees a POSIX shell on every Windows install without depending
+  // on the user installing Git for Windows.
+  const bundledBusybox = deps.env['RIVET_BUNDLED_BUSYBOX']
+  if (bundledBusybox && deps.exists(bundledBusybox)) return bundledBusybox
+
   const override = deps.env['RIVET_GIT_BASH_PATH']
   if (override && deps.exists(override)) return override
 
@@ -218,6 +224,31 @@ export function getShellCommand(): ShellCommand {
     hasPwsh: hasPwshWindows,
   })
   return _cachedShell
+}
+
+export interface ShellDiagnostics {
+  kind: ShellCommand['kind']
+  cmd: string
+  /** Git Bash path if found, null if probed but not found. */
+  gitBashPath: string | null
+  /** Why we fell back from Git Bash (Windows only). Undefined when kind === 'bash' or non-Windows. */
+  fallbackReason?: string
+}
+
+/**
+ * 诊断当前 shell 选择——降级时产出可观测原因（"未找到 Git Bash" + 探测路径）。
+ * 给 bash.ts 的 spawn ENOENT 和首次执行警告用。
+ */
+export function getShellDiagnostics(): ShellDiagnostics {
+  const shell = getShellCommand()
+  const gitBash = findGitBashPath()
+  const diag: ShellDiagnostics = { kind: shell.kind, cmd: shell.cmd, gitBashPath: gitBash }
+  if (isWin && shell.kind !== 'bash') {
+    diag.fallbackReason = gitBash
+      ? `Git Bash found at ${gitBash} but not selected (RIVET_USE_POWERSHELL set?)`
+      : 'Git Bash not found — probed RIVET_GIT_BASH_PATH, `where git` → …\\Git\\bin\\bash.exe, C:\\Program Files\\Git, %LOCALAPPDATA%\\Programs\\Git'
+  }
+  return diag
 }
 
 /**

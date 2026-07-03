@@ -87,9 +87,13 @@ export class SteerBuffer {
       return a.id - b.id
     }).map(entry => entry.text)
 
+    // Priority framing: mid-run user words must beat any standing plan or
+    // auto-continuation reminder ([GOAL CONTINUATION] etc.), otherwise the
+    // agent barrels on and the user feels unheard ("刹不住").
+    const header = '[User guidance — 用户新指令，优先于当前计划/目标/续跑指示，立即遵从并调整方向]'
     return messages.length === 1
-      ? `[User guidance]: ${messages[0]}`
-      : `[User guidance]:\n${messages.map((m, i) => `${i + 1}. ${m}`).join('\n')}`
+      ? `${header}: ${messages[0]}`
+      : `${header}:\n${messages.map((m, i) => `${i + 1}. ${m}`).join('\n')}`
   }
 
   /** Peek at the highest-priority pending text without removing it. */

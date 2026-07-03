@@ -5,7 +5,7 @@ import type { StreamCallbacks } from './stream-client.js'
 import { withStructuredRetry } from './retry-engine.js'
 import { parseRetryAfterMs } from './error-classifier.js'
 import { fetchWithTimeout } from './fetch-timeout.js'
-import { wireAbortToReaderCancel } from './abort-reader.js'
+import { wireAbortToReaderCancel, wrapBodyTimeoutError } from './abort-reader.js'
 
 export interface CodexClientConfig {
   baseUrl: string
@@ -253,6 +253,8 @@ export class CodexClient implements StreamClient {
     let receivedFirstChunk = false
     let receivedThinking = false
     let textReceived = false
+    /** Chars streamed this attempt (reasoning + text) — reported when the attempt aborts. */
+    let receivedChars = 0
 
     // Wire external abort signal to reader.cancel() (same fix as OpenAIClient).
 
@@ -262,6 +264,7 @@ export class CodexClient implements StreamClient {
     const timeoutController = new AbortController()
     const maxStreamMs = 10 * 60_000
     const maxStreamTimer = setTimeout(() => timeoutController.abort(), maxStreamMs)
+    const streamStartedAt = Date.now()
 
     const signalCleanup = signal
       ? wireAbortToReaderCancel(AbortSignal.any([signal, timeoutController.signal]), reader)
@@ -328,7 +331,10 @@ export class CodexClient implements StreamClient {
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
-              if (text) callbacks.onTextDelta(text)
+              if (text) {
+                receivedChars += text.length
+                callbacks.onTextDelta(text)
+              }
               break
             }
 
@@ -339,7 +345,10 @@ export class CodexClient implements StreamClient {
               const text = typeof parsed.delta === 'string'
                 ? parsed.delta
                 : (parsed.delta as Record<string, unknown>)?.text as string | undefined
-              if (text) callbacks.onThinkingDelta(text)
+              if (text) {
+                receivedChars += text.length
+                callbacks.onThinkingDelta(text)
+              }
               break
             }
 
@@ -452,6 +461,18 @@ export class CodexClient implements StreamClient {
         // 仅在收到真实内容事件时重置 idle timer（心跳不重置）
         if (sawDataEvent) resetIdleTimer()
       }
+    } catch (err) {
+      // Observability: surface how much streamed output this attempt discards.
+      callbacks.onStreamAttemptAborted?.({
+        provider: 'codex',
+        receivedChars,
+        elapsedMs: Date.now() - streamStartedAt,
+        errorName: (err as Error)?.name ?? 'Error',
+        errorMessage: (err as Error)?.message ?? String(err),
+      })
+      // Body-phase TimeoutError (raw undici DOMException) → descriptive,
+      // classifiable Error. User AbortError and other errors pass through.
+      throw wrapBodyTimeoutError(err, 'Codex', streamStartedAt)
     } finally {
       if (idleTimer) clearTimeout(idleTimer)
       if (maxStreamTimer) clearTimeout(maxStreamTimer)

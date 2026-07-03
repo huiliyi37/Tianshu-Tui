@@ -20,6 +20,9 @@ export interface TddGateState {
   /** Whether any of the modified files is a code file (vs. docs/config only).
    *  When false, the TDD gate skips entirely — no constraint on doc-only edits. */
   hasCodeEdits: boolean
+  /** Whether the agent has read any test files (.test./.spec./__tests__).
+   *  Used by skipIfNoTests: if no test files exist in the project, don't block. */
+  hasReadTestFiles: boolean
 }
 
 export interface EvidenceState {
@@ -59,7 +62,9 @@ export type EvidenceLocale = 'zh-CN' | 'en'
 
 const MAX_VERIFICATIONS = 50
 
-/** Code file extensions whose edits should count toward the TDD gate. */
+/** Code file extensions whose edits should count toward the TDD gate.
+ *  Config files (.yml/.yaml/.toml/.json/.ini/.env) are excluded — they don't
+ *  need test coverage and counting them caused false gate triggers. */
 const CODE_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
   '.py', '.rs', '.go', '.java', '.kt', '.scala',
@@ -68,7 +73,6 @@ const CODE_EXTENSIONS = new Set([
   '.sh', '.bash', '.zsh',
   '.sql', '.graphql',
   '.css', '.scss', '.less',
-  '.yaml', '.yml', '.toml', // config-as-code counts
 ])
 
 function isCodeFile(path: string): boolean {
@@ -240,6 +244,7 @@ export class EvidenceTracker implements EvidenceTrackerPublic {
       editsSinceLastTest: this.#editsSinceLastTest,
       hasFailedTests: this.state.verifications.some(v => v.status === 'failed'),
       hasCodeEdits: this.#hasCodeEdits,
+      hasReadTestFiles: [...this.state.filesRead].some(p => /\.test\.|\.spec\.|__tests__|_test\.|test_/.test(p)),
     }
   }
 

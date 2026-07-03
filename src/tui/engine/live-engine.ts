@@ -36,6 +36,54 @@ export interface LiveEngineOptions {
   maxRows?: number
 }
 
+/**
+ * 活动期定高视口：把 `[0, chromeStart)` 的动态段（spinner / thinking / streaming
+ * tail / 工具卡片）垫高或截断到**恰好** `budget` display rows。
+ *
+ * 动机：live region 是 normal flow——thinking/tail 每增减一行，整个区域高度变化，
+ * 底部 chrome（输入框）的屏幕 Y 坐标随之跳动（「输入框随思考字符浮动」）。
+ * 活动期把动态段高度锁死为预算值后，live region 总高度逐帧恒定 → 输入框不动。
+ *
+ * 规则：
+ * - `budget <= 0`：原样返回（空闲期自然塌回，不垫行）。
+ * - 动态段 > budget：从**顶部**截掉最旧行（approval prompt 等关键内容位于动态段
+ *   尾部，天然优先保留）。
+ * - 动态段 < budget：在动态内容与 chrome 之间垫空行——内容贴上、输入框贴下，
+ *   间隙随内容增长自然收窄。
+ * - 截断可能因多 display-row 行整行丢弃而低于预算，随后垫空行补齐——
+ *   **返回的动态段恒等于 budget display rows**。
+ *
+ * @param rowsForLine 单行 display rows 度量（wrapping-aware）；默认每行 1 row。
+ */
+export function padDynamicRegion(
+  lines: readonly LiveRegionLine[],
+  chromeStart: number,
+  budget: number,
+  rowsForLine: (text: string) => number = () => 1,
+): { lines: LiveRegionLine[]; chromeStart: number } {
+  if (budget <= 0) return { lines: lines.slice(), chromeStart }
+  const dynamic = lines.slice(0, chromeStart)
+  const chrome = lines.slice(chromeStart)
+
+  let rows = 0
+  for (const line of dynamic) rows += rowsForLine(line.text)
+
+  let dropUntil = 0
+  while (rows > budget && dropUntil < dynamic.length) {
+    rows -= rowsForLine(dynamic[dropUntil]!.text)
+    dropUntil++
+  }
+  const kept = dynamic.slice(dropUntil)
+
+  const padCount = Math.max(0, budget - rows)
+  const padding: LiveRegionLine[] = Array.from({ length: padCount }, () => ({ text: '' }))
+
+  return {
+    lines: [...kept, ...padding, ...chrome],
+    chromeStart: kept.length + padCount,
+  }
+}
+
 export class LiveEngine {
   private stdout: WriteStream
   private reservedRows: number
@@ -70,6 +118,15 @@ export class LiveEngine {
     this.stdout = options.stdout
     this.reservedRows = options.reservedRows ?? 2
     this.maxRows = options.maxRows ?? 20
+  }
+
+  /**
+   * 更新 live region 行上限（终端 resize 时调用）。
+   * maxRows 若大于终端高度，全量重写的 cursorUp 回顶量会超出屏幕导致错位，
+   * 因此调用方应传入高度感知的值（如 `min(28, rows - 1)`）。
+   */
+  setMaxRows(n: number): void {
+    this.maxRows = Math.max(1, Math.floor(n))
   }
 
   // ── Display-row helpers ───────────────────────────────────────

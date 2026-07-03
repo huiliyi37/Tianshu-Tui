@@ -163,6 +163,8 @@ export class TurnStepProducer {
     this.self.lastThinkingContent = ''
     this.self.consecutiveNoToolTurns = 0
     this.self.autoContinueCount = 0
+    this.self.wedgeToolFingerprint = ''
+    this.self.wedgeRepeatCount = 0
     this.self.lastTurnTextFingerprint = ''
     this.self.evidence.reset()
     this.self.repairHintTracker = new RepairHintTracker()
@@ -282,7 +284,9 @@ export class TurnStepProducer {
       turnMode === 'task' ? renderPlanCacheAdvisory(this.self.p3.planCacheSuggest(userInput)) : null,
     )
 
-    if (this.self.config.autoReasoning && turnMode === 'task') {
+    if (this.self.config.autoReasoning && turnMode === 'task' && !this.self.userReasoningOverride) {
+      // autoReasoning 自动按输入复杂度选 effort——但用户显式 /effort <档位> 后
+      // （userReasoningOverride=true）不再覆盖，尊重用户选择直到 /effort auto 交还。
       const ruleEffort = selectReasoningEffort(userInput, this.self.config.reasoningFloor)
       const banditAdjusted = this.self.applyEffortDelta(ruleEffort) as import('./auto-reasoning.js').ReasoningEffort
       this.self.config.reasoningEffort = banditAdjusted
@@ -591,7 +595,7 @@ export class TurnStepProducer {
         // even when test files were read (checkTddGate only checks that).
         // Only sets _lastImmuneHint when checkTddGate didn't already produce one,
         // since "no test file touched" is the more critical message.
-        const tddConfig = this.self.config.tddGate ?? { enabled: true, mode: 'enforce' as const, threshold: 3 }
+        const tddConfig = this.self.config.tddGate ?? { enabled: true, mode: 'enforce' as const, threshold: 3, skipIfNoTests: true }
         const gateHint = buildTddGateHint(this.self.evidence.getGateState(), tddConfig)
         if (gateHint && !this.self._lastImmuneHint) {
           this.self._lastImmuneHint = gateHint

@@ -12,6 +12,11 @@ export type PlanModeState = 'off' | 'planning'
 /** Lifecycle of a submitted plan document on disk. */
 export type PlanStatus = 'submitted' | 'approved' | 'executed' | 'rejected'
 
+export interface PlanOption {
+  label: string
+  description: string
+}
+
 export interface SessionRecord {
   id: string
   status: SessionStatus
@@ -39,6 +44,8 @@ export interface SessionRecord {
   contextTokens?: number
   /** Model context window size in tokens. */
   contextWindow?: number
+  /** Current reasoning effort level (off/low/medium/high/max). */
+  reasoningEffort?: string
   /** Archived (closed) sessions are hidden from the sidebar. */
   archived?: boolean
   /** Git worktree branch name — set when created with isolated worktree. */
@@ -137,6 +144,7 @@ export interface PlanSummary {
   path: string
   createdAt: number
   approvedAt?: number
+  options?: PlanOption[]
 }
 
 /** Full plan document including markdown content. */
@@ -148,6 +156,7 @@ export interface PlanDoc {
   status: PlanStatus
   createdAt: number | string
   approvedAt?: number | string
+  options?: PlanOption[]
 }
 
 export type SessionEventType =
@@ -180,6 +189,10 @@ export type SessionEventType =
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'
+  // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
+  | 'watchdog_recovery'
+  // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
+  | 'autonomy_checkpoint'
 
 export interface SessionEvent {
   seq: number
@@ -230,6 +243,14 @@ export interface EnvironmentInfo {
   git: ToolVersionInfo
   node: ToolVersionInfo
   platform: string
+  /** Windows only: effective `git config core.autocrlf` ('true'|'input'|'false'), undefined when unset. */
+  gitAutocrlf?: string
+  /** Shell info — Windows 上 Git Bash 可用性 + 当前降级状态。 */
+  shell?: {
+    kind: 'bash' | 'powershell' | 'cmd' | 'sh'
+    gitBashAvailable: boolean
+    fallbackReason?: string
+  }
 }
 
 export interface ProjectTemplatesStatus {
@@ -553,4 +574,14 @@ export interface StorageApplyResult {
   migrated: boolean
   requiresRestart: boolean
   error?: string
+}
+
+export interface BalanceInfo {
+  currency: string
+  totalBalance: string
+}
+
+export interface BalanceResult {
+  isAvailable: boolean
+  balances: BalanceInfo[]
 }

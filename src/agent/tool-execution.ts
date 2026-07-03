@@ -1,4 +1,5 @@
 import type { ContentBlock } from '../api/types.js'
+import type { ToolErrorClass } from '../tools/types.js'
 import type { TurnBudget } from './turn-budget.js'
 import { enforcePerMessageBudget, enforceTurnReadBudget, enforceContextPressureTruncation, enforceToolTypeBudgets } from './per-message-budget.js'
 import { perMessageToolResultBudget } from '../compact/constants.js'
@@ -39,6 +40,7 @@ import {
 } from './prediction-error.js'
 import type { ReasoningEffort } from './auto-reasoning.js'
 import { createRuntimeHookContext } from './runtime-hooks.js'
+import { toolTargetFromInput } from './tool-target.js'
 
 export interface ToolExecutionDeps {
   config: AgentConfig
@@ -59,7 +61,7 @@ export interface ToolExecutionDeps {
   getSessionTurnCount: () => number
   getSessionId: () => string | undefined
   addToolResults: (results: ContentBlock[]) => void
-  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: 'environment' | 'exec-failure') => void
+  recordToolHistory: (name: string, input: Record<string, unknown>, isError: boolean, content: string, errorClass?: ToolErrorClass) => void
   buildRuntimeSnapshot: (extra?: Partial<RuntimeHookSnapshot>) => RuntimeHookSnapshot
   requestThetaCheck: (reason: string) => void
   getAutoReasoning: () => boolean
@@ -135,6 +137,10 @@ export interface ToolExecBatchResult {
   artifactIdsAccessed: string[]
   /** True when any tool returned endTurn: true (e.g. ask_user_question). */
   endTurn?: boolean
+  /** Number of tool_use in this batch — for wedged-loop detection. */
+  toolCount: number
+  /** Number of tool_result marked is_error in this batch — for wedged-loop detection. */
+  errorCount: number
 }
 
 export class ToolExecutionController {
@@ -502,14 +508,10 @@ export class ToolExecutionController {
 
     for (const tu of input.toolUses) {
       const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
-      const target =
-        typeof tu.input?.file_path === 'string'
-          ? tu.input.file_path
-          : typeof tu.input?.path === 'string'
-            ? tu.input.path
-            : typeof tu.input?.command === 'string'
-              ? tu.input.command.slice(0, 50)
-              : undefined
+      const hasTargetField = typeof tu.input?.file_path === 'string'
+        || typeof tu.input?.path === 'string'
+        || typeof tu.input?.command === 'string'
+      const target = hasTargetField ? toolTargetFromInput(tu.name, tu.input as Record<string, unknown>) : undefined
       await this.deps.runtimeHooks.runPostTool(
         createRuntimeHookContext(
           this.deps.buildRuntimeSnapshot(),
@@ -573,6 +575,11 @@ export class ToolExecutionController {
       this.deps.setClientReasoningEffort(newEffort)
    }
 
-    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined }
+    const errorCount = input.toolUses.reduce((n, tu) => {
+      const result = toolResults.find(r => r.type === 'tool_result' && r.tool_use_id === tu.id)
+      return n + (result && 'is_error' in result && result.is_error === true ? 1 : 0)
+    }, 0)
+
+    return { checkpointCreated: checkpointCreatedThisTurn, traceStore, importGraph, lastConflictCheckCount, latestRisk, artifactIdsEvicted, artifactIdsAccessed, endTurn: endTurn || undefined, toolCount: input.toolUses.length, errorCount }
  }
 }

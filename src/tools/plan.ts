@@ -7,8 +7,9 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify } from '../plan/plan-store.js'
+import { writePlan, slugify, type PlanOption } from '../plan/plan-store.js'
 import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { relative } from 'node:path'
 import { validatePath } from './path-validate.js'
@@ -34,6 +35,39 @@ const ONLY_DOTS_RE = /^(\.{3,}|…+|-\s*\.{3,})\s*$/m
 interface PlaceholderCheckResult {
   ok: boolean
   reason?: string
+}
+
+const RESERVED_OPTION_LABELS = new Set(
+  ['Approve', 'Reject', 'Reject and Exit', 'Revise'].map(normalizeOptionLabel),
+)
+
+function normalizeOptionLabel(label: string): string {
+  return label.trim().toLowerCase()
+}
+
+function parseSubmitOptions(raw: unknown): PlanOption[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const options: PlanOption[] = []
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object') continue
+    const label = (item as { label?: unknown }).label
+    const description = (item as { description?: unknown }).description
+    if (typeof label !== 'string' || label.trim().length === 0) continue
+    if (typeof description !== 'string') continue
+    options.push({ label: label.trim(), description: description.trim() })
+  }
+  if (options.length === 0) return undefined
+  if (options.length > 3) {
+    throw new Error('At most 3 options are allowed')
+  }
+  const labels = new Set<string>()
+  for (const option of options) {
+    const key = normalizeOptionLabel(option.label)
+    if (labels.has(key)) throw new Error('Option labels must be unique')
+    if (RESERVED_OPTION_LABELS.has(key)) throw new Error('Option labels must not use reserved approval labels')
+    labels.add(key)
+  }
+  return options
 }
 
 function checkPlanForPlaceholders(content: string): PlaceholderCheckResult {
@@ -100,6 +134,10 @@ Submit a completed implementation plan for user approval. The plan is persisted 
 
 The \`plan\` field must be a concrete, ready-to-implement design document. Do NOT submit outlines, skeletons, or placeholder text such as "TODO", "FIXME", "TBD", "待补充", or section headers with no content. Plans that are mostly placeholders will be rejected and you will be asked to continue planning.
 
+Omit \`plan\` to submit from the active plan file (plan mode draft). Write the plan incrementally with write_file/edit_file first.
+
+When the plan contains multiple approaches, pass \`options\` (up to 3) so the user can choose at approval time.
+
 ### Action: close
 Preview or apply implementation plan closure updates. Defaults to preview mode (no writes). Set apply=true to update the plan file.
 
@@ -114,7 +152,19 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
         },
         // ── submit fields ──
         title: { type: 'string', description: '[submit] Short descriptive plan title (used for file slug)' },
-        plan: { type: 'string', description: '[submit] Full plan in Markdown. Use Mermaid diagrams, code snippets, tables.' },
+        plan: { type: 'string', description: '[submit] Full plan in Markdown. Omit to read from active plan file in plan mode.' },
+        options: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: 'Short name for this approach (append "(Recommended)" if preferred)' },
+              description: { type: 'string', description: 'Brief summary of trade-offs' },
+            },
+            required: ['label', 'description'],
+          },
+          description: '[submit] When the plan has 2-3 distinct approaches, list them for user selection at approval.',
+        },
         // ── close fields ──
         file_path: { type: 'string', description: '[close] Path to the plan Markdown file under docs/superpowers/plans/' },
         tasks: { type: 'string', description: '[close] Task selection such as 1, 1-3, 1,3-4, or all' },
@@ -158,18 +208,52 @@ Only supports Markdown files under docs/superpowers/plans/ or .rivet/plans/.`,
 
 async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
   const title = params.input.title
-  const planContent = params.input.plan
+  let planContent: unknown = params.input.plan
+  let submitOptions: PlanOption[] | undefined
+  try {
+    submitOptions = parseSubmitOptions(params.input.options)
+  } catch (err) {
+    return {
+      content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      isError: true,
+    }
+  }
 
   if (typeof title !== 'string' || !title.trim()) {
     return { content: 'Error: title is required', isError: true }
   }
+
   if (typeof planContent !== 'string' || !planContent.trim()) {
-    return { content: 'Error: plan is required', isError: true }
+    const draftPath = params.activePlanFilePath
+    if (!draftPath) {
+      return {
+        content: 'Error: plan is required when no active plan file is set. Write to the plan file first or pass plan content.',
+        isError: true,
+      }
+    }
+    let draftText: string
+    try {
+      draftText = await readFile(join(params.cwd, draftPath), 'utf-8')
+    } catch (err) {
+      return {
+        content: `Error reading active plan file (${draftPath}): ${err instanceof Error ? err.message : String(err)}`,
+        isError: true,
+      }
+    }
+    if (!draftText.trim()) {
+      return {
+        content: `Error: active plan file is empty (${draftPath}). Write your plan there first, then submit.`,
+        isError: true,
+      }
+    }
+    planContent = draftText
   }
+
+  const planBody = planContent as string
 
   const slug = slugify(title)
 
-  if (!MERMAID_FENCE.test(planContent) && !warnedSlugs.has(slug)) {
+  if (!MERMAID_FENCE.test(planBody) && !warnedSlugs.has(slug)) {
     warnedSlugs.add(slug)
     return {
       content: [
@@ -187,7 +271,9 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     }
   }
 
-  const fullContent = `# ${title.trim()}\n\n${planContent.trim()}\n`
+  const fullContent = planBody.trim().startsWith('# ')
+    ? `${planBody.trim()}\n`
+    : `# ${title.trim()}\n\n${planBody.trim()}\n`
 
   const placeholderCheck = checkPlanForPlaceholders(fullContent)
   if (!placeholderCheck.ok) {
@@ -202,20 +288,25 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
   }
 
   try {
-    const relativePath = await writePlan(params.cwd, slug, fullContent)
+    const relativePath = await writePlan(params.cwd, slug, fullContent, submitOptions)
+    const optionsHint = submitOptions && submitOptions.length >= 2
+      ? `\nOptions recorded (${submitOptions.length}). User can choose at approval: ${submitOptions.map(o => `\`${o.label}\``).join(', ')}`
+      : ''
     return {
       content: [
         `✅ Plan submitted: **${title.trim()}**`,
         `File: \`${relativePath}\``,
         `Slug: \`${slug}\``,
+        optionsHint,
         '',
         `The user will review and respond with:`,
         `- \`/plan-approve ${slug}\` — approve and start execution`,
-        `- \`/plan-reject ${slug}\` — reject with feedback`,
+        `- \`/plan-approve ${slug} <option-label>\` — approve a specific approach`,
+        `- \`/plan-reject ${slug} <feedback>\` — reject with feedback for revision`,
         `- \`/plan-list\` — list all plans`,
         '',
         `**Wait here — do not proceed until the user approves.**`,
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     }
   } catch (err) {
     return {

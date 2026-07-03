@@ -77,6 +77,10 @@ export interface ExecuteBatchResult {
   /** True when any tool in the batch returned endTurn: true (e.g. ask_user_question).
    *  The orchestrator uses this to end the turn as final. */
   endTurn?: boolean
+  /** Number of tool_use in this batch — for wedged-loop detection. */
+  toolCount: number
+  /** Number of tool_result marked is_error in this batch — for wedged-loop detection. */
+  errorCount: number
 }
 
 export interface CompleteTurnParams {
@@ -105,6 +109,10 @@ export interface TurnStateBag {
   latestFsWatcherState: FsWatcherState
   consecutiveNoToolTurns: number
   autoContinueCount: number
+  /** Fingerprint of the last fully-errored tool batch — for wedged-loop detection. */
+  wedgeToolFingerprint: string
+  /** Consecutive identical fully-errored tool batches — for wedged-loop detection. */
+  wedgeRepeatCount: number
   thinkingOnlyRetries: number
   lastThinkingContent: string
   lastTurnTextFingerprint: string
@@ -133,6 +141,8 @@ export interface TurnOrchestratorDeps {
 
   // === Config ===
   getMaxTurns: () => number
+  /** C3 自治档检查点 — pause after this many turns per run (0 = off). */
+  getCheckpointEveryTurns: () => number
   getTurnLevelThinking: () => boolean | undefined
   getPlanModeState: () => PlanModeState
   getStreamRules: () => StreamRule[] | undefined
@@ -252,6 +262,22 @@ export function wrapCallbacksWithHeartbeat(cb: AgentCallbacks, hb: TurnHeartbeat
 
 const MAX_RULE_RETRIES = 2
 
+/** Consecutive identical fully-errored tool batches before the run is ended as a
+ *  wedged loop. Guards against the "requires user approval" denial loop (and any
+ *  same-args-same-error retry) spinning to maxTurns and ballooning context → OOM. */
+const MAX_WEDGE_REPEATS = 3
+
+/** Order-preserving fingerprint of a tool batch (name + input). Two batches with
+ *  the same tools and args produce the same string, so a model re-emitting an
+ *  identical failing call is detectable across turns. */
+function toolBatchFingerprint(toolUses: { name: string; input: unknown }[]): string {
+  try {
+    return JSON.stringify(toolUses.map(tu => [tu.name, tu.input]))
+  } catch {
+    return toolUses.map(tu => tu.name).join('|')
+  }
+}
+
 export class TurnOrchestrator {
   constructor(private deps: TurnOrchestratorDeps) {}
 
@@ -318,6 +344,25 @@ export class TurnOrchestrator {
           return
         }
 
+        // ── C3 自治档检查点 ──
+        // Autonomous mode has no approval brakes; without a stop point a run
+        // barrels through up to maxTurns (200) turns. When configured, pause
+        // cleanly after N turns and hand control back — the user resumes with
+        // "continue" (desktop renders a checkpoint card).
+        const checkpointEvery = this.deps.getCheckpointEveryTurns()
+        if (checkpointEvery > 0 && turn >= checkpointEvery) {
+          this.emitStop({
+            source: 'checkpoint',
+            turn,
+            voluntary: false,
+            detail: `autonomy checkpoint every ${checkpointEvery} turns`,
+          }, callbacks)
+          callbacks.onAutonomyCheckpoint?.(turn)
+          callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
+          finalTurnCompleted = true
+          break
+        }
+
         const estTokens = this.deps.getEstimatedTokens()
         // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS narrows to null but later turns reassign
         const snap = this.deps.getLatestResourceSnapshot() as ResourceSensorSnapshot | null
@@ -371,12 +416,24 @@ export class TurnOrchestrator {
           // call trySessionSplit → llmCompact (a network call) whose internal
           // abort cooperation is exactly the unreliable mechanism this commit
           // backstops. Without the race, a watchdog abort can't free a wedge here.
-          const { action } = await rejectOnAbort(
-            this.deps.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
-            signal!,
-            'convergence',
-          )
-          if (action === 'abort') return
+          //
+          // Also disarm the hard-stall watchdog during convergence: llmCompact
+          // is a legitimate lengthy operation (30-60s on slow models), not a
+          // wedge. Informational heartbeats stay alive so the UI doesn't freeze.
+          const convHeartbeat = this.deps.getHeartbeat()
+          convHeartbeat?.disarmWatchdog()
+          let convAction: string
+          try {
+            const convResult = await rejectOnAbort(
+              this.deps.runConvergenceCheck(turn, phaseClass, assistantResponded, userMessageConsumed, callbacks),
+              signal!,
+              'convergence',
+            )
+            convAction = convResult.action
+          } finally {
+            convHeartbeat?.rearmWatchdog()
+          }
+          if (convAction === 'abort') return
         }
 
         // Step 6e: U6 replan check — detect deviation from the plan trace and
@@ -530,6 +587,12 @@ export class TurnOrchestrator {
           }
         } finally {
           streamHeartbeat?.rearmWatchdog()
+
+        // Tick after stream settles: the last text/tool delta may have been
+        // tens of seconds ago (thinking phase, tool-call serialization). Reset
+        // the silence clock now so the downstream tool-execution / no-tool
+        // boundary steps start from a fresh baseline, not from mid-stream.
+        this.deps.getHeartbeat()?.tick('stream-done')
         }
 
         // Only decide full-turn suppression at the stream boundary. A mid-stream exact
@@ -675,7 +738,17 @@ export class TurnOrchestrator {
           // 但审批/checkpoint 前置 await 与 postTool hooks 不在 timeout 覆盖内，
           // 一旦卡住，仅靠 240s 心跳看门狗才能解锁 → run() 长时间不 settle、会话假死。
           // 这里把整批与 abort 信号竞速，Esc 后立即抛 AbortError → 下方 catch 走 onAbort。
-          const r = await rejectOnAbort(
+          //
+          // 同时 disarm 看门狗的 hardStall abort：工具执行期间（bash 编译/测试
+          // 可能超 120s），onToolUse→onToolResult 之间无 tick，看门狗会将正常耗时
+          // 误判为楔死。保留 informational heartbeat（UI 仍显示"still working"），
+          // 仅挂起 hardStall 熔断；工具完成后 rearm。工具级 timeout + rejectOnAbort
+          // 提供真正的 hang 保护。
+          const toolHeartbeat = this.deps.getHeartbeat()
+          toolHeartbeat?.disarmWatchdog()
+          let r: Awaited<ReturnType<typeof this.deps.executeBatch>>
+          try {
+            r = await rejectOnAbort(
             this.deps.executeBatch({
               toolUses, callbacks, turn, checkpointCreatedThisTurn,
               abortSignal: signal!,
@@ -731,12 +804,44 @@ export class TurnOrchestrator {
             break
           }
 
+          // Wedged-loop guard: a model that re-emits the SAME tool batch and gets
+          // an all-error result every time (the classic "requires user approval"
+          // denial loop — see the boundary-stall screenshot) would otherwise spin
+          // to maxTurns, ballooning context until the sidecar OOMs. Detect an
+          // identical, fully-errored batch repeating and end the run instead.
+          const allErrored = r.toolCount > 0 && r.errorCount === r.toolCount
+          const batchFingerprint = allErrored ? toolBatchFingerprint(toolUses) : ''
+          if (allErrored && batchFingerprint === this.deps.state.wedgeToolFingerprint) {
+            this.deps.state.wedgeRepeatCount = this.deps.state.wedgeRepeatCount + 1
+          } else {
+            this.deps.state.wedgeRepeatCount = allErrored ? 1 : 0
+            this.deps.state.wedgeToolFingerprint = batchFingerprint
+          }
+          if (this.deps.state.wedgeRepeatCount >= MAX_WEDGE_REPEATS) {
+            this.emitStop({
+              source: 'wedged-loop',
+              turn,
+              voluntary: false,
+              detail: `${toolUses.map(tu => tu.name).join(',')} ×${this.deps.state.wedgeRepeatCount}`,
+            }, callbacks)
+            await rejectOnAbort(
+              this.deps.completeTurn({ turn, isFinal: true, emitBadge: true, callbacks }),
+              signal!,
+              'post-turn-wedged',
+            )
+            finalTurnCompleted = true
+            break
+          }
+
           await rejectOnAbort(
             this.deps.completeTurn({ turn, isFinal: false, callbacks }),
             signal!,
             'post-turn',
           )
           continue
+          } finally {
+            toolHeartbeat?.rearmWatchdog()
+          }
         }
 
         // Thinking-only turn detection: retry if model produced reasoning but no text/tools
@@ -763,27 +868,57 @@ export class TurnOrchestrator {
         // No tool calls this turn — increment the counter for convergence detection
         this.deps.state.consecutiveNoToolTurns = this.deps.state.consecutiveNoToolTurns + 1
 
+        // ── User steer takes precedence over any auto-continuation ──
+        // Steer normally drains only at tool-result boundaries, so a no-tool
+        // continuation chain (goal/phantom) starves queued user guidance while
+        // injecting its own "keep going" reminder — the user feels unheard.
+        // Drain here FIRST: if the user said something, hand the next turn to
+        // their words alone and skip this round's continuation reminders.
+        const steerText = callbacks.onSteerDrain?.()
+        if (steerText) {
+          debugLog(`[steer-preempt] turn=${turn} user guidance preempted auto-continuation`)
+          await rejectOnAbort(
+            this.deps.completeTurn({ turn, isFinal: false, callbacks }),
+            signal!,
+            'steer-preempt-complete',
+          )
+          this.deps.appendSystemReminder(steerText)
+          continue
+        }
+
         // ── Goal continuation check ──
         // Delegated to GoalContinuationController — it handles tracker.check,
         // judge gating, saveGoalState, flushMeridianTurn, completeTurn, and
-        // continuation reminder injection internally.
-        const goalCheckResult = await this.deps.goalContinuation.handleGoalCheck({
-          streamedText: this.deps.state.streamedText,
-          estimatedTokens: this.deps.getEstimatedTokens(),
-          isAborted: signal?.aborted === true,
-          turn,
-          callbacks,
-          signal: signal!,
-        })
+        // continuation reminder injection internally. Wrapped in rejectOnAbort
+        // so a watchdog abort during judgeGoalCompletion (LLM call) immediately
+        // races instead of waiting for the next loop-iteration signal check.
+        const goalCheckResult = await rejectOnAbort(
+          this.deps.goalContinuation.handleGoalCheck({
+            streamedText: this.deps.state.streamedText,
+            estimatedTokens: this.deps.getEstimatedTokens(),
+            isAborted: signal?.aborted === true,
+            turn,
+            callbacks,
+            signal: signal!,
+          }),
+          signal!,
+          'goal-check',
+        )
         if (goalCheckResult.kind === 'continue') continue
 
         // ── Phantom continuation check ──
         // Only reached when goal check returned accept/finalize (goal not continuing).
-        const phantomResult = await this.deps.postTurnDecision.evaluatePhantomContinuation({
-          turn,
-          callbacks,
-          signal: signal!,
-        })
+        // Wrapped in rejectOnAbort for uniform abort cooperation across all
+        // turn-boundary steps.
+        const phantomResult = await rejectOnAbort(
+          this.deps.postTurnDecision.evaluatePhantomContinuation({
+            turn,
+            callbacks,
+            signal: signal!,
+          }),
+          signal!,
+          'phantom-check',
+        )
         if (phantomResult.shouldContinue) continue
 
         // Final completion: goal inactive / achieved / budget exhausted / context limit.
