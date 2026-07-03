@@ -129,6 +129,13 @@ export const PLAN_TOOL: Tool = {
     name: 'plan',
     description: `Unified plan lifecycle tool — submit a plan for approval, or close completed tasks.
 
+### Plan file status
+\`.rivet/plans/*.md\` files carry a status marker: \`> **Status: APPROVED/REJECTED/EXECUTED**\`. When scanning existing plans:
+- **REJECTED** plans are dismissed by the user — do NOT re-submit, re-propose, or remind the user about them unless explicitly asked.
+- **EXECUTED** plans are done — reference them for context but don't re-process.
+- **APPROVED** plans are in progress — continue execution.
+- Only **submitted** (no status marker) plans await user action.
+
 ### Action: submit
 Submit a completed implementation plan for user approval. The plan is persisted to \`.rivet/plans/<slug>.md\`.
 
