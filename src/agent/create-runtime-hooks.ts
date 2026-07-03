@@ -35,6 +35,7 @@ import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
@@ -408,6 +409,16 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Error Diagnosis: postTool hook — when a tool fails, reads the
+  // failureClass (already classified by tool-execution.ts via
+  // failure-classifier.ts) and injects a scenario-specific diagnosis
+  // into the advisory stream. Replaces the static error-to-user
+  // translation table in the system prompt — knowledge is injected
+  // on-demand instead of occupying prompt space permanently.
+  if (deps.advisoryBus) {
+    hooks.push(createErrorDiagnosisHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Probe-Tracking: postTool hook — detects debug probes (console.log,
