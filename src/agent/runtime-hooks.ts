@@ -45,6 +45,12 @@ export interface RuntimeHookSnapshot {
   touchedTsFiles?: boolean
   /** Component C: a real typecheck has run since the last TS edit. */
   sawTypecheckThisTask?: boolean
+  /** Reasoning spiral guard: length of last turn's thinking content.
+   *  Populated from AgentLoop.lastThinkingContent.length in buildRuntimeSnapshot. */
+  lastThinkingLength?: number
+  /** Reasoning spiral guard: whether last turn had any tool calls.
+   *  Derived from recentToolHistory in buildRuntimeSnapshot. */
+  lastTurnHadTools?: boolean
 }
 
 export interface RuntimePhaseChangeDetail {

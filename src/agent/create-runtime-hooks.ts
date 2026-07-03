@@ -39,6 +39,7 @@ import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
 import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
 import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
 import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
+import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -448,6 +449,15 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // Gated by RIVET_GIT_CLEAR_GUARD (default on; set to '0' to disable).
   if (deps.advisoryBus && process.env.RIVET_GIT_CLEAR_GUARD !== '0') {
     hooks.push(createGitClearAfterFailHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Reasoning-Spiral Guard: preTurn hook — detects single-turn reasoning
+  // spirals (3000+ chars thinking + zero tool calls). Session-scoped trend
+  // tracking for escalation detection. Fills the gap that convergence-detector
+  // and exploration-stall don't cover: pure thinking length without tools.
+  // Gated by RIVET_REASONING_SPIRAL_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_REASONING_SPIRAL_GUARD !== '0') {
+    hooks.push(createReasoningSpiralHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a

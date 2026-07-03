@@ -274,6 +274,8 @@ return {
       },
       touchedTsFiles: self.touchedTsFiles,
       sawTypecheckThisTask: self.sawTypecheckThisTask,
+      lastThinkingLength: self.lastThinkingContent.length || undefined,
+      lastTurnHadTools: self.recentToolHistory.some(h => h.status === 'success') || undefined,
       ...extra,
     }
 }
