@@ -1087,6 +1087,60 @@ describe('evaluateConvergence', () => {
         `read-only with no report should still flag, got level ${result.level} (score=${result.score.toFixed(2)})`)
     })
 
+    it('exemption narrowed (2026-07-04): unverified edits + long analysis text still flags', () => {
+      // 有未验证编辑还在写长文 — 是该被提醒的场景，不是审查报告。
+      // 与 "does NOT flag" 用例完全同构，唯一差异是 evidenceState 带未验证编辑。
+      const history = makeHistory([
+        { tool: 'read_file', target: 'conftest.py' },
+        { tool: 'grep', target: 'SCREENING' },
+        { tool: 'read_file', target: 'config.py' },
+        { tool: 'read_file', target: 'updater.py' },
+        { tool: 'grep', target: 'update_daily_kline' },
+        { tool: 'read_file', target: 'test_scoring.py' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 24,
+        phaseClass: 'plan',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        textFingerprints: reportFingerprints,
+        evidenceState: {
+          filesModified: new Set(['src/a.ts', 'src/b.ts']),
+          filesRead: new Set<string>(),
+          deliveryStatus: 'unverified' as const,
+        },
+      }))
+      assert.ok(result.level >= 2,
+        `unverified edits must void the report exemption, got level ${result.level} (score=${result.score.toFixed(2)})`)
+    })
+
+    it('exemption survives when edits are verified (pure post-verification review)', () => {
+      const history = makeHistory([
+        { tool: 'read_file', target: 'conftest.py' },
+        { tool: 'grep', target: 'SCREENING' },
+        { tool: 'read_file', target: 'config.py' },
+        { tool: 'read_file', target: 'updater.py' },
+        { tool: 'grep', target: 'update_daily_kline' },
+        { tool: 'read_file', target: 'test_scoring.py' },
+      ])
+      const result = evaluateConvergence(baseInput({
+        turn: 24,
+        phaseClass: 'plan',
+        contextWindow: 200_000,
+        recentToolHistory: history,
+        noToolTurnCount: 0,
+        textFingerprints: reportFingerprints,
+        evidenceState: {
+          filesModified: new Set(['src/a.ts']),
+          filesRead: new Set<string>(),
+          deliveryStatus: 'verified' as const,
+        },
+      }))
+      assert.equal(result.level, 0,
+        `verified edits + report production must keep the exemption, got level ${result.level}`)
+    })
+
     it('repetitive text (stuck loop) is NOT treated as report production', () => {
       // Same long text repeated across turns → high repetition → still stagnation.
       const repeated = reportFingerprints[0]!

@@ -311,8 +311,25 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       }
     },
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
-    wasConvergenceTriggered: () => self.latestConvergenceResult?.shouldKick ?? false,
+    // 让位判据解耦：shouldKick 在卡住期间恒 true 但发射被冷却节流——只有
+    // convergence 真实发射过（相邻轮）才压制 CCR/kick，避免冷却静默期陪葬。
+    wasConvergenceTriggered: () =>
+      (self.latestConvergenceResult?.shouldKick ?? false) && self.wasConvergenceEmittedRecently(),
     telemetryWriter: self.telemetryWriter,
+    // Phase 0 观测：CCR 触发落遥测（sensorium.jsonl 同通道）+ guardian 计数。
+    // 此前 onCcrTrigger 无生产接线 — 触发频次不可观测，静音只能靠体感发现。
+    onCcrTrigger: event => {
+      self.guardianActivity.ccr += 1
+      self.telemetryWriter.write({
+        kind: 'ccr-trigger',
+        rule: event.rule,
+        star: event.star,
+        turn: event.turn,
+        principleKey: event.principleKey,
+        dynamicPool: event.dynamicPool,
+        dimValues: event.dimValues,
+      })
+    },
     getPhysarumShadowStats: () => self.getPhysarumShadowStats(),
     getDomainId: () => self.sessionDomain?.id ?? null,
     getFileObservations: () => self.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],

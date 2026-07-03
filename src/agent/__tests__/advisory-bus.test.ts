@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, STALENESS_GATE_TURN_THRESHOLD, STALENESS_GATE_QUIET_WINDOW, disciplineReanchorEntry, stalenessGateEntry, vigorLowEntry } from '../advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from '../advisory-bus.js'
 
 describe('AdvisoryBus', () => {
   it('renders empty when no entries', () => {
@@ -124,35 +124,71 @@ describe('discipline re-anchor (F-fix, session 803d897d)', () => {
   })
 })
 
-describe('anti-habituation: staleness gate & vigor-low', () => {
-  it('staleness gate has sane thresholds', () => {
-    assert.ok(STALENESS_GATE_TURN_THRESHOLD >= 10 && STALENESS_GATE_TURN_THRESHOLD <= 40)
-    assert.ok(STALENESS_GATE_QUIET_WINDOW >= 5 && STALENESS_GATE_QUIET_WINDOW <= 20)
-  })
+// 2026-07-04：deprecated stalenessGateEntry / vigorLowEntry 死代码已删除
+//（零生产调用方，宣称的 CCR P2 替代早已被裁）。胶囊召回改为 CCR 触发的
+// 一等附属，见 cognitive-capsule-router.test.ts。
 
-  it('staleness gate entry includes turn count and has TTL 2', () => {
-    const entry = stalenessGateEntry(15)
-    assert.equal(entry.key, 'staleness-gate')
-    assert.equal(entry.category, 'discipline')
-    assert.equal(entry.ttl, 2)
-    assert.ok(entry.content.includes('15'))
-  })
-
-  it('vigor-low entry has appropriate priority and TTL 1', () => {
-    const entry = vigorLowEntry()
-    assert.equal(entry.key, 'vigor-low-refresh')
-    assert.equal(entry.category, 'discipline')
-    assert.equal(entry.ttl, 1)
-    assert.ok(entry.priority > 0.5, 'vigor-low should have moderate-high priority')
-  })
-
-  it('staleness and vigor-low can coexist in advisory bus', () => {
+describe('star-domain render filter (2026-07-04 触发面修复)', () => {
+  it('suppresses static same-domain manifesto entries (frozen-base duplicates)', () => {
     const bus = new AdvisoryBus()
-    bus.submit(stalenessGateEntry(20))
-    bus.submit(vigorLowEntry())
+    bus.submit({ key: 'discipline-reanchor', priority: 0.55, category: 'discipline', content: '【天权】静态宣言内容' })
+    const rendered = bus.render('天权')
+    assert.doesNotMatch(rendered, /discipline-reanchor/, '同星域静态条目应被冻结区 persona 顶掉')
+  })
+
+  it('does NOT suppress situational star_domain entries for the active domain', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'ccr-天权-P7', priority: 0.65, category: 'star_domain', content: '【天权】验证连续失败 2 次。换维度。' })
+    bus.submit({ key: 'capsule-recall', priority: 0.45, category: 'star_domain', tier: 'informational', content: '【天权·胶囊】方法论 gist——recall_capsule("天权")。' })
+    const rendered = bus.render('天权')
+    assert.match(rendered, /ccr-天权-P7/, '同星域的情境性改道提醒不是宣言重复，必须渲染')
+    assert.match(rendered, /capsule-recall/, '胶囊召回条目同样豁免')
+  })
+
+  it('star_domain category does not compete with discipline for MAX_PER_CATEGORY', () => {
+    const bus = new AdvisoryBus()
+    // 2 条 discipline 吃满类别预算
+    bus.submit({ key: 'd1', priority: 0.9, category: 'discipline', content: 'D1' })
+    bus.submit({ key: 'd2', priority: 0.85, category: 'discipline', content: 'D2' })
+    // CCR 条目在独立类别 — 不再被 discipline 上限挤掉
+    bus.submit({ key: 'ccr-瑶光-P1', priority: 0.55, category: 'star_domain', content: '【瑶光】去验证' })
     const rendered = bus.render()
-    assert.ok(rendered.includes('staleness-gate'))
-    assert.ok(rendered.includes('vigor-low-refresh'))
+    assert.match(rendered, /ccr-瑶光-P1/, 'star_domain 独立类别，不受 discipline MAX_PER_CATEGORY 影响')
+  })
+})
+
+describe('advisory delivery ledger (Phase 0 观测)', () => {
+  it('counts submitted, rendered and dropped entries', () => {
+    const bus = new AdvisoryBus()
+    for (let i = 0; i < 5; i++) {
+      bus.submit({ key: `op-${i}`, priority: 0.9 - i * 0.1, category: 'repair', content: `OP-${i}` })
+    }
+    bus.render()
+    const ledger = bus.drainLedger()
+    assert.equal(ledger.submitted, 5)
+    // repair 类别上限 2 → 渲染 2，丢 3
+    assert.equal(ledger.rendered, 2)
+    assert.equal(ledger.dropped, 3)
+    assert.ok(ledger.droppedKeys.includes('op-2'))
+  })
+
+  it('drainLedger resets counters', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'a', priority: 0.5, category: 'repair', content: 'A' })
+    bus.render()
+    bus.drainLedger()
+    const second = bus.drainLedger()
+    assert.equal(second.submitted, 0)
+    assert.equal(second.rendered, 0)
+    assert.equal(second.dropped, 0)
+  })
+
+  it('records star-domain filter drops', () => {
+    const bus = new AdvisoryBus()
+    bus.submit({ key: 'static-persona', priority: 0.5, category: 'discipline', content: '【天枢】常驻宣言' })
+    bus.render('天枢')
+    const ledger = bus.drainLedger()
+    assert.ok(ledger.droppedKeys.includes('static-persona'))
   })
 })
 

@@ -1,6 +1,7 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCcrHook, _RULES_FOR_TESTING, _fillTemplate, _isTestIntent, type CcrTriggerEvent } from '../hooks/cognitive-capsule-router.js'
+import { readFileSync } from 'node:fs'
+import { createCcrHook, _RULES_FOR_TESTING, _fillTemplate, _isTestIntent, _STAR_FALLBACK_POOLS, type CcrTriggerEvent } from '../hooks/cognitive-capsule-router.js'
 import { extractPrinciplesFromRaw } from '../seed-capsule-store.js'
 import type { AdvisoryEntry } from '../advisory-bus.js'
 import type { EvidenceState } from '../evidence.js'
@@ -143,8 +144,10 @@ describe('CognitiveCapsuleRouter', () => {
       assert.equal(_isTestIntent('read_file', 'src/__tests__/foo.test.ts'), true)
     })
 
-    it('detects edit tools (likely about to test)', () => {
-      assert.equal(_isTestIntent('edit_file', 'src/foo.ts'), true)
+    it('edit tools are NOT test intent (2026-07-04 触发面修复：编辑不是验证)', () => {
+      assert.equal(_isTestIntent('edit_file', 'src/foo.ts'), false)
+      assert.equal(_isTestIntent('hash_edit', 'src/foo.ts'), false)
+      assert.equal(_isTestIntent('write_file', 'src/foo.ts'), false)
     })
 
     it('returns false for read_file on non-test target', () => {
@@ -174,7 +177,7 @@ describe('CognitiveCapsuleRouter', () => {
       }))
       assert.equal(h.submitted.length, 1)
       assert.ok(h.submitted[0]!.content.startsWith('【瑶光】'))
-      assert.equal(h.submitted[0]!.category, 'discipline')
+      assert.equal(h.submitted[0]!.category, 'star_domain', 'CCR 走独立类别，不与 discipline 争预算')
     })
 
     it('does not fire at turn 2', () => {
@@ -389,7 +392,8 @@ More text.
         sensorium: makeSensorium({ confidence: 0.2 }),
         vigor: makeVigor({ vigor: 0.8 }),
       }))
-      assert.equal(h.submitted.length, 1)
+      const ccrEntries = h.submitted.filter(e => e.key.startsWith('ccr-'))
+      assert.equal(ccrEntries.length, 1)
       assert.equal(h.triggerEvents.length, 1)
       assert.equal(h.triggerEvents[0]!.dynamicPool, true, 'should use dynamic pool from capsule docs')
     })
@@ -401,9 +405,144 @@ More text.
         sensorium: makeSensorium({ confidence: 0.2 }),
         vigor: makeVigor({ vigor: 0.8 }),
       }))
-      assert.equal(h.submitted.length, 1)
+      const ccrEntries = h.submitted.filter(e => e.key.startsWith('ccr-'))
+      assert.equal(ccrEntries.length, 1)
       assert.equal(h.triggerEvents.length, 1)
       assert.equal(h.triggerEvents[0]!.dynamicPool, false, 'should fall back to hardcoded pool')
+    })
+  })
+
+  describe('capsule recall attachment (触发面修复 2026-07-04)', () => {
+    it('attaches an informational capsule-recall entry when a rule fires with capsule docs', () => {
+      const cwd = process.cwd()
+      const h = createHarness({ evidenceOverrides: { filesModified: new Set(['a.ts']) }, cwd })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      const recall = h.submitted.find(e => e.key === 'capsule-recall')
+      assert.ok(recall, 'capsule-recall entry attached alongside the CCR entry')
+      assert.equal(recall!.tier, 'informational')
+      assert.equal(recall!.category, 'star_domain')
+      assert.ok(recall!.content.includes('recall_capsule'), 'content points to the recall entrypoint')
+    })
+
+    it('does not attach recall when cwd is absent (no capsule source)', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      assert.equal(h.submitted.filter(e => e.key === 'capsule-recall').length, 0)
+    })
+
+    it('includes the selected principle action in the CCR content', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
+      h.run(makeSnapshot({
+        turn: 5,
+        sensorium: makeSensorium({ confidence: 0.2 }),
+        vigor: makeVigor({ vigor: 0.8 }),
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.ok(h.submitted[0]!.content.includes('行动指引：'), 'principle actionPrompt 必须送达模型')
+    })
+  })
+
+  describe('P7: 天权 — verification failure inflation', () => {
+    const failedRun = { tool: 'run_tests', status: 'failed' as const, target: 'src/foo.test.ts' }
+    const okRun = { tool: 'run_tests', status: 'success' as const, target: 'src/foo.test.ts' }
+    const edit = { tool: 'edit_file', status: 'success' as const, target: 'src/foo.ts' }
+
+    it('fires on >=2 consecutive semantic verification failures', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 4,
+        recentToolHistory: [failedRun, edit, failedRun],
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.match(h.submitted[0]!.key, /ccr-天权-P7/)
+      assert.ok(h.submitted[0]!.content.includes('连续失败 2 次'))
+    })
+
+    it('does not fire when a later verification succeeded', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 4,
+        recentToolHistory: [failedRun, failedRun, okRun],
+      }))
+      const p7 = h.submitted.filter(e => e.key.includes('P7'))
+      assert.equal(p7.length, 0)
+    })
+
+    it('ignores environment/timeout failures (non-semantic)', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 4,
+        recentToolHistory: [
+          { tool: 'run_tests', status: 'failed' as const, target: 't', errorClass: 'environment' as const },
+          { tool: 'run_tests', status: 'failed' as const, target: 't', errorClass: 'timeout' as const },
+        ],
+      }))
+      const p7 = h.submitted.filter(e => e.key.includes('P7'))
+      assert.equal(p7.length, 0)
+    })
+
+    it('is NOT suppressed by test intent — the failing test IS the moment', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 4,
+        recentToolHistory: [failedRun, failedRun],
+      }))
+      assert.equal(h.submitted.filter(e => e.key.includes('P7')).length, 1)
+    })
+  })
+
+  describe('P6: 天璇 — investigation stall (read-only + low momentum)', () => {
+    const reads = Array.from({ length: 7 }, (_, i) => ({
+      tool: 'read_file', status: 'success' as const, target: `src/f${i}.ts`,
+    }))
+
+    it('fires when turn>5, momentum low, >=6 read-only, no edits', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 8,
+        sensorium: makeSensorium({ momentum: 0.2 }),
+        recentToolHistory: reads,
+      }))
+      assert.equal(h.submitted.length, 1)
+      assert.match(h.submitted[0]!.key, /ccr-天璇-P6/)
+    })
+
+    it('does not fire when momentum is healthy', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 8,
+        sensorium: makeSensorium({ momentum: 0.7 }),
+        recentToolHistory: reads,
+      }))
+      assert.equal(h.submitted.filter(e => e.key.includes('P6')).length, 0)
+    })
+
+    it('does not fire when files were modified (implementation, not investigation)', () => {
+      const h = createHarness({ filesModified: new Set(['a.ts']) })
+      h.run(makeSnapshot({
+        turn: 8,
+        sensorium: makeSensorium({ momentum: 0.2 }),
+        recentToolHistory: reads,
+      }))
+      assert.equal(h.submitted.filter(e => e.key.includes('P6')).length, 0)
+    })
+
+    it('does not fire when an edit interrupts the read streak', () => {
+      const h = createHarness()
+      h.run(makeSnapshot({
+        turn: 8,
+        sensorium: makeSensorium({ momentum: 0.2 }),
+        recentToolHistory: [...reads.slice(0, 3), { tool: 'edit_file', status: 'success' as const, target: 'a.ts' }, ...reads.slice(0, 3)],
+      }))
+      assert.equal(h.submitted.filter(e => e.key.includes('P6')).length, 0)
     })
   })
 
@@ -424,6 +563,60 @@ More text.
       assert.ok('vigor' in event.dimValues)
       assert.ok('vigorTonic' in event.dimValues)
       assert.ok('vigorPhasic' in event.dimValues)
+    })
+  })
+
+  describe('synthetic playback: 排查任务 10 轮只读 + 验证失败 2 次', () => {
+    it('CCR fires for both investigation-stall and verify-fail, within anti-spam bounds', () => {
+      const h = createHarness()
+      type Entry = { tool: string; status: 'success' | 'failed'; target: string }
+      const history: Entry[] = []
+
+      for (let turn = 1; turn <= 10; turn++) {
+        if (turn <= 8) {
+          history.push({ tool: turn % 2 === 0 ? 'grep' : 'read_file', status: 'success', target: `src/f${turn}.ts` })
+        }
+        if (turn === 9 || turn === 10) {
+          history.push({ tool: 'run_tests', status: 'failed', target: 'src/foo.test.ts' })
+        }
+        h.run(makeSnapshot({
+          turn,
+          sensorium: makeSensorium({ momentum: 0.2 }),
+          recentToolHistory: [...history],
+        }))
+      }
+
+      const ccrEntries = h.submitted.filter(e => e.key.startsWith('ccr-'))
+      assert.ok(ccrEntries.some(e => e.key.includes('P6')), '排查停滞（天璇）至少触发一次')
+      assert.ok(ccrEntries.some(e => e.key.includes('P7')), '验证失败膨胀（天权）至少触发一次')
+      // 防刷屏上界：10 轮内 CCR 触发不超过 3 次（星域冷却生效）
+      assert.ok(ccrEntries.length <= 3, `anti-spam bound: got ${ccrEntries.length} CCR triggers in 10 turns`)
+      // 任意连续 6 轮窗口内不超过 2 次
+      const triggerTurns = h.triggerEvents.map(e => e.turn)
+      for (let start = 1; start <= 5; start++) {
+        const inWindow = triggerTurns.filter(t => t >= start && t < start + 6).length
+        assert.ok(inWindow <= 2, `6-turn window starting at ${start} has ${inWindow} triggers`)
+      }
+    })
+  })
+
+  describe('瑶光 fallback pool ↔ capsule doc sync (静音之道 Y8–Y10)', () => {
+    it('fallback pool mirrors every <principle> key in the shipped capsule doc', () => {
+      const raw = readFileSync('docs/seed-capsule-yaoguang.md', 'utf-8')
+      const docKeys = extractPrinciplesFromRaw(raw).map(p => p.key)
+      const fallbackKeys = _STAR_FALLBACK_POOLS['瑶光'].map(p => p.key)
+      for (const key of docKeys) {
+        assert.ok(fallbackKeys.includes(key),
+          `capsule principle ${key} missing from YAOGUANG_FALLBACK — 兜底落后于胶囊，裸环境缺方法论`)
+      }
+    })
+
+    it('capsule doc carries the silence-audit principles Y8/Y9/Y10', () => {
+      const raw = readFileSync('docs/seed-capsule-yaoguang.md', 'utf-8')
+      const keys = extractPrinciplesFromRaw(raw).map(p => p.key)
+      for (const key of ['Y8', 'Y9', 'Y10']) {
+        assert.ok(keys.includes(key), `${key} missing from capsule doc`)
+      }
     })
   })
 

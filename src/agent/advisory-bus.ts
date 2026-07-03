@@ -45,6 +45,9 @@ export type AdvisoryCategory =
   | 'typecheck'
   | 'todo'
   | 'background'
+  /** 星域路由（CCR）与胶囊召回 — 独立类别，不与 discipline 争 MAX_PER_CATEGORY
+   *  预算（2026-07-04 触发面修复：discipline 赛道扩容后 CCR 0.55 常被挤出）。 */
+  | 'star_domain'
 
 /**
  * 宪法级优先级 — 构成性规则（不可违抗的行为底线）。
@@ -97,39 +100,9 @@ export function disciplineReanchorEntry(): AdvisoryEntry {
   }
 }
 
-/**
- * 新鲜度衰减门 — 当 session 较长且近期无主动异议时触发。
- * @deprecated Replaced by CognitiveCapsuleRouter rule P2 (freshness < 0.25).
- * Kept for backward compatibility; callers should migrate to CCR.
- */
-export const STALENESS_GATE_TURN_THRESHOLD = 20
-export const STALENESS_GATE_QUIET_WINDOW = 10
-
-/** @deprecated Use CCR rule P2 instead. */
-export function stalenessGateEntry(turnsSinceLastObjection: number): AdvisoryEntry {
-  return {
-    key: 'staleness-gate',
-    priority: 0.6,
-    category: 'discipline',
-    content: `【天璇】你已执行 ${turnsSinceLastObjection}+ 轮未提出异议。快速自检：当前方向有隐患吗？有遗留项在累积吗？天璇胶囊（docs/seed-capsule-tianxuan.md）有换视角方法论可供 recall。`,
-    ttl: 2,
-  }
-}
-
-/**
- * Vigor 低迷唤醒 — 当执行能量（tonic）过低时注入具体化行动指引。
- * @deprecated Replaced by CognitiveCapsuleRouter rule P3 (verif_cov < 0.3 ∧ vigor < 0.3).
- * Kept for backward compatibility; callers should migrate to CCR.
- */
-export function vigorLowEntry(): AdvisoryEntry {
-  return {
-    key: 'vigor-low-refresh',
-    priority: 0.65,
-    category: 'discipline',
-    content: '【天枢】执行能量偏低。回到证据：最后一个成功验证的事实是什么？下一步最小可验证行动是什么？',
-    ttl: 1,
-  }
-}
+// 死代码清理（2026-07-04）：deprecated 的 stalenessGateEntry / vigorLowEntry 已删除。
+// 它们声称"被 CCR P2/P3 替代"，但 P2 早已被裁（c43660f0）且两函数零生产调用方——
+// 胶囊召回的提醒通路由此断裂。召回现在是 CCR 触发的一等附属（见 cognitive-capsule-router.ts）。
 
 // ─── 正向激励条目 ─────────────────────────────────────────────────
 // 当 agent 做出好的决策时，通过 advisory bus 注入简短的正向反馈。
@@ -172,19 +145,68 @@ export function vigorRecoveryEntry(): AdvisoryEntry {
   }
 }
 
+/**
+ * 投递账本快照 — 自上次 drain 以来的投递/渲染/丢弃计数。
+ * Phase 0 观测：advisory 被预算挤掉时不再静默——被丢弃的 key 可从遥测回放。
+ */
+export interface AdvisoryLedgerDelta {
+  /** submit/submitAll 收到的条目数 */
+  submitted: number
+  /** render 实际输出的条目数 */
+  rendered: number
+  /** 参与竞争但未获渲染位的条目数（含星域过滤、类别上限、Top-N 截断） */
+  dropped: number
+  /** 被丢弃条目的 key（去重后，最多保留最近 50 个） */
+  droppedKeys: string[]
+}
+
+const LEDGER_DROPPED_KEYS_CAP = 50
+
 export class AdvisoryBus {
   private entries: AdvisoryEntry[] = []
   /** 存活条目 — 未过期的跨轮条目 */
   private alive: AdvisoryEntry[] = []
+  // ── 投递账本（Phase 0 观测）──
+  private ledgerSubmitted = 0
+  private ledgerRendered = 0
+  private ledgerDropped = 0
+  private ledgerDroppedKeys: string[] = []
 
   /** 投递一条劝导 */
   submit(entry: AdvisoryEntry): void {
     this.entries.push(entry)
+    this.ledgerSubmitted++
   }
 
   /** 批量投递 */
   submitAll(entries: AdvisoryEntry[]): void {
     this.entries.push(...entries)
+    this.ledgerSubmitted += entries.length
+  }
+
+  /** 读取并清零投递账本（自上次 drain 以来的增量） */
+  drainLedger(): AdvisoryLedgerDelta {
+    const delta: AdvisoryLedgerDelta = {
+      submitted: this.ledgerSubmitted,
+      rendered: this.ledgerRendered,
+      dropped: this.ledgerDropped,
+      droppedKeys: [...new Set(this.ledgerDroppedKeys)],
+    }
+    this.ledgerSubmitted = 0
+    this.ledgerRendered = 0
+    this.ledgerDropped = 0
+    this.ledgerDroppedKeys = []
+    return delta
+  }
+
+  private recordDropped(keys: Iterable<string>): void {
+    for (const key of keys) {
+      this.ledgerDropped++
+      this.ledgerDroppedKeys.push(key)
+    }
+    if (this.ledgerDroppedKeys.length > LEDGER_DROPPED_KEYS_CAP) {
+      this.ledgerDroppedKeys = this.ledgerDroppedKeys.slice(-LEDGER_DROPPED_KEYS_CAP)
+    }
   }
 
   /**
@@ -196,15 +218,24 @@ export class AdvisoryBus {
    *   informational tier — 填充剩余槽位
    *
    * @param activeStarDomain — active star domain name (e.g. '天枢'). When set,
-   *   advisory entries whose content starts with the same star name are suppressed.
+   *   static manifesto-style entries tagged with the same star name are
+   *   suppressed (they duplicate the persona already rendered in the frozen
+   *   base). Situational entries (category 'star_domain' — CCR routing and
+   *   capsule recall) are exempt: a 【天权】 course-correction fired while the
+   *   天权 domain is active is contextual advice, not a duplicate manifesto.
+   *   (2026-07-04 触发面修复：旧逻辑按内容前缀无差别过滤，同星域的改道提醒
+   *   被静态 persona 顶掉——静音栈的一环。)
    */
   render(activeStarDomain?: string): string {
     let all = [...this.alive, ...this.entries]
 
-    // Star-domain dedup
+    // Star-domain dedup — static entries only; situational star_domain exempt
     if (activeStarDomain) {
       const tag = `【${activeStarDomain}】`
-      all = all.filter(e => !e.content.startsWith(tag))
+      const isFrozenDuplicate = (e: AdvisoryEntry): boolean =>
+        e.content.startsWith(tag) && e.category !== 'star_domain'
+      this.recordDropped(all.filter(isFrozenDuplicate).map(e => e.key))
+      all = all.filter(e => !isFrozenDuplicate(e))
     }
 
     // Separate by tier — constitutional bypasses all caps
@@ -257,6 +288,11 @@ export class AdvisoryBus {
     taken.sort((a, b) => b.priority - a.priority)
     sorted.push(...taken)
 
+    // 账本：本轮参与竞争但没拿到渲染位的条目（类别上限 / Top-N 截断）
+    const renderedKeys = new Set(sorted.map(e => e.key))
+    this.recordDropped([...deduped.keys()].filter(k => !renderedKeys.has(k)))
+    this.ledgerRendered += sorted.length
+
     if (sorted.length === 0) {
       this.entries = []
       this.alive = []
@@ -281,6 +317,10 @@ export class AdvisoryBus {
   reset(): void {
     this.entries = []
     this.alive = []
+    this.ledgerSubmitted = 0
+    this.ledgerRendered = 0
+    this.ledgerDropped = 0
+    this.ledgerDroppedKeys = []
   }
 }
 

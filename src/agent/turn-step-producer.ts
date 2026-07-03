@@ -340,6 +340,15 @@ export class TurnStepProducer {
     const activeStarName = this.self.sessionDomain?.name
     this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName))
 
+    // Phase 0 观测：advisory 投递账本落盘（仅有活动时写，避免遥测噪音），
+    // 并把 guardian 活动摘要（CCR/改道/丢弃计数）同步进 session meta。
+    const advisoryLedger = this.self.advisoryBus.drainLedger()
+    if (advisoryLedger.submitted > 0 || advisoryLedger.dropped > 0) {
+      this.self.telemetryWriter.write({ kind: 'advisory-ledger', turn, ...advisoryLedger })
+    }
+    this.self.recordAdvisoryLedger(advisoryLedger)
+    this.self.flushGuardianMeta()
+
     this.self.refreshReliabilityDecision()
 
     _tb = Date.now()
@@ -520,7 +529,10 @@ export class TurnStepProducer {
       baselineFingerprint: this.self.baselineFingerprint,
     }, {
       emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-      emitDecisionShift: (shift) => { callbacks.onDecisionShift?.(shift) },
+      emitDecisionShift: (shift) => {
+        this.self.recordDecisionShift(shift.source)
+        callbacks.onDecisionShift?.(shift)
+      },
     })
     this.self.sensorium = perceptionResult.sensorium
     debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)
