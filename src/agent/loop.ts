@@ -223,6 +223,13 @@ export class AgentLoop {
   private lastConvergenceEmitTurn = -Infinity
   private lastConvergenceEmitLevel = 0
   private lastConvergenceMsgKey = ''
+  /** Phase 0 观测 — guardian（CCR / 改道 / kick）触发计数。会话内累计，
+   *  随遥测与 session meta 落盘，让"守护链路被静音"从体感问题变成数据问题。 */
+  readonly guardianActivity: { ccr: number; shifts: Record<string, number> } = { ccr: 0, shifts: {} }
+  /** 记录一次结构化改道发射（source: 'kick' | 'convergence' | …）。 */
+  recordDecisionShift(source: string): void {
+    this.guardianActivity.shifts[source] = (this.guardianActivity.shifts[source] ?? 0) + 1
+  }
   /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
    *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
    *  (isGoalActive) read LOCAL state instead of reaching back into the
@@ -1580,14 +1587,16 @@ export class AgentLoop {
             content: convergenceCheck.injectedMessage,
           })
 
-          // When convergence is detected AND doom loop is blocked, the agent is
-          // likely in a post-completion verification loop. Append gate hint
-          // to the same SR (already injected above) instead of creating a second SR.
-          if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-            let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+          // When convergence is detected, append the delivery gate hint so the
+          // agent sees the gate state alongside the convergence message.
+          // Previously only fired for doomLoopLevel==='blocked', but YELLOW
+          // gates (no_test_infra, external_blocked) also need context —
+          // otherwise the generic "换个角度看问题" can contradict "可带条件交付".
+          if (convergenceCheck.level >= 2) {
+            let gateHint = '交付门禁状态未知。请运行 deliver_task 检查。'
             try {
               const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
-              if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
+              if (gate) gateHint = `交付门禁：${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
             } catch { /* gate evaluation must never break convergence handling */ }
             this.advisoryBus.submit({
               key: 'convergence-gate',
