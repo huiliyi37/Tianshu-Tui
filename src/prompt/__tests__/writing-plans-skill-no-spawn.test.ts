@@ -46,24 +46,29 @@ test('writing-plans skill: anti-spawn guard rail is present', () => {
   const content = readFileSync(SKILL_PATH, 'utf-8')
 
   // ── REQUIRED GUARDS ────────────────────────────────────────────
-  // These guard phrases are what actively prevent the spawn. Without
-  // them the fix is incomplete: the LLM has nothing to anchor on.
+  // Updated for delegation-friendly plan phase: the prohibition on ALL
+  // delegation is replaced with targeted guidance on when/how to use
+  // read-only star-domain scouts.
   const guards = [
     {
       pattern: '不要调用 `task` / `Agent` / `TodoWrite`',
-      why: 'must explicitly name Cursor/Claude Code tool names so the LLM knows what to avoid',
+      why: 'must explicitly name non-Rivet tool names so the LLM knows what to avoid',
     },
     {
-      pattern: '`delegate_task` / `delegate_batch`',
-      why: 'must surface real Rivet tool names so the LLM has a positive anchor',
+      pattern: '`delegate_task`',
+      why: 'must surface real Rivet tool name so the LLM has a positive anchor',
     },
     {
-      pattern: '计划阶段不要派子代理',
-      why: 'must state the planning-phase prohibition explicitly',
+      pattern: '只读 profile：`code_scout` 或 `doc_scout`',
+      why: 'must guide toward read-only profiles for plan-phase research',
     },
     {
-      pattern: '不要派 scout',
-      why: 'must forbid the scout concept in the 注意事项 tail',
+      pattern: '**不要**',
+      why: 'must have explicit "do not" guardrails (no write profiles, no delegating main task)',
+    },
+    {
+      pattern: '待核验假设',
+      why: 'must warn that scout findings are unverified hypotheses',
     },
   ]
   for (const { pattern, why } of guards) {
