@@ -161,6 +161,17 @@ export interface ToolCallParams {
 
 export type VerificationFailureKind = 'test_failure' | 'tool_invocation_failure'
 
+/** Root cause when status is 'blocked'. Absent for passed/failed.
+ *  Enables downstream (attribution, gate, deliver_task) to give
+ *  scenario-specific guidance instead of a uniform "tests blocked" message. */
+export type VerificationBlockedReason =
+  | 'no_test_framework'    // no package.json / no detectable runner at all
+  | 'no_tests_found'        // project has a runner but no test files detected
+  | 'filter_unresolved'     // run_tests(filter=...) could not resolve to a test file
+  | 'unknown_runner'        // npm test script uses an unrecognized runner (not vitest/jest/node-test)
+  | 'timeout'               // tests timed out
+  | 'invocation_failure'    // runner crashed / EPERM / could not start
+
 export interface VerificationMetadata {
   command: string
   status: 'passed' | 'failed' | 'blocked'
@@ -171,6 +182,10 @@ export interface VerificationMetadata {
   skipped: number
   durationMs: number
   failureKind?: VerificationFailureKind
+  /** Why verification was blocked — enables scenario-specific guidance downstream. */
+  blockedReason?: VerificationBlockedReason
+  /** User-facing next step when blocked (e.g. "项目缺少测试框架，运行 npm init 后配置 test 脚本"). */
+  userGuidance?: string
   targetFiles?: string[]
   resolvedCommand?: string
   recommendedCommand?: string

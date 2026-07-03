@@ -325,6 +325,17 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             lines.push('     - Run only related tests first, then expand scope')
           }
         }
+        // no_test_infra: project lacks testing infrastructure entirely.
+        // Give user-facing guidance rather than generic "run tests" advice.
+        if (report.attributionClass === 'no_test_infra') {
+          lines.push('', '  ⚠️ 测试基础设施缺失 — 项目没有可自动检测的测试框架或测试文件。')
+          lines.push('  run_tests 每次都会以同样原因受阻，继续重试不会改变结果。')
+          lines.push('  建议向用户报告：')
+          lines.push('    1. 当前项目缺少什么（package.json 中的 test 脚本 / pytest / vitest 等）')
+          lines.push('    2. 用户是否需要协助搭建测试框架')
+          lines.push('    3. 或者用 bash 运行替代验证（编译检查/手动测试/脚本输出检查）后交付')
+          lines.push('  ⚠ 不要只说"请运行测试"——项目根本没有测试可以运行。')
+        }
       }
 
       // Memory-driven review checklist (non-blocking, informational only).

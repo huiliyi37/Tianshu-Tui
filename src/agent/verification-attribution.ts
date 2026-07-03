@@ -211,6 +211,7 @@ export type AttributionClass =
   | 'verified'
   | 'owned_failure'
   | 'external_blocked'
+  | 'no_test_infra'  // project has no test framework / no test files
   | 'tool_invocation_failure'
   | 'unattributed_failure'
   | 'unverified'
@@ -256,8 +257,19 @@ export function createVerificationAttribution(opts: {
       }
     }
 
-    // Blocked → external (can't run, not our fault)
+    // Blocked → determine root cause for differentiated feedback
     if (result.status === 'blocked') {
+      const blockedReason = result.blockedReason
+      // Test infrastructure missing — distinct from transient external blocks
+      if (blockedReason === 'no_test_framework' || blockedReason === 'no_tests_found') {
+        const userGuidance = result.userGuidance ?? '项目缺少可自动检测的测试框架。'
+        return {
+          attribution: 'no_test_infra',
+          isBlocking: false,
+          reason: `Verification infrastructure missing (${blockedReason}): ${result.command}. ${userGuidance}`,
+          source: result,
+        }
+      }
       return {
         attribution: 'external_blocked',
         isBlocking: false,
@@ -338,7 +350,7 @@ export function createVerificationAttribution(opts: {
 
     const attributions = results.map(r => attribute(r))
 
-    // Priority: owned_failure > tool_invocation_failure > unattributed_failure > external_blocked > verified
+    // Priority: owned_failure > tool_invocation_failure > no_test_infra > unattributed_failure > external_blocked > verified
     const hasOwnedFailure = attributions.some(a => a.attribution === 'owned_failure')
     if (hasOwnedFailure) {
       const first = attributions.find(a => a.attribution === 'owned_failure')!
@@ -357,6 +369,17 @@ export function createVerificationAttribution(opts: {
         attribution: 'tool_invocation_failure',
         isBlocking: true,
         reason: `Verification invocation failure: ${first.source.command}`,
+        source: first.source,
+      }
+    }
+
+    const hasNoTestInfra = attributions.some(a => a.attribution === 'no_test_infra')
+    if (hasNoTestInfra) {
+      const first = attributions.find(a => a.attribution === 'no_test_infra')!
+      return {
+        attribution: 'no_test_infra',
+        isBlocking: false,
+        reason: `Project test infrastructure missing: ${first.source.command}. ${first.source.userGuidance ?? ''}`,
         source: first.source,
       }
     }

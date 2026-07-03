@@ -1,7 +1,7 @@
 import { readFile, stat, glob } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, delimiter, win32 as winPath } from 'node:path'
-import type { Tool, ToolCallParams, ToolResult, VerificationMetadata } from './types.js'
+import type { Tool, ToolCallParams, ToolResult, VerificationMetadata, VerificationBlockedReason } from './types.js'
 import { track } from './process-tracker.js'
 import { WinStreamDecoder } from '../platform.js'
 import { spawnHidden } from './spawn-hidden.js'
@@ -26,6 +26,8 @@ interface BlockedTestCommand {
   scope: 'full' | 'targeted'
   message: string
   recommendedCommand?: string
+  blockedReason: VerificationBlockedReason
+  userGuidance: string
 }
 
 type TestCommand = RunnableTestCommand | BlockedTestCommand
@@ -198,6 +200,9 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
         'No package.json or supported test runner markers were found.',
         'Use bash to run the project-specific verification command (for example a Python script, pytest invocation, or output check).',
       ].join('\n'),
+      recommendedCommand: undefined,
+      blockedReason: 'no_test_framework',
+      userGuidance: '项目缺少测试框架。如果项目使用 Node.js，运行 npm init 后配置 test 脚本；如果项目使用 Python，创建 tests/ 目录并安装 pytest。也可以绕过自动检测，直接用 bash 运行验证命令。',
     }
   }
 
@@ -214,6 +219,8 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
           'If this is a non-test output/plot task, use bash to run the concrete Python script or inspect generated output instead.',
         ].join('\n'),
         recommendedCommand: recommendedCommand ?? 'pytest',
+        blockedReason: 'no_tests_found',
+        userGuidance: 'Python 项目检测到，但 tests/ 目录下没有 test_*.py 或 *_test.py 文件。如果项目不需要自动化测试，用 bash 直接运行脚本验证；如果需要测试，在 tests/ 下创建 pytest 用例。',
       }
     }
     const safeFilter = filter?.replace(/[`$\\;"'|]/g, '')
@@ -269,6 +276,8 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
         'Use a concrete .test/.spec file path, or use bash to run the exact project-specific test command.',
       ].join('\n'),
       recommendedCommand: 'npm test',
+      blockedReason: 'filter_unresolved',
+      userGuidance: `无法将 "${safeFilter}" 解析为测试文件。请使用完整路径（如 src/__tests__/xxx.test.ts），或运行无过滤的 run_tests() 跑全量测试。`,
     }
   }
 
@@ -291,6 +300,8 @@ async function buildTestCommand(cwd: string, filter?: string): Promise<TestComma
       'Use bash to run the exact targeted verification command, or run run_tests() without a filter for the full npm test script.',
     ].join('\n'),
     recommendedCommand: 'npm test',
+    blockedReason: 'unknown_runner',
+    userGuidance: `npm test 脚本使用了不被自动识别的测试运行器。请用 bash 直接运行精确的测试命令，或不带 filter 运行 run_tests() 执行完整 npm test。`,
   }
 }
 
@@ -420,7 +431,12 @@ const MAX_OUTPUT = 8000
 const HEAD_CHARS = 4000
 const TAIL_CHARS = 3000
 
-function buildBlockedVerification(command: TestCommand, startTime: number): VerificationMetadata {
+function buildBlockedVerification(
+  command: TestCommand,
+  startTime: number,
+  blockedReason: VerificationBlockedReason,
+  userGuidance: string,
+): VerificationMetadata {
   return {
     command: command.display,
     status: 'blocked',
@@ -432,6 +448,8 @@ function buildBlockedVerification(command: TestCommand, startTime: number): Veri
     durationMs: Date.now() - startTime,
     timestamp: startTime,
     failureKind: 'tool_invocation_failure',
+    blockedReason,
+    userGuidance,
     ...(command.recommendedCommand ? { recommendedCommand: command.recommendedCommand } : {}),
   }
 }
@@ -509,7 +527,7 @@ Good: run_tests(timeout=300000) — longer timeout for slow suites`,
         uiContent: buildUiOutput(testCommand.message, meta),
         rawPath,
         isError: true,
-        verification: buildBlockedVerification(testCommand, startTime),
+        verification: buildBlockedVerification(testCommand, startTime, testCommand.blockedReason, testCommand.userGuidance),
       }
     }
 
@@ -622,8 +640,6 @@ function runTestCommandIn(
         }
       })
 
-      const blockedVerification = (): VerificationMetadata => buildBlockedVerification(testCommand, startTime)
-
       const timer = setTimeout(async () => {
         killProcessTree(child, 'SIGTERM')
         setTimeout(() => killProcessTree(child, 'SIGKILL'), 3000)
@@ -637,7 +653,11 @@ function runTestCommandIn(
           uiContent: buildUiOutput(raw, meta),
           rawPath,
           isError: true,
-          verification: blockedVerification(),
+          verification: buildBlockedVerification(
+            testCommand, startTime,
+            'timeout',
+            '测试超时。可尝试增大 timeout 参数（如 timeout=300000），或分批运行（按目录拆分），或只运行相关测试文件。',
+          ),
         })
       }, timeout)
 
@@ -694,7 +714,13 @@ function runTestCommandIn(
           skipped: parsed.skipped,
           durationMs,
           timestamp: startTime,
-          ...(invocationFailed ? { failureKind: 'tool_invocation_failure' as const } : {}),
+          ...(invocationFailed
+            ? {
+                failureKind: 'tool_invocation_failure' as const,
+                blockedReason: 'invocation_failure' as const,
+                userGuidance: '测试运行器启动失败或崩溃。请检查测试命令是否正确，必要时用 bash 手动运行以诊断环境问题。',
+              }
+            : {}),
           ...(testCommand.recommendedCommand ? { recommendedCommand: testCommand.recommendedCommand } : {}),
         }
 
@@ -730,7 +756,11 @@ function runTestCommandIn(
           uiContent: err.message,
           rawPath,
           isError: true,
-          verification: blockedVerification(),
+          verification: buildBlockedVerification(
+            testCommand, startTime,
+            'invocation_failure',
+            '测试进程启动失败。检查命令是否在系统 PATH 中可用，或依赖是否已安装。',
+          ),
         })
       })
     })
