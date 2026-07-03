@@ -44,6 +44,7 @@ import { appendMilestone } from '../constellation/store.js'
 import { ArtifactStore } from '../artifact/store.js'
 import { SessionJobs } from '../tools/job-store.js'
 import { COMPACT_HISTORY_TOOL } from '../compact/recall-marker.js'
+import { compactPolicyRatios } from '../compact/constants.js'
 import { SessionStateManager } from './session-state.js'
 import { isStarSoulEnabled } from './star-soul-gate.js'
 import { debugLog } from '../utils/debug.js'
@@ -114,11 +115,11 @@ export function formatActivePlanPointer(plan: { slug: string; title: string }): 
 }
 
 
-/** Debounce before an idle compaction pass fires after a turn settles. */
-const IDLE_COMPACTION_DELAY_MS = 12_000
-/** Minimum context fill ratio that makes an idle compaction pass worthwhile
- *  (deferred pending work bypasses this). Aligned with the stale-round floor. */
-const IDLE_COMPACTION_MIN_RATIO = 0.5
+/** Debounce before an idle compaction pass fires after a turn settles.
+ *  60s：典型「读完回答→打下一条」节奏在 20–60s 内，过短的 debounce 会让快速
+ *  追问频繁 abort 进行中的 LLM 压缩（浪费已花的压缩 tokens）；真正离开的场景
+ *  60s 后依然远早于用户回来。可用 RIVET_IDLE_COMPACTION_MS 覆盖。 */
+const IDLE_COMPACTION_DELAY_MS = 60_000
 
 export class AgentLoop {
     session!: SessionContext;
@@ -1345,20 +1346,37 @@ export class AgentLoop {
   }
 
   /**
+   * 闲时压缩生效门槛 = provider 策略的 compact 档（cache-preserving 0.86 /
+   * balanced 0.78 / aggressive 0.70），可用 RIVET_IDLE_COMPACTION_RATIO 覆盖。
+   *
+   * 语义：闲时**只做下一轮用户边界铁定要做的重压缩**（纯时间挪移，零额外信息
+   * 损失）。旧门槛 0.5 对齐的是陈旧轮截断地板——用户离开一小会旧轮工具输出就
+   * 被提前截断且不可逆（「闲时压缩吃掉上下文」投诉的根因）；50–compact 档区间
+   * 的渐进降压留给用户边界在正常门控（缓存健康延迟等）下决定。
+   */
+  private idleCompactionMinRatio(): number {
+    const override = Number(process.env['RIVET_IDLE_COMPACTION_RATIO'])
+    if (Number.isFinite(override) && override > 0 && override <= 1) return override
+    return compactPolicyRatios(this.config.providerProfile).compact
+  }
+
+  /**
    * Run a single turn-0-equivalent compaction pass while idle. Reuses the full
    * boundary ladder (session split → maybeCompact → T9 → stale → heap, plus
    * pending-flag drain) at turn=0 semantics — prefix-cache safe, identical to
    * what the next user turn would run, just paid during idle time.
+   *
+   * 触发语义 = 「重压缩时间挪移 + 递延债清算」：ratio 达到 compact 档（下一轮
+   * 反正要做重压缩）才主动跑；mid-turn 递延的 pendingStale/pendingHeap 债不论
+   * ratio 都清算。不在闲时做 50% 档的主动陈旧轮截断。
    */
   async runIdleCompaction(): Promise<void> {
     if (this._running || this._idleCompacting) return
     if (!this.config.compact?.enabled) return
     const ctxWindow = this.config.contextWindow ?? 1_000_000
     const ratio = this.session.getEstimatedTokens() / ctxWindow
-    // Light pre-gate: only bother when there's deferred mid-turn work or real
-    // pressure (≥0.5, the stale-round floor). The coordinator re-checks tiers
-    // and cache health internally, so this just avoids no-op churn at low fill.
-    if (!this.pendingStaleCompact && !this.pendingHeapCompact && ratio < IDLE_COMPACTION_MIN_RATIO) return
+    const minRatio = this.idleCompactionMinRatio()
+    if (!this.pendingStaleCompact && !this.pendingHeapCompact && ratio < minRatio) return
 
     this._idleCompacting = true
     const idleAbort = new AbortController()
@@ -1368,7 +1386,7 @@ export class AgentLoop {
     this.abortController = idleAbort
     this._idleSettled = (async () => {
       try {
-        debugLog(`[idle-compact] starting (ratio=${ratio.toFixed(2)} pendingStale=${this.pendingStaleCompact} pendingHeap=${this.pendingHeapCompact})`)
+        debugLog(`[idle-compact] starting (ratio=${ratio.toFixed(2)} gate=${minRatio.toFixed(2)} pendingStale=${this.pendingStaleCompact} pendingHeap=${this.pendingHeapCompact})`)
         await this.compactBoundaryCoordinator.runCompaction(0, null)
       } catch (e) {
         debugLog(`[idle-compact] error: ${(e as Error)?.message}`)

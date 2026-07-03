@@ -54,6 +54,49 @@ describe('AgentLoop idle compaction', () => {
     assert.equal(fn.mock.callCount(), 0, 'must skip at low fill with no deferred work')
   })
 
+  it('55% fill（旧 0.5 门槛以上、compact 档以下）不再触发闲时压缩——上下文原样保留', async () => {
+    const agent = makeAgent(true)
+    const fn = mockCoordinator(agent)
+    // 无 providerProfile → balanced 策略 → compact 档 0.78
+    agent.session.getEstimatedTokens = () => 550_000 // ratio 0.55 / 1M window
+    await agent.runIdleCompaction()
+    assert.equal(fn.mock.callCount(), 0,
+      '50–78% 区间的渐进降压必须留给用户边界，闲时不得主动重写历史')
+  })
+
+  it('ratio ≥ compact 档（balanced 0.78）时闲时压缩照跑——重压缩时间挪移', async () => {
+    const agent = makeAgent(true)
+    const fn = mockCoordinator(agent)
+    agent.session.getEstimatedTokens = () => 800_000 // ratio 0.80
+    await agent.runIdleCompaction()
+    assert.equal(fn.mock.callCount(), 1, '下一轮反正要做的重压缩应在闲时提前完成')
+    assert.deepEqual(fn.mock.calls[0]!.arguments, [0, null])
+  })
+
+  it('pending 递延债在低 ratio 下照样清算（债清算路径不受门槛提升影响）', async () => {
+    const agent = makeAgent(true)
+    const fn = mockCoordinator(agent)
+    agent.session.getEstimatedTokens = () => 100_000 // ratio 0.10
+    agent.pendingHeapCompact = true
+    await agent.runIdleCompaction()
+    assert.equal(fn.mock.callCount(), 1, 'mid-turn 递延的压缩债必须在闲时清算')
+  })
+
+  it('RIVET_IDLE_COMPACTION_RATIO 覆盖生效门槛', async () => {
+    const prev = process.env['RIVET_IDLE_COMPACTION_RATIO']
+    process.env['RIVET_IDLE_COMPACTION_RATIO'] = '0.4'
+    try {
+      const agent = makeAgent(true)
+      const fn = mockCoordinator(agent)
+      agent.session.getEstimatedTokens = () => 550_000 // ratio 0.55 ≥ 覆盖值 0.4
+      await agent.runIdleCompaction()
+      assert.equal(fn.mock.callCount(), 1, 'env 覆盖后 0.55 应触发')
+    } finally {
+      if (prev === undefined) delete process.env['RIVET_IDLE_COMPACTION_RATIO']
+      else process.env['RIVET_IDLE_COMPACTION_RATIO'] = prev
+    }
+  })
+
   it('is a no-op when discretionary compaction is disabled', async () => {
     const agent = makeAgent(false)
     const fn = mockCoordinator(agent)
