@@ -89,6 +89,21 @@ describe('StarDomain', () => {
     assert.equal(matchDomain('评估架构层次是否合理'), 'tianquan')
   })
 
+  it('routes silence-audit / baseline keywords to yaoguang (静音之道, 2026-07-04)', () => {
+    assert.equal(matchDomain('这个提醒机制好像静默失效了，帮我查一下'), 'yaoguang')
+    assert.equal(matchDomain('先跑基线分清是不是我改坏的'), 'yaoguang')
+    // 注意：短语里不能带 "fixture" — 天府的 'fix' 会子串命中造成平局。
+    // 这是 matchDomain 子串匹配的已知锐边（'fix' ⊂ 'fixture'/'prefix'/…）。
+    assert.equal(matchDomain('这个绿灯是不是假绿，喂的输入形状和生产一致吗'), 'yaoguang')
+  })
+
+  it('yaoguang volatileBlock carries the absence-audit question (缺席不会自己报警)', () => {
+    const yaoguang = STAR_DOMAINS.yaoguang
+    assert.match(yaoguang.volatileBlock, /缺席不会自己报警/)
+    assert.match(yaoguang.systemPromptSuffix, /观测先行/)
+    assert.match(yaoguang.systemPromptSuffix, /先验基线/)
+  })
+
   it('returns null for ambiguous tasks', () => {
     assert.equal(matchDomain('帮我看看'), null)
     assert.equal(matchDomain('探索并修复缓存问题'), null)
