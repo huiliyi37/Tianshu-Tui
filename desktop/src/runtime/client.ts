@@ -845,6 +845,11 @@ export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
     .then(r => r.json() as Promise<{ ok: boolean }>)
 }
 
+export function removeProviderModel(providerName: string, modelId: string): Promise<{ ok: boolean }> {
+  return rivetFetch(`/config/providers/${providerName}/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
+    .then(r => r.json() as Promise<{ ok: boolean }>)
+}
+
 export function setProviderKey(
   name: string,
   key: { apiKey?: string; apiKeyEnv?: string },

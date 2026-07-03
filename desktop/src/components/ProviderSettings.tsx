@@ -7,6 +7,7 @@ import {
   setupConfigProvider,
   setupCustomProvider,
   removeConfigProvider,
+  removeProviderModel,
   setProviderKey,
   setProviderAsDefault,
   type ProviderListItem,
@@ -235,6 +236,25 @@ function ModelManageList({
               <button className="btn-sm ghost" onClick={() => startEdit(m)} title="编辑">
                 <Pencil size={12} />
               </button>
+              {models.length > 1 && (
+                <button
+                  className="btn-sm ghost danger"
+                  disabled={busy}
+                  title="删除模型"
+                  onClick={async () => {
+                    if (!window.confirm(`确定删除模型「${m.alias ?? m.id}」？`)) return
+                    setBusy(true)
+                    try {
+                      await removeProviderModel(providerName, m.id)
+                      onRefresh()
+                    } catch (e) {
+                      toast.error(`删除模型失败: ${(e as Error).message}`)
+                    } finally { setBusy(false) }
+                  }}
+                >
+                  ✕
+                </button>
+              )}
             </>
           )}
         </div>

@@ -6,6 +6,7 @@
  *   POST   /config/providers                add/update a provider (setup flow)
  *   POST   /config/providers/custom         create a new OpenAI-compatible provider from scratch
  *   DELETE /config/providers/:name          remove a provider
+ *   DELETE /config/providers/:name/models/:modelId  remove a model from a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
@@ -20,6 +21,7 @@ import {
   setupProvider,
   setupCustomProvider,
   removeProvider,
+  removeModel,
   setDefaultProvider,
   setApiKey,
   setApiKeyEnv,
@@ -153,6 +155,18 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       try {
         removeProvider(name)
         return { status: 200, body: { ok: true, removed: name } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    'DELETE /config/providers/:name/models/:modelId': withAuth((_body, params) => {
+      const name = params?.name
+      const modelId = params?.modelId
+      if (!name || !modelId) return { status: 400, body: { error: 'provider name and modelId are required' } }
+      try {
+        removeModel(name, modelId)
+        return { status: 200, body: { ok: true, removed: modelId } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }
