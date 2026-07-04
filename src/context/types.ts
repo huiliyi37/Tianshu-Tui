@@ -193,4 +193,17 @@ export interface SessionMetadata {
   cleanExit?: boolean
   /** TUI side panel open state persisted across session resume. */
   sidePanelOpen?: boolean
+  /**
+   * Guardian（星域守护链路）活动摘要 — CCR 触发数、改道发射数（按 source 分）、
+   * advisory 渲染/丢弃计数。排查"守护链路被静音"时一眼可见（Phase 0 观测）。
+   */
+  guardianActivity?: {
+    ccr: number
+    shifts: Record<string, number>
+    advisoriesRendered: number
+    advisoriesDropped: number
+    /** P1a 核销闭环：expect 谓词判定的采纳/忽略累计（缺省 = 会话早于该功能） */
+    advisoriesAdopted?: number
+    advisoriesIgnored?: number
+  }
 }

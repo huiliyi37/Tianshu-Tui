@@ -414,6 +414,7 @@ export async function buildPrimaryWorkerPacket(results: WorkerResult[], artifact
       risks: result.risks,
       nextActions: result.nextActions,
       evidenceStatus: result.evidenceStatus,
+      failureReason: result.failureReason,
     }
     return stripEmpty(raw)
   })

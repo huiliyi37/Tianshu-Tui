@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, dirname, join, basename } from 'path'
 import { realpathSync, existsSync } from 'fs'
 import { isReadGranted, isWriteGranted } from './path-grants.js'
+import { detectSensitiveFile } from './sensitive-file-detector.js'
 
 export interface ValidatedPath {
   ok: true
@@ -20,6 +21,17 @@ export type PathValidationResult = ValidatedPath | InvalidPath
  * ('read' satisfied by read|write grant; 'write' requires a write grant).
  */
 export function validatePathSafe(cwd: string, inputPath: string, mode: 'read' | 'write' = 'read'): PathValidationResult {
+  // Sensitive file check — fail-closed BEFORE path escape check.
+  // Hard-gate: refuse to read/commit .env, credentials, private keys etc.
+  // even when the path is inside the workspace.
+  const sensitiveResult = detectSensitiveFile(inputPath)
+  if (sensitiveResult.sensitive) {
+    return {
+      ok: false,
+      error: `Sensitive file blocked: ${inputPath} matches sensitive pattern "${sensitiveResult.patternName}". Reading or committing credential/key files is not permitted. If this is a false positive (e.g. a template or fixture), rename the file or move it to a whitelisted path.`,
+    }
+  }
+
   // Returned path stays original-cwd-based to preserve the existing contract
   // (callers compute relative labels / read via this path). Validation, however,
   // canonicalizes both sides: without resolving cwd, a cwd reached through a

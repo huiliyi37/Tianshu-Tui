@@ -37,9 +37,8 @@ export interface AgentConfig {
    */
   maxAutoContinue?: number
   /**
-   * C3 自治档检查点 — pause the run for user confirmation after this many turns
-   * within a single run(). 0/unset disables. Only enforced when approvalMode is
-   * 'dangerously-skip-permissions' (supervised modes brake via approvals).
+   * C3 检查点间隔 — Auto 模式下每 N 轮暂停并同步进度摘要（0 = 关）。
+   * YOLO 和 Manual 模式不读此字段。
    */
   checkpointEveryTurns?: number
   contextWindow: number
@@ -211,6 +210,16 @@ export interface DecisionShift {
   severity?: 'info' | 'warn'
 }
 
+/** C3 — payload for Auto mode checkpoint pauses. */
+export interface AutonomyCheckpointInfo {
+  /** Turns completed in this run when the event fired. */
+  turns: number
+  /** Human-readable progress digest: files modified, recent tools, token usage. */
+  digest: string
+  /** Always true for checkpoints (the run pauses awaiting confirmation). */
+  paused: true
+}
+
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
   onThinkingDelta: (thinking: string) => void
@@ -221,7 +230,7 @@ export interface AgentCallbacks {
   onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
-  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string }) => void
+  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; suggestion?: string; voluntary?: boolean; source?: string }) => void
   /** R4 — structured course-correction signal surfaced to the desktop conversation. */
   onDecisionShift?: (shift: DecisionShift) => void
   /**
@@ -234,9 +243,9 @@ export interface AgentCallbacks {
   onIntentNote?: (intent: IntentPreview) => void
   /** Called to drain any pending steer guidance for injection into tool results */
   onSteerDrain?: () => string | null
-  /** C3 自治档检查点 — the run paused after `turnsDone` turns awaiting user
-   *  confirmation ("continue" resumes). Only fires in autonomous mode. */
-  onAutonomyCheckpoint?: (turnsDone: number) => void
+  /** C3 Auto 模式检查点 — 仅在 auto-safe 模式下、checkpointEveryTurns > 0
+   *  时触发。run 暂停等待用户确认（"continue" 继续）。digest 为进度摘要。 */
+  onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
   /** T4 — structured per-worker delegation status/progress (subagent panel). */
   onDelegationActivity?: (activity: DelegationActivity) => void
 }

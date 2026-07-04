@@ -213,11 +213,10 @@ export const agentSchema = z.object({
    */
   maxAutoContinue: z.number().int().min(0).max(3).default(1),
   /**
-   * C3 自治档检查点 — in autonomous mode (dangerously-skip-permissions), pause
-   * the run for user confirmation after this many turns. 0 disables. Only the
-   * autonomous tier is affected; supervised modes brake via approvals.
+   * C3 检查点间隔 — Auto 模式下每 N 轮暂停并同步进度摘要（0 = 关）。
+   * YOLO 和 Manual 模式不读此字段。仅在高风险仍需人工确认的 auto-safe 模式下生效。
    */
-  checkpointEveryTurns: z.number().int().min(0).default(10),
+  checkpointEveryTurns: z.number().int().min(0).default(0),
   /** Explicit opt-in for current-turn intent retrieval route guidance. */
   intentRetrievalRouter: intentRetrievalRouterSchema,
   /** @deprecated Use banditPromotion.teamScheduler ('forced') instead. True still works as forced. */
@@ -379,6 +378,13 @@ export const envSchema = z.object({
   /** Extra environment variables injected into command execution. Highest
    *  priority — overrides both process env and resolved values. */
   extraVars: z.record(z.string(), z.string()).default({}),
+  /** Windows only: absolute path to a custom Git Bash `bash.exe`. When set,
+   *  it seeds `RIVET_GIT_BASH_PATH` at startup so both the agent bash tool
+   *  (platform.ts) and the desktop integrated terminal (pty.rs) use it. A real
+   *  OS env var of the same name always wins (explicit override). Empty/unset
+   *  falls back to the normal probe chain (where git → common dirs → bundled
+   *  PortableGit). */
+  gitBashPath: z.string().optional(),
 }).default({})
 
 export const uiSchema = z.object({

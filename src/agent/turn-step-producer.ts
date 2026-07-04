@@ -19,7 +19,7 @@ import { parseMentions, renderMentionContext } from '../tui/mention-parser.js'
 import { renderPlanCacheAdvisory } from './plan-cache-advisory.js'
 import { selectReasoningEffort } from './auto-reasoning.js'
 import { SessionPersist } from './session-persist.js'
-import { formatEventsForAppendix, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
+import { formatEventsForAppendix, invalidateReadCachesForEvents, renderCrossSessionClaims } from './hooks/cross-session-hook.js'
 import { loadPresence, formatPresenceForAppendix } from './companion-presence.js'
 // staleness/vigor-low advisory entries migrated to CCR hook (cognitive-capsule-router.ts)
 import { classifySeason } from './cognitive-season.js'
@@ -158,6 +158,8 @@ export class TurnStepProducer {
     this.self.traceStore = createTraceStore()
     this.self.predictionAccumulator = createPredictionAccumulator()
     this.self.initialUserMessage = userInput
+    this.self.runLoopTurn = 0
+    this.self.lastUserInputRunTurn = 0
     // Reset accumulations from previous run
     this.self.thinkingOnlyRetries = 0
     this.self.lastThinkingContent = ''
@@ -338,7 +340,31 @@ export class TurnStepProducer {
     // Pass active star domain name for dedup — suppress entries whose 【星名】 tag
     // matches the domain already rendered in the frozen base.
     const activeStarName = this.self.sessionDomain?.name
-    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName))
+    this.self.config.promptEngine.setHarnessAdvisoryBlock(this.self.advisoryBus.render(activeStarName, turn))
+
+    // Phase 2 通道分级：system-reminder 通道条目走消息流细断点（必读通道,
+    // 缓存安全:只追加尾部）。目前仅 git-clear 等 immediate 守护使用。
+    for (const sr of this.self.advisoryBus.drainSystemReminders()) {
+      this.self.session.appendSystemReminder(sr)
+    }
+
+    // P1a 核销闭环：把本轮实际送达的条目（含 expect 谓词）交给 readback 跟踪。
+    // 送达轮 = 当前 turn；postTurn 的 advisory-readback-evaluate 按窗口核销。
+    this.self.advisoryReadback.track(this.self.advisoryBus.drainDelivered(), turn)
+
+    // Phase 0 观测：advisory 投递账本落盘（仅有活动时写，避免遥测噪音），
+    // 并把 guardian 活动摘要（CCR/改道/丢弃计数）同步进 session meta。
+    const advisoryLedger = this.self.advisoryBus.drainLedger()
+    if (advisoryLedger.submitted > 0 || advisoryLedger.dropped > 0) {
+      this.self.telemetryWriter.write({ kind: 'advisory-ledger', turn, ...advisoryLedger })
+    }
+    this.self.recordAdvisoryLedger(advisoryLedger)
+    this.self.flushGuardianMeta()
+
+    // B 跨会话效能信息素:每 20 轮增量写回(崩溃不丢账;postSession 兜底全量)
+    if (turn > 0 && turn % 20 === 0) {
+      this.self.flushAdvisoryEfficacy()
+    }
 
     this.self.refreshReliabilityDecision()
 
@@ -360,6 +386,9 @@ export class TurnStepProducer {
       if (events.length > 0) {
         this.self.lastSeenEventId = Math.max(...events.map(e => e.id))
         appendix = formatEventsForAppendix(events)
+        // Peer sessions edited these files — drop our read-dedup records so
+        // the next read_file returns real content instead of a [read-ref].
+        invalidateReadCachesForEvents(events, this.self.cwd)
       }
       // P2b: inject active cross-session claims so the LLM can proactively avoid conflicts
       const claims = this.self.config.sessionRegistry.getActiveClaims(this.self.config.sessionId)
@@ -517,7 +546,10 @@ export class TurnStepProducer {
       baselineFingerprint: this.self.baselineFingerprint,
     }, {
       emitPhaseChange: (phase, detail) => { callbacks.onPhaseChange?.(phase, detail) },
-      emitDecisionShift: (shift) => { callbacks.onDecisionShift?.(shift) },
+      emitDecisionShift: (shift) => {
+        this.self.recordDecisionShift(shift.source)
+        callbacks.onDecisionShift?.(shift)
+      },
     })
     this.self.sensorium = perceptionResult.sensorium
     debugLog(`[turn-boundary] turn=${turn} perceive: ${Date.now() - _tb}ms`)

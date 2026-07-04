@@ -33,7 +33,7 @@ import { TaskRegistry } from './task-registry.js'
 import { JsonTaskStore } from './task-store.js'
 import { SessionRuntimePool } from './session-runtime-pool.js'
 import { loadConfig } from '../config/manager.js'
-import { setTargetConventions } from '../platform.js'
+import { setTargetConventions, applyConfiguredGitBashPath } from '../platform.js'
 import { resolveApiKey } from '../api/factory.js'
 import { createAuthProvider } from '../auth/registry.js'
 import type { AuthProvider } from '../auth/types.js'
@@ -87,6 +87,7 @@ export interface ServeContext {
 export function resolveServeContext(loader: () => Config = loadConfig): ServeContext {
   const config = loader()
   setTargetConventions(config.editor.platform, config.editor.eol)
+  applyConfiguredGitBashPath(config.env.gitBashPath)
   const provider = config.provider.providers[config.provider.default]
   if (!provider) {
     throw new Error(`Provider "${config.provider.default}" not configured. Run 'rivet config setup' first.`)
@@ -968,33 +969,22 @@ export function runServe(opts: RunServeOptions = {}): RunningServer {
       return { status: 400, body: { error: 'Missing path' } }
     }
     const reveal = (body as Record<string, unknown>)?.reveal === true
+    // 路径存在性检查——不静默吞错（之前 spawn error 被 () => {} 吞掉，用户看不到失败）。
+    const { existsSync } = require('node:fs') as typeof import('node:fs')
+    const { resolve: resolvePath } = require('node:path') as typeof import('node:path')
+    const resolved = resolvePath(filePath)
+    if (!existsSync(resolved)) {
+      return { status: 404, body: { error: `Path not found: ${resolved}` } }
+    }
     import('node:child_process').then(({ spawn }) => {
       const command = reveal ? buildRevealCommand(filePath) : buildOpenPathCommand(filePath)
       const child = spawn(command.cmd, command.args, { detached: true, stdio: 'ignore' })
-      child.on('error', () => {})
+      child.on('error', (err) => {
+        console.error(`[open-file] spawn failed: ${command.cmd} ${command.args.join(' ')} → ${err.message}`)
+      })
       child.on('spawn', () => child.unref())
     })
     return { status: 200, body: { opened: filePath } }
-  }
-
-  // Open an external URL in the system browser. `start` is a cmd builtin (not an
-  // exe), so on Windows it must be invoked via `cmd /c start "" <url>`; the empty
-  // title arg keeps URLs parsed correctly. Used by the first-run Git install
-  // dialog's "open download page" button.
-  routes['POST /open-external'] = (body) => {
-    const url = (body as Record<string, unknown>)?.url
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) {
-      return { status: 400, body: { error: 'Missing or invalid url (must be http/https)' } }
-    }
-    import('node:child_process').then(({ execFile }) => {
-      if (process.platform === 'win32') {
-        execFile('cmd', ['/c', 'start', '', url], () => {})
-      } else {
-        const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
-        execFile(opener, [url], () => {})
-      }
-    })
-    return { status: 200, body: { opened: url } }
   }
 
   // N1: GET /health — sidecar liveness for the desktop crash-reconnect banner.

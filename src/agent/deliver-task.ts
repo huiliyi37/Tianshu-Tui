@@ -41,6 +41,7 @@ import { detectWroteButNeverRead, formatWroteButNeverRead, detectReadButNeverPro
 import { readUnacknowledged, acknowledgeAll, type RecoveryEntry } from './recovery-journal.js'
 import { analyzeImpact } from '../repo/meridian-impact.js'
 import { runChangedFilesTypecheckMemo, typecheckGateEnabled } from './typecheck-gate.js'
+import { scanFilesForProbes, formatProbeHits, type ProbeHit } from './probe-detector.js'
 
 export interface B1Context {
   taskLedger: TaskLedger
@@ -94,6 +95,9 @@ export interface B1Context {
   /** Injectable typecheck runner for the review-gate backstop. Absent → the
    *  real `tsc --noEmit` is used (covers worker/headless). Tests pass a mock. */
   typecheckRunner?: import('./typecheck-gate.js').TypecheckRunner
+  /** Injectable probe scanner for the probe-residue gate. Absent → the real
+   *  scanFilesForProbes with readFileSync is used. Tests pass a mock. */
+  scanProbes?: (files: string[], cwd: string) => import('./probe-detector.js').ProbeHit[]
 }
 
 // ── Post-commit review batching ──
@@ -289,41 +293,25 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       }
 
       const hasVerificationDiagnostics = report.currentBlockingFailure
-        || report.staleFailureCandidates > 0
-        || report.toolInvocationFailureCandidates.length > 0
-        || report.shortestNextStep
+        || report.supersededFailures > 0
       if (hasVerificationDiagnostics) {
-        lines.push('', 'Verification diagnostics:')
+        lines.push('')
         if (report.currentBlockingFailure) {
-          lines.push(`  Current blocking failure: ${report.currentBlockingFailure}`)
+          lines.push(`  阻断项：${report.currentBlockingFailure}`)
         }
         if (report.staleFailureCandidates > 0) {
-          lines.push(`  Stale failure candidates: ${report.staleFailureCandidates}`)
+          lines.push(`  预存量失败：${report.staleFailureCandidates} 条（改动前已存在，不归本次改动，可 force 交付）`)
         }
-        if (report.toolInvocationFailureCandidates.length > 0) {
-          lines.push('  Tool invocation failure candidates:')
-          const shown = report.toolInvocationFailureCandidates.slice(0, 2)
-          for (const candidate of shown) {
-            lines.push(`    - ${candidate}`)
-          }
-          if (report.toolInvocationFailureCandidates.length > 2) {
-            lines.push(`    ... and ${report.toolInvocationFailureCandidates.length - 2} more`)
-          }
-        }
-        if (report.shortestNextStep) {
-          lines.push(`  Shortest next step: ${report.shortestNextStep}`)
-        }
-        // When tool invocation failures are present (timeout, crash), suggest
-        // batch running tests with a longer timeout to increase verification coverage.
-        if (report.toolInvocationFailureCandidates.length > 0) {
-          // Check if the shortest next step looks like a test command
-          const nextStep = report.shortestNextStep ?? ''
-          if (nextStep.includes('--test') || nextStep.includes('test')) {
-            lines.push('', '  💡 Tests timed out or crashed. Try:')
-            lines.push('     - Increase bash timeout: pass timeout=300000 for full suites')
-            lines.push('     - Run in batches: split by directory (src/tui/__tests__/, src/agent/__tests__/, etc.)')
-            lines.push('     - Run only related tests first, then expand scope')
-          }
+        // no_test_infra: project lacks testing infrastructure entirely.
+        // Give user-facing guidance rather than generic "run tests" advice.
+        if (report.attributionClass === 'no_test_infra') {
+          lines.push('', '  ⚠️ 测试基础设施缺失 — 项目没有可自动检测的测试框架或测试文件。')
+          lines.push('  run_tests 每次都会以同样原因受阻，继续重试不会改变结果。')
+          lines.push('  建议向用户报告：')
+          lines.push('    1. 当前项目缺少什么（package.json 中的 test 脚本 / pytest / vitest 等）')
+          lines.push('    2. 用户是否需要协助搭建测试框架')
+          lines.push('    3. 或者用 bash 运行替代验证（编译检查/手动测试/脚本输出检查）后交付')
+          lines.push('  ⚠ 不要只说"请运行测试"——项目根本没有测试可以运行。')
         }
       }
 
@@ -374,6 +362,18 @@ For complex specs or cross-module integration, include checklist entries: fact-f
       }
 
       lines.push('', `Attribution: ${report.attributionSummary}`)
+
+      // Failure attribution summary: distinguish "my fault" vs "not my fault" failures.
+      // Helps the agent understand: which failures should I fix, which are external?
+      {
+        const parts: string[] = []
+        if (report.currentBlockingFailure) parts.push(`1 条阻断失败（你需处理）`)
+        if (report.supersededFailures > 0) parts.push(`${report.supersededFailures} 条预存量（改动前已存在，不归你）`)
+        if (parts.length > 0) {
+          lines.push(`失败归因：${parts.join(' | ')}`)
+          lines.push('→ 只处理"阻断失败"——那是你的改动引入的。预存量失败不归你，可 force 交付。')
+        }
+      }
 
       // Recovery journal: detect files that were restored (undo/git checkout) during this session.
       // A clean file after restore may hide unfinished intent — surface it explicitly.
@@ -452,10 +452,10 @@ For complex specs or cross-module integration, include checklist entries: fact-f
         }
 
         if (report.state === 'RED') {
-          // Stale failure candidates: failures that likely pre-date this change.
-          // force=true allows override when all blocking failures look pre-existing.
-          if (forceGate && report.staleFailureCandidates > 0) {
-            lines.push('', '⚠️  RED overridden (force=true): stale failure candidates detected.')
+          // Superseded failures: failures that were later fixed (already green).
+          // force=true allows override when all blocking failures look superseded.
+          if (forceGate && report.supersededFailures > 0) {
+            lines.push('', '⚠️  RED overridden (force=true): superseded failures detected (these were later fixed).')
             lines.push('   Verify these pre-existing failures are unrelated to your changes before proceeding.')
           } else if (
             report.attributionClass === 'unverified'
@@ -464,8 +464,8 @@ For complex specs or cross-module integration, include checklist entries: fact-f
             lines.push('', `✅ 机械式变更 (${mechanicalClass.class})，免验证交付：${mechanicalClass.reason}`)
           } else {
             lines.push('', '❌ Cannot commit: delivery gate is RED.')
-            if (report.staleFailureCandidates > 0) {
-              lines.push('   (Stale failure candidates found — use force=true if pre-existing.)')
+            if (report.supersededFailures > 0) {
+              lines.push('   (Superseded failures found — these were later fixed, use force=true if pre-existing.)')
             }
             lines.push('', 'Recovery:')
             if (report.blockingReason) {
@@ -600,6 +600,24 @@ For complex specs or cross-module integration, include checklist entries: fact-f
           lines.push(...formatReadButNeverProduced(falseGreen))
         } catch {
           // best-effort: never let the nudge break delivery
+        }
+
+        // Probe-residue gate: scan owned files for leftover debug probes
+        // (console.log/debugger/.only etc.). YELLOW, non-blocking — the model
+        // may have intentionally added logging. fs re-scan is authoritative:
+        // probes already cleaned by a later edit won't be in the file.
+        try {
+          const scanner = ctx.scanProbes ?? ((files, cwd) => {
+            return scanFilesForProbes(files, cwd, (p) => {
+              try { return readFileSync(p, 'utf-8') } catch { return null }
+            })
+          })
+          const probeHits = scanner(filesToCommit, params.cwd)
+          if (probeHits.length > 0) {
+            lines.push(...formatProbeHits(probeHits))
+          }
+        } catch {
+          // best-effort: never let probe scanning break delivery
         }
 
         // Cohesion gate: RED if files span too many areas (unless force=true)

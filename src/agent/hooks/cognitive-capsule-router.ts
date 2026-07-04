@@ -14,11 +14,11 @@
  */
 
 import type { PreTurnRuntimeHook } from '../runtime-hooks.js'
-import type { AdvisoryEntry } from '../advisory-bus.js'
+import type { AdvisoryEntry, AdvisoryExpectation } from '../advisory-bus.js'
 import type { EvidenceState } from '../evidence.js'
 import type { Sensorium } from '../sensorium.js'
 import type { VigorState } from '../vigor.js'
-import { extractPrinciples, type ExtractedPrinciple } from '../seed-capsule-store.js'
+import { extractPrinciples, getCapsuleByStar, type ExtractedPrinciple } from '../seed-capsule-store.js'
 
 interface AdvisoryBusLike {
   submit(entry: AdvisoryEntry): void
@@ -33,12 +33,20 @@ export interface Principle {
 
 // Hardcoded fallback pools — used when capsule docs have no <principle> tags
 
+// 与 docs/seed-capsule-yaoguang.md 的 <principle> 池保持同步（Y1–Y10）。
+// 胶囊在场时走动态池，这里只是无胶囊环境的兜底——但兜底落后于胶囊
+// 意味着裸环境的瑶光缺一半方法论，同步是纪律不是可选。
 const YAOGUANG_FALLBACK: Principle[] = [
   { key: 'Y1', actionPrompt: '那行修复能复现原缺陷吗？先 RED→GREEN 再声称已验证' },
   { key: 'Y2', actionPrompt: '不要靠测试绿就判断完成——用原缺陷输入跑一次确认' },
   { key: 'Y5', actionPrompt: '你刚下的结论有没有 ground truth 能自检？' },
   { key: 'Y3', actionPrompt: '这个 bug 和上次的是同一族吗？查 git log 看同类修复' },
+  { key: 'Y4', actionPrompt: '不加兜底——补正确语义，不改容错倾向' },
   { key: 'Y6', actionPrompt: '逐条核对 spec 的验收条件，不靠"看起来完成了"' },
+  { key: 'Y7', actionPrompt: '测试 fixture 复现了真实系统产出的输入形状吗？追到产出它的那行代码' },
+  { key: 'Y8', actionPrompt: '怀疑某机制静默失效？先给它装账本（触发/渲染/丢弃计数），让"没发生"变成可观测事实' },
+  { key: 'Y9', actionPrompt: '测试失败先验基线（stash/worktree 跑同一用例），分清"我弄坏的"与"本来就坏的"再归因' },
+  { key: 'Y10', actionPrompt: '声称注入/发送的信息，去消费端确认它真的到了——选了却没送达是最安静的断裂' },
 ]
 
 const TIANXUAN_FALLBACK: Principle[] = [
@@ -82,6 +90,12 @@ interface RouteRule {
   poolKeyFilter?: Set<string>
   promptTemplate: string
   suppressOnTestIntent?: boolean
+  /** 胶囊召回指向的星域（缺省 = rule.star）。P7 由天权发声但方法论在瑶光胶囊。 */
+  recallStar?: string
+  /** P1a 核销谓词 — 该改道提醒被采纳时的行为签名（缺省 = 只计送达） */
+  expect?: AdvisoryExpectation
+  /** Phase 2 多信号确认 — 本规则触发时提前确认这些 key 的挂起条目 */
+  corroborates?: string[]
 }
 
 interface RouteState {
@@ -93,17 +107,78 @@ interface RouteState {
   vigorPhasic: number
   lastTool: string
   lastToolTarget: string
+  /** Sensorium 预测动量 — 排查停滞规则（P6）的主信号。 */
+  momentum: number
+  /** 队尾连续只读（非产出类）工具数 — 排查场景不依赖 filesModified。 */
+  readOnlyStreak: number
+  /** 队尾连续验证失败数（run_tests/bash 语义失败；中间的读/改不打断）。 */
+  verifyFailStreak: number
+}
+
+/** 产出类工具 — 与 convergence-detector 的 productiveTools 语义一致。 */
+const PRODUCTIVE_TOOLS = new Set(['edit_file', 'write_file', 'hash_edit', 'run_tests', 'bash', 'deliver_task', 'delegate_task', 'delegate_batch'])
+/** 验证类工具 — 失败流水从这两个工具的 status/errorClass 提取。 */
+const VERIFY_TOOLS = new Set(['run_tests', 'bash'])
+
+type HistoryEntry = { tool: string; target: string; status?: 'success' | 'failed' | 'running'; errorClass?: string }
+
+/** 队尾连续只读工具数（遇到产出类工具即停）。 */
+export function computeReadOnlyStreak(history: ReadonlyArray<HistoryEntry>): number {
+  let streak = 0
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (PRODUCTIVE_TOOLS.has(history[i]!.tool)) break
+    streak++
+  }
+  return streak
+}
+
+/**
+ * 队尾连续验证失败数。语义：从队尾回看，验证工具（run_tests/bash）的语义失败
+ * （非 environment/timeout）计入流水；中间的读取/编辑不打断——「改一下再跑还是红」
+ * 正是要抓的验证轮次膨胀模式。遇到一次验证成功即停。
+ */
+export function computeVerifyFailStreak(history: ReadonlyArray<HistoryEntry>): number {
+  let streak = 0
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i]!
+    if (!VERIFY_TOOLS.has(h.tool)) continue
+    if (h.status === 'failed') {
+      // environment/timeout 是环境问题，不是语义失败，不计入
+      if (h.errorClass === 'environment' || h.errorClass === 'timeout') continue
+      streak++
+      continue
+    }
+    if (h.status === 'success') break
+  }
+  return streak
 }
 
 /**
  * Rule evaluation order matters: first match wins.
+ * P7 first — verification-failure inflation is the sharpest signal (objective
+ * failure streak) and directly targets the "排查轮次膨胀" failure mode.
  * P3 before P1 — dual-deficit (verif + vigor both low → 天权 "switch direction")
  * precedes single-deficit (verif low only → 瑶光 "go verify").
+ * P6 last — investigation-stall is the broadest (read-only) net.
  *
  * Removed (2026-06-18): P2 (freshness→天璇, causal chain too weak),
- * P4 (complexity→天权, no causal link), P6 (stability→天府, overlaps kick-hook).
+ * P4 (complexity→天权, no causal link), P6-stability (stability→天府, overlaps kick-hook).
+ * Added (2026-07-04 触发面修复): P7 (verify-fail streak→天权), P6 (investigation
+ * stall→天璇) — 补上 verificationCoverage 在零改动时恒 1.0 的排查场景盲区。
  */
 const RULES: RouteRule[] = [
+  {
+    id: 'P7',
+    star: '天权',
+    match: s => s.verifyFailStreak >= 2,
+    busPriority: 0.65,
+    poolKeyFilter: new Set(['Q3', 'X3']),
+    promptTemplate: '【天权】验证连续失败 {verify_fail_streak} 次。停止同方向变体重试——换维度（不同证据路径/更小复现）或先用探针确认前提。瑶光胶囊有 RED→GREEN 方法论可 recall。',
+    // 最后一个工具就是失败的测试 — 这正是要提醒的时刻，不做测试意图让位
+    recallStar: '瑶光',
+    // 核销：换维度后仍应回到验证——2 轮内出现验证尝试即采纳
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
+  },
   {
     id: 'P3',
     star: '天权',
@@ -112,6 +187,7 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Q3', 'X3']),
     promptTemplate: '【天权】检查点：改了 {files_modified} 个文件未验证，且执行能量在下降。如果同一方向第三次撞墙，换维度。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
   },
   {
     id: 'P1',
@@ -121,6 +197,11 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Y1', 'Y2', 'Y5']),
     promptTemplate: '【瑶光】改了 {files_modified} 个文件但还没验证（距上次验证 {turns_since_verify} 轮）。typecheck + 相关测试，跑通再继续。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
+    // Phase 2 多信号确认：P1(preTurn/star_domain)与 self-verify(postTurn/
+    // discipline)、typecheck(postTurn/typecheck)是独立信号（不同 phase 且
+    // 不同 category）——P1 触发时提前确认它们的挂起条目。
+    corroborates: ['self-verify', 'typecheck-reminder'],
   },
   {
     id: 'P5',
@@ -130,6 +211,18 @@ const RULES: RouteRule[] = [
     poolKeyFilter: new Set(['Y3', 'Y6']),
     promptTemplate: '【瑶光】大面积改动（{files_modified} 文件，验证覆盖 {verification_coverage}）。只交付已验证的部分，未验证的留到下轮。',
     suppressOnTestIntent: true,
+    expect: { kind: 'verify_attempted', withinTurns: 2 },
+  },
+  {
+    id: 'P6',
+    star: '天璇',
+    match: s => s.turn > 5 && s.momentum < 0.35 && s.readOnlyStreak >= 6 && s.filesModified === 0,
+    busPriority: 0.55,
+    poolKeyFilter: new Set(['X1', 'X3', 'X4']),
+    promptTemplate: '【天璇】排查已连续 {readonly_streak} 次只读且预测动量偏低——当前证据维度可能挖穿了。换一层抽象或换一个证据路径（日志/git 历史/小复现），天璇胶囊有跨域换视角方法论可 recall。',
+    // 只读排查中读到 test 文件是常态，不做测试意图让位
+    // 无 expect："换证据维度"没有单一行为签名（换目录 glob / git log / 写复现
+    // 都算采纳），谓词会系统性误判——只计送达（P1a 谓词映射表的显式豁免项）。
   },
 ]
 
@@ -189,12 +282,16 @@ function selectP3Principle(pool: Principle[], state: RouteState, lastUsedKeys: S
 // ─── Test Intent Detection ──────────────────────────────────────
 
 const TEST_TOOLS = new Set(['run_tests'])
-const EDIT_TOOLS = new Set(['edit_file', 'write_file', 'hash_edit'])
 
+/**
+ * 触发面修复（2026-07-04）：删除 EDIT_TOOLS 分支。
+ * 旧逻辑把任意编辑工具都视作"测试意图"压制——恰好在验证覆盖率最低的
+ * 实现中期（上一个工具几乎总是 edit）把 P1/P3/P5 大面积静音。
+ * 编辑不是验证意图；真正该让位的只有"正在跑测试/正在操作测试文件"。
+ */
 function isTestIntent(lastTool: string, lastToolTarget: string): boolean {
   if (TEST_TOOLS.has(lastTool)) return true
   if (lastToolTarget.includes('test')) return true
-  if (EDIT_TOOLS.has(lastTool)) return true
   return false
 }
 
@@ -271,7 +368,7 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
     vigor: VigorState | null,
     evidence: EvidenceState,
     turn: number,
-    recentToolHistory: ReadonlyArray<{ tool: string; target: string }>,
+    recentToolHistory: ReadonlyArray<HistoryEntry>,
   ): RouteState {
     const last = recentToolHistory.length > 0
       ? recentToolHistory[recentToolHistory.length - 1]!
@@ -285,6 +382,11 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
       vigorPhasic: vigor?.phasic ?? 0.0,
       lastTool: last.tool,
       lastToolTarget: last.target,
+      // P1b：momentum 无预测样本时是 0 回退（quality='no-data'），会让 P6 的
+      // "momentum < 0.35" 把无数据误判为停滞——回退到 1.0（中性偏乐观）。
+      momentum: sensorium.quality?.momentum === 'no-data' ? 1.0 : (sensorium.momentum ?? 1.0),
+      readOnlyStreak: computeReadOnlyStreak(recentToolHistory),
+      verifyFailStreak: computeVerifyFailStreak(recentToolHistory),
     }
   }
 
@@ -334,21 +436,44 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
         if (lastUsed.size >= pool.length) lastUsed.clear()
 
         const turnsSinceVerify = turn - lastVerifyTurn
-        const content = fillTemplate(rule.promptTemplate, {
+        const situationText = fillTemplate(rule.promptTemplate, {
           files_modified: state.filesModified,
           turn: state.turn,
           turns_since_verify: turnsSinceVerify,
           last_tool: state.lastTool || '(none)',
           verification_coverage: (state.verificationCoverage * 100).toFixed(0) + '%',
+          readonly_streak: state.readOnlyStreak,
+          verify_fail_streak: state.verifyFailStreak,
         })
+        // 触发面修复（2026-07-04）：把选中的原则真正带给模型。此前 principle
+        // 只进遥测不进 content——动态原则池（胶囊经验）选了却没送达。
+        const content = `${situationText} 行动指引：${principle.actionPrompt}`
 
         opts.advisoryBus.submit({
           key: `ccr-${rule.star}-${rule.id}`,
           priority: rule.busPriority,
-          category: 'discipline',
+          // star_domain：独立类别，不与 discipline 争 MAX_PER_CATEGORY 预算
+          category: 'star_domain',
           content,
           ttl: 1,
+          expect: rule.expect,
+          corroborates: rule.corroborates,
         })
+
+        // 胶囊经验召回 — CCR 触发的一等附属：同轮追加一条 informational 条目
+        // （填空位，不占 operational Top-N），指向对应星域胶囊的 gist 与 recall 入口。
+        const recallStar = rule.recallStar ?? rule.star
+        const capsule = opts.cwd ? getCapsuleByStar(opts.cwd, recallStar) : undefined
+        if (capsule) {
+          opts.advisoryBus.submit({
+            key: 'capsule-recall',
+            priority: 0.45,
+            category: 'star_domain',
+            tier: 'informational',
+            content: `【${recallStar}·胶囊】${capsule.gist ?? '方法论已封存'}——需要完整方法论时调用 recall_capsule("${recallStar}")。`,
+            ttl: 1,
+          })
+        }
 
         // Telemetry
         opts.onTrigger?.({
@@ -361,6 +486,9 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
             vigor: state.vigor,
             vigorTonic: state.vigorTonic,
             vigorPhasic: state.vigorPhasic,
+            momentum: state.momentum,
+            readOnlyStreak: state.readOnlyStreak,
+            verifyFailStreak: state.verifyFailStreak,
           },
           dynamicPool,
         })
@@ -375,8 +503,17 @@ export function createCcrHook(opts: CcrHookOptions): PreTurnRuntimeHook {
 }
 
 function getDominantDimValue(rule: RouteRule, state: RouteState): number {
-  // P1, P3, P5 all use verificationCoverage as the primary signal
-  return state.verificationCoverage
+  // 主导维度值用于冷却期内的恶化升级判断（value 减半 → 提前发射）。
+  switch (rule.id) {
+    case 'P6':
+      return state.momentum
+    case 'P7':
+      // 失败流水越长值越小 — streak 2→0.33, 4→0.2（翻倍恶化触发升级）
+      return 1 / (1 + state.verifyFailStreak)
+    default:
+      // P1, P3, P5 use verificationCoverage as the primary signal
+      return state.verificationCoverage
+  }
 }
 
 // ─── Exports for testing ─────────────────────────────────────────

@@ -21,6 +21,11 @@ use tauri::{
     Manager, State,
 };
 
+/// 进程级退出标志。托盘「退出」触发后置 true，退出过程中所有可见性切换
+/// （托盘点击 toggle、CloseRequested→hide）都让它先让路，避免退出清理
+/// 与可见性切换打架，表现为窗口/托盘"一闪一闪"且退不干净。
+static EXITING: AtomicBool = AtomicBool::new(false);
+
 /// Live coordinates of the rivet sidecar, handed to the frontend so it can talk
 /// to 127.0.0.1:<port> with the per-launch Bearer token.
 #[derive(Clone, Serialize)]
@@ -52,9 +57,10 @@ struct SidecarLaunchSpec {
     cwd: Option<PathBuf>,
     port: u16,
     token: String,
-    /// Bundled busybox.exe path (Windows-only). Passed as RIVET_BUNDLED_BUSYBOX
-    /// so platform.ts can use it as a shell fallback before degrading to PowerShell.
-    bundled_busybox: Option<PathBuf>,
+    /// Extracted bundled PortableGit dir (Windows-only). Passed as
+    /// RIVET_BUNDLED_GIT_DIR so platform.ts can use its bin\bash.exe as the
+    /// shell fallback when no system Git is installed (system Git wins).
+    bundled_git_dir: Option<PathBuf>,
 }
 
 struct Sidecar {
@@ -365,27 +371,119 @@ fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
     }
 }
 
-/// Locate the bundled busybox-w32 binary (Windows-only, provides POSIX shell).
-/// Returns None on non-Windows or when not bundled.
-fn bundled_busybox_path(app: &tauri::App) -> Option<PathBuf> {
-    if std::env::consts::OS != "windows" {
-        return None;
-    }
+/// Version of the bundled PortableGit archive. MUST stay in sync with the
+/// default PORTABLE_GIT_VERSION in desktop/scripts/fetch-shell-runtime.js.
+#[cfg(target_os = "windows")]
+const BUNDLED_GIT_VERSION: &str = "2.55.0.2";
+
+/// Locate the bundled PortableGit self-extracting archive (Windows-only).
+/// Returns None when not bundled (e.g. fetch-shell-runtime download failed).
+#[cfg(target_os = "windows")]
+fn bundled_git_archive(app: &tauri::App) -> Option<PathBuf> {
     let res = resource_dir_fallback(app);
-    let busybox_arch = match std::env::consts::ARCH {
+    let arch_dir = match std::env::consts::ARCH {
         "aarch64" => "win-aarch64",
         "x86_64" => "win-x86_64",
         _ => return None,
     };
     let path = res
         .join("shell-runtime")
-        .join(busybox_arch)
-        .join("busybox.exe");
+        .join(arch_dir)
+        .join("PortableGit.7z.exe");
     if path.exists() {
         Some(path)
     } else {
         None
     }
+}
+
+/// Remove stale version dirs under `<rivet_home>/git-runtime` (anything that
+/// isn't the current bundled version). `.extract-tmp` is left alone — it is
+/// cleaned at the start of the next extraction attempt.
+#[cfg(target_os = "windows")]
+fn cleanup_stale_git_runtimes(runtime_root: &Path) {
+    let Ok(entries) = std::fs::read_dir(runtime_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name != BUNDLED_GIT_VERSION && name != ".extract-tmp" {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Ensure the bundled PortableGit is extracted to `<rivet_home>/git-runtime/<ver>`.
+///
+/// Returns the FINAL dir as soon as extraction is under way — the sidecar
+/// probes `<dir>\bin\bash.exe` lazily on the first bash tool call, so passing
+/// the path before extraction completes is safe (the probe just misses and the
+/// existing PowerShell fallback covers the gap until the next probe/launch).
+///
+/// Extraction runs on a background thread and never blocks startup. It goes
+/// through `.extract-tmp` + rename so the final dir only ever appears complete:
+/// `bin\bash.exe` existing implies the whole tree is in place.
+#[cfg(target_os = "windows")]
+fn ensure_bundled_git(app: &tauri::App, rivet_home: &Path) -> Option<PathBuf> {
+    let runtime_root = rivet_home.join("git-runtime");
+    let final_dir = runtime_root.join(BUNDLED_GIT_VERSION);
+    if final_dir.join("bin").join("bash.exe").exists() {
+        cleanup_stale_git_runtimes(&runtime_root);
+        // Also expose to THIS process so the integrated-terminal PTY
+        // (pty.rs::find_git_bash) can use the bundled bash as its fallback.
+        std::env::set_var("RIVET_BUNDLED_GIT_DIR", final_dir.as_os_str());
+        return Some(final_dir);
+    }
+    let archive = bundled_git_archive(app)?;
+    // Expose the (future) dir now — consumers probe bin\bash.exe existence
+    // lazily, so a not-yet-extracted dir is a harmless miss until it lands.
+    std::env::set_var("RIVET_BUNDLED_GIT_DIR", final_dir.as_os_str());
+    let tmp_dir = runtime_root.join(".extract-tmp");
+    let final_clone = final_dir.clone();
+    std::thread::spawn(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+            eprintln!("[rivet] PortableGit extract: cannot create tmp dir: {e}");
+            return;
+        }
+        // PortableGit.7z.exe is a 7-Zip SFX: -y (yes to all) -o<dir> (output).
+        let status = Command::new(&archive)
+            .arg("-y")
+            .arg(format!("-o{}", tmp_dir.display()))
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                if !tmp_dir.join("bin").join("bash.exe").exists() {
+                    eprintln!("[rivet] PortableGit extract: bin\\bash.exe missing after extraction");
+                    let _ = std::fs::remove_dir_all(&tmp_dir);
+                    return;
+                }
+                let _ = std::fs::remove_dir_all(&final_clone);
+                match std::fs::rename(&tmp_dir, &final_clone) {
+                    Ok(()) => {
+                        eprintln!("[rivet] PortableGit ready at {}", final_clone.display());
+                        if let Some(root) = final_clone.parent() {
+                            cleanup_stale_git_runtimes(root);
+                        }
+                    }
+                    Err(e) => eprintln!("[rivet] PortableGit extract: rename into place failed: {e}"),
+                }
+            }
+            Ok(s) => eprintln!("[rivet] PortableGit extract failed: {s}"),
+            Err(e) => eprintln!("[rivet] PortableGit extract: cannot run SFX: {e}"),
+        }
+    });
+    Some(final_dir)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn ensure_bundled_git(_app: &tauri::App, _rivet_home: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// Fallback Node lookup when no bundled binary is available.
@@ -725,10 +823,17 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
         // only covers the clean-shutdown paths we control.)
         .env("RIVET_PARENT_PID", std::process::id().to_string());
-    // Pass bundled busybox path to sidecar so platform.ts finds it before
-    // degrading to PowerShell on Windows (no-op when None / non-Windows).
-    if let Some(bb) = &spec.bundled_busybox {
-        cmd.env("RIVET_BUNDLED_BUSYBOX", bb.to_string_lossy().as_ref());
+    // Bundled PortableGit (Windows-only): tell platform.ts where the fallback
+    // Git Bash lives, and append the git `cmd\` dir to PATH so `git` resolves
+    // on machines without a system Git. Appended LAST so a system Git wins.
+    if let Some(dir) = &spec.bundled_git_dir {
+        cmd.env("RIVET_BUNDLED_GIT_DIR", dir.to_string_lossy().as_ref());
+        let mut paths: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        paths.push(dir.join("cmd"));
+        if let Ok(joined) = std::env::join_paths(paths) {
+            cmd.env("PATH", joined);
+        }
     }
     // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
     // resolved to absolute paths above, so the child's different cwd can't break
@@ -758,12 +863,52 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
     }
 }
 
+/// Seed `RIVET_GIT_BASH_PATH` from the persisted config (`env.gitBashPath` in
+/// `<rivet_home>/config.json`) so BOTH the sidecar bash tool (platform.ts) and
+/// the desktop integrated terminal PTY (pty.rs::find_git_bash) honor a
+/// user-chosen Git Bash location set from the Settings UI. Setting it on THIS
+/// process's env means the sidecar inherits it on spawn and the PTY reads it
+/// later. A real OS env var of the same name always wins (explicit override).
+/// Best-effort: any missing file / parse error just leaves the normal probe
+/// chain (where git → common dirs → bundled PortableGit) intact.
+fn apply_configured_git_bash(rivet_home: &std::path::Path) {
+    if let Some(v) = std::env::var_os("RIVET_GIT_BASH_PATH") {
+        if !v.is_empty() {
+            return;
+        }
+    }
+    let cfg_path = std::env::var_os("RIVET_CONFIG_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| rivet_home.join("config.json"));
+    let text = match std::fs::read_to_string(&cfg_path) {
+        Ok(t) => t,
+        Err(_) => return,
+    };
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(j) => j,
+        Err(_) => return,
+    };
+    if let Some(p) = json
+        .get("env")
+        .and_then(|e| e.get("gitBashPath"))
+        .and_then(|v| v.as_str())
+    {
+        let p = p.trim();
+        if !p.is_empty() {
+            std::env::set_var("RIVET_GIT_BASH_PATH", p);
+        }
+    }
+}
+
 fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunchSpec) {
     let port = pick_free_port();
     let token = random_token();
     let (node, node_source) = resolve_node_cmd(app);
     let entry = sidecar_entry(app);
     let rivet_home = strip_verbatim_prefix(resolve_rivet_home(app));
+    // Seed a user-configured Git Bash path before spawn (sidecar inherits it)
+    // and before any PTY is created (pty.rs reads it from this process env).
+    apply_configured_git_bash(&rivet_home);
     let spec = SidecarLaunchSpec {
         node,
         entry,
@@ -771,7 +916,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         cwd: sidecar_cwd(app),
         port,
         token: token.clone(),
-        bundled_busybox: bundled_busybox_path(app),
+        bundled_git_dir: ensure_bundled_git(app, &rivet_home),
     };
 
     let mut child = spawn_from_spec(&spec);
@@ -917,6 +1062,15 @@ pub fn run() {
     let tray_icon_bytes = include_bytes!("../icons/32x32.png");
 
     tauri::Builder::default()
+        // 单例保护：必须是第一个 plugin。第二个实例启动直接退出并唤起已有窗口，
+        // 杜绝多实例各建托盘图标 / sidecar、争抢同一 ~/.rivet。仅桌面端生效。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             // macOS: LaunchAgent plist (no deprecated AppleScript); Windows: HKCU Run key.
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -927,6 +1081,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .manage(pty::PtyManager::default())
         .invoke_handler(tauri::generate_handler![
             runtime_info,
@@ -984,6 +1139,17 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app: &tauri::AppHandle, event: tauri::menu::MenuEvent| {
                     let id = event.id().as_ref();
+                    if id == "quit" {
+                        // 退出优先：先立 flag，让退出过程中所有可见性切换让路，
+                        // 再杀 sidecar、退 app。避免 hide/show 打架导致"一闪一闪"退不干净。
+                        EXITING.store(true, Ordering::SeqCst);
+                        kill_sidecar(app);
+                        app.exit(0);
+                        return;
+                    }
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     if let Some(w) = app.get_webview_window("main") {
                         match id {
                             "show" => {
@@ -996,12 +1162,12 @@ pub fn run() {
                             _ => {}
                         }
                     }
-                    if id == "quit" {
-                        kill_sidecar(app);
-                        app.exit(0);
-                    }
                 })
                 .on_tray_icon_event(|tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent| {
+                    // 退出过程中忽略托盘点击 toggle，避免与退出清理的 window.hide 打架。
+                    if EXITING.load(Ordering::SeqCst) {
+                        return;
+                    }
                     // 只在「左键抬起」时切换窗口显隐。之前用 `button: _` 会把右键点击
                     // 也当成切窗口,而右键此刻正要弹出托盘上下文菜单——切窗口会抢走菜单
                     // 焦点使其立即关闭,在 Windows 上表现为右键菜单闪来闪去、无法点退出。
@@ -1029,7 +1195,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                // 关闭窗口 → 隐藏到托盘，不杀 sidecar
+                if EXITING.load(Ordering::SeqCst) {
+                    // 正在退出 → 不 prevent_close，让窗口正常关闭，别挡住退出流程。
+                    return;
+                }
+                // 用户点 X → 隐藏到托盘，不杀 sidecar
                 api.prevent_close();
                 let _ = window.hide();
             }

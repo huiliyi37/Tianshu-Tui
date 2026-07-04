@@ -83,8 +83,13 @@ export function defaultWritableRoots(ctx: { cwd: string; env?: NodeJS.ProcessEnv
   roots.add(ctx.cwd)
   roots.add(tmp)
   roots.add('/tmp')
-  roots.add('/private/tmp')
-  roots.add('/var/folders') // macOS per-user temp lives here
+  // macOS-specific paths — only add on darwin (Linux/WSL doesn't have these;
+  // bwrap bind-mount of a non-existent dir causes sandbox init failure).
+  const isMac = (ctx.platform ?? process.platform) === 'darwin'
+  if (isMac) {
+    roots.add('/private/tmp')
+    roots.add('/var/folders') // macOS per-user temp lives here
+  }
 
   // Common package-manager / toolchain caches under HOME.
   for (const rel of [
@@ -146,7 +151,11 @@ export function buildSeatbeltCommand(command: string, writableRoots: string[]): 
 
 /** Wrap a command for bubblewrap: read-only root, writable cwd + caches, network on. */
 export function buildBwrapCommand(command: string, writableRoots: string[]): string {
-  const binds = writableRoots
+  // Filter out non-existent directories — bwrap --bind fails on them and aborts
+  // the entire sandbox (causing all bash commands to fail with exit 127).
+  const { existsSync } = require('node:fs') as typeof import('node:fs')
+  const validRoots = writableRoots.filter(p => { try { return existsSync(p) } catch { return false } })
+  const binds = validRoots
     .map(root => `--bind ${shSingleQuote(root)} ${shSingleQuote(root)}`)
     .join(' ')
   return [

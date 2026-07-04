@@ -37,6 +37,7 @@ import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../r
 import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
 import { SideChat } from '../components/SideChat'
+import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -89,9 +90,14 @@ export function ThreadView(props: {
   onRetryStream?: () => void
 }) {
   const { session, view, onSend, onSteer, onAbort, onSetApprovalMode, onSetPlanMode, onClose, streamStatus, onRetryStream } = props
-  const [input, setInput] = useState('')
   const ui = useUiState()
   const dispatch = useUiDispatch()
+  const [input, setInputRaw] = useState(ui.composerDrafts[session.id] ?? '')
+  /** Wrapper that also syncs to the store so drafts survive tab switches. */
+  const setInput = useCallback((text: string) => {
+    setInputRaw(text)
+    dispatch({ type: 'setComposerDraft', sessionId: session.id, text })
+  }, [dispatch, session.id])
   const qc = useQueryClient()
   const [showRewind, setShowRewind] = useState(false)
   const [showDelegation, setShowDelegation] = useState(false)
@@ -127,6 +133,7 @@ export function ThreadView(props: {
   const handleWatchdogContinue = useCallback(() => onSend('continue'), [onSend])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+  const [navTick, setNavTick] = useState(0) // bumps on scroll → refresh navigator marker
 
   // Time-Travel Timeline Slider state
   const [rewindPoints, setRewindPoints] = useState<import('../runtime/client').RewindPoint[]>([])
@@ -305,12 +312,89 @@ export function ThreadView(props: {
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
     setScrolledUp(!isNearBottom())
-  }, [isNearBottom])
+    setNavTick((t) => t + 1) // refresh navigator "current" marker
+    // Persist scroll position to store (throttled via rAF).
+    const el = msgRef.current
+    if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: el.scrollTop })
+  }, [isNearBottom, dispatch, session.id])
+
+  // Restore scroll position on mount — preserves across tab switches.
+  useEffect(() => {
+    const saved = ui.scrollPositions[session.id]
+    const el = msgRef.current
+    if (saved != null && saved > 0 && el) {
+      // Wait one frame for the virtualizer to measure content.
+      requestAnimationFrame(() => { el.scrollTop = saved })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id])
 
   const scrollToBottom = useCallback(() => {
     if (rendered.length > 0) virtualizer.scrollToIndex(rendered.length - 1, { align: 'end' })
     setScrolledUp(false)
   }, [rendered.length, virtualizer])
+
+  // Keyboard navigation: j/k or ↑/↓ to jump between message blocks.
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null)
+  const onMessagesKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Only handle when focus is on the messages container itself (not in input).
+    const el = document.activeElement
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) return
+    const isNav = e.key === 'j' || e.key === 'k' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))
+    if (!isNav) return
+    e.preventDefault()
+    const dir = e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1
+    setFocusedIndex((prev) => {
+      const next = prev == null ? (dir > 0 ? 0 : rendered.length - 1) : Math.max(0, Math.min(rendered.length - 1, prev + dir))
+      virtualizer.scrollToIndex(next, { align: 'center' })
+      return next
+    })
+  }, [rendered.length, virtualizer])
+
+  // ── Message navigator: jump to any earlier user turn without scrolling ──
+  // seq → timestamp, joined from the already-fetched rewind points.
+  const tsBySeq = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const p of rewindPoints) {
+      if (typeof p.seq === 'number') m.set(p.seq, p.timestamp)
+    }
+    return m
+  }, [rewindPoints])
+
+  // User turns as jumpable anchors. Derived from `rendered` (not raw blocks) so
+  // renderedIndex is always a valid scrollToIndex target for the virtual list.
+  const userTurns = useMemo<TurnEntry[]>(() => {
+    const out: TurnEntry[] = []
+    rendered.forEach((item, i) => {
+      if (item.kind === 'block' && item.block.kind === 'user') {
+        const seq = Number(item.block.key.slice(2)) // "u-<seq>"
+        out.push({
+          renderedIndex: i,
+          key: item.block.key,
+          text: item.block.text,
+          ...(tsBySeq.has(seq) ? { ts: tsBySeq.get(seq) } : {}),
+        })
+      }
+    })
+    return out
+  }, [rendered, tsBySeq])
+
+  // Rendered-row index of the first currently-visible row → drives the
+  // navigator's "current" marker. Recomputed on scroll via navTick.
+  const navActiveIndex = useMemo(() => {
+    void navTick // recompute when the viewport moves
+    const items = virtualizer.getVirtualItems()
+    return items.length > 0 ? items[0]!.index : null
+  }, [navTick, virtualizer, rendered.length])
+
+  const jumpTo = useCallback((renderedIndex: number) => {
+    setScrolledUp(true) // stop streaming auto-scroll from yanking us back to bottom
+    virtualizer.scrollToIndex(renderedIndex, { align: 'start' })
+    // Dynamic row heights: the estimate (80px) differs from measured height, so
+    // a single call can under/overshoot — correct once on the next frame.
+    requestAnimationFrame(() => virtualizer.scrollToIndex(renderedIndex, { align: 'start' }))
+    setFocusedIndex(renderedIndex)
+  }, [virtualizer])
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
@@ -649,7 +733,7 @@ export function ThreadView(props: {
         </div>
       </header>
 
-      <div className="messages" ref={msgRef} onScroll={onScroll}>
+      <div className="messages" ref={msgRef} onScroll={onScroll} onKeyDown={onMessagesKeyDown} tabIndex={-1}>
         {streamStatus === 'offline' && (
           <div className="stream-banner offline" role="alert">
             <span className="stream-banner-glyph" aria-hidden>⚠</span>
@@ -689,7 +773,7 @@ export function ThreadView(props: {
               return (
                 <div
                   key={vi.key}
-                  className="vrow"
+                  className={`vrow${focusedIndex === vi.index ? ' vrow-focused' : ''}`}
                   data-index={vi.index}
                   ref={virtualizer.measureElement}
                   style={{ transform: `translateY(${vi.start}px)` }}
@@ -760,15 +844,17 @@ export function ThreadView(props: {
             </svg>
           </button>
         )}
+        <MessageNavigator turns={userTurns} activeIndex={navActiveIndex} onJump={jumpTo} />
       </div>
 
       {session.status === 'completed' && view.completionSummary && (() => {
-        // 只在有实际交付时显示完成面板——todo 全部完成，或有代码改动。
-        // 普通问答（无 todo 无改动）不弹 CompletionCurtain。
+        // 显示条件：有 todo（无论是否全部完成）、有文件改动、或有验证记录。
+        // 之前要求 allTodosDone 才显示——agent 不用 todo 就永远看不到总结。
         const hasTodos = view.todos.length > 0
-        const allTodosDone = hasTodos && view.todos.every(t => t.status === 'completed')
         const hasFileChanges = (view.completionSummary.filesModified?.length ?? 0) > 0
-        if (!allTodosDone && !hasFileChanges) return null
+        const hasReads = (view.completionSummary.filesRead?.length ?? 0) > 0
+        const hasVerifications = (view.completionSummary.verifications?.length ?? 0) > 0
+        if (!hasTodos && !hasFileChanges && !hasReads && !hasVerifications) return null
         return <CompletionCurtain summary={view.completionSummary} />
       })()}
 
@@ -859,7 +945,11 @@ export function ThreadView(props: {
             planMode={view.planMode}
             onSetPlanMode={onSetPlanMode}
             onDelegate={() => setShowDelegateDialog(true)}
-            onWorkflow={(cmd) => onSend(cmd)}
+            onWorkflow={(cmd) => {
+              // 带上引导 prompt——让 agent 进入对应工作流模式并询问用户具体目标。
+              const label = cmd === '/council' ? '议事会评审' : '团队协作'
+              onSend(`${cmd} 我想用${label}模式完成一个任务，请先问我具体目标是什么。`)
+            }}
             menuRev={view.menuRev}
           />
         </div>
@@ -1224,8 +1314,24 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     )
   }
   if (block.kind === 'autonomy_checkpoint') {
-    // C3 刹车 — the autonomous run paused after N turns; the user resumes explicitly.
+    // C3 刹车 — cruise pause (resume explicitly) vs unleashed non-blocking
+    // progress ping (informational, no resume button — the run keeps going).
     const turns = block.checkpointTurns ?? 0
+    const paused = block.checkpointPaused !== false
+    if (!paused) {
+      return (
+        <div className="decision-shift info">
+          <div className="ds-head">
+            <span className="ds-glyph" aria-hidden>◦</span>
+            <span className="ds-domain">自治进度播报</span>
+            <span className="ds-tag">第 {turns} 轮 · 不暂停</span>
+          </div>
+          {block.checkpointDigest && (
+            <pre className="ds-digest">{block.checkpointDigest}</pre>
+          )}
+        </div>
+      )
+    }
     return (
       <div className="decision-shift info">
         <div className="ds-head">
@@ -1236,6 +1342,9 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
         <div className="ds-reason">
           已连续自主执行 {turns} 轮。停在这里核对方向——确认没跑偏再继续，或直接键入新指令改道。
         </div>
+        {block.checkpointDigest && (
+          <pre className="ds-digest">{block.checkpointDigest}</pre>
+        )}
         {onContinue && (
           <button className="btn-sm watchdog-continue" onClick={onContinue}>继续执行</button>
         )}

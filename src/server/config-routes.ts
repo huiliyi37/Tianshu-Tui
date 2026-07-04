@@ -6,11 +6,12 @@
  *   POST   /config/providers                add/update a provider (setup flow)
  *   POST   /config/providers/custom         create a new OpenAI-compatible provider from scratch
  *   DELETE /config/providers/:name          remove a provider
+ *   DELETE /config/providers/:name/models/:modelId  remove a model from a provider
  *   POST   /config/providers/:name/key      set API key (inline or env)
  *   POST   /config/providers/:name/default  set as default provider
  *   GET    /config/balance                  query DeepSeek account balance (official API)
- *   GET    /config/autonomy                 autonomy checkpoint interval (C3)
- *   PUT    /config/autonomy                 set autonomy checkpoint interval (C3)
+ *   GET    /config/autonomy                 autonomy brake mode + checkpoint interval (C3)
+ *   PUT    /config/autonomy                 set autonomy brake mode / checkpoint interval (C3)
  */
 import type { RouteHandler } from './index.js'
 import { isAuthorizedRequest } from './auth.js'
@@ -20,6 +21,7 @@ import {
   setupProvider,
   setupCustomProvider,
   removeProvider,
+  removeModel,
   setDefaultProvider,
   setApiKey,
   setApiKeyEnv,
@@ -27,9 +29,12 @@ import {
   setRoutingConfig,
   getEditorConfig,
   setEditorConfig,
-  getAutonomyConfig,
-  setAutonomyConfig,
+  getShellConfig,
+  setShellConfig,
+  getCheckpointConfig,
+  setCheckpointConfig,
 } from '../config/manager.js'
+import { existsSync } from 'node:fs'
 import { PROVIDER_PRESETS, providerPresetKeys, type ProviderPresetKey } from '../config/provider-presets.js'
 import { modelConfigSchema, type ModelConfig } from '../config/schema.js'
 import { queryDeepSeekBalance, type BalanceResult } from '../api/balance-client.js'
@@ -158,6 +163,18 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
+    'DELETE /config/providers/:name/models/:modelId': withAuth((_body, params) => {
+      const name = params?.name
+      const modelId = params?.modelId
+      if (!name || !modelId) return { status: 400, body: { error: 'provider name and modelId are required' } }
+      try {
+        removeModel(name, modelId)
+        return { status: 200, body: { ok: true, removed: modelId } }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
     'POST /config/providers/:name/key': withAuth((body, params) => {
       const name = params?.name
       if (!name) return { status: 400, body: { error: 'provider name is required' } }
@@ -217,18 +234,44 @@ export function buildConfigRoutes(apiToken?: string): Record<string, RouteHandle
       }
     }, apiToken),
 
-    // C3 — autonomy checkpoint interval (0 = off) for the desktop settings UI.
-    'GET /config/autonomy': withAuth(() => {
-      return { status: 200, body: getAutonomyConfig() }
+    // Windows Git Bash override for the desktop settings UI. `exists` lets the
+    // UI warn about a stale/typo'd path without blocking the save (the user may
+    // set it before installing Git). Takes effect on the next sidecar restart.
+    'GET /config/shell': withAuth(() => {
+      const cfg = getShellConfig()
+      return { status: 200, body: { ...cfg, exists: cfg.gitBashPath ? existsSync(cfg.gitBashPath) : null } }
     }, apiToken),
 
-    'PUT /config/autonomy': withAuth((body) => {
-      const { checkpointEveryTurns } = (body ?? {}) as { checkpointEveryTurns?: unknown }
+    'PUT /config/shell': withAuth((body) => {
+      const { gitBashPath } = (body ?? {}) as { gitBashPath?: unknown }
+      if (gitBashPath === undefined) {
+        return { status: 400, body: { error: 'gitBashPath is required' } }
+      }
+      try {
+        const next = setShellConfig({ gitBashPath })
+        return {
+          status: 200,
+          body: { ok: true, ...next, exists: next.gitBashPath ? existsSync(next.gitBashPath) : null },
+        }
+      } catch (err) {
+        return { status: 400, body: { error: (err as Error).message } }
+      }
+    }, apiToken),
+
+    // C3 — Auto mode checkpoint interval for the desktop/TUI settings UI.
+    'GET /config/checkpoint': withAuth(() => {
+      return { status: 200, body: getCheckpointConfig() }
+    }, apiToken),
+
+    'PUT /config/checkpoint': withAuth((body) => {
+      const { checkpointEveryTurns } = (body ?? {}) as {
+        checkpointEveryTurns?: unknown
+      }
       if (checkpointEveryTurns === undefined) {
         return { status: 400, body: { error: 'checkpointEveryTurns is required' } }
       }
       try {
-        return { status: 200, body: { ok: true, ...setAutonomyConfig({ checkpointEveryTurns }) } }
+        return { status: 200, body: { ok: true, ...setCheckpointConfig({ checkpointEveryTurns }) } }
       } catch (err) {
         return { status: 400, body: { error: (err as Error).message } }
       }

@@ -4,7 +4,7 @@ import { relative } from 'node:path'
 import type { Tool, ToolCallParams } from './types.js'
 import { validatePath } from './path-validate.js'
 import { syntaxCheck } from './syntax-check.js'
-import { getFileReadMtime, refreshFileReadMtime, markSessionFileEdit, wasFileEditedBySession } from './read-file.js'
+import { getFileReadMtime, noteFileObserved, recordSuccessfulEdit, wasFileEditedBySession } from './read-file.js'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
 import { trackFileChange } from '../agent/recovery-stack.js'
 import { detectEol, chooseEol, toLf, applyEol } from './line-endings.js'
@@ -167,21 +167,21 @@ Note: For large new_string, the message history keeps only a short pointer
     const posOnly = anchors.every(a => a.hash === null)
     let positionDriftWarning = false
     if (posOnly) {
-      const lastReadMtime = getFileReadMtime(filePath)
+      const lastReadMtime = getFileReadMtime(filePath, params.sessionId)
       if (lastReadMtime !== null && currentMtime !== lastReadMtime) {
         // File was modified since last read_file (likely by a prior hash_edit
         // in this turn). Position-only anchors may have drifted — flag for
         // warning, but still attempt the edit (line-existence check below
         // catches out-of-bounds).
         positionDriftWarning = true
-        refreshFileReadMtime(filePath, currentMtime)
+        noteFileObserved(filePath, currentMtime, fileStat.size, params.sessionId)
       }
     }
 
     // Hard reject: position-only anchors are unsafe after any session file edit.
     // The first edit shifts line numbers; subsequent L<num> anchors point to
     // wrong content. Force the model to re-read and use full-hash anchors.
-    if (posOnly && wasFileEditedBySession(filePath)) {
+    if (posOnly && wasFileEditedBySession(filePath, params.sessionId)) {
       return {
         content: [
           `Error: position-only anchors blocked on ${filePath}`,
@@ -263,8 +263,7 @@ Note: For large new_string, the message history keeps only a short pointer
             trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
             await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-            refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-            markSessionFileEdit(filePath)
+            await recordSuccessfulEdit(filePath, params.sessionId)
             const warn = syntaxCheck(filePath, newContent)
             const recoveredInfo = recoveredCount > 0
               ? ` (auto-recovered ${recoveredCount} stale anchors)`
@@ -303,8 +302,7 @@ Note: For large new_string, the message history keeps only a short pointer
     trackFileChange(params.cwd, { filePath: relPath, action: 'edit', toolCallId: params.toolUseId ?? 'hash_edit' })
 
     await writeFileAtomicAsync(filePath, applyEol(newContent, eol))
-    refreshFileReadMtime(filePath, (await stat(filePath)).mtimeMs)
-    markSessionFileEdit(filePath)
+    await recordSuccessfulEdit(filePath, params.sessionId)
     const warn = syntaxCheck(filePath, newContent)
     const posDrift = positionDriftWarning
       ? '\n\n⚠ Position-only anchors used on a file modified since last read — line numbers may have drifted. Verify the result or use edit_file instead.'

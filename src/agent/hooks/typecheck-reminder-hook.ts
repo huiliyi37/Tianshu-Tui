@@ -44,6 +44,9 @@ export function createTypecheckReminderHook(deps: TypecheckReminderHookDeps): Po
         tier: 'operational',
         content: '【天梁】你改了 TS 文件、跑了测试,但没跑类型检查。esbuild/tsx 只转译不查类型——重复键/重复成员/悬空引用都不会报。交付前跑 `npm run typecheck`(或 `tsc --noEmit`)再声明完成。',
         ttl: 1,
+        // P1a 核销 + Phase 2 挂起观察：下一轮自发跑 typecheck → 自愈撤销
+        expect: { kind: 'verify_attempted', withinTurns: 2 },
+        observe: { turns: 1 },
       })
     },
   }

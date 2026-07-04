@@ -256,6 +256,8 @@ return new ToolExecutionController({
           self.traceStore = recordToolNamedFingerprint(self.traceStore, fingerprint, toolName)
         }
       },
+      destructiveGate: self.destructiveGate,
+      writeTelemetry: (record) => { self.telemetryWriter.write(record) },
     })
 }
 export function buildRuntimeSnapshot(self: AgentLoop, extra?: Partial<RuntimeHookSnapshot>): RuntimeHookSnapshot {
@@ -274,8 +276,40 @@ return {
       },
       touchedTsFiles: self.touchedTsFiles,
       sawTypecheckThisTask: self.sawTypecheckThisTask,
+      lastThinkingLength: self.lastThinkingContent.length || undefined,
+      lastTurnHadTools: self.recentToolHistory.some(h => h.status === 'success') || undefined,
       ...extra,
     }
+}
+
+/**
+ * Phase 3 副驾的 cheap completion（懒初始化,进程内缓存）。
+ * 优先 workers.profiles.cheap 的独立 StreamClient（不与主会话争 socket）;
+ * 无 cheap profile 或构建失败 → resolve null（副驾休眠,绝不回退主模型——
+ * 副驾建议不值得花主模型的钱和延迟）。
+ */
+function buildLazyCopilotCompletion(self: AgentLoop): (system: string, user: string) => Promise<string | null> {
+  let completionPromise: Promise<((system: string, user: string, signal?: AbortSignal) => Promise<string>) | null> | undefined
+  return async (system, user) => {
+    completionPromise ??= (async () => {
+      try {
+        const { buildCheapClient, completionFromClient } = await import('./goal-criteria.js')
+        const { loadConfig } = await import('../config/manager.js')
+        const cfg = await loadConfig()
+        const cheapProfile = cfg.workers?.profiles?.cheap
+        const allProviders = self.config.allProviders ?? {}
+        if (!cheapProfile || !allProviders[cheapProfile.provider]) return null
+        const cheap = buildCheapClient(cheapProfile, allProviders)
+        return cheap ? completionFromClient(cheap.client, cheap.model) : null
+      } catch {
+        return null
+      }
+    })()
+    const completion = await completionPromise
+    if (!completion) return null // 基础设施缺失 → hook 永久休眠
+    // 单次调用失败向上抛（hook catch 后静默跳过本次,不算基础设施不可用）
+    return completion(system, user)
+  }
 }
 
 export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline {
@@ -311,8 +345,37 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       }
     },
     getDoomLoopLevel: () => self.getDoomLoopLevel(),
-    wasConvergenceTriggered: () => self.latestConvergenceResult?.shouldKick ?? false,
+    // 让位判据解耦：shouldKick 在卡住期间恒 true 但发射被冷却节流——只有
+    // convergence 真实发射过（相邻轮）才压制 CCR/kick，避免冷却静默期陪葬。
+    wasConvergenceTriggered: () =>
+      (self.latestConvergenceResult?.shouldKick ?? false) && self.wasConvergenceEmittedRecently(),
     telemetryWriter: self.telemetryWriter,
+    // Phase 0 观测：CCR 触发落遥测（sensorium.jsonl 同通道）+ guardian 计数。
+    // 此前 onCcrTrigger 无生产接线 — 触发频次不可观测，静音只能靠体感发现。
+    onCcrTrigger: event => {
+      self.guardianActivity.ccr += 1
+      self.telemetryWriter.write({
+        kind: 'ccr-trigger',
+        rule: event.rule,
+        star: event.star,
+        turn: event.turn,
+        principleKey: event.principleKey,
+        dynamicPool: event.dynamicPool,
+        dimValues: event.dimValues,
+      })
+    },
+    // P1a 核销闭环：advisory 采纳核销器 + 会话累计采纳/忽略同步到 guardian meta。
+    advisoryReadback: self.advisoryReadback,
+    onAdvisoryOutcomes: totals => self.recordAdvisoryOutcomes(totals),
+    // Phase 3 异步副驾：cheap client 懒初始化（首次触发才 loadConfig/建连接）。
+    // 构建失败 resolve null → hook 永久休眠,不影响主链路。
+    asyncCopilot: {
+      getContext: () => ({
+        objective: self.taskContract?.objective ?? null,
+        starDomain: self.sessionDomain?.name ?? null,
+      }),
+      complete: buildLazyCopilotCompletion(self),
+    },
     getPhysarumShadowStats: () => self.getPhysarumShadowStats(),
     getDomainId: () => self.sessionDomain?.id ?? null,
     getFileObservations: () => self.config.contextClaimStore?.listClaims({ kind: ['file_observation'] }) ?? [],
@@ -341,6 +404,11 @@ export function createRuntimeHooksPipeline(self: AgentLoop): RuntimeHookPipeline
       }
     },
     getObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 120) ?? null,
+    // 缺口 C/D:run 轮数 / 用户输入轮 / 意图复合源 / maxTurns 预算
+    getRunTurn: () => self.runLoopTurn,
+    getLastUserInputRunTurn: () => self.lastUserInputRunTurn,
+    getIntentObjective: () => self.taskContract?.objective ?? self.initialUserMessage?.slice(0, 500) ?? null,
+    getMaxTurns: () => self.config.maxTurns,
     hearthObserveEnabled: self.config.hearthObserveEnabled,
     getAnchorGraph: () => self.antiAnchoring.buildAnchorGraph(),
     getPrevAnchorGraphHash: () => self.prevAnchorGraphHash,
@@ -494,6 +562,55 @@ export function appendMeridianBlastRadius(
   return text + '\n\nMeridian blast radius:\n' + parts.join('\n')
 }
 
+/** Input snapshot for the autonomy progress digest (C3). */
+export interface ProgressDigestInput {
+  turns: number
+  filesModified: string[]
+  recentTools: Array<{ tool: string; target: string; status: 'success' | 'failed' | 'running' }>
+  usage: { input_tokens: number; output_tokens: number }
+  todos?: Array<{ content: string; status: string }>
+}
+
+function formatTokenCount(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
+}
+
+/**
+ * C3 — human-readable progress digest shown at autonomy checkpoints (cruise
+ * pause card) and progress pings (unleashed broadcast). Pure function: all
+ * data comes from the snapshot so it is unit-testable without an AgentLoop.
+ */
+export function buildProgressDigest(input: ProgressDigestInput): string {
+  const lines: string[] = [`已执行 ${input.turns} 轮。`]
+
+  if (input.filesModified.length > 0) {
+    const shown = input.filesModified.slice(0, 8)
+    const more = input.filesModified.length - shown.length
+    lines.push(`修改文件 (${input.filesModified.length})：${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`)
+  } else {
+    lines.push('修改文件：无')
+  }
+
+  if (input.recentTools.length > 0) {
+    const items = input.recentTools.slice(-5).map(t => {
+      const icon = t.status === 'failed' ? '✗' : t.status === 'running' ? '…' : '✓'
+      return `${t.tool} ${t.target} ${icon}`.trim()
+    })
+    lines.push(`最近工具：${items.join(' · ')}`)
+  }
+
+  if (input.todos && input.todos.length > 0) {
+    const done = input.todos.filter(t => t.status === 'completed').length
+    const inProgress = input.todos.find(t => t.status === 'in_progress')
+    let todoLine = `任务进度：${done}/${input.todos.length} 完成`
+    if (inProgress) todoLine += `，进行中：${inProgress.content}`
+    lines.push(todoLine)
+  }
+
+  lines.push(`Token：输入 ${formatTokenCount(input.usage.input_tokens)} / 输出 ${formatTokenCount(input.usage.output_tokens)}`)
+  return lines.join('\n')
+}
+
 export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
   return new TurnOrchestrator({
     // === Lifecycle ===
@@ -502,12 +619,19 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
 
     // === Config ===
     getMaxTurns: () => self.config.maxTurns,
-    // C3 — checkpoint brake applies only to the autonomous tier; supervised
-    // modes already stop at approvals. Read live (not captured) so a mid-session
-    // approval-mode switch takes effect on the next turn.
-    getCheckpointEveryTurns: () => self.config.approvalMode === 'dangerously-skip-permissions'
+    // C3 — checkpoint brake applies only to auto-safe mode (high-risk tools
+    // still need human approval). YOLO and manual modes get 0 (no brake).
+    // Read live so a mid-session approval-mode switch takes effect.
+    getCheckpointEveryTurns: () => self.config.approvalMode === 'auto-safe'
       ? (self.config.checkpointEveryTurns ?? 0)
       : 0,
+    buildProgressDigest: (turns) => buildProgressDigest({
+      turns,
+      filesModified: [...self.evidence.getState().filesModified],
+      recentTools: self.recentToolHistory.slice(-5),
+      usage: self.session.getTotalUsage(),
+      todos: self.config.getTodos?.(),
+    }),
     getTurnLevelThinking: () => self.config.turnLevelThinking,
     getPlanModeState: () => self.planModeState,
     getStreamRules: () => self.config.streamRules,
@@ -612,6 +736,8 @@ export function createTurnOrchestrator(self: AgentLoop): TurnOrchestrator {
       set thetaRequestsThisTurn(v) { self.thetaRequestsThisTurn = v },
       get taskContract() { return self.taskContract },
       set taskContract(v) { self.taskContract = v },
+      get runLoopTurn() { return self.runLoopTurn },
+      set runLoopTurn(v) { self.runLoopTurn = v },
     } as TurnStateBag,
     getMaxAutoContinue: () => self.config.maxAutoContinue ?? 0,
     getDoomLoopLevel: () => self.getDoomLoopLevel(),

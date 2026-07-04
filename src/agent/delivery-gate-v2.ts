@@ -91,9 +91,13 @@ export interface DeliveryGateResult {
   ownedFileCount: number
   externalFileCount: number
   verificationCount: number
-  /** Count of earlier failures superseded by later successes */
+  /** Count of earlier failures superseded by later successes — these were fixed. */
   supersededFailures: number
+  /** Count of verifications dropped because their snapshotRef is stale
+   *  (owned diff changed since they ran — ran on outdated code). */
+  staleSnapshotDropped: number
   latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
+  /** @deprecated use supersededFailures instead — renamed for semantic clarity. */
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -116,11 +120,14 @@ export interface DeliveryReport {
   externalFiles: string[]
   externalFileCount: number
   verificationCount: number
-  /** Count of earlier failures superseded by later successes */
+  /** Count of earlier failures superseded by later successes — these were fixed. */
   supersededFailures: number
+  /** Count of verifications dropped because their snapshotRef is stale. */
+  staleSnapshotDropped: number
   /** Latest verification pass/fail/skipped totals — for "声明即实测" echo in deliver_task output.
    *  Agents copy these numbers into delivery reports instead of guessing from memory. */
   latestVerificationTotals?: { passed: number; failed: number; skipped: number; command: string }
+  /** @deprecated use supersededFailures instead — renamed for semantic clarity. */
   staleFailureCandidates: number
   toolInvocationFailureCandidates: string[]
   currentBlockingFailure?: string
@@ -148,7 +155,7 @@ export interface DeliveryGateV2 {
  * YELLOW → 可带条件交付。返回的字符串作为 system-reminder 注入。
  */
 export function buildGateConvergenceHint(
-  gate: Pick<DeliveryGateResult, 'state' | 'reason' | 'blockingReason' | 'shortestNextStep'>,
+  gate: Pick<DeliveryGateResult, 'state' | 'reason' | 'blockingReason' | 'shortestNextStep' | 'attributionClass'>,
   depthLayer?: import('../context/task-contract.js').TaskDepthLayer,
 ): string {
   const depthSuffix = depthLayer && depthLayer !== 'unit'
@@ -159,9 +166,13 @@ export function buildGateConvergenceHint(
   }
   if (gate.state === 'RED') {
     const lines = [`交付门禁 RED：${gate.blockingReason ?? gate.reason ?? 'owned 文件存在未验证或失败项。'}`]
-    if (gate.shortestNextStep) lines.push(`最短下一步：${gate.shortestNextStep}`)
     lines.push('请先解决阻断项再继续；若无法解决，明确报告阻断原因后结束回合。')
+    if (gate.shortestNextStep) lines.push(`方向：${gate.shortestNextStep}`)
     return lines.join('\n') + depthSuffix
+  }
+  // YELLOW — differentiate no_test_infra from transient external blocks
+  if (gate.attributionClass === 'no_test_infra') {
+    return `交付门禁 YELLOW（测试基础设施缺失）：${gate.reason ?? '项目无可自动检测的测试框架。'}\n\n不要反复重试 run_tests——它每次都会以同样原因受阻。应向用户报告具体缺失项，并询问是否需要协助搭建测试框架，或用 bash 运行替代验证后交付。` + depthSuffix
   }
   return `交付门禁 YELLOW：${gate.reason ?? '存在外部阻塞，owned 文件已验证。'}\n可带条件交付：输出最终摘要并明确标注 caveat，然后结束回合。${depthSuffix}`
 }
@@ -174,7 +185,9 @@ export function createDeliveryGateV2(opts: {
   const { taskLedger, ownership, attribution } = opts
 
   const emptyDiagnostics = {
+    supersededFailures: 0,
     staleFailureCandidates: 0,
+    staleSnapshotDropped: 0,
     toolInvocationFailureCandidates: [] as string[],
   }
 
@@ -183,13 +196,15 @@ export function createDeliveryGateV2(opts: {
       || (v.status === 'failed' && v.exitCode !== 0 && v.passed === 0 && v.failed === 0 && v.skipped === 0)
   }
 
-  function verificationDiagnostics(verifications: VerificationMetadata[], supersededFailures: number): Pick<DeliveryGateResult, 'staleFailureCandidates' | 'toolInvocationFailureCandidates' | 'shortestNextStep'> {
+  function verificationDiagnostics(verifications: VerificationMetadata[], supersededFailures: number, staleSnapshotDropped: number): Pick<DeliveryGateResult, 'supersededFailures' | 'staleFailureCandidates' | 'staleSnapshotDropped' | 'toolInvocationFailureCandidates' | 'shortestNextStep'> {
     const invocationFailures = verifications.filter(isToolInvocationFailure)
     const shortestNextStep = invocationFailures
       .map(v => v.recommendedCommand ?? v.resolvedCommand)
       .find((cmd): cmd is string => typeof cmd === 'string' && cmd.length > 0)
     return {
+      supersededFailures,
       staleFailureCandidates: supersededFailures,
+      staleSnapshotDropped,
       toolInvocationFailureCandidates: invocationFailures.map(v => v.command),
       ...(shortestNextStep ? { shortestNextStep } : {}),
     }
@@ -242,7 +257,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: externalVerifications.length,
-          supersededFailures: 0,
           ...emptyDiagnostics,
         }
       }
@@ -250,14 +264,14 @@ export function createDeliveryGateV2(opts: {
 
     // Use effective verifications (deduplicated by supersession + VSW staleness)
     const rawVerifications = taskLedger.getVerifications()
-    const { effective: ownedVerifications, supersededFailures } = getEffectiveVerifications(rawVerifications, currentSnapshotRef)
+    const { effective: ownedVerifications, supersededFailures, staleSnapshotDropped } = getEffectiveVerifications(rawVerifications, currentSnapshotRef)
 
     // Combine owned + external verifications for full picture
     const allVerifications = [
       ...ownedVerifications,
       ...externalVerifications,
     ]
-    const diagnostics = verificationDiagnostics(allVerifications, supersededFailures)
+    const diagnostics = verificationDiagnostics(allVerifications, supersededFailures, staleSnapshotDropped)
 
     // 层 1a: latest verification totals for "声明即实测" echo
     const _lv = allVerifications.length > 0 ? allVerifications[allVerifications.length - 1] : undefined
@@ -278,7 +292,6 @@ export function createDeliveryGateV2(opts: {
         ownedFileCount: 0,
         externalFileCount: externalFiles.length,
         verificationCount: allVerifications.length,
-        supersededFailures,
         ...diagnostics,
       latestVerificationTotals,
       }
@@ -297,7 +310,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -311,9 +323,26 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
+        }
+
+      case 'no_test_infra':
+        // Project has no test framework / test files — not a transient error,
+        // but a structural gap. YELLOW: deliverable with specific guidance to
+        // the user about setting up testing. Do NOT keep retrying run_tests —
+        // it will keep failing the same way.
+        return {
+          state: 'YELLOW',
+          canDeliver: true,
+          isBlocked: false,
+          reason: `测试基础设施缺失：${aggregate.reason}\n\n该项目无可自动检测的测试框架或测试文件。run_tests 不会自动生效，继续重试不会改变结果。请向用户说明具体缺失项和下一步。`,
+          ownedFileCount: ownedFiles.length,
+          externalFileCount: externalFiles.length,
+          verificationCount: allVerifications.length,
+          ...diagnostics,
+      latestVerificationTotals,
+          attributionClass: 'no_test_infra',
         }
 
       case 'owned_failure':
@@ -326,7 +355,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: aggregate.reason,
@@ -342,7 +370,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -356,7 +383,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -373,7 +399,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -388,7 +413,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: `${ownedFiles.length} owned file(s) modified but unverified.`,
@@ -404,7 +428,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: 'Unknown verification state.',
@@ -430,6 +453,7 @@ export function createDeliveryGateV2(opts: {
       externalFileCount: result.externalFileCount,
       verificationCount: result.verificationCount,
       supersededFailures: result.supersededFailures,
+      staleSnapshotDropped: result.staleSnapshotDropped,
       latestVerificationTotals: result.latestVerificationTotals,
       staleFailureCandidates: result.staleFailureCandidates,
       toolInvocationFailureCandidates: result.toolInvocationFailureCandidates,

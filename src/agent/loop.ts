@@ -8,6 +8,7 @@ import { gateToolDefinitions, isExtendedTool } from './tool-tiers.js'
 import type { CompactCircuitBreakerState, ContextAnchor } from '../context/types.js'
 import type { ToolErrorClass } from '../tools/types.js'
 import { EvidenceTracker } from './evidence.js'
+import { computeVerifyFailStreak } from './hooks/cognitive-capsule-router.js'
 import { TurnHarness } from './turn-harness.js'
 import { TrajectoryRecorder } from './trajectory.js'
 import { createTraceStore, type TraceStore } from './trace-store.js'
@@ -65,7 +66,10 @@ import type { RecallMetricsSummary } from '../cache/recall-metrics.js'
 import { createSycophancyTrap, type SycophancyTrap } from './sycophancy-trap.js'
 import { createP3Integration, P3Integration } from './p3-integration.js'
 import { ImmuneHook } from './immune-hook.js'
-import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryBus, DISCIPLINE_REANCHOR_INTERVAL, HOLDOUT_MIN_DELIVERED, parseHoldoutRate, disciplineReanchorEntry } from './advisory-bus.js'
+import { AdvisoryReadback, type EfficacyPriorCounts } from './advisory-readback.js'
+import { createDestructiveGateState } from '../tools/destructive-gate.js'
+import { AdvisoryEfficacyStore, type EfficacyDelta } from '../context/advisory-efficacy-store.js'
 import { PhysarumEngine } from '../repo/physarum-engine.js'
 import { getPhysarumShadowStatsFromDb } from '../repo/physarum-shadow-stats.js'
 import type { PhysarumShadowStats } from '../repo/physarum-shadow-stats.js'
@@ -81,7 +85,7 @@ import type { Pheromone } from '../context/stigmergy.js'
 import type { PrefixFingerprint } from '../prompt/fingerprint.js'
 import type { SensoriumEntry } from './retrospect.js'
 import { join, dirname } from 'node:path'
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import type { ApprovalMode, AgentConfig, AgentCallbacks } from './loop-types.js'
 import type { PermissionAllowRule, PermissionOverlay } from './permissions.js'
 import { createPermissionOverlay } from './permissions.js'
@@ -118,6 +122,7 @@ export function formatActivePlanPointer(plan: { slug: string; title: string; sel
     : ''
   return `<active-plan slug="${slug}" title="${title}" path=".rivet/plans/${slug}.md">${approach}已批准,正在执行此方案。完整步骤见该文件,需要时用 read_file 查看;开工前先用 todo 列出有序步骤跟踪进度,完成后 plan_close。</active-plan>`
 }
+
 
 
 /** Debounce before an idle compaction pass fires after a turn settles.
@@ -223,6 +228,93 @@ export class AgentLoop {
   private lastConvergenceEmitTurn = -Infinity
   private lastConvergenceEmitLevel = 0
   private lastConvergenceMsgKey = ''
+  /** 上次发射时的验证失败流水 — 第四突破条件（流水加深 → 提前发射）的基线。 */
+  private lastConvergenceEmitVerifyFailStreak = 0
+  /** 解耦修复：CCR/kick 的让位判据。旧判据 latestConvergenceResult.shouldKick
+   *  在卡住期间恒为 true，而发射被 3 轮冷却节流——冷却静默期 CCR 也被整轮压制
+   *  （守护链路静音栈的一环）。新判据只在 convergence **真实发射**过 advisory 的
+   *  相邻轮让位（避免同轮双重提醒），其余轮 CCR 正常参与。 */
+  wasConvergenceEmittedRecently(): boolean {
+    return this.session.getTurnCount() - this.lastConvergenceEmitTurn <= 1
+  }
+  /** Phase 0 观测 — guardian（CCR / 改道 / kick）触发计数。会话内累计，
+   *  随遥测与 session meta 落盘，让"守护链路被静音"从体感问题变成数据问题。 */
+  readonly guardianActivity: {
+    ccr: number
+    shifts: Record<string, number>
+    advisoriesRendered: number
+    advisoriesDropped: number
+    /** P1a 核销闭环：expect 谓词判定为采纳/忽略的累计数 */
+    advisoriesAdopted: number
+    advisoriesIgnored: number
+    /** Holdout 反事实组：被静默扣留的累计数（cockpit advisory 面板消费） */
+    advisoriesHeldOut: number
+  } = { ccr: 0, shifts: {}, advisoriesRendered: 0, advisoriesDropped: 0, advisoriesAdopted: 0, advisoriesIgnored: 0, advisoriesHeldOut: 0 }
+  private lastGuardianMetaFingerprint = ''
+  /** 记录一次结构化改道发射（source: 'kick' | 'convergence' | …）。 */
+  recordDecisionShift(source: string): void {
+    this.guardianActivity.shifts[source] = (this.guardianActivity.shifts[source] ?? 0) + 1
+  }
+  /** 累计 advisory 投递账本（来自 AdvisoryBus.drainLedger）。 */
+  recordAdvisoryLedger(delta: { rendered: number; dropped: number; heldOut?: number }): void {
+    this.guardianActivity.advisoriesRendered += delta.rendered
+    this.guardianActivity.advisoriesDropped += delta.dropped
+    this.guardianActivity.advisoriesHeldOut += delta.heldOut ?? 0
+  }
+  /** P1a：核销判定后同步会话累计采纳/忽略（来自 AdvisoryReadback.getTotals）。 */
+  recordAdvisoryOutcomes(totals: { adopted: number; ignored: number }): void {
+    this.guardianActivity.advisoriesAdopted = totals.adopted
+    this.guardianActivity.advisoriesIgnored = totals.ignored
+  }
+
+  /**
+   * B：把会话内效能计数的**增量**合并写回跨会话信息素文件。
+   * 差分基线在 lastEfficacyFlush——每 20 轮 + postSession 各调一次,
+   * 重复调用安全(零增量直接跳过)。失败不致命(信息素是尽力而为)。
+   */
+  flushAdvisoryEfficacy(): void {
+    try {
+      const deltas = new Map<string, EfficacyDelta>()
+      for (const [key, s] of this.advisoryReadback.getStats()) {
+        const base = this.lastEfficacyFlush.get(key)
+        const delta: EfficacyDelta = {
+          delivered: s.delivered - (base?.delivered ?? 0),
+          adopted: s.adopted - (base?.adopted ?? 0),
+          ignored: s.ignored - (base?.ignored ?? 0),
+          shadowHeld: s.shadowHeld - (base?.shadowHeld ?? 0),
+          shadowSatisfied: s.shadowSatisfied - (base?.shadowSatisfied ?? 0),
+        }
+        if (delta.delivered > 0 || delta.adopted > 0 || delta.ignored > 0 || delta.shadowHeld > 0 || delta.shadowSatisfied > 0) {
+          deltas.set(key, delta)
+        }
+        this.lastEfficacyFlush.set(key, {
+          delivered: s.delivered, adopted: s.adopted, ignored: s.ignored,
+          shadowHeld: s.shadowHeld, shadowSatisfied: s.shadowSatisfied,
+        })
+      }
+      if (deltas.size > 0) this.advisoryEfficacyStore.mergeAndSave(deltas)
+    } catch { /* 尽力而为——写回失败不影响会话 */ }
+  }
+  /** 把 guardian 活动摘要写进 session meta（仅在计数变化时写，原子写、失败不致命）。 */
+  flushGuardianMeta(): void {
+    if (!this.persist) return
+    const ga = this.guardianActivity
+    const fingerprint = JSON.stringify([ga.ccr, ga.shifts, ga.advisoriesRendered, ga.advisoriesDropped, ga.advisoriesAdopted, ga.advisoriesIgnored])
+    if (fingerprint === this.lastGuardianMetaFingerprint) return
+    this.lastGuardianMetaFingerprint = fingerprint
+    try {
+      this.persist.updateMetadata({
+        guardianActivity: {
+          ccr: ga.ccr,
+          shifts: { ...ga.shifts },
+          advisoriesRendered: ga.advisoriesRendered,
+          advisoriesDropped: ga.advisoriesDropped,
+          advisoriesAdopted: ga.advisoriesAdopted,
+          advisoriesIgnored: ga.advisoriesIgnored,
+        },
+      })
+    } catch { /* meta 摘要是观测辅助 — 永不阻断 turn */ }
+  }
   /** Goal tracker for autonomous long-running tasks. Owned by AgentLoop so that
    *  doom-loop threshold selection (getDoomLoopLevel) and goal-active checks
    *  (isGoalActive) read LOCAL state instead of reaching back into the
@@ -356,12 +448,25 @@ export class AgentLoop {
   _lastImmuneHint?: import('./immune-context.js').ImmuneContextHint
   /** A1: unified advisory bus — collects corrective signals, renders ≤3 per turn */
   advisoryBus = new AdvisoryBus()
+  /** P1a 核销闭环：advisory 送达后按 expect 谓词核销 adopted/ignored */
+  advisoryReadback = new AdvisoryReadback()
+  /** 破坏性命令 pre-execution 闸门(验证失败后 git 清场当轮拦截,首拦重放行)。
+   *  tool-pipeline 是唯一写者兼读者,loop 只持有生命周期。 */
+  destructiveGate = createDestructiveGateState()
+  /** B 跨会话效能信息素 store（构造器内初始化） */
+  advisoryEfficacyStore!: AdvisoryEfficacyStore
+  /** 上次效能 flush 时的 per-key 计数快照 — mergeAndSave 只收增量,差分在此 */
+  private lastEfficacyFlush = new Map<string, EfficacyDelta>()
   /** F-fix: tool calls since the last discipline re-anchor advisory. */
   private toolCallsSinceReanchor = 0
   /** Anti-habituation: turn count since last model-initiated objection/risk flag. */
   turnsSinceLastObjection = 0
   lastToolCompleteTime = 0
   initialUserMessage: string | null = null
+  /** 当前 run 的 orchestrator 循环轮数(每 run 从 0 重计)——缺口 C/D hook 消费 */
+  runLoopTurn = 0
+  /** 最近一次用户输入(run 启动 = 0,steer 注入时更新)的 run 轮数 */
+  lastUserInputRunTurn = 0
   /** Sliding window of recent turn text fingerprints for cross-turn repetition detection. */
   recentTextFingerprints: string[] = []
   /** T2-02: Current effort shadow record (telemetry only in P0, influences effort in P3+) */
@@ -381,6 +486,44 @@ export class AgentLoop {
     this.cwd = cwd ?? process.cwd()
     this.evidence = new EvidenceTracker()
     this.traceStore = createTraceStore()
+    // P1b 习惯化对抗：核销账本的 ignoredStreak 驱动升级措辞/有界静音
+    this.advisoryBus.setHabituationPolicy(this.advisoryReadback)
+    // Phase 2 挂起观察自愈判定：expect 谓词在观察窗口内已被自发满足 → 撤销
+    this.advisoryBus.setSelfHealCheck((expect, since, now) =>
+      this.advisoryReadback.wasSatisfiedBetween(expect, since, now))
+    // Holdout 反事实抽样：小概率静默扣留以度量真实 lift（RIVET_ADVISORY_HOLDOUT=0 关闭）
+    this.advisoryBus.setHoldoutPolicy({
+      rate: parseHoldoutRate(process.env.RIVET_ADVISORY_HOLDOUT),
+      isEligible: key => this.advisoryReadback.getDeliveredCount(key) >= HOLDOUT_MIN_DELIVERED,
+    })
+    // B 跨会话效能信息素：加载 EWMA 衰减后的先验（holdout 资格/副驾闸门/
+    // Top-N 次级排序三个消费方;习惯化保持会话内,guardian meta 保持会话纯度）
+    this.advisoryEfficacyStore = new AdvisoryEfficacyStore(this.cwd)
+    try {
+      const priors = this.advisoryEfficacyStore.load()
+      this.advisoryReadback.seedPriors(
+        [...priors].map(([k, p]) => [k, {
+          delivered: p.delivered, adopted: p.adopted, ignored: p.ignored,
+          shadowHeld: p.shadowHeld, shadowSatisfied: p.shadowSatisfied,
+        }] as [string, EfficacyPriorCounts]),
+      )
+    } catch { /* 先验加载失败不致命——回退冷启动 */ }
+    this.advisoryBus.setAdoptionRateProvider(key => this.advisoryReadback.getAdoptionRate(key))
+    // Lift 消费端：成熟 lift（会话 + 先验,过成熟度门）驱动负 lift 静音与
+    // Top-N 排序升级。RIVET_ADVISORY_LIFT_CONSUMER=0 关（不注入 = 全回退旧行为）。
+    if (process.env.RIVET_ADVISORY_LIFT_CONSUMER !== '0') {
+      this.advisoryBus.setLiftProvider(key => this.advisoryReadback.getMatureLift(key))
+    }
+    // Phase 2 阶段抑制：产出流 = 近期编辑+验证交替且无失败（navigator 沉默规则）。
+    // 只影响 encouragement/typecheck/informational 白名单——守护类不受抑制。
+    this.advisoryBus.setFlowStateProvider(() => {
+      const recent = this.recentToolHistory.slice(-6)
+      if (recent.length < 3) return false
+      const hasEdit = recent.some(h => ['edit_file', 'hash_edit', 'write_file', 'apply_patch'].includes(h.tool))
+      const hasVerify = recent.some(h => h.tool === 'run_tests' || (h.tool === 'bash' && /\b(test|typecheck|tsc)\b/i.test(h.target ?? '')))
+      const hasFailure = recent.some(h => h.status === 'failed')
+      return hasEdit && hasVerify && !hasFailure
+    })
     this.harness = new TurnHarness(
       { maxRetries: 2, retryableClasses: ['timeout', 'flaky'] },
       this.trajectory,
@@ -707,6 +850,11 @@ export class AgentLoop {
 
   setApprovalMode(mode: ApprovalMode): void {
     this.config.approvalMode = mode
+  }
+
+  /** C3 — current checkpoint interval for status displays. */
+  getCheckpointInterval(): number {
+    return this.config.checkpointEveryTurns ?? 0
   }
 
   /** Return the current session permission overlay, initializing if needed. */
@@ -1131,6 +1279,12 @@ export class AgentLoop {
 
   /** Enter plan mode — only read-only tools allowed. Clears any stale approved-plan pointer. */
   enterPlanMode(opts?: { planFilePath?: string }): void {
+    // Idempotent re-entry: already planning with a live draft and no explicit
+    // target → keep the current draft. Creating a fresh one would orphan the
+    // file the agent is incrementally writing to.
+    if (this.planModeState === 'planning' && this.activePlanFilePath && !opts?.planFilePath) {
+      return
+    }
     this.planModeState = 'planning'
     this.config.promptEngine.setActivePlan(null)
 
@@ -1150,8 +1304,26 @@ export class AgentLoop {
   /** Exit plan mode — user approved, all tools allowed */
   exitPlanMode(): void {
     this.planModeState = 'off'
-    this.activePlanFilePath = null
+    this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
+  }
+
+  /**
+   * Shared plan-mode teardown: drop the draft pointer (removing the draft file
+   * when it is still empty, so toggling in and out doesn't litter .rivet/plans/)
+   * and release the writing-plans skill pin — leaving it invoked would re-inject
+   * the full planning skill into every post-approval execution turn.
+   */
+  private releasePlanModeArtifacts(): void {
+    const draft = this.activePlanFilePath
+    this.activePlanFilePath = null
+    if (draft && /\/draft-\d+\.md$/.test(draft.replace(/\\/g, '/'))) {
+      try {
+        const abs = join(this.cwd, draft)
+        if (existsSync(abs) && readFileSync(abs, 'utf-8').trim() === '') rmSync(abs)
+      } catch { /* best-effort cleanup */ }
+    }
+    this.markSkillCompleted(WRITING_PLANS_SKILL)
   }
 
   /**
@@ -1167,7 +1339,7 @@ export class AgentLoop {
     }
     this.config.promptEngine.setActivePlan(formatActivePlanPointer(plan))
     this.planModeState = 'off'
-    this.activePlanFilePath = null
+    this.releasePlanModeArtifacts()
     this.syncPlanModeToConfig()
   }
 
@@ -1258,6 +1430,7 @@ export class AgentLoop {
     if (this.config.sessionRegistry) {
       try { this.config.sessionRegistry.cleanupOldEvents(2 * 60 * 60 * 1000) } catch { /* ignore */ }
     }
+    this.flushAdvisoryEfficacy()
     try { this.immuneHook.getPhysarum().save() } catch { /* non-critical */ }
     try {
       const db = this.config.meridianIndexer?.getDb()
@@ -1477,7 +1650,11 @@ export class AgentLoop {
     // stale streak can't drive a spurious stagnation/abort right after the user
     // speaks. (Turn-start and tool-use paths reset this elsewhere; this covers
     // mid-run steer injection.)
-    if (userMessageConsumed) this.consecutiveNoToolTurns = 0
+    if (userMessageConsumed) {
+      this.consecutiveNoToolTurns = 0
+      // 缺口 C 意图锚点:steer 注入 = 用户刚重申过意图,stale 计时重置
+      this.lastUserInputRunTurn = turn
+    }
 
     const convergenceCheck = evaluateConvergence({
       turn,
@@ -1505,6 +1682,7 @@ export class AgentLoop {
         this.lastConvergenceEmitTurn = -Infinity
         this.lastConvergenceEmitLevel = 0
         this.lastConvergenceMsgKey = ''
+        this.lastConvergenceEmitVerifyFailStreak = 0
       } else {
         // Fix 1 — cooldown + dedup gate on the visible side-effects. The message
         // type is keyed by its header line (first line), so same-type nudges with
@@ -1513,10 +1691,16 @@ export class AgentLoop {
         const cooledDown = turn - this.lastConvergenceEmitTurn >= this.convergenceEmitCooldownTurns
         const escalated = convergenceCheck.level > this.lastConvergenceEmitLevel
         const changedDirection = msgKey !== this.lastConvergenceMsgKey
-        if (cooledDown || escalated || changedDirection) {
+        // 第四突破条件（2026-07-04 触发面修复）：验证失败流水加深 = 排查轮次
+        // 正在膨胀，是最尖锐的"需要改道"信号——不等冷却到期，提前发射。
+        // 与 CCR P7 同信号源（computeVerifyFailStreak），语义失败才计入。
+        const verifyFailStreak = computeVerifyFailStreak(this.recentToolHistory)
+        const verifyFailEscalated = verifyFailStreak >= 2 && verifyFailStreak > this.lastConvergenceEmitVerifyFailStreak
+        if (cooledDown || escalated || changedDirection || verifyFailEscalated) {
           this.lastConvergenceEmitTurn = turn
           this.lastConvergenceEmitLevel = convergenceCheck.level
           this.lastConvergenceMsgKey = msgKey
+          this.lastConvergenceEmitVerifyFailStreak = verifyFailStreak
 
           // Level 2: inject user guidance as a system-visible nudge
           callbacks.onPhaseChange?.('convergence-warning', {
@@ -1526,6 +1710,7 @@ export class AgentLoop {
           // R4 — externalize the convergence nudge as a structured course-correction
           // so the desktop renders a "改道" card; the injected guidance below is what
           // the agent acts on next, making the cause→effect visible to the user.
+          this.recordDecisionShift('convergence')
           callbacks.onDecisionShift?.({
             source: 'convergence',
             reason: `${phaseClass} 阶段连续 ${turn} 轮未收敛，已提示换一种推进方式`,
@@ -1538,16 +1723,24 @@ export class AgentLoop {
             tier: 'operational',
             category: 'discipline',
             content: convergenceCheck.injectedMessage,
+            // 谓词映射表（P1a）：仅无工具僵局变体可客观核销——任意工具调用
+            // 即打破僵局（计划中的 tool_stops 反向谓词）。其余变体（重复循环/
+            // 换推进方式）没有单一行为签名，不设谓词，只计送达。
+            expect: this.consecutiveNoToolTurns >= 2
+              ? { kind: 'tool_appears', tools: [], withinTurns: 1 }
+              : undefined,
           })
 
-          // When convergence is detected AND doom loop is blocked, the agent is
-          // likely in a post-completion verification loop. Append gate hint
-          // to the same SR (already injected above) instead of creating a second SR.
-          if (this.getDoomLoopLevel() === 'blocked' && convergenceCheck.level >= 2) {
-            let gateHint = '任务验证循环已检测到。如果交付门禁为 GREEN，请输出最终摘要并结束回合。不再调用工具。'
+          // When convergence is detected, append the delivery gate hint so the
+          // agent sees the gate state alongside the convergence message.
+          // Previously only fired for doomLoopLevel==='blocked', but YELLOW
+          // gates (no_test_infra, external_blocked) also need context —
+          // otherwise the generic "换个角度看问题" can contradict "可带条件交付".
+          if (convergenceCheck.level >= 2) {
+            let gateHint = '交付门禁状态未知。请运行 deliver_task 检查。'
             try {
               const gate = this.config.deliveryGateV2?.([...this.evidence.getState().filesModified])
-              if (gate) gateHint = `任务验证循环已检测到。${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
+              if (gate) gateHint = `交付门禁：${buildGateConvergenceHint(gate, this._taskDepthLayer)}`
             } catch { /* gate evaluation must never break convergence handling */ }
             this.advisoryBus.submit({
               key: 'convergence-gate',

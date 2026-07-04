@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getArtifact, openExternal } from '../runtime/client'
+import { getArtifact } from '../runtime/client'
+import { openExternal } from '../lib/open-external'
 import { useSessionEvents } from '../state/use-session-events'
 import { deriveBrowserState, EMPTY_BROWSER_STATE } from '../lib/browser-mirror'
 
@@ -64,7 +65,7 @@ export function BrowserPanel({ sessionId }: { sessionId: string | null }) {
           <button
             type="button"
             className="text-[10px] text-muted hover:text-text px-1.5 py-0.5 border border-border rounded shrink-0"
-            onClick={() => { if (state.currentUrl) openExternal(state.currentUrl).catch(() => {}) }}
+            onClick={() => { if (state.currentUrl) openExternal(state.currentUrl) }}
             title="在系统浏览器中打开"
           >
             外部打开

@@ -15,6 +15,7 @@ const KEY_TABS = 'tianshu.openTabs'
 const KEY_SPLIT_MODE = 'tianshu.splitMode'
 const KEY_NOTIF_PREF = 'tianshu.notifPref'
 const KEY_VIEW_MODE = 'tianshu.viewMode'
+const KEY_SEND_MODE = 'tianshu.sendMode'
 
 // ── Split mode (Phase 3 preview, persisted now) ──
 
@@ -161,6 +162,23 @@ export function saveDefaultAutonomy(level: string): void {
   } catch {
     // non-fatal
   }
+}
+
+// ── Send mode: Enter to send vs Shift+Enter to send ──
+
+export type SendMode = 'enter' | 'shift-enter'
+/** 'enter' (default): Enter sends, Shift+Enter inserts newline.
+ *  'shift-enter': Shift+Enter sends, Enter inserts newline (QQ/WeChat style). */
+export function loadSendMode(): SendMode {
+  try {
+    const v = localStorage.getItem(KEY_SEND_MODE)
+    if (v === 'enter' || v === 'shift-enter') return v
+  } catch { /* non-fatal */ }
+  return 'enter'
+}
+
+export function saveSendMode(mode: SendMode): void {
+  try { localStorage.setItem(KEY_SEND_MODE, mode) } catch { /* non-fatal */ }
 }
 
 // ── Panel visibility ──

@@ -12,7 +12,7 @@
 // Windows EPERM scandir noise filter — must register before any dependency
 // that might trigger fs operations against system-protected directories.
 import { installEpermFilter } from './platform/eperm-filter.js'
-import { setTargetConventions } from './platform.js'
+import { setTargetConventions, applyConfiguredGitBashPath } from './platform.js'
 installEpermFilter()
 
 import { bootstrapInteractiveSession, createShutdownHandler, switchAgentRuntime } from './bootstrap.js'
@@ -35,7 +35,9 @@ import { parseScrollbackTranscript } from './tui/scrollback-transcript.js'
 import { buildWorkerDetailContent } from './tui/worker-detail.js'
 import { killAllSync } from './tools/process-tracker.js'
 import { getTheme, getActiveThemeName, setTheme, THEMES, type ThemeName } from './tui/theme.js'
-import { resolveAppPromptInput, registerTuiSlashCommands } from './tui/slash-commands.js'
+import { resolveAppPromptInput, registerTuiSlashCommands, approvePlanAndKickoff } from './tui/slash-commands.js'
+import { listPlansSync } from './plan/plan-store.js'
+import type { PlanPickerEntry } from './tui/format/overlay.js'
 import { skillRegistry } from './skills/skill-loader.js'
 import { starDomainRegistry } from './agent/star-domain-registry.js'
 import { buildDomainPickerEntries, DOMAIN_SWITCH_CACHE_WARNING } from './agent/domain-picker-entries.js'
@@ -77,6 +79,10 @@ const skipWelcome = args.includes('--skip-welcome')
 let app: TuiApp | null = null
 let ctx: BootstrapContext | null = null
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
+
+/** advisory status 通道环形缓冲（最近 N 条,cockpit advisory 面板展示） */
+const ADVISORY_STATUS_BUFFER_MAX = 20
+const advisoryStatusNotices: string[] = []
 
 let isShuttingDown = false
 
@@ -199,6 +205,7 @@ async function main() {
 
     const cfg = loadConfig()
     setTargetConventions(cfg.editor.platform, cfg.editor.eol)
+    applyConfiguredGitBashPath(cfg.env.gitBashPath)
     const prov = cfg.provider.providers[cfg.provider.default]
     if (!prov) { process.stderr.write('Provider not configured. Run: rivet config setup <provider>\n'); process.exit(1) }
     const key = prov.apiKey ?? process.env[prov.apiKeyEnv ?? '']
@@ -396,6 +403,18 @@ async function main() {
   // Store heartbeat for shutdown cleanup
   heartbeatInterval = ctx.heartbeatInterval
 
+  // ── Advisory status 通道点亮（dark cockpit 单感官通道）──────────
+  // status 条目不进 prompt、不占 Top-N 预算,只落环形缓冲进 cockpit
+  // advisory 面板。未设 sink 的路径(server/desktop)保持 bus 回退。
+  ctx.agent.advisoryBus.setStatusSink(entries => {
+    for (const e of entries) {
+      advisoryStatusNotices.push(e.content)
+    }
+    if (advisoryStatusNotices.length > ADVISORY_STATUS_BUFFER_MAX) {
+      advisoryStatusNotices.splice(0, advisoryStatusNotices.length - ADVISORY_STATUS_BUFFER_MAX)
+    }
+  })
+
   // ── Recovery CLI fallback ────────────────────────────────────
   if (forceRecoveryCli) {
     const { runRecoveryCli } = await import('./recovery-cli.js')
@@ -468,6 +487,23 @@ async function main() {
     const base = getPaletteCommands().filter(c => c.name.startsWith('/') || c.name.startsWith('__surface:'))
     return filterCommands(base, tuiApp.getOverlayQuery())
   }
+  // 待批计划(submitted)映射为 plan-picker 条目。同步读盘,供渲染 provider 与
+  // Shift+Tab 触发判定共用。多方案计划附上方案标签。
+  const pendingPlanPickerEntries = (): PlanPickerEntry[] => {
+    try {
+      return listPlansSync(ctx!.agent.cwd)
+        .filter(p => p.status === 'submitted')
+        .map(p => ({
+          slug: p.slug,
+          title: p.title,
+          status: p.status,
+          createdAt: p.createdAt.toLocaleString(),
+          options: p.options?.map(o => o.label),
+        }))
+    } catch {
+      return []
+    }
+  }
   tuiApp.registerOverlays({
     // Pager — scrollback 内容 或 当前选中 worker 的 detail（用于 /tasks Enter）
     pagerContent: () => {
@@ -529,6 +565,7 @@ async function main() {
         cacheHitRate: ctx.session.getRecentTurnHitRate(3) ?? ctx.session.getCacheHitRate(),
         cost: metrics?.cost ?? 0,
         mcpManager: ctx.refs.mcpManager,
+        advisoryStatusNotices,
       })
     },
     // Rewind — 最近用户消息（携带真实 messageIndex 作为回溯边界）
@@ -639,8 +676,17 @@ async function main() {
         selectedIndex: 0,
       }
     },
-    // Effort 选择面板——/effort 无参数时弹出，上下选择 + 回车确认。
+    // Effort / Permission 选择面板——/effort 或 /permission 无参数时弹出，上下选择 + 回车确认。
     choicePanelData: () => {
+      if (tuiApp.choicePanelKind === 'permission') {
+        const current = ctx?.agent.config.approvalMode ?? 'auto-safe'
+        const entries = [
+          { id: 'manual', label: 'Manual', description: '每个高风险工具都弹确认。最大控制，适合敏感项目。', current: current === 'manual' },
+          { id: 'auto-safe', label: 'Auto', description: '低/无风险工具自动执行，高风险仍需确认。可配每 N 轮暂停检查点。', current: current === 'auto-safe', recommended: true },
+          { id: 'dangerously-skip-permissions', label: 'YOLO', description: '全自动执行，无刹车无打扰。回滚兜底（/rollback + git 检查点）。需二次确认。', current: current === 'dangerously-skip-permissions' },
+        ]
+        return { title: '权限模式 / Permission', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
+      }
       const current = ctx?.agent.getReasoningEffort() ?? ctx?.agent.config.reasoningEffort ?? 'high'
       const isAuto = ctx?.agent.config.autoReasoning && !ctx?.agent.userReasoningOverride
       const entries: Array<{ id: string; label: string; description: string; recommended?: boolean; current?: boolean }> = [
@@ -653,6 +699,9 @@ async function main() {
       ]
       return { title: '推理强度 / Reasoning Effort', choices: entries, selectedIndex: Math.max(0, entries.findIndex(e => e.current)) }
     },
+    // Plan Picker — Shift+Tab / /plan-approve 无参打开的待批计划选择器。
+    // 同步读盘（渲染路径不能 await），只列出等待批准的 submitted 计划。
+    planPickerData: () => ({ entries: pendingPlanPickerEntries(), selectedIndex: 0 }),
   }, /* paletteExec: */ (index: number) => {
     // Command palette Enter 回调：执行选中命令。
     // 必须用与 display 相同的过滤后列表，否则 query 过滤时索引错位。
@@ -750,6 +799,20 @@ async function main() {
       tuiApp.commitStatic(`⚠️ 设置默认主题失败: ${(err as Error).message}`)
     }
   }, /* choicePanelExec: */ (id: string) => {
+    if (tuiApp.choicePanelKind === 'permission') {
+      // Permission 选择面板回调
+      tuiApp.choicePanelKind = 'effort' // reset
+      if (id === 'dangerously-skip-permissions') {
+        // YOLO needs confirmation — re-show panel with confirm prompt
+        tuiApp.choicePanelKind = 'permission'
+        tuiApp.commitStatic('⚠ YOLO 模式将跳过所有审批，全自动执行。确认请输入: /permission yolo confirm')
+        return
+      }
+      ctx!.agent.setApprovalMode(id as import('./agent/loop-types.js').ApprovalMode)
+      const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[id] ?? id
+      tuiApp.commitStatic(`权限模式 → ${label}`)
+      return
+    }
     // Effort 选择面板回车回调。
     ctx!.agent.setReasoningEffort(id as import('./agent/auto-reasoning.js').ReasoningEffort | 'auto')
     const label = id === 'auto' ? 'Auto（按任务复杂度自动选档）' : id
@@ -797,6 +860,17 @@ async function main() {
       liveApplied
         ? `✅ ${summary}`
         : `✅ ${summary}\n（已保存到配置。若模型未切换，重启天枢后生效。）`,
+    )
+  }, /* planPickerExec: */ (slug: string) => {
+    // Plan Picker Enter 回调：批准选中计划并自动 kickoff 分波执行（与 /plan-approve 共用）。
+    void approvePlanAndKickoff(
+      {
+        cwd: ctx!.agent.cwd,
+        agent: ctx!.agent,
+        submitToAgent: (prompt: string) => { tuiApp.submitText(prompt) },
+        notify: (content: string, isError?: boolean) => tuiApp.commitStatic(content, { isError }),
+      },
+      slug,
     )
   })
 
@@ -861,6 +935,12 @@ async function main() {
   app.setPlanModeProvider(() => ctx!.agent.planModeState === 'planning')
   app.setPlanModeToggleHandler(() => {
     const agent = ctx!.agent
+    // 有待批计划时,Shift+Tab 优先弹出选择器(方向键选 + 回车批准并自动分波执行),
+    // 免去手抄 slug。无待批计划才回落到「进入/退出 plan mode」原语义。
+    if (pendingPlanPickerEntries().length > 0) {
+      app!.activateOverlay('plan-picker')
+      return
+    }
     if (agent.planModeState === 'planning') {
       agent.exitPlanMode()
       app!.commitStatic('Plan Mode 已关闭 — 写入操作已解锁。')
@@ -888,8 +968,20 @@ async function main() {
     // /review → "deliver_task(...)"；未知 slash → null → 显示错误提示。
     const resolved = resolveAppPromptInput(trimmed, process.cwd())
     if (resolved === null) {
+      // Backstop: a registered slash command (e.g. /plan-approve) may slip past
+      // normal dispatch. Give the registry one more chance before reporting
+      // "Unknown command" — kills the silent failure users hit on /plan-* copy-paste.
       app!.rejectSubmit()
-      app!.commitStatic(`⚠️  Unknown command: ${trimmed.split(/\s/)[0]}\nType /help for available commands.`)
+      void (async () => {
+        const handled = await app!.tryDispatchSlash(trimmed)
+        if (!handled) {
+          const firstTok = trimmed.split(/\s/)[0]
+          const planHint = firstTok?.startsWith('/plan')
+            ? '\n提示: Shift+Tab 打开待批计划选择器,或 /plan-list 查看计划、/plan-approve 无参批准唯一待批计划。'
+            : ''
+          app!.commitStatic(`⚠️  Unknown command: ${firstTok}\nType /help for available commands.${planHint}`)
+        }
+      })()
       return
     }
 

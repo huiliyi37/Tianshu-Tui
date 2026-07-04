@@ -91,6 +91,10 @@ export function createSelfVerifyHook(deps: SelfVerifyHookDeps): PostTurnRuntimeH
         category: 'discipline',
         content: '【瑶光】最近几步你基于读取/编辑给出了结论，但没有独立验证（未运行测试或类型检查）。在继续推进之前，请先确认该结论有 ground truth 支撑——跑测试/读原文/用原输入自检，而非信任摘要或自己的判断。',
         ttl: 1,
+        // P1a 核销 + Phase 2 挂起观察：模型常在下一轮自发验证——挂 1 个周期,
+        // 窗口内 expect 已满足则自愈撤销（ICU 延迟确认降误报）,否则准时送达。
+        expect: { kind: 'verify_attempted', withinTurns: 2 },
+        observe: { turns: 1 },
       })
     },
   }

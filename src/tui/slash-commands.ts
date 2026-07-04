@@ -34,7 +34,7 @@ import { formatVolatilePayloadReport } from '../context/payload-diagnostic.js'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { exportsDir } from '../config/paths.js'
-import { listPlans, approvePlan, rejectPlan } from '../plan/plan-store.js'
+import { listPlans, approvePlan, rejectPlan, resolvePlanOptionLabel, resolvePlanRef, stripCopiedTitleSuffix } from '../plan/plan-store.js'
 import { fullRebuild, generateCodebaseIndexBlock, getHeadSha } from '../repo/codebase-index.js'
 import { isDiagramType, buildDiagramDoc, renderDiagramBlock, formatDiagramList } from './diagram-templates.js'
 import { renderRecoveryStack } from '../agent/recovery-stack.js'
@@ -60,7 +60,7 @@ import { loadTodos, setTodoSession } from '../tools/todo.js'
 import { restoreGoalTracker } from '../agent/goal-persist.js'
 import { setPlanSession } from '../agent/plan-store.js'
 import { isToolAllowed, isToolDenied, isBashCommandAllowlisted, isBashCommandDenied } from '../agent/permissions.js'
-import { getMirrorConfig, setMirrorConfig } from '../config/manager.js'
+import { getMirrorConfig, setMirrorConfig, setCheckpointConfig } from '../config/manager.js'
 import { formatMirrorStatus } from '../tools/mirror-env.js'
 import { detectEnv, formatEnvGuidance, recommendUvSetup, isPythonProject } from '../tools/env-check.js'
 import { getResolvedEnv, getResolvedPathDiff } from '../tools/resolved-env.js'
@@ -77,8 +77,7 @@ const HELP_TEXT = `Available commands:
 /model [name|list] — Show or switch model
 /domain [list|<name>|auto|off] — Show or switch star domain personality
 /verbose — Toggle verbose tool output
-/auto — Toggle auto-approve
-/permission [status|mode|allow|deny|bash|remove|reset|test] — Manage permission mode and rules
+/permission [manual|auto|yolo|allow|deny|bash|remove|reset|test] — 权限模式：统一入口（Manual/Auto/YOLO 三档）
 /theme [cobalt|gemini|antigravity|slate|ziwei|tianshu|midnight|pastel|cyberpunk|observatory|starfield|claude] — Switch color theme (default: cobalt)
 /vim — Toggle vim keybindings
 /effort [off|low|medium|high|max] — Set reasoning effort
@@ -99,7 +98,7 @@ const HELP_TEXT = `Available commands:
 /evidence — Show last turn evidence summary
 /debug [prompt|fingerprint|cache|context-payload|mcp] — Debug info
 /mcp — Show MCP server status
-/cockpit [summary|trace|verify|context|safety|model|off] — Toggle cockpit panel
+/cockpit [summary|trace|verify|context|safety|model|mcp|advisory|off] — Toggle cockpit panel
 /scroll — Browse session history in pager
 /skill [list|install <name>|import <name>|<name>|off <name>|review|approve <name>|reject <name>] — List/load skills; install from .claude/skills; review drafts
 /interview <topic> — Deep interview before coding
@@ -176,6 +175,8 @@ export interface SlashHandlerContext {
   setCockpitPanel: (v: Panel | ((prev: Panel) => Panel)) => void
   activeOverlay?: string | null
   surfacePush?: (id: string) => void
+  /** 设置 choice-panel 类型（effort / permission），供选择面板渲染器读取。 */
+  setChoicePanelKind?: (kind: 'effort' | 'permission') => void
   surfacePop?: () => void
   pushStatic: (entry: LogEntry) => void
   setIsStreaming: (v: boolean) => void
@@ -457,6 +458,42 @@ export function resolveEnterWorkerInput(
   return { prompt }
 }
 
+
+/** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
+export function buildPlanKickoff(slug: string, title: string, approach?: string): string {
+  let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
+  if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
+  return msg
+}
+
+/**
+ * 批准计划并自动 kickoff 分波执行的共享闭环。slash `/plan-approve` 与 plan-picker
+ * overlay 回车共用:approve → setActivePlan(注入指针 + 退出 plan mode)→ 提交 kickoff。
+ * 返回 false 表示计划不存在(调用方据此报错)。
+ */
+export async function approvePlanAndKickoff(
+  deps: {
+    cwd: string
+    agent: Pick<AgentLoop, 'setActivePlan'>
+    submitToAgent?: (prompt: string) => void
+    notify: (content: string, isError?: boolean) => void
+  },
+  slug: string,
+  resolvedApproach?: string,
+): Promise<boolean> {
+  const approved = await approvePlan(deps.cwd, slug)
+  if (!approved) {
+    deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
+    return false
+  }
+  deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
+  const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
+  deps.notify(
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。`,
+  )
+  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach))
+  return true
+}
 
 interface TuiSlashCommandDef {
   readonly name: string
@@ -1188,45 +1225,6 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     },
   },
   {
-    name: '/auto',
-    immediate: true,
-    handler(ctx) {
-      const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const next = !ctx.autoSafeRef.current
-      ctx.setAutoSafe(next)
-      ctx.agent.setApprovalMode(next ? 'auto-safe' : 'manual')
-      pushStatic(createLogEntry({ type: 'system', content: next ? 'Auto-approve: on (auto-safe — high-risk still requires approval)' : 'Auto-approve: off (manual — all mutating tools require approval)' }))
-      setIsStreaming(false)
-      return true
-    },
-  },
-  {
-    name: '/yes',
-    immediate: true,
-    handler(ctx) {
-      const { parts, agent, pushStatic, setIsStreaming } = ctx
-      const sub = parts[1]?.toLowerCase()
-      const currentlyYolo = (agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
-      let enable: boolean
-      if (sub === 'on') enable = true
-      else if (sub === 'off') enable = false
-      else enable = !currentlyYolo // bare /yes toggles
-
-      if (enable) {
-        agent.setApprovalMode('dangerously-skip-permissions')
-        ctx.setAutoSafe(false)
-        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。' }))
-      } else {
-        agent.setApprovalMode('auto-safe')
-        ctx.setAutoSafe(true)
-        pushStatic(createLogEntry({ type: 'system', content: 'YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。' }))
-      }
-      setIsStreaming(false)
-      return true
-    },
-  },
-  {
     name: '/permission',
     immediate: true,
     handler(ctx) {
@@ -1275,12 +1273,11 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
 
         const lines: string[] = []
         const currentMode = agent.config.approvalMode ?? 'manual'
-        lines.push(`当前模式: ${currentMode}`)
-        lines.push('\n可选模式：')
-        for (const m of VALID_MODES) {
-          const marker = m === currentMode ? '→ ' : '  '
-          lines.push(`${marker}${MODE_LABELS[m]}`)
-        }
+        const currentLabel = { manual: 'Manual', 'auto-safe': 'Auto', 'auto-accept': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[currentMode] ?? currentMode
+        lines.push(`当前权限: ${currentLabel} (${currentMode})`)
+        lines.push('')
+        lines.push('快速切换: /permission manual | /permission auto [轮次] | /permission yolo [confirm]')
+        lines.push('')
 
         if (allow.length > 0) {
           lines.push('\nAllow 规则：')
@@ -1309,11 +1306,76 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
         return lines.join('\n')
       }
 
-      if (!sub || sub === 'status') {
+      if (!sub) {
+        // 无参数 → 弹出交互式权限选择面板（上下选 + 回车确认，同 /effort 风格）
+        ctx.setChoicePanelKind?.('permission')
+        ctx.surfacePush?.('choice-panel')
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'status') {
         pushStatic(createLogEntry({ type: 'system', content: formatRules() }))
         setIsStreaming(false)
         return true
       }
+
+      // ── 三档快速切换 ──
+
+      if (sub === 'manual') {
+        agent.setApprovalMode('manual')
+        ctx.setAutoSafe(false)
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 Manual — 所有高风险操作都需人工确认' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'auto') {
+        const intervalRaw = parts[2]
+        if (intervalRaw !== undefined) {
+          const v = Number(intervalRaw)
+          if (!Number.isInteger(v) || v < 0) {
+            pushStatic(createLogEntry({ type: 'system', content: '轮数必须是非负整数。用法: /permission auto [轮次]', isError: true }))
+            setIsStreaming(false)
+            return true
+          }
+          setCheckpointConfig({ checkpointEveryTurns: v })
+        }
+        agent.setApprovalMode('auto-safe')
+        ctx.setAutoSafe(true)
+        const interval = intervalRaw !== undefined ? Number(intervalRaw) : undefined
+        const cpNote = interval !== undefined ? (interval > 0 ? `，检查点每 ${interval} 轮暂停` : '，检查点已关闭') : ''
+        pushStatic(createLogEntry({ type: 'system', content: `✓ 已切换至 Auto — 低/无风险工具自动执行，高风险仍需确认${cpNote}\n\n  调整检查点: /permission auto <轮数>（0 = 关）` }))
+        setIsStreaming(false)
+        return true
+      }
+
+      if (sub === 'yolo') {
+        const confirmed = parts[2]?.toLowerCase() === 'confirm'
+        if (!confirmed) {
+          pushStatic(createLogEntry({ type: 'system', content: [
+            '⚠ YOLO 模式风险说明',
+            '',
+            '  · 无轮次刹车 — run 一直执行到完成或 maxTurns 上限',
+            '  · 无进度播报 — 完全静默运行',
+            '  · 所有工具调用直接执行，不再弹确认',
+            '  · 沙箱仍拦截项目外写入',
+            '  · 回滚兜底：/rollback + git 检查点',
+            '  · Windows 注意：沙箱能力降级',
+            '',
+            '确认进入: /permission yolo confirm',
+          ].join('\n') }))
+          setIsStreaming(false)
+          return true
+        }
+        agent.setApprovalMode('dangerously-skip-permissions')
+        ctx.setAutoSafe(false)
+        pushStatic(createLogEntry({ type: 'system', content: '✓ 已切换至 YOLO — 全自动执行，无刹车无打扰。/rollback 可随时回滚。' }))
+        setIsStreaming(false)
+        return true
+      }
+
+      // ── 高级 mode 命令（保留兼容） ──
 
       if (sub === 'mode') {
         const mode = parts[2]
@@ -1323,7 +1385,6 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
           return true
         }
         agent.setApprovalMode(mode)
-        // Keep /auto toggle ref in sync for users who still use /auto.
         ctx.setAutoSafe(mode === 'auto-safe')
         pushStatic(createLogEntry({ type: 'system', content: `Approval mode → ${mode}` }))
         setIsStreaming(false)
@@ -1445,6 +1506,15 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
       const cmd = parts[0]!.toLowerCase()
+      // Idempotent re-entry: if already planning, keep the current draft —
+      // re-entering would create a fresh empty draft and orphan the one the
+      // agent is writing to.
+      if (ctx.agent.getPlanModeState() === 'planning') {
+        const activePath = ctx.agent.getActivePlanFilePath()
+        pushStatic(createLogEntry({ type: 'system', content: `🔍 Plan Mode is already active.${activePath ? `\nActive plan file: \`${activePath}\`` : ''}\n\nUse Shift+Tab or /plan-approve to exit.` }))
+        setIsStreaming(false)
+        return true
+      }
       ctx.agent.enterPlanMode()
       pushStatic(createLogEntry({ type: 'system', content: '🔍 Plan Mode activated. Write operations are blocked except the active plan file.\n\nWorkflow: identify key questions → delegate_task (code_scout) / web_search → write plan incrementally → ask_user_question or plan submit.\n\nWhen ready:\n  plan action=submit — submit for approval\n  /plan-list — list submitted plans\n  /plan-approve <slug> [option] — approve and start execution\n  /plan-reject <slug> <feedback> — reject with feedback (plan mode stays active)' }))
       setIsStreaming(false)
@@ -1477,60 +1547,90 @@ const TUI_SLASH_COMMANDS: readonly TuiSlashCommandDef[] = [
     immediate: true,
     async handler(ctx) {
       const { parts, pushStatic, setIsStreaming } = ctx
-      const cmd = parts[0]!.toLowerCase()
-      const slug = parts[1]?.toLowerCase()
-      const selectedApproach = parts.slice(2).join(' ').trim() || undefined
-      if (!slug) {
-        // No slug — list plans and hint
-        const cwd = ctx.agent.cwd
-        const plans = await listPlans(cwd)
-        if (plans.length === 0) {
-          pushStatic(createLogEntry({ type: 'system', content: 'No plans to approve. Use /plan-mode to create one.' }))
-        } else {
-          const submitted = plans.filter(p => p.status === 'submitted')
-          if (submitted.length === 0) {
-            pushStatic(createLogEntry({ type: 'system', content: `No submitted plans awaiting approval.\n\nUse /plan-list to see all plans.` }))
-          } else {
-            const hint = submitted.map(p => `  /plan-approve ${p.slug} — ${p.title}`).join('\n')
-            pushStatic(createLogEntry({ type: 'system', content: `Submitted plans awaiting approval:\n\n${hint}` }))
-          }
-        }
-        setIsStreaming(false)
-        return true
-      }
-
       const cwd = ctx.agent.cwd
-      const approved = await approvePlan(cwd, slug)
-      if (!approved) {
-        pushStatic(createLogEntry({ type: 'system', content: `Plan not found: "${slug}". Use /plan-list to see available plans.`, isError: true }))
-        setIsStreaming(false)
-        return true
-      }
+      const notify = (content: string, isError?: boolean) =>
+        pushStatic(createLogEntry({ type: 'system', content, isError }))
+      const kickoffDeps = { cwd, agent: ctx.agent, submitToAgent: ctx.submitToAgent, notify }
+      const rawArg = parts.slice(1).join(' ').trim()
+      const plans = await listPlans(cwd)
 
-      if (selectedApproach && approved.options && approved.options.length > 0) {
-        const known = approved.options.some(o => o.label === selectedApproach)
-        if (!known) {
-          const available = approved.options.map(o => `  \`${o.label}\``).join('\n')
-          pushStatic(createLogEntry({
-            type: 'system',
-            content: `Unknown option "${selectedApproach}". Available options:\n${available}`,
-            isError: true,
-          }))
+      // ── No arg: approve the single pending plan, else open the picker ──
+      if (!rawArg) {
+        const submitted = plans.filter(p => p.status === 'submitted')
+        if (submitted.length === 0) {
+          notify(plans.length > 0
+            ? 'No submitted plans awaiting approval.\n\nUse /plan-list to see all plans.'
+            : 'No plans to approve. Use /plan-mode to create one.')
           setIsStreaming(false)
           return true
         }
+        if (submitted.length === 1) {
+          // Sole pending plan → approve + kickoff directly (no slug typing needed).
+          await approvePlanAndKickoff(kickoffDeps, submitted[0]!.slug)
+          setIsStreaming(false)
+          return true
+        }
+        // Multiple pending → interactive picker (arrow-select + Enter approves).
+        if (ctx.surfacePush) {
+          ctx.surfacePush('plan-picker')
+        } else {
+          const hint = submitted.map(p => `  /plan-approve ${p.slug}`).join('\n')
+          notify(`Submitted plans awaiting approval:\n\n${hint}`)
+        }
+        setIsStreaming(false)
+        return true
       }
 
-      // Inject a tiny pointer (slug/title/path) into the dynamic appendix — the
-      // plan body stays on disk to keep the prefix cache intact. setActivePlan
-      // also releases plan mode internally.
-      ctx.agent.setActivePlan({
-        slug,
-        title: approved.title,
-        selectedApproach: selectedApproach || undefined,
-      })
-      const approachLine = selectedApproach ? `\nSelected approach: **${selectedApproach}**` : ''
-      pushStatic(createLogEntry({ type: 'system', content: `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 执行可开始。\n\nUse /plan-list to view all plans.` }))
+      // ── Explicit arg: resolve tolerantly (handles copied "slug — title") ──
+      // A copied hint contains " — "; a real approach is space-separated. Split so
+      // the em-dash title junk never gets mistaken for an approach.
+      let slugCandidate: string
+      let approachRaw = ''
+      if (rawArg.includes(' — ')) {
+        slugCandidate = stripCopiedTitleSuffix(rawArg)
+      } else {
+        slugCandidate = parts[1]!
+        approachRaw = parts.slice(2).join(' ').trim()
+      }
+
+      let resolution = resolvePlanRef(plans, slugCandidate)
+      // Fallback: the whole arg may be a multi-word title, not slug + approach.
+      if (resolution.kind === 'none' && approachRaw) {
+        const full = resolvePlanRef(plans, rawArg)
+        if (full.kind === 'match') { resolution = full; approachRaw = '' }
+      }
+      if (resolution.kind === 'none') {
+        notify(`Plan not found: "${stripCopiedTitleSuffix(rawArg)}". Use /plan-list to see available plans.`, true)
+        setIsStreaming(false)
+        return true
+      }
+      if (resolution.kind === 'ambiguous') {
+        notify(`Ambiguous plan ref "${stripCopiedTitleSuffix(rawArg)}". Matches:\n${resolution.slugs.map(s => `  \`${s}\``).join('\n')}\n\nUse the full slug, or /plan-approve (no arg) to pick interactively.`, true)
+        setIsStreaming(false)
+        return true
+      }
+
+      const plan = resolution.plan
+      const slug = plan.slug
+
+      // Validate the selected approach BEFORE mutating the plan file — approving
+      // first would leave the file marked APPROVED even when the option is bogus.
+      let resolvedApproach: string | undefined
+      if (approachRaw) {
+        if (plan.options && plan.options.length > 0) {
+          resolvedApproach = resolvePlanOptionLabel(plan.options, approachRaw)
+          if (!resolvedApproach) {
+            const available = plan.options.map(o => `  \`${o.label}\``).join('\n')
+            notify(`Unknown option "${approachRaw}". Available options:\n${available}`, true)
+            setIsStreaming(false)
+            return true
+          }
+        } else {
+          resolvedApproach = approachRaw
+        }
+      }
+
+      await approvePlanAndKickoff(kickoffDeps, slug, resolvedApproach)
       setIsStreaming(false)
       return true
     },
@@ -3068,6 +3168,7 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
       submitToAgent: (prompt: string) => { app.submitText(prompt) },
       goalTrackerRef: ctx.refs.goalTrackerRef,
       surfacePush: (id: string) => { app.activateOverlay(id) },
+      setChoicePanelKind: (kind) => { app.choicePanelKind = kind },
       surfacePop: () => { app.deactivateOverlay() },
       setReasoningEffort: (effort) => { ctx.agent.setReasoningEffort(effort) },
       reasoningEffort: ctx.agent.getReasoningEffort() ?? ctx.agent.config.reasoningEffort,
@@ -3352,48 +3453,13 @@ export function registerTuiSlashCommands(app: TuiApp, ctx: BootstrapContext): vo
     },
   })
 
-  register("/auto", {
-    description: "Toggle auto-approve",
+  register("/permission", {
+    description: "权限模式：Manual / Auto / YOLO 三档统一入口",
     immediate: true,
     handler: () => {
-      const next = !autoSafeRef.current
-      autoSafeRef.current = next
-      const mode = next ? "auto-safe" : "manual"
-      ctx.agent.setApprovalMode(mode)
-      app.setApprovalMode(mode)
-      app.commitStatic(next
-        ? 'Auto-approve: on (auto-safe — high-risk still requires approval)'
-        : 'Auto-approve: off (manual — all mutating tools require approval)')
-      app.setStreamingState(false)
-      return true
-    },
-  })
-
-  // /yes needs the same TUI state sync as /auto so worker pills / glance bar
-  // reflect the real approval mode.
-  register("/yes", {
-    description: "YOLO 模式 — 一键跳过所有审批（再次输入关闭）",
-    immediate: true,
-    handler: ({ trimmed }) => {
-      const parts = trimmed.split(/\s+/)
-      const sub = parts[1]?.toLowerCase()
-      const currentlyYolo = (ctx.agent.config.approvalMode ?? 'manual') === 'dangerously-skip-permissions'
-      let enable: boolean
-      if (sub === 'on') enable = true
-      else if (sub === 'off') enable = false
-      else enable = !currentlyYolo
-
-      if (enable) {
-        ctx.agent.setApprovalMode('dangerously-skip-permissions')
-        autoSafeRef.current = false
-        app.setApprovalMode('dangerously-skip-permissions')
-        app.commitStatic('YES 模式：开启 — 跳过所有审批，不再弹确认。⚠️ 高风险操作也会直接执行，请谨慎。')
-      } else {
-        ctx.agent.setApprovalMode('auto-safe')
-        autoSafeRef.current = true
-        app.setApprovalMode('auto-safe')
-        app.commitStatic('YES 模式：关闭 — 恢复 auto-safe（高风险操作仍会弹确认）。')
-      }
+      // Delegate to the main permission handler — it reads approvalMode live.
+      app.setApprovalMode(ctx.agent.config.approvalMode ?? 'manual')
+      app.commitStatic(`当前权限: ${ctx.agent.config.approvalMode ?? 'manual'} — /permission manual|auto|yolo 快速切换`)
       app.setStreamingState(false)
       return true
     },

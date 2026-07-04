@@ -25,6 +25,7 @@ import {
   type WorkerResult,
   type WorkerBudget,
   type WorkOrderScope,
+  type WorkerFailureReason,
   clampWorkerMaxTurns,
 } from './work-order.js'
 import { buildPrimaryWorkerPacket } from './worker-prompts.js'
@@ -295,18 +296,33 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
-function workerFailureResult(order: WorkOrder, error: unknown, nextActions?: string[]): WorkerResult {
+function classifyWorkerError(error: unknown): WorkerFailureReason {
+  const msg = error instanceof Error ? error.message : String(error)
+  if (/timed out|timeout|exceeded.*time/i.test(msg)) return 'timeout'
+  if (/JSON|parse.*fail|malformed|unexpected token|Unterminated string/i.test(msg)) return 'json_parse'
+  if (/schema|validation.*fail|does not match/i.test(msg)) return 'schema_mismatch'
+  if (/circuit.*open|breaker/i.test(msg)) return 'circuit_open'
+  if (/aborted|cancelled|signal/i.test(msg)) return 'caller_aborted'
+  if (/claim.*conflict|claimed by/i.test(msg)) return 'claim_conflict'
+  if (/crash|killed|signal|ECONNRESET/i.test(msg)) return 'worker_crash'
+  return 'unknown'
+}
+
+function workerFailureResult(order: WorkOrder, error: unknown, opts?: { nextActions?: string[]; failureReason?: WorkerFailureReason }): WorkerResult {
   const reason = error instanceof Error ? error.message : String(error)
+  const nextActions = opts?.nextActions ?? ['Primary should continue without trusting this worker result']
+  const failureReason = opts?.failureReason ?? 'unknown'
   return {
     workOrderId: order.id,
     status: 'blocked',
-    summary: `Worker failed: ${reason}`,
+    summary: `Worker ${failureReason === 'timeout' ? 'timed out' : 'failed'}: ${reason}`,
     findings: [],
-    artifacts: [{ kind: 'risk', title: 'Worker execution failed', content: reason }],
+    artifacts: [{ kind: 'risk', title: `Worker execution ${failureReason === 'timeout' ? 'timed out' : 'failed'}`, content: reason }],
     changedFiles: [],
-    risks: [`worker failed: ${reason}`],
-    nextActions: nextActions ?? ['Primary should continue without trusting this worker result'],
+    risks: [`worker ${failureReason === 'timeout' ? 'timed out' : 'failed'}: ${reason}`],
+    nextActions,
     evidenceStatus: 'blocked',
+    failureReason,
   }
 }
 
@@ -1081,7 +1097,7 @@ export class DelegationCoordinator {
       return {
         status: 'completed',
         order,
-        results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'))],
+        results: [workerFailureResult(order, new Error('Delegation aborted: caller signal fired'), { failureReason: 'caller_aborted' })],
         packet: await buildPrimaryWorkerPacket([], this.config.artifactStore),
       }
     }
@@ -1552,7 +1568,7 @@ export class DelegationCoordinator {
                   if (conflictedFiles.length > 0) {
                     for (const f of retryClaimFiles) registry.releaseClaim(sid, f)
                     const degraded = this.enrichResult(
-                      workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`)),
+                      workerFailureResult(order, new Error(`Retry blocked: ${conflictedFiles.join(', ')} claimed by another session`), { failureReason: 'claim_conflict' }),
                       strongCard.model,
                       upgradedConfig.providerName,
                     )
@@ -1614,7 +1630,7 @@ export class DelegationCoordinator {
             // Pro upgrade also failed — record provider outcome; circuit failure for tier-locked profiles
             this.recordProviderOutcome(strongCard.model, false)
             if (profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-            const degraded = this.enrichResult(workerFailureResult(order, error), strongCard.model, upgradedConfig.providerName)
+            const degraded = this.enrichResult(workerFailureResult(order, error, { failureReason: classifyWorkerError(error) }), strongCard.model, upgradedConfig.providerName)
             return {
               status: 'completed' as const,
               order,
@@ -1632,7 +1648,7 @@ export class DelegationCoordinator {
       // If retry didn't happen, return degraded — circuit records failure for tier-locked profiles
       if (!run) {
         if (!isAbort && profileRegistry.get(order.profile)?.tierLock) this.circuitBreaker.recordFailure(order.profile)
-        const degraded = this.enrichResult(workerFailureResult(order, error), selected.model, workerConfig.providerName)
+        const degraded = this.enrichResult(workerFailureResult(order, error, { failureReason: classifyWorkerError(error) }), selected.model, workerConfig.providerName)
         return {
           status: 'completed' as const,
           order,
@@ -1845,7 +1861,7 @@ export class DelegationCoordinator {
         }
         queue.markCompleted(order)
       } catch (error) {
-        allResults.push(workerFailureResult(order, error))
+        allResults.push(workerFailureResult(order, error, { failureReason: classifyWorkerError(error) }))
         queue.markFailed(order)
       }
       completedCount++

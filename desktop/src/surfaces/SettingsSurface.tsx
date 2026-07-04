@@ -21,9 +21,11 @@ import { ProviderSettings } from '../components/ProviderSettings'
 import { RoutingSettings } from '../components/RoutingSettings'
 import { McpSettings } from '../components/McpSettings'
 import { StorageLocationPanel } from '../components/StorageLocationPanel'
-import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getAutonomyConfig, setAutonomyConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { getMcpStatus, getMcpPresets, addMcpServer, removeMcpServer, restartMcpServer, getStorageReport, cleanupStorage, getEditorConfig, setEditorConfig, getShellConfig, setShellConfig, getEnvironment, getCheckpointConfig, setCheckpointConfig, type StorageReport, type EditorConfig, type EditorPlatform, type EditorEol } from '../runtime/client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import type { McpStatusResponse, McpServerConfig, McpPreset } from '../runtime/types'
+import type { McpStatusResponse, McpServerConfig, McpPreset, EnvironmentInfo } from '../runtime/types'
 import { useWallpaper, type WallpaperFit } from '../components/WallpaperLayer'
 import {
   Select,
@@ -308,6 +310,7 @@ export function SettingsSurface() {
             </section>
             <AutostartSection />
             <PlatformSection />
+            <ShellSection />
             <StorageLocationSection />
             <StorageSection />
             <UpdaterSection />
@@ -528,41 +531,79 @@ function AutostartSection() {
   )
 }
 
-/** C3 刹车 — 自治档检查点档位（每 N 轮暂停等确认，0 = 关）。仅自治档生效。 */
+/** C3 — Auto 模式检查点间隔。权限模式（Manual/Auto/YOLO）通过 AutonomyControl 切换。 */
 function CheckpointSection() {
-  const [value, setValue] = useState<number | null>(null)
+  const [cfg, setCfg] = useState<{ checkpointEveryTurns: number } | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const [customInterval, setCustomInterval] = useState('')
 
   useEffect(() => {
-    void getAutonomyConfig().then((c) => setValue(c.checkpointEveryTurns)).catch(() => setValue(null))
+    void getCheckpointConfig()
+      .then((c) => setCfg({ checkpointEveryTurns: c.checkpointEveryTurns }))
+      .catch(() => setCfg(null))
   }, [])
 
-  const update = useCallback(async (next: number) => {
+  const update = useCallback(async (patch: { checkpointEveryTurns?: number }) => {
     setMsg(null)
-    setValue(next)
     try {
-      await setAutonomyConfig({ checkpointEveryTurns: next })
+      const saved = await setCheckpointConfig(patch)
+      setCfg({ checkpointEveryTurns: saved.checkpointEveryTurns })
       setMsg('已保存 · 新会话生效')
     } catch (err) {
       setMsg(`保存失败：${(err as Error).message}`)
     }
   }, [])
 
-  if (value === null) return null
+  if (cfg === null) return null
+
+  const presetIntervals = [20, 25, 30]
+  const isPreset = presetIntervals.includes(cfg.checkpointEveryTurns)
+
+  const applyCustomInterval = () => {
+    const v = Number(customInterval)
+    if (!Number.isInteger(v) || v < 0) {
+      setMsg('轮数必须是非负整数（0 = 关）')
+      return
+    }
+    setCustomInterval('')
+    void update({ checkpointEveryTurns: v })
+  }
 
   return (
     <section className="settings-group">
-      <h4>自治检查点</h4>
-      <Select value={String(value)} onValueChange={(v) => void update(Number(v))}>
-        <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="10">每 10 轮暂停</SelectItem>
-          <SelectItem value="20">每 20 轮暂停</SelectItem>
-          <SelectItem value="0">关闭</SelectItem>
-        </SelectContent>
-      </Select>
+      <h4>Auto 检查点</h4>
+      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+        <Select
+          value={isPreset ? String(cfg.checkpointEveryTurns) : 'custom'}
+          onValueChange={(v) => { if (v !== 'custom') void update({ checkpointEveryTurns: Number(v) }) }}
+        >
+          <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="20">每 20 轮暂停</SelectItem>
+            <SelectItem value="25">每 25 轮暂停（推荐）</SelectItem>
+            <SelectItem value="30">每 30 轮暂停</SelectItem>
+            {!isPreset && (
+              <SelectItem value="custom">
+                {cfg.checkpointEveryTurns === 0 ? '已关闭' : `每 ${cfg.checkpointEveryTurns} 轮暂停（自定义）`}
+              </SelectItem>
+            )}
+          </SelectContent>
+        </Select>
+        <input
+          className="settings-input"
+          style={{ width: 96 }}
+          inputMode="numeric"
+          placeholder="自定义轮数"
+          value={customInterval}
+          onChange={(e) => setCustomInterval(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') applyCustomInterval() }}
+        />
+        <button type="button" className="btn-sm" onClick={applyCustomInterval} disabled={!customInterval.trim()}>
+          应用
+        </button>
+      </div>
       <div className="meta">
-        自治档（免批准）连续执行到设定轮数时暂停，等你确认方向后再继续——防止「刹不住」。受监督档位不受影响。
+        Auto 模式下，每隔 N 轮暂停并同步进度摘要。默认关闭（0 = 不暂停）。仅在 auto-safe 模式下生效；YOLO 和 Manual 模式不受影响。权限模式通过上方 Autonomy 控件切换。
       </div>
       {msg && <div className="meta">{msg}</div>}
     </section>
@@ -625,6 +666,101 @@ function PlatformSection() {
       <div className="meta" style={{ marginTop: 6 }}>
         <code>.bat</code> / <code>.cmd</code> 始终用 CRLF；已存在的文件始终沿用其原有换行符。也可在项目根的 <code>.rivet-config.json</code> 的 <code>editor</code> 段做按项目覆盖。
       </div>
+    </section>
+  )
+}
+
+function ShellSection() {
+  const [env, setEnv] = useState<EnvironmentInfo | null>(null)
+  const [path, setPath] = useState('')
+  const [saved, setSaved] = useState('')
+  const [exists, setExists] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const [e, s] = await Promise.all([getEnvironment(), getShellConfig()])
+      setEnv(e)
+      setPath(s.gitBashPath)
+      setSaved(s.gitBashPath)
+      setExists(s.exists)
+    } catch {
+      setEnv(null)
+    }
+  }, [])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  const save = useCallback(async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const next = await setShellConfig({ gitBashPath: path })
+      setSaved(next.gitBashPath)
+      setExists(next.exists)
+      if (next.gitBashPath && next.exists === false) {
+        setMsg('已保存，但该路径当前不存在 — 装好 Git 或修正路径后重启应用生效')
+      } else if (next.gitBashPath) {
+        setMsg('已保存 · 重启应用后生效')
+      } else {
+        setMsg('已清除自定义路径 · 重启应用后回到自动探测')
+      }
+      void getEnvironment().then(setEnv).catch(() => {})
+    } catch (err) {
+      setMsg(`保存失败：${(err as Error).message}`)
+    } finally {
+      setBusy(false)
+    }
+  }, [path])
+
+  // Git Bash override only affects command execution on Windows. Hide the whole
+  // card elsewhere to avoid confusing macOS/Linux users. Render nothing until
+  // the environment probe resolves so we don't flash then vanish.
+  if (!env) return null
+  if (env.platform !== 'win32') return null
+
+  const shell = env.shell
+  const usingBash = shell?.kind === 'bash'
+  const statusText = shell
+    ? usingBash
+      ? `命令执行使用 Git Bash（${shell.kind}）`
+      : `⚠ 未使用 Git Bash — 已退回 ${shell.kind}，部分命令可能异常或无输出`
+    : '未获取到 shell 状态'
+
+  return (
+    <section className="system-card">
+      <div className="system-card-header">
+        <h4>命令执行 Shell（Git Bash 路径）</h4>
+        <p className="meta">
+          Windows 上天枢优先用 Git 自带的 Git Bash 执行命令（更可靠的 POSIX 行为）。装在非默认位置、或想指定自带 Git 时，在此填 <code>bash.exe</code> 的完整路径。留空则自动探测（系统 Git → 常见位置 → 内置 PortableGit）。系统环境变量 <code>RIVET_GIT_BASH_PATH</code> 优先级更高。
+        </p>
+      </div>
+      <div className={`meta ${usingBash ? '' : 'warn'}`} style={{ marginBottom: 8 }}>
+        当前：{statusText}
+        {shell?.gitBashAvailable === false && '（未检测到可用 Git Bash）'}
+      </div>
+      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+        <Input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="C:\\Program Files\\Git\\bin\\bash.exe"
+          spellCheck={false}
+          style={{ minWidth: 340, flex: 1, fontFamily: 'var(--font-mono, monospace)' }}
+        />
+        <Button onClick={() => void save()} disabled={busy || path.trim() === saved.trim()}>
+          {busy ? '保存中…' : '保存'}
+        </Button>
+        {saved && (
+          <Button variant="outline" onClick={() => { setPath(''); }} disabled={busy}>
+            清除
+          </Button>
+        )}
+      </div>
+      {saved && exists === false && (
+        <div className="meta warn" style={{ marginTop: 6 }}>已保存的路径不存在：<code>{saved}</code></div>
+      )}
+      {msg && <div className="meta" style={{ marginTop: 8 }}>{msg}</div>}
     </section>
   )
 }

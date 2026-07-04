@@ -124,45 +124,93 @@ export function detectOrphanToolResultsOai(messages: OaiMessage[]): string[] {
   return orphanResultIds
 }
 
+const SYNTHETIC_TOOL_RESULT_CONTENT =
+  '[recovered] Tool result missing after interrupted session resume.'
+
 /**
- * OAI-format resume preflight: detect and repair orphan tool_calls.
- * Inserts synthetic role='tool' messages for orphan tool_calls.
+ * True when every assistant `tool_calls` message is IMMEDIATELY followed by a
+ * contiguous run of `tool` messages that covers exactly its tool_call ids (one
+ * each, no foreign ids), and no `tool` message appears outside such a run.
+ *
+ * This is the provider's real requirement. The id-presence check
+ * (detectOrphanToolCallsOai) is necessary but NOT sufficient: a tool result that
+ * exists but sits AFTER an intervening user/assistant message (e.g. a tool batch
+ * aborted mid-flight whose late addToolResults landed past the next turn) has a
+ * matching id yet still triggers "insufficient tool messages following
+ * tool_calls". Adjacency is what must hold.
+ */
+function isToolAdjacencyCleanOai(messages: OaiMessage[]): boolean {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!
+    if (m.role === 'tool') return false // a tool message not consumed by a run below → stray
+    if (m.role !== 'assistant' || !('tool_calls' in m) || !m.tool_calls || m.tool_calls.length === 0) continue
+
+    const ids = m.tool_calls.map(tc => tc.id)
+    const seen = new Set<string>()
+    let j = i + 1
+    while (j < messages.length && messages[j]!.role === 'tool') {
+      const id = (messages[j] as OaiToolMessage).tool_call_id
+      if (!ids.includes(id) || seen.has(id)) return false // foreign or duplicate result
+      seen.add(id)
+      j++
+    }
+    if (seen.size !== ids.length) return false // some tool_call has no in-position result
+    i = j - 1 // skip the consumed run; the outer loop's ++ lands on messages[j]
+  }
+  return true
+}
+
+/**
+ * OAI-format resume preflight: guarantee the tool-call adjacency invariant.
+ *
+ * Rebuilds each assistant `tool_calls` message's tool-result run in tool_call
+ * order, pulling the matching `tool` message from anywhere in the history (so a
+ * late/out-of-order result is MOVED back into position) and synthesizing a
+ * placeholder only when no result exists at all. Any leftover `tool` message
+ * (a duplicate or truly orphaned result) is dropped. No-op — same array
+ * reference, prefix cache untouched — when adjacency already holds.
  */
 export function runResumePreflightOai(messages: OaiMessage[]): OaiResumePreflightReport {
-  const orphanCallIds = detectOrphanToolCallsOai(messages)
-  const orphanResultIds = detectOrphanToolResultsOai(messages)
-
-  if (orphanCallIds.length === 0) {
+  if (isToolAdjacencyCleanOai(messages)) {
     return {
       messageCount: messages.length,
       roundCount: groupIntoRoundsOai(messages).length,
       repaired: false,
       syntheticResultsInserted: 0,
-      safe: orphanResultIds.length === 0,
+      safe: true,
       messages,
     }
   }
 
-  const repaired = [...messages]
+  // Index every tool message by id as a FIFO queue so identical-id results
+  // (rare, pollution) are consumed deterministically front-to-back.
+  const toolMsgsById = new Map<string, OaiToolMessage[]>()
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      const q = toolMsgsById.get(m.tool_call_id) ?? []
+      q.push(m)
+      toolMsgsById.set(m.tool_call_id, q)
+    }
+  }
+
+  const repaired: OaiMessage[] = []
   let inserted = 0
 
-  // For each orphan tool_call, insert a synthetic tool result right after the assistant message
-  for (let i = repaired.length - 1; i >= 0; i--) {
-    const msg = repaired[i]!
-    if (msg.role !== 'assistant' || !('tool_calls' in msg) || !msg.tool_calls) continue
+  for (const m of messages) {
+    if (m.role === 'tool') continue // re-emitted in-position below; leftovers are dropped
+    repaired.push(m)
+    if (m.role !== 'assistant' || !('tool_calls' in m) || !m.tool_calls || m.tool_calls.length === 0) continue
 
-    const orphans = msg.tool_calls.filter(tc => orphanCallIds.includes(tc.id))
-    if (orphans.length === 0) continue
-
-    const syntheticResults: OaiToolMessage[] = orphans.map(tc => ({
-      role: 'tool' as const,
-      tool_call_id: tc.id,
-      content: '[recovered] Tool result missing after interrupted session resume.',
-    }))
-
-    // Insert right after the assistant message
-    repaired.splice(i + 1, 0, ...syntheticResults)
-    inserted += syntheticResults.length
+    for (const tc of m.tool_calls) {
+      const q = toolMsgsById.get(tc.id)
+      const existing = q?.shift()
+      if (existing) {
+        repaired.push({ role: 'tool', tool_call_id: tc.id, content: existing.content })
+      } else {
+        repaired.push({ role: 'tool', tool_call_id: tc.id, content: SYNTHETIC_TOOL_RESULT_CONTENT })
+        inserted++
+      }
+    }
   }
 
   return {

@@ -49,7 +49,8 @@ struct PtyExit {
 }
 
 /// Windows：定位 Git Bash（与 agent bash 工具 `src/platform.ts::resolveGitBashPath`
-/// 同一优先级链：env 覆盖 → 从 `where git` 推导 → 常见安装位置）。
+/// 同一优先级链：env 覆盖 → 从 `where git` 推导 → 常见安装位置 → 内嵌
+/// PortableGit 兜底（RIVET_BUNDLED_GIT_DIR，由 lib.rs::ensure_bundled_git 设置））。
 /// 刻意不搜 PATH 上的裸 `bash.exe` —— 那可能是 WSL 的 System32 bash。
 #[cfg(windows)]
 fn find_git_bash() -> Option<String> {
@@ -85,6 +86,12 @@ fn find_git_bash() -> Option<String> {
                     .join("bin")
                     .join("bash.exe"),
             );
+        }
+    }
+    // 兜底：桌面包内嵌的 PortableGit（系统 Git 都缺席时才会走到这里）。
+    if let Ok(dir) = std::env::var("RIVET_BUNDLED_GIT_DIR") {
+        if !dir.is_empty() {
+            candidates.push(std::path::Path::new(&dir).join("bin").join("bash.exe"));
         }
     }
     candidates

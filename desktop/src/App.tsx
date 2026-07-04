@@ -5,6 +5,7 @@ import { useUiDispatch, useUiState } from './state/store'
 import { loadKnownProjects, projectId, deriveProjects } from './lib/projects'
 import { useGlobalNotifications } from './state/use-global-notifications'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { SurfaceSkeleton } from './components/Skeleton'
 import { WorkspaceSurface } from './surfaces/WorkspaceSurface'
 import { TitleBar } from './components/TitleBar'
 
@@ -18,10 +19,11 @@ import { WallpaperLayer } from './components/WallpaperLayer'
 import { WallpaperProvider } from './components/WallpaperContext'
 import { useGlobalShortcuts } from './lib/use-global-shortcuts'
 import { useSurfaceCommands } from './lib/use-surface-commands'
+import { openExternal } from './lib/open-external'
 import { ProjectTemplatesDialog } from './components/ProjectTemplatesDialog'
 import { FirstRunStorageDialog } from './components/FirstRunStorageDialog'
 import { FirstRunGitDialog } from './components/FirstRunGitDialog'
-import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured } from './runtime/client'
+import { applyProjectTemplates, getProjectTemplatesStatus, isStorageConfigured, fixAutocrlf } from './runtime/client'
 import type { ProjectTemplatesStatus } from './runtime/types'
 
 export function App() {
@@ -227,8 +229,21 @@ export function App() {
         )}
         {env.data && env.data.platform === 'win32' && env.data.gitAutocrlf === 'true' && !envDismissed && (
           <div className="banner warn">
-            检测到 git core.autocrlf=true：checkout 为 CRLF 而 agent 写入 LF，diff 会出现整文件换行噪音。
-            建议改为 input：<code>git config --global core.autocrlf input</code>
+            换行符设置可能影响代码 diff。你的 Git 当前会把文件转为 Windows 换行（CRLF），但 AI 写入的是 Unix 换行（LF），这会导致 diff 显示整文件变更（只是换行差异）。
+            <button
+              className="banner-action"
+              onClick={async () => {
+                try {
+                  await fixAutocrlf()
+                  await env.refetch()
+                  toast.success('已修复 — Git 换行设为 input（保留 LF）')
+                } catch (e) {
+                  toast.error(`修复失败: ${(e as Error).message}`)
+                }
+              }}
+            >
+              一键修复
+            </button>
             <button className="banner-close" onClick={() => setEnvDismissed(true)} aria-label="关闭" title="关闭">
               ×
             </button>
@@ -255,7 +270,7 @@ export function App() {
             未检测到 Git Bash。当前 shell 降级为 {env.data.shell.kind === 'powershell' ? 'PowerShell' : 'cmd.exe'}，部分 bash 命令可能不兼容。
             <button
               className="banner-action"
-              onClick={() => window.open('https://git-scm.com/download/win', '_blank')}
+              onClick={() => openExternal('https://git-scm.com/download/win')}
             >
               下载 Git for Windows
             </button>
@@ -275,7 +290,7 @@ export function App() {
 
         <div className="surface">
           <ErrorBoundary label={ui.surface === 'mission' ? '任务中控台' : '工作台'}>
-            <Suspense fallback={<div className="surface-loading">加载中…</div>}>
+            <Suspense fallback={<SurfaceSkeleton />}>
               <WorkspaceSurface />
             </Suspense>
           </ErrorBoundary>

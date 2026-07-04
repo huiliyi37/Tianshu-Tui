@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { writeFileAtomicSync } from '../fs-atomic.js'
 import { resolve, join } from 'path'
-import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
+import { configSchema, reviewConfigSchema, workersSchema, councilConfigSchema, editorSchema, mirrorsSchema, envSchema, uiSchema, type Config, type ProviderConfig, type ModelConfig, type ReviewConfig, type WorkersConfig, type CouncilConfig, type EditorConfig, type MirrorsConfig, type UiConfig } from './schema.js'
 import { DEFAULT_CONFIG } from './default.js'
 import { userConfigPath } from './paths.js'
 import { cloneProviderPreset, findPresetModel, isProviderPresetKey, type ProviderPresetKey } from './provider-presets.js'
@@ -49,6 +49,26 @@ export function findProjectConfig(startDir: string): string | undefined {
 }
 
 /**
+ * One-shot legacy migration for the C3 autonomy brake (2026-07): configs
+ * written before `autonomyBrake` existed persisted the then-default
+ * `checkpointEveryTurns: 10`. The default since moved to 0 (off) — a
+ * persisted 10 would pin them to the old behavior forever.  When the brake
+ * field is absent AND the interval equals the old default, treat the 10 as
+ * unmigrated legacy and drop it so the new schema default applies.
+ * Explicit non-10 values (user actually tuned it) are untouched.
+ */
+function migrateLegacyCheckpointInterval(raw: Record<string, unknown>): Record<string, unknown> {
+  const agent = raw.agent
+  if (!agent || typeof agent !== 'object' || Array.isArray(agent)) return raw
+  const a = agent as Record<string, unknown>
+  if (a.autonomyBrake === undefined && a.checkpointEveryTurns === 10) {
+    const { checkpointEveryTurns: _legacy, ...rest } = a
+    return { ...raw, agent: rest }
+  }
+  return raw
+}
+
+/**
  * Load config with 3-layer resolution: user → project → session overlay.
  *
  * Priority (highest wins):
@@ -73,7 +93,7 @@ export function loadConfig(options?: {
   if (existsSync(configPath)) {
     try {
       const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
-      base = deepMerge(base, raw as Record<string, unknown>)
+      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
     } catch {
       // malformed user config — fall through to defaults
     }
@@ -85,7 +105,7 @@ export function loadConfig(options?: {
   if (projectPath && existsSync(projectPath)) {
     try {
       const raw = JSON.parse(readFileSync(projectPath, 'utf-8'))
-      base = deepMerge(base, raw as Record<string, unknown>)
+      base = deepMerge(base, migrateLegacyCheckpointInterval(raw as Record<string, unknown>))
     } catch {
       // malformed project config — skip
     }
@@ -209,19 +229,55 @@ export function setEditorConfig(input: { platform?: unknown; eol?: unknown }): E
   return cfg.editor
 }
 
-// --- Autonomy brakes (C3) ---
+// --- Shell / Git Bash 路径（Windows 命令执行） ---
 
-/** Snapshot of the autonomy checkpoint setting for the desktop settings UI. */
-export function getAutonomyConfig(): { checkpointEveryTurns: number } {
+export interface ShellConfigSnapshot {
+  /** Configured custom Git Bash path, or empty string when unset. */
+  gitBashPath: string
+}
+
+/** Snapshot of the shell block (Git Bash override) for the desktop settings UI. */
+export function getShellConfig(): ShellConfigSnapshot {
+  return { gitBashPath: loadConfig().env.gitBashPath ?? '' }
+}
+
+/**
+ * Persist a custom Git Bash path to the user global config (`env.gitBashPath`).
+ * An empty/whitespace value clears the override. Takes effect on the next
+ * sidecar/session start (seeded into RIVET_GIT_BASH_PATH via
+ * applyConfiguredGitBashPath). Only meaningful on Windows.
+ */
+export function setShellConfig(input: { gitBashPath?: unknown }): ShellConfigSnapshot {
+  const cfg = loadConfig()
+  const merged: Record<string, unknown> = { ...cfg.env }
+  if (input.gitBashPath !== undefined) {
+    const raw = String(input.gitBashPath).trim()
+    if (raw) merged.gitBashPath = raw
+    else delete merged.gitBashPath
+  }
+  cfg.env = envSchema.parse(merged)
+  saveConfig(cfg)
+  return { gitBashPath: cfg.env.gitBashPath ?? '' }
+}
+
+// --- Auto 检查点 (C3) ---
+
+export interface CheckpointConfigSnapshot {
+  checkpointEveryTurns: number
+}
+
+/** Snapshot of the checkpoint interval for the desktop/TUI settings UI. */
+export function getCheckpointConfig(): CheckpointConfigSnapshot {
   return { checkpointEveryTurns: loadConfig().agent.checkpointEveryTurns }
 }
 
 /**
- * Persist the autonomy checkpoint interval (0 = off). Validated as a
- * non-negative integer. Takes effect at the next run() (the orchestrator reads
- * it live per turn).
+ * Persist the checkpoint interval for Auto mode (auto-safe).
+ * 0 = off (no pause). Takes effect at the next run().
  */
-export function setAutonomyConfig(input: { checkpointEveryTurns?: unknown }): { checkpointEveryTurns: number } {
+export function setCheckpointConfig(input: {
+  checkpointEveryTurns?: unknown
+}): CheckpointConfigSnapshot {
   const cfg = loadConfig()
   if (input.checkpointEveryTurns !== undefined) {
     const v = Number(input.checkpointEveryTurns)

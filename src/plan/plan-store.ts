@@ -9,7 +9,7 @@
 
 import { mkdir, readdir, readFile, stat, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 
 export interface PlanDocument {
   /** 文件名 slug (不含 .md) */
@@ -36,6 +36,18 @@ export interface PlanOption {
 }
 
 const PLAN_OPTIONS_FRONTMATTER_RE = /^---\nrivet-options:\s*(\[[\s\S]*?\])\s*\n---\n/
+
+/** approve/reject 写入的状态标记行（H1 前）。 */
+const PLAN_STATUS_LINE_RE = /^>\s*\*\*Status:\s*(?:APPROVED|REJECTED|EXECUTED)\*\*.*(?:\r?\n)+/gm
+
+/**
+ * 剥离 approve/reject 留下的状态标记行。重新提交（尤其是省略 plan 字段、
+ * 从活动计划文件整读的路径）时必须清掉，否则旧的 REJECTED 标记会让
+ * 新提交被 parsePlanStatus 误判为 rejected，从待批准列表里消失。
+ */
+export function stripPlanStatusMarkers(content: string): string {
+  return content.replace(PLAN_STATUS_LINE_RE, '')
+}
 
 /** .rivet/plans 相对于项目根目录的路径 */
 const PLANS_DIR = '.rivet/plans'
@@ -89,6 +101,65 @@ export function parsePlanOptions(content: string): PlanOption[] | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * 在方案列表中解析用户输入的方案名。大小写不敏感、忽略首尾空白，
+ * 并容忍省略 "(Recommended)" 一类括号后缀。命中时返回规范标签
+ * （options 中的原始 label），未命中返回 undefined。
+ */
+export function resolvePlanOptionLabel(
+  options: readonly PlanOption[],
+  input: string,
+): string | undefined {
+  const normalize = (s: string) => s.trim().toLowerCase()
+  const stripSuffix = (s: string) => normalize(s).replace(/\s*\([^)]*\)\s*$/, '')
+  const wanted = normalize(input)
+  const exact = options.find(o => normalize(o.label) === wanted)
+  if (exact) return exact.label
+  const wantedBare = stripSuffix(input)
+  const bareMatches = options.filter(o => stripSuffix(o.label) === wantedBare)
+  return bareMatches.length === 1 ? bareMatches[0]!.label : undefined
+}
+
+/**
+ * 剥离用户从提示行整段复制来的 " — <title>" 后缀。/plan-list 与 /plan-approve
+ * 的提示渲染成 `slug — title`，整行复制会把 title 混进参数。用 em-dash（前后带空格）
+ * 切分，只取首段 slug 候选；未含分隔符时原样返回（去首尾空白）。
+ */
+export function stripCopiedTitleSuffix(input: string): string {
+  const idx = input.indexOf(' — ')
+  return (idx >= 0 ? input.slice(0, idx) : input).trim()
+}
+
+/** resolvePlanRef 结果：命中唯一计划 / 多个候选歧义 / 未命中。 */
+export type PlanRefResolution =
+  | { kind: 'match'; plan: PlanDocument }
+  | { kind: 'ambiguous'; slugs: string[] }
+  | { kind: 'none' }
+
+/**
+ * 在计划列表中解析用户输入的计划标识，容忍复制粘贴与标题近似。
+ * 优先级：slug 精确 → slugify(title) 精确 → slug 前缀模糊。
+ * 命中唯一返回 match；命中多个返回 ambiguous；都没命中返回 none。
+ */
+export function resolvePlanRef(
+  plans: readonly PlanDocument[],
+  input: string,
+): PlanRefResolution {
+  const stripped = stripCopiedTitleSuffix(input)
+  const wanted = stripped.toLowerCase()
+  if (!wanted) return { kind: 'none' }
+  const exact = plans.find(p => p.slug.toLowerCase() === wanted)
+  if (exact) return { kind: 'match', plan: exact }
+  const wantedSlug = slugify(stripped)
+  const byTitle = plans.filter(p => slugify(p.title) === wantedSlug)
+  if (byTitle.length === 1) return { kind: 'match', plan: byTitle[0]! }
+  if (byTitle.length > 1) return { kind: 'ambiguous', slugs: byTitle.map(p => p.slug) }
+  const prefix = plans.filter(p => p.slug.toLowerCase().startsWith(wanted))
+  if (prefix.length === 1) return { kind: 'match', plan: prefix[0]! }
+  if (prefix.length > 1) return { kind: 'ambiguous', slugs: prefix.map(p => p.slug) }
+  return { kind: 'none' }
 }
 
 function buildPlanFrontmatter(options?: readonly PlanOption[]): string {
@@ -152,6 +223,39 @@ export async function listPlans(cwd: string): Promise<PlanDocument[]> {
   return plans.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
 }
 
+/**
+ * 同步列出所有计划。供 TUI overlay 的渲染 provider 使用（渲染路径无法 await
+ * 异步 listPlans）。语义与 listPlans 一致，仅换用 *Sync fs API。
+ */
+export function listPlansSync(cwd: string): PlanDocument[] {
+  const dir = plansRoot(cwd)
+  if (!existsSync(dir)) return []
+
+  const plans: PlanDocument[] = []
+  for (const entry of readdirSync(dir)) {
+    if (!entry.endsWith('.md')) continue
+    const slug = entry.replace(/\.md$/, '')
+    try {
+      const filePath = planFilePath(cwd, slug)
+      const content = readFileSync(filePath, 'utf-8')
+      const s = statSync(filePath)
+      plans.push({
+        slug,
+        title: extractTitle(content),
+        content,
+        path: join(PLANS_DIR, `${slug}.md`),
+        createdAt: s.birthtime,
+        status: parsePlanStatus(content),
+        options: parsePlanOptions(content),
+      })
+    } catch {
+      // Skip unreadable entries (mirrors readPlan's swallow-on-error).
+    }
+  }
+
+  return plans.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+}
+
 /** 标记计划为已批准（在文件头部插入状态标记） */
 export async function approvePlan(cwd: string, slug: string): Promise<PlanDocument | null> {
   return markPlanStatus(cwd, slug, 'APPROVED')
@@ -184,7 +288,9 @@ async function markPlanStatus(
     newContent = statusLine + plan.content
   }
 
-  await writePlan(cwd, slug, newContent)
+  // 透传 options — writePlan 会剥离旧 frontmatter，不传会把多方案记录抹掉，
+  // 导致 approve 后 selectedApproach 校验永远跳过（见 2026-07-03 缺陷复盘）。
+  await writePlan(cwd, slug, newContent, plan.options)
   return readPlan(cwd, slug)
 }
 

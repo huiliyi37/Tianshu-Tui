@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { SurfaceSkeleton } from '../components/Skeleton'
 import { useAbortSession, useArtifacts, useCloseSession, useSendPrompt, useSessions, useSetPlanMode } from '../state/queries'
 import { useUiDispatch, useUiState } from '../state/store'
 import { useSessionEvents } from '../state/use-session-events'
@@ -218,7 +219,7 @@ export function WorkspaceSurface() {
           <div className="conversation">
             <div className="conversation-body">
               <ThreadTabs />
-              <Suspense fallback={<div className="surface-loading">加载中…</div>}>
+              <Suspense fallback={<SurfaceSkeleton />}>
                 {ui.surface === 'home' ? <HomeSurface /> :
                  ui.surface === 'mission' ? <MissionControlSurface /> :
                  ui.surface === 'delegation' ? <DelegationSurface /> :
@@ -417,7 +418,7 @@ export function WorkspaceSurface() {
       )}
 
       {view.pendingApproval && (
-        <ApprovalModal
+        <ApprovalInline
           request={view.pendingApproval}
           onDecision={handleApproval}
         />
@@ -481,7 +482,9 @@ interface ApprovalModalProps {
   onDecision: (decision: 'approve' | 'reject', editedInput?: Record<string, unknown>) => void
 }
 
-function ApprovalModal({ request, onDecision }: ApprovalModalProps) {
+/** Inline approval card — non-blocking, pinned above the composer.
+ *  Replaces the old full-screen backdrop modal (Cursor-style inline diff gutter). */
+function ApprovalInline({ request, onDecision }: ApprovalModalProps) {
   const preview = previewOf(request)
   const editKey = editableKey(request)
   const [editing, setEditing] = useState(false)
@@ -513,62 +516,59 @@ function ApprovalModal({ request, onDecision }: ApprovalModalProps) {
   }
 
   return (
-    <div className="approval-modal-backdrop" onClick={() => onDecision('reject')}>
-      <div className="approval-modal-card" onClick={(e) => e.stopPropagation()}>
-        <div className="approval-modal-header">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">{intent.icon}</span>
-            <div className="min-w-0">
-              <h3 className="approval-modal-title truncate">{intent.title}</h3>
-              <p className="approval-modal-subtitle truncate" title={intent.desc}>{intent.desc}</p>
-            </div>
+    <div className="approval-inline">
+      <div className="approval-inline-header">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-lg shrink-0">{intent.icon}</span>
+          <div className="min-w-0">
+            <div className="approval-inline-title truncate">{intent.title}</div>
+            <div className="approval-inline-subtitle truncate" title={intent.desc}>{intent.desc}</div>
           </div>
-          <span className="approval-modal-badge shrink-0">需要批准</span>
         </div>
+        <span className="approval-inline-badge shrink-0">需批准</span>
+      </div>
 
-        <div className="approval-modal-body">
-          {editing && editKey ? (
-            <textarea
-              className="approval-modal-textarea font-mono"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-          ) : preview.isDiff ? (
-            <div className="approval-modal-diff overflow-auto max-h-[350px] border border-border rounded">
-              <DiffView raw={preview.text} />
-            </div>
-          ) : (
-            <pre className="approval-modal-pre font-mono overflow-auto max-h-[350px] border border-border rounded p-2 bg-panel-2 text-xs">
-              {preview.text}
-            </pre>
-          )}
-        </div>
+      <div className="approval-inline-body">
+        {editing && editKey ? (
+          <textarea
+            className="approval-inline-textarea font-mono"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        ) : preview.isDiff ? (
+          <div className="approval-inline-diff overflow-auto max-h-[300px] border border-border rounded">
+            <DiffView raw={preview.text} />
+          </div>
+        ) : (
+          <pre className="approval-inline-pre font-mono overflow-auto max-h-[300px] border border-border rounded p-2 bg-panel-2 text-xs">
+            {preview.text}
+          </pre>
+        )}
+      </div>
 
-        <div className="approval-modal-footer flex items-center justify-between">
-          <div>
-            {editKey && (
-              <button
-                className="btn ghost sm"
-                onClick={() => setEditing((v) => !v)}
-              >
-                {editing ? '取消编辑' : '编辑代码'}
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="btn ghost"
-              onClick={() => onDecision('reject')}
-            >
-              拒绝 (Esc)
-            </button>
-            <button
-              className="btn"
-              onClick={approve}
-            >
-              {editing ? '应用并批准' : '批准 (⌘Enter)'}
-            </button>
-          </div>
+      <div className="approval-inline-footer">
+        {editKey && (
+          <button
+            className="btn ghost sm"
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? '取消编辑' : '编辑代码'}
+          </button>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
+          <button
+            className="btn ghost sm"
+            onClick={() => onDecision('reject')}
+          >
+            拒绝 (Esc)
+          </button>
+          <button
+            className="btn sm"
+            onClick={approve}
+            autoFocus
+          >
+            {editing ? '应用并批准' : '批准 (⌘↵)'}
+          </button>
         </div>
       </div>
     </div>

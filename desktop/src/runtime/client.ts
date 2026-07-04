@@ -162,6 +162,11 @@ export function getEnvironment(): Promise<EnvironmentInfo> {
   return apiGet<EnvironmentInfo>('/environment')
 }
 
+/** One-click fix: set git core.autocrlf to 'input' (prevents CRLF diff noise). */
+export function fixAutocrlf(): Promise<{ ok: boolean }> {
+  return apiPost<{ ok: boolean }>('/config/fix-autocrlf')
+}
+
 export function getProjectTemplatesStatus(cwd: string): Promise<ProjectTemplatesStatus> {
   return apiGet<ProjectTemplatesStatus>(`/project-templates/status?cwd=${encodeURIComponent(cwd)}`)
 }
@@ -194,11 +199,6 @@ export async function listSessions(): Promise<SessionRecord[]> {
 
 export async function openFile(path: string, reveal?: boolean): Promise<void> {
   await apiPost('/open-file', { path, ...(reveal ? { reveal: true } : {}) })
-}
-
-/** Open an external URL in the system browser via the sidecar. */
-export async function openExternal(url: string): Promise<void> {
-  await apiPost('/open-external', { url })
 }
 
 export async function listAllSessions(): Promise<SessionRecord[]> {
@@ -845,6 +845,11 @@ export function removeConfigProvider(name: string): Promise<{ ok: boolean }> {
     .then(r => r.json() as Promise<{ ok: boolean }>)
 }
 
+export function removeProviderModel(providerName: string, modelId: string): Promise<{ ok: boolean }> {
+  return rivetFetch(`/config/providers/${providerName}/models/${encodeURIComponent(modelId)}`, { method: 'DELETE' })
+    .then(r => r.json() as Promise<{ ok: boolean }>)
+}
+
 export function setProviderKey(
   name: string,
   key: { apiKey?: string; apiKeyEnv?: string },
@@ -930,17 +935,35 @@ export function setEditorConfig(
   return apiPut<{ ok: boolean } & EditorConfig>('/config/editor', input)
 }
 
-// ── Autonomy brakes (C3) ─────────────────────────────────────────────
-export interface AutonomyConfig { checkpointEveryTurns: number }
+// ── Shell / Git Bash 路径（Windows 命令执行）─────────────────────────
+/** `exists`: true/false when a path is set (probed), null when unset. */
+export interface ShellConfig { gitBashPath: string; exists: boolean | null }
 
-export function getAutonomyConfig(): Promise<AutonomyConfig> {
-  return apiGet<AutonomyConfig>('/config/autonomy')
+export function getShellConfig(): Promise<ShellConfig> {
+  return apiGet<ShellConfig>('/config/shell')
 }
 
-export function setAutonomyConfig(
-  input: { checkpointEveryTurns: number },
-): Promise<{ ok: boolean } & AutonomyConfig> {
-  return apiPut<{ ok: boolean } & AutonomyConfig>('/config/autonomy', input)
+export function setShellConfig(
+  input: { gitBashPath: string },
+): Promise<{ ok: boolean } & ShellConfig> {
+  return apiPut<{ ok: boolean } & ShellConfig>('/config/shell', input)
+}
+
+// ── Auto 检查点 (C3) ─────────────────────────────────────────────
+
+export interface CheckpointConfig {
+  /** Auto mode pause interval (turns). 0 = off. */
+  checkpointEveryTurns: number
+}
+
+export function getCheckpointConfig(): Promise<CheckpointConfig> {
+  return apiGet<CheckpointConfig>('/config/checkpoint')
+}
+
+export function setCheckpointConfig(
+  input: { checkpointEveryTurns?: number },
+): Promise<{ ok: boolean } & CheckpointConfig> {
+  return apiPut<{ ok: boolean } & CheckpointConfig>('/config/checkpoint', input)
 }
 
 // ── MCP (Model Context Protocol) ────────────────────────────────────

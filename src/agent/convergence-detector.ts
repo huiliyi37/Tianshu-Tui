@@ -608,6 +608,29 @@ function buildInjectedMessage(
     return lines.join('\n')
   }
 
+  // Gate-aware variant: when delivery status is blocked or failed, integrate
+  // the gate state into the convergence message instead of giving a generic
+  // "换个角度看问题". The agent may be stuck in a retry loop that the gate
+  // already classifies as non-blocking (YELLOW) — don't contradict the gate.
+  if (deliveryStatus === 'blocked' || deliveryStatus === 'failed') {
+    const gateLabel = deliveryStatus === 'blocked' ? '受阻' : '失败'
+    lines.push(`**天枢-感知：交付门禁为 ${deliveryStatus.toUpperCase()}（验证${gateLabel}），任务进入收敛状态。**`)
+    lines.push('')
+    if (deliveryStatus === 'blocked') {
+      lines.push('验证被外部因素阻断（超时、命令不存在、测试框架缺失）。不要反复重试同一方法。')
+      lines.push('- 若为测试基础设施缺失：向用户说明并询问是否需要协助搭建')
+      lines.push('- 若为超时：增加 timeout 或分批运行')
+      lines.push('- 若已有可交付成果：确认 deliver_task 门禁状态，若 YELLOW 可带条件交付')
+    } else {
+      lines.push('验证失败。先诊断根因：是代码改动的 bug 还是预存量失败？')
+      lines.push('- 查看 failure diagnostics 定位失败文件和错误类型')
+      lines.push('- 若是预存量失败（改动前就存在）：不归你，force 交付或另行处理')
+      lines.push('- 若是你的改动引入：用最小复现定位根因')
+    }
+    lines.push('- 不要让收敛信号和门禁信号矛盾——收敛说"换策略"，门禁说"可交付"')
+    return lines.join('\n')
+  }
+
   if (level === 2) {
     lines.push('**天璇-感知：当前任务可能进入低效循环。换个角度看问题。**')
   } else {
@@ -684,7 +707,14 @@ export function evaluateConvergence(input: ConvergenceInput): ConvergenceResult 
   // text report (code review / audit / investigation) is producing its
   // deliverable, not stalling. Relax the read-only penalty and suppress the
   // productive-stagnation flag so it is not spammed with "去编辑/测试" nudges.
-  const producingReport = isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
+  //
+  // 收窄（2026-07-04 触发面修复）：豁免仅对"纯审查"生效——存在未验证编辑时，
+  // 边写长分析文本边搁置验证正是该被提醒的场景，不是审查报告。原豁免让
+  // 排查/验证类会话（每轮都输出大段分析）把改道机制永久静音，验证轮次膨胀。
+  const hasUnverifiedEdits = input.evidenceState.filesModified.size > 0
+    && input.evidenceState.deliveryStatus !== 'verified'
+  const producingReport = !hasUnverifiedEdits
+    && isProducingReport(input.textFingerprints ?? [], signals.textRepetitionPenalty)
 
   const score = computeConvergenceScore(signals, weights, input.phaseClass, input.noToolTurnCount ?? 0, input.turn, input.recentToolHistory, input.providerName, signalsMissingData, producingReport)
 

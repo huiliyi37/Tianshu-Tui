@@ -119,6 +119,25 @@ export function useGlobalShortcuts(
         dispatch({ type: 'toggleZen' })
         return
       }
+
+      // Cmd+A / Ctrl+A — only allow select-all when focused in an input/textarea.
+      // Otherwise Tauri WebView selects the entire page (messages, tools, etc.),
+      // which is never what the user wants.
+      if (mod && (e.key === 'a' || e.key === 'A')) {
+        const el = document.activeElement
+        const isInput = el instanceof HTMLInputElement
+          || el instanceof HTMLTextAreaElement
+          || (el instanceof HTMLElement && el.isContentEditable)
+        if (!isInput) {
+          e.preventDefault()
+          // Focus the main input so a second Cmd+A selects its text.
+          const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+            '.composer-input, textarea[data-composer]'
+          )
+          input?.focus()
+          input?.select()
+        }
+      }
     }
 
     window.addEventListener('keydown', onKey)

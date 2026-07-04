@@ -64,6 +64,11 @@ export interface UiState {
   /** One-shot request to focus a review-panel tab (e.g. ArtifactCard "Review").
    *  `rev` bumps so repeated requests for the same tab still trigger. */
   reviewTabRequest: { tab: string; rev: number } | null
+  /** Per-session composer drafts — preserved across tab switches.
+   *  Keyed by sessionId so switching tabs doesn't lose unsent input. */
+  composerDrafts: Record<string, string>
+  /** Per-session scroll positions (scrollTop in px) — restored on tab switch. */
+  scrollPositions: Record<string, number>
 }
 
 /** A queued @-reference (file or folder) awaiting insertion into the composer. */
@@ -95,6 +100,8 @@ type UiAction =
   | { type: 'addComposerAttachments'; items: ComposerAttachment[] }
   | { type: 'clearComposerAttachments' }
   | { type: 'requestReviewTab'; tab: string }
+  | { type: 'setComposerDraft'; sessionId: string; text: string }
+  | { type: 'setScrollPosition'; sessionId: string; scrollTop: number }
 
 function reducer(state: UiState, action: UiAction): UiState {
   switch (action.type) {
@@ -192,6 +199,16 @@ function reducer(state: UiState, action: UiAction): UiState {
         reviewManuallyToggled: true,
         reviewTabRequest: { tab: action.tab, rev: (state.reviewTabRequest?.rev ?? 0) + 1 },
       }
+    case 'setComposerDraft':
+      return {
+        ...state,
+        composerDrafts: { ...state.composerDrafts, [action.sessionId]: action.text },
+      }
+    case 'setScrollPosition':
+      return {
+        ...state,
+        scrollPositions: { ...state.scrollPositions, [action.sessionId]: action.scrollTop },
+      }
     default:
       return state
   }
@@ -222,6 +239,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     connectOpen: false,
     composerAttachments: [],
     reviewTabRequest: null,
+    composerDrafts: {},
+    scrollPositions: {},
   }))
 
   useEffect(() => {

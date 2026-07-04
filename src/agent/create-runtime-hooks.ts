@@ -35,6 +35,16 @@ import { createTodoReminderHook } from './hooks/todo-reminder-hook.js'
 import { createBackgroundJobsHook } from './hooks/background-jobs-hook.js'
 import { createEditToolAdvisoryHook } from './hooks/edit-tool-advisory-hook.js'
 import { createLossyObservationHook } from './hooks/lossy-observation-hook.js'
+import { createErrorDiagnosisHook } from './hooks/error-diagnosis-hook.js'
+import { createProbeTrackingHook } from './hooks/probe-tracking-hook.js'
+import { createExternalClaimTrackingHook } from './hooks/external-claim-tracking-hook.js'
+import { createGitClearAfterFailHook } from './hooks/git-clear-after-fail-hook.js'
+import { createDeadEndDetectorHook } from './hooks/dead-end-detector.js'
+import { createIntentAnchorHook } from './hooks/intent-anchor-hook.js'
+import { createTurnBudgetHook } from './hooks/turn-budget-hook.js'
+import { createReasoningSpiralHook } from './hooks/reasoning-spiral-hook.js'
+import { createAdvisoryReadbackHooks } from './hooks/advisory-readback-hook.js'
+import { createAsyncCopilotHook, type CopilotContextPack } from './hooks/async-copilot-hook.js'
 import { createLanguageAnchorHook } from './hooks/language-anchor-hook.js'
 import { createContextPressureHook } from './hooks/context-pressure-hook.js'
 import { createSpecVerifyGateHook } from './hooks/spec-verify-gate-hook.js'
@@ -180,6 +190,16 @@ export interface RuntimeHookDeps {
   getTodos?: () => import('../tools/todo-store.js').TodoItem[]
   /** CCR telemetry callback — invoked on each capsule router trigger for offline analysis. */
   onCcrTrigger?: (event: CcrTriggerEvent) => void
+  /** P1a 核销闭环：advisory 采纳核销器（loop.advisoryReadback）。缺省 → 不装核销 hook。 */
+  advisoryReadback?: import('./advisory-readback.js').AdvisoryReadback
+  /** P1a：核销判定后的会话累计回调（guardian meta 接线） */
+  onAdvisoryOutcomes?: (totals: { adopted: number; ignored: number }) => void
+  /** Phase 3 异步副驾：cheap model 情境合成。缺省 → 不装副驾 hook。 */
+  asyncCopilot?: {
+    getContext: () => CopilotContextPack
+    /** resolve null = cheap client 不可用（副驾永久休眠） */
+    complete: (system: string, user: string) => Promise<string | null>
+  }
   /** Sycophancy trap — courage-hook consumes its cumulative state for constitutional override */
   sycophancyTrap?: import('./sycophancy-trap.js').SycophancyTrap
 
@@ -196,6 +216,16 @@ export interface RuntimeHookDeps {
     getCoordinator: () => DelegationCoordinator | null
     getAbortSignal?: () => AbortSignal | undefined
   }
+
+  // ── 主控工作流缺口 C/D(intent-anchor / turn-budget,2026-07-04) ──
+  /** 当前 run 的 orchestrator 循环轮数(每 run 从 0 重计)。 */
+  getRunTurn?: () => number
+  /** 最近一次用户输入(run 启动 = 0,steer 注入更新)的 run 轮数。 */
+  getLastUserInputRunTurn?: () => number
+  /** 意图锚点复合源:taskContract?.objective ?? initialUserMessage(截 500 字)。 */
+  getIntentObjective?: () => string | null
+  /** run 的 maxTurns 预算(turn-budget 预警)。 */
+  getMaxTurns?: () => number
 }
 
 export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] {
@@ -407,6 +437,116 @@ export function createDefaultRuntimeHooks(deps: RuntimeHookDeps): RuntimeHook[] 
   // inline VERIFICATION_REQUIRED marker (which only fires on lossy + negative).
   if (deps.advisoryBus) {
     hooks.push(createLossyObservationHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Error Diagnosis: postTool hook — when a tool fails, reads the
+  // failureClass (already classified by tool-execution.ts via
+  // failure-classifier.ts) and injects a scenario-specific diagnosis
+  // into the advisory stream. Replaces the static error-to-user
+  // translation table in the system prompt — knowledge is injected
+  // on-demand instead of occupying prompt space permanently.
+  if (deps.advisoryBus) {
+    hooks.push(createErrorDiagnosisHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Probe-Tracking: postTool hook — detects debug probes (console.log,
+  // debugger, .only) in write operations. Session-scoped tracker survives
+  // across turns; deliver-task gate does authoritative fs re-scan.
+  // Gated by RIVET_PROBE_TRACKING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_PROBE_TRACKING !== '0') {
+    hooks.push(createProbeTrackingHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // External-Claim Tracking: postTool hook — detects delegate_task/batch
+  // results containing file:line references, then warns if the agent edits
+  // those paths without independent verification (read_file/grep) first.
+  // Session-scoped claim set with TTL. Guards the "格式完整不是可信度信号"
+  // discipline against authoritative-sounding worker reports.
+  // Gated by RIVET_EXTERNAL_CLAIM_TRACKING (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_EXTERNAL_CLAIM_TRACKING !== '0') {
+    hooks.push(createExternalClaimTrackingHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Git-Clear-After-Fail: postTool hook — detects the pattern of running git
+  // stash/reset/checkout/restore/clean shortly after a test failure without
+  // any diagnosis (read/grep) in between. Constitutional tier: the underlying
+  // action is irreversible and can harm other sessions in a shared worktree.
+  // Gated by RIVET_GIT_CLEAR_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_GIT_CLEAR_GUARD !== '0') {
+    hooks.push(createGitClearAfterFailHook({ advisoryBus: deps.advisoryBus }))
+  }
+
+  // Dead-End Detector: postTool hook — 同一文件反复 edit→verify-fail 循环
+  // (≥2 次且无 verify pass)= 盲改死路。advisory 带 tool_appears 谓词
+  // (采纳 = 转向诊断),触发时同步沉积文件级 dead-end 信息素。
+  // Gated by RIVET_DEAD_END_DETECTOR (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_DEAD_END_DETECTOR !== '0') {
+    hooks.push(createDeadEndDetectorHook({
+      advisoryBus: deps.advisoryBus,
+      deposit: deps.stigmergyDeposit,
+    }))
+  }
+
+  // Intent Anchor: preTurn hook — 长自治 run(>20 轮且距上次用户输入 >10 轮)
+  // 重锚本次 run 的启动意图(taskContract?.objective ?? initialUserMessage)。
+  // 无行为签名 → 无 expect,只计送达。冷却 10 轮。
+  // Gated by RIVET_INTENT_ANCHOR (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.getRunTurn && deps.getLastUserInputRunTurn && deps.getIntentObjective
+    && process.env.RIVET_INTENT_ANCHOR !== '0') {
+    hooks.push(createIntentAnchorHook({
+      advisoryBus: deps.advisoryBus,
+      getRunTurn: deps.getRunTurn,
+      getLastUserInputTurn: deps.getLastUserInputRunTurn,
+      getObjective: deps.getIntentObjective,
+    }))
+  }
+
+  // Turn Budget: preTurn hook — maxTurns 预算进入危险区(剩余 ≤ max(3, 10%))
+  // 时预警一次,引导收敛。expect = verify_attempted(采纳 = 先验证手头工作)。
+  // Gated by RIVET_TURN_BUDGET_WARN (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.getRunTurn && deps.getMaxTurns
+    && process.env.RIVET_TURN_BUDGET_WARN !== '0') {
+    hooks.push(createTurnBudgetHook({
+      advisoryBus: deps.advisoryBus,
+      getMaxTurns: deps.getMaxTurns,
+      getRunTurn: deps.getRunTurn,
+    }))
+  }
+
+  // Advisory-Readback: postTool 观察 + postTurn 核销 — 对送达的 advisory 按
+  // expect 谓词判定 adopted/ignored，产出采纳率账本（P1a 生命周期闭环）。
+  // 无独立开关：随 advisoryBus 存在自动启用（观察半边零副作用）。
+  if (deps.advisoryBus && deps.advisoryReadback) {
+    hooks.push(...createAdvisoryReadbackHooks({
+      readback: deps.advisoryReadback,
+      writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
+      onOutcomes: deps.onAdvisoryOutcomes,
+    }))
+  }
+
+  // Async-Copilot: postTurn hook — cheap-model 情境合成的中层建议（Phase 3）。
+  // 可行性双闸门为运行时数据判定（全局采纳率 >30% 才激活）,自我淘汰降频。
+  // Gated by RIVET_ASYNC_COPILOT (default on; set to '0' to disable).
+  if (deps.advisoryBus && deps.advisoryReadback && deps.asyncCopilot && process.env.RIVET_ASYNC_COPILOT !== '0') {
+    const rb = deps.advisoryReadback
+    hooks.push(createAsyncCopilotHook({
+      advisoryBus: deps.advisoryBus,
+      // 闸门 totals 含跨会话先验(贡献上限 20)——消灭"决出样本 ≥10"的每会话
+      // 冷启动沉睡;自我淘汰的 per-key stats 保持会话实测。
+      readback: { getTotals: () => rb.getTotalsWithPriors(), getStats: () => rb.getStats() },
+      getContext: deps.asyncCopilot.getContext,
+      complete: deps.asyncCopilot.complete,
+      writeTelemetry: deps.telemetryWriter ? (r) => deps.telemetryWriter!.write(r) : undefined,
+    }))
+  }
+
+  // Reasoning-Spiral Guard: preTurn hook — detects single-turn reasoning
+  // spirals (3000+ chars thinking + zero tool calls). Session-scoped trend
+  // tracking for escalation detection. Fills the gap that convergence-detector
+  // and exploration-stall don't cover: pure thinking length without tools.
+  // Gated by RIVET_REASONING_SPIRAL_GUARD (default on; set to '0' to disable).
+  if (deps.advisoryBus && process.env.RIVET_REASONING_SPIRAL_GUARD !== '0') {
+    hooks.push(createReasoningSpiralHook({ advisoryBus: deps.advisoryBus }))
   }
 
   // Language Anchor: postTool hook — when a turn's cumulative tool output is a

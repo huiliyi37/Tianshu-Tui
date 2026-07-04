@@ -1,8 +1,8 @@
 import type { PhysarumShadowStats } from '../../repo/physarum-shadow-stats.js'
 
-export type Panel = 'summary' | 'trace' | 'verify' | 'context' | 'safety' | 'model' | 'mcp'
+export type Panel = 'summary' | 'trace' | 'verify' | 'context' | 'safety' | 'model' | 'mcp' | 'advisory'
 
-export const PANELS: Panel[] = ['summary', 'trace', 'verify', 'context', 'safety', 'model', 'mcp']
+export const PANELS: Panel[] = ['summary', 'trace', 'verify', 'context', 'safety', 'model', 'mcp', 'advisory']
 
 export const PANEL_LABELS: Record<Panel, string> = {
   summary: 'Summary',
@@ -12,6 +12,7 @@ export const PANEL_LABELS: Record<Panel, string> = {
   safety: 'Safety',
   model: 'Model',
   mcp: 'MCP',
+  advisory: 'Advisory',
 }
 
 export interface CockpitContextLayerView {
@@ -113,6 +114,31 @@ export interface CockpitSnapshot {
     }>
     totalTools: number
     connectedServers: number
+  }
+  /** Advisory 面板 — 提醒系统可观测性（账本累计 / 静音 / 挂起 / per-key 效能）。 */
+  advisory: {
+    /** 会话累计（guardianActivity 口径） */
+    rendered: number
+    dropped: number
+    adopted: number
+    ignored: number
+    heldOut: number
+    /** 静音中的 key（习惯化 + 负 lift） */
+    silenced: Array<{ key: string; remaining: number; reason: 'habituation' | 'lift' }>
+    /** 挂起观察中的条目数（observe 状态机） */
+    pendingWatch: number
+    /** per-key 效能 Top 行（delivered 降序,截 8） */
+    keys: Array<{
+      key: string
+      delivered: number
+      adopted: number
+      ignored: number
+      ignoredStreak: number
+      adoptionRate: number | null
+      lift: number | null
+    }>
+    /** status 通道最近条目（dark cockpit 单感官通道,不进 prompt） */
+    statusNotices: string[]
   }
   panelStatuses: Record<Panel, PanelStatus>
 }

@@ -62,8 +62,8 @@ import { extractAtToken, getCompletions, applyCompletion } from '../file-complet
 import stringWidth from 'string-width'
 import { truncateToDisplayWidth, displayWidth, ambiguousWideEnabled } from '../width.js'
 import { appendHistoryAsync, nextHistoryAfterSubmit } from '../history.js'
-import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderConnect } from '../format/overlay.js'
-import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
+import { renderPager, renderStarmap, renderCommandPalette, renderChronicle, renderTasks, renderDomainPicker, renderModelPicker, renderThemePicker, renderChoicePanel, renderPlanPicker, renderConnect } from '../format/overlay.js'
+import type { PagerData, StarmapData, PaletteData, ChronicleData, TasksData, TasksGroup, TasksWorkerRow, DomainPickerData, ModelPickerData, ThemePickerData, ChoicePanelData, PlanPickerData, ChoiceEntry, ConnectOverlayData } from '../format/overlay.js'
 import { ConnectFlow, type ConnectCommit, type ConnectStepResult } from '../connect-flow.js'
 import { parseScrollbackTranscript, searchTranscript, findNextMatch, findPrevMatch } from '../scrollback-transcript.js'
 import { renderCockpit } from '../format/cockpit.js'
@@ -186,8 +186,10 @@ import type { IntentPreview } from '../../agent/intent-preview.js'
 import { describeIntentNote } from '../../agent/intent-preview.js'
 import type { ApprovalResult } from '../../agent/approval-edit.js'
 import type { DelegationActivity } from '../../tools/types.js'
+import type { AutonomyCheckpointInfo } from '../../agent/loop-types.js'
 import { FleetRegistry } from '../fleet-registry.js'
 import { WatchdogRecoveryPolicy } from '../../agent/watchdog-recovery-policy.js'
+import { phaseStatusLabel } from '../phase-status.js'
 
 export interface AgentCallbacks {
   onTextDelta: (text: string) => void
@@ -199,9 +201,11 @@ export interface AgentCallbacks {
   onAbort: (reason?: string) => void
   onApprovalRequired: (id: string, name: string, input: Record<string, unknown>) => Promise<ApprovalResult | boolean>
   onCheckpoint?: (hash: string) => void
-  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string }) => void
+  onPhaseChange?: (phase: string, detail?: { tool?: string; reason?: string; voluntary?: boolean; source?: string }) => void
   onIntentNote?: (intent: IntentPreview) => void
   onSteerDrain?: () => string | null
+  /** C3 — autonomy checkpoint pause (cruise) / progress ping (unleashed). */
+  onAutonomyCheckpoint?: (info: AutonomyCheckpointInfo) => void
   /** T4 — structured per-worker delegation status/progress feeding the fleet read model. */
   onDelegationActivity?: (activity: DelegationActivity) => void
 }
@@ -316,6 +320,8 @@ export class TuiApp {
   private agentBusy = false
   /** 当前会话审批模式（继承自 agent config），供 worker pills badge */
   private _approvalMode: string = 'auto-safe'
+  /** choice-panel 当前模式：'effort' (推理强度) 或 'permission' (权限选择) */
+  choicePanelKind: 'effort' | 'permission' = 'effort'
   /**
    * Run 世代计数 —— 唯一权威的「当前 run」标识。
    * 每次 abort 自增；被中断的旧 run 的迟到回调（经 bridge 包裹时捕获的旧 gen）
@@ -763,7 +769,20 @@ export class TuiApp {
       onAbort: (reason) => this.handleAbort(reason),
       onApprovalRequired: async (id, name, input) => this.handleApprovalRequired(id, name, input),
       onCheckpoint: (hash) => this.handleCheckpoint(hash),
-      onPhaseChange: (phase, _detail) => {
+      onPhaseChange: (phase, detail) => {
+        // stop-reason: surface guard-forced stops (max-turns / wedged-loop /
+        // convergence …) as a visible system line — previously this phase was
+        // silently dropped, leaving the user to guess why the run halted.
+        // Voluntary finishes already render a completion badge; the checkpoint
+        // source is skipped here because onAutonomyCheckpoint renders the
+        // richer digest card for it.
+        if (phase === 'stop-reason') {
+          if (detail?.voluntary === false && detail.source !== 'checkpoint') {
+            const label = phaseStatusLabel(phase, detail)
+            if (label) this.commitStatic(color(label, this.theme.warning))
+          }
+          return
+        }
         // Only map recognized phases to ActivityPhase; ignore unknown strings
         const knownPhases: Record<string, ActivityPhase> = {
           idle: 'idle',
@@ -784,6 +803,7 @@ export class TuiApp {
         // for the status bar display
       },
       onIntentNote: (intent) => this.handleIntentNote(intent),
+      onAutonomyCheckpoint: (info) => this.handleAutonomyCheckpoint(info),
       onSteerDrain: () => this.steerBuffer.drain(),
       onDelegationActivity: (activity) => this.handleDelegationActivity(activity),
     }
@@ -953,6 +973,14 @@ export class TuiApp {
         const choices = this.overlayController.getData()?.choicePanelData?.().choices ?? []
         const curIdx = choices.findIndex(c => c.recommended || (c as ChoiceEntry & { current?: boolean }).current)
         if (curIdx >= 0) this.overlayController.nav().choicePanelIndex = curIdx
+        return this.overlay.activate(id)
+      }
+      case 'plan-picker': {
+        this.overlayController.resetNav()
+        // 光标初始定位到第一个待批（submitted）计划。
+        const entries = this.overlayController.getData()?.planPickerData?.().entries ?? []
+        const curIdx = entries.findIndex(e => e.status === 'submitted')
+        if (curIdx >= 0) this.overlayController.nav().planPickerIndex = curIdx
         return this.overlay.activate(id)
       }
       default:
@@ -1480,6 +1508,27 @@ export class TuiApp {
       return false
     }
 
+    if (id === 'plan-picker') {
+      const count = this.overlayController.getData()?.planPickerData?.().entries.length ?? 0
+      const cur = this.overlayController.nav().planPickerIndex
+      if (key.name === 'down') {
+        if (count > 0) { this.overlayController.nav().planPickerIndex = (cur + 1) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'up') {
+        if (count > 0) { this.overlayController.nav().planPickerIndex = (cur - 1 + count) % count; this.overlay.rerender() }
+        return true
+      }
+      if (key.name === 'return') {
+        const entry = count > 0 ? this.overlayController.getData()?.planPickerData?.().entries[cur] : undefined
+        // Close the overlay BEFORE kickoff — approve submits a run that re-renders.
+        this.deactivateOverlay()
+        if (entry && this.overlayController.getPlanPickerExec()) this.overlayController.getPlanPickerExec()?.(entry.slug)
+        return true
+      }
+      return false
+    }
+
     if (id === 'model-picker') {
       const count = this.overlayController.getData()?.modelPickerData?.().entries.length ?? 0
       const cur = this.overlayController.nav().modelPickerIndex
@@ -1821,6 +1870,17 @@ export class TuiApp {
   /** 注册一条 metadata-driven slash 命令。 */
   registerSlashCommand(command: import('../slash-command-registry.js').SlashCommand): void {
     this.slashRegistry.register(command)
+  }
+
+  /**
+   * 通过 slash 注册表执行一条命令。返回是否被消费。供外部 onSubmit 兜底：
+   * 已注册命令若因任何原因漏过正常分发,再给一次注册表分发机会,避免静默
+   * 变成 "Unknown command"。
+   */
+  async tryDispatchSlash(input: string): Promise<boolean> {
+    const trimmed = input.trim()
+    const res = await this.slashRegistry.execute({ app: this, input, trimmed })
+    return res.handled
   }
 
   /** 注册内置 slash 命令（/clear、/starmap、/chronicle、/exit）。 */
@@ -3215,6 +3275,27 @@ export class TuiApp {
   }
 
   /**
+   * C3 自治刹车 — cruise 暂停时渲染进度摘要卡（之前 TUI 完全静默，用户只能
+   * 盲猜发"继续"）；unleashed 播报打一条简短的非阻塞系统块。
+   */
+  private handleAutonomyCheckpoint(info: AutonomyCheckpointInfo): void {
+    const lines: string[] = []
+    if (info.paused) {
+      lines.push(this.renderBanner(`⏸ 自治检查点 — 已执行 ${info.turns} 轮`, this.theme.warning))
+      for (const line of info.digest.split('\n')) {
+        lines.push(` │ ${color(line, this.theme.secondary)}`)
+      }
+      lines.push(` ╰─ ${color('输入 continue 继续，或 /permission 调整权限模式', this.theme.secondary)}`)
+    } else {
+      lines.push(color(`◦ 自治进度播报（第 ${info.turns} 轮，不暂停）`, this.theme.secondary))
+      for (const line of info.digest.split('\n')) {
+        lines.push(color(`  ${line}`, this.theme.secondary))
+      }
+    }
+    this.commitStatic(lines.join('\n'))
+  }
+
+  /**
    * 提交 slash 命令：await 外部 handler（SlashRouter）的结果，
    * handler 返回 false（透传命令如 /team、/review、/plan <x>）时把原始输入交给 agent。
    * 这修复了「async handler 一律视为已处理」吞掉透传命令的 bug。
@@ -3277,7 +3358,8 @@ export class TuiApp {
     modelPickerData?: () => ModelPickerData
     themePickerData?: () => ThemePickerData
     choicePanelData?: () => ChoicePanelData
-  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void): void {
+    planPickerData?: () => PlanPickerData
+  }, paletteExec?: (index: number) => void, rewindExec?: (messageIndex: number, mode: RewindMode) => void, chronicleExec?: (id: string) => void, domainPickerExec?: (key: string) => void, modelPickerExec?: (key: string) => void, themePickerExec?: (key: string) => void, themePickerSaveDefaultExec?: (key: string) => void, choicePanelExec?: (id: string) => void, connectExec?: (commit: ConnectCommit, summary: string) => void, planPickerExec?: (slug: string) => void): void {
     this.overlayController.setData(overlayData)
     this.overlayController.setPaletteExec(paletteExec)
     this.overlayController.setRewindExec(rewindExec)
@@ -3288,6 +3370,7 @@ export class TuiApp {
     this.overlayController.setThemePickerSaveDefaultExec(themePickerSaveDefaultExec)
     this.overlayController.setChoicePanelExec(choicePanelExec)
     this.overlayController.setConnectExec(connectExec)
+    this.overlayController.setPlanPickerExec(planPickerExec)
     // Pager — page / mode / search / message 由 overlayNav 注入（覆盖 provider 的静态值）
     this.overlay.register('pager', {
       render: (_w, _h) => {
@@ -3406,6 +3489,14 @@ export class TuiApp {
       render: (_w, _h) => {
         const data = overlayData?.choicePanelData?.() ?? { title: '', choices: [], selectedIndex: 0 }
         return renderChoicePanel({ ...data, selectedIndex: this.overlayController.nav().choicePanelIndex }, this.columns, this.rows, this.theme)
+      },
+    })
+
+    // Plan Picker — 待批计划选择器；回车批准并自动分波执行（selectedIndex 由 overlayNav 注入）
+    this.overlay.register('plan-picker', {
+      render: (_w, _h) => {
+        const data = overlayData?.planPickerData?.() ?? { entries: [], selectedIndex: 0 }
+        return renderPlanPicker({ ...data, selectedIndex: this.overlayController.nav().planPickerIndex }, this.columns, this.rows, this.theme)
       },
     })
 

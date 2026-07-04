@@ -125,6 +125,8 @@ export interface TurnStateBag {
   latestRisk: RiskAssessment
   thetaRequestsThisTurn: number
   taskContract: import('../context/task-contract.js').TaskContract | undefined
+  /** 当前 run 的循环轮数(缺口 C/D:intent-anchor / turn-budget hook 消费) */
+  runLoopTurn: number
 }
 
 // ── Deps interface ──
@@ -141,8 +143,10 @@ export interface TurnOrchestratorDeps {
 
   // === Config ===
   getMaxTurns: () => number
-  /** C3 自治档检查点 — pause after this many turns per run (0 = off). */
+  /** C3 检查点间隔 — Auto 模式下每 N 轮暂停（0 = 关）。YOLO 和 Manual 模式不读此字段。 */
   getCheckpointEveryTurns: () => number
+  /** C3 — build the progress digest attached to checkpoint pauses. */
+  buildProgressDigest: (turns: number) => string
   getTurnLevelThinking: () => boolean | undefined
   getPlanModeState: () => PlanModeState
   getStreamRules: () => StreamRule[] | undefined
@@ -267,6 +271,17 @@ const MAX_RULE_RETRIES = 2
  *  same-args-same-error retry) spinning to maxTurns and ballooning context → OOM. */
 const MAX_WEDGE_REPEATS = 3
 
+/** Grace period to let an aborted `executeBatch` finish committing its tool
+ *  results in-order before the turn tears down. `rejectOnAbort` stops awaiting
+ *  the batch to keep the UI responsive on Esc, but the batch keeps running and
+ *  calls `addToolResults()` later — if that write lands after the NEXT turn has
+ *  appended messages, the tool result is detached from its assistant tool_calls
+ *  and the provider rejects the following request ("insufficient tool messages
+ *  following tool_calls"). Draining here lands the commit in-order in the common
+ *  (abort-cooperative) case; the bound preserves responsiveness when a tool is
+ *  wedged, and runResumePreflightOai backstops any overrun at request-build time. */
+const TOOL_ABORT_DRAIN_MS = 1500
+
 /** Order-preserving fingerprint of a tool batch (name + input). Two batches with
  *  the same tools and args produce the same string, so a model re-emitting an
  *  identical failing call is detectable across turns. */
@@ -335,6 +350,7 @@ export class TurnOrchestrator {
     try {
       for (let turn = 0; turn < this.deps.getMaxTurns(); turn++) {
         this.deps.state.thetaRequestsThisTurn = 0
+        this.deps.state.runLoopTurn = turn
         // Sync plan-mode state into config so tool-pipeline gate reads it
         this.deps.syncPlanModeToConfig()
         const signal = this.deps.getAbortSignal()
@@ -344,20 +360,20 @@ export class TurnOrchestrator {
           return
         }
 
-        // ── C3 自治档检查点 ──
-        // Autonomous mode has no approval brakes; without a stop point a run
-        // barrels through up to maxTurns (200) turns. When configured, pause
-        // cleanly after N turns and hand control back — the user resumes with
-        // "continue" (desktop renders a checkpoint card).
+        // ── C3 Auto 模式检查点 ──
+        // Auto mode has no approval brakes; checkpointEveryTurns gives
+        // users a periodic pause point. 0 = off (default).
+        // YOLO mode gets 0 from getCheckpointEveryTurns() and skips this.
         const checkpointEvery = this.deps.getCheckpointEveryTurns()
-        if (checkpointEvery > 0 && turn >= checkpointEvery) {
+        if (checkpointEvery > 0 && turn > 0 && turn >= checkpointEvery) {
+          const digest = this.deps.buildProgressDigest(turn)
           this.emitStop({
             source: 'checkpoint',
             turn,
             voluntary: false,
             detail: `autonomy checkpoint every ${checkpointEvery} turns`,
           }, callbacks)
-          callbacks.onAutonomyCheckpoint?.(turn)
+          callbacks.onAutonomyCheckpoint?.({ turns: turn, digest, paused: true })
           callbacks.onTurnComplete(this.deps.getTotalUsage(), this.deps.getTurnCount(), true)
           finalTurnCompleted = true
           break
@@ -747,17 +763,18 @@ export class TurnOrchestrator {
           const toolHeartbeat = this.deps.getHeartbeat()
           toolHeartbeat?.disarmWatchdog()
           let r: Awaited<ReturnType<typeof this.deps.executeBatch>>
+          // Keep a handle on the batch itself: rejectOnAbort races it against the
+          // abort signal and stops AWAITING on Esc, but the batch keeps running and
+          // commits its tool results (addToolResults) later. We must drain that
+          // commit in-order on abort — see TOOL_ABORT_DRAIN_MS.
+          const batchPromise = this.deps.executeBatch({
+            toolUses, callbacks, turn, checkpointCreatedThisTurn,
+            abortSignal: signal!,
+            traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
+            lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
+          })
           try {
-            r = await rejectOnAbort(
-            this.deps.executeBatch({
-              toolUses, callbacks, turn, checkpointCreatedThisTurn,
-              abortSignal: signal!,
-              traceStore: this.deps.state.traceStore, importGraph: this.deps.state.importGraph,
-              lastConflictCheckCount: this.deps.state.lastConflictCheckCount, latestRisk: this.deps.state.latestRisk,
-            }),
-            signal!,
-            'tools',
-          )
+            r = await rejectOnAbort(batchPromise, signal!, 'tools')
           this.deps.state.traceStore = r.traceStore
           this.deps.state.importGraph = r.importGraph
           this.deps.state.lastConflictCheckCount = r.lastConflictCheckCount
@@ -839,6 +856,22 @@ export class TurnOrchestrator {
             'post-turn',
           )
           continue
+          } catch (err) {
+            // Esc during tool execution: rejectOnAbort abandoned the await to keep
+            // the UI responsive, but `batchPromise` is still running and will call
+            // addToolResults() at an uncontrolled later time. Drain it (bounded) so
+            // its result commit lands in-order NOW — before this turn tears down and
+            // any new user message starts a fresh run that would push the late tool
+            // result out of position. Without this the next request breaks with
+            // "insufficient tool messages following tool_calls" (only /rewind fixed
+            // it). Non-abort errors skip the drain and propagate unchanged.
+            if ((err as Error).name === 'AbortError') {
+              await Promise.race([
+                batchPromise.then(() => {}, () => {}),
+                new Promise<void>((resolve) => setTimeout(resolve, TOOL_ABORT_DRAIN_MS)),
+              ])
+            }
+            throw err
           } finally {
             toolHeartbeat?.rearmWatchdog()
           }

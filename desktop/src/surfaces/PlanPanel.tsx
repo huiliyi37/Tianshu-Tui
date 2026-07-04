@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePlans, usePlan, useApprovePlan, useRejectPlan } from '../state/queries'
 import { Markdown } from '../components/Markdown'
 import type { PlanStatus, PlanSummary, PlanOption } from '../runtime/types'
+import type { TodoStateItem } from '../runtime/types'
 import { ChevronDown, ChevronUp, LayoutList, Search } from 'lucide-react'
 
 const STATUS_LABEL: Record<PlanStatus, string> = {
@@ -15,14 +16,14 @@ type FilterMode = 'active' | 'archived' | 'all'
 
 const FILTERS: { key: FilterMode; label: string }[] = [
   { key: 'active', label: '活动' },
-  { key: 'archived', label: '归档' },
+  { key: 'archived', label: '已拒绝' },
   { key: 'all', label: '全部' },
 ]
 
 function matchesFilter(p: PlanSummary, mode: FilterMode) {
   if (mode === 'all') return true
-  if (mode === 'active') return p.status === 'submitted' || p.status === 'approved'
-  return p.status === 'executed' || p.status === 'rejected'
+  if (mode === 'active') return p.status === 'submitted' || p.status === 'approved' || p.status === 'executed'
+  return p.status === 'rejected'
 }
 
 /**
@@ -40,6 +41,7 @@ export function PlanPanel(props: {
   sessionId: string | null
   planRev: number
   latestPlanSlug?: string
+  todos?: TodoStateItem[]
 }) {
   const { sessionId, planRev, latestPlanSlug } = props
   const plans = usePlans(sessionId, planRev)
@@ -56,8 +58,14 @@ export function PlanPanel(props: {
   const reject = useRejectPlan()
 
   const all = plans.data ?? []
+  // Sort: submitted first (newest), then approved/executed, rejected last.
+  const STATUS_ORDER: Record<PlanStatus, number> = { submitted: 0, approved: 1, executed: 2, rejected: 3 }
   const sorted = useMemo(
-    () => [...all].sort((a, b) => b.createdAt - a.createdAt),
+    () => [...all].sort((a, b) => {
+      const so = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
+      if (so !== 0) return so
+      return b.createdAt - a.createdAt
+    }),
     [all],
   )
   const filtered = useMemo(
@@ -73,11 +81,13 @@ export function PlanPanel(props: {
   const selectedExists = selected != null && filtered.some((p) => p.slug === selected)
   useEffect(() => {
     if (selectedExists) return
+    // Auto-select prefers the freshly submitted plan, else the newest non-rejected.
+    // Never auto-select a rejected plan — user dismissed it, shouldn't resurface.
     const candidates = filter === 'active' ? sorted.filter((p) => matchesFilter(p, 'active')) : sorted
     const next =
       latestPlanSlug && candidates.some((p) => p.slug === latestPlanSlug)
         ? latestPlanSlug
-        : candidates[0]?.slug ?? sorted[0]?.slug ?? null
+        : candidates[0]?.slug ?? null
     setSelected(next)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestPlanSlug, sorted.length, filter, selectedExists])
@@ -229,6 +239,25 @@ export function PlanPanel(props: {
                     {opt.description && <span className="plan-option-desc">{opt.description}</span>}
                   </span>
                 </label>
+              ))}
+            </div>
+          )}
+
+          {props.todos && props.todos.length > 0 && (
+            <div className="plan-checklist">
+              <div className="plan-checklist-header">
+                执行进度
+                <span className="plan-checklist-count">
+                  {props.todos.filter(t => t.status === 'completed').length}/{props.todos.length}
+                </span>
+              </div>
+              {props.todos.map((t) => (
+                <div key={t.id} className={`plan-checklist-item st-${t.status}`}>
+                  <span className="plan-checklist-glyph">
+                    {t.status === 'completed' ? '✓' : t.status === 'in_progress' ? '◌' : '○'}
+                  </span>
+                  <span className="plan-checklist-text">{t.content}</span>
+                </div>
               ))}
             </div>
           )}

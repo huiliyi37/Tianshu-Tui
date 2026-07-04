@@ -34,6 +34,7 @@ import {
   readPlan as storeReadPlan,
   approvePlan as storeApprovePlan,
   rejectPlan as storeRejectPlan,
+  resolvePlanOptionLabel,
   type PlanDocument,
 } from '../plan/plan-store.js'
 import { SteerBuffer } from '../tui/steer-buffer.js'
@@ -370,6 +371,8 @@ export interface StorageReport {
 export interface SessionPersistenceAdapter {
   saveRecord(record: SessionRecord): void
   appendEvent(sessionId: string, event: SessionEvent): void
+  /** Flush buffered writes to disk (batched adapters). Optional — no-op if absent. */
+  flushSync?(): void
   loadAll(): PersistedSession[]
   /**
    * Lazy-boot support (optional). `loadRecords` reads ONLY the lightweight
@@ -1389,6 +1392,20 @@ export class RuntimeSessionManager {
   async approvePlan(id: string, slug: string, selectedApproach?: string): Promise<boolean> {
     const session = this.sessions.get(id)
     if (!session || session.running) return false
+    // Validate the selected approach BEFORE mutating the plan file — approving
+    // first would leave the file marked APPROVED even when the option is bogus.
+    let resolvedApproach: string | undefined
+    if (selectedApproach?.trim()) {
+      const pending = await storeReadPlan(session.record.cwd, slug)
+      if (!pending) return false
+      if (pending.options && pending.options.length > 0) {
+        resolvedApproach = resolvePlanOptionLabel(pending.options, selectedApproach)
+        if (!resolvedApproach) return false
+      } else {
+        // No recorded options — pass the user's text through as-is.
+        resolvedApproach = selectedApproach.trim()
+      }
+    }
     let approved: PlanDocument | null
     try {
       approved = await storeApprovePlan(session.record.cwd, slug)
@@ -1396,16 +1413,12 @@ export class RuntimeSessionManager {
       return false
     }
     if (!approved) return false
-    if (selectedApproach && approved.options && approved.options.length > 0) {
-      const known = approved.options.some(o => o.label === selectedApproach)
-      if (!known) return false
-    }
     const agent = this.ensureAgent(session)
     try {
       agent.setActivePlan?.({
         slug,
         title: approved.title,
-        selectedApproach: selectedApproach?.trim() || undefined,
+        selectedApproach: resolvedApproach,
       })
     } catch { /* non-fatal */ }
     try { agent.exitPlanMode?.() } catch { /* non-fatal */ }
@@ -1414,8 +1427,8 @@ export class RuntimeSessionManager {
     this.touch(session)
     this.persistRecord(session)
     let kickoff = `开始执行已批准的方案「${approved.title}」(.rivet/plans/${slug}.md)。`
-    if (selectedApproach?.trim()) {
-      kickoff += `\nSelected approach: ${selectedApproach.trim()} — execute ONLY this approach. Do not execute unselected alternatives.`
+    if (resolvedApproach) {
+      kickoff += `\nSelected approach: ${resolvedApproach} — execute ONLY this approach. Do not execute unselected alternatives.`
     }
     this.run(id, kickoff)
     return true
@@ -1701,12 +1714,11 @@ export class RuntimeSessionManager {
    */
   shutdownAll(): void {
     for (const s of this.sessions.values()) {
-      // agent 在 rehydrated/idle session 上为 null（懒构造）；只对已建过 agent
-      // 的 session 调 shutdown，节省 best-effort try 的无谓 catch。
       try { s.agent?.shutdown?.() } catch { /* best-effort */ }
-      // 终结性关闭：杀掉所有后台任务（dev server/watcher）避免孤儿进程。
       try { s.jobs?.killAll() } catch { /* best-effort */ }
     }
+    // Flush any buffered events to disk before exit.
+    this.persistence?.flushSync?.()
   }
 
   /**
@@ -2191,9 +2203,14 @@ export class RuntimeSessionManager {
       // it to the last tool_result; see tool-execution.ts). The buffer is fed by
       // POST /sessions/:id/steer while the session is running.
       onSteerDrain: () => session.steer.drain(),
-      // C3 — 自治档检查点：run 在 N 轮后干净收尾，桌面渲染确认卡片。
-      onAutonomyCheckpoint: (turnsDone) => {
-        this.append(session, 'autonomy_checkpoint', { turns: turnsDone })
+      // C3 — 自治档检查点：cruise 暂停（paused=true，桌面渲染确认卡片）；
+      // unleashed 无此回调（无刹车无播报）。digest 为进度摘要。
+      onAutonomyCheckpoint: (info) => {
+        this.append(session, 'autonomy_checkpoint', {
+          turns: info.turns,
+          digest: info.digest,
+          paused: info.paused,
+        })
       },
       // T4 — structured per-worker delegation status/progress → subagent panel.
       // Keyed by workOrderId (distinct from the spawning tool id, which is the

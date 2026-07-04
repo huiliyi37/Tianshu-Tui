@@ -174,13 +174,31 @@ export function resolveHostEnv(deps: ResolvedEnvDeps): HostEnvResult {
   }
 
   if (isWin) {
+    let regReadOk = false
     for (const scope of ['machine', 'user'] as const) {
       const reg = deps.readRegistryEnv(scope)
       const regPath = reg.Path ?? reg.PATH ?? ''
+      if (regPath) regReadOk = true
       for (const e of splitPath(expandWinVars(regPath, deps.baseEnv), sep)) addPath(e)
       for (const v of TOOLCHAIN_VARS) {
         const val = reg[v]
         if (val) addVar(v, expandWinVars(val, deps.baseEnv))
+      }
+    }
+    // Fallback: if reg query failed entirely (empty PATH from GUI launch + reg.exe
+    // was unreachable before the SystemRoot fix), probe critical system dirs so
+    // basic commands (cmd, powershell, git, python) have a chance of resolving.
+    if (!regReadOk) {
+      const sysRoot = deps.baseEnv.SystemRoot || deps.baseEnv.windir || 'C:\\Windows'
+      for (const dir of [`${sysRoot}\\System32`, `${sysRoot}`, `${sysRoot}\\System32\\Wbem`]) {
+        if (deps.exists(dir)) addPath(dir)
+      }
+      // Common user-installed tool locations.
+      const localApp = deps.baseEnv.LOCALAPPDATA
+      if (localApp) {
+        for (const sub of ['Programs\\Git\\bin', 'Programs\\Git\\cmd', 'Microsoft\\WindowsApps']) {
+          if (deps.exists(`${localApp}\\${sub}`)) addPath(`${localApp}\\${sub}`)
+        }
       }
     }
   } else if (looksShort(pathEntries)) {
@@ -243,13 +261,18 @@ export function applyConfigEnv(
 
 // ─── Real-IO deps + cached entry point ────────────────────────────────────────
 
-/** Windows: read a hive's Environment values via `reg query`. `{}` on failure. */
+/** Windows: read a hive's Environment values via `reg query`. `{}` on failure.
+ *  Uses the absolute path to reg.exe (SystemRoot\System32\reg.exe) so it works
+ *  even when the inherited PATH is empty — the classic GUI-launch PATH problem. */
 function readRegistryEnvReal(scope: 'machine' | 'user'): Record<string, string> {
   const hive = scope === 'machine'
     ? 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
     : 'HKCU\\Environment'
+  // Resolve reg.exe via SystemRoot/windir — never depend on PATH being set.
+  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows'
+  const regExe = systemRoot + '\\System32\\reg.exe'
   try {
-    const res = spawnSync('reg', ['query', hive], {
+    const res = spawnSync(regExe, ['query', hive], {
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 3000,
       encoding: 'utf8',
