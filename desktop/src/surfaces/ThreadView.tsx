@@ -294,17 +294,26 @@ export function ThreadView(props: {
   }, [filteredBlocks, viewMode])
 
   const rendered = useMemo(() => groupBlocks(modeBlocks), [modeBlocks, view.blocksRev])
+  const renderedWithTurns = useMemo(() => {
+    let tNum = 1
+    return rendered.map((item) => {
+      if (item.kind === 'block' && item.block.kind === 'turn') {
+        tNum = item.block.turn?.turnNumber ?? tNum
+      }
+      return { ...item, turnNumber: tNum }
+    })
+  }, [rendered])
   const lastKey = view.blocks[view.blocks.length - 1]?.key
   // P2 — only render the visible window of the message list. Long sessions keep
   // DOM at O(viewport) instead of O(messages). Item heights vary, so rows are
   // measured dynamically via measureElement (ResizeObserver under the hood).
   const virtualizer = useVirtualizer({
-    count: rendered.length,
+    count: renderedWithTurns.length,
     getScrollElement: () => msgRef.current,
     estimateSize: () => 80,
     overscan: 8,
     getItemKey: (index) => {
-      const item = rendered[index]!
+      const item = renderedWithTurns[index]!
       return item.kind === 'timeline' ? item.key : item.block.key
     },
   })
@@ -813,10 +822,10 @@ export function ThreadView(props: {
             </div>
           </div>
         )}
-        {rendered.length > 0 && (
+        {renderedWithTurns.length > 0 && (
           <div className="vlist" style={{ height: virtualizer.getTotalSize() }}>
             {virtualizer.getVirtualItems().map((vi) => {
-              const item = rendered[vi.index]!
+              const item = renderedWithTurns[vi.index]!
               return (
                 <div
                   key={vi.key}
@@ -861,6 +870,21 @@ export function ThreadView(props: {
                       domainName={activeDomain?.name}
                       onContinue={handleWatchdogContinue}
                       onCancelContinue={onAbort}
+                      domainTurnNumber={item.turnNumber}
+                      onEditUserMsg={async (seq, text) => {
+                        const point = rewindPoints.find(p => p.seq === seq)
+                        if (point) {
+                          try {
+                            await rewindSession(session.id, point.index)
+                            setSelectedTurnIndex(-1)
+                            const { points } = await getRewindPoints(session.id)
+                            setRewindPoints(points)
+                            onSend(text)
+                          } catch (err) {
+                            console.error(err)
+                          }
+                        }
+                      }}
                       isStreaming={
                         item.block.key === lastKey && (
                           (item.block.kind === 'thinking' && view.private_thinkingOpen) ||
@@ -1256,10 +1280,11 @@ const Block = memo(BlockImpl, (a, b) =>
   a.sessionId === b.sessionId && a.onOpenImage === b.onOpenImage &&
   a.onFileClick === b.onFileClick &&
   a.domainGlyph === b.domainGlyph && a.domainName === b.domainName &&
-  a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue
+  a.onContinue === b.onContinue && a.onCancelContinue === b.onCancelContinue &&
+  a.domainTurnNumber === b.domainTurnNumber && a.onEditUserMsg === b.onEditUserMsg
 )
 
-function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue }: {
+function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, domainGlyph, domainName, onContinue, onCancelContinue, domainTurnNumber, onEditUserMsg }: {
   block: ConvoBlock
   isStreaming?: boolean
   sessionId?: string
@@ -1267,14 +1292,64 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
   onFileClick?: (path: string) => void
   domainGlyph?: string
   domainName?: string
+  domainTurnNumber?: number
   /** Resume a run stopped by the watchdog quota (sends "continue"). */
   onContinue?: () => void
   /** C2 刹车 — cancel a pending watchdog auto-continue countdown (aborts the session). */
   onCancelContinue?: () => void
+  onEditUserMsg?: (seq: number, text: string) => Promise<void>
 }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editText, setEditText] = useState(block.text)
+
   if (block.kind === 'user') {
+    const seq = Number(block.key.slice(2))
+    const canEdit = !!onEditUserMsg && !isNaN(seq)
+
+    if (isEditing) {
+      return (
+        <MsgBlock role="你" roleGlyph="user" className="user editing">
+          <div className="user-edit-container">
+            <textarea
+              className="user-edit-textarea"
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              rows={Math.min(10, editText.split('\n').length || 1)}
+            />
+            <div className="user-edit-actions">
+              <button
+                className="btn-sm btn-primary user-edit-submit"
+                onClick={async () => {
+                  if (editText.trim()) {
+                    await onEditUserMsg?.(seq, editText)
+                    setIsEditing(false)
+                  }
+                }}
+              >
+                保存并重发
+              </button>
+              <button
+                className="btn-sm btn-secondary user-edit-cancel"
+                onClick={() => {
+                  setIsEditing(false)
+                  setEditText(block.text)
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </MsgBlock>
+      )
+    }
+
     return (
-      <MsgBlock role="你" roleGlyph="user">
+      <MsgBlock
+        role="你"
+        roleGlyph="user"
+        canEdit={canEdit}
+        onEdit={() => setIsEditing(true)}
+      >
         <Markdown source={block.text} onFileClick={onFileClick} />
         {block.imageIds && block.imageIds.length > 0 && sessionId ? (
           <div className="msg-images">
@@ -1302,14 +1377,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     return <ThinkingBlock block={block} streaming={!!isStreaming} />
   }
   if (block.kind === 'turn') {
-    const t = block.turn
-    const tokens = t?.totalTokens ? ` · ~${formatTokens(t.totalTokens)} tokens` : ''
-    const label = t?.turnNumber != null ? `第 ${t.turnNumber} 轮` : '一轮结束'
-    return (
-      <div className="turn-divider" role="separator">
-        <span className="turn-label">{label}{tokens}</span>
-      </div>
-    )
+    return <div className="turn-divider-line" />
   }
   if (block.kind === 'checkpoint') {
     return (
@@ -1442,7 +1510,7 @@ function BlockImpl({ block, isStreaming, sessionId, onOpenImage, onFileClick, do
     )
   }
   return (
-    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph}>
+    <MsgBlock role={domainName ?? STAR_DOMAINS.tianshu.name} roleGlyph={domainGlyph} turnNumber={domainTurnNumber}>
       <AssistantText text={block.text} isStreaming={!!isStreaming} onFileClick={onFileClick} />
     </MsgBlock>
   )
@@ -1589,8 +1657,11 @@ function MsgBlock(props: {
   isError?: boolean
   className?: string
   children: React.ReactNode
+  turnNumber?: number
+  canEdit?: boolean
+  onEdit?: () => void
 }) {
-  const { role, roleGlyph, isError, className, children } = props
+  const { role, roleGlyph, isError, className, children, turnNumber, canEdit, onEdit } = props
   const [copied, setCopied] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -1616,10 +1687,24 @@ function MsgBlock(props: {
           {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' && (
             <span className="msg-role-glyph">{roleGlyph}</span>
           )}
-          <span className="msg-role-label">{role}</span>
+          {roleGlyph && roleGlyph !== 'user' && roleGlyph !== 'steer' ? (
+            <span className="msg-role-turn">#{turnNumber ?? 1}</span>
+          ) : (
+            <span className="msg-role-label">{role}</span>
+          )}
         </div>
       )}
       <div className="msg-body" ref={ref}>
+        {canEdit && onEdit && (
+          <button
+            className="msg-edit-btn"
+            onClick={onEdit}
+            title="编辑并重新发送"
+            aria-label="编辑"
+          >
+            ✎
+          </button>
+        )}
         <button
           className="msg-copy-btn"
           onClick={copy}
