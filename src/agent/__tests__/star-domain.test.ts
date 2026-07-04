@@ -168,6 +168,65 @@ describe('buildActiveDomain', () => {
   })
 })
 
+describe('四域分工模型（2026-07-04 校订）', () => {
+  it('tianshu carries all-round default-domain identity (可规划可执行)', () => {
+    const tianshu = STAR_DOMAINS.tianshu
+    assert.match(tianshu.systemPromptSuffix, /默认域/, 'default-domain identity must be explicit')
+    assert.match(tianshu.systemPromptSuffix, /全能/, 'all-round capability must be explicit')
+    assert.doesNotMatch(tianshu.systemPromptSuffix, /不在逐行编码/, 'orchestrator-only framing must be removed')
+  })
+
+  it('tianshu is a global partner star (意图至上/闭环/委派只是手段)', () => {
+    const tianshu = STAR_DOMAINS.tianshu
+    assert.match(tianshu.systemPromptSuffix, /落地的是开发者的规划/, 'developer-intent primacy')
+    assert.match(tianshu.systemPromptSuffix, /做了什么、遗留什么、设计偏差/, 'delivery report three items')
+    assert.match(tianshu.systemPromptSuffix, /委派的唯一理由是并行加速/, 'delegation is a means, not identity')
+    assert.match(tianshu.systemPromptSuffix, /一致性高于局部最优/, 'global consistency discipline')
+    assert.match(tianshu.volatileBlock, /帮开发者落地他们的规划/, 'raison d\'etre in identity block')
+  })
+
+  it('star-interface declarations exist across domains (协同公理落地)', () => {
+    // 抽查四域 + 全量兜底:每个内置域的 suffix 都带星间接口声明
+    assert.match(STAR_DOMAINS.tianshu.systemPromptSuffix, /星间接口/)
+    assert.match(STAR_DOMAINS.tianquan.systemPromptSuffix, /星间接口/)
+    assert.match(STAR_DOMAINS.tianliang.systemPromptSuffix, /星间接口/)
+    assert.match(STAR_DOMAINS.yaoguang.systemPromptSuffix, /星间接口/)
+    for (const domain of Object.values(STAR_DOMAINS)) {
+      assert.match(domain.systemPromptSuffix, /星间接口/, `${domain.name} missing 星间接口 declaration`)
+    }
+  })
+
+  it('tianliang is the universal delivery endpoint (任何星域的规划都可交付)', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, /计划可来自任何星域/, 'plans from any domain')
+    assert.match(tianliang.systemPromptSuffix, /数据缝隙/, 'data-gap discovery in clean session')
+  })
+
+  it('tianquan deliverable is an executable plan (出计划不出实现代码)', () => {
+    const tianquan = STAR_DOMAINS.tianquan
+    assert.match(tianquan.systemPromptSuffix, /可执行的计划文档/, 'plan document as deliverable')
+    assert.match(tianquan.systemPromptSuffix, /物理事实验证/, 'three-layer review: physical facts')
+    assert.match(tianquan.systemPromptSuffix, /概念完整性/, 'three-layer review: conceptual integrity')
+    assert.match(tianquan.systemPromptSuffix, /blocker/, 'review feedback severity tiering')
+  })
+
+  it('yaoguang carries plan+execute identity while keeping rigor phrases', () => {
+    const yaoguang = STAR_DOMAINS.yaoguang
+    assert.match(yaoguang.volatileBlock, /自己规划、自己执行/, 'plan+execute identity in volatileBlock')
+    assert.match(yaoguang.systemPromptSuffix, /调研→计划→执行→验证/, 'full-loop execution in suffix')
+    // 旧的严谨底色短语必须原样保留（复现纪律不因身份扩展而稀释）
+    assert.match(yaoguang.volatileBlock, /缺席不会自己报警/)
+    assert.match(yaoguang.systemPromptSuffix, /观测先行/)
+    assert.match(yaoguang.systemPromptSuffix, /先验基线/)
+  })
+
+  it('tianliang autonomy boundary is two-tiered (信号精炼自主/方向变更回退)', () => {
+    const tianliang = STAR_DOMAINS.tianliang
+    assert.match(tianliang.systemPromptSuffix, /信号精炼/, 'signal refinement is executor autonomy')
+    assert.match(tianliang.systemPromptSuffix, /回退请求修订/, 'directional changes still escalate')
+  })
+})
+
 describe('tianliang cognitive field + delivery discipline split', () => {
   it('volatileBlock carries wave-split concept as cognitive bias', () => {
     const tianliang = STAR_DOMAINS.tianliang
