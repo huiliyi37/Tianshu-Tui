@@ -67,6 +67,26 @@ describe('open_path', () => {
     assert.equal(literalArg, "explorer /select,'C:\\R&D\\o''brien.txt'")
   })
 
+  it('normalizes forward slashes to backslashes in Windows reveal paths', () => {
+    // 前端 toAbsolute 在 cwd 含 '/' 时会拼出 'C:/Users/.../file.ts'。
+    // explorer 对正斜杠路径静默失败——必须归一为反斜杠。
+    const fwdSlash = 'C:/Users/test/project/src/index.ts'
+    const backslash = 'C:\\Users\\test\\project\\src\\index.ts'
+    const command = buildRevealCommand(fwdSlash, 'win32')
+
+    const literalArg = command.args[command.args.length - 1]
+    assert.equal(literalArg, `explorer /select,'${backslash}'`)
+  })
+
+  it('normalizes forward slashes to backslashes in Windows open paths', () => {
+    const fwdSlash = 'C:/Users/test/R&D/report.md'
+    const backslash = 'C:\\Users\\test\\R&D\\report.md'
+    const command = buildOpenPathCommand(fwdSlash, 'win32')
+
+    const literalArg = command.args[command.args.length - 1]
+    assert.equal(literalArg, `Start-Process -LiteralPath '${backslash}'`)
+  })
+
   it('builds macOS reveal command with open -R', () => {
     const target = '/Users/banxia/Desktop/天枢 logo.svg'
     const command = buildRevealCommand(target, 'darwin')

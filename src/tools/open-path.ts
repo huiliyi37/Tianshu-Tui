@@ -25,7 +25,11 @@ export function buildOpenPathCommand(path: string, platform: NodeJS.Platform = p
     // 路径包成单引号字面串（单引号内 & | % ^ $ 全不解释，'' 转义内嵌单引号），
     // -LiteralPath 又禁用通配符。既能正常打开含 & 的合法路径（如 R&D 文件夹），
     // 又消除元字符注入。
-    const literal = `'${target.replace(/'/g, "''")}'`
+    //
+    // explorer/Start-Process 对正斜杠路径不友好（前端 toAbsolute 在 cwd 含 '/'
+    // 时会拼出 'C:/Users/...'，explorer 会静默失败），统一转反斜杠。
+    const winTarget = target.replace(/\//g, '\\')
+    const literal = `'${winTarget.replace(/'/g, "''")}'`
     return {
       cmd: 'powershell.exe',
       args: ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -LiteralPath ${literal}`],
@@ -44,7 +48,10 @@ export function buildRevealCommand(path: string, platform: NodeJS.Platform = pro
     // explorer /select,"C:\path\to\file" — invoke through PowerShell so spaces
     // and shell metacharacters are not re-interpreted. Single-quote escaping
     // handles the rare embedded single quote.
-    const literal = `'${target.replace(/'/g, "''")}'`
+    //
+    // explorer 对正斜杠路径静默失败（前端可能传 'C:/Users/...'），统一转反斜杠。
+    const winTarget = target.replace(/\//g, '\\')
+    const literal = `'${winTarget.replace(/'/g, "''")}'`
     return {
       cmd: 'powershell.exe',
       args: ['-NoProfile', '-NonInteractive', '-Command', `explorer /select,${literal}`],
