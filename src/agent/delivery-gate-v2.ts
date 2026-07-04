@@ -257,7 +257,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: externalVerifications.length,
-          supersededFailures: 0,
           ...emptyDiagnostics,
         }
       }
@@ -293,7 +292,6 @@ export function createDeliveryGateV2(opts: {
         ownedFileCount: 0,
         externalFileCount: externalFiles.length,
         verificationCount: allVerifications.length,
-        supersededFailures,
         ...diagnostics,
       latestVerificationTotals,
       }
@@ -312,7 +310,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -326,7 +323,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -344,7 +340,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           attributionClass: 'no_test_infra',
@@ -360,7 +355,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: aggregate.reason,
@@ -376,7 +370,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -390,7 +383,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -407,7 +399,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
         }
@@ -422,7 +413,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: `${ownedFiles.length} owned file(s) modified but unverified.`,
@@ -438,7 +428,6 @@ export function createDeliveryGateV2(opts: {
           ownedFileCount: ownedFiles.length,
           externalFileCount: externalFiles.length,
           verificationCount: allVerifications.length,
-          supersededFailures,
           ...diagnostics,
       latestVerificationTotals,
           currentBlockingFailure: 'Unknown verification state.',

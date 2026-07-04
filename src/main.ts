@@ -808,7 +808,7 @@ async function main() {
         tuiApp.commitStatic('⚠ YOLO 模式将跳过所有审批，全自动执行。确认请输入: /permission yolo confirm')
         return
       }
-      ctx!.agent.setApprovalMode(id as string)
+      ctx!.agent.setApprovalMode(id as import('./agent/loop-types.js').ApprovalMode)
       const label = { manual: 'Manual', 'auto-safe': 'Auto', 'dangerously-skip-permissions': 'YOLO' }[id] ?? id
       tuiApp.commitStatic(`权限模式 → ${label}`)
       return

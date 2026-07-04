@@ -38,7 +38,6 @@ const testConfig = {
     maxTeamParallel: 3,
     council: { seats: [] },
     maxAutoContinue: 1,
-    autonomyBrake: 'cruise' as const,
     checkpointEveryTurns: 25,
     intentRetrievalRouter: { enabled: true, classifier: 'heuristic', timeoutMs: 100, maxTokens: 128, temperature: 0 },
     teamSchedulerBanditEnabled: false,

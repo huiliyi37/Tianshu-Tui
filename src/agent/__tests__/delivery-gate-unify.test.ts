@@ -114,7 +114,7 @@ describe('processTurnEnd gate integration (Track 3)', () => {
       return {
         state: 'GREEN', canDeliver: true, isBlocked: false,
         reason: 'verified', ownedFileCount: 1, externalFileCount: 0,
-        verificationCount: 1, supersededFailures: 0,
+        verificationCount: 1, supersededFailures: 0, staleSnapshotDropped: 0,
         staleFailureCandidates: 0, toolInvocationFailureCandidates: [],
       }
     }))

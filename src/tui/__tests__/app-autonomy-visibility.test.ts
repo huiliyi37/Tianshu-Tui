@@ -8,8 +8,7 @@
  *  #1 guard-forced stop-reason（max-turns / wedged-loop）→ 系统行可见
  *  #2 voluntary stop-reason → 不打系统行（完成 badge 已覆盖）
  *  #3 checkpoint source 的 stop-reason → 跳过（由检查点卡片渲染，避免重复）
- *  #4 cruise 暂停（paused=true）→ 摘要卡 + continue/autonomy 提示
- *  #5 unleashed 播报（paused=false）→ 非阻塞系统块
+ *  #4 检查点暂停（paused=true）→ 摘要卡 + continue / permission 提示
  */
 
 import { test } from 'node:test'
@@ -91,7 +90,7 @@ test('#3 checkpoint stop-reason is skipped (checkpoint card renders it instead)'
   assert.ok(!text.includes('自治检查点'), 'checkpoint stop-reason must not duplicate the digest card')
 })
 
-test('#4 cruise pause renders the digest card with resume hint', () => {
+test('#4 checkpoint pause renders the digest card with resume hint', () => {
   const { app } = makeApp()
 
   app.callbacks.onAutonomyCheckpoint?.({
@@ -105,20 +104,5 @@ test('#4 cruise pause renders the digest card with resume hint', () => {
   assert.ok(text.includes('已执行 25 轮'), 'digest content must be visible')
   assert.ok(text.includes('src/a.ts'), 'modified files from the digest must be visible')
   assert.ok(text.includes('continue'), 'resume hint must mention continue')
-  assert.ok(text.includes('/autonomy'), 'resume hint must mention /autonomy')
-})
-
-test('#5 unleashed ping renders a non-blocking progress block', () => {
-  const { app } = makeApp()
-
-  app.callbacks.onAutonomyCheckpoint?.({
-    turns: 30,
-    digest: '已执行 30 轮。\n修改文件：无\nToken：输入 60.0k / 输出 4.0k',
-    paused: false,
-  })
-
-  const text = scrollbackPlain(app)
-  assert.ok(text.includes('自治进度播报'), 'ping header must be visible')
-  assert.ok(text.includes('已执行 30 轮'), 'ping digest must be visible')
-  assert.ok(!text.includes('continue 继续'), 'ping must not carry the pause resume hint')
+  assert.ok(text.includes('/permission'), 'resume hint must mention /permission')
 })
