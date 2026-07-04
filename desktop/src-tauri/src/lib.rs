@@ -52,9 +52,10 @@ struct SidecarLaunchSpec {
     cwd: Option<PathBuf>,
     port: u16,
     token: String,
-    /// Bundled busybox.exe path (Windows-only). Passed as RIVET_BUNDLED_BUSYBOX
-    /// so platform.ts can use it as a shell fallback before degrading to PowerShell.
-    bundled_busybox: Option<PathBuf>,
+    /// Extracted bundled PortableGit dir (Windows-only). Passed as
+    /// RIVET_BUNDLED_GIT_DIR so platform.ts can use its bin\bash.exe as the
+    /// shell fallback when no system Git is installed (system Git wins).
+    bundled_git_dir: Option<PathBuf>,
 }
 
 struct Sidecar {
@@ -365,27 +366,119 @@ fn bundled_node_path(app: &tauri::App) -> Option<PathBuf> {
     }
 }
 
-/// Locate the bundled busybox-w32 binary (Windows-only, provides POSIX shell).
-/// Returns None on non-Windows or when not bundled.
-fn bundled_busybox_path(app: &tauri::App) -> Option<PathBuf> {
-    if std::env::consts::OS != "windows" {
-        return None;
-    }
+/// Version of the bundled PortableGit archive. MUST stay in sync with the
+/// default PORTABLE_GIT_VERSION in desktop/scripts/fetch-shell-runtime.js.
+#[cfg(target_os = "windows")]
+const BUNDLED_GIT_VERSION: &str = "2.55.0.2";
+
+/// Locate the bundled PortableGit self-extracting archive (Windows-only).
+/// Returns None when not bundled (e.g. fetch-shell-runtime download failed).
+#[cfg(target_os = "windows")]
+fn bundled_git_archive(app: &tauri::App) -> Option<PathBuf> {
     let res = resource_dir_fallback(app);
-    let busybox_arch = match std::env::consts::ARCH {
+    let arch_dir = match std::env::consts::ARCH {
         "aarch64" => "win-aarch64",
         "x86_64" => "win-x86_64",
         _ => return None,
     };
     let path = res
         .join("shell-runtime")
-        .join(busybox_arch)
-        .join("busybox.exe");
+        .join(arch_dir)
+        .join("PortableGit.7z.exe");
     if path.exists() {
         Some(path)
     } else {
         None
     }
+}
+
+/// Remove stale version dirs under `<rivet_home>/git-runtime` (anything that
+/// isn't the current bundled version). `.extract-tmp` is left alone — it is
+/// cleaned at the start of the next extraction attempt.
+#[cfg(target_os = "windows")]
+fn cleanup_stale_git_runtimes(runtime_root: &Path) {
+    let Ok(entries) = std::fs::read_dir(runtime_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name != BUNDLED_GIT_VERSION && name != ".extract-tmp" {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Ensure the bundled PortableGit is extracted to `<rivet_home>/git-runtime/<ver>`.
+///
+/// Returns the FINAL dir as soon as extraction is under way — the sidecar
+/// probes `<dir>\bin\bash.exe` lazily on the first bash tool call, so passing
+/// the path before extraction completes is safe (the probe just misses and the
+/// existing PowerShell fallback covers the gap until the next probe/launch).
+///
+/// Extraction runs on a background thread and never blocks startup. It goes
+/// through `.extract-tmp` + rename so the final dir only ever appears complete:
+/// `bin\bash.exe` existing implies the whole tree is in place.
+#[cfg(target_os = "windows")]
+fn ensure_bundled_git(app: &tauri::App, rivet_home: &Path) -> Option<PathBuf> {
+    let runtime_root = rivet_home.join("git-runtime");
+    let final_dir = runtime_root.join(BUNDLED_GIT_VERSION);
+    if final_dir.join("bin").join("bash.exe").exists() {
+        cleanup_stale_git_runtimes(&runtime_root);
+        // Also expose to THIS process so the integrated-terminal PTY
+        // (pty.rs::find_git_bash) can use the bundled bash as its fallback.
+        std::env::set_var("RIVET_BUNDLED_GIT_DIR", final_dir.as_os_str());
+        return Some(final_dir);
+    }
+    let archive = bundled_git_archive(app)?;
+    // Expose the (future) dir now — consumers probe bin\bash.exe existence
+    // lazily, so a not-yet-extracted dir is a harmless miss until it lands.
+    std::env::set_var("RIVET_BUNDLED_GIT_DIR", final_dir.as_os_str());
+    let tmp_dir = runtime_root.join(".extract-tmp");
+    let final_clone = final_dir.clone();
+    std::thread::spawn(move || {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        if let Err(e) = std::fs::create_dir_all(&tmp_dir) {
+            eprintln!("[rivet] PortableGit extract: cannot create tmp dir: {e}");
+            return;
+        }
+        // PortableGit.7z.exe is a 7-Zip SFX: -y (yes to all) -o<dir> (output).
+        let status = Command::new(&archive)
+            .arg("-y")
+            .arg(format!("-o{}", tmp_dir.display()))
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        match status {
+            Ok(s) if s.success() => {
+                if !tmp_dir.join("bin").join("bash.exe").exists() {
+                    eprintln!("[rivet] PortableGit extract: bin\\bash.exe missing after extraction");
+                    let _ = std::fs::remove_dir_all(&tmp_dir);
+                    return;
+                }
+                let _ = std::fs::remove_dir_all(&final_clone);
+                match std::fs::rename(&tmp_dir, &final_clone) {
+                    Ok(()) => {
+                        eprintln!("[rivet] PortableGit ready at {}", final_clone.display());
+                        if let Some(root) = final_clone.parent() {
+                            cleanup_stale_git_runtimes(root);
+                        }
+                    }
+                    Err(e) => eprintln!("[rivet] PortableGit extract: rename into place failed: {e}"),
+                }
+            }
+            Ok(s) => eprintln!("[rivet] PortableGit extract failed: {s}"),
+            Err(e) => eprintln!("[rivet] PortableGit extract: cannot run SFX: {e}"),
+        }
+    });
+    Some(final_dir)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn ensure_bundled_git(_app: &tauri::App, _rivet_home: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// Fallback Node lookup when no bundled binary is available.
@@ -725,10 +818,17 @@ fn spawn_from_spec(spec: &SidecarLaunchSpec) -> Option<Child> {
         // "End task" can't leave an orphaned node.exe holding the port. (Child::kill
         // only covers the clean-shutdown paths we control.)
         .env("RIVET_PARENT_PID", std::process::id().to_string());
-    // Pass bundled busybox path to sidecar so platform.ts finds it before
-    // degrading to PowerShell on Windows (no-op when None / non-Windows).
-    if let Some(bb) = &spec.bundled_busybox {
-        cmd.env("RIVET_BUNDLED_BUSYBOX", bb.to_string_lossy().as_ref());
+    // Bundled PortableGit (Windows-only): tell platform.ts where the fallback
+    // Git Bash lives, and append the git `cmd\` dir to PATH so `git` resolves
+    // on machines without a system Git. Appended LAST so a system Git wins.
+    if let Some(dir) = &spec.bundled_git_dir {
+        cmd.env("RIVET_BUNDLED_GIT_DIR", dir.to_string_lossy().as_ref());
+        let mut paths: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        paths.push(dir.join("cmd"));
+        if let Ok(joined) = std::env::join_paths(paths) {
+            cmd.env("PATH", joined);
+        }
     }
     // Anchor the child's cwd (NOT the parent's — `entry`/`node` are already
     // resolved to absolute paths above, so the child's different cwd can't break
@@ -771,7 +871,7 @@ fn spawn_sidecar(app: &tauri::App) -> (RuntimeInfo, Option<Child>, SidecarLaunch
         cwd: sidecar_cwd(app),
         port,
         token: token.clone(),
-        bundled_busybox: bundled_busybox_path(app),
+        bundled_git_dir: ensure_bundled_git(app, &rivet_home),
     };
 
     let mut child = spawn_from_spec(&spec);

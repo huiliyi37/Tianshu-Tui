@@ -155,7 +155,7 @@ rivet config show                                         # 查看完整配置
 | `manual` | 任何工具声明需要审批时都询问 |
 | `dangerously-skip-permissions` | 跳过所有交互提示 —— 仅限可信工作区 |
 
-> **Windows 注意**：Windows 原生无文件系统沙箱。天枢打包内置 busybox-w32 POSIX shell（开箱即用，不依赖 Git for Windows）。无沙箱环境下，安全写命令在 `auto-safe` 模式自动放行，风险写（rm/mv/git 写操作）仍需审批。
+> **Windows 注意**：Windows 原生无文件系统沙箱。天枢桌面版安装包内嵌 PortableGit（完整 Git + Git Bash，开箱即用，不依赖用户自装 Git for Windows；已装系统 Git 时优先用系统版）。无沙箱环境下，安全写命令在 `auto-safe` 模式自动放行，风险写（rm/mv/git 写操作）仍需审批。
 
 ```bash
 rivet config set-approval dangerously-skip-permissions

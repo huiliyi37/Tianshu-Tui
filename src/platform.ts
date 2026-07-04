@@ -97,17 +97,14 @@ export interface GitBashProbeDeps {
  *   1. `RIVET_GIT_BASH_PATH` override
  *   2. derive from `where git` (…\Git\cmd\git.exe → …\Git\bin\bash.exe)
  *   3. common install locations (Program Files / LocalAppData)
+ *   4. bundled PortableGit shipped with the desktop app (`RIVET_BUNDLED_GIT_DIR`,
+ *      extracted by the Tauri launcher on first run) — LAST so a system Git,
+ *      with the user's own version and config, always wins.
  * All path math uses win32 semantics so it's deterministic when unit-tested on
  * POSIX hosts. Returns null when not on Windows or not found.
  */
 export function resolveGitBashPath(deps: GitBashProbeDeps): string | null {
   if (!deps.isWindows) return null
-
-  // Priority 0: bundled busybox-w32 (shipped with the desktop app).
-  // This guarantees a POSIX shell on every Windows install without depending
-  // on the user installing Git for Windows.
-  const bundledBusybox = deps.env['RIVET_BUNDLED_BUSYBOX']
-  if (bundledBusybox && deps.exists(bundledBusybox)) return bundledBusybox
 
   const override = deps.env['RIVET_GIT_BASH_PATH']
   if (override && deps.exists(override)) return override
@@ -129,6 +126,17 @@ export function resolveGitBashPath(deps: GitBashProbeDeps): string | null {
   for (const c of candidates) {
     if (deps.exists(c)) return c
   }
+
+  // Fallback: bundled PortableGit (desktop app only). Real Git for Windows —
+  // its bin\bash.exe wrapper self-assembles PATH (usr/bin coreutils etc.), so
+  // no special-casing downstream. May not exist yet on the very first launch
+  // (background extraction in progress) — then this probe simply misses.
+  const bundledGitDir = deps.env['RIVET_BUNDLED_GIT_DIR']
+  if (bundledGitDir) {
+    const bundledBash = winPath.join(bundledGitDir, 'bin', 'bash.exe')
+    if (deps.exists(bundledBash)) return bundledBash
+  }
+
   return null
 }
 
@@ -244,9 +252,12 @@ export function getShellDiagnostics(): ShellDiagnostics {
   const gitBash = findGitBashPath()
   const diag: ShellDiagnostics = { kind: shell.kind, cmd: shell.cmd, gitBashPath: gitBash }
   if (isWin && shell.kind !== 'bash') {
+    const bundledNote = process.env['RIVET_BUNDLED_GIT_DIR']
+      ? `, 内置 Git（${process.env['RIVET_BUNDLED_GIT_DIR']}——可能仍在首次解压中，稍后重试或重启）`
+      : ''
     diag.fallbackReason = gitBash
       ? `Git Bash found at ${gitBash} but not selected (RIVET_USE_POWERSHELL set?)`
-      : 'Git Bash not found — probed RIVET_GIT_BASH_PATH, `where git` → …\\Git\\bin\\bash.exe, C:\\Program Files\\Git, %LOCALAPPDATA%\\Programs\\Git'
+      : `Git Bash not found — probed RIVET_GIT_BASH_PATH, \`where git\` → …\\Git\\bin\\bash.exe, C:\\Program Files\\Git, %LOCALAPPDATA%\\Programs\\Git${bundledNote}`
   }
   return diag
 }

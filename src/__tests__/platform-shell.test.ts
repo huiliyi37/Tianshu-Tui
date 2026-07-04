@@ -69,6 +69,56 @@ describe('resolveGitBashPath — probe order', () => {
   it('returns null when nothing is found', () => {
     assert.equal(resolveGitBashPath(baseDeps({})), null)
   })
+
+  it('4. bundled PortableGit (RIVET_BUNDLED_GIT_DIR) is the LAST fallback', () => {
+    const expected = 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2\\bin\\bash.exe'
+    const got = resolveGitBashPath(baseDeps({
+      env: { RIVET_BUNDLED_GIT_DIR: 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2' },
+      exists: (p) => p === expected,
+    }))
+    assert.equal(got, expected)
+  })
+
+  it('4b. a system Git wins over the bundled PortableGit', () => {
+    const system = 'C:\\Program Files\\Git\\bin\\bash.exe'
+    const bundled = 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2\\bin\\bash.exe'
+    const got = resolveGitBashPath(baseDeps({
+      env: { RIVET_BUNDLED_GIT_DIR: 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2' },
+      whichGit: () => 'C:\\Program Files\\Git\\cmd\\git.exe',
+      exists: (p) => p === system || p === bundled,
+    }))
+    assert.equal(got, system)
+  })
+
+  it('4c. bundled dir set but bash.exe not extracted yet → miss (null)', () => {
+    const got = resolveGitBashPath(baseDeps({
+      env: { RIVET_BUNDLED_GIT_DIR: 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2' },
+      exists: () => false,
+    }))
+    assert.equal(got, null)
+  })
+
+  it('4d. legacy RIVET_BUNDLED_BUSYBOX is no longer recognized (regression guard)', () => {
+    const busybox = 'C:\\app\\resources\\shell-runtime\\win-x86_64\\busybox.exe'
+    const got = resolveGitBashPath(baseDeps({
+      env: { RIVET_BUNDLED_BUSYBOX: busybox },
+      exists: (p) => p === busybox,
+    }))
+    assert.equal(got, null)
+  })
+
+  it('4e. bundled bash spawns with plain -c (real Git Bash, no applet prefix)', () => {
+    const bundledBash = 'C:\\Users\\me\\AppData\\Local\\.rivet\\git-runtime\\2.55.0.2\\bin\\bash.exe'
+    const shell = resolveShellCommand({
+      isWindows: true,
+      env: {},
+      gitBashPath: bundledBash,
+      hasPwsh: () => false,
+    })
+    assert.equal(shell.kind, 'bash')
+    assert.equal(shell.cmd, bundledBash)
+    assert.deepEqual(shell.args, ['-c'])
+  })
 })
 
 describe('resolveShellCommand — Windows priority Git Bash > PowerShell > cmd', () => {
