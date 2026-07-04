@@ -465,7 +465,7 @@ const SAFETY_KEYWORD_PATTERN = /(security|permission|sandbox|安全|权限|沙�
 export function classifyPlanMethodology(
   contract: TaskContract,
   depthLayer: TaskDepthLayer,
-  impact?: DepthImpactHint,
+  _impact?: DepthImpactHint,
   override?: PlanMethodology,
 ): PlanMethodology {
   // User override always wins — skip the entire rule chain

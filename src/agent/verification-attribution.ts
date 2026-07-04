@@ -243,7 +243,7 @@ function isInvocationFailure(result: VerificationMetadata): boolean {
     && result.skipped === 0
 }
 
-export function createVerificationAttribution(opts: {
+export function createVerificationAttribution(_opts: {
   ownership: OwnershipLedger
 }): VerificationAttribution {
   function attribute(result: VerificationMetadata): AttributionResult {
