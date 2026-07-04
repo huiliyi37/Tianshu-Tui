@@ -235,14 +235,19 @@ function parseWorkingTreeFiles(numstat: string, statusPorcelain: string): Workin
 }
 
 /**
- * List working-tree changes relative to HEAD for the desktop "changes" tab.
- * Uses `git diff HEAD --numstat` (tracked) + `git status --porcelain` (untracked + status codes).
+ * List working-tree changes relative to `baseRef` (default HEAD) for the
+ * desktop "changes" tab.
+ * Uses `git diff <base> --numstat` (tracked) + `git status --porcelain` (untracked + status codes).
  * Lightweight: file list only, no diff body — the body is fetched per-file on demand via getFileDiff.
  * Returns `notARepo: true` (empty files) if cwd isn't a git repo, so the UI can degrade gracefully.
+ *
+ * Worktree sessions pass their recorded baseline commit as baseRef so the tab
+ * shows the full task delta even after the agent commits mid-task.
  */
-export async function getWorkingTreeFiles(cwd: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
-  const { ok: numstatOk, output: numstat } = await runGitSafe(['diff', 'HEAD', '--numstat'], cwd)
-  // git diff HEAD fails if HEAD doesn't exist (empty repo) — treat as "no tracked diff yet"
+export async function getWorkingTreeFiles(cwd: string, baseRef = 'HEAD'): Promise<{ files: WorkingTreeFile[]; isRepo: boolean }> {
+  const base = safeBaseRef(baseRef)
+  const { ok: numstatOk, output: numstat } = await runGitSafe(['diff', base, '--numstat'], cwd)
+  // git diff <base> fails if the ref doesn't exist (empty repo) — treat as "no tracked diff yet"
   const { ok: statusOk, output: statusOut } = await runGitSafe(['status', '--porcelain', '-uall'], cwd)
   if (!statusOk && !numstatOk) {
     // Both failed — likely not a git repo
@@ -283,16 +288,27 @@ async function backfillUntrackedAdditions(cwd: string, files: WorkingTreeFile[])
 }
 
 /**
- * Fetch the unified diff of a single file relative to HEAD, for on-demand
- * rendering in the desktop "changes" tab. Empty string = no textual diff
- * (binary file, or untracked with no HEAD to diff against).
+ * Reject base refs that could be parsed as git options or revision ranges.
+ * Accepts commit hashes, HEAD, and simple branch/tag names.
  */
-export async function getFileDiff(cwd: string, path: string): Promise<string> {
+function safeBaseRef(ref: string): string {
+  const trimmed = ref.trim()
+  if (!trimmed || trimmed.startsWith('-') || /[\s~^:.\\]/.test(trimmed)) return 'HEAD'
+  return trimmed
+}
+
+/**
+ * Fetch the unified diff of a single file relative to `baseRef` (default
+ * HEAD), for on-demand rendering in the desktop "changes" tab. Empty string =
+ * no textual diff (binary file, or untracked with no base to diff against).
+ */
+export async function getFileDiff(cwd: string, path: string, baseRef = 'HEAD'): Promise<string> {
   // Guard against path traversal / pathspec injection — pathspec must be relative
   const rel = normalizeProjectRelativePath(cwd, path)
   if (!rel) throw new Error(`Invalid file path: ${path}`)
-  // Tracked changes (modified/deleted/staged) diff cleanly against HEAD.
-  const tracked = await runGitSafe(['diff', 'HEAD', '--', rel], cwd)
+  const base = safeBaseRef(baseRef)
+  // Tracked changes (modified/deleted/staged) diff cleanly against the base.
+  const tracked = await runGitSafe(['diff', base, '--', rel], cwd)
   if (tracked.ok && tracked.output.trim()) return tracked.output
   // New / untracked file: not in HEAD, so `git diff HEAD` is empty. Render the
   // whole file as additions via --no-index against /dev/null. This exits 1 when

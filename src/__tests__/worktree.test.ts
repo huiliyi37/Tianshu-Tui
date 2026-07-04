@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree, cleanupStaleHandsBranches } from '../agent/worktree.js'
+import { parseWorktreeList, buildWorktreeArgs, getCurrentGitRef, createWorktree, cleanupStaleHandsBranches, removeWorktree, hasUnlandedWork, commitAll } from '../agent/worktree.js'
 
 function git(dir: string, args: string[]): string {
   return execFileSync('git', args, { cwd: dir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -189,6 +189,22 @@ describe('cleanupStaleHandsBranches', () => {
     assert.equal(remaining, '')
   })
 
+  it('keeps stale branches that carry unmerged commits (unlanded work)', () => {
+    git(repo, ['checkout', '-b', 'rivet-hands-unmerged-1'])
+    writeFileSync(join(repo, 'unlanded.txt'), 'work\n')
+    git(repo, ['add', '-A'])
+    git(repo, ['commit', '-m', 'unlanded work'])
+    git(repo, ['checkout', 'main'])
+    try {
+      const removed = cleanupStaleHandsBranches(repo)
+      assert.ok(!removed.includes('rivet-hands-unmerged-1'), 'branch with unmerged commits must survive cleanup')
+      const remaining = git(repo, ['branch', '--list', 'rivet-hands-unmerged-1']).trim()
+      assert.ok(remaining.includes('rivet-hands-unmerged-1'))
+    } finally {
+      git(repo, ['branch', '-D', 'rivet-hands-unmerged-1'])
+    }
+  })
+
   it('keeps branches that still belong to an active worktree', () => {
     const wt = createWorktree(repo, 'active-1', 'rivet-hands-active-1')
     try {
@@ -205,5 +221,69 @@ describe('cleanupStaleHandsBranches', () => {
       git(repo, ['worktree', 'remove', '--force', wt.path])
       git(repo, ['branch', '-D', wt.branch])
     }
+  })
+})
+
+describe('hasUnlandedWork / removeWorktree keepBranch / commitAll', () => {
+  let repo: string
+
+  before(() => {
+    repo = mkdtempSync(join(tmpdir(), 'rivet-unlanded-'))
+    initGitRepo(repo, 'main')
+  })
+
+  after(() => {
+    rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('reports clean worktree with no unmerged commits', () => {
+    const wt = createWorktree(repo, 'clean-1')
+    try {
+      const work = hasUnlandedWork(repo, wt.path, wt.branch)
+      assert.deepEqual(work, { dirty: false, unmergedCommits: 0 })
+    } finally {
+      removeWorktree(repo, wt.path, wt.branch)
+    }
+  })
+
+  it('detects dirty tree and unmerged commits', () => {
+    const wt = createWorktree(repo, 'dirty-1')
+    try {
+      writeFileSync(join(wt.path, 'committed.txt'), 'a\n')
+      git(wt.path, ['add', '-A'])
+      git(wt.path, ['commit', '-m', 'work'])
+      writeFileSync(join(wt.path, 'uncommitted.txt'), 'b\n')
+
+      const work = hasUnlandedWork(repo, wt.path, wt.branch)
+      assert.equal(work.dirty, true)
+      assert.equal(work.unmergedCommits, 1)
+    } finally {
+      removeWorktree(repo, wt.path, wt.branch)
+    }
+  })
+
+  it('commitAll checkpoints a dirty tree; keepBranch preserves the branch', () => {
+    const wt = createWorktree(repo, 'keep-1')
+    writeFileSync(join(wt.path, 'wip.txt'), 'wip\n')
+
+    const result = commitAll(wt.path, 'rivet: archive checkpoint', { noVerify: true })
+    assert.equal(result.ok, true)
+    assert.ok(result.sha, 'checkpoint commit created')
+
+    removeWorktree(repo, wt.path, wt.branch, { keepBranch: true })
+
+    const branches = git(repo, ['branch', '--list', wt.branch]).trim()
+    assert.ok(branches.includes(wt.branch), 'branch survives removal with keepBranch')
+    // The checkpoint commit is reachable from the kept branch.
+    const show = git(repo, ['show', '--stat', '--format=%s', wt.branch]).trim()
+    assert.ok(show.includes('rivet: archive checkpoint'))
+    assert.ok(show.includes('wip.txt'))
+
+    git(repo, ['branch', '-D', wt.branch])
+  })
+
+  it('commitAll returns nothingToCommit on a clean tree', () => {
+    const result = commitAll(repo, 'noop')
+    assert.deepEqual(result, { ok: true, nothingToCommit: true })
   })
 })

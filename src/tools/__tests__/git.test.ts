@@ -286,4 +286,31 @@ describe('getWorkingTreeFiles / getFileDiff (desktop changes tab)', () => {
       rmSync(nonRepo, { recursive: true, force: true })
     }
   })
+
+  it('keeps committed changes visible when diffing against a baseline ref', async () => {
+    const baseline = execSync('git rev-parse HEAD', { cwd: TMP2, encoding: 'utf-8' }).trim()
+    // Commit some work mid-task, then leave more work uncommitted.
+    writeFileSync(join(TMP2, 'base.txt'), 'base changed\n')
+    execSync('git add . && git commit -m "mid-task commit"', { cwd: TMP2 })
+    writeFileSync(join(TMP2, 'wip.txt'), 'wip\n')
+
+    // Against HEAD, the committed change is invisible.
+    const headView = await getWorkingTreeFiles(TMP2)
+    assert.ok(!headView.files.some((f) => f.path === 'base.txt'), 'committed file hidden vs HEAD')
+
+    // Against the baseline, both committed and uncommitted work show up.
+    const baselineView = await getWorkingTreeFiles(TMP2, baseline)
+    const paths = baselineView.files.map((f) => f.path).sort()
+    assert.deepEqual(paths, ['base.txt', 'wip.txt'])
+
+    const diff = await getFileDiff(TMP2, 'base.txt', baseline)
+    assert.ok(diff.includes('-base'), 'baseline diff shows old content')
+    assert.ok(diff.includes('+base changed'), 'baseline diff shows committed change')
+  })
+
+  it('falls back to HEAD for a malicious or malformed base ref', async () => {
+    writeFileSync(join(TMP2, 'base.txt'), 'base changed\n')
+    const diff = await getFileDiff(TMP2, 'base.txt', '--output=/tmp/evil')
+    assert.ok(diff.includes('+base changed'), 'behaves like HEAD diff, no option injection')
+  })
 })

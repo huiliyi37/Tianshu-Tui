@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useFileDiff, useWorkingTree } from '../state/queries'
+import { useTranslation } from 'react-i18next'
+import { useQueryClient } from '@tanstack/react-query'
+import { qk, useFileDiff, useSessions, useWorkingTree } from '../state/queries'
+import { commitSessionChanges, createSessionPr, mergeSessionBack } from '../runtime/client'
 import { DiffView } from '../components/DiffView'
 import type { LineComment, WorkingTreeFile } from '../runtime/types'
 
@@ -20,7 +23,10 @@ const STATUS_CLASS: Record<WorkingTreeFile['status'], string> = {
 }
 
 /**
- * Working-tree changes relative to HEAD — the desktop "Changes" tab.
+ * Working-tree changes relative to the session baseline — the desktop
+ * "Changes" tab. Worktree sessions diff against the recorded task-start
+ * commit (baselineHead) in their own worktree cwd, so committed work stays
+ * visible; plain sessions fall back to HEAD in the shared cwd.
  *
  * Antigravity-2.0-style review: a single scrollable column with a sticky
  * summary bar (file count, total +/-, global single/double-column toggle) and
@@ -42,7 +48,7 @@ export function ChangesTab(props: {
   onSendPrompt?: (text: string) => void
 }) {
   const enabled = props.sessionId !== null
-  const tree = useWorkingTree(enabled)
+  const tree = useWorkingTree(props.sessionId)
   const [sideBySide, setSideBySide] = useState(false)
   const [lineComments, setLineComments] = useState<LineComment[]>([])
 
@@ -61,6 +67,11 @@ export function ChangesTab(props: {
     props.onSendPrompt(`请根据以下针对工作树 diff 的行级评论修改代码：\n\n${lines.join('\n')}`)
     setLineComments([])
   }
+
+  const sessions = useSessions()
+  const session = sessions.data?.find((s) => s.id === props.sessionId)
+  const busy = session?.status === 'running'
+  const isWorktree = Boolean(session?.worktreeBranch)
 
   const files = tree.data?.files ?? []
   const totals = useMemo(
@@ -122,6 +133,7 @@ export function ChangesTab(props: {
           <FileDiffCard
             key={f.path}
             file={f}
+            sessionId={props.sessionId}
             sideBySide={sideBySide}
             defaultOpen={i === 0}
             comments={props.onSendPrompt ? lineComments : undefined}
@@ -129,6 +141,161 @@ export function ChangesTab(props: {
           />
         ))}
       </div>
+      {props.sessionId && (
+        <LandingBar
+          sessionId={props.sessionId}
+          busy={busy}
+          isWorktree={isWorktree}
+          onSendPrompt={props.onSendPrompt}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Change-landing action bar — closes the "agent produced changes, now what?"
+ * loop. Dual-channel: server-direct git (Commit / Merge back / Create PR,
+ * fast, no agent turns) plus a "let the agent commit" prompt path that goes
+ * through the agent's commit discipline. Direct git actions are disabled
+ * while the agent is running to avoid racing its file writes.
+ */
+function LandingBar(props: {
+  sessionId: string
+  busy: boolean
+  isWorktree: boolean
+  onSendPrompt?: (text: string) => void
+}) {
+  const { sessionId, busy, isWorktree, onSendPrompt } = props
+  const { t } = useTranslation('thread')
+  const queryClient = useQueryClient()
+  const [commitOpen, setCommitOpen] = useState(false)
+  const [commitMsg, setCommitMsg] = useState('')
+  const [pending, setPending] = useState<null | 'commit' | 'merge' | 'pr'>(null)
+  const [notice, setNotice] = useState<null | { kind: 'ok' | 'err'; text: string; url?: string }>(null)
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: qk.workingTree(sessionId) })
+  }
+
+  const runCommit = async () => {
+    setPending('commit')
+    setNotice(null)
+    try {
+      const r = await commitSessionChanges(sessionId, commitMsg.trim() || undefined)
+      if (r.ok && r.nothingToCommit) setNotice({ kind: 'ok', text: t('landingNothingToCommit') })
+      else if (r.ok) setNotice({ kind: 'ok', text: t('landingCommitted', { sha: r.sha?.slice(0, 8) ?? '' }) })
+      else setNotice({ kind: 'err', text: t('landingFailed', { error: r.error ?? '' }) })
+      if (r.ok) {
+        setCommitOpen(false)
+        setCommitMsg('')
+        refresh()
+      }
+    } catch (e) {
+      setNotice({ kind: 'err', text: t('landingFailed', { error: String(e) }) })
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runMerge = async () => {
+    setPending('merge')
+    setNotice(null)
+    try {
+      const r = await mergeSessionBack(sessionId)
+      if (r.ok && r.nothingToMerge) setNotice({ kind: 'ok', text: t('landingNothingToMerge') })
+      else if (r.ok) setNotice({ kind: 'ok', text: t('landingMerged', { sha: r.sha?.slice(0, 8) ?? '' }) })
+      else if (r.conflictFiles?.length) setNotice({ kind: 'err', text: t('landingConflicts', { files: r.conflictFiles.join(', ') }) })
+      else setNotice({ kind: 'err', text: t('landingFailed', { error: r.error ?? '' }) })
+      if (r.ok) refresh()
+    } catch (e) {
+      setNotice({ kind: 'err', text: t('landingFailed', { error: String(e) }) })
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const runPr = async () => {
+    setPending('pr')
+    setNotice(null)
+    try {
+      const r = await createSessionPr(sessionId)
+      if (r.ok) setNotice({ kind: 'ok', text: t('landingPrCreated'), url: r.url })
+      else setNotice({ kind: 'err', text: t('landingFailed', { error: r.error ?? '' }) })
+    } catch (e) {
+      setNotice({ kind: 'err', text: t('landingFailed', { error: String(e) }) })
+    } finally {
+      setPending(null)
+    }
+  }
+
+  const askAgentCommit = () => {
+    onSendPrompt?.(t('landingAgentCommitPrompt'))
+    setNotice({ kind: 'ok', text: t('landingAgentCommitSent') })
+  }
+
+  const directDisabled = busy || pending !== null
+
+  return (
+    <div className="changes-landing">
+      <div className="changes-landing-actions">
+        <button
+          className="btn sm"
+          disabled={directDisabled}
+          onClick={() => setCommitOpen((v) => !v)}
+          title={busy ? t('landingBusy') : undefined}
+        >
+          {pending === 'commit' ? '…' : t('landingCommit')}
+        </button>
+        {onSendPrompt && (
+          <button className="btn sm ghost" onClick={askAgentCommit}>
+            {t('landingCommitAgent')}
+          </button>
+        )}
+        {isWorktree && (
+          <>
+            <button
+              className="btn sm"
+              disabled={directDisabled}
+              onClick={runMerge}
+              title={busy ? t('landingBusy') : t('landingMergeBackHint')}
+            >
+              {pending === 'merge' ? '…' : t('landingMergeBack')}
+            </button>
+            <button
+              className="btn sm"
+              disabled={directDisabled}
+              onClick={runPr}
+              title={busy ? t('landingBusy') : t('landingCreatePrHint')}
+            >
+              {pending === 'pr' ? '…' : t('landingCreatePr')}
+            </button>
+          </>
+        )}
+      </div>
+      {commitOpen && (
+        <div className="changes-landing-commit">
+          <input
+            type="text"
+            value={commitMsg}
+            placeholder={t('landingCommitMsgPlaceholder')}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !directDisabled) void runCommit() }}
+            autoFocus
+          />
+          <button className="btn sm primary" disabled={directDisabled} onClick={runCommit}>
+            {t('landingConfirm')}
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div className={`changes-landing-notice ${notice.kind}`}>
+          {notice.text}
+          {notice.url && (
+            <a href={notice.url} target="_blank" rel="noreferrer">{notice.url}</a>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -136,15 +303,16 @@ export function ChangesTab(props: {
 /** One collapsible per-file diff card. Fetches its diff only once expanded. */
 function FileDiffCard(props: {
   file: WorkingTreeFile
+  sessionId: string | null
   sideBySide: boolean
   defaultOpen: boolean
   comments?: LineComment[]
   onLineComment?: (anchor: { file: string; oldLine?: number; newLine?: number }, text: string) => void
 }) {
-  const { file, sideBySide, defaultOpen, comments, onLineComment } = props
+  const { file, sessionId, sideBySide, defaultOpen, comments, onLineComment } = props
   const [open, setOpen] = useState(defaultOpen)
   // null path → query disabled, so collapsed cards never fetch.
-  const diff = useFileDiff(open ? file.path : null)
+  const diff = useFileDiff(open ? file.path : null, sessionId)
 
   return (
     <div className={`file-diff-card ${open ? 'open' : ''}`}>

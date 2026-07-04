@@ -156,11 +156,78 @@ export function createWorktreeAt(cwd: string, wtPath: string, commitish: string)
   return { path: wtPath, branch: '(detached)' }
 }
 
-export function removeWorktree(cwd: string, wtPath: string, branch?: string): void {
+export function removeWorktree(cwd: string, wtPath: string, branch?: string, opts?: { keepBranch?: boolean }): void {
   git(cwd, ['worktree', 'remove', '--force', wtPath])
-  if (branch) git(cwd, ['branch', '-D', branch])
+  if (branch && !opts?.keepBranch) git(cwd, ['branch', '-D', branch])
   // Clean up owner marker so the reaper doesn't try to reap an already-removed worktree
   try { rmSync(join(wtPath, OWNER_FILE), { force: true }) } catch {}
+}
+
+export interface CommitAllResult {
+  ok: boolean
+  /** Commit sha on success; undefined when nothing to commit or on failure. */
+  sha?: string
+  /** True when the tree was already clean (ok=true, no commit created). */
+  nothingToCommit?: boolean
+  error?: string
+}
+
+/**
+ * Stage everything and commit in the given directory. Used for archive
+ * checkpoints and the desktop "Commit" landing action. Returns a structured
+ * result instead of throwing — callers decide how fatal a failure is.
+ */
+/** Working-tree dirtiness, ignoring the vsw owner marker (infrastructure noise). */
+function isDirty(cwd: string): boolean {
+  const status = git(cwd, ['status', '--porcelain', '-uall'])
+  if (!status.ok) return false
+  return status.stdout.split('\n').some(line => {
+    const trimmed = line.trim()
+    return trimmed.length > 0 && !trimmed.endsWith(OWNER_FILE)
+  })
+}
+
+export function commitAll(cwd: string, message: string, opts?: { noVerify?: boolean }): CommitAllResult {
+  if (!isDirty(cwd)) return { ok: true, nothingToCommit: true }
+  const add = git(cwd, ['add', '-A', '--', '.', `:(exclude)${OWNER_FILE}`])
+  if (!add.ok) return { ok: false, error: add.stderr || add.stdout || 'git add failed' }
+  const args = ['commit', '-m', message]
+  if (opts?.noVerify) args.push('--no-verify')
+  const commit = git(cwd, args)
+  if (!commit.ok) return { ok: false, error: commit.stderr || commit.stdout || 'git commit failed' }
+  const sha = git(cwd, ['rev-parse', 'HEAD'])
+  return { ok: true, sha: sha.ok ? sha.stdout.trim() : undefined }
+}
+
+export interface UnlandedWork {
+  /** Uncommitted changes (staged/unstaged/untracked) exist in the worktree. */
+  dirty: boolean
+  /** Commits on the worktree branch not reachable from the main workspace HEAD. */
+  unmergedCommits: number
+}
+
+/**
+ * Detect work in a session worktree that would be lost if the worktree and its
+ * branch were removed: uncommitted changes in the tree, or commits on the
+ * branch that the main workspace HEAD doesn't contain. Fail-open on git
+ * errors (report work present) so archive never silently destroys data.
+ */
+export function hasUnlandedWork(cwd: string, wtPath: string, branch?: string): UnlandedWork {
+  // If status fails (worktree dir gone / not a repo) there is nothing to lose.
+  // The .vsw-owner.json marker is infrastructure noise, not user work.
+  const dirty = isDirty(wtPath)
+
+  let unmergedCommits = 0
+  if (branch && branchExists(cwd, branch)) {
+    const revList = git(cwd, ['rev-list', '--count', `HEAD..${branch}`])
+    if (revList.ok) {
+      unmergedCommits = Number.parseInt(revList.stdout.trim(), 10) || 0
+    } else {
+      // Can't tell — fail-open: assume the branch has unmerged work.
+      unmergedCommits = 1
+    }
+  }
+  return { dirty, unmergedCommits }
 }
 
 /**
@@ -168,6 +235,10 @@ export function removeWorktree(cwd: string, wtPath: string, branch?: string): vo
  * registered worktree. These are typically left behind when a previous run
  * crashed between worktree creation and branch deletion. Returns the list of
  * removed branch names (best-effort).
+ *
+ * Branches with commits not reachable from HEAD are preserved — they hold
+ * unlanded work (archive keeps such branches deliberately; crashed sessions
+ * may too). Only branches with zero unique commits are deleted.
  */
 export function cleanupStaleHandsBranches(cwd: string): string[] {
   const removed: string[] = []
@@ -187,10 +258,92 @@ export function cleanupStaleHandsBranches(cwd: string): string[] {
     const branch = raw.replace(/^\*\s*/, '').trim()
     if (!branch.startsWith('rivet-hands-')) continue
     if (activeBranches.has(branch)) continue
+    // Keep branches that carry unmerged commits — deleting them loses work.
+    const revList = git(cwd, ['rev-list', '--count', `HEAD..${branch}`])
+    const unmerged = revList.ok ? Number.parseInt(revList.stdout.trim(), 10) || 0 : 1
+    if (unmerged > 0) continue
     const del = git(cwd, ['branch', '-D', branch])
     if (del.ok) removed.push(branch)
   }
   return removed
+}
+
+export interface SquashMergeResult {
+  ok: boolean
+  /** Squash commit sha on success. */
+  sha?: string
+  /** True when the branch had no changes relative to the target HEAD. */
+  nothingToMerge?: boolean
+  /** Conflicted file paths when the merge failed on conflicts. */
+  conflictFiles?: string[]
+  error?: string
+}
+
+/**
+ * Squash-merge `branch` into the current branch of `cwd` (the main workspace)
+ * and commit. Fail-closed: refuses when the target tree is dirty, and rolls
+ * back (`git reset --merge`) on conflict, reporting the conflicted files.
+ */
+export function squashMergeBranch(cwd: string, branch: string, message: string): SquashMergeResult {
+  if (!branchExists(cwd, branch)) return { ok: false, error: `branch not found: ${branch}` }
+  if (isDirty(cwd)) {
+    return { ok: false, error: 'main workspace has uncommitted changes — commit or stash them before merging back' }
+  }
+  const merge = git(cwd, ['merge', '--squash', branch])
+  if (!merge.ok) {
+    const conflicts = git(cwd, ['diff', '--name-only', '--diff-filter=U'])
+    const conflictFiles = conflicts.ok
+      ? conflicts.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+      : []
+    // Squash merges don't create MERGE_HEAD, so `merge --abort` may not apply —
+    // reset --merge restores the pre-merge index and working tree.
+    git(cwd, ['merge', '--abort'])
+    git(cwd, ['reset', '--merge'])
+    return {
+      ok: false,
+      conflictFiles,
+      error: conflictFiles.length > 0
+        ? `merge conflicts in ${conflictFiles.length} file(s)`
+        : (merge.stderr || merge.stdout || 'git merge --squash failed'),
+    }
+  }
+  const commit = git(cwd, ['commit', '-m', message])
+  if (!commit.ok) {
+    const output = `${commit.stdout}\n${commit.stderr}`
+    if (/nothing to commit|nothing added to commit/i.test(output)) {
+      return { ok: true, nothingToMerge: true }
+    }
+    // Commit failed (e.g. hook rejection) — unstage the squashed changes.
+    git(cwd, ['reset', '--merge'])
+    return { ok: false, error: commit.stderr || commit.stdout || 'git commit failed' }
+  }
+  const sha = git(cwd, ['rev-parse', 'HEAD'])
+  return { ok: true, sha: sha.ok ? sha.stdout.trim() : undefined }
+}
+
+/**
+ * Push `branch` to origin with upstream tracking. Never prompts for
+ * credentials (GIT_TERMINAL_PROMPT=0) and times out instead of hanging.
+ */
+export function pushBranch(cwd: string, branch: string): { ok: boolean; error?: string } {
+  const result = spawnSync('git', ['push', '-u', 'origin', branch], {
+    cwd,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 60_000,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  })
+  if (result.status === 0) return { ok: true }
+  const stderr = typeof result.stderr === 'string' ? result.stderr : ''
+  const stdout = typeof result.stdout === 'string' ? result.stdout : ''
+  return { ok: false, error: (stderr || stdout || 'git push failed').trim() }
+}
+
+/** Current HEAD commit hash, or undefined outside a git repo. */
+export function revParseHead(cwd: string): string | undefined {
+  const result = git(cwd, ['rev-parse', 'HEAD'])
+  const sha = result.stdout.trim()
+  return result.ok && sha ? sha : undefined
 }
 
 export function getCurrentGitRef(cwd: string): string | undefined {

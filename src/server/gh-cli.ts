@@ -279,3 +279,33 @@ export async function isGhAvailable(cwd: string): Promise<boolean> {
   const result = await runGh(['auth', 'status'], cwd)
   return result !== null
 }
+
+export interface CreatePrResult {
+  ok: boolean
+  /** PR URL on success. */
+  url?: string
+  error?: string
+}
+
+/**
+ * Create a PR from the current branch of `cwd` via `gh pr create`. The branch
+ * must already be pushed (the caller handles `git push -u`). Without a title,
+ * `--fill` derives title/body from the commits.
+ */
+export async function createPr(
+  cwd: string,
+  opts: { title?: string; body?: string; draft?: boolean } = {},
+): Promise<CreatePrResult> {
+  const args = ['pr', 'create']
+  if (opts.title?.trim()) {
+    args.push('--title', opts.title.trim(), '--body', opts.body ?? '')
+  } else {
+    args.push('--fill')
+  }
+  if (opts.draft) args.push('--draft')
+  const res = await runGhCapture(args, cwd)
+  if (!res.ok) return { ok: false, error: (res.stderr || res.stdout).trim() || 'gh pr create failed' }
+  // gh prints the PR URL as the last stdout line.
+  const url = res.stdout.split('\n').map(l => l.trim()).filter(l => l.startsWith('https://')).pop()
+  return { ok: true, url }
+}

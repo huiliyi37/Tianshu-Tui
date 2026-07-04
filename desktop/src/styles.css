@@ -3662,6 +3662,29 @@ a.mention-link:hover { background: var(--accent-soft); }
 .changes-summary .diff-toggle { margin-left: auto; }
 .changes-cards { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
 
+/* Change landing bar — Commit / let-agent-commit / Merge back / Create PR */
+.changes-landing {
+  flex: none; display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border);
+  background: var(--panel);
+}
+.changes-landing-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.changes-landing-commit { display: flex; align-items: center; gap: var(--space-2); }
+.changes-landing-commit input {
+  flex: 1; min-width: 0; padding: 4px 8px; font-size: var(--text-xs);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); font-family: var(--font-mono);
+}
+.changes-landing-commit input:focus { outline: none; border-color: var(--accent); }
+.changes-landing-notice {
+  font-size: var(--text-xs); padding: 4px 8px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  word-break: break-all;
+}
+.changes-landing-notice.ok { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+.changes-landing-notice.err { color: var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); }
+.changes-landing-notice a { color: var(--accent); text-decoration: underline; }
+
 .file-diff-card { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; background: var(--panel); }
 .file-diff-card-head {
   display: flex; align-items: center; gap: var(--space-2); width: 100%;

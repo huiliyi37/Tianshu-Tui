@@ -207,6 +207,8 @@ export type SessionEventType =
   | 'skills_changed'
   // I4 — user-defined .rivet/hooks.json script results.
   | 'hook_result'
+  // Change landing — commit / squash merge-back / PR created from the Changes tab.
+  | 'landing'
   // Background jobs (bash run_in_background) — started / output / exit.
   | 'job'
   | 'done'

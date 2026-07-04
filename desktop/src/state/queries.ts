@@ -59,8 +59,8 @@ export const qk = {
   githubPr: (n: number) => ['github', 'pr', n] as const,
   githubPrDiff: (n: number) => ['github', 'pr', n, 'diff'] as const,
   configProviders: ['config', 'providers'] as const,
-  workingTree: ['git', 'working-tree'] as const,
-  fileDiff: (path: string) => ['git', 'diff', path] as const,
+  workingTree: (sessionId: string) => ['git', 'working-tree', sessionId] as const,
+  fileDiff: (path: string, sessionId: string) => ['git', 'diff', sessionId, path] as const,
 }
 
 export function useHealth() {
@@ -391,13 +391,14 @@ export function useConfigProviders() {
 
 // ── Git: Working Tree (changes tab) ─────────────────────────────────
 
-/** Poll the working-tree change list. Diff changes less often than session
- *  state, so 5s (vs sessions' 2s) is a reasonable cadence. Disabled when no
- *  active session, since the cwd is session-scoped. */
-export function useWorkingTree(enabled: boolean) {
+/** Poll the working-tree change list, scoped to the active session (worktree
+ *  cwd + task baseline). Diff changes less often than session state, so 5s
+ *  (vs sessions' 2s) is a reasonable cadence. Disabled when no active session. */
+export function useWorkingTree(sessionId: string | null) {
+  const enabled = sessionId !== null
   return useQuery({
-    queryKey: qk.workingTree,
-    queryFn: getWorkingTree,
+    queryKey: qk.workingTree(sessionId ?? ''),
+    queryFn: () => getWorkingTree(sessionId!),
     refetchInterval: enabled ? 5000 : false,
     enabled,
     staleTime: 2000,
@@ -405,11 +406,11 @@ export function useWorkingTree(enabled: boolean) {
 }
 
 /** Fetch a single file's unified diff on demand (when the user selects it). */
-export function useFileDiff(path: string | null) {
+export function useFileDiff(path: string | null, sessionId: string | null) {
   return useQuery({
-    queryKey: qk.fileDiff(path ?? ''),
-    queryFn: () => getFileDiff(path!),
-    enabled: path !== null,
+    queryKey: qk.fileDiff(path ?? '', sessionId ?? ''),
+    queryFn: () => getFileDiff(path!, sessionId!),
+    enabled: path !== null && sessionId !== null,
     staleTime: 3000,
   })
 }

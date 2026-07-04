@@ -46,7 +46,8 @@ import type { StarDomainId } from '../agent/star-domain.js'
 import { skillRegistry, loadProjectSkills, listInstallableSkills, importSkillsIntoRivet, countInstalledSkills, type InstallableSkill } from '../skills/skill-loader.js'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
-import { createWorktree, removeWorktree, listWorktrees, type WorktreeEntry } from '../agent/worktree.js'
+import { createWorktree, removeWorktree, listWorktrees, hasUnlandedWork, commitAll, revParseHead, squashMergeBranch, pushBranch, type WorktreeEntry } from '../agent/worktree.js'
+import { createPr } from './gh-cli.js'
 import { getGitGraph, getWorkingTreeFiles, getFileDiff } from '../tools/git.js'
 import type { WorkingTreeFile } from '../tools/git.js'
 import { SessionJobs, type JobEvent } from '../tools/job-store.js'
@@ -100,6 +101,8 @@ export type SessionEventType =
   | 'done'
   // Watchdog stall auto-recovery (桌面端对齐 TUI v3) — 续跑决策可观测。
   | 'watchdog_recovery'
+  // Change landing — commit / squash merge-back / PR created from the Changes tab.
+  | 'landing'
   // C3 自治档检查点 — run 在 N 轮后暂停等待用户确认（continue 恢复）。
   | 'autonomy_checkpoint'
 
@@ -162,6 +165,12 @@ export interface SessionRecord {
   worktreeBranch?: string
   /** Worktree path on disk (for cleanup on archive/close). */
   worktreePath?: string
+  /** HEAD commit at session creation — diff baseline for the Changes tab (worktree sessions). */
+  baselineHead?: string
+  /** Worktree branch head at the last successful merge-back. Squash merges
+   *  leave the branch commits unreachable from main, so rev-list can't tell
+   *  "landed" — this marker lets archive safely delete a landed branch. */
+  landedHead?: string
 }
 
 /** PlusMenu — a selectable model across all configured providers. */
@@ -931,6 +940,7 @@ export class RuntimeSessionManager {
     let cwd = input.cwd ?? this.defaultCwd
     let worktreeBranch: string | undefined
     let worktreePath: string | undefined
+    let baselineHead: string | undefined
 
     if (input.isolatedWorktree) {
       try {
@@ -938,6 +948,9 @@ export class RuntimeSessionManager {
         worktreeBranch = wt.branch
         worktreePath = wt.path
         cwd = wt.path
+        // Diff baseline for the Changes tab: task delta stays visible even
+        // after the agent commits mid-task.
+        baselineHead = revParseHead(wt.path)
       } catch {
         // Worktree creation failed — fall back to shared cwd silently.
       }
@@ -959,6 +972,7 @@ export class RuntimeSessionManager {
         domain: 'auto',
         worktreeBranch,
         worktreePath,
+        baselineHead,
       },
       agent: null,
       approvalMode: input.approvalMode,
@@ -1802,12 +1816,34 @@ export class RuntimeSessionManager {
     }
     s.record.archived = true
     s.running = false
-    // Clean up isolated worktree on archive (best-effort).
+    // Clean up isolated worktree on archive. Guard against data loss: if the
+    // worktree has uncommitted changes, checkpoint-commit them first; if the
+    // branch carries commits not merged into the main workspace, keep the
+    // branch (only the worktree directory is removed) so work stays landable.
+    let branchKept = false
     if (s.record.worktreePath) {
-      try { removeWorktree(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch) } catch { /* non-fatal */ }
+      try {
+        const work = hasUnlandedWork(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch)
+        if (work.dirty) {
+          // worktree remove --force discards uncommitted changes — snapshot them.
+          commitAll(s.record.worktreePath, 'rivet: archive checkpoint', { noVerify: true })
+        }
+        const after = work.dirty || work.unmergedCommits > 0
+          ? hasUnlandedWork(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch)
+          : work
+        // Squash merge-back leaves branch commits unreachable from main —
+        // the landedHead marker proves they were landed. A branch head that
+        // hasn't moved past the last merge-back is safe to delete.
+        const landed = Boolean(s.record.landedHead)
+          && revParseHead(s.record.worktreePath) === s.record.landedHead
+        branchKept = Boolean(s.record.worktreeBranch) && after.unmergedCommits > 0 && !landed
+        removeWorktree(this.defaultCwd, s.record.worktreePath, s.record.worktreeBranch, { keepBranch: branchKept })
+      } catch { /* non-fatal */ }
     }
     this.touch(s)
-    this.append(s, 'status', { status: 'archived' })
+    this.append(s, 'status', branchKept
+      ? { status: 'archived', branchKept: true, worktreeBranch: s.record.worktreeBranch }
+      : { status: 'archived' })
     this.persistRecord(s)
     try { this.getRegistry?.()?.releaseAllClaims(id) } catch (e) { console.warn('releaseAllClaims failed during archive:', e) }
     return true
@@ -1858,6 +1894,109 @@ export class RuntimeSessionManager {
   /** Unified diff of a single file relative to HEAD (on-demand). */
   async getFileDiff(path: string, cwd?: string): Promise<string> {
     return getFileDiff(cwd ?? this.defaultCwd, path)
+  }
+
+  /**
+   * Resolve the git context of a session: worktree cwd (falls back to the
+   * shared default cwd) and the diff baseline (recorded creation HEAD for
+   * worktree sessions, plain HEAD otherwise).
+   */
+  private sessionGitContext(id: string): { cwd: string; baseRef: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    const cwd = s.record.worktreePath ?? this.defaultCwd
+    const baseRef = s.record.baselineHead ?? 'HEAD'
+    return { cwd, baseRef }
+  }
+
+  /** Session-scoped working-tree changes (worktree cwd + task baseline). */
+  async getSessionWorkingTree(id: string): Promise<{ files: WorkingTreeFile[]; isRepo: boolean } | null> {
+    const ctx = this.sessionGitContext(id)
+    if (!ctx) return null
+    const result = await getWorkingTreeFiles(ctx.cwd, ctx.baseRef)
+    // The worktree owner marker is infrastructure, not user work — hide it.
+    return { ...result, files: result.files.filter(f => f.path !== '.vsw-owner.json') }
+  }
+
+  /** Session-scoped single-file diff (worktree cwd + task baseline). */
+  async getSessionFileDiff(id: string, path: string): Promise<string | null> {
+    const ctx = this.sessionGitContext(id)
+    if (!ctx) return null
+    return getFileDiff(ctx.cwd, path, ctx.baseRef)
+  }
+
+  // ── Change landing (desktop Changes tab: Commit / Merge back / Create PR) ──
+
+  /**
+   * Stage and commit everything in the session's cwd (worktree for isolated
+   * sessions, shared cwd otherwise). Server-direct path of the dual-channel
+   * design — the "let the agent commit" path goes through a normal prompt.
+   */
+  commitSessionChanges(id: string, message?: string): { ok: boolean; sha?: string; nothingToCommit?: boolean; error?: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    const cwd = s.record.worktreePath ?? this.defaultCwd
+    const fallback = `rivet: ${s.record.title?.trim() || `session ${id.slice(0, 8)}`} changes`
+    const result = commitAll(cwd, message?.trim() || fallback)
+    if (result.ok && result.sha) {
+      this.append(s, 'landing', { action: 'commit', sha: result.sha })
+      this.touch(s)
+    }
+    return result
+  }
+
+  /**
+   * Squash-merge the session's worktree branch into the main workspace's
+   * current branch. Uncommitted worktree changes are committed first so the
+   * squash captures the full task delta. Fail-closed on dirty main workspace
+   * or conflicts (rolled back, conflict files reported).
+   */
+  mergeSessionBack(id: string): { ok: boolean; sha?: string; nothingToMerge?: boolean; conflictFiles?: string[]; error?: string } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    if (!s.record.worktreeBranch || !s.record.worktreePath) {
+      return { ok: false, error: 'not a worktree session — nothing to merge back' }
+    }
+    // Sweep uncommitted work into the branch first (squash flattens it anyway).
+    const checkpoint = commitAll(s.record.worktreePath, 'rivet: pre-merge checkpoint', { noVerify: true })
+    if (!checkpoint.ok) return { ok: false, error: `failed to checkpoint worktree: ${checkpoint.error}` }
+    const title = s.record.title?.trim() || 'session changes'
+    const result = squashMergeBranch(this.defaultCwd, s.record.worktreeBranch, `${title} (rivet session ${id.slice(0, 8)})`)
+    if (result.ok) {
+      // Squash merges leave the branch commits unreachable from main, so
+      // rev-list alone can't prove "landed". Record the branch head at merge
+      // time — archive deletes the branch when it hasn't moved past this.
+      s.record.landedHead = revParseHead(s.record.worktreePath)
+      if (result.sha) this.append(s, 'landing', { action: 'merge_back', sha: result.sha, branch: s.record.worktreeBranch })
+      this.touch(s)
+      this.persistRecord(s)
+    }
+    return result
+  }
+
+  /**
+   * Push the session's worktree branch and open a PR via `gh pr create`.
+   * Uncommitted changes are checkpoint-committed first.
+   */
+  async createSessionPr(id: string, title?: string, body?: string): Promise<{ ok: boolean; url?: string; error?: string } | null> {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    if (!s.record.worktreeBranch || !s.record.worktreePath) {
+      return { ok: false, error: 'not a worktree session — create PRs from an isolated worktree session' }
+    }
+    const checkpoint = commitAll(s.record.worktreePath, 'rivet: pre-PR checkpoint', { noVerify: true })
+    if (!checkpoint.ok) return { ok: false, error: `failed to checkpoint worktree: ${checkpoint.error}` }
+    const pushed = pushBranch(s.record.worktreePath, s.record.worktreeBranch)
+    if (!pushed.ok) return { ok: false, error: `git push failed: ${pushed.error}` }
+    const result = await createPr(s.record.worktreePath, {
+      title: title?.trim() || s.record.title?.trim(),
+      body: body?.trim() || `Created from Rivet session ${id.slice(0, 8)}.`,
+    })
+    if (result.ok && result.url) {
+      this.append(s, 'landing', { action: 'pr_created', url: result.url, branch: s.record.worktreeBranch })
+      this.touch(s)
+    }
+    return result
   }
 
   /** Expose defaultCwd for routes that need the repo root (e.g. gh CLI). */
