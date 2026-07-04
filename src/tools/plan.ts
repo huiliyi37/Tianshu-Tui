@@ -7,7 +7,7 @@
  */
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
-import { writePlan, slugify, stripPlanStatusMarkers, type PlanOption } from '../plan/plan-store.js'
+import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, type PlanOption } from '../plan/plan-store.js'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
@@ -107,6 +107,14 @@ function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const strings = value.filter((item): item is string => typeof item === 'string' && item.length > 0)
   return strings.length > 0 ? strings : undefined
+}
+
+type GateState = 'GREEN' | 'YELLOW' | 'RED'
+
+/** Delivery severity ordering: RED > YELLOW > GREEN. Returns the worse of two. */
+function worseState(a: GateState, b: GateState): GateState {
+  const rank: Record<GateState, number> = { GREEN: 0, YELLOW: 1, RED: 2 }
+  return rank[a] >= rank[b] ? a : b
 }
 
 function closureAction(result: PlanCloseResult): 'insert' | 'update' | 'unchanged' {
@@ -359,23 +367,81 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
     return { content: 'Error: deliveryState must be GREEN, YELLOW, or RED', isError: true }
   }
 
+  const claimedCommands = asStringArray(params.input.verifiedCommands)
+
+  // ── 防伪闭环: evidence-gated closure ──
+  // When the session wired a real delivery gate, closure state and verified
+  // commands are driven by actual evidence, not the model's self-report.
+  // Degrades gracefully to legacy (trust-claimed) behavior when absent.
+  let effectiveState: GateState | undefined = deliveryState
+  let effectiveCommands = claimedCommands
+  let mismatchNote: string | undefined
+  let realGreen = false
+  let gateBlock: { reason: string; nextStep?: string } | undefined
+
+  if (params.assessDelivery) {
+    const real = params.assessDelivery(params.sessionModifiedFiles)
+    const summary = params.getVerificationEvidence?.()
+    const claimed: GateState = deliveryState ?? 'GREEN'
+
+    if (claimed === 'GREEN' && real.state === 'RED') {
+      gateBlock = {
+        reason: real.blockingReason ?? real.reason ?? 'Delivery gate is RED — owned files modified but unverified.',
+        nextStep: real.shortestNextStep,
+      }
+    } else {
+      effectiveState = worseState(claimed, real.state)
+      realGreen = effectiveState === 'GREEN'
+      const hasRealVerification = real.verificationCount > 0 || (summary?.verified ?? 0) > 0
+      if (!hasRealVerification) {
+        if (claimedCommands && claimedCommands.length > 0) {
+          mismatchNote = `声明了 ${claimedCommands.length} 条验证命令，但会话证据中无对应验证记录（已按真实证据记为空）。`
+        }
+        effectiveCommands = undefined
+      } else if (!effectiveCommands && real.latestVerificationTotals?.command) {
+        effectiveCommands = [real.latestVerificationTotals.command]
+      }
+    }
+  }
+
+  // Anti-forgery block only fires on write (apply=true); preview still renders.
+  if (gateBlock && params.input.apply === true) {
+    return {
+      content: [
+        `Plan close blocked: claimed GREEN but the delivery gate is RED.`,
+        gateBlock.reason,
+        gateBlock.nextStep ? `Next: ${gateBlock.nextStep}` : '',
+        '',
+        `Run the real verification (typecheck/tests) then re-close, or close honestly with deliveryState=RED/YELLOW as a progress checkpoint.`,
+      ].filter(Boolean).join('\n'),
+      isError: true,
+    }
+  }
+
+  const combinedNote = [
+    typeof params.input.note === 'string' ? params.input.note : undefined,
+    mismatchNote,
+  ].filter(Boolean).join(' ') || undefined
+
   try {
     const result = closePlanMarkdown(await readFile(filePath, 'utf-8'), {
       tasks,
-      verifiedCommands: asStringArray(params.input.verifiedCommands),
-      deliveryState,
-      note: typeof params.input.note === 'string' ? params.input.note : undefined,
+      verifiedCommands: effectiveCommands,
+      deliveryState: effectiveState,
+      note: combinedNote,
       updateClosure: typeof params.input.updateClosure === 'boolean' ? params.input.updateClosure : undefined,
     })
 
     const action = closureAction(result)
     if (params.input.apply === true) {
-      await writeFileAtomicAsync(filePath, result.content)
+      // EXECUTED status marker is written only on gate-backed GREEN.
+      const contentToWrite = realGreen ? insertPlanStatusMarker(result.content, 'EXECUTED') : result.content
+      await writeFileAtomicAsync(filePath, contentToWrite)
       if (params.onPlanClosed) {
         params.onPlanClosed({
           planFile: relativePath,
           tasks,
-          deliveryState: deliveryState ?? 'GREEN',
+          deliveryState: effectiveState ?? 'GREEN',
           totalChangedCheckboxes: result.totalChangedCheckboxes,
         })
       }
@@ -386,7 +452,9 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
           `Tasks: ${tasks}`,
           `Checkboxes updated: ${result.totalChangedCheckboxes}`,
           `Closure: ${action}`,
-        ].join('\n'),
+          effectiveState ? `Delivery: ${effectiveState}${realGreen ? ' (marked EXECUTED)' : ''}` : '',
+          mismatchNote ? `Evidence: ${mismatchNote}` : '',
+        ].filter(Boolean).join('\n'),
       }
     }
 
@@ -396,12 +464,15 @@ async function planCloseExecute(params: ToolCallParams): Promise<ToolResult> {
         `Tasks: ${tasks}`,
         `Checkboxes to update: ${result.totalChangedCheckboxes}`,
         `Closure: ${action}`,
+        effectiveState ? `Delivery: ${effectiveState}` : '',
+        gateBlock ? `⚠ Gate: claimed GREEN but real gate is RED — apply=true will be blocked.` : '',
+        mismatchNote ? `Evidence: ${mismatchNote}` : '',
         '',
         'Changes:',
         ...formatChanges(result),
         '',
         'No files changed. Re-run with apply=true to write the plan closure.',
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     }
   } catch (err) {
     return { content: `Error: ${err instanceof Error ? err.message : String(err)}`, isError: true }

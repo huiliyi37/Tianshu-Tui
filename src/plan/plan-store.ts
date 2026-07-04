@@ -269,6 +269,22 @@ export async function rejectPlan(cwd: string, slug: string): Promise<PlanDocumen
   return markPlanStatus(cwd, slug, 'REJECTED')
 }
 
+/** 在第一个 H1 前插入状态标记，返回更新后的文本（纯函数，无 IO）。
+ *  用于 plan_close 直接对已读入的 markdown 打 EXECUTED 标记（含
+ *  docs/superpowers/plans 下、无 slug 语义的计划文件）。 */
+export function insertPlanStatusMarker(
+  content: string,
+  status: 'APPROVED' | 'REJECTED' | 'EXECUTED',
+): string {
+  const statusLine = `> **Status: ${status}** — ${new Date().toISOString()}\n\n`
+  const h1Match = content.match(/^#\s+.*$/m)
+  if (h1Match) {
+    const idx = content.indexOf(h1Match[0])
+    return content.slice(0, idx) + statusLine + content.slice(idx)
+  }
+  return statusLine + content
+}
+
 /** 在第一个 H1 前插入状态标记并回写,返回更新后的文档。 */
 async function markPlanStatus(
   cwd: string,
@@ -278,15 +294,7 @@ async function markPlanStatus(
   const plan = await readPlan(cwd, slug)
   if (!plan) return null
 
-  const statusLine = `> **Status: ${status}** — ${new Date().toISOString()}\n\n`
-  let newContent: string
-  const h1Match = plan.content.match(/^#\s+.*$/m)
-  if (h1Match) {
-    const idx = plan.content.indexOf(h1Match[0])
-    newContent = plan.content.slice(0, idx) + statusLine + plan.content.slice(idx)
-  } else {
-    newContent = statusLine + plan.content
-  }
+  const newContent = insertPlanStatusMarker(plan.content, status)
 
   // 透传 options — writePlan 会剥离旧 frontmatter，不传会把多方案记录抹掉，
   // 导致 approve 后 selectedApproach 校验永远跳过（见 2026-07-03 缺陷复盘）。

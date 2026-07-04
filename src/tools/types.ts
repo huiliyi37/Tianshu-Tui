@@ -95,6 +95,14 @@ export interface ToolCallParams {
   onLeaveMark?: (mark: LeaveMarkInput) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: PlanClosedInput) => void
+  /** Evidence-gated plan closure (防伪闭环): assess the real delivery gate over
+   *  owned/dirty files. Pre-bound to the session's evidence + ownership. Absent
+   *  in worker/non-agent contexts → plan_close falls back to trusting the
+   *  self-reported deliveryState. */
+  assessDelivery?: (dirtyFiles?: string[]) => import('../agent/delivery-gate-v2.js').DeliveryGateResult
+  /** Real verification records for this session — used by plan_close to record
+   *  actual verified commands instead of the model's self-reported list. */
+  getVerificationEvidence?: () => import('../agent/evidence.js').VerificationSummary
   /** U6/C1: capture the goal decomposition (ordered step descriptions) produced
    *  by the plan_steps tool during planning. The loop maps these into the active
    *  PlanExecutionTrace. Absent in non-task / worker contexts → tool is a no-op. */

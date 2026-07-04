@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { AgentLoop } from '../loop.js'
-import { buildRuntimeSnapshot } from '../loop-factory.js'
+import { buildRuntimeSnapshot, createToolExecutionController } from '../loop-factory.js'
 
 /**
  * Safety net for the loop.ts decomposition (mid-loop). `buildRuntimeSnapshot`
@@ -66,4 +66,37 @@ test('buildRuntimeSnapshot reads turn count live from the session each call', ()
   assert.equal(buildRuntimeSnapshot(loop).turn, 1)
   turns = 5
   assert.equal(buildRuntimeSnapshot(loop).turn, 5)
+})
+
+/**
+ * 防伪闭环 wiring: plan_close's evidence gate is only real if loop-factory threads
+ * both accessors into the tool-execution deps. Pin the seam so a rename/drop of
+ * either accessor fails here instead of silently degrading plan_close to legacy
+ * trust-claimed behavior.
+ */
+test('createToolExecutionController wires assessDelivery + getVerificationEvidence when a gate exists', () => {
+  const summary = { total: 0, verified: 0, pending: 0, files: [] }
+  const gate = () => ({ state: 'GREEN' }) as never
+  const self = {
+    config: { deliveryGateV2: gate },
+    evidence: { getVerificationSummary: () => summary },
+  } as unknown as AgentLoop
+
+  const controller = createToolExecutionController(self)
+  const deps = (controller as unknown as { deps: Record<string, unknown> }).deps
+  assert.equal(typeof deps.assessDelivery, 'function')
+  assert.equal(typeof deps.getVerificationEvidence, 'function')
+  assert.equal((deps.getVerificationEvidence as () => unknown)(), summary)
+})
+
+test('createToolExecutionController leaves assessDelivery undefined without a gate (graceful degradation)', () => {
+  const self = {
+    config: {},
+    evidence: { getVerificationSummary: () => ({ total: 0, verified: 0, pending: 0, files: [] }) },
+  } as unknown as AgentLoop
+
+  const controller = createToolExecutionController(self)
+  const deps = (controller as unknown as { deps: Record<string, unknown> }).deps
+  assert.equal(deps.assessDelivery, undefined)
+  assert.equal(typeof deps.getVerificationEvidence, 'function')
 })

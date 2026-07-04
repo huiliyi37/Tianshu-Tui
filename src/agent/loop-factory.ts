@@ -232,6 +232,10 @@ return new ToolExecutionController({
       onLeaveMark: mark => self.captureLeaveMark(mark),
       onPlanSteps: steps => self.capturePlanSteps(steps),
       onPlanClosed: input => self.handlePlanClosed(input),
+      assessDelivery: self.config.deliveryGateV2
+        ? files => self.config.deliveryGateV2!(files)
+        : undefined,
+      getVerificationEvidence: () => self.evidence.getVerificationSummary(),
       onSkillInvoked: name => self.config.promptEngine.markSkillInvoked(name),
       onSkillCompleted: name => self.config.promptEngine.markSkillCompleted(name),
       buildRuntimeSnapshot: extra => self.buildRuntimeSnapshot(extra),

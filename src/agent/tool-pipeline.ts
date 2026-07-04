@@ -220,6 +220,10 @@ export interface ToolPipelineDeps {
   onPlanSteps?: (steps: import('../tools/types.js').PlanStepInput[]) => void
   /** Write a constellation milestone when plan_close succeeds with apply=true. */
   onPlanClosed?: (input: import('../tools/types.js').PlanClosedInput) => void
+  /** Evidence-gated plan closure: assess the real delivery gate over owned/dirty files. */
+  assessDelivery?: (dirtyFiles?: string[]) => import('./delivery-gate-v2.js').DeliveryGateResult
+  /** Real verification records for this session (evidence-gated plan closure). */
+  getVerificationEvidence?: () => import('./evidence.js').VerificationSummary
   /** Called when the model explicitly loads a skill via the skill tool. */
   onSkillInvoked?: (name: string) => void
   /** Called when the model explicitly marks a skill as complete via the skill tool. */
@@ -554,6 +558,8 @@ export async function executeToolUse(
     onLeaveMark: deps.onLeaveMark,
     onPlanSteps: deps.onPlanSteps,
     onPlanClosed: deps.onPlanClosed,
+    assessDelivery: deps.assessDelivery,
+    getVerificationEvidence: deps.getVerificationEvidence,
     onSkillInvoked: deps.onSkillInvoked,
     onSkillCompleted: deps.onSkillCompleted,
     sessionModifiedFiles: [...deps.evidence.getState().filesModified],
