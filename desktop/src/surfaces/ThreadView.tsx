@@ -912,7 +912,7 @@ export function ThreadView(props: {
       />
 
       <div className="composer-float" ref={composerWrapRef}>
-        <div className="composer-float-inner">
+        <div className={`composer-float-inner accent-${activeDomain?.uiPersona.accent ?? 'primary'}`}>
           {view.pendingQuestion && !busy && (
             <QuestionCard
               question={view.pendingQuestion}
@@ -965,6 +965,7 @@ export function ThreadView(props: {
             onChange={setInput}
             busy={busy}
             threadNonEmpty={view.blocks.length > 0}
+            activeDomainAccent={activeDomain?.uiPersona.accent ?? 'primary'}
             approvalLevel={modeToLevel(session.approvalMode)}
             onSetApprovalLevel={(lvl) => onSetApprovalMode(levelToMode(lvl))}
             contextUsage={{

@@ -132,8 +132,9 @@ export function Composer(props: {
   onHistoryPrev?: () => void
   /** Recall next (newer) prompt from history — terminal-style Down-arrow. */
   onHistoryNext?: () => void
+  activeDomainAccent?: string
 }) {
-  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext } = props
+  const { sessionId, value, onChange, busy, onSubmit, onAbort, onDoubleEscape, commands, planMode, onSetPlanMode, onDelegate, onWorkflow, menuRev, threadNonEmpty, approvalLevel, onSetApprovalLevel, contextUsage, onHistoryPrev, onHistoryNext, activeDomainAccent = 'primary' } = props
   const planning = planMode === 'planning'
 
   useEffect(() => {
@@ -556,7 +557,7 @@ export function Composer(props: {
 
   return (
     <div
-      className={`composer${dragOver ? ' drag-over' : ''}${planning ? ' planning' : ''}`}
+      className={`composer${dragOver ? ' drag-over' : ''}${planning ? ' planning' : ''} accent-${activeDomainAccent}`}
       onDrop={onDrop}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={(e) => { e.preventDefault(); setDragOver(false) }}
@@ -907,7 +908,7 @@ function ModelPicker({ sessionId, disabled, menuRev }: { sessionId: string; disa
   return (
     <div className="model-picker" ref={ref}>
       <button
-        className="model-picker-trigger"
+        className="model-picker-trigger model-active"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!switchingId}
         title={disabled ? '运行中不可切换模型' : '切换模型'}
@@ -1011,7 +1012,7 @@ function DomainPicker({ sessionId, disabled, menuRev, threadNonEmpty }: { sessio
   return (
     <div className="model-picker domain-picker" ref={ref}>
       <button
-        className="model-picker-trigger"
+        className={`model-picker-trigger accent-${current?.uiPersona?.accent || 'primary'}`}
         onClick={() => setOpen((o) => !o)}
         disabled={disabled || !!applyingKey}
         title={disabled ? '运行中不可切换星域' : '切换星域'}

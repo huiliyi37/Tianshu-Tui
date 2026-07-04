@@ -6441,3 +6441,113 @@ html[data-maximized] .review {
   background: var(--panel-2);
   color: var(--text);
 }
+
+/* 输入框 Focus 边框与星域主题色联动 (第四阶段新增) */
+html[data-theme="dark"] .composer-float-inner.accent-primary:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px color-mix(in oklab, var(--accent) 30%, transparent);
+}
+html[data-theme="dark"] .composer-float-inner.accent-warning:focus-within {
+  border-color: #eab308;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(234, 179, 8, 0.25);
+}
+html[data-theme="dark"] .composer-float-inner.accent-success:focus-within {
+  border-color: #22c55e;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(34, 197, 94, 0.25);
+}
+html[data-theme="dark"] .composer-float-inner.accent-danger:focus-within {
+  border-color: #ef4444;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(239, 68, 68, 0.25);
+}
+html[data-theme="dark"] .composer-float-inner.accent-info:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+html[data-theme="dark"] .composer-float-inner.accent-purple:focus-within {
+  border-color: #a855f7;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), 0 0 0 3px rgba(168, 85, 247, 0.25);
+}
+
+/* Pickers 醒目芯片及星域差异化微背光 (第四阶段新增) */
+.model-picker-trigger {
+  border-radius: var(--radius-pill, 9999px) !important;
+  font-weight: var(--weight-semibold, 600) !important;
+  transition: all 0.2s ease-out !important;
+}
+
+/* 模型芯片样式 */
+.model-picker-trigger.model-active {
+  background: var(--panel-3) !important;
+  border: 1px solid var(--border-strong, var(--border)) !important;
+  color: var(--text-strong) !important;
+  box-shadow: var(--shadow-sm);
+}
+.model-picker-trigger.model-active:hover {
+  background: var(--hover) !important;
+}
+
+/* 星域芯片专属差异化颜色与背景 */
+.model-picker-trigger.accent-primary {
+  background: rgba(var(--accent-rgb), 0.08) !important;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent) !important;
+  color: var(--accent) !important;
+}
+.model-picker-trigger.accent-primary:hover {
+  background: rgba(var(--accent-rgb), 0.15) !important;
+}
+
+.model-picker-trigger.accent-warning {
+  background: rgba(234, 179, 8, 0.08) !important;
+  border: 1px solid rgba(234, 179, 8, 0.3) !important;
+  color: #eab308 !important;
+}
+.model-picker-trigger.accent-warning:hover {
+  background: rgba(234, 179, 8, 0.15) !important;
+}
+
+.model-picker-trigger.accent-success {
+  background: rgba(34, 197, 94, 0.08) !important;
+  border: 1px solid rgba(34, 197, 94, 0.3) !important;
+  color: #22c55e !important;
+}
+.model-picker-trigger.accent-success:hover {
+  background: rgba(34, 197, 94, 0.15) !important;
+}
+
+.model-picker-trigger.accent-danger {
+  background: rgba(239, 68, 68, 0.08) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  color: #ef4444 !important;
+}
+.model-picker-trigger.accent-danger:hover {
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+.model-picker-trigger.accent-info {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: 1px solid rgba(59, 130, 246, 0.3) !important;
+  color: #3b82f6 !important;
+}
+.model-picker-trigger.accent-info:hover {
+  background: rgba(59, 130, 246, 0.15) !important;
+}
+
+.model-picker-trigger.accent-purple {
+  background: rgba(168, 85, 247, 0.08) !important;
+  border: 1px solid rgba(168, 85, 247, 0.3) !important;
+  color: #a855f7 !important;
+}
+.model-picker-trigger.accent-purple:hover {
+  background: rgba(168, 85, 247, 0.15) !important;
+}
+
+/* 按钮内星体图标呼吸/动效 */
+.model-picker-trigger span[aria-hidden] {
+  margin-right: 4px;
+  display: inline-block;
+  animation: pickerGlow 2s ease-in-out infinite alternate;
+}
+@keyframes pickerGlow {
+  from { filter: drop-shadow(0 0 1px currentColor); transform: scale(1); }
+  to { filter: drop-shadow(0 0 3px currentColor); transform: scale(1.08); }
+}
