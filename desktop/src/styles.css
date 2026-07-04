@@ -4354,8 +4354,8 @@ html[data-theme="dark"] .timeline-summary:hover .tl-icon {
 }
 
 /* 5. Physical separation for sidebars */
-html[data-theme="dark"] .project-sidebar,
-html[data-theme="dark"] .review {
+html[data-theme="dark"]:not([data-surface="glass"]) .project-sidebar,
+html[data-theme="dark"]:not([data-surface="glass"]) .review {
   background: var(--panel);
   border: none;
 }
