@@ -1,6 +1,6 @@
 # Rivet
 
-Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / Ink 6 / React 19 / node:test.
+Terminal coding agent optimized for DeepSeek V4 prefix cache. Node.js 24+ (`engines` pins 24.1.0) / TypeScript strict / 纯 ANSI 终端 UI（`src/tui/engine/`，零 React/Ink 渲染） / node:test。桌面端 `desktop/` 是独立的 React 应用；`src/tui/command-palette.tsx` 是仅存的 Ink 组件残留（main.ts 只用它的纯函数，待清理）。
 
 ## Build & Test
 
@@ -13,7 +13,7 @@ npm run typecheck # tsc --noEmit
 ## Architecture
 
 ```
-main.tsx → AgentLoop (agent/loop.ts)
+main.ts → AgentLoop (agent/loop.ts)
   ├── RuntimeHookPipeline (agent/runtime-hooks.ts)  ← TUI 2.x 核心
   │     纯分阶段执行器 + 错误隔离（任一 hook 抛错只走 onError，不中断 turn）
   │     5 阶段真实调用点（非概念，已钉在 loop 主路径）：
@@ -36,7 +36,7 @@ main.tsx → AgentLoop (agent/loop.ts)
   ├── AgentSession (messages, usage, turn count)
   ├── EvidenceTracker + FileHistory
   ├── Stores: claim-store, stigmergy-store, playbook-store, trace-store
-  └── Tool dispatch → API (SSE streaming) → TUI (Ink 6)
+  └── Tool dispatch → API (SSE streaming) → TUI (纯 ANSI, src/tui/engine/)
 ```
 
 > ⚠️ 旧文档写「9 个固定 hook」是误导性简化。真相是条件装配，开关在 `loop-factory.ts:createRuntimeHooksPipeline` 传入的 deps。改 hook 行为前先看 `create-runtime-hooks.ts` 的 gate 条件，不要假设某 hook 一定在跑。

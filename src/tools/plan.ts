@@ -8,6 +8,7 @@
 
 import type { Tool, ToolCallParams, ToolResult } from './types.js'
 import { writePlan, slugify, stripPlanStatusMarkers, insertPlanStatusMarker, type PlanOption } from '../plan/plan-store.js'
+import { checkPlanFactAnchors, formatAnchorDrifts } from '../plan/plan-fact-anchors.js'
 import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileAtomicAsync } from '../fs-atomic.js'
@@ -18,6 +19,10 @@ import { closePlanMarkdown, type PlanCloseOptions, type PlanCloseResult } from '
 // ── plan_submit helpers ──
 
 const warnedSlugs = new Set<string>()
+// Fact-anchor gate: one-shot soft block per slug (mermaid-gate pattern). First
+// submit with drifted anchors fails with the drift list; resubmitting the same
+// title passes — the model judges false positives (illustrative paths) itself.
+const anchorWarnedSlugs = new Set<string>()
 const MERMAID_FENCE = /```\s*mermaid/i
 const MISSING_DIAGRAM_SKELETON = `\`\`\`mermaid
 flowchart TD
@@ -318,6 +323,32 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
     }
   }
 
+  // Fact-anchor verification: file paths / line anchors cited by the plan must
+  // match the current working tree. One-shot soft block — first offense returns
+  // the drift list, resubmitting the same title passes (with drift note kept).
+  let anchorDriftNote = ''
+  try {
+    const anchorReport = await checkPlanFactAnchors(fullContent, params.cwd)
+    if (anchorReport.drifts.length > 0) {
+      if (!anchorWarnedSlugs.has(slug)) {
+        anchorWarnedSlugs.add(slug)
+        return {
+          content: [
+            `⚠️ Plan not yet saved — ${anchorReport.drifts.length} 个事实锚点与当前项目不符：`,
+            '',
+            formatAnchorDrifts(anchorReport.drifts),
+            '',
+            '文档和历史计划描述的是写下时的状态，不是现状——用 read/grep/glob 对当前源码逐条核实后修正引用；确认是有意新建的文件请在同一行标注「新增」。核实完成后重新提交（同一 title），若你判断某条是误报（示例路径等）可原样重提。',
+          ].join('\n'),
+          isError: true,
+        }
+      }
+      anchorDriftNote = `\n⚠ 锚点残留提示：${anchorReport.drifts.length} 个引用仍与当前工作区不符（已放行）。执行时以现实为准并在交付报告留痕。`
+    }
+  } catch {
+    // Anchor verification is best-effort — never let the guard itself block a submit.
+  }
+
   try {
     const relativePath = await writePlan(params.cwd, slug, fullContent, submitOptions)
     const optionsHint = submitOptions && submitOptions.length >= 2
@@ -329,6 +360,7 @@ async function planSubmitExecute(params: ToolCallParams): Promise<ToolResult> {
         `File: \`${relativePath}\``,
         `Slug: \`${slug}\``,
         optionsHint,
+        anchorDriftNote,
         '',
         `The user will review and respond with:`,
         `- \`/plan-approve ${slug}\` — approve and start execution`,

@@ -8,7 +8,7 @@
 | `src/tools/` | 工具实现（definition + execute）与注册 |
 | `src/api/` | API 客户端层（OpenAI 兼容、Codex OAuth、流式处理） |
 | `src/prompt/` | 系统提示词工程（static / volatile / engine） |
-| `src/tui/` | 终端 UI（Ink 6 / React） |
+| `src/tui/` | 终端 UI（纯 ANSI，渲染引擎在 `src/tui/engine/`，零 React/Ink） |
 | `src/compact/` | 上下文压缩策略（修剪、微压缩、阈值） |
 | `src/cache/` | 前缀缓存管理与命中诊断 |
 | `src/repo/` | 代码仓库分析（导入图、持久化索引） |

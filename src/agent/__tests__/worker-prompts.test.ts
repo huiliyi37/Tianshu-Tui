@@ -35,6 +35,22 @@ describe('worker prompts', () => {
     assert.ok(prompt.includes('Do not call disallowed tools'))
   })
 
+  // 天枢 agent 的默认项目约定文件是 .rivet.md / AGENTS.md——worker 的发现引导
+  // 不指向其他工具的记忆文件（CLAUDE.md 曾在此处被引用，误导 worker 采信外部记忆）。
+  it('project discovery points workers at rivet defaults, not other tools\' memory files', () => {
+    const order = createReadOnlyWorkOrder({
+      id: 'wo_disc',
+      parentTurnId: 'turn_1',
+      kind: 'code_search',
+      profile: 'code_scout',
+      objective: 'Find routing seams.',
+      scope: { files: [] },
+    })
+    const prompt = buildWorkerPrompt(order)
+    assert.ok(prompt.includes('.rivet.md or AGENTS.md'), 'discovery preamble cites rivet defaults')
+    assert.ok(!prompt.includes('CLAUDE.md'), 'no reference to other agents\' memory files')
+  })
+
   it('builds a write-capable worker prompt for write work orders', () => {
     const order = createWriteWorkOrder({
       id: 'wo_write1',

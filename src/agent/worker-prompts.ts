@@ -42,7 +42,7 @@ Evidence quality checklist:
 You are an expert at finding and analyzing documentation, specs, and plans.
 
 1. **Find docs**: Use glob to locate *.md, docs/, *.txt, DESIGN*, PLAN* files.
-   Check for .claude/, .rivet/, CLAUDE.md, README.md at project root.
+   Check for .rivet/, .rivet.md, AGENTS.md, README.md at project root.
 2. **Read selectively**: Use read_file with offset/limit for large documents.
    Focus on sections relevant to the objective.
 3. **Extract structure**: Identify headings, sections, and key decisions.
@@ -138,7 +138,7 @@ the registry prompt was not loaded — escalate as blocked.`,
 const PROJECT_DISCOVERY_PREAMBLE = `## Project Context Discovery
 
 Before diving into the objective, quickly orient yourself:
-1. If CLAUDE.md or .rivet.md exists at the project root, read it — it contains project conventions.
+1. If .rivet.md or AGENTS.md exists at the project root, read it — it contains project conventions.
 2. If package.json exists, read the "scripts" and "dependencies" sections to understand the stack.
 3. Use repo_map to see the top-level file structure if you need navigation context.
 

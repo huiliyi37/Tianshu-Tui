@@ -817,6 +817,21 @@ describe('GWT salience and Top-K selection', () => {
       assert.ok(fences.length >= 2, 'default (full) keeps the skeletons')
     })
 
+    // 2026-07-04 缺陷复盘: 一份计划基于过时文档提出"新增 Ink 组件"于不存在的目录。
+    // 第 4 步从建议性"回读验证"升级为硬性事实锚点纪律——文档是历史状态、源码是现状。
+    it('full variant carries the hard fact-anchor discipline (step 4)', () => {
+      const out = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'full' })
+      assert.match(out, /事实锚点核对/)
+      assert.match(out, /写下时的状态/)
+      assert.match(out, /文档与源码冲突时信源码/)
+      assert.match(out, /父目录/)
+    })
+
+    it('sparse variant stays light — no fact-anchor spec duplication', () => {
+      const sparse = buildDynamicAppendix({ cwd: '/repo', planModeState: 'planning', planInjectionVariant: 'sparse' })
+      assert.doesNotMatch(sparse, /事实锚点核对/)
+    })
+
     it('renders the one-shot exit reminder when pending, even with plan mode off', () => {
       const out = buildDynamicAppendix({ cwd: '/repo', planExitReminderPending: true })
       assert.match(out, /<plan-mode-exit>/)

@@ -24,6 +24,22 @@ describe('ProfileRegistry', () => {
     assert.equal(registry.list().length, 18)
   })
 
+  // 2026-07-04 缺陷复盘: scout 读了过时文档把 Ink 组件当成现状上报,规划者照单全收。
+  // 侦察层必须区分"当前源码"与"文档/历史计划",文档断言先对源码复核再上报。
+  it('code_scout carries evidence-source discipline', () => {
+    const p = registry.get('code_scout')!
+    assert.match(p.expertisePrompt, /\[current source\]/)
+    assert.match(p.expertisePrompt, /\[historical plan or memo\]/)
+    assert.match(p.expertisePrompt, /verified against the current source code/)
+    assert.match(p.expertisePrompt, /docs say X, current code shows Y/)
+  })
+
+  it('doc_scout marks unverified current-state claims', () => {
+    const p = registry.get('doc_scout')!
+    assert.match(p.expertisePrompt, /lag behind the code/)
+    assert.match(p.expertisePrompt, /unverified against source/)
+  })
+
   it('maps code_scout as readonly', async () => {
     const p = registry.get('code_scout')!
     assert.ok(p)

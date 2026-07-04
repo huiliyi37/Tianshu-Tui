@@ -464,9 +464,10 @@ export function resolveEnterWorkerInput(
 
 
 /** Build the kickoff prompt that drives wave-by-wave execution of an approved plan. */
-export function buildPlanKickoff(slug: string, title: string, approach?: string): string {
+export function buildPlanKickoff(slug: string, title: string, approach?: string, anchorDriftNote?: string): string {
   let msg = `开始执行已批准方案「${title}」(.rivet/plans/${slug}.md)。先 read_file 读取该计划,然后用 plan_task(execute=true) 或 team_orchestrate 把任务按波次并行执行、逐波过审查门;开工前用 todo 列出有序步骤跟踪进度,全部完成后 plan_close。`
   if (approach) msg += `\nSelected approach: ${approach} — 只执行此方案,勿执行未选中的备选。`
+  if (anchorDriftNote) msg += `\n\n⚠ 锚点漂移提示——以下计划引用与当前工作区不符（计划写成后代码可能已变化）:\n${anchorDriftNote}\n执行时以当前源码为准,先用工具核实真实位置再动手,并把每处偏差记入交付报告;若漂移改变了方案方向,暂停执行向用户说明。`
   return msg
 }
 
@@ -498,6 +499,20 @@ export async function approvePlanAndKickoff(
     return false
   }
 
+  // Approval-time anchor drift recheck (non-blocking): the plan was written
+  // against an earlier tree state — concurrent sessions / elapsed time drift
+  // anchors. Aged plans are normal, so drift never blocks approval; it is
+  // surfaced to the user and injected into the kickoff prompt so the executor
+  // treats reality as ground truth and logs deviations in the delivery report.
+  let driftNote: string | undefined
+  try {
+    const { checkPlanFactAnchors, formatAnchorDrifts } = await import('../plan/plan-fact-anchors.js')
+    const report = await checkPlanFactAnchors(existing.content, deps.cwd)
+    if (report.drifts.length > 0) driftNote = formatAnchorDrifts(report.drifts)
+  } catch {
+    // Best-effort — the guard itself must never break approval.
+  }
+
   const approved = await approvePlan(deps.cwd, slug)
   if (!approved) {
     deps.notify(`Plan not found: "${slug}". Use /plan-list to see available plans.`, true)
@@ -505,10 +520,13 @@ export async function approvePlanAndKickoff(
   }
   deps.agent.setActivePlan({ slug, title: approved.title, selectedApproach: resolvedApproach })
   const approachLine = resolvedApproach ? `\nSelected approach: **${resolvedApproach}**` : ''
+  const driftLine = driftNote
+    ? `\n\n⚠ 锚点漂移复查:计划中有引用与当前工作区不符(已注入执行提示,执行方将以现实为准):\n${driftNote}`
+    : ''
   deps.notify(
-    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。`,
+    `✅ Plan approved: **${approved.title}** (\`${slug}\`)${approachLine}\n\n方案指针已加载,正文在 \`.rivet/plans/${slug}.md\`。Plan Mode 已退出 — 开始自动分波执行。${driftLine}`,
   )
-  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach))
+  deps.submitToAgent?.(buildPlanKickoff(slug, approved.title, resolvedApproach, driftNote))
   return true
 }
 

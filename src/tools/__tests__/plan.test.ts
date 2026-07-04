@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { PLAN_TOOL } from '../plan.js'
@@ -11,6 +11,15 @@ describe('plan tool submit', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'rivet-plan-submit-'))
+    // Fact-anchor gate verifies referenced paths against the working tree —
+    // materialize the files the fixtures cite so honest plans stay accepted.
+    mkdirSync(join(dir, 'src/agent'), { recursive: true })
+    writeFileSync(join(dir, 'src/foo.ts'), 'export const foo = 1\n', 'utf-8')
+    writeFileSync(
+      join(dir, 'src/agent/loop.ts'),
+      Array.from({ length: 150 }, (_, i) => `// line ${i + 1}`).join('\n'),
+      'utf-8',
+    )
   })
 
   afterEach(() => {
@@ -201,6 +210,55 @@ describe('plan tool submit', () => {
     const options = parsePlanOptions(written)
     assert.equal(options?.length, 2)
     assert.equal(options?.[0]?.label, 'Redis cache (Recommended)')
+  })
+
+  // 2026-07-04 缺陷复盘: 一份计划提出"新增 Ink 组件"于一个不存在的目录——scout 读了
+  // 过时文档、规划者未复核、submit 门禁只查形式。事实锚点门禁在提交边界拦下这类漂移。
+  it('soft-blocks first submit with drifted anchors, passes resubmission with residual note', async () => {
+    const plan = [
+      '## 根因分析',
+      '权限入口分散。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '- [ ] 新增 `src/tui/components/selector.tsx` — 选择器组件',
+      '修改 `src/ghost.ts` 的导出。',
+    ].join('\n')
+
+    const first = await execute({ action: 'submit', title: 'Anchor Drift Plan', plan })
+    assert.equal(first.isError, true)
+    assert.ok(first.content.includes('事实锚点'), first.content)
+    assert.ok(first.content.includes('src/tui/components/selector.tsx'), 'missing-parent-dir drift listed')
+    assert.ok(first.content.includes('src/ghost.ts'), 'missing-file drift listed')
+    assert.ok(!existsSync(join(dir, '.rivet/plans/anchor-drift-plan.md')), 'plan must not be persisted on first offense')
+
+    const second = await execute({ action: 'submit', title: 'Anchor Drift Plan', plan })
+    assert.ok(!second.isError, second.content)
+    assert.ok(second.content.includes('Plan submitted'))
+    assert.ok(second.content.includes('锚点残留提示'), 'residual drift note kept on pass-through')
+  })
+
+  it('does not flag anchors that match the working tree', async () => {
+    const plan = [
+      '## 根因分析',
+      '边界未重置。',
+      '',
+      '## 实现方案',
+      '```mermaid',
+      'flowchart TD',
+      '    A --> B',
+      '```',
+      '',
+      '修改 `src/agent/loop.ts:120` 与 `src/foo.ts`。',
+    ].join('\n')
+
+    const result = await execute({ action: 'submit', title: 'Clean Anchor Plan', plan })
+    assert.ok(!result.isError, result.content)
+    assert.ok(!result.content.includes('锚点残留提示'))
   })
 
   it('rejects reserved option labels', async () => {
