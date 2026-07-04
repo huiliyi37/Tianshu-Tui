@@ -37,6 +37,7 @@ import { fetchSessionImageObjectUrl, getRewindPoints, rewindSession } from '../r
 import { formatMention } from '../lib/mention-input'
 import { useUiState, useUiDispatch } from '../state/store'
 import { SideChat } from '../components/SideChat'
+import { MessageNavigator, type TurnEntry } from '../components/MessageNavigator'
 import { STAR_DOMAINS } from '../../../src/agent/star-domain.js'
 import type { StarDomainId } from '../../../src/agent/star-domain.js'
 
@@ -132,6 +133,7 @@ export function ThreadView(props: {
   const handleWatchdogContinue = useCallback(() => onSend('continue'), [onSend])
   const msgRef = useRef<HTMLDivElement>(null)
   const [scrolledUp, setScrolledUp] = useState(false)
+  const [navTick, setNavTick] = useState(0) // bumps on scroll → refresh navigator marker
 
   // Time-Travel Timeline Slider state
   const [rewindPoints, setRewindPoints] = useState<import('../runtime/client').RewindPoint[]>([])
@@ -310,6 +312,7 @@ export function ThreadView(props: {
   // clear the scrolled-up flag so auto-scroll resumes.
   const onScroll = useCallback(() => {
     setScrolledUp(!isNearBottom())
+    setNavTick((t) => t + 1) // refresh navigator "current" marker
     // Persist scroll position to store (throttled via rAF).
     const el = msgRef.current
     if (el) dispatch({ type: 'setScrollPosition', sessionId: session.id, scrollTop: el.scrollTop })
@@ -347,6 +350,51 @@ export function ThreadView(props: {
       return next
     })
   }, [rendered.length, virtualizer])
+
+  // ── Message navigator: jump to any earlier user turn without scrolling ──
+  // seq → timestamp, joined from the already-fetched rewind points.
+  const tsBySeq = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const p of rewindPoints) {
+      if (typeof p.seq === 'number') m.set(p.seq, p.timestamp)
+    }
+    return m
+  }, [rewindPoints])
+
+  // User turns as jumpable anchors. Derived from `rendered` (not raw blocks) so
+  // renderedIndex is always a valid scrollToIndex target for the virtual list.
+  const userTurns = useMemo<TurnEntry[]>(() => {
+    const out: TurnEntry[] = []
+    rendered.forEach((item, i) => {
+      if (item.kind === 'block' && item.block.kind === 'user') {
+        const seq = Number(item.block.key.slice(2)) // "u-<seq>"
+        out.push({
+          renderedIndex: i,
+          key: item.block.key,
+          text: item.block.text,
+          ...(tsBySeq.has(seq) ? { ts: tsBySeq.get(seq) } : {}),
+        })
+      }
+    })
+    return out
+  }, [rendered, tsBySeq])
+
+  // Rendered-row index of the first currently-visible row → drives the
+  // navigator's "current" marker. Recomputed on scroll via navTick.
+  const navActiveIndex = useMemo(() => {
+    void navTick // recompute when the viewport moves
+    const items = virtualizer.getVirtualItems()
+    return items.length > 0 ? items[0]!.index : null
+  }, [navTick, virtualizer, rendered.length])
+
+  const jumpTo = useCallback((renderedIndex: number) => {
+    setScrolledUp(true) // stop streaming auto-scroll from yanking us back to bottom
+    virtualizer.scrollToIndex(renderedIndex, { align: 'start' })
+    // Dynamic row heights: the estimate (80px) differs from measured height, so
+    // a single call can under/overshoot — correct once on the next frame.
+    requestAnimationFrame(() => virtualizer.scrollToIndex(renderedIndex, { align: 'start' }))
+    setFocusedIndex(renderedIndex)
+  }, [virtualizer])
 
   const showThinking = busy && !view.private_textOpen && !view.private_thinkingOpen
 
@@ -796,6 +844,7 @@ export function ThreadView(props: {
             </svg>
           </button>
         )}
+        <MessageNavigator turns={userTurns} activeIndex={navActiveIndex} onJump={jumpTo} />
       </div>
 
       {session.status === 'completed' && view.completionSummary && (() => {

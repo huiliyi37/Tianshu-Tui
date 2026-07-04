@@ -34,6 +34,7 @@ const GROUPS: Array<{ title: string; rows: ShortcutRow[] }> = [
       { keys: [`${MOD}+;`], desc: '旁路提问（不影响主任务的轻会话）' },
       { keys: [`${MOD}+.`], desc: 'Zen 模式（隐藏侧栏与面板）' },
       { keys: [`${MOD}+O`], desc: '视图模式循环：标准 → 详尽 → 摘要' },
+      { keys: ['右下 ☰ 钮'], desc: '消息导航 · 跳转历史消息（↑/↓ 选择 · Enter 跳转 · Esc 关闭）' },
     ],
   },
   {

@@ -2025,6 +2025,59 @@ body {
   transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .scroll-bottom-btn:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
+
+/* Message navigator — floating jump-to-user-turn outline. Sticky (not absolute)
+   so it pins to the viewport bottom-right instead of scrolling with content,
+   mirroring .scroll-bottom-btn. Panel expands upward above the toggle. */
+.msg-nav {
+  position: sticky; bottom: var(--space-3); align-self: flex-end;
+  margin-right: var(--space-1); z-index: 6;
+  display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2);
+  pointer-events: none; /* let the (empty) gap area pass clicks through */
+}
+.msg-nav > * { pointer-events: auto; }
+.msg-nav-toggle {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--border); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--shadow-md);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
+}
+.msg-nav-toggle:hover { color: var(--text); background: var(--panel-2); transform: scale(1.08); }
+.msg-nav-toggle.is-open { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.msg-nav-panel {
+  width: 320px; max-width: min(320px, 70vw); max-height: 60vh;
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.msg-nav-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.msg-nav-title { font-size: 12px; font-weight: 600; color: var(--text); }
+.msg-nav-count { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.msg-nav-list { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; overscroll-behavior: contain; }
+.msg-nav-list:focus { outline: none; }
+.msg-nav-item {
+  width: 100%; display: flex; align-items: baseline; gap: var(--space-2);
+  padding: var(--space-2) var(--space-2); border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text); cursor: pointer; text-align: left;
+  transition: background var(--dur-fast) var(--ease);
+}
+.msg-nav-item:hover, .msg-nav-item.is-selected { background: var(--panel-2); }
+.msg-nav-idx {
+  flex-shrink: 0; min-width: 18px; text-align: right;
+  font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums;
+}
+.msg-nav-item.is-current .msg-nav-idx { color: var(--accent); font-weight: 700; }
+.msg-nav-text {
+  flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.msg-nav-time { flex-shrink: 0; font-size: 10px; color: var(--faint); }
 .msg { white-space: pre-wrap; word-break: break-word; transition: background var(--dur) var(--ease); padding: var(--space-2) 0; }
 .msg-role { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px; margin-bottom: var(--space-1); }
 .msg-role-glyph { font-size: 12px; line-height: 1; }
